@@ -969,7 +969,6 @@ class TaskRevokeResultDTO(BaseModel):
 
 
 TaskSettingType = Literal[
-    "claim_join_filter",
     "search_skill",
     "skill_report_enabled",
     "harness_poller",

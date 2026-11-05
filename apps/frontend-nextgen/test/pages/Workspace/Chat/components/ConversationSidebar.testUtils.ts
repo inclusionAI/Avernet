@@ -26,7 +26,8 @@ export const botOf = (botId: string, displayName: string, isFriendBot = false): 
 export const managedBotA = botOf('bot-a:2088', '管理 Bot A');
 export const managedBotB = botOf('bot-b:2088', '管理 Bot B');
 export const friendBot = botOf('fb-1:327325', '朋友 Bot', true);
-export const teamBot = botOf('bot-team:2088', '团队空间 Bot');
+// displayName 与团队组标题「团队空间 Bot」错开(2026-11-04 分组更名后同步调整):避免 getByText/queryByText 双命中脆弱断言。
+export const teamBot = botOf('bot-team:2088', '团队空间 Bot A');
 
 export const sessionOf = (sessionId: string, botId = 'bot-a:2088') => ({
   sessionId,

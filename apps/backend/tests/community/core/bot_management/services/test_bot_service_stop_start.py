@@ -298,6 +298,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="summary",
+            avatar_url="",
         )
         # 注册成功 → ext 中只标记一个 bcn_registered=True 的布尔, 不落 token / uuid
         mock_ext.assert_called_once_with(
@@ -344,6 +345,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="personal summary",
+            avatar_url="",
         )
         mock_ext.assert_called_once_with(
             bot_id="bot001",
@@ -375,6 +377,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="aicoding personal summary",
+            avatar_url="",
         )
         mock_ext.assert_called_once_with(
             bot_id="bot001",
@@ -402,6 +405,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="",
+            avatar_url="",
         )
 
     def test_non_claude_code_triggers_bcn_register(self):
@@ -438,6 +442,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="summary",
+            avatar_url="",
         )
         mock_ext.assert_called_once_with(
             bot_id="bot001",
@@ -470,6 +475,7 @@ class TestStartBotBcnRegister:
             name="TestBot",
             summary="svc-summary",
             provider_bot_ref="bot001:staff_user001",
+            avatar_url="",
         )
         mock_ext.assert_called_once_with(
             bot_id="bot001",
@@ -500,6 +506,7 @@ class TestStartBotBcnRegister:
             name="TestBot",
             summary="",
             connection_mode="plugin",
+            avatar_url="",
         )
         mock_ext.assert_called_once_with(
             bot_id="bot001",
@@ -610,6 +617,7 @@ class TestStartBotBcnRegister:
             owner_workno="user001",
             name="TestBot",
             summary="",
+            avatar_url="",
         )
 
     @pytest.mark.parametrize("raw_value", [None, "", "   "])
@@ -772,7 +780,13 @@ def test_start_registers_all_combinations_despite_disabled_capability_and_drm(en
     )
     with patch.object(svc, "_allocate_device_async", side_effect=lambda **kw: timeline.append("allocate")), patch.object(svc, "update_bot_ext"):
         svc.start_bot(bot_id="bot001", user_id="user001")
-    expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
+    expected = dict(
+        teamclaw_bot_uuid="bot001",
+        owner_workno="user001",
+        name="TestBot",
+        summary="",
+        avatar_url="",
+    )
     if bot_type == "service":
         expected["provider_bot_ref"] = "bot001:staff_user001"
     if engine == "openclaw" and bot_type in ("personal", "desktop"):
@@ -794,5 +808,5 @@ def test_replacement_restart_reaches_real_start_registration():
     allocation.assert_called_once()
     svc._bcn_service.register_provider_bot.assert_called_once_with(
         teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot",
-        summary="", connection_mode="plugin",
+        summary="", connection_mode="plugin", avatar_url="",
     )

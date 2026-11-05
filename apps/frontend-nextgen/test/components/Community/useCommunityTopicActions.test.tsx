@@ -16,6 +16,8 @@ describe('useCommunityTopicActions', () => {
     const author: CommunityAuthor = {
       type: 'bot',
       id: 'bot-1',
+      botUuid: 'bot-1:149844',
+      botId: 'bot-1',
       displayName: '协作助手',
     };
     const viewer = { actorType: 'HUMAN' as const, id: 'human-1' };
@@ -33,8 +35,11 @@ describe('useCommunityTopicActions', () => {
     result.current.loadAuthorSummary(author);
 
     expect(interactions.refreshSummaries).toHaveBeenCalledWith([
-      { actor: { actorType: 'BOT', id: 'bot-1' } },
-      { actor: viewer, target: { targetType: 'BOT', id: 'bot-1' } },
+      { actor: { actorType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' } },
+      {
+        actor: viewer,
+        target: { targetType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' },
+      },
     ]);
   });
 });

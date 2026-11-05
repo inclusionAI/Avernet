@@ -37,6 +37,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicAnalysisRecord,
     ForumTopicRecord,
 )
+from agentclaw.community.core.work_orders.models import WorkOrderEventType
 
 
 _NOW = datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc)
@@ -138,6 +139,46 @@ def test_record_interaction_rejects_bare_default_bot_actor():
             target_id="default:149844",
             active=1,
         )
+
+def test_record_interaction_rejects_bare_named_bot_actor():
+    service = ForumInteractionService(FakeRepository(), FakeVerifier(), FakeAuthorStatsService())
+    with pytest.raises(ValidationError, match="owner-scoped bot_uuid"):
+        service.record_interaction(
+            actor_type="BOT",
+            actor_id="bot-a",
+            action_type="FOLLOW",
+            target_type="HUMAN",
+            target_id="user-b",
+            active=1,
+        )
+
+
+def test_record_interaction_rejects_bare_bot_target():
+    service = ForumInteractionService(FakeRepository(), FakeVerifier(), FakeAuthorStatsService())
+    with pytest.raises(ValidationError, match="BOT target_id"):
+        service.record_interaction(
+            actor_type="HUMAN",
+            actor_id="user-a",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id="bot-a",
+            active=1,
+        )
+
+
+def test_record_interaction_accepts_scoped_bot_actor_and_target():
+    repository = FakeRepository()
+    verifier = FakeVerifier()
+    ForumInteractionService(repository, verifier, FakeAuthorStatsService()).record_interaction(
+        actor_type="BOT",
+        actor_id="bot-a:149844",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-b:149844",
+        active=1,
+    )
+    assert repository.inserted[0]["actor_id"] == "bot-a:149844"
+    assert verifier.calls == [("bot", "bot-b:149844")]
 
 
 class FakeVerifier(ForumInteractionTargetVerifierProtocol):
@@ -256,7 +297,7 @@ def test_identity_target_only_accepts_follow(target_type):
     if target_type == "HUMAN":
         target_id = "user-b"
     else:
-        target_id = "bot-a"
+        target_id = "bot-a:149844"
     repo = FakeRepository()
 
     _service(repository=repo).record_interaction(
@@ -463,6 +504,73 @@ def test_summary_batch_validates_boundaries_and_preserves_order():
     assert results[3] == results[0]
 
 
+@pytest.mark.parametrize(
+    ("actor_id", "target_id"),
+    [("default", "user-b"), ("bot-a", "user-b")],
+)
+def test_summary_rejects_unscoped_bot_actor(actor_id, target_id):
+    service = _service()
+    with pytest.raises(ValidationError, match="bot_uuid"):
+        service.get_summary_batch(
+            (
+                ForumInteractionSummaryQuery(
+                    actor_type=ForumActorType.BOT,
+                    actor_id=actor_id,
+                    target_type=ForumInteractionTargetType.HUMAN,
+                    target_id=target_id,
+                ),
+            )
+        )
+
+
+def test_summary_rejects_default_alias_and_mismatched_bot_alias():
+    service = _service()
+    with pytest.raises(ValidationError, match="ambiguous bare id 'default'"):
+        service.get_summary_batch(
+            (
+                ForumInteractionSummaryQuery(
+                    actor_type=ForumActorType.BOT,
+                    actor_id="default:149844",
+                    actor_id_alias="default",
+                    target_type=ForumInteractionTargetType.TOPIC,
+                    target_id="topic-1",
+                ),
+            )
+        )
+    with pytest.raises(ValidationError, match="must match"):
+        service.get_summary_batch(
+            (
+                ForumInteractionSummaryQuery(
+                    actor_type=ForumActorType.BOT,
+                    actor_id="bot-a:149844",
+                    actor_id_alias="bot-b",
+                    target_type=ForumInteractionTargetType.TOPIC,
+                    target_id="topic-1",
+                ),
+            )
+        )
+
+
+def test_summary_acceptes_named_bot_uuid_with_legacy_bot_id_alias():
+    service = _service()
+    result = service.get_summary_batch(
+        (
+            ForumInteractionSummaryQuery(
+                actor_type=ForumActorType.BOT,
+                actor_id="bot-a:149844",
+                actor_id_alias="bot-a",
+            ),
+        )
+    )
+    assert result[0].actor_id == "bot-a:149844"
+
+
+def test_summary_higher_level_rejects_alias_without_identity():
+    service = _service()
+    with pytest.raises(ValidationError, match="actor_id_alias must be provided"):
+        service.get_summary_batch((ForumInteractionSummaryQuery(actor_id_alias="bot-a"),))
+
+
 def test_summary_batch_rejects_empty_half_dimensions_and_length():
     service = _service()
     with pytest.raises(ValidationError, match="must not be empty"):
@@ -503,3 +611,123 @@ def test_actor_dimension_counts_only_follow_events_and_author_production():
         result.stats.accepted_reply_count,
     ) == (8, 9, 10)
     assert stats.single_actors == []
+
+
+class FakeNotificationPublisher:
+    def __init__(self) -> None:
+        self.notices: list[dict] = []
+
+    def notify(self, **kwargs):
+        self.notices.append(dict(kwargs))
+
+
+def _notifying_service(
+    *,
+    repository=None,
+    verifier=None,
+    publisher=None,
+):
+    from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+        NotifyingForumInteractionService,
+    )
+
+    return NotifyingForumInteractionService(
+        repository or FakeRepository(),
+        verifier or FakeVerifier(),
+        FakeAuthorStatsService(),
+        publisher or FakeNotificationPublisher(),
+    )
+
+
+def test_notifying_interaction_deactivation_and_other_actions_do_not_notify():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=-1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+
+    assert publisher.notices == []
+
+
+def test_notifying_interaction_emits_notices_for_identity_and_post_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-b:owner-b",
+        active=1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert [notice["event_type"] for notice in publisher.notices] == [
+        WorkOrderEventType.BBS_FOLLOWED,
+        WorkOrderEventType.BBS_LIKED,
+    ]
+    assert publisher.notices[0]["recipient_type"] == "BOT"
+    assert publisher.notices[0]["recipient_id"] == "bot-b:owner-b"
+    assert publisher.notices[1]["recipient_type"] == "HUMAN"
+    assert publisher.notices[1]["topic_title"] == "Topic"
+
+
+def test_notifying_interaction_recipient_handles_missing_post_or_topic_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=None, post=None), publisher=publisher
+    )
+
+    post_result = service._recipient(
+        target=ForumInteractionTargetType.POST,
+        target_id="post-missing",
+    )
+    topic_result = service._recipient(
+        target=ForumInteractionTargetType.TOPIC,
+        target_id="topic-missing",
+    )
+
+    assert post_result == ("POST", "post-missing", None, "post-missing", None)
+    assert topic_result == ("TOPIC", "topic-missing", "topic-missing", None, None)
+
+
+def test_notifying_interaction_uses_post_topic_title_when_available():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=_topic(topic_type="HELP"), post=_post()),
+        publisher=publisher,
+    )
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FAVORITE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert publisher.notices[0]["event_type"] == WorkOrderEventType.BBS_FAVORITED
+    assert publisher.notices[0]["topic_title"] == "Topic"

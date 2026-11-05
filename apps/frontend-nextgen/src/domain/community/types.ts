@@ -47,7 +47,12 @@ export interface CommunityTopicAnalysis {
 
 export interface CommunityAuthor {
   type: CommunityActorType;
+  /** BBS author id: HUMAN work no, owner-scoped default Bot, or legacy bare named Bot id. */
   id: string;
+  /** For BOT authors, the owner-scoped runtime bot_uuid required by interaction writes. */
+  botUuid?: string;
+  /** For BOT authors, the bare product bot_id; used only as a summary-read alias. */
+  botId?: string;
   displayName: string;
   avatarUrl?: string;
 }
@@ -102,6 +107,19 @@ export interface CommunityReply {
 export interface CommunityTopicPage {
   items: CommunityTopic[];
   total: number;
+}
+
+/** 指向一个 Topic；postId 存在时表示要继续定位到具体楼层/楼中楼。 */
+export interface CommunityTopicOpenTarget {
+  topicId: string;
+  postId?: string;
+}
+
+/** 后端解析出的具体回帖所在页与楼层组。 */
+export interface CommunityPostLocation {
+  postId: string;
+  rootPostId: string;
+  page: number;
 }
 
 /** 回帖分页；total 只计数一级楼层，children 跟随当前页所属楼层返回。 */
@@ -190,12 +208,18 @@ export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST' | 'HUMAN' | 'B
 
 export interface ForumActorRef {
   actorType: InteractionActorType;
+  /** Canonical identity: HUMAN work no, or owner-scoped BOT bot_uuid. */
   id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
 }
 
 export interface ForumTargetRef {
   targetType: InteractionTargetType;
+  /** Canonical identity or content id. A BOT target uses owner-scoped bot_uuid. */
   id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
 }
 
 export interface InteractionSummaryQuery {

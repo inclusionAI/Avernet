@@ -1,5 +1,117 @@
 # Coding-only restart backup
 
+## Runtime-preserving backup veto (2026-11-04)
+
+Runtime readiness and restart progress are independent. Ordinary coding admission
+keeps the current Bot status, binding and startup markers. QUEUED/BACKING_UP
+failures write only `ext.coding_restart`: FAILED, failure_phase and the sanitized
+error_message. They never write runtime FAILED/start_status. The mutation fence
+clears obsolete startup markers and enters PENDING only after the final receipt
+and target checks. Actual post-submission failures keep the existing lifecycle.
+BaaS binding PENDING is also delayed until that final check passes.
+
+Published restart admission and failure remain in the coding strategy. The
+publish record's status, version, binding and global deployment errors are
+preserved on a backup veto. `ext.restart` stores captured engine, operation_id,
+stage, operation status/phase/message and the existing precondition_error.
+Each explicitly submitted task gets its own operation ID; queue redelivery uses
+that same ID, and a new manual attempt gets a fresh container backup receipt.
+The operation runner still owns adoption and never reissues an accepted workflow.
+
+The OpenAPI restart acceptance response also retains the operation view/ID so
+clients can correlate their subsequent status polls. Both `GET /api/bots/{bot_id}/status` and
+`GET /openapi/v1/bots/{bot_id}/status` project an optional `data.ext.aicoding.restart`:
+`{operation_id, status: RUNNING|SUCCEEDED|FAILED, phase, message}`. Original
+bot_status/status, binding status, is_ready and runtime error_message keep their
+meaning. The published `POST /api/service-bot/publish/{publish_id}/restart_status`
+adds the same object while preserving the existing publication status and nested
+BaaS progress. A queued/pre-backup/blocked operation is answered by the strategy
+before querying any old workflow. Legacy/default strategies contribute nothing;
+the old JSON shape is retained when there is no restart view. No database schema
+or configuration change is required.
+
+The response envelope is extensible: shared schemas declare only a generic `ext`
+object. `EngineProvisioningStrategy.project_status_ext` supplies its content;
+AICoding alone owns the `aicoding.restart` namespace, the projection of persisted
+journals, and the backup-precondition result. Other engines may contribute their
+own namespace without changing HTTP handlers or common orchestration. Existing
+response extension keys are preserved, and projection never writes the stored
+JSON. The existing persistence locations (`Bot.ext.coding_restart` and
+`BotPublishRecord.ext.restart`) are not migrated or exposed as the public journal.
+
+The published `restart_status` envelope retains `success=false` for a backup
+veto, while `data.status` remains the original publication status. That outcome
+is supplied by the strategy through the neutral result `success` flag; it is
+not serialized inside `data`. Consumers must read `data.ext.aicoding.restart`
+before interpreting the outer `success` flag. `RUNNING` means continue polling,
+`FAILED` means stop and display its message without disconnecting the preserved
+runtime, and `SUCCEEDED` means the restart workflow completed. Without this
+extension, consumers retain their existing nested BaaS-progress logic.
+
+The published OpenAPI surface uses `POST /openapi/v1/bots/{bot_id}/lifecycle/restart`
+with `stage=online` or `prestable` (and the existing `staging` alias). Its
+202 acknowledgement retains the accepted operation in `data.ext.aicoding.restart`,
+including its `operation_id`.
+`GET /openapi/v1/bots/{bot_id}/lifecycle` exposes the same four-field restart
+view on the matching `data.items[].ext.aicoding.restart`, independently of that card's
+`status`/`internal_status`/`deployment`. A veto keeps a running card running;
+it is not a new publication failure. Different version cards never share the
+restart result. The GET is a read-only projection; the existing background
+restart poll persists provider terminal results, so GET adds no workflow I/O.
+
+The lifecycle facade calls the strategy dispatcher without interpreting coding
+metadata. Its public projection asks the coding policy for stable, actionable
+failure guidance; raw helper/provider diagnostics, credentials and physical
+container identifiers are not exposed. Legacy/non-coding cards and acknowledgements omit empty `ext`;
+no top-level `restart` or new top-level `operation_id` field is added. No existing required request field or HTTP status changes.
+
+Frontend restart polling must correlate operation_id. ACTIVE while a restart is
+RUNNING is not operation success, and restart FAILED must not disconnect the
+serving Bot. Do not clear a serving binding at admission. Only deployment/runtime
+state may drive online/offline UI. Legacy responses without the new contract keep
+their original behavior. No API response claims that a preserved runtime is
+healthy if its original runtime state was already unhealthy.
+
+The helper installed in the actual container is authoritative. Current scripts
+master uses live backup and clears its barrier on failure; an old installed
+stop-before-backup bundle cannot be made non-disruptive by changing status JSON.
+Backend timeout does not imply worker exit. Do not delete barriers or alter
+production container processes as part of this state-contract fix.
+
+## Non-blocking backup failure warning (2026-11-04)
+
+A confirmed fastdisk backup failure with `fastdisk_fail_block` disabled continues
+restart and adds an optional warning to `ext.aicoding.restart` on the ordinary,
+published and OpenAPI status projections:
+
+```json
+{
+  "status": "RUNNING",
+  "warning": {
+    "code": "backup_failed_continue",
+    "message": "快盘备份失败，当前配置不阻断重启，存在数据丢失风险。"
+  }
+}
+```
+
+This warning is not a failure status: consumers show a warning once per polling
+session for the current operation and keep polling until its terminal result.
+It remains visible in SUCCEEDED/FAILED so a consumer that first observes a
+terminal result does not miss the risk. A new manual operation clears the old
+warning; queue redelivery of that same operation retains it. Normal Bot polling
+correlates operation_id; the existing published page polls by publish_id.
+A blocking backup failure instead returns FAILED with its existing sanitized
+message: stop polling, show an error, and retain the old runtime.
+
+The coding strategy persists only a fixed warning code, merging the existing
+journal/ext atomically. It exposes no helper output, credentials or physical
+container IDs. Warning persistence failures propagate rather than returning a
+restart success with a silently missing risk notice. Non-fastdisk/failed initial
+detection and non-coding engines do not gain this warning. Valid partial backup
+receipts still count as success and retain their distinct logs without a new
+backup-failure toast. The shared lifecycle and generic response schemas are
+unchanged.
+
 ## Confirmed-fastdisk policy (2026-10-30)
 
 Backend sends the embedded publication detector. Unknown/failed initial detection
@@ -13,10 +125,9 @@ restarts persist positive confirmations across redelivery.
 Published restart policy and correlated failure logs live in the existing
 `restart_backup.py`, contributed by
 `AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
-exact-operation failure and status/ext CAS for the existing frontend fields.
+exact-operation failure and status/ext CAS for operation-only progress.
 Shared publish orchestration stays in its original `execute_restart` method and
-only calls the declared `published_restart_scope` and `acquire_restart_workflow`
-strategy hooks. No second common execution function or workflow callback is
+calls declared strategy hooks for admission, execution and progress. No second common execution function or workflow callback is
 introduced. The scope owns entry checks and failure handling: an empty result
 permits execution; a populated result returns an existing/handled failure. Coding
 fills the result only after required failure persistence succeeds. Default scopes
@@ -144,14 +255,14 @@ caller, backup-only failures warn and continue, while lifecycle failures
 retain the caller's existing lock-release behavior. The default strategy
 returns no verifier and never probes devices. The synchronous stop/start/update and allocation lock hand-off remain in
 BotService. Ordinary HTTP coding restart now admits a durable task before this
-precondition; its persisted pending state and operation journal are owned by the
+precondition; its operation journal and eventual mutation state are owned by the
 coding strategy. No restart-lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
 resolves the strategy and calls its `execute_restart` contract; explicit
 `aicoding` / `claude_code` engines with an eligible existing binding enqueue
-persist PENDING synchronously before enqueueing durable work. Workers
-initialize/recover the operation journal, not initial PENDING. Unbound recovery and existing
+durable work without changing the current runtime status. Workers
+initialize/recover the operation journal and enter PENDING only at mutation. Unbound recovery and existing
 activation-in-progress cases retain their original threaded, awaited lifecycle
 so that admission does not erase their original FAILED/ACTIVE state. Default engines execute inline. The coding worker retains the original direct-ARCA stop/start flow;
 ordinary BaaS uses the coding BaaS orchestrator. The worker

@@ -19,6 +19,9 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/list"): NoCheck(
         "a task, not a bot; filters records by the named user"
     ),
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): NoCheck(
+        "a task, not a bot; read-only relay task, node, and owner by chat session id"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): NoCheck(
         "a task, not a bot; paged read of BBS relay tasks"
     ),
@@ -47,6 +50,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "tenant-wide BBS reply read; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): NoCheck(
+        "tenant-wide BBS reply location read; no addressed bot"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "public BBS write; author declared in the body, no addressed bot"

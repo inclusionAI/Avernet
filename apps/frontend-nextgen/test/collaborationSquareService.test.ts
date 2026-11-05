@@ -28,6 +28,7 @@ function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): Col
       ownerName: 'Owner',
       description: '',
       capabilities: [],
+      skills: [],
     })),
     requestBotFriendship: jest.fn(async () => ({ status: 'applying' as const })),
     openBotConversation: jest.fn(async () => ({ sessionId: 'bot-session' })),

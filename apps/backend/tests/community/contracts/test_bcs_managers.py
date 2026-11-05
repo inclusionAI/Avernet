@@ -82,7 +82,8 @@ async def test_consumer_unknown_retries_then_allows_a_later_round(world):
 
 
 @pytest.mark.asyncio
-async def test_consumer_rejected_delivery_is_terminal_failed(world):
+@pytest.mark.parametrize("code", ["http_403", "bot_not_found"])
+async def test_consumer_rejected_delivery_is_terminal_failed(world, code):
     """A considered-and-refused PUT ends the round FAILED — no retry."""
     db = world.get(DatabasePlugin)
     key = seed_sync_facts(
@@ -97,7 +98,7 @@ async def test_consumer_rejected_delivery_is_terminal_failed(world):
     )
     consumer = world.get(BotManagerSyncService)
     plugin = world.get(BcsManagersPlugin)
-    plugin.outcomes.append(BcsManagersError(DeliveryFailure.REJECTED, "http_403"))
+    plugin.outcomes.append(BcsManagersError(DeliveryFailure.REJECTED, code))
 
     assert await consumer.sync_once(key) is SyncOutcome.FAILED
     # A failed round does not prevent a later independent synchronization.

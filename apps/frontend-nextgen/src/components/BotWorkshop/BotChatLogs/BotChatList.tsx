@@ -161,9 +161,8 @@ export function BotChatList({ page, onOpen, onPage, onPageSize }: Props) {
       id: 'actions',
       header: '操作',
       width: 'w-[120px]',
-      // sticky 右置操作列（首页 useBotTableColumns 同款语法，表头底色与其对齐）。
-      className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-      headerClassName: 'sticky right-0 z-10 bg-muted/50 border-l border-divider/60',
+      // sticky 右置操作列：定位/不透明垫底/hover 高亮/滚动遮挡阴影由 DataTable 通用层注入。
+      sticky: 'right',
       cell: (item) => (
         <Button
           variant="ghost"

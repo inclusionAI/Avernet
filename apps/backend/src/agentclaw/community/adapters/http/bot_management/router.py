@@ -111,6 +111,9 @@ from agentclaw.community.plugin_api.bot_create_extension import (
     ExtensionConflict,
     ExtensionInvalidInput,
 )
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -468,6 +471,14 @@ async def restart_bot_for_others(
         return ApiResponse(
             success=False,
             message=str(e),
+            error_code=400,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.restart_bot_for_others] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
             error_code=400,
             data=None,
         )
@@ -2561,6 +2572,14 @@ async def admin_update_bot(
             error_code=409,
             data=None,
         )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.admin_update_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
+            error_code=400,
+            data=None,
+        )
     except BotServiceError as e:
         error_msg = str(e)
         error_code = 400 if "校验失败" in error_msg else 500
@@ -2734,6 +2753,14 @@ async def update_bot(
             success=False,
             message=f"{str(e)}",
             error_code=409,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.update_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
@@ -3001,6 +3028,8 @@ async def get_bot_status(
             "ext": response_ext,  # 添加扩展字段
         }
 
+        from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
+        result['ext'] = resolve_status_ext(bot, response_ext=response_ext)
         return ApiResponse(
             success=True,
             data=result,
@@ -3271,6 +3300,14 @@ async def restart_bot(
         return ApiResponse(
             success=False,
             message=str(e),
+            error_code=400,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.restart_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
             error_code=400,
             data=None,
         )

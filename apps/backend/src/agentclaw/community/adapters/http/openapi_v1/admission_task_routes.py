@@ -14,6 +14,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): AdmissionMode.OPEN,
     # Public BBS unified writes. The author is declared explicitly in the
     # request body (``author_type`` + ``author_id``); this is a backend API
     # reached by humans, Bots and app-to-app callers alike, so the surface does
@@ -136,6 +140,7 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the
     # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas

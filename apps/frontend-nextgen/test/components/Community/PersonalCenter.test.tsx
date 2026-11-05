@@ -96,7 +96,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.getByText('最新回复：2 小时前')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('PRD 风格主题卡片'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-1' });
   });
 
   it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
@@ -209,6 +209,7 @@ describe('CommunityPersonalCenter', () => {
   });
 
   it('keeps liked topic and reply rows separate while distinguishing their source content', async () => {
+    const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'LIKED';
     mockedCenter.activityPage = {
       items: [
@@ -239,7 +240,13 @@ describe('CommunityPersonalCenter', () => {
       total: 2,
     };
 
-    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
+
+    fireEvent.click(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容'));
+    expect(onOpenTopic).toHaveBeenCalledWith({
+      topicId: 'topic-1',
+      postId: 'post-1',
+    });
 
     expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
@@ -350,7 +357,7 @@ describe('CommunityPersonalCenter', () => {
       { target: { targetType: 'TOPIC', id: 'topic-2' } },
     ]);
     fireEvent.click(screen.getByText('张三的主题'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
     fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
     expect(onUnfollow).toHaveBeenCalledTimes(1);
   });
@@ -406,7 +413,7 @@ describe('CommunityPersonalCenter', () => {
           target: { targetType: 'TOPIC', id: 'topic-2' },
           topicId: 'topic-2',
           postId: 'post-direct',
-          happenedAt: '2026-10-27T10:00:00Z',
+          happenedAt: '2026-10-27T10:00:00',
           bodyPreview: '我直接回复帖子本身的内容。',
           topicContext,
         },
@@ -426,13 +433,28 @@ describe('CommunityPersonalCenter', () => {
           },
           topicContext,
         },
+        {
+          activityType: 'REPLIED',
+          actor: { actorType: 'BOT', id: 'bot-mine:149844' },
+          target: { targetType: 'POST', id: 'post-parent' },
+          topicId: 'topic-2',
+          postId: 'post-bot',
+          happenedAt: '2026-10-27T10:10:00Z',
+          bodyPreview: '我的 Bot 补充的内容。',
+          topicContext,
+        },
       ],
-      total: 2,
+      total: 3,
     };
     const onOpenTopic = jest.fn();
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
 
     expect(screen.getAllByText('误报率怎么压下来')).toHaveLength(1);
+    expect(screen.getByText('最近回复：2026-10-27 18:00')).toBeInTheDocument();
+    expect(screen.getAllByText('本人')).toHaveLength(2);
+    expect(screen.getAllByText('149844')).toHaveLength(2);
+    expect(screen.getByText('bot-mine:149844')).toBeInTheDocument();
+    expect(screen.queryByText(/回帖人：/)).not.toBeInTheDocument();
     expect(screen.getByText('我直接回复帖子本身的内容。')).toBeInTheDocument();
     expect(screen.getByText('我回复另一个回复的内容。')).toBeInTheDocument();
     expect(
@@ -445,6 +467,18 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
 
     fireEvent.click(screen.getByText('误报率怎么压下来'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2' });
+
+    fireEvent.click(screen.getByText('我直接回复帖子本身的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-direct',
+    });
+
+    fireEvent.click(screen.getByText('我回复另一个回复的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-child',
+    });
   });
 });

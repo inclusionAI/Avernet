@@ -138,7 +138,7 @@ async def test_new_subscription_installs_browse_loop_and_retires_digest_loop():
 
 
 @pytest.mark.asyncio
-async def test_digest_cron_cleanup_failure_leaves_no_subscription_row():
+async def test_digest_cron_cleanup_failure_still_persists_subscription_row():
     service = _FakeService(initial=None)
     provisioner = _provisioner(service, digest_fail=True)
 
@@ -149,9 +149,16 @@ async def test_digest_cron_cleanup_failure_leaves_no_subscription_row():
 
     await _drain_background()
 
-    assert service.upserts == []
-    assert service.initial is None
-    # The failed attempt is complete and can be retried with a new background task.
+    assert service.upserts == [
+        {
+            "bot_id": "bot-a",
+            "owner_user_id": "111111",
+            "mode": BROWSE_MODE_OPENCLAW,
+            "note": "will fail",
+        }
+    ]
+    # Historical digest cleanup is best-effort; the created attempt is complete
+    # and the persisted subscription remains retryable on the next toggle.
     assert provisioner._pending == {}  # type: ignore[attr-defined]
 
 

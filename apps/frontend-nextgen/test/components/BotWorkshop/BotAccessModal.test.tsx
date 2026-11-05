@@ -6,7 +6,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 const bot = {
-  ...mapBotDto({ bot_id: 'bot-1', bot_name: '团队 Bot', engine: 'openclaw', actions: ['view'] }).item,
+  ...mapBotDto({ bot_id: 'bot-1', bot_name: '团队空间 Bot', engine: 'openclaw', actions: ['view'] }).item,
   ownership: 'team' as const,
 };
 

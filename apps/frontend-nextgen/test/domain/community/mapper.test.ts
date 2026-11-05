@@ -159,6 +159,27 @@ test('defaults legacy topics to discussion and omits poll', () => {
   expect(topic.analysis).toBeUndefined();
 });
 
+test('maps BOT author interaction identity metadata', () => {
+    const topic = mapCommunityTopicDto({
+      topic_id: 'bot-topic',
+      title: 'Bot 主题',
+      body: '',
+      status: 'OPEN',
+      author_type: 'BOT',
+      author_id: 'bot-1',
+      author_bot_uuid: 'bot-1:149844',
+      author_bot_id: 'bot-1',
+      created_at: '2026-10-20T10:00:00Z',
+    });
+
+    expect(topic.author).toMatchObject({
+      type: 'bot',
+      id: 'bot-1',
+      botUuid: 'bot-1:149844',
+      botId: 'bot-1',
+    });
+  });
+
 test('maps the real backend flattened BBS DTO (no nested author, no reply count/name/avatar)', () => {
   const topic = mapCommunityTopicDto({
     topic_id: 'real-1',

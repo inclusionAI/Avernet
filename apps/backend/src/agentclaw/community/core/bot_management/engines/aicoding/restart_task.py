@@ -159,7 +159,7 @@ class AicodingDurableRestartMixin:
             "operation_id": uuid.uuid4().hex,
             "engine": bot["active_engine"],
             "binding_id": bot.get("binding_id"),
-            "previous_status": "PENDING",  # Admission persists this before enqueue.
+            "previous_status": bot["status"],
             "device_id": binding.get("device_id"),
             "provider": binding.get("device_provider"),
             "nick_name": kwargs.get("nick_name"),
@@ -169,11 +169,6 @@ class AicodingDurableRestartMixin:
             # Physical identity is already on the binding, exactly as release
             # resolves it. No BaaS inventory or sandbox-list request is needed.
             payload["sandbox_id"] = (binding.get("device_props") or {}).get("sandbox_id")
-        if bot["status"] != "PENDING":
-            if services.repository.update_by_owner(
-                bot_id, owner_id, {"status": "PENDING"}
-            ) is None:
-                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         task, _created = services.task_queue.enqueue(
             TASK_TYPE,
             payload,
@@ -185,11 +180,13 @@ class AicodingDurableRestartMixin:
         result = _state(services.repository, task.payload).ensure(task.payload, task.id)
         return self._accepted(result)
 
-    @staticmethod
-    def _accepted(bot):
+    def _accepted(self, bot):
         result = dict(bot)
         result["restart_in_progress"] = journal(bot).get("phase") in IN_PROGRESS
         result["restart_operation_id"] = journal(bot).get("operation_id")
+        result["ext"] = self.project_status_ext(
+            ext=bot.get("ext") or {}, response_ext=bot.get("ext") or {},
+        )
         return result
 
 

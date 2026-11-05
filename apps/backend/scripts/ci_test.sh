@@ -94,11 +94,17 @@ fi
 # supports well before 3.14. Set ``BACKEND_CI_COVERAGE_CORE=ctrace`` to fall back.
 export COVERAGE_CORE="${BACKEND_CI_COVERAGE_CORE:-sysmon}"
 
+# Stop on the first failure so its traceback and reports survive the job
+# deadline. Slow-test timings and long-test stack dumps distinguish a slow
+# suite from a blocked worker without relaxing any coverage gate.
 set +e
 DEPLOY_PROFILE=test \
 PYTHONPATH="$backend_dir/src:$backend_dir:${PYTHONPATH:-}" \
 run_without_git_local_env "$backend_python" -m pytest tests/community -v \
   "${xdist_args[@]}" \
+  --maxfail=1 \
+  --durations=30 \
+  -o faulthandler_timeout=120 \
   --continue-on-collection-errors \
   --junitxml="$junit_report" \
   --cov="$ci_workspace/apps/backend/src" \
