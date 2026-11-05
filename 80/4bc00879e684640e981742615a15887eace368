@@ -1,0 +1,20 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/assembly.rs
+  h_fa66fe7c023b4b 44-46
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 142-152,155,240-269,284-289
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 45-51
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 342-371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "804bc00879e684640e981742615a15887eace368",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
