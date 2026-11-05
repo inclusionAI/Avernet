@@ -38,10 +38,10 @@
   <text x="180" y="260" font-size="10.5" text-anchor="middle" fill="#b3402e">kernel stall)</text>
   <text x="180" y="280" font-size="10.5" text-anchor="middle" fill="#b3402e">no heartbeats</text>
 
-  <text x="30" y="246" font-size="11" fill="#5c6a62">t ≈ 15 s</text>
+  <text x="30" y="246" font-size="11" fill="#5c6a62">t ≈ 5 s</text>
   <rect x="404" y="232" width="152" height="24" rx="5" fill="#f7eed7" stroke="#9a6b0a"/>
   <text x="480" y="248" font-size="11" text-anchor="middle" fill="#9a6b0a">A's heartbeat stale</text>
-  <text x="30" y="290" font-size="11" fill="#5c6a62">t ≈ 16 s</text>
+  <text x="30" y="290" font-size="11" fill="#5c6a62">t ≈ 6 s</text>
   <line x1="776" y1="286" x2="484" y2="286" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
   <text x="630" y="279" font-size="11" text-anchor="middle" fill="#157a55">CLAIM: token 7 → 8 WHERE claimable</text>
   <rect x="404" y="300" width="152" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>

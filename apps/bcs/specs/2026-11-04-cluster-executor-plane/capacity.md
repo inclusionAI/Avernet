@@ -6,8 +6,8 @@
 
 | Operation | Statements | Frequency |
 | --- | --- | --- |
-| Heartbeat (renews all of a node's leases) | 1 write | per node per 5 s |
-| Roster read | 1 read | per node per 5 s |
+| Heartbeat (renews all of a node's leases) | 1 write | per node per second |
+| Roster read | 1 read | per node per second |
 | Claim (either outcome) | 2 in one transaction (conditional increment + read-back) | per new episode; rarely after membership change |
 | Fence step | +1 single-row PK update per fenced transaction | per owner write transaction |
 | Release / transfer | 1 | per drain or rebalance |

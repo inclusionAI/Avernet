@@ -73,14 +73,14 @@ shared database is the only place they meet.
 ## 3. Membership: who is alive?
 
 Each node keeps one row in `bcs_node_roster` and refreshes `last_heartbeat_at`
-every 5 s. States are `active` and `draining`. **"Dead" is never written** —
+every second. States are `active` and `draining`. **"Dead" is never written** —
 a crashed node can't write anything — it is derived: the heartbeat is too old.
 
 **Why a table in the shared database** (not etcd, ZooKeeper or gossip):
 membership here is only a hint. The one fact that must be linearizable — who
 owns a session — already lives in the database next to the data. A separate
 coordination service would add infrastructure and a second source of truth
-for no gain. Cost: 20 nodes × one write per 5 s = 4 writes/s.
+for no gain. Cost: 20 nodes × one write per second = 20 tiny writes/s.
 
 **Two identities.** `node_id` changes on every process start: a restarted
 process has none of the old memory, so it is a *different owner*, and "is
@@ -115,9 +115,9 @@ window every healthy peer heartbeats several times; only truly dead nodes
 stay stale. (Chubby gives clients the same kind of grace after its own
 master fails over.)
 
-Two thresholds on the same heartbeat: a node leaves **placement** after 10 s
-(cheap to be wrong) and its leases become **claimable** after 15 s (costlier
-to be wrong).
+Two thresholds on the same heartbeat: a node leaves **placement** after 3 s
+(cheap to be wrong) and its leases become **claimable** after 5 s — five
+missed heartbeats (costlier to be wrong).
 
 ---
 
@@ -135,7 +135,7 @@ preferred(S) = the active node with the highest score
 
 Hashing the session's **bucket** rather than the session itself keeps every
 property below (4096 buckets ≫ nodes, so balance is unaffected) and lets
-failover split a dead node's sessions with an indexed column (§7).
+failover split a dead node's sessions with an indexed column (§8).
 
 Every node computes the same ranking in microseconds with no coordination.
 When a node joins or leaves, only the sessions whose winner changed move —
@@ -200,7 +200,7 @@ was lost.
 
 **Release** — give S up with no successor (only for sessions with nothing to
 do). **Transfer** — hand S directly to a chosen successor with token + 1
-(only the current holder can do this; used by drain, §8).
+(only the current holder can do this; used by drain, §7).
 
 Rules:
 
@@ -210,7 +210,7 @@ Rules:
 - **Expiry decides who may claim; the token decides who may write.** A late
   owner whose lease nobody has claimed can still write safely.
 - **Pending work is never released, only transferred.** A released lease is
-  invisible to failure discovery (§7), so a session that still needs a driver
+  invisible to failure discovery (§8), so a session that still needs a driver
   must always have one.
 
 ### 5.4 The pending-work flag
@@ -292,7 +292,7 @@ TARGET NODE
 **Durable fallback** — one transaction on S's lease row: if the lease is
 claimable, the entry node claims S itself and serves (placement is only a
 preference); otherwise it records the round as input, sets the pending-work
-flag, and acknowledges. Recovery (§7) picks it up.
+flag, and acknowledges. Recovery (§8) picks it up.
 
 The entry node proxies the owner's token stream back to the PA, which only
 ever talks to the load balancer. Nothing here depends on the load balancer:
@@ -302,7 +302,128 @@ just makes forwarding rarer.
 
 ---
 
-## 7. Failover: when a node crashes
+## 7. Planned drain and deploy
+
+Deploy model: a group G of nodes is restarted in place, one group at a time.
+
+**Principle: move ownership before the process stops, and keep serving until
+the move.** Draining never means refusing work.
+
+![Drain timeline: stop signal; roster draining and readiness red; sessions released or handed off cheapest first; non-resumable steps finish then hand off; bot sockets emptied last; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
+
+### 7.1 The sequence for node A
+
+1. **Stop signal:** roster `state = draining` (peers stop placing on A),
+   readiness fails (the load balancer stops sending new connections), stop
+   claiming. Keep serving every session A still owns.
+2. **Move sessions, cheapest first** (a session that just got a round jumps
+   the queue):
+   - **cold** (nothing in memory) → release;
+   - **warm, or waiting on something that can be picked up elsewhere** → hand
+     off now;
+   - **waiting on a stream that can't be resumed** → finish that step, then
+     hand off (A stays owner meanwhile and does not start the next step);
+   - **about to start a new step** → hand off first, so the step starts on
+     the successor.
+3. **Bot sockets last** (§7.4).
+4. **Finish what is already flowing through A.** A PA round whose token
+   stream passes through A (A was its entry node) keeps streaming — owner →
+   A → PA — until that round ends or the deadline. A asks clients to open new
+   connections (HTTP/2 `GOAWAY` / `Connection: close`); A is out of the load
+   balancer, so those land on other nodes, and an interrupted stream is
+   resumed from its last sequence number through another node. Peers that
+   still guess A for a session get a `NOT_OWNER` redirect.
+5. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
+   is left to its successors. A step still running on a non-resumable stream
+   is cancelled and **re-run by the successor**. That is safe because such
+   streams only ever carry read-only or idempotent steps: side-effecting
+   steps are dispatched only to agents with durable, queryable tasks (items
+   3 and 6). The cost is the step's time, never correctness.
+6. Delete the roster row and exit. On restart: same address and
+   `member_name`, new `node_id` → leftovers are claimable at once and the node
+   gets its old placement back.
+
+Successors must be outside G, or a session would move twice: a draining node
+refuses a handoff and the next-ranked node is tried. If the deploy platform
+can mark a whole group draining at once, double moves disappear entirely.
+
+### 7.2 Handoff
+
+![Handoff: A sends PREPARE; B loads S and replies READY; A pauses writes for S; A transfers the lease to B with token n+1; A sends COMMIT; B checks write_seq and drives S; A forwards held rounds and redirects later ones.](assets/handoff-sequence.svg)
+
+1. **PREPARE** — A asks successor B to load S into memory (B is not owner yet).
+2. **Pause** — A finishes its current write for S and holds new events for a
+   few milliseconds.
+3. **Transfer** — one database update: owner = B, token + 1.
+4. **COMMIT** — A tells B; B starts driving, re-reading only what changed
+   since PREPARE.
+5. A forwards anything it held; later arrivals get `NOT_OWNER(B)`.
+
+The gap for S is one database write plus one network round trip. If anything
+fails midway, existing rules cover it: B dies → ordinary takeover; the COMMIT
+is lost → B finds S anyway; A writes after the transfer → fenced out.
+
+How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
+sets it `TRUE` in the same transaction; a new owner sets it `TRUE` (fenced)
+when it starts driving. Every node reads, each heartbeat, its leases that
+are not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed,
+usually empty), at most one batch per tick (the same 2,000-row bound and
+backoff as failure discovery; state is reloaded lazily, so adopting is
+cheap). Adopted rows leave the result set, so paging needs no cursor
+either. There is no timestamp or cursor, so a transfer that commits
+late can't be skipped: an unadopted row stays visible until it is adopted.
+The same read covers transfers made without a PREPARE (drain deadline,
+watchdog).
+
+### 7.3 When is it safe to move a run mid-flight?
+
+A run can move between any two durable writes, because its whole position is
+in the database. The cases that need care:
+
+| The run is… | Move now? |
+| --- | --- |
+| Between steps | ✓ |
+| Waiting on an agent task whose id is recorded | ✓ — the successor reads or re-subscribes to the task |
+| Waiting on a dial-in bot | ✓ — the socket's node relays events to whoever owns S now |
+| In the middle of sending a dispatch | Finish the send first (milliseconds) |
+| Waiting on a stream that can't be resumed | ✗ — wait for that step to end (its output exists only on that stream); at the deadline it is re-run by the successor (§7.1) |
+| Waiting on a timer | ✓ — provided timer deadlines are stored durably |
+
+### 7.4 Bot sockets: a second, independent job
+
+A dial-in bot keeps one WebSocket open to whichever node it connected to.
+That node is just **transport**: it relays the bot's events to the owner of
+each run's session, wherever that owner is.
+
+![Bot socket roles: before handoff the socket holder delivers events in-process to the owner; after handoff the same socket holder relays each event to the new owner; the bot sees nothing.](assets/bot-socket-roles.svg)
+
+- Handing off a session does **not** touch the socket: the socket's node
+  simply relays the next event to the new owner, looked up per event.
+- What must wait is **closing the socket**, because it may carry runs of
+  sessions owned by any node. A draining node sends no new work over its
+  sockets, lets in-flight runs finish (still relaying events and aborts),
+  then asks the bot to reconnect, and the bot redials through the load
+  balancer to another node.
+- New work for that bot is never queued on the draining node. It stays a
+  durable delivery owned by the session's owner, dispatched once the bot is
+  reachable again.
+
+### 7.5 Rolling out safely
+
+- **Probes:** liveness ("is the process stuck?") stays green while draining;
+  readiness ("send me work?") is red while draining, self-fenced or starting.
+- **Pacing:** add one new node before removing one old one, wait ~30 s
+  between steps so rehydration waves don't stack, and keep groups to ≤ 25 %
+  of the cluster.
+- **Mixed versions:** old and new nodes take over each other's sessions, so
+  schema changes go expand → migrate → contract across releases; new durable
+  formats ship the reader first and the writer later; a node that meets a
+  format it can't read hands the session back instead of guessing. The lease
+  protocol and the placement hash are frozen across versions.
+
+---
+
+## 8. Failover: when a node crashes
 
 There is no handoff message after a crash. Survivors must **discover** the
 dead node's sessions and split them without talking to each other.
@@ -338,136 +459,21 @@ blindly resend), and resume.
 safe, evidence can replace waiting: a restart at the same address frees the
 old run's leases at once; a process that panics marks its own roster row
 dead on the way out (heartbeat set to NULL) and keeps its leases, so
-survivors find them through the normal dead-node query (§7, step 1) at once —
+survivors find them through the normal dead-node query (§8, step 1) at once —
 pending work is never released. A node that is alive but silently unreachable gives no evidence —
 for it, wait the claim threshold.
 
 | Situation | Sessions resume after |
 | --- | --- |
-| Restart in place | restart time + ≤ 5 s |
-| Crash, preferred survivor claims | ~18–23 s |
-| Crash, worst case (second choice claims) | ~26 s — within the 30 s target, assuming survivors are past their own recovery grace |
+| Restart in place | restart time + ≤ 1 s |
+| Crash, preferred survivor claims | ~6–7 s (5 s claim threshold + ≤ 1 s roster poll + lazy reload) |
+| Crash, worst case (second choice claims) | ~8 s (adds the 1 s non-preferred grace), assuming survivors are past their own recovery grace |
 
----
-
-## 8. Planned drain and deploy
-
-Deploy model: a group G of nodes is restarted in place, one group at a time.
-
-**Principle: move ownership before the process stops, and keep serving until
-the move.** Draining never means refusing work.
-
-![Drain timeline: stop signal; roster draining and readiness red; sessions released or handed off cheapest first; non-resumable steps finish then hand off; bot sockets emptied last; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
-
-### 8.1 The sequence for node A
-
-1. **Stop signal:** roster `state = draining` (peers stop placing on A),
-   readiness fails (the load balancer stops sending new connections), stop
-   claiming. Keep serving every session A still owns.
-2. **Move sessions, cheapest first** (a session that just got a round jumps
-   the queue):
-   - **cold** (nothing in memory) → release;
-   - **warm, or waiting on something that can be picked up elsewhere** → hand
-     off now;
-   - **waiting on a stream that can't be resumed** → finish that step, then
-     hand off (A stays owner meanwhile and does not start the next step);
-   - **about to start a new step** → hand off first, so the step starts on
-     the successor.
-3. **Bot sockets last** (§8.4).
-4. **Finish what is already flowing through A.** A PA round whose token
-   stream passes through A (A was its entry node) keeps streaming — owner →
-   A → PA — until that round ends or the deadline. A asks clients to open new
-   connections (HTTP/2 `GOAWAY` / `Connection: close`); A is out of the load
-   balancer, so those land on other nodes, and an interrupted stream is
-   resumed from its last sequence number through another node. Peers that
-   still guess A for a session get a `NOT_OWNER` redirect.
-5. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
-   is left to its successors. A step still running on a non-resumable stream
-   is cancelled and **re-run by the successor**. That is safe because such
-   streams only ever carry read-only or idempotent steps: side-effecting
-   steps are dispatched only to agents with durable, queryable tasks (items
-   3 and 6). The cost is the step's time, never correctness.
-6. Delete the roster row and exit. On restart: same address and
-   `member_name`, new `node_id` → leftovers are claimable at once and the node
-   gets its old placement back.
-
-Successors must be outside G, or a session would move twice: a draining node
-refuses a handoff and the next-ranked node is tried. If the deploy platform
-can mark a whole group draining at once, double moves disappear entirely.
-
-### 8.2 Handoff
-
-![Handoff: A sends PREPARE; B loads S and replies READY; A pauses writes for S; A transfers the lease to B with token n+1; A sends COMMIT; B checks write_seq and drives S; A forwards held rounds and redirects later ones.](assets/handoff-sequence.svg)
-
-1. **PREPARE** — A asks successor B to load S into memory (B is not owner yet).
-2. **Pause** — A finishes its current write for S and holds new events for a
-   few milliseconds.
-3. **Transfer** — one database update: owner = B, token + 1.
-4. **COMMIT** — A tells B; B starts driving, re-reading only what changed
-   since PREPARE.
-5. A forwards anything it held; later arrivals get `NOT_OWNER(B)`.
-
-The gap for S is one database write plus one network round trip. If anything
-fails midway, existing rules cover it: B dies → ordinary takeover; the COMMIT
-is lost → B finds S anyway; A writes after the transfer → fenced out.
-
-How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
-sets it `TRUE` in the same transaction; a new owner sets it `TRUE` (fenced)
-when it starts driving. Every node reads, each heartbeat, its leases that
-are not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed,
-usually empty), at most one batch per tick (the same 2,000-row bound and
-backoff as failure discovery; state is reloaded lazily, so adopting is
-cheap). Adopted rows leave the result set, so paging needs no cursor
-either. There is no timestamp or cursor, so a transfer that commits
-late can't be skipped: an unadopted row stays visible until it is adopted.
-The same read covers transfers made without a PREPARE (drain deadline,
-watchdog).
-
-### 8.3 When is it safe to move a run mid-flight?
-
-A run can move between any two durable writes, because its whole position is
-in the database. The cases that need care:
-
-| The run is… | Move now? |
-| --- | --- |
-| Between steps | ✓ |
-| Waiting on an agent task whose id is recorded | ✓ — the successor reads or re-subscribes to the task |
-| Waiting on a dial-in bot | ✓ — the socket's node relays events to whoever owns S now |
-| In the middle of sending a dispatch | Finish the send first (milliseconds) |
-| Waiting on a stream that can't be resumed | ✗ — wait for that step to end (its output exists only on that stream); at the deadline it is re-run by the successor (§8.1) |
-| Waiting on a timer | ✓ — provided timer deadlines are stored durably |
-
-### 8.4 Bot sockets: a second, independent job
-
-A dial-in bot keeps one WebSocket open to whichever node it connected to.
-That node is just **transport**: it relays the bot's events to the owner of
-each run's session, wherever that owner is.
-
-![Bot socket roles: before handoff the socket holder delivers events in-process to the owner; after handoff the same socket holder relays each event to the new owner; the bot sees nothing.](assets/bot-socket-roles.svg)
-
-- Handing off a session does **not** touch the socket: the socket's node
-  simply relays the next event to the new owner, looked up per event.
-- What must wait is **closing the socket**, because it may carry runs of
-  sessions owned by any node. A draining node sends no new work over its
-  sockets, lets in-flight runs finish (still relaying events and aborts),
-  then asks the bot to reconnect, and the bot redials through the load
-  balancer to another node.
-- New work for that bot is never queued on the draining node. It stays a
-  durable delivery owned by the session's owner, dispatched once the bot is
-  reachable again.
-
-### 8.5 Rolling out safely
-
-- **Probes:** liveness ("is the process stuck?") stays green while draining;
-  readiness ("send me work?") is red while draining, self-fenced or starting.
-- **Pacing:** add one new node before removing one old one, wait ~30 s
-  between steps so rehydration waves don't stack, and keep groups to ≤ 25 %
-  of the cluster.
-- **Mixed versions:** old and new nodes take over each other's sessions, so
-  schema changes go expand → migrate → contract across releases; new durable
-  formats ship the reader first and the writer later; a node that meets a
-  format it can't read hands the session back instead of guessing. The lease
-  protocol and the placement hash are frozen across versions.
+These come from a 1 s heartbeat and a 5 s claim threshold. Going lower is
+possible and still safe (fencing makes a wrong takeover harmless), but each
+false takeover of a node that merely stalled for a few seconds costs a
+rehydration. Cluster-wide stalls are already absorbed by relative staleness
+and the recovery grace.
 
 ---
 
@@ -490,16 +496,16 @@ each run's session, wherever that owner is.
 
 ## 10. Parameters
 
-All configurable; defaults sized for a ≤ 30 s takeover.
+All configurable; defaults sized for a crash takeover in under ~10 s.
 
 | Parameter | Default |
 | --- | --- |
-| Heartbeat interval (also keeps leases alive) | 5 s |
-| Placement-stale threshold | 10 s |
-| Claim threshold | 15 s |
-| Observer recovery grace | 15 s (= claim threshold) |
-| Self-fence margin | 2 s |
-| Claim grace for non-preferred nodes | 3 s |
+| Heartbeat interval (also keeps leases alive) | 1 s |
+| Placement-stale threshold | 3 s |
+| Claim threshold | 5 s |
+| Observer recovery grace | 5 s (= claim threshold) |
+| Self-fence margin | 1 s |
+| Claim grace for non-preferred nodes | 1 s |
 | Failure discovery: batch per poll / poll interval while backlog remains | 2,000 rows / 1 s |
 | Safety-net sweep | 30–60 s |
 | Drain deadline | 25 s |
