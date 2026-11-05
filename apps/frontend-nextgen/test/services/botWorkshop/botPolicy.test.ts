@@ -254,10 +254,10 @@ describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/
     expect(getGeneralConfigAvailability(personalBot, true, false)).toEqual({ enabled: true });
   });
 
-  test('非 Bot 管理员禁用并说明原因', () => {
+  test('非 Bot 拥有者禁用并说明原因', () => {
     expect(getGeneralConfigAvailability(personalBot, false, false)).toEqual({
       enabled: false,
-      disabledReason: '仅 Bot 管理员可变更公开设置',
+      disabledReason: '仅 Bot 拥有者可变更公开设置',
     });
   });
 
@@ -268,16 +268,16 @@ describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/
     });
   });
 
-  test('非管理员与持锁同时存在时管理员原因优先', () => {
-    expect(getGeneralConfigAvailability(personalBot, false, true).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
+  test('非拥有者与持锁同时存在时拥有者原因优先', () => {
+    expect(getGeneralConfigAvailability(personalBot, false, true).disabledReason).toBe('仅 Bot 拥有者可变更公开设置');
   });
 
-  test('已发布（运行中）的服务 Bot 管理员可打开', () => {
+  test('已发布（运行中）的服务 Bot 拥有者可打开', () => {
     expect(getGeneralConfigAvailability(publishedServiceBot, true, false)).toEqual({ enabled: true });
   });
 
   test.each(['draft', 'deploying', 'prestable', 'offline', 'failed', 'unknown'] as const)(
-    '服务 Bot 未发布（lifecycle=%s）时管理员也禁用，并说明原因',
+    '服务 Bot 未发布（lifecycle=%s）时拥有者也禁用，并说明原因',
     (lifecycle) => {
       const bot = { ...publishedServiceBot, lifecycle };
       expect(getGeneralConfigAvailability(bot, true, false)).toEqual({
@@ -292,8 +292,8 @@ describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/
     expect(getGeneralConfigAvailability(draftPersonalBot, true, false)).toEqual({ enabled: true });
   });
 
-  test('未发布服务 Bot 的非管理员命中管理员原因优先', () => {
+  test('未发布服务 Bot 的非拥有者命中拥有者原因优先', () => {
     const draftServiceBot = { ...publishedServiceBot, lifecycle: 'draft' as const };
-    expect(getGeneralConfigAvailability(draftServiceBot, false, false).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
+    expect(getGeneralConfigAvailability(draftServiceBot, false, false).disabledReason).toBe('仅 Bot 拥有者可变更公开设置');
   });
 });
