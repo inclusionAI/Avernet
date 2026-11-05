@@ -290,6 +290,11 @@ pub enum DbTransactionStep {
     /// business failure.
     Query(DbStatement),
     Execute(DbStatement),
+    /// Query and require at least this many rows before proceeding.
+    /// Fewer rows (including zero) gracefully terminates the transaction
+    /// with all previous writes committed, analogous to
+    /// `Execute::with_transaction_stop_on_no_rows` for queries.
+    QueryChecked { statement: DbStatement, expected_min_rows: u64 },
     /// Execute and require exactly this many affected rows before proceeding.
     /// Mismatch rolls back the entire transaction, including earlier writes.
     /// Callers must use genuinely changing CAS updates (e.g. increment version)
@@ -302,7 +307,9 @@ impl DbTransactionStep {
     /// parameter bindings are evaluated only when a step is reached.
     pub fn validate(&self) -> DbResult<()> {
         match self {
-            Self::Query(statement) | Self::ExecuteChecked { statement, .. }
+            Self::Query(statement)
+            | Self::QueryChecked { statement, .. }
+            | Self::ExecuteChecked { statement, .. }
                 if statement.stops_transaction_on_no_rows() =>
             {
                 Err(DbError::InvalidInput(

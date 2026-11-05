@@ -290,6 +290,18 @@ impl DbPlugin for LocalSqliteDbPlugin {
                         &params,
                     )?));
                 }
+                DbTransactionStep::QueryChecked { statement, expected_min_rows } => {
+                    let params = statement.resolve_transaction_params(&results, step_index)?;
+                    let rows = query_with_connection_params(&tx, statement.sql(), &params)?;
+                    let count = u64::try_from(rows.len()).map_err(|_| DbError::Conversion(
+                        "query result count exceeds u64".into(),
+                    ))?;
+                    if count < expected_min_rows {
+                        results.push(DbTransactionStepResult::Rows(rows));
+                        break;
+                    }
+                    results.push(DbTransactionStepResult::Rows(rows));
+                }
                 DbTransactionStep::Execute(statement) => {
                     let params = statement.resolve_transaction_params(&results, step_index)?;
                     let result = execute_with_connection_params(&tx, statement.sql(), &params)?;
