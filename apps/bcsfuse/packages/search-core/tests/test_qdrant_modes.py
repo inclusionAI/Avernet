@@ -59,8 +59,8 @@ def test_retrieval_filters_updates_and_deletes(index):
     )
     assert index.point_counts() == {"vector_points": 2, "keyword_points": 2}
     for hits in [
-        index.vector_search([1.0, 0.0], 1, {"team": ("b",)}, frozenset({"b"})),
-        index.keyword_search("invoice", 1, {"team": ("b",)}, frozenset({"b"})),
+        index.vector_search([1.0, 0.0], 1, {"team": ("b",)}),
+        index.keyword_search("invoice", 1, {"team": ("b",)}),
     ]:
         assert [hit.id for hit in hits] == ["b"]
     index.upsert(
@@ -70,12 +70,12 @@ def test_retrieval_filters_updates_and_deletes(index):
             )
         ]
     )
-    assert index.keyword_search("invoice", 2, {}, frozenset({"b"})) == []
-    assert [h.id for h in index.keyword_search("weather", 2, {}, None)] == ["b"]
+    assert index.keyword_search("invoice", 2, {"team": ("b",)}) == []
+    assert [h.id for h in index.keyword_search("weather", 2, {})] == ["b"]
     index.delete(["b"])
     assert index.point_counts() == {"vector_points": 1, "keyword_points": 1}
-    assert index.vector_search([0.0, 1.0], 2, {}, frozenset({"b"})) == []
-    assert index.keyword_search("weather", 2, {}, None) == []
+    assert index.vector_search([0.0, 1.0], 2, {"team": ("b",)}) == []
+    assert index.keyword_search("weather", 2, {}) == []
 
 
 def test_inspection_reads_actual_source_points_and_excludes_other_cards(index):
@@ -160,8 +160,8 @@ def test_server_retains_both_collections_and_rejects_dimension_change(index, tmp
     )
     index._dense.close()
     index._keyword.close()
-    assert index.vector_search([1.0, 0.0], 1, {}, None)[0].id == "a"
-    assert index.keyword_search("支付", 1, {}, None)[0].id == "a"
+    assert index.vector_search([1.0, 0.0], 1, {})[0].id == "a"
+    assert index.keyword_search("支付", 1, {})[0].id == "a"
     with pytest.raises(ValueError, match="dimension/distance"):
         QdrantRetrievalIndex(
             path=str(tmp_path / "unused"),
@@ -169,7 +169,7 @@ def test_server_retains_both_collections_and_rejects_dimension_change(index, tmp
             collection_name=index._dense.collection_name,
             connection=index.connection,
         )
-    assert index.keyword_search("支付", 1, {}, None)[0].id == "a"
+    assert index.keyword_search("支付", 1, {})[0].id == "a"
 
 
 def test_keyword_field_indexes_are_created_for_both_server_collections(

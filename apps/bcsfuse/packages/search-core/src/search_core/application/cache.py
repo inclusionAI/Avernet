@@ -148,7 +148,6 @@ class CachedRetrieval:
             return await self.retrieval.retrieve(request)
         with stage_timing("result_cache_read") as stage:
             # Search/recommend currently share identical validated default semantics.
-            # None (unrestricted) and an empty authorization set remain distinct.
             key = _key(
                 [
                     revision,
@@ -156,9 +155,6 @@ class CachedRetrieval:
                     request.query,
                     request.limit,
                     {k: sorted(v) for k, v in request.filters.items()},
-                    None
-                    if request.allowed_ids is None
-                    else sorted(request.allowed_ids),
                 ]
             )
             hit = self.cache.get(key)

@@ -52,7 +52,7 @@ def test_emergency_toggle_works_without_cache_and_preserves_inflight_snapshot(
         index = QdrantRetrievalIndex(path=str(tmp_path / "index"), dimension=2)
 
         async def auth(request):
-            return VerifiedIdentity("test", None)
+            return VerifiedIdentity("test")
 
         app = create_catalog_search_app(
             sqlite_catalog_repository(str(tmp_path / "cards.db")),
@@ -69,7 +69,7 @@ def test_emergency_toggle_works_without_cache_and_preserves_inflight_snapshot(
                 control = app.state.search_emergency
                 assert control.update_cache({"enabled": cache_enabled})
                 assert not control.current.policy.cache.query_embedding.enabled
-                request = RetrievalRequest("same", 1, {}, None)
+                request = RetrievalRequest("same", 1, {})
 
                 async def burst():
                     return await asyncio.gather(

@@ -101,7 +101,7 @@ class HybridRetrievalService:
     async def recall(self, request: RetrievalRequest) -> RecallResult:
         if not request.query.strip() or not 0 < request.limit <= self._candidate_limit:
             raise ValueError("query and limit within candidate_limit are required")
-        if request.allowed_ids == frozenset() or any(
+        if any(
             not v for v in request.filters.values()
         ):
             return RecallResult()
@@ -126,7 +126,7 @@ class HybridRetrievalService:
                     vector,
                     self._recall_limit,
                     request.filters,
-                    request.allowed_ids,
+
                 )
                 stage["raw_count"] = len(hits)
                 return hits
@@ -141,7 +141,7 @@ class HybridRetrievalService:
                     request.query,
                     self._recall_limit,
                     request.filters,
-                    request.allowed_ids,
+
                 )
                 stage["raw_count"] = len(hits)
                 return hits
@@ -196,12 +196,6 @@ class HybridRetrievalService:
                 else:
                     available = True
                     hits = tuple(result)
-                    if request.allowed_ids is not None and any(
-                        self._identity(h) not in request.allowed_ids for h in hits
-                    ):
-                        raise SearchUnavailable(
-                            "index returned an unauthorized candidate"
-                        )
                     threshold = self._thresholds[position]
                     if threshold is not None:
                         hits = tuple(

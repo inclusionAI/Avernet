@@ -36,7 +36,7 @@ class Management(CardManagementService):
 
 
 async def operator():
-    return VerifiedIdentity("operator", None)
+    return VerifiedIdentity("operator")
 
 
 @pytest.fixture

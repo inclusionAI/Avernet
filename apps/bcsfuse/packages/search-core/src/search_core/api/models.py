@@ -13,9 +13,6 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class VerifiedIdentity:
     subject: str
-    # None intentionally means unrestricted; an empty set means no access.
-    # IDs identify ranked items (full Profile key in TC, Agent ID in Agent Search).
-    allowed_ids: frozenset[str] | None
 
     def __post_init__(self):
         if not self.subject:
@@ -104,7 +101,6 @@ class RetrievalRequest:
     query: str
     limit: int
     filters: dict[str, tuple[str, ...]]
-    allowed_ids: frozenset[str] | None
 
 
 @dataclass(frozen=True)

@@ -19,7 +19,6 @@ from search_core.application.cache import CachedEmbedding, CachedRetrieval, Sear
 from search_core.application.card_metadata import CardMetadataRetrieval
 from search_core.application.catalog_retrieval import CatalogRetrieval
 from search_core.application.default_candidates import DefaultCandidates
-from search_core.application.document_index import DocumentIndex
 from search_core.application.emergency import (
     EmergencyControl,
     EmergencyPolicy,
@@ -194,7 +193,7 @@ def create_catalog_search_app(
             )
         candidate_limit = max(30, policy.max_results)
         retrieval: StagedRetrievalService = HybridRetrievalService(
-            index=DocumentIndex(index),
+            index=index,
             embedding=online_embedding,
             group_by_source=True,
             candidate_limit=candidate_limit,
@@ -279,11 +278,11 @@ def create_catalog_search_app(
         app.include_router(create_index_build_router(index_builds, authorize_operator))
 
     def check_index(switches):
-        scope = frozenset({"__catalog_readiness_probe__"})
+        filters = {"source_id": ("__catalog_readiness_probe__",)}
         if switches.keyword_enabled:
-            index.keyword_search("catalog readiness", 1, {}, scope)
+            index.keyword_search("catalog readiness", 1, filters)
         if switches.vector_enabled:
-            index.vector_search([0.0] * embedding.dimension, 1, {}, scope)
+            index.vector_search([0.0] * embedding.dimension, 1, filters)
         if not switches.keyword_enabled and not switches.vector_enabled:
             repository.page("", 1)  # Default candidates require the source DB.
 

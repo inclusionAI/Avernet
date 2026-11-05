@@ -76,7 +76,7 @@ def test_64_native_async_model_waits_preserve_keyword_fallback(blocked):
             execution=calls,
         )
         results = await asyncio.gather(
-            *(service.retrieve(RetrievalRequest("x", 1, {}, None)) for _ in range(64))
+            *(service.retrieve(RetrievalRequest("x", 1, {})) for _ in range(64))
         )
         assert all(
             r.status == "degraded" and r.items[0].item_id == "a" for r in results

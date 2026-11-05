@@ -122,7 +122,7 @@ class CatalogSearchApplication:
             )
             with binding:
                 try:
-                    result = await self._validated_execute(command, identity)
+                    result = await self._validated_execute(command)
                 except Exception as error:
                     events.record(
                         "search_request",
@@ -170,7 +170,7 @@ class CatalogSearchApplication:
                     ),
                 )
 
-    async def _validated_execute(self, command, identity):
+    async def _validated_execute(self, command):
         with stage_timing("validation"):
             if command.scene != "default" or command.extensions:
                 raise UnsupportedSearchOption(
@@ -178,32 +178,18 @@ class CatalogSearchApplication:
                 )
             if command.filters.keys() - self._filter_fields:
                 raise UnsupportedSearchOption("unsupported catalog filter")
-            if identity.allowed_ids == frozenset() or any(
+            if any(
                 not values for values in command.filters.values()
             ):
                 return SearchResult()
-        return await self._execute(command, identity)
+        return await self._execute(command)
 
-    async def _execute(self, command, identity):
+    async def _execute(self, command):
         result = await self._retrieval.retrieve(
             RetrievalRequest(
                 command.query,
                 command.limit,
                 dict(command.filters),
-                identity.allowed_ids,
             )
         )
-        # Defense in depth for provider bugs. Providers still MUST prefilter;
-        # filtering after top-k alone would under-fill valid results.
-        with stage_timing("authorization") as stage:
-            items = tuple(
-                item
-                for item in result.items
-                if identity.allowed_ids is None or item.item_id in identity.allowed_ids
-            )
-            stage.update(
-                restricted_to_ids=identity.allowed_ids is not None,
-                input_count=len(result.items),
-                result_count=len(items[: command.limit]),
-            )
-            return replace(result, items=items[: command.limit])
+        return replace(result, items=result.items[: command.limit])
