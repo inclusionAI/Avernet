@@ -342,8 +342,15 @@ async def test_http_logs_business_fields_trace_and_session_keys_without_credenti
     _, transport = seed_recording_runtime(world)
     caplog.set_level(logging.INFO)
     sentinel = "private-auth-" + "value"
-    transport.extensions = {"token": sentinel, "Authorization": sentinel, "Cookie": sentinel,
-        "secret": sentinel, "credentials": {"password": sentinel}, "sessionKey": "business-session-a", "session_key": "business-session-b"}
+    transport.extensions = {
+        "token": sentinel,
+        "Authorization": sentinel,
+        "Cookie": sentinel,
+        "secret": sentinel,
+        "credentials": {"password": sentinel},
+        "sessionKey": "business-session-a",
+        "session_key": "business-session-b",
+    }
     result = await async_client.post(BASE, params={"user_id": "u_owner"}, headers={**headers(), "Cookie": sentinel}, json={**BODY, "runtime_stage": "online", "device_uuid": "instance-a"})
     assert result.status_code == 201, result.text
     assert sentinel not in caplog.text

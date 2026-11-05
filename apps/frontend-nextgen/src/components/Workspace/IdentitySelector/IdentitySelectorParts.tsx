@@ -13,7 +13,7 @@ import { type ReactNode } from 'react';
 export { IdentityTriggerButton } from './IdentityTriggerButton';
 
 function isAvatarUrl(avatar: string): boolean {
-  return /^https?:\/\//.test(avatar);
+  return /^(?:(?:https?:)?\/\/|data:image\/|\/)/.test(avatar);
 }
 
 export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip' | 'inline';

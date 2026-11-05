@@ -52,18 +52,19 @@ function legacyLifecycle(dto: BackendUnknownRecord, warnings: string[]): BotLife
   return 'unknown';
 }
 
-/** 服务 Bot 的实体状态和发布状态优先于旧 display_state，避免初始化/失败被误报为草稿。 */
+/** 非草稿发布记录拥有独立运行态，源 Bot 的实例状态只用于草稿或无发布阶段的记录。 */
 function serviceLifecycle(dto: BackendUnknownRecord, warnings: string[]): BotLifecycle {
   const status = asString(dto.status)?.toUpperCase();
   const publishStatus = publishStatusOf(dto);
-  if (status && DEPLOYING_BOT_STATUSES.has(status)) return 'deploying';
-  if (status && FAILED_BOT_STATUSES.has(status)) return 'failed';
-  if (status && OFFLINE_BOT_STATUSES.has(status)) return 'offline';
   if (publishStatus === 'FAILED') return 'failed';
   if (publishStatus && DEPLOYING_PUBLISH_STATUSES.has(publishStatus)) return 'deploying';
   if (publishStatus && PRESTABLE_PUBLISH_STATUSES.has(publishStatus)) return 'prestable';
   if (publishStatus && RUNNING_PUBLISH_STATUSES.has(publishStatus)) return 'running';
   if (publishStatus && OFFLINE_PUBLISH_STATUSES.has(publishStatus)) return 'offline';
+  // 升级会重启源 Bot 的草稿实例，不能把它的 PENDING/FAILED 等状态传播到线上版本。
+  if (status && DEPLOYING_BOT_STATUSES.has(status)) return 'deploying';
+  if (status && FAILED_BOT_STATUSES.has(status)) return 'failed';
+  if (status && OFFLINE_BOT_STATUSES.has(status)) return 'offline';
   if (publishStatus === 'DRAFT') return 'draft';
   const displayState = asString(dto.display_state)?.toLowerCase();
   if (displayState && DISPLAY_STATE_LIFECYCLE[displayState]) return DISPLAY_STATE_LIFECYCLE[displayState];
