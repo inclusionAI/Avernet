@@ -76,6 +76,7 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   const userId = human.identity?.userId ?? '';
   const repairVisible = !isExternalBot && showCollaborationAbilitySettings;
   const availability = getGeneralConfigAvailability(
+    bot,
     Boolean(userId && bot.ownerId === userId),
     bot.lock?.status === 'other',
   );
