@@ -179,6 +179,7 @@ export function useSessionTaskPanelBootstrap({
 
         // 显式任务来源（任务列表“进入对话”）具有最高优先级，不会被默认 latest task 覆盖。
         if (requestedTaskId) {
+          associationStore.setActiveSessionTaskIds(sessionId, [requestedTaskId]);
           const requestedResult = await listMyTasks({ user_id: sessionOwnerUserId });
           if (cancelled) return;
           await openTaskPanel(requestedTaskId, taskRecords(requestedResult), false);
@@ -202,6 +203,7 @@ export function useSessionTaskPanelBootstrap({
         const records = taskRecords(result);
         const latestRecord = records ? findLatestTaskForSession(records, sessionId) : null;
         if (!latestRecord) return;
+        associationStore.setActiveSessionTaskIds(sessionId, [latestRecord.task_id]);
         await openTaskPanel(latestRecord.task_id, records, false);
       } catch {
         // by_session 失败不算会话错误；恢复是增强体验，不能阻断会话打开。

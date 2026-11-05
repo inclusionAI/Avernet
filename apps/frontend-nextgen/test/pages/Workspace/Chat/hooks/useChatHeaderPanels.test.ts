@@ -213,6 +213,37 @@ it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即�
   expect(result.current.sidePaneOpen).toBe(false);
 });
 
+it('TaskPanel-only 会话在关闭后 Monitor 仍可点，并用 task tab 快照重开', () => {
+  const { options, openTab, closePanel } = makeOptions({ messages: makeMessages() });
+  useTaskSessionAssociationStore.getState().setActiveSession('sess-1');
+  useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-1', ['task-1']);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('task-1', {
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+    closable: true,
+    params: { taskId: 'task-1' },
+  });
+
+  const { result } = renderHook(() => useChatHeaderPanels(options));
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(1);
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+  });
+
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(2);
+});
+
 it('打开按消息标记幂等重建 tabs：BCS 天气卡（单引号 cardId/type/tab）原样重建 openTab 载荷', () => {
   // 真实线上形态：单引号属性 + 标签体 JSON（PanelCardTrigger 同款 payload 语义）。
   const weatherMessage = {
