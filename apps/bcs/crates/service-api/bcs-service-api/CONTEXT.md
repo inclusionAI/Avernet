@@ -1,5 +1,16 @@
 # bcs-service-api Context
 
+## Version 3.0.0: Bot response avatars
+
+`PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
+struct literals must supply this field, requiring a major Service API version
+change. Workspace consumers rebuild together; external constructors should use
+`None` for an unset avatar and for Humans. JSON responses always include the
+nullable key, while serde still accepts older payloads without it. All V1 Bot
+projections share this shape, including mine, get, query, update and candidates.
+The application reuses `BotRegistryCoreService::avatar_urls`; no Plugin API,
+storage schema, HTTP route version, or configuration changes are needed.
+
 ## Version 2.0.0: avatar source compatibility
 
 The avatar extension adds fields to public Rust structs, including
