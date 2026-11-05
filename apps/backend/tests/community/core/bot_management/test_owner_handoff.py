@@ -714,3 +714,66 @@ def test_expired_snapshot_failure_does_not_issue_credentials(world, monkeypatch)
     assert not world.service().step(op)
     assert world.repo.get(op)["error_code"] == "HANDOFF_EXTERNAL_ERROR"
     assert not world.passport.issues
+
+
+@pytest.mark.parametrize("initial_arca_ack", [True, False, []])
+def test_real_runtime_arca_receipt_completes_handoff_and_releases_lock(
+    world, monkeypatch, initial_arca_ack,
+):
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.models import PublishStatus
+
+    with world.db.orm_session() as db:
+        db.get(BotModel, world.bot["id"]).binding_id = 11
+    devices = MagicMock()
+    devices.get_device.return_value = SimpleNamespace(
+        id=11, device_id="draft-device", device_provider="arca",
+        device_props={"sandbox_id": "ARCA-SANDBOX-test@0"},
+    )
+    receipts = {"arca": initial_arca_ack}
+    devices.update_device_headers.side_effect = lambda **kw: (
+        receipts["arca"] if kw["device"].device_provider == "arca"
+        else [{"device_uuid": "DEVICE-online"}]
+    )
+    runtime = BotService.__new__(BotService)
+    runtime._repository = world.bots
+    runtime._passport_plugin = world.passport
+    runtime._device_service_provider = lambda: devices
+    runtime._device_binding_repo = MagicMock()
+    runtime._device_binding_repo.list_active_caller_instance_bindings.return_value = []
+    runtime._bot_publish_repo = MagicMock()
+    runtime._bot_publish_repo.get_by_publish_bot_id.side_effect = lambda **kw: (
+        SimpleNamespace(id=21, ext={"binding": {"online": 22}})
+        if kw["publish_status"] == PublishStatus.SUCCESS.value else None
+    )
+    publication = MagicMock()
+    publication.get_device_binding_by_id.return_value = SimpleNamespace(
+        id=22, device_id="BOT-online", device_provider="baas",
+    )
+    runtime._bot_publish_provider = lambda: publication
+    monkeypatch.setattr(
+        world.runtime, "hot_update_passport_token_to_device",
+        runtime.hot_update_passport_token_to_device,
+    )
+    op = begin(world)
+    service = world.service()
+    for _ in range(3):
+        service.step(op)
+    assert world.repo.get(op)["phase"] == "UPDATING_RUNTIME"
+    service.step(op)
+    if initial_arca_ack is not True:
+        assert world.repo.get(op)["error_code"] == "RUNTIME_ACK_REQUIRED"
+        assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
+        with world.db.orm_session() as db:
+            assert db.query(BotCollabLockModel).count() == 1
+        receipts["arca"] = True
+    drain(world, op)
+    assert world.repo.get(op)["phase"] == "SUCCEEDED"
+    bot = world.bots.get_by_pk(world.bot["id"])
+    assert bot["owner_id"] == "B" and bot["entity_id"] == "A"
+    assert not (bot.get("ext") or {}).get("owner_handoff")
+    with world.db.orm_session() as db:
+        assert db.query(BotCollabLockModel).count() == 0
+    assert len(world.passport.issues) == 1
+    assert any(call.kwargs["device"].device_provider == "arca" for call in devices.update_device_headers.call_args_list)
+    assert any(call.kwargs["device"].device_provider == "baas" for call in devices.update_device_headers.call_args_list)
