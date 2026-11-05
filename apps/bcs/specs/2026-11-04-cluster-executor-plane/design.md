@@ -63,7 +63,7 @@ split also turns an executor deploy into moving leases (§8).
 | **Placement** — rendezvous hashing of 4,096 buckets over the executors | Which executor *should* own S's bucket? | One extra hop or one rehydration |
 | **Lease + fencing token** — one row per bucket | Which executor *does* own S's bucket, and so drive S? | — this is the correctness mechanism |
 | **Routing** — forward to the owner, redirect on mismatch | How does a round reach the owner fast? | Falls back to a durable write |
-| **Event log + session channel** | How does every stream see every state change and every token, across owner changes? | Seconds of delay, never a lost state change |
+| **Event log + session channel** | How does every stream see every state change and every token, across owner changes? | Milliseconds on a planned handoff; after a failure, up to the takeover time (owner crash, ~6–8 s) or the 2 s catch-up (pub/sub outage); never a lost state change |
 
 Three kinds of traffic:
 
@@ -91,7 +91,7 @@ shared database is the only place they meet.
 | `member_name` | Stable identity of a node slot (e.g. host name); survives restarts. Used for placement |
 | `node_id` | Identity of one process run (`member_name` + a fresh ULID). Used for ownership |
 | `advertise_addr` | Internal `host:port` peers use to reach this node |
-| Bucket | `xxh3(user_id ‖ session_id) mod 4096`: the unit of ownership (§4) |
+| Bucket | `xxh3(session_id) mod 4096`: the unit of ownership (§4) |
 | Owner | The executor whose `node_id` is on the lease row of S's bucket and whose heartbeat is fresh |
 | Entry gateway | The gateway that accepted the PA's connection for a request |
 | Dispatch gateway | The gateway running one dispatch: it holds the stream to the supply agent |
@@ -168,12 +168,13 @@ Sessions are grouped into a fixed set of **buckets**, and buckets — not
 sessions — are what executors own:
 
 ```
-bucket(S)    = xxh3(user_id ‖ session_id) mod 4096     -- fixed seed and count; stored on the session row
+bucket(S)    = xxh3(session_id) mod 4096                -- fixed seed and count; stored on the session row
 score(b, E)  = xxh3(b ‖ E.member_name)
 preferred(b) = the active executor with the highest score
 ```
 
-Every node — gateways included — computes the same ranking in microseconds
+Session ids are globally unique, so the session id alone decides the
+bucket. Every node — gateways included — computes the same ranking in microseconds
 with no coordination. 4,096 buckets ≫ executors, so each of N executors
 holds about 4096/N buckets and load stays balanced (about 200 each at 20
 executors, still about 10 at 400). When an executor joins or leaves, only
@@ -627,24 +628,34 @@ can mark a whole group draining at once, double moves disappear entirely.
 
 ### 8.2 Handoff
 
-![Handoff of bucket b: A sends PREPARE with b's warm sessions and step buffers; B loads them and replies READY; A pauses b; A transfers b's lease to B with token n+1; A sends COMMIT; B checks each session's write_seq, drives b's sessions and publishes on their channels; later deltas and events from gateways go to B.](assets/handoff-sequence.svg)
+![Handoff of bucket b: A sends PREPARE; B loads b's warm sessions and replies READY; A pauses b and queues new messages for it; A transfers b's lease to B with token n+1; A sends COMMIT with b's step buffers; B checks each session's write_seq, drives b's sessions and publishes on their channels; A passes the queued messages to B; later messages from gateways go to B.](assets/handoff-sequence.svg)
 
 1. **PREPARE** — A asks successor B to load bucket b's warm sessions into
-   memory and hands it their step buffers (B is not owner yet).
-2. **Pause** — A finishes its current writes for b and holds new events for a
-   few milliseconds.
+   memory (B is not owner yet).
+2. **Pause** — A finishes its in-flight writes for b and, for a few
+   milliseconds, queues new messages for b's sessions instead of processing
+   them: rounds, control events, and deltas from dispatch gateways.
 3. **Transfer** — one database update: owner of b = B, token + 1.
-4. **COMMIT** — A tells B; B starts driving b's sessions and publishing on
-   their channels, re-reading only what changed since PREPARE (by each
-   session's `write_seq`).
-5. A forwards anything it held, deltas included; later arrivals get
-   `NOT_OWNER(B)`. Dispatch gateways send their next message to B, because
-   they look the owner up per message. Subscribers notice nothing: they are
-   on the sessions' channels, not on A.
+4. **COMMIT** — A tells B and hands it b's **step buffers**: for each
+   in-flight dispatch, the output so far, which the owner keeps to build
+   reconnect snapshots (§7.5). They are final now, because A is paused. B
+   starts driving b's sessions and publishing on their channels, re-reading
+   only what changed since PREPARE (by each session's `write_seq`).
+5. A passes the messages it queued in step 2 to B. Deltas need this: a
+   dispatch gateway sends each delta once, without acknowledgement (§7.2),
+   so a delta that reached A would otherwise never reach the PA. Rounds and
+   control events would be retried anyway; passing them on saves a round
+   trip. Later arrivals at A get `NOT_OWNER(B)`. Dispatch gateways send their
+   next message to B, because they look the owner up per message.
+   Subscribers notice nothing: they are on the sessions' channels, not on
+   A.
 
 The gap for b is one database write plus one network round trip: the PA's
 stream pauses for milliseconds. If anything fails midway, existing rules
-cover it: B dies → ordinary takeover; the COMMIT is lost → B finds b anyway;
+cover it: B dies → ordinary takeover; the COMMIT is lost → B finds b anyway
+and takes the step buffers from the dispatch gateways (`FetchBuffer`, §7.2);
+A dies before passing on its queue → a few deltas are missing from the live
+view, and the final result is still exact;
 A writes after the transfer → fenced out; A publishes after the transfer →
 subscribers drop its lower token.
 
@@ -849,7 +860,7 @@ its local database, so the takeover path is exercised everywhere.
 | D1 | Each write carries `WHERE lease_token = my_token` | The first step of each transaction locks and checks the lease row of the session's bucket | Stronger: protects every write from the moment of a claim, with no extra column on every table |
 | D2 | — | Recovery and dispatch run per lease, not on a single leader | Required for N > 1 nodes |
 | D3 | "node id" | `node_id` is per process run | Makes restarts and renewal simple |
-| D4 | "consistent hashing" | Rendezvous hashing | Same family, no tuning |
+| D4 | "consistent hashing" of `(user_id, session_id)` | Rendezvous hashing of buckets, with `bucket = xxh3(session_id)` | Same family, no tuning; session ids are globally unique, so the user id adds nothing |
 | D5 | Each lease expires and is renewed | Lease liveness = the owner's heartbeat | O(nodes) writes instead of O(sessions) |
 | D6 | Rounds are written and picked up | Rounds are forwarded to the owner; the write is the fallback | Milliseconds instead of up to 1 s |
 | D7 | — | Stable `member_name` for placement | Placement survives restarts |
