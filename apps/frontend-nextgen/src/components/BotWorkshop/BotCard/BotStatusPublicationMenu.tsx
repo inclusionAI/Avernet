@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowUpRight, ChevronDown } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { publicationManagementAvailability } from './botManagementPolicy';
 import { ActionHelp } from './menuPrimitives';
 
@@ -15,6 +15,14 @@ interface Props {
 /** 状态列的发布入口；复用原菜单的可用性判断与发布回调。 */
 export function BotStatusPublicationMenu({ bot, children, onManagePublication }: Props) {
   const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const openedByHover = useRef(false);
+  const cancelClose = () => clearTimeout(closeTimer.current);
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  };
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
   const publication = publicationManagementAvailability(bot);
   if (bot.serviceMode !== 'service' || !publication.visible || !onManagePublication) return <>{children}</>;
 
@@ -29,13 +37,35 @@ export function BotStatusPublicationMenu({ bot, children, onManagePublication }:
           size="sm"
           aria-label={`${bot.name} 发布状态`}
           className="-ml-2 h-7 gap-1 rounded-md px-2 hover:bg-muted data-[state=open]:bg-muted"
-          onClick={(event) => event.stopPropagation()}
+          onMouseEnter={() => {
+            cancelClose();
+            openedByHover.current = true;
+            setOpen(true);
+          }}
+          onMouseLeave={scheduleClose}
+          onClick={(event) => {
+            event.stopPropagation();
+            cancelClose();
+            openedByHover.current = false;
+          }}
         >
           {children}
           <ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-52 p-1" onClick={(event) => event.stopPropagation()}>
+      <PopoverContent
+        align="start"
+        className="w-52 p-1"
+        onMouseEnter={cancelClose}
+        onMouseLeave={scheduleClose}
+        onOpenAutoFocus={(event) => {
+          if (openedByHover.current) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (openedByHover.current) event.preventDefault();
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
         <Button
           variant="ghost"
           size="sm"
@@ -43,6 +73,7 @@ export function BotStatusPublicationMenu({ bot, children, onManagePublication }:
           leftIcon={<ArrowUpRight className="size-4" />}
           disabled={lockedByOther || !publication.enabled}
           onClick={() => {
+            cancelClose();
             setOpen(false);
             onManagePublication(bot);
           }}
