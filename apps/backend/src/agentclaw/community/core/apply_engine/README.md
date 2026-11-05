@@ -69,6 +69,13 @@ starts from.
 ```yaml
 purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the six materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome) and never by a document or a fetch.
 provides:
+  - CapabilityDeclaration  # one aggregate target, prefixed child report identities
+  - DesiredCapabilities
+  - DesiredSkillSet
+  - DefaultSkillSetRef
+  - CenterSkillRef
+  - CenterSkillByCode
+  - CURRENT_CATEGORIES  # active vocabulary; historical Skills/MCP are decode-only
   - DesiredState  # the typed input; one Declaration per construct, None when not declared
   - Declaration
   - EntryFailure

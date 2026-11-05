@@ -24,6 +24,7 @@ from enum import StrEnum
 __all__ = [
     "ApplyConstruct",
     "Construct",
+    "CURRENT_CATEGORIES",
     "ConstructKind",
     "Category",
     "Section",
@@ -46,7 +47,9 @@ class Category(StrEnum):
     order (that is ``order.APPLY_ORDER``).
     """
 
-    #: MCP servers the bot may use, each by ``server_code``, with an optional override of its configuration.
+    #: Historical report/input spelling; excluded from current execution.
+    #: Direct Skills, ordinary SkillSets/Default and Direct MCP converge together.
+    CAPABILITIES = "capabilities"
     MCP = "mcp"
     #: Files and directories under the bot's resources root (``data/``), each by workspace-relative path.
     RESOURCES = "resources"
@@ -95,3 +98,9 @@ def parse_category(value: object) -> Category | None:
         return Category(value)
     except ValueError:
         return None
+
+
+# Historical SKILLS/MCP remain decodable; only this tuple is executable.
+CURRENT_CATEGORIES: tuple[Category, ...] = tuple(
+    category for category in Category if category not in (Category.SKILLS, Category.MCP)
+)
