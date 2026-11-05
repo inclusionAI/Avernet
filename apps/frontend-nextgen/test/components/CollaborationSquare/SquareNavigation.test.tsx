@@ -43,3 +43,12 @@ test('页头右侧 actions 槽位仅在透传时渲染工具区', () => {
   rerender(<SquareNavigation active="bot" />);
   expect(container.querySelector('nav > div')).not.toContainHTML('工具');
 });
+
+test('页头右侧工具区允许压缩：定宽内容过长时收缩截断而不是顶出页面', () => {
+  const actions = <button type="button">工具</button>;
+  render(<SquareNavigation active="bot" actions={actions} />);
+  const wrapper = screen.getByRole('button', { name: '工具' }).parentElement;
+  // flex 子项默认可收缩，禁止 shrink-0 锁死活动区宽度（348/338 定宽工具会把他推到视口外）。
+  expect(wrapper).toHaveClass('min-w-0');
+  expect(wrapper).not.toHaveClass('shrink-0');
+});
