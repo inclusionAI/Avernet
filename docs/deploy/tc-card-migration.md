@@ -1,5 +1,44 @@
 # TC 单资料离线迁移工具
 
+## TC 索引数据源开关
+
+TC 独有的 `BCSFUSE_TC_INDEX_SOURCE=legacy|card` 选择查询索引的数据来源。
+默认 `card` 保持当前行为；也可配置 `tc.index_source`，环境变量优先。
+**这是启动配置：修改后滚动重启，不做进程内热切换。两种模式均保留旧查询接口，不设置查询门禁。**
+
+| 模式 | Qdrant 恢复来源 | 查询与写入 |
+| --- | --- | --- |
+| legacy | 原 `bcsfuse_vector_embeddings`，内部预发为 `_pre` 表；使用独立 `tc_legacy_<environment>` 集合 | 旧 recommend/search/Fuse 可用；旧 Worker/Profile 只读补充尚未导入的身份，当前新 Card 优先 |
+| card | `tc_search_index_documents`；使用 `tc_<environment>_<index_key>` 集合 | 旧查询接口不变；完全从新 Card/Doc 读取，不初始化旧源适配，不回退旧表 |
+
+两种模式下，旧 sync、online/offline、availability、配置接口均写入 TC 新 Card/Doc，
+不会回写旧 Worker/Profile/向量表。legacy 模式对旧 Worker 首次修改时保留其当前资料和配置，
+再应用请求；源画像只供旧读取，复制身份时不会伪装成有效的新模型画像。
+sync 成功仍要求对应新 Doc 已在本实例同步；旧向量内容在 legacy 查询中保持原样，
+新描述的语义检索在切到 card 后生效。未完成迁移时，不能靠切回 legacy 代替数据回退。
+
+legacy 查询将原命中转换为当前 TC 的检索对象；online、availability、生命周期和调用方 filters
+在召回 top-k 前生效，优先使用新 Card 中已更新的状态；Worker/profile_key 身份过滤继续兼容。
+不恢复旧评分器、多 Profile 状态机或旧画像生成流程。legacy 仅作迁移桥接，查询不复用结果缓存，
+持久向量按现有 backend 的增量同步能力更新；本地 SQLite 仅用于演练，按快照恢复。
+旧源模式须保持与原向量一致的模型/维度配置；维度不匹配或恢复失败会阻止启动，不静默切源。
+
+部署顺序：
+
+1. 创建两张 TC 新表并确认权限；以 `BCSFUSE_TC_INDEX_SOURCE=legacy` 部署新实例。
+   应用恢复的是隔离的旧源集合，不清空旧实例正在使用的集合。旧实例可继续承接正式流量。
+2. 对新实例的独立地址调用原 sync 导入资料，通过 config 和状态接口补齐权威数据。
+   用旧 Worker/Profile/config 查询接口核对；sync 不能替代配置、删除和全量状态对账。
+3. 短暂停止全部旧写入口并排空后台任务，追平最新资料、配置、状态及删除；核对有效记录数量。
+   新 Card/Doc 与索引数据需完整，不能只凭 `/ready=200` 判断迁移完成。
+4. 改为 `BCSFUSE_TC_INDEX_SOURCE=card`，滚动重启新实例。检查 `/ready` 的 `index_source=card`、
+   索引就绪和旧 recommend/search/Fuse 实际查询，再切流并恢复写入。融合历史存储不变。
+
+没有增加通用切源框架或支付宝配置。公共本地演练可从 `BCSFUSE_DATABASE_SQLITE_PATH` 指定旧库；
+新库仍由 `WORKER_REGISTRY_SQLITE_DB_PATH` 指定。真实内部环境使用 TC 专属 ZDAS 组装。
+
+## 离线工具
+
 工具读取用户提供的 `bcs_bots` CSV，默认只读盘点；只有显式传入 `--sqlite` 才写入隔离的本地库。
 它不访问部署数据库、不调用模型、不构建 Doc / 索引，也不切换运行中的应用。
 CSV 只有基础信息，不能据此声称配置、历史画像、会话和所有运行状态已完成全量迁移。

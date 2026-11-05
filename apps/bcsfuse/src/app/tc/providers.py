@@ -27,6 +27,85 @@ class OfflineReranker:
         ]
 
 
+def legacy_storage(context):
+    """Only TC legacy mode opens old stores; never target its live Qdrant collection."""
+    registry, config = context.registry, context.config
+    factory = registry.get("tc_legacy_storage_factory")
+    if factory is not None:
+        return factory()
+    dimension = registry.require("embedding_provider").dimension
+    if context.mode in {"test", "dev", "dev_smoke"}:
+        from app.infra.public.stores.sqlite_worker_profile_content_store import (
+            SQLiteWorkerProfileContentStore,
+        )
+        from app.infra.public.stores.sqlite_worker_registry_store import (
+            SQLiteWorkerRegistryStore,
+        )
+        from app.infra.public.stores.sqlite_worker_runtime_state_store import (
+            SQLiteWorkerRuntimeStateStore,
+        )
+        from app.infra.public.vectorstores.qdrant_sqlite_vector_store import (
+            QdrantSQLiteVectorStore,
+        )
+
+        path = os.getenv("BCSFUSE_DATABASE_SQLITE_PATH") or config.get(
+            "database.sqlite.path", "data/bcsfuse.db"
+        )
+        if not Path(path).is_file():
+            raise ValueError("TC legacy mode requires an existing SQLite source")
+        return (
+            SQLiteWorkerRegistryStore(path),
+            SQLiteWorkerProfileContentStore(path),
+            SQLiteWorkerRuntimeStateStore(path),
+            QdrantSQLiteVectorStore(
+                dimension=dimension,
+                db_path=path,
+                qdrant_path=path + ".tc-legacy-qdrant",
+                auto_load=False,
+            ),
+        )
+    if context.mode != "runtime":
+        raise ValueError("internal TC legacy mode requires tc_legacy_storage_factory")
+    from app.infra.public.database.mysql_connection_pool import (
+        MySQLConnectionPoolProvider,
+    )
+    from app.infra.public.stores.mysql_worker_profile_content_store import (
+        MySQLWorkerProfileContentStore,
+    )
+    from app.infra.public.stores.mysql_worker_registry_store import (
+        MySQLWorkerRegistryStore,
+    )
+    from app.infra.public.stores.mysql_worker_runtime_state_store import (
+        MySQLWorkerRuntimeStateStore,
+    )
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        QdrantMySQLVectorStore,
+    )
+
+    pool = registry.get("mysql_connection_pool") or MySQLConnectionPoolProvider()
+    connection = QdrantConnection.from_mapping(
+        {
+            **os.environ,
+            "QDRANT_URL": os.getenv("QDRANT_URL")
+            or config.get("vector.qdrant.url")
+            or "http://127.0.0.1:6333",
+        },
+        default_mode="server",
+    )
+    environment = config.get("environment", "prod")
+    return (
+        MySQLWorkerRegistryStore(connection_pool=pool),
+        MySQLWorkerProfileContentStore(connection_pool=pool),
+        MySQLWorkerRuntimeStateStore(connection_pool=pool),
+        QdrantMySQLVectorStore(
+            collection_name=f"tc_legacy_{environment}",
+            dimension=dimension,
+            qdrant_path=os.getenv("QDRANT_LOCAL_PATH", "data/tc_qdrant") + "-legacy",
+            connection=connection,
+        ),
+    )
+
+
 def configure_models(registry, config, mode):
     if mode in {"test", "dev_smoke"}:
         from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
