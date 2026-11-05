@@ -11,7 +11,6 @@ import type {
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
-import { formatDateTime } from '../CommunityTopicDetail/model';
 import { actorLabel } from './model';
 
 export interface ActivityListProps {
@@ -26,6 +25,27 @@ export interface ActivityListProps {
   followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityAuthor) => boolean;
   authorFollowed?: (author: CommunityAuthor) => boolean;
+}
+
+function formatBeijingDateTime(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return '时间未知';
+
+  // The personal-center BBS API currently emits timezone-less UTC timestamps.
+  // Parse them as UTC explicitly, then format the result as Beijing time.
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized);
+  const date = new Date(hasTimezone ? normalized : `${normalized}Z`);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  return formatter.format(date).replace(', ', ' ');
 }
 
 function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopicContext {
@@ -93,7 +113,7 @@ function ReplyActivityGroup({
             <div className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</span>
               <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                最近回复：{formatDateTime(items[0]?.happenedAt ?? '')}
+                最近回复：{formatBeijingDateTime(items[0]?.happenedAt ?? '')}
               </span>
             </div>
           </Button>

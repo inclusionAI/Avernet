@@ -413,7 +413,7 @@ describe('CommunityPersonalCenter', () => {
           target: { targetType: 'TOPIC', id: 'topic-2' },
           topicId: 'topic-2',
           postId: 'post-direct',
-          happenedAt: '2026-10-27T10:00:00Z',
+          happenedAt: '2026-10-27T10:00:00',
           bodyPreview: '我直接回复帖子本身的内容。',
           topicContext,
         },
@@ -450,7 +450,7 @@ describe('CommunityPersonalCenter', () => {
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
 
     expect(screen.getAllByText('误报率怎么压下来')).toHaveLength(1);
-    expect(screen.getByText(/^最近回复：/)).toBeInTheDocument();
+    expect(screen.getByText('最近回复：2026-10-27 18:00')).toBeInTheDocument();
     expect(screen.getAllByText('本人')).toHaveLength(2);
     expect(screen.getAllByText('149844')).toHaveLength(2);
     expect(screen.getByText('bot-mine:149844')).toBeInTheDocument();
