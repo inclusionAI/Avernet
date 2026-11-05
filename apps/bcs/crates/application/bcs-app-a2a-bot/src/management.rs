@@ -97,7 +97,7 @@ impl A2aBotManagement {
         let (url, card) = self.public_load(command.source).await?;
         policy::validate_summary(command.summary.as_deref(), &card.raw)?;
         let outcome = self
-            .register_loaded(
+            .register_loaded_with_visibility(
                 bcs_service_api::RegisterProviderBotCommand {
                     avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
                     provider_id,
@@ -117,6 +117,7 @@ impl A2aBotManagement {
                 url,
                 card,
                 command.now_ms,
+                command.visibility,
             )
             .await?;
         let record = self
@@ -138,11 +139,13 @@ impl A2aBotManagement {
         &self,
         token: &str,
         name: &str,
-        source: A2aCardSource,
+        source: Option<A2aCardSource>,
+        visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label) = self.public_provider(token).await?;
+        if source.is_none() && visibility.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
         let target = self.public_record(&provider, name).await?;
-        let (url, card) = self.public_load(source).await?;
+        let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
         // Retry only local CAS races, never the outbound fetch. Each attempt
         // rechecks the original identity and name, so a reused name cannot retarget.
         for _ in 0..3 {
@@ -157,18 +160,19 @@ impl A2aBotManagement {
                             == Some(name)
                 })
                 .ok_or_else(|| failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED"))?;
-            policy::validate_source_transition(&current.agent_card, &card.raw)?;
+            let (url,raw)=match &loaded {Some((url,card))=>(url.clone(),card.raw.clone()),None=>(current.agent_card_url.clone(),current.agent_card.clone())};
+            policy::validate_source_transition(&current.agent_card, &raw)?;
             let revision = current
                 .revision
                 .checked_add(1)
                 .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
             let next = A2aBotRecord {
                 agent_card_url: url.clone(),
-                agent_card: card.raw.clone(),
+                agent_card: raw,
                 revision,
                 ..current
             };
-            match self.core.commit_card(next, revision - 1).await {
+            match self.core.commit_card_with_visibility(next, revision - 1, visibility).await {
                 Ok(record) => return view(&label, record),
                 Err(ServiceError::Conflict(_)) => continue,
                 Err(ServiceError::Forbidden(_)) => {

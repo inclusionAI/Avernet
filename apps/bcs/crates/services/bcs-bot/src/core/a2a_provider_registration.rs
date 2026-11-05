@@ -60,7 +60,7 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         let owner = params.owners[0].trim();
         let capabilities = BotCapabilities { name: Some(params.bot_name), summary: params.summary,
             domains: params.domains, skills: params.skills, scopes: params.scopes,
-            visibility: "protected".into(), agent_code: identity.agent_code.clone(), ..Default::default() };
+            visibility: card.visibility.as_str().into(), agent_code: identity.agent_code.clone(), ..Default::default() };
         let bot = BotProviderRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), connection_mode: ProviderBotConnectionMode::Gateway,
             webhook_url: None, is_deleted: false };

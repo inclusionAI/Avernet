@@ -65,3 +65,5 @@ updates bind the original Bot ID and current name across the fetch, retry local
 CAS conflicts at most three times, and cannot retarget a renamed/deleted Bot.
 The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.

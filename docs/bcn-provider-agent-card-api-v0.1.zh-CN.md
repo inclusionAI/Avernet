@@ -237,6 +237,7 @@ Content-Type: application/json
 | 请求字段 | 必填 | 规则 |
 | --- | --- | --- |
 | owners | 是 | 见公共定义 |
+| visibility | 否 | `protected`（默认）或 `public`，采用 BCN 现有可见性规则；Card 更新和刷新不改变它 |
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
@@ -397,3 +398,20 @@ details.field 指出错误字段，例如 agent_card.name；reason 为原因标�
 | 500 | INTERNAL_ERROR | 内部处理异常；提供 request_id 排查 |
 
 注册、更新或刷新请求超时后，请先查询当前 Card 确认结果，再决定是否重试。
+
+注册接口 `POST /a2a/agents` 支持顶层可选字段 `visibility`：
+
+- `protected`（默认）：沿用 BCN 现有受保护访问规则。
+- `public`：沿用 BCN 现有公开访问规则。
+
+该字段与 `owners`、`agent_card` 并列，不属于 AgentCard。Card 更新未传 visibility 时及刷新操作不改变可见性。
+
+可通过 `PUT /a2a/agent-card` 修改 BCN 可见性，使用同一 Provider 管理 token：
+
+```json
+{"agent_name":"订单助手","visibility":"public"}
+```
+
+`visibility` 仅接受 `protected`、`public`；省略时保留当前值。
+也可与 `agent_card` 或 `agent_card_url` 一起提交，Card 与可见性在同一事务内更新。
+仅修改可见性时无需提交 Card，也不会重新抓取 Card；请求至少包含一项更新。

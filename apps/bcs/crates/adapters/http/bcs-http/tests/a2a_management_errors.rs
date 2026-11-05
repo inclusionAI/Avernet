@@ -27,6 +27,7 @@ const PRIVATE: &str = "private-provider-credential";
 struct Management {
     failure: Option<fn() -> ServiceError>,
     calls: AtomicUsize,
+    visibility: std::sync::Mutex<Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>>,
 }
 impl Management {
     fn result(&self) -> ServiceResult<()> {
@@ -61,6 +62,7 @@ impl A2aBotManagementService for Management {
         Ok(card())
     }
     async fn register_agent(&self, command: RegisterAgentCommand) -> ServiceResult<ManagedA2aCard> {
+        *self.visibility.lock().unwrap() = Some(command.visibility);
         assert_eq!(command.provider_admin_token, "test-admin");
         assert_eq!(command.owners, vec!["owner"]);
         assert!(command.now_ms > 0);
@@ -92,6 +94,17 @@ impl A2aBotManagementService for Management {
     async fn get(&self, _: &str, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> {
         panic!("legacy ID path")
     }
+    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
+        if let Some(visibility)=visibility {
+            assert_eq!(token,"test-admin");
+            assert_eq!(name,"订单助手");
+            assert!(source.is_none());
+            *self.visibility.lock().unwrap()=Some(visibility);
+            self.result()?;
+            return Ok(card());
+        }
+        self.update_agent(token,name,source.unwrap()).await
+    }
     async fn configure(&self, _: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord> {
         panic!("legacy ID path")
     }
@@ -106,6 +119,7 @@ fn app(failure: Option<fn() -> ServiceError>) -> (Router, Arc<Management>) {
     let service = Arc::new(Management {
         failure,
         calls: AtomicUsize::new(0),
+        visibility: Default::default(),
     });
     (
         build_router(HttpAppState::new(
@@ -722,4 +736,38 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
         json!({"error":"Chat admission failed","status":403})
     );
     assert_eq!(management.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn registration_visibility_defaults_and_invalid_values_fail_before_admission() {
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected, Public};
+    for (value, expected) in [(None, Protected), (Some("protected"), Protected), (Some("public"), Public)] {
+        let (app, service) = app(None);
+        let mut body = json!({"owners":["owner"],"agent_card_url":"https://example.org/card"});
+        if let Some(value) = value { body["visibility"] = json!(value); }
+        let response = app.oneshot(request("POST", "/a2a/agents", body.to_string())).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(*service.visibility.lock().unwrap(), Some(expected));
+    }
+    for value in [json!("private"), json!("PUBLIC"), json!(null), json!(true)] {
+        let (app, service) = app(None);
+        let body = json!({"owners":["owner"],"agent_card_url":"https://example.org/card","visibility":value});
+        let response = app.oneshot(request("POST", "/a2a/agents", body.to_string())).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(service.calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn visibility_only_update_is_routed_and_empty_or_invalid_updates_are_rejected() {
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Public;
+    let (app,service)=app(None);
+    let response=app.clone().oneshot(request("PUT","/a2a/agent-card",json!({"agent_name":"订单助手","visibility":"public"}).to_string())).await.unwrap();
+    assert_eq!(response.status(),StatusCode::OK);
+    assert_eq!(*service.visibility.lock().unwrap(),Some(Public));
+    for body in [json!({"agent_name":"订单助手"}),json!({"agent_name":"订单助手","visibility":"private"})] {
+        let response=app.clone().oneshot(request("PUT","/a2a/agent-card",body.to_string())).await.unwrap();
+        assert_eq!(response.status(),StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(service.calls.load(Ordering::SeqCst),1);
 }

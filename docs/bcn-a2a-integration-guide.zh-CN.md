@@ -403,3 +403,20 @@ data: {"statusUpdate":{"taskId":"task-001","contextId":"context-001","status":{"
 | 更新 Card 失败 | 检查 Card 内容、来源 URL 和 Provider 管理凭据 |
 
 如果提交后立即断线，BCN 可能无法确定远端是否已执行，并阻塞该会话的后续调用。尤其涉及有副作用的工具时，应先核实远端结果，不要直接重新发送。当前也不承诺服务重启后自动恢复所有运行中的任务。
+
+注册接口 `POST /a2a/agents` 支持顶层可选字段 `visibility`：
+
+- `protected`（默认）：沿用 BCN 现有受保护访问规则。
+- `public`：沿用 BCN 现有公开访问规则。
+
+该字段与 `owners`、`agent_card` 并列，不属于 AgentCard。Card 更新未传 visibility 时及刷新操作不改变可见性。
+
+可通过 `PUT /a2a/agent-card` 修改 BCN 可见性，使用同一 Provider 管理 token：
+
+```json
+{"agent_name":"订单助手","visibility":"public"}
+```
+
+`visibility` 仅接受 `protected`、`public`；省略时保留当前值。
+也可与 `agent_card` 或 `agent_card_url` 一起提交，Card 与可见性在同一事务内更新。
+仅修改可见性时无需提交 Card，也不会重新抓取 Card；请求至少包含一项更新。
