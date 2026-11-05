@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2457a6"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#157a55"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9a6b0a"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="600" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">One round end to end</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Blue: control channel (gateway ↔ owner). Orange: tokens, which stay inside GW1. Green: fenced writes.</text>
+
+  <rect x="40" y="72" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="115" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">PA (via LB)</text>
+  <rect x="290" y="72" width="170" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
+  <text x="375" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Gateway GW1</text>
+  <rect x="560" y="72" width="170" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="645" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Executor E3 (owner)</text>
+  <rect x="790" y="72" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="865" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Supply agent</text>
+  <line x1="115" y1="112" x2="115" y2="580" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="375" y1="112" x2="375" y2="580" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="645" y1="112" x2="645" y2="580" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="865" y1="112" x2="865" y2="580" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+
+  <text x="24" y="146" font-size="11" font-weight="bold" fill="#5c6a62">1</text>
+  <line x1="119" y1="142" x2="371" y2="142" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="245" y="136" font-size="11" text-anchor="middle" fill="#1c2420">SendStreamingMessage (SSE)</text>
+  <text x="24" y="176" font-size="11" font-weight="bold" fill="#5c6a62">2</text>
+  <line x1="379" y1="172" x2="641" y2="172" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="166" font-size="11" text-anchor="middle" fill="#2457a6">Submit(round) — HRW / hint, NOT_OWNER</text>
+  <rect x="655" y="160" width="130" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="720" y="176" font-size="10.5" text-anchor="middle" fill="#157a55">dedup · persist, fenced</text>
+  <line x1="641" y1="200" x2="379" y2="200" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="194" font-size="11" text-anchor="middle" fill="#2457a6">Accepted(Task) · GW1 is now a subscriber</text>
+  <line x1="371" y1="214" x2="119" y2="214" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="245" y="228" font-size="10.5" text-anchor="middle" fill="#1c2420">first event: Task</text>
+
+  <text x="24" y="258" font-size="11" font-weight="bold" fill="#5c6a62">3</text>
+  <rect x="655" y="240" width="140" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="725" y="256" font-size="10.5" text-anchor="middle" fill="#157a55">dispatch record: on GW1</text>
+  <line x1="641" y1="276" x2="379" y2="276" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="270" font-size="11" text-anchor="middle" fill="#2457a6">StartDispatch(D) — GW1 holds the caller's stream</text>
+  <line x1="379" y1="296" x2="861" y2="296" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="760" y="290" font-size="11" text-anchor="middle" fill="#1c2420">A2A stream</text>
+
+  <text x="24" y="330" font-size="11" font-weight="bold" fill="#5c6a62">4</text>
+  <line x1="861" y1="326" x2="379" y2="326" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="760" y="320" font-size="11" text-anchor="middle" fill="#9a6b0a">artifact chunks (deltas)</text>
+  <line x1="371" y1="340" x2="119" y2="340" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="245" y="356" font-size="10.5" text-anchor="middle" fill="#9a6b0a">deltas straight to the PA + step buffer</text>
+
+  <text x="24" y="388" font-size="11" font-weight="bold" fill="#5c6a62">5</text>
+  <line x1="861" y1="384" x2="379" y2="384" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="760" y="378" font-size="11" text-anchor="middle" fill="#1c2420">input-required</text>
+  <line x1="379" y1="400" x2="641" y2="400" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="394" font-size="11" text-anchor="middle" fill="#2457a6">DispatchEvent(D, seq) — retried until Ack</text>
+  <rect x="655" y="388" width="140" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="725" y="404" font-size="10.5" text-anchor="middle" fill="#157a55">record + event_seq, fenced</text>
+  <line x1="641" y1="426" x2="379" y2="426" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="420" font-size="11" text-anchor="middle" fill="#2457a6">Event(S, event_seq): Task input-required</text>
+  <line x1="371" y1="440" x2="119" y2="440" stroke="#5c6a62" marker-end="url(#ar)"/>
+
+  <text x="24" y="478" font-size="11" font-weight="bold" fill="#5c6a62">6</text>
+  <line x1="861" y1="474" x2="379" y2="474" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="760" y="468" font-size="11" text-anchor="middle" fill="#1c2420">completed (final)</text>
+  <line x1="379" y1="490" x2="641" y2="490" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="484" font-size="11" text-anchor="middle" fill="#2457a6">DispatchResult(D, assembled output)</text>
+  <rect x="655" y="478" width="140" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="725" y="494" font-size="10.5" text-anchor="middle" fill="#157a55">step result, fenced</text>
+  <line x1="641" y1="516" x2="379" y2="516" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="510" y="510" font-size="11" text-anchor="middle" fill="#2457a6">Event(S, event_seq): Task completed</text>
+  <line x1="371" y1="530" x2="119" y2="530" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="245" y="546" font-size="10.5" text-anchor="middle" fill="#1c2420">after the step's last chunk; stream ends</text>
+  <text x="24" y="578" font-size="11" fill="#5c6a62">If E3 crashes during 4, the deltas keep flowing; GW1 re-subscribes and delivers 5–6 to the new owner.</text>
+</svg>

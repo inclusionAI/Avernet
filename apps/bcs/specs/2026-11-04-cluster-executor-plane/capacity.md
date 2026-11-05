@@ -15,9 +15,14 @@
 | Owner pickup of fallback input | 1 indexed query **per node per tick**, never per session | per node per tick |
 | Failure discovery | 1 indexed query per survivor per dead node per poll, reading only that survivor's buckets, at most one batch (2,000 rows); once its own share is empty, 1 `LIMIT 1` probe over all buckets | while a node is dead, until it is retired; one per-tick budget across all dead nodes |
 | Transferred, not-yet-adopted leases | 1 indexed query per node per tick (`adopted = FALSE`, at most one 2,000-row batch; usually empty) | per node per tick |
+| Session event (control event for subscribers) | +1 insert inside an existing fenced transaction, no extra round trip | per state change, interrupt or step result — a few per step, never per token |
+| Subscription replay | 1 indexed range read (`event_seq > :last`) | per re-subscribe, i.e. after an owner change or a reconnect |
+| Tokens (deltas) | **0** statements; relayed in gateway memory | — |
+| Gateway ↔ executor messages | 1 per round, per control event and per dispatch result, plus 1 batched re-assertion per gateway–executor pair every 5 s | — (network, not storage) |
 
 The rule behind every row: costs scale with **nodes**, never with
-**sessions**, except for work a session actually does. These counts should be
+**sessions**, except for work a session actually does — and never with
+**tokens**, which stay in the gateway tier. These counts should be
 pinned by tests so a later change cannot turn a per-node query into a
 per-session one.
 
@@ -37,9 +42,16 @@ round; micro-batching inbound writes; persist chunks or final output, not every 
 compaction become mandatory; size the tenant by load test. These figures
 are estimates, not measurements.
 
+**Gateway memory.** Each in-flight dispatch keeps a step buffer of the
+current step's output until the owner records the result: about 10 KB at a
+typical step size, so ~3 GB across all gateways for 300 k concurrent
+dispatches. It costs no storage operations and is dropped when the step
+ends.
+
 ## 3. How to replace estimates with measurements
 
 1. Count statements per operation in tests.
 2. Load-test one node against real storage (release build) to find its knee.
 3. Load-test the storage tenant at the measured statement mix.
-4. Kill a node at load to measure the rehydration spike.
+4. Kill an executor at load to measure the rehydration spike, and a gateway
+   to measure the reconnect and snapshot spike.
