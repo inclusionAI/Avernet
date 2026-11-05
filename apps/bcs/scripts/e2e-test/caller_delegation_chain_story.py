@@ -87,11 +87,7 @@ class DelegationChainStory:
             },
         })
         headers = {"Authorization": "Bearer " + self.provider["provider_admin_token"]}
-        self.manager = self.post(f"/providers/{segment(self.provider['provider_id'])}/bots", {
-            "name": "Delegating manager", "summary": "Owner-mode delegating parent",
-            "owners": [self.args.human],
-            "provider_bot_ref": "delegation-manager-" + uuid.uuid4().hex,
-        }, headers=headers)
+        self.manager = self.register_manager(headers)
         self.worker = self.post(f"/providers/{segment(self.provider['provider_id'])}/bots", {
             "name": "Delegation worker", "summary": "Caller-enabled delegated worker",
             "owners": [self.args.human],
@@ -110,6 +106,13 @@ class DelegationChainStory:
             self.request(f"/bots/{segment(bot['bot_uuid'])}/visibility",
                          {"visibility": "public"}, method="PUT")
         self.enable_group_queue_policy()
+
+    def register_manager(self, headers):
+        return self.post(f"/providers/{segment(self.provider['provider_id'])}/bots", {
+            "name": "Delegating manager", "summary": "Owner-mode delegating parent",
+            "owners": [self.args.human],
+            "provider_bot_ref": "delegation-manager-" + uuid.uuid4().hex,
+        }, headers=headers)
 
     def enable_group_queue_policy(self) -> None:
         current = self.request("/admin/message-delivery/policy")

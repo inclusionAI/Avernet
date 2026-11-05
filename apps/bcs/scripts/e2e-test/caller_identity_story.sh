@@ -55,3 +55,16 @@ story_caller_delegation_chain_inject() { run_caller_delegation_chain inject; }
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_caller_delegation_chain_send" "story_caller_delegation_chain_inject")
 fi
+
+story_native_task_caller_delegation() {
+    info "Story: native WS task dispatch inherits Caller identity and rejects unsafe replay"
+    local result=0
+    python3 "$SCRIPT_DIR/native_task_caller_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Native Caller task parent binding, replay fences and result delivery" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_native_task_caller_delegation")
+fi

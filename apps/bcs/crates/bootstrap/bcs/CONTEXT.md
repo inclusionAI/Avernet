@@ -13,6 +13,10 @@ publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
 acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
 the existing metrics::InstrumentedMessageFlowService export.
+Native Task dispatch also forwards to the matching inner entrypoint with its
+request ID and command intact, rather than selecting the ordinary-dispatch
+fallback. Parent correlation, Caller inheritance and replay checks remain owned
+by the application; success and failure each record one Task dispatch metric.
 
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds

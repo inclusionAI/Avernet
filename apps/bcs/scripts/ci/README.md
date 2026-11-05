@@ -105,3 +105,16 @@ cargo install cargo-public-api --locked   # API-1
 ```
 
 `arch-check.sh` 在缺工具时返回 SKIP（exit 77），不阻塞 CI。
+
+## Import 检查的测试边界
+
+`check-import-rules.sh` 按架构宪法 Rule 5 区分业务源码与测试组合根：
+仅排除 Service、Delivery Adapter 和 External Client crate 根目录下的
+Cargo 集成测试 `tests/`，包括其支持模块。`src/`（即使目录名包含
+`tests`）和 Service API 内部分层规则仍完整检查；不新增违规 baseline。
+
+运行正反例自检，验证测试组合合法、生产越层导入仍失败：
+
+```bash
+bash scripts/ci/tests/import_scope_regression.sh
+```

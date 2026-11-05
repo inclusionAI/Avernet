@@ -783,3 +783,18 @@ Name access adds one conditional indexed UPDATE and one indexed SELECT (one
 Provider row); only the first pin changes data. It invalidates the Provider cache,
 propagates errors, and never runs per output event. No network request is made
 while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## Native task Service API compatibility
+
+`MessageFlowService::handle_native_task_dispatch(request_id, command)` is the
+inbound entry for authenticated native task requests without a wire parent key.
+The production Caller-aware implementation correlates accepted starts and checks
+BCS-owned parent identity; request IDs and model arguments never grant authority.
+The additive entry is versioned as bcs-service-api 3.1.0 on top of the 3.0.0 API.
+Workspace consumers rebuild together; existing implementations retain source
+compatibility with the 3.0.0 API.
+The additive default strips delegation and retains ordinary task dispatch only,
+not Caller inheritance. There is no identity Plugin API or task wire change.
+Bounded replay and composition semantics are specified in
+`apps/bcs/docs/native-task-caller.md` and exercised through the real task and
+protected-delivery application seams.
