@@ -222,24 +222,25 @@ disabled bindings are out of scope without ever being reported
 
 `DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
 nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
-SQLite 039. One explicit read returns one Card; one CAS commits all three fields
-and updates the generic Bot audit time. Writes fence environment, Provider/ref,
+SQLite 039. One explicit read returns one Card. A short transaction updates the Card and
+synchronized Bot name and reads its committed snapshot.
+It also updates the generic Bot audit time. Writes fence environment, Provider/ref,
 active Gateway mode and revision; failures propagate. Routes and credential
 references are derived, never duplicated in this store.
 Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not
-one ID query plus per-Card lookups. Availability projects only interfaces for at
+one ID query plus per-Card lookups. Availability projects interfaces and security declarations for at
 most 256 IDs. No persistent refresh/error state or additional cache exists.
 See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
 
 Full Card queries select only Bot identity and Card payload in batches of 256.
-Discovery matches the local BCS display name/ID as well as Card
+Discovery matches the synchronized BCS name/ID as well as Card
 names/descriptions and skill IDs/names/descriptions/tags
 in SQL before selecting matching payloads. A nonmatching A2A identity remains
 distinguishable from a legacy Bot, preventing stale capability fallback. Search
-count and pagination share the same predicate. Display aliases do not enable
+count and pagination share the same predicate. Name matches do not enable
 legacy skill/summary matching; explicit skill selectors still require Card skills.
-The alias predicate uses the existing SQL queries and pagination/batch bounds.
-Offline Gateway discovery also matches the alias in the Provider binding selector;
+The name predicate uses the existing SQL queries and pagination/batch bounds.
+Offline Gateway discovery also matches the name in the Provider binding selector;
 organization candidate counts/pages use the same name rule. A live registry
 entry is not required to discover an enabled Gateway Bot. SQL flavor is explicitly injected;
 SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
@@ -252,8 +253,8 @@ and provider_tests.rs; the existing Provider behavior remains covered by its sui
 A2A strict registration extends the existing ownership composite with a checked
 Card UPDATE inside the same transaction, after the new Bot/binding and before
 ownership/profile/audit steps. Identity, credential scope and initial revision
-are checked before writing. It adds one single-row statement, no network or new
-schema. Failure of Card or a later ownership step rolls back every lifecycle row.
+are checked before writing. It adds the Card update inside the existing transaction,
+with no network access. Failure of Card or a later ownership step rolls back every lifecycle row.
 
 
 Provider-admin A2A admission uses the separate
@@ -270,3 +271,66 @@ same already-migrated disposable schema. The isolated a2a_mysql test reuses thos
 cases. Failure injection uses temporary CHECK constraints, without requiring
 privileged trigger creation. JSON search, CAS, rollback of Task/context association,
 shared Task references and all audit fields are exercised on native MySQL.
+
+
+Provider Bot registration performs a fresh name preflight across active Bots in
+(env, provider_id), including non-A2A Bots. It adds one SELECT returning at most
+one identifier before writes; a name collision returns Conflict without side effects.
+Memory registration checks the corresponding instance-local records. No name cache,
+extra table, generated column, length change or migration 040 is required.
+The preflight does not prevent cross-process concurrent inserts or legacy renames;
+a database unique index is deferred until duplicate production rows are corrected.
+Without a name index, the read may scan the Provider's rows (LIMIT bounds results,
+not rows examined). A2A Card writes also preflight names; Card/name changes remain
+atomic and explicit replacement returns its own committed revision. Name lookup
+returns at most two rows and rejects ambiguous legacy names, including non-A2A
+collisions. Rename and soft deletion release names; there is no historical reservation.
+Lifecycle capability writes preserve Card.name atomically even when an earlier
+registry read supplied stale capabilities. Direct control-plane name patches
+reject a different A2A name and retain the Card-owned value during concurrent
+updates. The name-patch precheck reads one indexed name row; the UPDATE preserves
+the synchronized name without parsing Card JSON. Full Card projection remains
+authoritative for query responses.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## A2A source identity writes
+
+Source identity uses the original Card JSON, with no new columns or migrations.
+MySQL source registration/update transactions lock the existing environment-scoped
+Provider row before reading source conflicts and writing a Bot. SQLite uses its
+transactional writer serialization. Source queries return one scalar EXISTS value,
+filter by env/Provider/active Bot and compare IDs and URIs byte-exactly. They may
+scan that Provider's active Cards; there is no source index in this phase. This is
+registration/configuration work, never per-token or per-message work.
+
+Card writes add one current-Card read for immutable-ID validation, one conflict
+preflight when a source is present, then a transaction with a Provider lock (or
+constant query), a conflict query, conditional Card/name write and snapshot read.
+The revision fence protects the immutable-ID check even for legacy unconditional
+replacement; local replacement retries at most three times. Registration adds
+source preflight and two transaction reads to the existing ownership composite.
+All failures roll back or propagate; network fetches happen before transactions.
+A source conflict is distinct from the deferred name-index preflight guarantee.
+
+A successful Card write invalidates same-process registry metadata through the
+shared live registry wired at bootstrap. It does not evict connections, tokens or
+heartbeat state. Invalidated Bots use durable metadata for single and batched
+registry reads for the remaining process lifetime; delayed lifecycle writes cannot
+repopulate stale names. Single reads add one indexed row lookup; batches retain
+100-ID chunks rather than per-Bot queries. Card writes add no DB queries for
+invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
+not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
+Card-owned name even when a caller carries an older capabilities snapshot.

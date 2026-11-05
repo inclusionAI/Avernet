@@ -238,3 +238,19 @@ fn task_modes_query(
         user_visibility,
     }
 }
+
+#[tokio::test]
+async fn card_name_rejects_legacy_rename_but_allows_other_control_plane_updates() {
+    let (repo, db) = fixture().await;
+    seed_bot(db.as_ref(), "card-owned", "Card Agent", "bot", "public", "online", None, "2026-11-03 00:00:00").await;
+    db.execute(DbStatement::new("UPDATE bcs_bots SET agent_card='{\"name\":\"Card Agent\"}' WHERE bot_uuid='card-owned' AND env='dev'")).await.unwrap();
+    let error = repo.patch_control_plane("card-owned", "dev", BotControlPlanePatch {
+        name: Some("Legacy Rename".into()), ..Default::default()
+    }).await.unwrap_err();
+    assert!(matches!(error, ServiceError::Conflict(_)));
+    let updated = repo.patch_control_plane("card-owned", "dev", BotControlPlanePatch {
+        name: Some("Card Agent".into()), visibility: Some("private".into()), ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_eq!(updated.name, "Card Agent");
+    assert_eq!(updated.visibility, "private");
+}

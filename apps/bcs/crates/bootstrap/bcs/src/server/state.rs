@@ -232,6 +232,7 @@ impl Default for BcsServerState {
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,

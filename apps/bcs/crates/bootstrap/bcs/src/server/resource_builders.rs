@@ -137,6 +137,7 @@ fn build_organization_services(
 }
 
 pub(super) fn build_provider_services_with_webhook_url_guard(
+    a2a_allow_anonymous:bool,
     repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
@@ -156,7 +157,7 @@ pub(super) fn build_provider_services_with_webhook_url_guard(
         repos.provider_bindings.clone(),
         registry.clone(),
         webhook_url_guard,
-    ).with_bot_provider_repo(repos.bot_providers.clone()));
+    ).with_bot_provider_repo(repos.bot_providers.clone()).with_a2a_anonymous(a2a_allow_anonymous));
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl;
     let mut provider_management = ProviderManagement::new(
@@ -539,7 +540,7 @@ pub(super) fn build_openapi_v1_state(
         registry.clone(), relation.clone(), relation_env.clone(),
         config.openapi_v1.registration_self_service_provider_ids.clone(),
         outbound_url_guard_from_config(config),
-    ));
+    ).with_a2a_anonymous(config.a2a_allow_anonymous));
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_repos.provider_repo.clone(),

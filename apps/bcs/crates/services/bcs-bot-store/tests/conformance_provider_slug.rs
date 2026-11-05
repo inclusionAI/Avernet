@@ -107,3 +107,31 @@ async fn malformed_slug_value_is_an_error_in_provider_reads() {
         Err(ServiceError::InternalError(_))));
     assert!(matches!(store.list_providers().await, Err(ServiceError::InternalError(_))));
 }
+
+async fn assert_a2a_name_pinned(store: &dyn ProviderRepoPort) {
+    let provider = bcs_service_api::ProviderRecord {
+        provider_id: "pinned-provider".into(), slug: Some("stable-name".into()),
+        name: "Provider".into(), config: "{}".into(), disabled: false,
+        created_by: "alice".into(), owners: "[]".into(), created_at: 0, updated_at: 0,
+    };
+    store.insert_provider(provider).await.unwrap();
+    assert!(store.pin_a2a_slug("pinned-provider", "stale-name").await.is_err());
+    store.pin_a2a_slug("pinned-provider", "stable-name").await.unwrap();
+    store.pin_a2a_slug("pinned-provider", "stable-name").await.unwrap();
+    // A stale metadata writer cannot erase the reservation.
+    store.update_provider_metadata("pinned-provider", Some("New display name"), Some("{}"), None, 1).await.unwrap();
+    assert!(matches!(store.update_provider_metadata("pinned-provider", None, None, Some("other-name"), 2).await,
+        Err(ServiceError::Conflict(_))));
+    assert!(store.get_provider_by_slug("other-name").await.unwrap().is_none());
+    assert_eq!(store.get_provider_by_slug("stable-name").await.unwrap().unwrap().name, "New display name");
+}
+
+#[tokio::test]
+async fn a2a_name_reservation_survives_memory_metadata_updates() {
+    assert_a2a_name_pinned(&MemoryProviderStore::new()).await;
+}
+
+#[tokio::test]
+async fn a2a_name_reservation_survives_sqlite_metadata_updates() {
+    assert_a2a_name_pinned(&DbProviderStore::sqlite(database().await)).await;
+}

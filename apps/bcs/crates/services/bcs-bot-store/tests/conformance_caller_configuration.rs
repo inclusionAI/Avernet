@@ -37,7 +37,7 @@ fn snapshot(revision: u64, enabled: bool) -> CallerIdentitySnapshot {
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
-        "CREATE TABLE bcs_bots (
+        "CREATE TABLE bcs_bots (agent_card TEXT,
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

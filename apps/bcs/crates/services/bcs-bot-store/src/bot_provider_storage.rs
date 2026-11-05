@@ -123,11 +123,18 @@ impl DbProviderStore {
         }
         if let Some(card) = card { crate::a2a::validate_registration_card(&record, card)?; }
         let env = resolve_env();
+        crate::a2a::ensure_provider_name_available(self.db.as_ref(), self.flavor, &env,
+            &record.provider_id, capabilities.name.as_deref().unwrap_or(&record.bot_uuid), None).await?;
         let info = serde_json::to_string(&capabilities)
             .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
         let mode = record.connection_mode.as_str();
-        let mut steps = vec![DbTransactionStep::ExecuteChecked {
-            statement: DbStatement::with_params(
+        let mut steps = Vec::new();
+        if let Some(card)=card {
+            crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&env,card).await?;
+            steps.push(crate::a2a_source::provider_lock(self.flavor,&env,&record.provider_id));
+            steps.push(DbTransactionStep::Query(crate::a2a_source::conflict_query(self.flavor,&env,card)?));
+        }
+        let insert=DbStatement::with_params(
                 "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \
                  visibility, status, actor_kind, is_deleted, registered_at, updated_at, agent_code, \
                  provider_id, provider_bot_ref, connection_mode, webhook_url, ownership_version) \
@@ -137,16 +144,20 @@ impl DbProviderStore {
                     info.into(), token.into(), owner.into(), capabilities.visibility.as_str().into(),
                     capabilities.agent_code.clone().into(),
                     record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
-                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]),
-            expected_affected_rows: 1,
-        }];
+                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]);
+        let insert=if card.is_some() {
+            let mut params=crate::a2a_source::bound_params(insert.params().to_vec());
+            params.push(crate::a2a_source::conflict_param(1));
+            DbStatement::with_transaction_params(format!("{} AND ?=0",insert.sql()),params)
+        } else {insert};
+        steps.push(DbTransactionStep::ExecuteChecked {statement:insert,expected_affected_rows:1});
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
                 Self::insert_binding_sql(), vec![record.bot_uuid.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(),
                     env.as_str().into(), false.into(), record.webhook_url.clone().into()])));
         }
         if let Some(card) = card {
-            steps.push(crate::a2a::registration_card_step(card, &env)?);
+            steps.extend(crate::a2a::registration_card_steps(card, &env)?);
         }
         // Ownership pieces share the same Bot-row-first lock order
         // (Human ACTOR row is a separate bcs_bots row after the
@@ -170,7 +181,8 @@ impl DbProviderStore {
             .await
         {
             Ok(_) => {}
-            Err(error) => match error {
+            Err(error) => { if let Some(card)=card {crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&env,card).await?;}
+                match error {
                 DbError::Timeout => {
                     return Err(ServiceError::InternalError(format!(
                         "{}: the trusted Provider registration transaction \
@@ -181,7 +193,7 @@ impl DbProviderStore {
                     )));
                 }
                 other => return Err(storage_error(other)),
-            },
+            }},
         }
         // Post-commit cache publish (rebuildable object state only).
         self.bindings.invalidate(&format!("{env}:{}", record.bot_uuid));
@@ -459,6 +471,9 @@ impl DbProviderStore {
 
 #[async_trait]
 impl BotProviderRepoPort for DbProviderStore {
+    async fn validate_provider_bot_name(&self, provider_id:&str, name:&str, exclude_bot:Option<&str>) -> ServiceResult<()> {
+        crate::a2a::ensure_provider_name_available(self.db.as_ref(),self.flavor,&resolve_env(),provider_id,name,exclude_bot).await
+    }
     async fn validate_provider_affiliation(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<()> {
         self.check_affiliation_scope(provider_id, bot_uuid).await
     }
@@ -564,6 +579,8 @@ impl BotProviderRepoPort for DbProviderStore {
             return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
         }
         let env = resolve_env();
+        crate::a2a::ensure_provider_name_available(self.db.as_ref(), self.flavor, &env,
+            &record.provider_id, capabilities.name.as_deref().unwrap_or(&record.bot_uuid), None).await?;
         let info = serde_json::to_string(&capabilities)
             .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
         let mode = record.connection_mode.as_str();

@@ -307,6 +307,7 @@ mod tests {
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let (_provider_core, _provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                false,
                 &provider_repos,
                 bot_registry,
                 relation,

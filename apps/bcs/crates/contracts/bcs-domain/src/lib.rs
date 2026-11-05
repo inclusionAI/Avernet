@@ -130,3 +130,7 @@ pub mod state_machine_history;
 
 pub mod caller_identity_material;
 pub mod a2a;
+pub mod a2a_auth;
+pub mod a2a_names;
+pub mod a2a_management;
+mod a2a_json;

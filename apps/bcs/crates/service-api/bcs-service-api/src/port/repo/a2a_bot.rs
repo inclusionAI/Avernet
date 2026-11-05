@@ -22,7 +22,11 @@ pub trait A2aBotRepoPort: Send + Sync {
     /// Replace all configuration atomically on an existing, active Provider Bot.
     /// revision must be expected_revision + 1. False means stale/absent binding.
     async fn compare_and_set(&self, record: &A2aBotRecord, expected_revision: u64) -> ServiceResult<bool>;
+    /// Atomic explicit replacement, incrementing the stored revision internally.
+    /// Returns this write's committed snapshot; never reads back a subsequent writer.
+    async fn replace(&self, record: &A2aBotRecord) -> ServiceResult<A2aBotRecord>;
     /// Bounded keyset page of URL-backed Cards, at most 16 full snapshots.
     /// Inline Cards are excluded; callers keep their refresh-round cursor.
+    async fn get_by_name(&self, provider_id:&str, name:&str)->ServiceResult<Option<A2aBotRecord>>;
     async fn refreshable(&self, after_bot_uuid: Option<&str>, limit: u32) -> ServiceResult<Vec<A2aBotRecord>>;
 }

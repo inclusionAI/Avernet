@@ -12,7 +12,6 @@ pub struct SelectedCard {
 #[derive(Debug, PartialEq, Eq)]
 pub enum CardError {
     InvalidShape,
-    StreamingRequired,
     TextRequired,
     RequiredExtensionUnsupported(String),
     AuthenticationUnsupported,
@@ -47,13 +46,14 @@ pub fn select_card_with_bindings(
     for (interface,original) in card.supported_interfaces.iter_mut().zip(originals) {
         interface.url=original.get("url").and_then(Value::as_str).ok_or(CardError::InvalidShape)?.to_owned();
     }
-    if card.capabilities.streaming != Some(true) { return Err(CardError::StreamingRequired); }
     if !card.default_input_modes.iter().any(|m| m == "text/plain")
         || !card.default_output_modes.iter().any(|m| m == "text/plain") {
         return Err(CardError::TextRequired);
     }
     for extension in card.capabilities.extensions.iter().flatten() {
-        if extension.required == Some(true) && !extensions.contains(&extension.uri.as_str()) {
+        let streaming_only=matches!(extension.uri.as_str(),crate::tools::EXTENSION | crate::structured_exec::EXTENSION);
+        if extension.required == Some(true) && (!extensions.contains(&extension.uri.as_str())
+            || (streaming_only && raw.pointer("/capabilities/streaming").and_then(Value::as_bool)!=Some(true))) {
             return Err(CardError::RequiredExtensionUnsupported(extension.uri.clone()));
         }
     }

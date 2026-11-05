@@ -9,17 +9,25 @@ fn record(id: &str, mode: BotConnectionMode) -> BotProviderRecord {
     }
 }
 
-fn caps() -> BotCapabilities {
-    BotCapabilities { name: Some("Provider Bot".into()), visibility: "protected".into(), ..Default::default() }
+fn caps(name: &str) -> BotCapabilities {
+    BotCapabilities { name: Some(name.into()), visibility: "protected".into(), ..Default::default() }
 }
 
 pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPort, bindings: &dyn ProviderBotBindingRepoPort) {
     let upstream = record("upstream", BotConnectionMode::Plugin);
-    repo.create_provider_bot(upstream.clone(), caps(), "owner-a", "test-upstream-runtime").await.unwrap();
+    repo.create_provider_bot(upstream.clone(), caps("Provider Bot"), "owner-a", "test-upstream-runtime").await.unwrap();
     assert_eq!(repo.get_provider_bot("upstream").await.unwrap(), Some(upstream));
     assert!(bindings.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
+    let collision=record("same-name", BotConnectionMode::Gateway);
+    assert!(matches!(repo.create_provider_bot(collision,caps("Provider Bot"),"another-owner","test-name-collision-runtime").await,
+        Err(bcs_service_api::ServiceError::Conflict(_))));
+    assert!(repo.get_provider_bot("same-name").await.unwrap().is_none());
+    assert!(bindings.get_binding_by_bot_uuid("same-name").await.unwrap().is_none());
+    assert!(repo.validate_provider_bot_name("provider-a","Provider Bot",None).await.is_err());
+    repo.validate_provider_bot_name("provider-a","Provider Bot",Some("upstream")).await.unwrap();
+    repo.validate_provider_bot_name("other-provider","Provider Bot",None).await.unwrap();
     let gateway = record("gateway", BotConnectionMode::Gateway);
-    repo.create_provider_bot(gateway.clone(), caps(), "owner-a", "test-gateway-runtime").await.unwrap();
+    repo.create_provider_bot(gateway.clone(), caps("Gateway Bot"), "owner-a", "test-gateway-runtime").await.unwrap();
     assert_eq!(repo.get_provider_bot("gateway").await.unwrap(), Some(gateway));
     assert!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().is_some());
     // Repeated affiliation is a no-op, not a timestamp/version update.
@@ -32,7 +40,7 @@ pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPor
 
     let mut duplicate = record("other-id", BotConnectionMode::Gateway);
     duplicate.provider_bot_ref = "upstream".into();
-    assert!(repo.create_provider_bot(duplicate, caps(), "owner-a", "test-other-runtime").await.is_err());
+    assert!(repo.create_provider_bot(duplicate, caps("Provider Bot"), "owner-a", "test-other-runtime").await.is_err());
     assert!(repo.get_provider_bot("other-id").await.unwrap().is_none());
 
     repo.update_provider_webhook("provider-a", "gateway", Some("https://example.org/bot".into()), 2000).await.unwrap();
@@ -50,13 +58,15 @@ pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPor
     assert!(repo.get_provider_bot("gateway").await.unwrap().unwrap().is_deleted);
     assert!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().unwrap().disabled);
     assert!(!repo.delete_provider_bot("provider-a", "gateway", 3000).await.unwrap());
+    repo.validate_provider_bot_name("provider-a","Gateway Bot",None).await.unwrap();
+    repo.create_provider_bot(record("reused-name",BotConnectionMode::Plugin),caps("Gateway Bot"),"owner-a","test-reused-name-runtime").await.unwrap();
     assert!(repo.update_provider_webhook("provider-a", "gateway", None, 3000).await.is_err());
-    assert!(repo.create_provider_bot(record("gateway", BotConnectionMode::Gateway), caps(), "owner-a", "test-resurrection-runtime").await.is_err());
+    assert!(repo.create_provider_bot(record("gateway", BotConnectionMode::Gateway), caps("Provider Bot"), "owner-a", "test-resurrection-runtime").await.is_err());
 }
 
 /// Binding consumer contract, exercised against the compatibility projection.
 pub async fn provider_bot_binding_repo_port_contract_tests(repo: &dyn ProviderBotBindingRepoPort, bots: &dyn BotProviderRepoPort) {
-    bots.create_provider_bot(record("projection", BotConnectionMode::Plugin), caps(), "owner-a", "test-projection-runtime").await.unwrap();
+    bots.create_provider_bot(record("projection", BotConnectionMode::Plugin), caps("Projection Bot"), "owner-a", "test-projection-runtime").await.unwrap();
     let binding = ProviderBotBinding {
         bot_uuid: "projection".into(), provider_id: "provider-a".into(), provider_bot_ref: "projection".into(),
         webhook_url: None, disabled: false, created_at: 1000, updated_at: 1000,

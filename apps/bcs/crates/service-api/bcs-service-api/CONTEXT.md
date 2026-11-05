@@ -769,3 +769,17 @@ allowlist uses exact user IDs and defaults to denying all callers. Gateway or
 OAuth authentication, a binding and non-user identities do not implicitly grant
 issuance. HTTP request bodies remain count-only; Rust callers must provide the
 caller when rebuilding. No persistence schema changes are required.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
