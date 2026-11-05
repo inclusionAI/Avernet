@@ -45,6 +45,7 @@ from agentclaw.community.utils.gateway_principal_config import (
 from tests.community.endpoints.manifest_device_seed import (
     seed_empty_identity,
     seed_empty_manifest_device,
+    seed_empty_default_scope,
 )
 from tests.community.framework import (
     CaseInput,
@@ -60,9 +61,9 @@ _BOT_ID = "manifest-apply-bot"
 _KEY = "manifest-apply-framework-signing-key-at-least-32-bytes"
 _APPLY_ID = "0123456789abcdef0123456789abcdef"
 
-#: A document declaring only ``script``: it is the one construct whose
-#: materialiser needs neither a container nor a registry, so these cases test
-#: the surface rather than a device fixture.
+#: Only Script has a nonempty target. The full Manifest also replaces omitted
+#: capabilities with empty targets, so the fixture supplies a real Default
+#: scope for recording platform-policy exclusions.
 _DOCUMENT = 'schema_version: 1\nscript:\n  body: "echo hello"\n'
 
 
@@ -125,6 +126,7 @@ def _seed_bot(world) -> None:
 def _seed_bot_with_manifest(world) -> None:
     seed_empty_manifest_device(world)
     _seed_bot(world)
+    seed_empty_default_scope(world, "openclaw")
     world.get(BotConfigManifestRepositoryProtocol).upsert(
         env=get_current_env(),
         entity_id=_OWNER,
@@ -544,6 +546,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
     seed_empty_identity(world)
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world)
+    seed_empty_default_scope(world, "openclaw")
     world.get(BotConfigManifestRepositoryProtocol).upsert(
         env=get_current_env(),
         entity_id=_OWNER,
