@@ -166,9 +166,9 @@ class LegacyRetrievalIndex:
 
     def _search(self, query, limit, filters, allowed_ids, *, keyword):
         ids = [
-            row.card.agent_id
-            for row in self.catalog.rows()
-            if self.updates.eligible(row.card.agent_id, filters, allowed_ids)
+            worker_id
+            for worker_id in self.catalog.candidate_ids(filters, allowed_ids)
+            if worker_id not in self.catalog.dirty
         ]
         if not ids:
             return []
