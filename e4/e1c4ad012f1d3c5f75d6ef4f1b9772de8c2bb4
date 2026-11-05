@@ -1,0 +1,35 @@
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_20c3b110241190::t_773eb540cba990 28-33,44-45,52,199-200,209,230-231,241-242,258-259
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_20c3b110241190::t_6f917208688113 5,8,11,50-69,78,208-211
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_20c3b110241190::t_296ce9f0f57518 43-45,52-53,57-58,65-66
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_20c3b110241190::t_169753e6093468 31-46,232,243
+apps/bcsfuse/tests/deployment/test_zbcsfuse_trace.py
+  s_20c3b110241190::t_41025d19e056d6 73-74,92-97,101,124-140,165,180
+apps/bcsfuse/tr/java/pom.xml
+  s_20c3b110241190::t_697749201fd800 9
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/SearchContext.java
+  s_20c3b110241190::t_8b288ae39968d0 20-27,43-58
+apps/bcsfuse/tr/rpc.proto
+  s_20c3b110241190::t_07408cee4bfd40 3,72-74
+apps/bcsfuse/zbcsfuse_main.py
+  s_20c3b110241190::t_a40437418a1c73 40-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e4e1c4ad012f1d3c5f75d6ef4f1b9772de8c2bb4",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
