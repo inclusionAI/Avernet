@@ -103,7 +103,17 @@ class RenderScreenService(RenderScreenServiceProtocol):
             # 记录 scope 统一落 Bot 归属者,编辑/删除若只认「记录 owner == 登录人」,
             # 协作者刚创建的记录(落归属者 scope)立刻不可改删 — 回到「只能增加,
             # 不能删除和编辑」的不对称。故放行归属者本人与在册协作者。
-            if bot and not self._is_service_member_instance(bot, user_id):
+            # 但「service Bot 个人定制」例外:记录挂在被服务成员个人名下、既非
+            # 归属者也非 entity 行,存量语义为仅本人可改删,不随协作关系放行 —
+            # 否则归属交接后新归属者也能改删他人定制,破坏 B6 预期。
+            personal_customization = bool(bot) and (
+                bot.get("bot_type") == "service"
+                and record.owner_id not in (
+                    str(bot.get("owner_id") or ""),
+                    str(bot.get("entity_id") or ""),
+                )
+            )
+            if bot and not personal_customization and not self._is_service_member_instance(bot, user_id):
                 if self._bot_has_collaborative_access(record.bot_id, user_id):
                     return record
             # 兜底保持存量语义:BCN 无 bot 行按「记录 owner == 登录人」判;
