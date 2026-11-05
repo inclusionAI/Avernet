@@ -85,6 +85,7 @@ from agentclaw.community.core.expert_chat.errors import (
     ConnectionError as ExpertConnectionError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.utils.runtime_list_timing import mark
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
     tags=["sessions"],
@@ -150,6 +151,7 @@ async def list_sessions(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
@@ -890,6 +892,7 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,

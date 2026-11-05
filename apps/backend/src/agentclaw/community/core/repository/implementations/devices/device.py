@@ -83,6 +83,7 @@ from sqlalchemy import or_, func
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
@@ -196,12 +197,14 @@ class DeviceRepository(
     def get_by_id(
         self, binding_id: int
     ) -> DeviceBindingRecord | None:
+        mark("binding.by_id")
         with self._db.orm_session() as db:
             m = (
                 db.query(EntityDeviceBinding)
                 .filter(EntityDeviceBinding.id == binding_id)
                 .first()
             )
+            mark("binding.by_id.fetched")
             record = _to_record(m)
             if record:
                 logger.info(
@@ -224,6 +227,7 @@ class DeviceRepository(
         The outer join retains Bots without a binding for ambiguity detection.
         This resolves resources only; the caller remains responsible for access.
         """
+        mark("binding.by_bot")
         with self._db.orm_session() as db:
             m = (
                 db.query(BotModel.id, EntityDeviceBinding)
@@ -241,6 +245,7 @@ class DeviceRepository(
                 .limit(2)
                 .all()
             )
+            mark("binding.by_bot.fetched")
             if len(m) > 1:
                 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
                 raise BotLookupAmbiguousError(f"Ambiguous device Bot locator: {bot_id}")

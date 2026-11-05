@@ -47,6 +47,7 @@ internal_dependencies:
   - agentclaw.community.di.config
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.runtime_list_timing
 ```
 
 ### Change impact
