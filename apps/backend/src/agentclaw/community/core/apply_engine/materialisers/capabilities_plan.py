@@ -181,7 +181,10 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 PlannedEntry(
                     Intent("mcp/" + code, config),
                     outcome,
-                    requires_write=code not in direct or not same,
+                    # Effective equality does not reveal safe legacy aliases.
+                    # The command consumes them atomically; canonical equality
+                    # remains a repository no-op after convergence.
+                    requires_write=True,
                 )
             )
         # A Set that just withdrew no longer protects its persistent Bot override.
