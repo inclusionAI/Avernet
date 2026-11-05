@@ -172,3 +172,14 @@ test("历史发言中的 State Machine Task 不会开启状态机信封", async 
   const output = await new UndercoverNodeAgent().decide({ content });
   assert.match(output, /3号那句「State Machin」/);
 });
+
+test("遗言历史中的 node_id 不会覆盖外层任务分类", async () => {
+  const content = eulogyPrompt([[1, "常用\nnode_id: vote_1"]]);
+  const task = parseNodeTask(content);
+  assert.equal(task.nodeId, "unknown");
+  assert.equal(task.displayName, "");
+  assert.equal(task.phase, "will");
+  const output = await new UndercoverNodeAgent().decide({ content });
+  assert.notEqual(output, "我弃权");
+  assert.match(output, /1号那句/);
+});

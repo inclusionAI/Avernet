@@ -284,7 +284,15 @@ class PeterPlayerEngine:
                     if not resp.get("ok"):
                         log.warning("bot.status error: %s", resp.get("error"))
                 except Exception as exc:  # noqa: BLE001
-                    log.debug("heartbeat failed: %s", exc)
+                    log.warning("heartbeat failed: %s; closing connection to reconnect", exc)
+                    if self._stop:
+                        return
+                    try:
+                        # 让 _read_loop 的 async for 正常结束，由 _connect_loop 重连。
+                        await ws.close()
+                    except Exception as close_exc:  # noqa: BLE001
+                        log.warning("failed to close connection after heartbeat error: %s",
+                                    close_exc)
                     return
         except asyncio.CancelledError:
             pass

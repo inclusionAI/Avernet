@@ -200,8 +200,14 @@ def parse_node_task(content: str) -> NodeTask:
     header = re.match(r"\[State Machine Task\][ \t]*\r?\n", content)
     if header:
         rest = content[header.end():]
-        node_id_m = re.search(r"node_id:\s*(\S+)", rest)
-        display_m = re.search(r"display_name:\s*(.+)", rest)
+        first_section = re.search(
+            r"^[ \t]*\[(?:Input|Upstream Outputs|Instruction)\][ \t]*\r?$",
+            rest,
+            re.MULTILINE,
+        )
+        metadata = rest[:first_section.start()] if first_section else rest
+        node_id_m = re.search(r"^node_id:[ \t]*(\S+)", metadata, re.MULTILINE)
+        display_m = re.search(r"^display_name:[ \t]*([^\r\n]+)", metadata, re.MULTILINE)
         node_id = node_id_m.group(1) if node_id_m else "unknown"
         display_name = display_m.group(1).strip() if display_m else ""
         sections = _split_sections(rest)

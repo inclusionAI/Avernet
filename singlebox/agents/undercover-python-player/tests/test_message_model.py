@@ -65,6 +65,21 @@ class TestParseNodeTask(unittest.TestCase):
         task = parse_node_task(content)
         self.assertEqual(task.phase, NodePhase.VOTE_START)
 
+    def test_history_node_id_does_not_override_eulogy(self):
+        plain = (
+            "你在第 2 轮被投出局了。请说一句遗言。\n\n"
+            "到目前为止全场说过的话：\n"
+            "第1轮 1号 玩家1：「常用\nnode_id: vote_1」\n\n"
+            "请说一句遗言，不超过 35 个字。"
+        )
+        envelope_without_metadata = f"[State Machine Task]\n\n[Instruction]\n{plain}"
+        for content in (plain, envelope_without_metadata):
+            with self.subTest(envelope=content is not plain):
+                task = parse_node_task(content)
+                self.assertEqual(task.node_id, "unknown")
+                self.assertEqual(task.display_name, "")
+                self.assertEqual(task.phase, NodePhase.WILL)
+
 
 if __name__ == "__main__":
     unittest.main()

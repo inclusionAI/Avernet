@@ -411,6 +411,57 @@ class TestHeartbeat(unittest.TestCase):
 
         run_until(drive())
 
+    def test_bot_status_timeout_reconnects_and_stop_stays_stopped(self):
+        async def drive():
+            from unittest import mock
+
+            class CloseAwareWs(StubWs):
+                def __init__(self):
+                    super().__init__()
+                    self.closed = asyncio.Event()
+                    self.close_calls = 0
+
+                def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    await self.closed.wait()
+                    raise StopAsyncIteration
+
+                async def close(self):
+                    self.close_calls += 1
+                    self.closed.set()
+
+            engine = PeterPlayerEngine(ws_url="ws://unused", heartbeat_s=0.01)
+            connections = []
+            reconnected = asyncio.Event()
+
+            async def open_ws():
+                ws = CloseAwareWs()
+                connections.append(ws)
+                if len(connections) == 2:
+                    reconnected.set()
+                return ws
+
+            async def timeout_request(ws, req_id, method, params):
+                self.assertEqual(method, "bot.status")
+                raise asyncio.TimeoutError("bot.status timed out")
+
+            engine._open_ws = open_ws
+            engine._request = timeout_request
+            with mock.patch("undercover_player.engine.RECONNECT_MIN_DELAY_S", 0.001), \
+                    mock.patch("undercover_player.engine.RECONNECT_MAX_DELAY_S", 0.002):
+                starting = asyncio.create_task(engine.start())
+                await asyncio.wait_for(reconnected.wait(), 1)
+                await engine.stop()
+                await asyncio.wait_for(starting, 1)
+                await asyncio.sleep(0.01)
+
+            self.assertEqual(len(connections), 2)
+            self.assertGreaterEqual(connections[0].close_calls, 1)
+
+        run_until(drive())
+
 
 if __name__ == "__main__":
     unittest.main()

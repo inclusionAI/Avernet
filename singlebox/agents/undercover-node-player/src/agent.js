@@ -81,11 +81,13 @@ function classifyPhase(nodeId, displayName, instruction) {
 export function parseNodeTask(content) {
   const raw = typeof content === "string" ? content : "";
   const sections = splitSections(raw);
-  const nodeId = /(?:^|\n)node_id:\s*(\S+)/.exec(raw)?.[1] || "unknown";
-  const displayName = /(?:^|\n)display_name:\s*([^\r\n]+)/.exec(raw)?.[1]?.trim() || "";
-  const instruction = /^\[State Machine Task\][ \t]*\r?\n/.test(raw)
-    ? sections["[Instruction]"]
-    : raw;
+  const header = /^\[State Machine Task\][ \t]*\r?\n/.exec(raw);
+  const rest = header ? raw.slice(header[0].length) : "";
+  const firstSection = /^[ \t]*\[(?:Input|Upstream Outputs|Instruction)\][ \t]*\r?$/m.exec(rest);
+  const metadata = firstSection ? rest.slice(0, firstSection.index) : rest;
+  const nodeId = /^node_id:[ \t]*(\S+)/m.exec(metadata)?.[1] || "unknown";
+  const displayName = /^display_name:[ \t]*([^\r\n]+)/m.exec(metadata)?.[1]?.trim() || "";
+  const instruction = header ? sections["[Instruction]"] : raw;
 
   const seatMatch = /你是\s*(\d+)\s*号/.exec(instruction);
   // Quoted speeches are public history, never the current player's private word.
