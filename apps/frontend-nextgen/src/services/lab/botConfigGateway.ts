@@ -8,5 +8,5 @@ import type { BrowseSubscription, UpsertSubscriptionInput } from '@/domain/lab/t
 export interface BotConfigGateway {
   listSubscriptions(ownerUserId: string, signal?: AbortSignal): Promise<BrowseSubscription[]>;
   upsertSubscription(input: UpsertSubscriptionInput, signal?: AbortSignal): Promise<BrowseSubscription>;
-  deleteSubscription(botId: string, signal?: AbortSignal): Promise<void>;
+  deleteSubscription(botId: string, ownerUserId: string, signal?: AbortSignal): Promise<void>;
 }

@@ -77,7 +77,8 @@ class _FakeService:
         self.initial = initial
         self.upserts: list[dict[str, str | None]] = []
 
-    def get_subscription(self, *, bot_id: str):
+    def get_subscription(self, *, bot_id: str, owner_user_id: str):
+        assert owner_user_id
         return self.initial
 
     def upsert_subscription(self, **kwargs):
@@ -221,7 +222,9 @@ async def test_cancelling_pending_subscription_prevents_late_persistence():
         bot_id="bot-a", owner_user_id="111111", note="cancel me"
     )
     await asyncio.sleep(0)  # background enters the digest manager's wait()
-    await provisioner.cancel_pending(bot_id="bot-a")
+    await provisioner.cancel_pending(
+        bot_id="bot-a", owner_user_id="111111"
+    )
     block.set()
 
     await _drain_background()

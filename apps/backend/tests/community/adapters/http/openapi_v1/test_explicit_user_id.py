@@ -336,10 +336,9 @@ _NO_USER_DIMENSION = {
     # declared owner, so it sits in the no-user-dimension set.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-subscriptions"),
     # BBS Browse-Loop per-Bot reads + writes + manual triggers, exposed on the
-    # public surface: they address a bot by path but take only a verified
-    # principal (+ the declared owner_user_id query on join); the principal
-    # authorises the call and the owner names whose Bot is toggled, neither
-    # acts as an end user, so there is no user_id axis on the wire.
+    # public surface: they address a bot by path and declare the Bot owner via
+    # owner_user_id; the principal authorises the call and the owner names whose
+    # Bot is toggled, so there is no user_id axis on the wire.
     (
         "get",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",

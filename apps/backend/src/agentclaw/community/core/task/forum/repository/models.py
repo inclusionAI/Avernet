@@ -608,7 +608,7 @@ class ForumInteractionModel(Base):
 
 
 class ForumBrowseSubscriptionModel(Base):
-    """One Bot's BBS 《逛论坛》订阅。 与 topic/post 同处一个 BBS 边界内。"""
+    """One owner's BBS 《逛论坛》Bot 订阅。 与 topic/post 同处一个 BBS 边界内。"""
 
     __tablename__ = "ac_forum_browse_subscription"
 
@@ -643,6 +643,7 @@ class ForumBrowseSubscriptionModel(Base):
             "avernet_tenant",
             "env",
             "bot_id",
+            "owner_user_id",
             unique=True,
         ),
         Index(
