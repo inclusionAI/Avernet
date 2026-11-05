@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from agentclaw.community.core.models.skill import Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill_installation_source import (
@@ -189,6 +191,7 @@ class ApplySkillSetCommands:
         remove_names: tuple[str, ...],
         default_change: DefaultExclusionChange,
         platform_default_codes: frozenset[str],
+        mcp_catalog_entries: Mapping[str, Mapping[str, Any]],
     ) -> DesiredStateMutation:
         require_apply_scope(scope)
         names = [target.name for target in sets]
@@ -360,7 +363,9 @@ class ApplySkillSetCommands:
                             target.is_active,
                         )
                 if member_changed:
-                    self._replace_apply_members(session, scope, row, target)
+                    self._replace_apply_members(
+                        session, scope, row, target, mcp_catalog_entries
+                    )
             for name in remove_names:
                 if name in ordinary:
                     session.delete(ordinary[name])
@@ -475,14 +480,11 @@ class ApplySkillSetCommands:
                 ids = set()
             else:
                 try:
-                    ids = (
-                        set_member_skill_ids(
-                            self._scope,
-                            session,
-                            skill_set_id=item.id,
-                            excluded_raw_ids=frozenset(excluded),
-                        )
-                        - excluded
+                    ids = set_member_skill_ids(
+                        self._scope,
+                        session,
+                        skill_set_id=item.id,
+                        excluded_raw_ids=frozenset(excluded),
                     )
                 except SkillSetControlPlaneConflictError as error:
                     if (
@@ -494,18 +496,35 @@ class ApplySkillSetCommands:
                 if allow_unavailable:
                     ids |= set(item.skill_ids) - excluded
                 else:
-                    for raw_id in set(item.skill_ids) - excluded:
+                    resolved = {}
+                    center_uuids = set()
+                    for skill_id in sorted(ids):
                         skill = (
                             self._scope(session.query(Skill), Skill)
-                            .filter(Skill.id == raw_id)
+                            .filter(Skill.id == skill_id)
                             .with_for_update()
                             .one_or_none()
                         )
                         if skill is None:
                             raise SkillSetControlPlaneNotFoundError()
                         require_skill_online(skill)
-                        center_membership_skill_uuid(skill)
+                        uuid = center_membership_skill_uuid(skill)
+                        if uuid:
+                            center_uuids.add(uuid)
                         skill_projection_mcp_dependency_codes(session, skill)
+                        resolved[skill_id] = skill
+                    references = dict(item.skill_references)
+                    for raw_id in set(item.skill_ids) - excluded:
+                        raw = resolved.get(raw_id)
+                        if raw is not None and not str(raw.git_path or "").startswith(
+                            "center://"
+                        ):
+                            continue
+                        if (
+                            not references.get(raw_id)
+                            or references[raw_id] not in center_uuids
+                        ):
+                            raise SkillSetControlPlaneNotFoundError()
             for skill_id in ids:
                 skills[skill_id] = (
                     SkillInstallationSourceKind.DEFAULT
@@ -544,7 +563,7 @@ class ApplySkillSetCommands:
                 removed = removed or (wrote and attr.startswith("add_"))
         return changed, removed
 
-    def _replace_apply_members(self, session, scope, row, target):
+    def _replace_apply_members(self, session, scope, row, target, mcp_catalog_entries):
         self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
             SkillSetSkill.skill_set_id == row.id
         ).delete(synchronize_session=False)
@@ -576,11 +595,14 @@ class ApplySkillSetCommands:
                 )
             )
         for code in sorted(set(target.mcp_codes) - existing_mcps.keys()):
+            catalog = mcp_catalog_entries[code]
             session.add(
                 SkillSetMCPServer(
                     skill_set_id=row.id,
                     server_code=code,
-                    name=code,
+                    name=catalog["name"],
+                    description=catalog.get("description"),
+                    icon=catalog.get("icon"),
                     user_id=scope.owner_id,
                     env=scope.env,
                     avernet_tenant=scope.tenant,
@@ -590,42 +612,50 @@ class ApplySkillSetCommands:
     def _validate_default_restore(
         self, session, scope, facts, old, change, before_skills, before_mcps, policy
     ):
-        for set_id, skill_id in change.remove_skills & old.skill_exclusions:
-            other_excluded = frozenset(
+        for set_id, raw_id in change.remove_skills & old.skill_exclusions:
+            fact = next(item for item in facts if item.id == set_id)
+            if raw_id not in fact.skill_ids:
+                continue  # Removing a stale exclusion does not restore a member.
+            excluded = frozenset(
                 member
                 for current_set, member in old.skill_exclusions
-                if current_set == set_id and member != skill_id
+                if current_set == set_id
             )
-            members = set_member_skill_ids(
+            before = set_member_skill_ids(
                 self._scope,
                 session,
                 skill_set_id=set_id,
-                excluded_raw_ids=other_excluded,
+                excluded_raw_ids=excluded,
             )
-            if skill_id not in members:
-                continue
-            skill = (
-                self._scope(session.query(Skill), Skill)
-                .filter(Skill.id == skill_id)
-                .with_for_update()
-                .one_or_none()
+            after = set_member_skill_ids(
+                self._scope,
+                session,
+                skill_set_id=set_id,
+                excluded_raw_ids=excluded - {raw_id},
             )
-            if skill is None:
-                raise SkillSetControlPlaneNotFoundError()
-            references = self._skill_referencing_set_ids(
-                session, skill_id=skill_id, skill_uuid=skill.skill_uuid
-            )
-            ordinary = any(
-                not item.is_default and item.id in references for item in facts
-            )
-            require_can_join_set(
-                is_directly_active=skill_id in old.installations
-                and skill_id not in before_skills,
-                is_in_another_set=ordinary,
-            )
-            require_skill_online(skill)
-            center_membership_skill_uuid(skill)
-            skill_projection_mcp_dependency_codes(session, skill)
+            for skill_id in sorted(after - before):
+                skill = (
+                    self._scope(session.query(Skill), Skill)
+                    .filter(Skill.id == skill_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if skill is None:
+                    raise SkillSetControlPlaneNotFoundError()
+                references = self._skill_referencing_set_ids(
+                    session, skill_id=skill_id, skill_uuid=skill.skill_uuid
+                )
+                ordinary = any(
+                    not item.is_default and item.id in references for item in facts
+                )
+                require_can_join_set(
+                    is_directly_active=skill_id in old.installations
+                    and skill_id not in before_skills,
+                    is_in_another_set=ordinary,
+                )
+                require_skill_online(skill)
+                center_membership_skill_uuid(skill)
+                skill_projection_mcp_dependency_codes(session, skill)
         for set_id, code in change.remove_mcps & old.mcp_exclusions:
             fact = next(item for item in facts if item.id == set_id)
             if code not in set(fact.mcp_codes) | set(policy):

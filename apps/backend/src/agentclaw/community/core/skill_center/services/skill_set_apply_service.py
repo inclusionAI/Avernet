@@ -10,6 +10,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services.mcp_admission import (
+    mcp_catalog_entry,
     require_mcp_delivery_eligibility,
     resolve_mcp_catalog_detail,
 )
@@ -79,9 +80,11 @@ class SkillSetApplyService:
                 for set_id, code in default_change.remove_mcps & current.mcp_exclusions
                 if (set_id, code) in restoring
             )
+        mcp_catalog_entries = {}
         for code in sorted(codes):
             self._require_mcp_permission(actor_id=actor_id, server_code=code)
             detail = resolve_mcp_catalog_detail(self._mcp_center, code)
+            mcp_catalog_entries[code] = mcp_catalog_entry(code, detail)
             require_mcp_delivery_eligibility(
                 mcp_config=self._mcp_config,
                 engine_type=scope.engine_type,
@@ -110,6 +113,7 @@ class SkillSetApplyService:
                 remove_names=remove_names,
                 default_change=default_change,
                 platform_default_codes=platform_default_codes,
+                mcp_catalog_entries=mcp_catalog_entries,
             ),
         )
         return SkillSetApplyResult(
