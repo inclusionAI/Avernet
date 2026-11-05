@@ -2,16 +2,20 @@ apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
   s_875e3f9d4d0db3::t_3638948f8ea3f4 14
   s_875e3f9d4d0db3::t_9c2a64ecef02dc 204,209-215
   s_875e3f9d4d0db3::t_523b2b228557af 9
+  s_7d9f4f65cedfaf::t_6f30eb1494fdf5 216
 apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_container.rs
   s_875e3f9d4d0db3::t_9c2a64ecef02dc 133,137-143
+  s_7d9f4f65cedfaf::t_6759956d7d8e5e 144
 apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_observe.rs
   s_875e3f9d4d0db3::t_3638948f8ea3f4 9
   s_875e3f9d4d0db3::t_9c2a64ecef02dc 125,129-135
   s_875e3f9d4d0db3::t_9723795ba37b02 6
+  s_7d9f4f65cedfaf::t_ecb7dd2f3283a2 136
 apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_history.rs
   s_875e3f9d4d0db3::t_3638948f8ea3f4 11
   s_875e3f9d4d0db3::t_9c2a64ecef02dc 109,113-119
   s_875e3f9d4d0db3::t_40af25d8010b26 9
+  s_7d9f4f65cedfaf::t_4cda7edf82268a 120
 apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
   s_7d9f4f65cedfaf::t_59f2782e454976 4-17,207,211-212
 apps/bcs/crates/adapters/http/bcs-provider-http/tests/provider_headers_contract.rs
