@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/plugin-api/bcs-a2a-binding-api",
     "crates/plugin-api/bcs-tracing-api",
     "crates/auxiliary/bcs-network-tracing",
     # bootstrap
@@ -143,6 +144,7 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
 # Async runtime

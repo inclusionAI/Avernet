@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-a2a-binding-api.workspace = true
 bcs-tracing-api.workspace = true
 bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
 a2a = { package = "a2a-lf", version = "=0.4.2" }
