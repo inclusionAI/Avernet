@@ -1,0 +1,153 @@
+apps/agentclawscs/conf/docker/Dockerfile
+  s_63347400243a1a::t_d0080552d3a9fd 25-38,44
+apps/agentclawscs/conf/docker/logrotate.conf
+  s_63347400243a1a::t_ef8e7a13e652a9 24-38
+apps/agentclawscs/conf/docker/scripts/admin/bin/init-mosn.sh
+  s_63347400243a1a::t_e6e258742d961d 1-5,8-10,12-14
+apps/agentclawscs/conf/docker/scripts/admin/bin/preStop.sh
+  s_63347400243a1a::t_6c967b7d07b0a0 10-16
+apps/agentclawscs/conf/docker/scripts/admin/bin/start.sh
+  s_63347400243a1a::t_2b41509013eb11 12-19,30-39
+apps/agentclawscs/docker/bcs/Dockerfile
+  s_63347400243a1a::t_68c226092feb7e 30,33-34
+apps/agentclawscs/docker/bcs/logrotate.conf
+  s_63347400243a1a::t_975cf89a8617a7 24-38
+apps/agentclawscs/docker/bcs/scripts/admin/bin/init-mosn.sh
+  s_63347400243a1a::t_f42a9e3ccc01e0 1-5,8-10,12-14
+apps/agentclawscs/docker/bcs/scripts/admin/bin/preStop.sh
+  s_63347400243a1a::t_3301ee29f5e8ae 10-16
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  s_63347400243a1a::t_4a8d9a09528ffd 12-19,30-39
+apps/agentclawscs/docker/bcs/validate-bcs-artifact.sh
+  s_63347400243a1a::t_710be24c36cd72 33-35
+apps/bcs-internal/.aci.yml
+  s_63347400243a1a::t_21a7763557663c 25,44,53,72,78-80
+apps/bcs-internal/Cargo.lock
+  s_63347400243a1a::t_aa97e050b4b0b6 1885,1891,2292
+apps/bcs-internal/Cargo.toml
+  s_63347400243a1a::t_593d3819bcd338 8-9,116-117
+apps/bcs-internal/README.md
+  s_63347400243a1a::t_d954d64c5a74c3 42-43
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  s_63347400243a1a::t_73fa6a2f75562f 1-2
+apps/bcs-internal/configs/sofa-rpc-gray.toml
+  s_63347400243a1a::t_1d9257745c7876 1-2
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  s_63347400243a1a::t_e1935ea7c43132 1-2
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  s_63347400243a1a::t_795f4948ee7d85 1-2
+apps/bcs-internal/configs/sofa-rpc-prod.toml
+  s_63347400243a1a::t_df536279ec2b52 1-2
+apps/bcs-internal/configs/sofa-rpc.toml
+  s_63347400243a1a::t_73779aba763524 1-52
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_63347400243a1a::t_588a30334324b5 10-13
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_63347400243a1a::t_04ba359bdc7e7a 1-2,39,41-50,56-60,66,78-90
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/sofa_rpc.rs
+  s_63347400243a1a::t_c7a9d8190ba44e 1-139
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/Cargo.toml
+  s_63347400243a1a::t_8d63d781ba3822 1-45
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/build.rs
+  s_63347400243a1a::t_9bf0db4c88453a 1-15
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/scripts/bcs-sofa-rpc.sh
+  s_63347400243a1a::t_d56ea0a234c0d6 1-4
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/scripts/bcs_sofa_rpc_control.py
+  s_63347400243a1a::t_c99fdfb7f0ae32 1-648
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/admin.rs
+  s_63347400243a1a::t_4a6e4153dae646 1-72
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/config.rs
+  s_63347400243a1a::t_e56da95da520b8 1-102
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_63347400243a1a::t_c844f4d2817b87 1-240
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/context.rs
+  s_63347400243a1a::t_a741c745525ea0 1-130
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/control.rs
+  s_63347400243a1a::t_6e24213d67f753 1-222
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/diagnostic.rs
+  s_63347400243a1a::t_fc825e385956f8 1-59
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/discovery.rs
+  s_63347400243a1a::t_58a6e36856c0dc 1-179
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/error.rs
+  s_63347400243a1a::t_2499d3a808887b 1-117
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/journal.rs
+  s_63347400243a1a::t_da67ead5f24df3 1-346
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/lib.rs
+  s_63347400243a1a::t_6ea126cfbb9f76 1-19
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  s_63347400243a1a::t_24e062c5a3df4f 1-424
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/health.rs
+  s_63347400243a1a::t_c98aef4f76df18 1-24
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/mod.rs
+  s_63347400243a1a::t_48db48bf5b705d 1-407
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/contracts.rs
+  s_63347400243a1a::t_7524cc1b6cf8e9 1-198
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/control_state.rs
+  s_63347400243a1a::t_c275c3225562f7 1-70
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/outbound_wire.rs
+  s_63347400243a1a::t_687d1cf4acde64 1-257
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/test_control.py
+  s_63347400243a1a::t_323ed4def1ed5c 1-374
+apps/bcs-internal/crates/plugins/bcs-sofa-services/Cargo.toml
+  s_63347400243a1a::t_355dfdd714ffee 1-36
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  s_63347400243a1a::t_f595c83f406b93 1-13
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  s_63347400243a1a::t_b7141d071581ab 1-142
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/ucs/v1/ucs_render.proto
+  s_63347400243a1a::t_21600d0578ad29 1-57
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  s_63347400243a1a::t_308ebb78806311 1-58
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  s_63347400243a1a::t_8788ae60ffa1bd 1-43
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  s_63347400243a1a::t_20902f57d2fabf 1-11
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  s_63347400243a1a::t_4410b9f4e7465c 1-179
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/application.rs
+  s_63347400243a1a::t_eef635936bc105 1-18
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/consumer.rs
+  s_63347400243a1a::t_60eaf04910f871 1-29
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/mapping.rs
+  s_63347400243a1a::t_3a3f19c803ce89 1-56
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/mod.rs
+  s_63347400243a1a::t_4f447fb022a888 1-12
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/model.rs
+  s_63347400243a1a::t_8b8a334e594250 1-39
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/provider.rs
+  s_63347400243a1a::t_73a9a24408e692 1-47
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/validation.rs
+  s_63347400243a1a::t_6f44106d93261f 1-45
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  s_63347400243a1a::t_3f9172ed226766 1-140
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  s_63347400243a1a::t_59b181f83265ae 1-190
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  s_63347400243a1a::t_3008ac8028bc51 1-181
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  s_63347400243a1a::t_6df898852c602a 1-23
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_63347400243a1a::t_442bb408e977f8 1-167
+apps/bcs-internal/scripts/check-sofa-rpc.sh
+  s_63347400243a1a::t_71368acc7c8382 1-23
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_63347400243a1a::t_f46294308f79b6 1-68
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  s_63347400243a1a::t_432a7892ef3c8f 1-497
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a0e19635404e277349fbaf8ce609415f87253fea",
+  "prompts": {},
+  "sessions": {
+    "s_63347400243a1a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a47f-dc79-7492-a369-5971c956975b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
