@@ -11,8 +11,8 @@ The gateway tier (design §7) holds every long-lived connection. Item 2
 builds it to this contract:
 
 - **Hold every connection; hold no durable state.** PA streams, outbound
-  A2A and Provider streams, and dial-in bot sockets all terminate on
-  gateways. Executors keep none.
+  A2A and Provider streams terminate on gateways. BCN accepts no bot
+  connections (see the bot connection server below). Executors keep none.
 - **Send every downstream event to the session's owner** (design §7.2–7.3):
   deltas in 200 ms batches without acknowledgement; control events (the
   agent's task id, `input-required` / `auth-required`, coordination tool
@@ -32,18 +32,23 @@ builds it to this contract:
   published to it.
 - **Keep each in-flight dispatch's output** until the owner acknowledges the
   result, and hand it to a new owner on `FetchBuffer` (design §7.2).
-- **Cluster-wide bot reachability:** "which gateway holds bot X's socket?"
-  must be answerable from any node. This registry is soft state (rebuilt
-  when bots reconnect, verified by forwarding), so a fast store such as
-  Redis is fine.
-- **Draining sockets:** a socket on a draining gateway takes no new work;
-  once its in-flight runs end, the gateway sends a "please reconnect"
-  control frame (like HTTP/2 `GOAWAY`) and the bot redials elsewhere.
-- **Waiting, not failing:** work for a bot that is reconnecting waits as a
-  durable delivery owned by the session's owner, with a bound, and the owner
-  is woken when the bot is reachable again.
-- **Bots should buffer events while disconnected** and resend them after
+
+### The bot connection server (outside BCN)
+
+Bots that dial in connect to a dedicated server, not to BCN. BCN treats it as
+a dial-out agent, so it must:
+
+- **Expose each bot as a dial-out agent** that a gateway can stream to, with
+  a recorded task or request id that a new gateway can query or re-subscribe
+  to after a failover.
+- **Own the sockets:** reachability ("which server node holds bot X?"),
+  draining, and the "please reconnect" frame are its job.
+- **Wait, not fail:** a dispatch to a bot that is reconnecting waits, within
+  a bound, rather than failing at once.
+- **Have bots buffer events while disconnected** and resend them after
   reconnecting, so a socket drop does not lose a run's output.
+- **Relay coordination tool calls** (`tool_call_end`) as stream events, so
+  BCN can act on them mid-run.
 
 ## Item 3 — execution correctness
 

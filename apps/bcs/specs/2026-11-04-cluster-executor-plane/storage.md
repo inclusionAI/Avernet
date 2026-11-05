@@ -17,7 +17,7 @@ OceanBase; Redis only for state that can be lost and rebuilt.**
 | Months of data | RAM only | Disk (LSM, compressed) |
 | Write scaling | Linear, sub-ms | By partitions; a few ms per commit |
 
-**Redis is a good fit for:** item 2's connection-location registry
+**Redis is a good fit for:** the bot connection server's connection registry
 (rebuilt on reconnect, verified by forwarding), soft rate limits, read
 caches of rarely-changing content, best-effort wake-ups, and the
 non-durable session channels that carry fan-out (design §7.4; sharded

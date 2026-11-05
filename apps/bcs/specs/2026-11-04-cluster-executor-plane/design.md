@@ -42,13 +42,13 @@ or on the load balancer.
 
 ## 2. The big picture
 
-![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams, streams to supply agents, bot sockets); they send rounds, deltas and control events to the session's owner executor over a direct control channel; the owner applies BCN's fan-out logic and publishes on the session's pub/sub channel, which gateways subscribe to; executors hold leases and write the shared database.](assets/overview.svg)
+![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams, streams to supply agents, including the bot connection server); they send rounds, deltas and control events to the session's owner executor over a direct control channel; the owner applies BCN's fan-out logic and publishes on the session's pub/sub channel, which gateways subscribe to; executors hold leases and write the shared database.](assets/overview.svg)
 
 BCN has **two tiers**, which can ship as two deployments of one codebase:
 
 | Tier | Holds | Does | Durable state |
 | --- | --- | --- | --- |
-| **Gateway** | Every long-lived connection: PA streams, streams to supply agents, dial-in bot sockets | Terminates connections, runs dispatches, sends their output to the owner, relays the owner's fan-out to clients | None |
+| **Gateway** | Every long-lived connection: PA streams and streams to supply agents | Terminates connections, runs dispatches, sends their output to the owner, relays the owner's fan-out to clients | None |
 | **Executor** | No long-lived connections | Owns sessions through leases, drives runs and orchestration, decides and performs fan-out, writes the database | Everything, through fenced writes |
 
 Connections live on gateways, so an executor crash or deploy never closes a
@@ -77,8 +77,10 @@ Three kinds of traffic:
 - **Executor → session channels → gateways**: the owner publishes each
   session's events and deltas on a non-durable pub/sub channel; every
   gateway serving that session subscribes. This is BCN's fan-out.
-- **Gateway → supply agents**: outbound A2A or Provider streams, plus
-  dial-in bot sockets that arrive through the load balancer.
+- **Gateway → supply agents**: outbound A2A or Provider streams only. BCN
+  accepts no bot connections: bots that dial in connect to a **dedicated bot
+  connection server** outside BCN, which BCN calls like any other dial-out
+  agent.
 
 Executors never coordinate with each other directly to decide anything. The
 shared database is the only place they meet.
@@ -354,7 +356,6 @@ that hashes on a session header just makes forwarding rarer.
 | Gateway ↔ executor | One long-lived, multiplexed, bidirectional channel per pair (e.g. gRPC over HTTP/2) | Carries rounds, deltas and control events from dispatches, dispatch commands and results; keepalive pings detect a dead peer in seconds |
 | Executor → gateways | **Session channels** on a non-durable, sharded pub/sub | BCN's fan-out: the owner publishes each session's events and deltas; every gateway serving that session subscribes (§7.4) |
 | Gateway → supply agent | A2A `SendStreamingMessage` / `SubscribeToTask`, or a Provider stream | One per dispatch, opened by the dispatch gateway |
-| Bot → load balancer → gateway | Dial-in WebSocket | The socket is transport only (§7.6) |
 
 ### 7.2 Dispatch placement and results
 
@@ -402,7 +403,7 @@ durable:
 | `working` + progress text | "Searching flights…" | No | Fans it out; counts as liveness |
 | `input-required` / `auth-required` | "Which one should I book?" | **Yes** | Changes the Task's state, starts the human-wait timer, routes the PA's answer back to `ta-77` |
 | `completed` / `failed` | `final: true` | **Yes**, with the assembled output | Records the step result and decides what happens next |
-| Bot-protocol coordination calls | `tool_call_end` of a coordination tool | **Yes** | BCS acts on it mid-run |
+| Bot-protocol coordination calls (relayed by the bot connection server) | `tool_call_end` of a coordination tool | **Yes** | BCS acts on it mid-run |
 
 **Fan-out is BCN's logic, and it runs on the owner.** For every event the
 owner decides who sees it and in what form: the caller's stream, other
@@ -538,19 +539,15 @@ there:
   id, never blindly resend. A step with no queryable task is re-run, which is
   safe because side-effecting steps are dispatched only to agents with
   durable, queryable tasks (items 3 and 6).
-- **Bot sockets** drop; bots redial through the load balancer.
-
 **A pub/sub outage** stalls tokens but loses no state change: gateways
 catch up from the event log in batches until channels recover (§7.4,
 rule 4).
 
-**Bot sockets.** A dial-in bot keeps one WebSocket to the gateway it reached.
-That gateway is **transport only**: it forwards the bot's events to the
-current owner of each run's session, looked up per event. Handing a session
-off never touches the socket. "Which gateway holds bot X's socket?" is a
-cluster-wide soft-state registry (item 2).
-
-![Bot socket roles: before handoff the gateway holding the socket forwards events to owner A; after handoff it forwards each event to the new owner B; the bot sees nothing.](assets/bot-socket-roles.svg)
+**Bots that dial in** are not BCN's concern: they connect to the dedicated
+bot connection server, which owns their sockets, reconnects and
+reachability. To BCN that server is one more dial-out agent: a dispatch to a
+bot is a stream from a gateway to the server, recovered like any other
+dispatch.
 
 **Draining a gateway** (deploys of this tier are rare):
 
@@ -559,9 +556,7 @@ cluster-wide soft-state registry (item 2).
 2. In-flight dispatches finish. A PA stream whose step has ended is asked to
    reconnect (HTTP/2 `GOAWAY` / `Connection: close`) and resumes on another
    gateway with a snapshot.
-3. Bot sockets carry no new work; once their runs end, the gateway sends a
-   "please reconnect" control frame and the bot redials elsewhere.
-4. At the deadline, the gateway tells each owner that its remaining
+3. At the deadline, the gateway tells each owner that its remaining
    dispatches are abandoned, and the owners move them as after a crash.
 
 ---
@@ -639,7 +634,6 @@ in the database and its connections are on gateways:
 | --- | --- |
 | Between steps | ✓ |
 | Waiting on a dispatch (any kind of stream) | ✓ — the dispatch gateway sends its deltas and result to whoever owns S |
-| Waiting on a dial-in bot | ✓ — the socket's gateway forwards events to whoever owns S |
 | In the middle of a durable write or of starting a dispatch | Finish it first (milliseconds) |
 | Waiting on a timer | ✓ — provided timer deadlines are stored durably |
 
@@ -829,7 +823,7 @@ its local database, so the takeover path is exercised everywhere.
 | D5 | Each lease expires and is renewed | Lease liveness = the owner's heartbeat | O(nodes) writes instead of O(sessions) |
 | D6 | Rounds are written and picked up | Rounds are forwarded to the owner; the write is the fallback | Milliseconds instead of up to 1 s |
 | D7 | — | Stable `member_name` for placement | Placement survives restarts |
-| D8 | Any node serves any request; the owning node runs its own dial-out streams; dial-in sockets land on any node (planes 1 and 3) | A gateway tier holds every long-lived connection; executors hold none | An executor crash or deploy pauses streams instead of closing them, and executor drain becomes moving leases |
+| D8 | Any node serves any request; the owning node runs its own dial-out streams; dial-in sockets land on any node (planes 1 and 3) | A gateway tier holds every long-lived connection; executors hold none; dial-in bots connect to a dedicated bot connection server, which BCN reaches as a dial-out agent | An executor crash or deploy pauses streams instead of closing them, and executor drain becomes moving leases |
 | D9 | — | The owner fans out on a per-session channel of a non-durable pub/sub; a durable per-session event log is the truth | Fan-out stays BCN's logic; owner changes are invisible to subscribers; no durable queue on the token path |
 
 ---
