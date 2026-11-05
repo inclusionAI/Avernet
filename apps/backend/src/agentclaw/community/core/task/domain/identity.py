@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Callable
-
 _INVALID_SINGLE_BOT_ASSIGNEES = {"NOT_DECIDED"}
 _DEFAULT_PRODUCT_BOT_ID = "default"
 
@@ -99,24 +97,15 @@ def compose_bot_identity(bot_id: str, owner_id: str | None = None) -> str:
 def resolve_scoped_entry_bot_identity(
     owner_bot_id: str | None,
     owner_user_id: str | None,
-    owner_lookup: Callable[[str], str | None] | None = None,
 ) -> tuple[str, str]:
-    """Resolve the entry Bot identity into product id and real Bot owner id.
+    """Resolve the entry Bot identity into product id and owner user id.
 
-    A composite scope is authoritative. Historical bare ``default`` identities
-    are owner-relative and use the supplied task initiator. Other historical
-    bare ids are resolved through ``owner_lookup`` so callers can recover the
-    current Bot record owner without rewriting already stored rows.
+    A composite ``bot_id:owner_id`` scope is authoritative. Historical bare
+    ids are owner-relative and uniformly use ``owner_user_id`` as the owner;
+    no Bot-record reverse lookup is performed.
     """
     raw = str(owner_bot_id or "").strip()
     scoped = parse_scoped_bot_identity(raw)
     if scoped is not None:
         return scoped
-    product_bot_id = raw.partition(":")[0]
-    if product_bot_id == _DEFAULT_PRODUCT_BOT_ID:
-        return product_bot_id, str(owner_user_id or "").strip()
-    if product_bot_id and owner_lookup is not None:
-        resolved_owner = owner_lookup(product_bot_id)
-        if resolved_owner:
-            return product_bot_id, str(resolved_owner).strip()
-    return product_bot_id, str(owner_user_id or "").strip()
+    return raw, str(owner_user_id or "").strip()

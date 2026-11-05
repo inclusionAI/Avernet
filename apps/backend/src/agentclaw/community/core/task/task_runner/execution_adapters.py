@@ -60,7 +60,6 @@ class CentralizedExecutionAdapter:
         notify_messages_provider=None,
         bot_bindings=None,
         task_context_service: "TaskContextServiceProtocol | None" = None,
-        owner_lookup=None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -91,7 +90,6 @@ class CentralizedExecutionAdapter:
         # 轨迹旁路采集外部入口(可选):task_context_service;None 时 _log_trajectory 静默 no-op(emitter
         # 经内部 TaskTrajectoryService 独立 direct-INSERT,不走 task_action_log/append_action_event 链路)。
         self._task_context_service = task_context_service
-        self._owner_lookup = owner_lookup
         self._bg_tasks: set[object] = set()
         self._bbs_loop: asyncio.AbstractEventLoop | None = None
         self._bbs_loop_thread: threading.Thread | None = None
@@ -254,10 +252,10 @@ class CentralizedExecutionAdapter:
 
         pool = [WorkflowPlanningStrategy()]
         if self._bot is not None:
-            pool.append(GapBasedPlanningStrategy(self._bot, self._owner_lookup))
+            pool.append(GapBasedPlanningStrategy(self._bot))
         else:
-            pool.append(GapBasedPlanningStrategy(owner_lookup=self._owner_lookup))
-        return TaskPlanner(self._graph, pool=pool, owner_lookup=self._owner_lookup)
+            pool.append(GapBasedPlanningStrategy())
+        return TaskPlanner(self._graph, pool=pool)
 
     def _build_dispatcher(self):
         from agentclaw.community.core.task.task_dispatch.dispatcher import (
@@ -279,11 +277,10 @@ class CentralizedExecutionAdapter:
                     bcn=self._bcn,
                     use_search_skill=self._task_search_skill_enabled,
                     task_settings=self._task_settings,
-                    owner_lookup=self._owner_lookup,
                 )
             )
         else:
-            pool.append(SearchBasedDispatchStrategy(owner_lookup=self._owner_lookup))
+            pool.append(SearchBasedDispatchStrategy())
         return TaskDispatcher(
             self._graph,
             pool=pool,

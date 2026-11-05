@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any, Callable
+from typing import Any
 
 from agentclaw.community.core.task.domain.identity import (
     parse_scoped_bot_identity,
@@ -17,22 +17,18 @@ from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 logger = logging.getLogger("task.service")
 
 
-def normalize_owner_bot_id(
-    request: TaskInfoRequest,
-    owner_lookup: Callable[[str], str | None] | None = None,
-) -> TaskInfoRequest:
+def normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
     """Canonicalize ``owner_bot_id`` while preserving the task initiator.
 
-    New and existing rows use ``owner_bot_id=bot_id:bot_owner_id`` and keep
-    ``owner_user_id`` as the task initiator. For legacy bare non-default ids a
-    Bot owner lookup (when available) recovers the real owner; without a lookup,
-    keep the historical no-service fallback of treating the initiator as the
-    owner. Production TaskService always passes the Bot owner lookup.
+    New rows use ``owner_bot_id=bot_id:bot_owner_id`` and keep
+    ``owner_user_id`` as the task initiator. Legacy bare ids uniformly treat
+    the stored ``owner_user_id`` as the Bot owner-compatible value; no Bot
+    reverse lookup is performed.
     """
     from dataclasses import replace
 
     entry_bot_id, entry_owner_id = resolve_entry_bot_identity(
-        request.owner_bot_id, request.owner_user_id, owner_lookup
+        request.owner_bot_id, request.owner_user_id
     )
     owner_user_id = str(request.owner_user_id or "").strip() or entry_owner_id
     if not entry_bot_id and not entry_owner_id:
@@ -57,23 +53,6 @@ def normalize_owner_bot_id(
         owner_bot_id=canonical_owner_bot_id,
         owner_user_id=owner_user_id,
     )
-
-
-def resolve_entry_bot_owner(bot_service: Any, bot_id: str | None) -> str | None:
-    """Best-effort legacy bare Bot owner reverse lookup for task creation."""
-    if bot_service is None or not bot_id:
-        return None
-    try:
-        bot = bot_service.get_bot_by_id(str(bot_id))
-    except Exception:  # noqa: BLE001 owner enrichment must not block execute
-        logger.exception(
-            "[task][execute] entry Bot owner lookup failed bot_id=%s", bot_id
-        )
-        return None
-    if not isinstance(bot, dict):
-        return None
-    owner_id = bot.get("owner_id")
-    return str(owner_id).strip() if owner_id is not None else None
 
 
 def parse_status_filter(status: str | None) -> list[Status] | None:
