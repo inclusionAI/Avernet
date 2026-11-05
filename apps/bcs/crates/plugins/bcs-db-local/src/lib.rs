@@ -267,7 +267,7 @@ impl DbPlugin for LocalSqliteDbPlugin {
         // Note: acquiring the write lock is bounded by
         // `PRAGMA busy_timeout`, not by the between-step
         // deadline below.
-        let behavior = if steps.iter().all(|step| matches!(step, DbTransactionStep::Query(_))) {
+        let behavior = if steps.iter().all(|step| matches!(step, DbTransactionStep::Query(_) | DbTransactionStep::QueryChecked { .. })) {
             rusqlite::TransactionBehavior::Deferred
         } else {
             rusqlite::TransactionBehavior::Immediate

@@ -112,6 +112,24 @@ impl DbPlugin for MysqlDbPlugin {
                                     .collect::<DbResult<Vec<_>>>()?;
                                 results.push(DbTransactionStepResult::Rows(rows));
                             }
+                            PreparedTransactionStep::QueryChecked(statement, expected_min_rows) => {
+                                let params =
+                                    statement.resolve_transaction_params(&results, step_index)?;
+                                let rows =
+                                    tx.query(statement.sql(), mysql_params(&params)?).await?;
+                                let rows = rows
+                                    .into_iter()
+                                    .map(row_to_db_row)
+                                    .collect::<DbResult<Vec<_>>>()?;
+                                let count = u64::try_from(rows.len()).map_err(|_| DbError::Conversion(
+                                    "query result count exceeds u64".into(),
+                                ))?;
+                                if count < expected_min_rows {
+                                    results.push(DbTransactionStepResult::Rows(rows));
+                                    break;
+                                }
+                                results.push(DbTransactionStepResult::Rows(rows));
+                            }
                             PreparedTransactionStep::Execute(statement) => {
                                 let params =
                                     statement.resolve_transaction_params(&results, step_index)?;
@@ -181,6 +199,7 @@ enum PreparedTransactionStep {
     Query(DbStatement),
     Execute(DbStatement),
     ExecuteChecked(DbStatement, u64),
+    QueryChecked(DbStatement, u64),
 }
 
 impl From<DbTransactionStep> for PreparedTransactionStep {
@@ -190,6 +209,9 @@ impl From<DbTransactionStep> for PreparedTransactionStep {
             DbTransactionStep::Execute(statement) => Self::Execute(statement),
             DbTransactionStep::ExecuteChecked { statement, expected_affected_rows } => {
                 Self::ExecuteChecked(statement, expected_affected_rows)
+            }
+            DbTransactionStep::QueryChecked { statement, expected_min_rows } => {
+                Self::QueryChecked(statement, expected_min_rows)
             }
         }
     }
