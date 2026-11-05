@@ -1,0 +1,50 @@
+apps/agentclawscs/conf/docker/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 7-8,44-46
+apps/agentclawscs/conf/docker/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 13-14,53-54
+apps/agentclawscs/conf/docker/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 19-26,44-45,82-95,98-99,101-118,121-128,131-138
+apps/agentclawscs/docker/bcn/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 7-8,44-46
+apps/agentclawscs/docker/bcn/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 13-14,53-54
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 19-26,44-45,82-95,98-99,101-118,121-128,131-138
+apps/agentclawscs/docker/bcs/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 7-8,44-46
+apps/agentclawscs/docker/bcs/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 13-14,53-54
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 19-26,44-45,82-95,98-99,101-118,121-128,131-138
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_fa66fe7c023b4b 60-62,68
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/sofa_rpc.rs
+  h_fa66fe7c023b4b 107,111,166,208
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/admin.rs
+  h_fa66fe7c023b4b 51-53
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  h_fa66fe7c023b4b 135-139,171-175
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/health.rs
+  h_fa66fe7c023b4b 6-7
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/contracts.rs
+  h_fa66fe7c023b4b 123-124,127-128
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 22,28,32,40-49
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 22-23,25-26,136-137,184-185
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 136-139,144,214-216,228
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 593,597-610,630-647
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd193f54483e1ad8d67692e22e4315354399f109",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
