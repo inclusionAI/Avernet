@@ -1,0 +1,26 @@
+apps/bcsfuse/tests/composition/test_tc_card_storage.py
+  s_ce84d91f3d35be::t_6a086d6908bb21 228-229,234-238,240-247,253-255
+  s_ce84d91f3d35be::t_eee9a4866076f7 230-233,239,248-252
+apps/bcsfuse/docs/deployment/tc-card-storage.md
+  s_ce84d91f3d35be::t_57ea5348dc9c09 3-13
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/tc.py
+  s_ce84d91f3d35be::t_6a086d6908bb21 84-86,88,90-93,95-100,104-109,116-119,121-123,126,177-179
+  s_ce84d91f3d35be::t_9ee73f8dccbe82 87,89,94,101-103,110-115,120,124-125,127-129,174-176,180-181
+  s_ce84d91f3d35be::t_f9b014080cf946 182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35f10fe419892c8d441fbde0e41cf1f060ed8f5c",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
