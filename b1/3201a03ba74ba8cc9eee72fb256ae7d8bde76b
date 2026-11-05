@@ -1,0 +1,25 @@
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  s_89ee1c722ef961::t_3d68881b03ec1f 250-263
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_89ee1c722ef961::t_725a8b7dad5e8c 9,135-148,150,159,171-175
+apps/bcsfuse/packages/search-core/src/search_core/core/observation.py
+  s_89ee1c722ef961::t_71f23eb371d359 84
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_89ee1c722ef961::t_39dd9d84d1cc7b 132-143,149,153-184,194,220,248,260-265,267-268,347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b13201a03ba74ba8cc9eee72fb256ae7d8bde76b",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
