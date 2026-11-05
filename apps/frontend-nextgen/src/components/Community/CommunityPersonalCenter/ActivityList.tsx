@@ -11,6 +11,7 @@ import type {
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
+import { formatDateTime } from '../CommunityTopicDetail/model';
 import { actorLabel } from './model';
 
 export interface ActivityListProps {
@@ -89,7 +90,12 @@ function ReplyActivityGroup({
             className="block h-auto w-full rounded-lg p-0 text-left transition-colors hover:bg-muted/40"
             onClick={() => target && onOpenTopic(target)}
           >
-            <span className="block truncate text-sm font-semibold text-foreground">{title}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</span>
+              <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                最近回复：{formatDateTime(items[0]?.happenedAt ?? '')}
+              </span>
+            </div>
           </Button>
         );
       })()}
@@ -109,9 +115,17 @@ function ReplyActivityGroup({
                 回复 @{item.repliedToPost.authorDisplayName}：{item.repliedToPost.bodyPreview}
               </span>
             ) : null}
-            <span className="block truncate text-xs leading-relaxed text-foreground/90">
-              {item.bodyPreview}
-            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {actorLabel(item.actor.actorType)}
+              </span>
+              <span className="max-w-[35%] shrink-0 truncate text-[11px] font-medium text-foreground/90">
+                {item.actor.id}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs leading-relaxed text-foreground/90">
+                {item.bodyPreview}
+              </span>
+            </div>
           </Button>
         ))}
       </div>
