@@ -28,6 +28,31 @@ from secbaas.community.core.repository.publish_batch import (
     PublishBatchRecord,
 )
 from secbaas.community.core.service.publish_manage import DefaultPublishService
+from secbaas.community.core.service.publish_manage._publish_service import (
+    terminal_eligible_devices,
+)
+
+
+def test_terminal_eligible_devices_excludes_only_released():
+    """D1: every status except RELEASED is a terminal teardown target."""
+    from secbaas.community.api.device_manage import DeviceStatus
+
+    devices = [
+        SimpleNamespace(id=idx, status=status.value)
+        for idx, status in enumerate(DeviceStatus, start=1)
+    ]
+
+    kept = terminal_eligible_devices(devices)
+
+    assert [d.status for d in kept] == [
+        status.value for status in DeviceStatus if status is not DeviceStatus.RELEASED
+    ]
+    assert all(d.status != DeviceStatus.RELEASED.value for d in kept)
+    assert [d.id for d in kept] == sorted(d.id for d in kept)
+
+
+def test_terminal_eligible_devices_empty_input():
+    assert terminal_eligible_devices([]) == []
 
 
 @pytest.fixture
@@ -9448,25 +9473,122 @@ class TestCreatePublishNoEligibleDeviceRecords:
         assert result.status == "PENDING"
         _publish_service_instance._publish_record_repo.insert_record.assert_not_called()
 
-    def test_destroy_publish_with_non_released_device_still_raises(self):
-        """DESTROY rejects non-ACTIVE devices that still need cleanup."""
+    def test_destroy_publish_with_non_released_device_tears_it_down(self):
+        """DESTROY tears down non-ACTIVE devices instead of rejecting them.
+
+        A FAILED device still owns a provider-side resource that must be
+        cleaned up, so it is a legitimate teardown target rather than a
+        blocker (see terminal_eligible_devices).
+        """
         from secbaas.community.api.device_manage import DeviceStatus
 
-        mock_device = SimpleNamespace(id=10, status=DeviceStatus.FAILED.value)
+        mock_device = SimpleNamespace(
+            id=10,
+            status=DeviceStatus.FAILED.value,
+            device_uuid="uuid-failed",
+            provider_device_id="prov-10",
+        )
         _publish_service_instance._device_repo.list_by_bot_id.return_value = [
             mock_device
         ]
+        record_repo = MagicMock()
+        _publish_service_instance._publish_record_repo = record_repo
 
-        with pytest.raises(ValueError, match="No eligible devices for DESTROY publish"):
-            _publish_service_instance._create_device_records_for_publish(
-                tenant="test_tenant",
-                env="test_env",
-                publish_id=1,
-                publish_type=PublishType.DESTROY,
-                bot_record=SimpleNamespace(id=1, domain="test_domain"),
-                batch_records=[],
-                operator="user1",
+        batch = SimpleNamespace(id=100, batch_index=0, batch_capacity=10)
+        _publish_service_instance._create_device_records_for_publish(
+            tenant="test_tenant",
+            env="test_env",
+            publish_id=1,
+            publish_type=PublishType.DESTROY,
+            bot_record=SimpleNamespace(id=1, domain="test_domain"),
+            batch_records=[batch],
+            operator="user1",
+        )
+
+        record_repo.insert_record.assert_called_once()
+        assert record_repo.insert_record.call_args.kwargs["device_id"] == 10
+        assert (
+            record_repo.insert_record.call_args.kwargs["event_type"]
+            == PublishEventType.DESTROY.value
+        )
+
+    def test_destroy_publish_with_pending_residue_does_not_raise(self):
+        """Regression for work item 2026110400120333570.
+
+        A bot whose devices are one RELEASED plus one stale PENDING (never
+        started residue from a failed publish) must be destroyable. Before the
+        fix the ACTIVE-only filter resolved to an empty set and the publish
+        failed with
+        ``No eligible devices for DESTROY publish ... cannot create
+        device-level records``.
+        """
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        released = SimpleNamespace(
+            id=1390380,
+            status=DeviceStatus.RELEASED.value,
+            device_uuid="uuid-released",
+            provider_device_id=None,
+        )
+        stale_pending = SimpleNamespace(
+            id=1395384,
+            status=DeviceStatus.PENDING.value,
+            device_uuid="uuid-pending",
+            provider_device_id="prov-1395384",
+        )
+        _publish_service_instance._device_repo.list_by_bot_id.return_value = [
+            released,
+            stale_pending,
+        ]
+        record_repo = MagicMock()
+        _publish_service_instance._publish_record_repo = record_repo
+
+        batch = SimpleNamespace(id=92951, batch_index=0, batch_capacity=1)
+        _publish_service_instance._create_device_records_for_publish(
+            tenant="test_tenant",
+            env="test_env",
+            publish_id=92951,
+            publish_type=PublishType.DESTROY,
+            bot_record=SimpleNamespace(id=1, domain="test_domain"),
+            batch_records=[batch],
+            operator="user1",
+        )
+
+        inserted = [
+            call.kwargs["device_id"]
+            for call in record_repo.insert_record.call_args_list
+        ]
+        assert inserted == [1395384], (
+            "only the non-RELEASED device is a teardown target; RELEASED "
+            "devices must stay excluded"
+        )
+
+    def test_destroy_publish_with_only_released_devices_is_noop(self):
+        """An all-RELEASED bot still converges without creating records."""
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        _publish_service_instance._device_repo.list_by_bot_id.return_value = [
+            SimpleNamespace(
+                id=20,
+                status=DeviceStatus.RELEASED.value,
+                device_uuid="uuid-20",
+                provider_device_id=None,
             )
+        ]
+        record_repo = MagicMock()
+        _publish_service_instance._publish_record_repo = record_repo
+
+        _publish_service_instance._create_device_records_for_publish(
+            tenant="test_tenant",
+            env="test_env",
+            publish_id=1,
+            publish_type=PublishType.DESTROY,
+            bot_record=SimpleNamespace(id=1, domain="test_domain"),
+            batch_records=[],
+            operator="user1",
+        )
+
+        record_repo.insert_record.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_empty_destroy_batch_completes_and_releases_bot(self):
