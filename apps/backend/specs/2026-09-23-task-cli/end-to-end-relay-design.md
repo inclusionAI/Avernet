@@ -27,7 +27,7 @@ task-cli 输入
 | 主题 | 本文采用的口径 | 来源文档/实现差异 |
 | --- | --- | --- |
 | `TaskContext` 传递 | S1 每棒调用节点级 context API；派发指令只定位节点，不携带权威 `TaskContext` | 旧版 task-cli 描述过在派发消息中携带完整上下文；本次同步改为统一拉取 |
-| 首棒执行目标 | 已确认的 `IntakeTarget` 冻结为 `execution_config.initial_target`；根节点据其类型设置 `run_mode/assignee`，Group ID 不因解析 manager Bot 丢失 | `owner_bot_id` 是任务归属 Bot，不等同于 Group 执行者 |
+| 首棒执行目标 | 已确认的 `IntakeTarget` 冻结为 `execution_config.initial_target`；根节点据其类型设置 `run_mode/assignee`，Group ID 不因解析 manager Bot 丢失 | `owner_bot_id` 是规范 Bot UUID（`bot_id:bot_owner_id`），`owner_user_id` 是任务发起人/访问者；都不等同于 Group 执行者 |
 | Group 执行主体 | Group ID 保留为节点 `assignee`；唯一 manager/master Bot 是 Relay 协调执行者，负责 S1–S5 与上报；S3 读取其在群运行时真实可用的能力 | 群成员协作是 S4 内部执行，不把 Group ID 误当 Bot 身份 |
 | 同节点 harness 恢复 | 运行时无进展不开启新 attempt、不轮换 `relay_token`；只在既有会话发送自然语言续跑消息，节点保持 `RUNNING`；新执行代次重投才另行签发绑定 | Skill 不手填 attempt；报告响应丢失且已接纳成功时不递增 |
 | 本棒恢复 | `TaskContext.all_done_output` 只含本棒之前的事实；本棒已接纳执行 patch 与规划结果由图谱分别投影，Runtime 据此续跑 | 不持久化 `TaskContext`，也不重新执行已接纳的本棒业务操作 |
@@ -120,7 +120,7 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
     )
 ```
 
-此转换只读取已确认 Result 与服务端策略；`owner_user_id/source_type` 不要求用户重复输入，`TaskSpec` 不让 LLM 在确认后重写。`source_type` 记录发起来源，不决定首棒的 Bot/Group 模态。`TaskService.execute(TaskInfoRequest) -> TaskOpResult` 从冻结的 `initial_target` 创建根节点：Bot 目标对应 `single_bot/target_id`，Group 目标对应 `coop_group/target_id`；`owner_bot_id` 只记录归属 Bot。成功时 `task_id == node_id`。`TaskOpResult` 是任务标识的唯一直接返回对象。
+此转换只读取已确认 Result 与服务端策略；`owner_user_id` 是任务发起人（不是 Bot owner），`owner_bot_id` 规范化为 `bot_id:bot_owner_id`；`owner_user_id/source_type` 不要求用户重复输入，`TaskSpec` 不让 LLM 在确认后重写。`source_type` 记录发起来源，不决定首棒的 Bot/Group 模态。`TaskService.execute(TaskInfoRequest) -> TaskOpResult` 从冻结的 `initial_target` 创建根节点：Bot 目标对应 `single_bot/target_id`，Group 目标对应 `coop_group/target_id`；`owner_bot_id` 只记录归属 Bot。成功时 `task_id == node_id`。`TaskOpResult` 是任务标识的唯一直接返回对象。
 
 ### 3.2 接力执行
 

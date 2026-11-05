@@ -791,13 +791,13 @@ class TaskModule(Module):
         bot_public: BotPublicServiceProtocol,
         semantic_discover: BotDiscoverServiceProtocol | None = None,
     ) -> BotDiscoverServiceProtocol:
-        """Resolve semantic-first hybrid retrieval, or the keyword-only fallback.
+        """Resolve BCSFuse task candidate retrieval, or keyword-only legacy mode.
 
         ``BotDiscoverServiceProtocol`` from bot_public is the optional BCSFuse
-        recommendation port. When it is absent in a lightweight injector, task
-        dispatch keeps the existing keyword-only adapter; when it is present,
-        the hybrid adapter tries the candidate query semantically first and only
-        falls back to the established tokenized catalog keyword search.
+        recommendation port. Task candidate-query retrieval is semantic-only: empty or
+        failed semantic results stay empty, and an absent semantic port also returns
+        empty candidates. The wrapped keyword adapter only preserves the existing
+        direct ``search_by_keyword`` compatibility port.
         """
         from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
             CatalogKeywordBotDiscover,
@@ -807,6 +807,4 @@ class TaskModule(Module):
         )
 
         keyword_discover = CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
-        if semantic_discover is None:
-            return keyword_discover
         return SemanticKeywordBotDiscover(keyword_discover, semantic_discover)

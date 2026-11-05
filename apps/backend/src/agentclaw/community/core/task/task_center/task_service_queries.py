@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from typing import Callable
+
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 
 from agentclaw.community.utils.app_utils import get_current_executor_app
 
@@ -29,7 +34,11 @@ from agentclaw.community.core.task.task_center.task_service_support import (
 logger = logging.getLogger("task.service")
 
 
-def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> None:
+def _hydrate_root_dashboard_runtime(
+    graph: TaskExecutionGraph,
+    task_id: str,
+    owner_lookup: Callable[[str], str | None] | None = None,
+) -> None:
     """Fill missing root runtime identity for dashboard compatibility.
 
     ``initialize_graph`` creates a planning root before the concrete executor
@@ -71,19 +80,28 @@ def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> 
 
     if not root.run_info.run_mode and run_mode:
         root.run_info.run_mode = run_mode
-    if not root.run_info.assignee:
-        owner_bot_id = graph_props.get("owner_bot_id")
-        if owner_bot_id:
-            root.run_info.assignee = str(owner_bot_id)
+    is_group_root = str(root.run_info.run_mode or "").strip() == "coop_group"
+    if (
+        not root.run_info.assignee
+        or not root.run_info.extend_props.get("assignee_owner_id")
+    ):
+        entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+            graph_props.get("owner_bot_id"),
+            graph_props.get("owner_user_id"),
+            None if is_group_root else owner_lookup,
+        )
+        if not root.run_info.assignee and entry_bot_id:
+            root.run_info.assignee = entry_bot_id
+        if (
+            not root.run_info.extend_props.get("assignee_owner_id")
+            and entry_bot_owner_id
+        ):
+            root.run_info.extend_props["assignee_owner_id"] = entry_bot_owner_id
 
     if not root.run_info.extend_props.get("session_id"):
         main_session_id = config.get("main_session_id")
         if main_session_id:
             root.run_info.extend_props["session_id"] = main_session_id
-    if not root.run_info.extend_props.get("assignee_owner_id"):
-        owner_user_id = graph_props.get("owner_user_id")
-        if owner_user_id:
-            root.run_info.extend_props["assignee_owner_id"] = str(owner_user_id)
 
 
 def get_task_nodes_by_session(
@@ -153,7 +171,9 @@ def get_task_dashboard(
         self._harness.register(task_id)
     graph = self._graph.query_task_dashboard(task_id, node_id)
     if node_id is None:
-        self._hydrate_root_dashboard_runtime(graph, task_id)
+        _hydrate_root_dashboard_runtime(
+            graph, task_id, owner_lookup=self._resolve_entry_bot_owner
+        )
     if include_action_log:
         self._graph.load_action_logs(graph)
     root = next((n for n in graph.tasks if n.node_id == task_id), None)
@@ -240,17 +260,22 @@ def _attach_assignee_bot_info(self, graph: TaskExecutionGraph) -> None:
 def _enrich_task_owner_display(
     self, records: list[TaskInfoRecord]
 ) -> list[TaskInfoRecord]:
-    """Return list records with normalized owner IDs and best-effort names.
+    """Return list records with display IDs and best-effort names.
 
-    Name lookup is display enrichment only. Missing optional ports, missing
-    records, and lookup failures produce ``None`` and never fail the list API.
+    The projection keeps ``owner_user_id`` as the stored task initiator for
+    protocol compatibility. The Bot owner is resolved only for exact Bot-name
+    lookup; ``owner_bot_id`` remains the product Bot id expected by the list
+    view.
     """
     if not records:
         return []
 
+    owner_lookup = self._resolve_entry_bot_owner
     normalized: list[tuple[TaskInfoRecord, str, str]] = []
     for record in records:
-        bot_id, owner_id = split_owner_bot_id(record.owner_bot_id, record.owner_user_id)
+        bot_id, owner_id = resolve_entry_bot_identity(
+            record.owner_bot_id, record.owner_user_id, owner_lookup
+        )
         normalized.append((record, bot_id, owner_id))
 
     bot_names: dict[tuple[str, str], str | None] = {}
@@ -284,27 +309,30 @@ def _enrich_task_owner_display(
 
     user_names: dict[str, str | None] = {}
     if self._staff_dept is not None:
-        for _, _, owner_id in normalized:
-            if not owner_id or owner_id in user_names:
+        for record, _, _ in normalized:
+            initiator_id = str(record.owner_user_id or "").strip()
+            if not initiator_id or initiator_id in user_names:
                 continue
             try:
-                profile = self._staff_dept.get_profile_by_work_no(work_no=owner_id)
-                user_names[owner_id] = getattr(profile, "nick_name", None)
+                profile = self._staff_dept.get_profile_by_work_no(
+                    work_no=initiator_id
+                )
+                user_names[initiator_id] = getattr(profile, "nick_name", None)
             except Exception as exc:  # noqa: BLE001 display enrichment only
                 logger.warning(
                     "[task][list] owner user name lookup failed user_id=%s: %s",
-                    owner_id,
+                    initiator_id,
                     exc,
                 )
-                user_names[owner_id] = None
+                user_names[initiator_id] = None
 
     return [
         replace(
             record,
             owner_bot_id=bot_id,
-            owner_user_id=owner_id,
+            owner_user_id=str(record.owner_user_id or "").strip(),
             owner_bot_name=bot_names.get((bot_id, owner_id)),
-            owner_user_name=user_names.get(owner_id),
+            owner_user_name=user_names.get(str(record.owner_user_id or "").strip()),
         )
         for record, bot_id, owner_id in normalized
     ]
