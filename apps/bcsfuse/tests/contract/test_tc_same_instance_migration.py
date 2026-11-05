@@ -138,7 +138,7 @@ def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(ser
             client.get("/api/v2/workers/same:owner/config").json()["fusion_enable"]
             is True
         )
-        new_before = rows(path / "new.sqlite", "bcsfuse_tc_agent_cards")
+        new_before = rows(path / "new.sqlite", "bcsfuse_agent_cards")
         for action, body in (
             ("offline", {}),
             ("online", {}),
@@ -146,7 +146,7 @@ def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(ser
         ):
             result = client.put(f"/api/v1/workers/same:owner/{action}", json=body)
             assert result.status_code == 200, result.text
-        assert rows(path / "new.sqlite", "bcsfuse_tc_agent_cards") == new_before
+        assert rows(path / "new.sqlite", "bcsfuse_agent_cards") == new_before
         filtered = client.post(
             "/v1/search",
             json={"query": "LEGACY_MYSQL", "filters": {"worker_id": ["same:owner"]}},
@@ -253,7 +253,7 @@ def test_old_index_failure_cannot_succeed_using_new_doc_status(service, monkeypa
         )
         assert failed.status_code == 500, failed.text
         assert registry.require("tc_catalog_repository").get("legacy:owner") is None
-        assert rows(path / "new.sqlite", "bcsfuse_tc_agent_cards") == []
+        assert rows(path / "new.sqlite", "bcsfuse_agent_cards") == []
         monkeypatch.setattr(vectors, "upsert", original)
         old_sync(client, "legacy:owner", "updated text")
         assert client.get("/ready").status_code == 200
