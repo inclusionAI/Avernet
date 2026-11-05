@@ -1,12 +1,19 @@
 """Only backend-confirmed fastdisk backups may veto a coding restart."""
+import ast
+import base64
+from contextlib import redirect_stdout
+import io
 import json
+import shlex
+import zlib
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import detection_command
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import detection_command as publish_detection_command
+from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import detection_command
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -55,6 +62,152 @@ def executor(results, detected=None):
         return value
 
     return Mock(side_effect=execute)
+
+
+def embedded_detector(command, tmp_path):
+    """Run the actual backend payload; replace only container filesystem paths."""
+    bootstrap = shlex.split(command)[2]
+    encoded = ast.literal_eval(bootstrap.split('b64decode(', 1)[1].split(')', 1)[0])
+    source = zlib.decompress(base64.b64decode(encoded)).decode()
+    source = source.replace('/var/run/agentclaw/persist-runtime.json', str(tmp_path / 'no-config'))
+    source = source.replace('/home/admin/.aicoding', str(tmp_path / 'home'))
+    source = source.replace('/opt/.aicoding', str(tmp_path / 'storage'))
+    source = source.replace('/proc/self/mountinfo', str(tmp_path / 'mountinfo'))
+    output = io.StringIO()
+    with redirect_stdout(output):
+        exec(compile(source, '<embedded-fastdisk-detector>', 'exec'), {'__name__': 'embedded_probe'})
+    return SimpleNamespace(exit_code=0, stdout=output.getvalue())
+
+
+@pytest.mark.parametrize('blocking', [False, True])
+def test_restart_ignores_ready_marker_without_live_mounts_and_keeps_optional_backup(tmp_path, blocking, caplog):
+    for base in ('home', 'storage'):
+        for name in ('sessions', 'workspace'):
+            (tmp_path / base / name).mkdir(parents=True)
+    (tmp_path / 'storage' / '.fastdisk.ready').touch()
+    (tmp_path / 'mountinfo').write_text('1 0 0:1 / / rw - overlay overlay rw\n')
+    calls = []
+
+    def execute(command):
+        calls.append(command)
+        return embedded_detector(command, tmp_path) if len(calls) == 1 else response('failed')
+
+    guard = Mock(return_value=blocking)
+    with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
+        check = backup._attempt_backup(execute=execute, operation_id=OPERATION,
+                                       bot_id='b', target_id='physical', blocking_enabled=guard)
+        check()
+    result = backup.parse_detection_result(embedded_detector(calls[0], tmp_path))
+    assert result['status'] == 'skip_no_fastdisk'
+    assert len(calls) == 2  # Do not remove the existing compatibility backup attempt.
+    assert check.required is False
+    guard.assert_not_called()
+    warn.assert_not_called()
+    assert 'event=aicoding_restart_fastdisk_detect' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+
+
+@pytest.fixture
+def detector_layout(tmp_path):
+    for base in ('home', 'storage'):
+        for name in ('sessions', 'workspace'):
+            (tmp_path / base / name).mkdir(parents=True)
+    (tmp_path / 'mountinfo').write_text('1 0 0:1 / / rw - overlay overlay rw\n')
+    return tmp_path
+
+
+@pytest.mark.parametrize('marker', ['.fastdisk.ready', '.fastdisk.seeded',
+                                  '.fastdisk.new-sessions-only.request'])
+def test_restart_ignores_markers_but_publication_keeps_existing_safeguards(detector_layout, marker):
+    root = detector_layout
+    (root / 'storage' / marker).write_text(f'version=1\nstorage_root={root / "storage"}\n')
+    assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'skip_no_fastdisk'
+    if marker == '.fastdisk.ready':
+        with pytest.raises(ValueError, match='ready marker conflicts'):
+            embedded_detector(publish_detection_command(), root)
+    else:
+        assert backup.parse_detection_result(embedded_detector(publish_detection_command(), root))['status'] == 'run'
+
+
+@pytest.mark.parametrize('mounted', [('sessions', 'workspace'), ('sessions',), ('workspace',)])
+def test_restart_requires_both_live_mountpoints(detector_layout, mounted):
+    root = detector_layout
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(mounted, 1)))
+    with patch('os.path.samefile', return_value=True):
+        if len(mounted) == 2:
+            assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'run'
+            assert backup.parse_detection_result(embedded_detector(publish_detection_command(), root))['status'] == 'run'
+        else:
+            with pytest.raises(ValueError, match='partial fastdisk bind mounts'):
+                embedded_detector(detection_command(), root)
+
+
+@pytest.mark.parametrize('unsafe', ['wrong_source', 'source_symlink', 'target_symlink', 'source_missing'])
+def test_restart_does_not_confirm_wrong_or_unsafe_mount_sources(detector_layout, unsafe):
+    root = detector_layout
+    source, target = root / 'storage' / 'sessions', root / 'home' / 'sessions'
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(('sessions', 'workspace'), 1)))
+    if unsafe == 'source_symlink':
+        source.rmdir()
+        source.symlink_to(target, target_is_directory=True)
+    elif unsafe == 'target_symlink':
+        target.rmdir()
+        target.symlink_to(source, target_is_directory=True)
+    elif unsafe == 'source_missing':
+        source.rmdir()
+    with patch('os.path.samefile', return_value=unsafe != 'wrong_source'):
+        with pytest.raises(ValueError, match='mount source mismatch'):
+            embedded_detector(detection_command(), root)
+
+
+@pytest.mark.parametrize('marker', [None, '.fastdisk.seeded', '.fastdisk.new-sessions-only.request'])
+def test_restart_never_infers_mounts_from_aliased_paths_or_invalid_markers(detector_layout, marker):
+    root = detector_layout
+    if marker:
+        (root / 'storage' / marker).write_text('invalid or stale marker')
+    with patch('os.path.samefile', return_value=True):
+        assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'skip_no_fastdisk'
+        with pytest.raises(ValueError):
+            embedded_detector(publish_detection_command(), root)
+
+
+def test_restart_detector_still_rejects_unreadable_mount_table(detector_layout):
+    (detector_layout / 'mountinfo').write_text('invalid mountinfo\n')
+    with pytest.raises(ValueError, match='invalid mountinfo'):
+        embedded_detector(detection_command(), detector_layout)
+
+
+def test_restart_detector_remains_self_contained_and_bounded():
+    assert len(detection_command().encode()) < 8192
+    assert detection_command() != publish_detection_command()
+
+
+@pytest.mark.parametrize('mounted', [(), ('sessions',), ('sessions', 'workspace')])
+def test_live_mount_gate_is_opt_in_and_preserves_default_publication_policy(detector_layout, mounted):
+    from agentclaw.community.core.bot_management.engines.aicoding.fastdisk_detection.persist_mount_gate import check_mounts
+
+    root = detector_layout
+    marker = root / 'storage' / '.fastdisk.ready'
+    marker.touch()
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(mounted, 1)))
+    args = (str(root / 'storage'), str(root / 'home'), str(marker), str(root / 'mountinfo'))
+    with patch('os.path.samefile', return_value=True):
+        if len(mounted) == 2:
+            assert check_mounts(*args, live_mounts_only=True) == check_mounts(*args) == 'run'
+        else:
+            with pytest.raises(ValueError, match='ready marker conflicts'):
+                check_mounts(*args)
+            if mounted:
+                with pytest.raises(ValueError, match='partial fastdisk bind mounts'):
+                    check_mounts(*args, live_mounts_only=True)
+            else:
+                assert check_mounts(*args, live_mounts_only=True) == 'skip_no_fastdisk'
 
 
 def attempt(execute):

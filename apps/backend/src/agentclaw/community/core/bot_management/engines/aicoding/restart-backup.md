@@ -129,12 +129,31 @@ an observed running backup, or an actual terminal backup receipt still uses
 `event=aicoding_restart_backup`, so a real backup failure is not hidden by an
 earlier failed detector. All three events retain bot/ARCA/owner/environment and
 operation correlation, without raw commands, helper output or credentials.
-No detection decision, receipt check, blocking switch or other-engine behavior
-changes. Full and partial successful backup handling remains unchanged.
+These diagnostic changes preserve receipt checks, the blocking switch and
+other-engine behavior. Full and partial successful backup handling is unchanged.
+
+## Restart-only live-mount detection (2026-11-05)
+
+Backend sends a self-contained restart detector, distinct from the publication
+probe. Restart confirms fastdisk only when both runtime-home `sessions` and
+`workspace` are exact live mountpoints matching their storage directories.
+Directory/source checks and symlink rejection remain in place. No live mounts
+means `skip_no_fastdisk`, even with stale ready/seeded/request markers or aliased
+paths; markers alone never confirm fastdisk. Partial mounts, source mismatches,
+unreadable mount tables and execution failures remain failed detections and use
+the existing unconfirmed/non-fastdisk compatibility policy.
+
+Publication/restore keeps the existing strict detector, including pending-state
+and stale-marker safeguards. Positive restart confirmations already persisted
+for the same operation remain authoritative across redelivery. The optional
+compatibility backup is still attempted for unconfirmed/non-fastdisk targets;
+its container-owned mount gate is unchanged and may still reject an invalid
+layout. This change classifies detection, not repairs mounts or backup failures.
+No shared orchestration, frontend, API, container script or blocking rule changes.
 
 ## Confirmed-fastdisk policy (2026-10-30)
 
-Backend sends the embedded publication detector. Unknown/failed initial detection
+Backend sends the embedded restart detector. Unknown/failed initial detection
 uses the best-effort policy below; with blocking explicitly enabled, a positively
 confirmed fastdisk target requires
 a valid complete or partial backup receipt within 1500 seconds. Failure,

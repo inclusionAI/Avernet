@@ -27,7 +27,9 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
-from .fastdisk_probe import FastdiskDetectionError, detection_command, parse_detection_result
+from .fastdisk_probe import (
+    FastdiskDetectionError, parse_detection_result, restart_detection_command as detection_command,
+)
 from .restart_state import ENGINES, RestartSuperseded
 from ..restart_contract import PublishedRestartServices
 
