@@ -64,6 +64,25 @@ describe('applyIdentityLoadResult', () => {
     expect(useWorkspaceStore.getState().activeIdentityId).toBe('human-1');
   });
 
+  it('avatar-only refresh preserves identity, group and session selection', () => {
+    const bot = { id: 'b1', kind: 'bot' as const, displayName: 'Alpha', online: true };
+    useWorkspaceStore.setState({
+      identities: [{ ...bot, avatarUrl: '/old.png' }],
+      activeIdentityId: 'b1',
+      selectedGroupId: 'g1',
+      selectedSessionId: 's1',
+    });
+    for (const avatarUrl of ['/new.png', undefined]) {
+      applyIdentityLoadResult({ identities: [{ ...bot, avatarUrl }], defaultActiveId: 'me' });
+      expect(useWorkspaceStore.getState()).toMatchObject({
+        activeIdentityId: 'b1',
+        selectedGroupId: 'g1',
+        selectedSessionId: 's1',
+      });
+      expect(useWorkspaceStore.getState().identities[0].avatarUrl).toBe(avatarUrl);
+    }
+  });
+
   it('falls back to the default identity when none is active', () => {
     useWorkspaceStore.setState({ identities: [], activeIdentityId: null });
     applyIdentityLoadResult({

@@ -58,6 +58,7 @@ it.each<[CollaborationBotDto['visibility'], Record<string, unknown>, string]>([
   });
   render(<BotGeneralConfigDialog bot={row} isExternalBot onClose={jest.fn()} />);
   await screen.findByText('参与协作群聊');
+  expect(screen.queryByRole('button', { name: '修复信息' })).not.toBeInTheDocument();
   expect(screen.queryByText('对用户可见性')).not.toBeInTheDocument();
   for (const hidden of ['公开 Bot 画像', '任务认领', 'Dream Mode']) {
     expect(screen.queryByText(hidden)).not.toBeInTheDocument();
@@ -105,6 +106,7 @@ it('外部 Bot 修改可见性时按保存语义提交并直接生效，不渲�
     .mockResolvedValue({ ...bot, publication: { ...bot.publication, bot: { scope: 'all', organizationPaths: [] } } });
   render(<BotGeneralConfigDialog bot={row} isExternalBot onClose={jest.fn()} />);
   await screen.findByText('当前可见性：限定组织可申请 · 1 个组织范围');
+  expect(screen.queryByRole('button', { name: '修复信息' })).not.toBeInTheDocument();
 
   // 外部 Bot 无审批渲染：即使 friend_ext 带审批类字段也不出待审批/审批链接。
   expect(screen.queryByText('待审批')).not.toBeInTheDocument();

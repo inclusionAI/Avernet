@@ -97,5 +97,6 @@ it('read-only header has identity details but no switchable button or popover', 
   render(<CollaborationIdentityHeader readOnly />);
   expect(screen.getByText('当前协作身份')).toBeInTheDocument();
   expect(screen.getByText('用户 ID：fengtai')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: '我' })).toHaveAttribute('src', 'https://example.test/avatar.png');
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });

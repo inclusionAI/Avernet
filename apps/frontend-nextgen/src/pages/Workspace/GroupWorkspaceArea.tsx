@@ -80,14 +80,22 @@ export function GroupWorkspaceArea({
     setActivePanel,
   });
   const { selectedGroup, canManageGroup: canManage } = ws;
-  // 管理面板打开期间跟随选中群补拉详情：打开面板（齿轮/「…」菜单）或面板保持打开时切群，
-  // 都会为新选中群拉取 participants 等详情；否则列表项 participants 为空且 participantCount>0，
-  // 「群成员管理」card 会一直停留在「加载中…」。面板关闭时不拉取（保持按需拉取约定）。
+  // 管理面板打开期间按需补齐完整群详情：打开/切群都刷新；同群被新列表对象替换
+  // （participantDetailsLoaded=false）也会重拉，详情回填（true，含显式空详情）后停止。
+  // 面板关闭时不拉取，保留头像补拉的请求预算（AC-02）。
   const { selectedGroupId, reloadSelectedGroup } = ws;
+  const lastManagedGroupRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (activePanel !== 'manage' || !selectedGroupId) return;
-    void reloadSelectedGroup(selectedGroupId);
-  }, [activePanel, selectedGroupId, reloadSelectedGroup]);
+    if (activePanel !== 'manage' || !selectedGroupId) {
+      lastManagedGroupRef.current = null;
+      return;
+    }
+    const entering = lastManagedGroupRef.current !== selectedGroupId;
+    lastManagedGroupRef.current = selectedGroupId;
+    const detailLoaded = selectedGroup?.participantDetailsLoaded ??
+      ((selectedGroup?.participants.length ?? 0) > 0);
+    if (entering || !detailLoaded) void reloadSelectedGroup(selectedGroupId);
+  }, [activePanel, selectedGroupId, selectedGroup, reloadSelectedGroup]);
 
   const handleDissolve = () => {
     if (!ws.selectedGroupId) return;
