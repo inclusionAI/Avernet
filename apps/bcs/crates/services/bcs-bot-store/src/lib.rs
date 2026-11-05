@@ -97,6 +97,7 @@ pub fn caller_config_cache_statistics() -> [u64; 6] {
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
 
 fn bot_info_json_set(
+    flavor: bcs_db_api::DbSqlFlavor,
     updates: Vec<(&'static str, serde_json::Value)>,
 ) -> ServiceResult<(String, Vec<Value>)> {
     let mut expressions = Vec::with_capacity(updates.len());
@@ -107,11 +108,22 @@ fn bot_info_json_set(
             ServiceError::InternalError(error.to_string())
         })?));
     }
+    let unwrapped = match flavor {
+        bcs_db_api::DbSqlFlavor::Mysql => "JSON_UNQUOTE(bot_info)",
+        bcs_db_api::DbSqlFlavor::Sqlite => "json_extract(bot_info, '$')",
+    };
+    let string_type = match flavor {
+        bcs_db_api::DbSqlFlavor::Mysql => "string",
+        bcs_db_api::DbSqlFlavor::Sqlite => "text",
+    };
     Ok((
         format!(
             "bot_info = JSON_SET(\
-             CASE WHEN JSON_VALID(bot_info) AND LOWER(JSON_TYPE(bot_info)) = 'object' \
-                  THEN bot_info ELSE JSON_OBJECT() END, {})",
+             JSON_EXTRACT(CASE WHEN bot_info IS NULL THEN '{{}}' \
+               WHEN JSON_VALID(bot_info) = 0 THEN '{{}}' \
+               WHEN LOWER(JSON_TYPE(bot_info)) = 'object' THEN bot_info \
+               WHEN LOWER(JSON_TYPE(bot_info)) = '{string_type}' THEN {unwrapped} \
+               ELSE '{{}}' END, '$'), {})",
             expressions.join(", ")
         ),
         params,

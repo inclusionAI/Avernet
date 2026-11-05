@@ -28,8 +28,71 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_service_api::types::bot_profile::{AvatarChange, ExistingProfileUpdate, ProfileWrite};
 use bcs_service_api::{BotCapabilities, BotRepoPort};
+use bcs_service_api::port::repo::BotControlPlaneRepoPort;
+use bcs_service_api::types::bot_control_plane::{BotControlPlaneDescriptorPatch, BotControlPlanePatch};
 
 use profile_contract::avatar_contract;
+
+struct CorruptBeforeTransaction { db: Arc<LocalSqliteDbPlugin>, fired: AtomicBool }
+#[async_trait]
+impl DbPlugin for CorruptBeforeTransaction {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> { self.db.query(statement).await }
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> { self.db.execute(statement).await }
+    async fn transaction(&self, steps: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> {
+        if !self.fired.swap(true, Ordering::SeqCst) {
+            self.db.execute(DbStatement::new("UPDATE bcs_bots SET bot_info='{\"caller\":null}' WHERE bot_uuid='race-profile'" )).await?;
+        }
+        self.db.transaction(steps).await
+    }
+    async fn health_check(&self) -> DbResult<DbHealth> { self.db.health_check().await }
+}
+
+#[tokio::test]
+async fn sqlite_profile_rechecks_after_cas_loses_to_invalid_data() {
+    let (db, initial) = fixture::sqlite_repo().await;
+    initial.create_registration_if_absent("race-profile".into(), BotCapabilities { name: Some("before".into()), ..Default::default() }, "owner", "test-token").await.unwrap();
+    let wrapped = Arc::new(CorruptBeforeTransaction { db: db.clone(), fired: AtomicBool::new(false) });
+    let repo = PersistentBotRepo::with_sql_flavor(wrapped, DbSqlFlavor::Sqlite);
+    let result = repo.update_profile_existing("race-profile", ExistingProfileUpdate { capabilities: BotCapabilities { name: Some("after".into()), ..Default::default() }, avatar: AvatarChange::Set("https://example.test/new".into()) }).await;
+    assert!(result.is_err());
+    let rows = db.query(DbStatement::new("SELECT name,avatar_url,bot_info FROM bcs_bots WHERE bot_uuid='race-profile'")).await.unwrap();
+    assert_eq!(rows[0].get_string("name").unwrap().as_deref(), Some("before"));
+    assert_eq!(rows[0].get_string("avatar_url").unwrap(), None);
+    assert_eq!(rows[0].get_string("bot_info").unwrap().as_deref(), Some("{\"caller\":null}"));
+}
+
+#[tokio::test]
+async fn sqlite_control_plane_rechecks_after_cas_loses_to_invalid_data() {
+    let (db, initial) = fixture::sqlite_repo().await;
+    initial.create_registration_if_absent("race-profile".into(), BotCapabilities { name: Some("before".into()), ..Default::default() }, "owner", "test-token").await.unwrap();
+    let wrapped = Arc::new(CorruptBeforeTransaction { db: db.clone(), fired: AtomicBool::new(false) });
+    let repo = PersistentBotRepo::with_sql_flavor(wrapped, DbSqlFlavor::Sqlite);
+    let result = repo.patch_control_plane("race-profile", &bcs_config::resolve_env_str(), BotControlPlanePatch { name: Some("after".into()), descriptor: Some(BotControlPlaneDescriptorPatch { summary: Some("after".into()), ..Default::default() }), ..Default::default() }).await;
+    assert!(result.is_err());
+    let rows = db.query(DbStatement::new("SELECT name,bot_info FROM bcs_bots WHERE bot_uuid='race-profile'")).await.unwrap();
+    assert_eq!(rows[0].get_string("name").unwrap().as_deref(), Some("before"));
+    assert_eq!(rows[0].get_string("bot_info").unwrap().as_deref(), Some("{\"caller\":null}"));
+}
+
+#[tokio::test]
+async fn sqlite_profile_preserves_wrapped_siblings_and_rejects_invalid_caller() {
+    let (db, repo) = fixture::sqlite_repo().await;
+    repo.create_registration_if_absent("protected-profile".into(), BotCapabilities::default(), "owner", "test-token").await.unwrap();
+    let metadata = serde_json::json!({"future":{"keep":true},"caller":{"source_revision":2,"caller_identity":{"enabled":true}}});
+    let wrapped = serde_json::json!(metadata.to_string()).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid=?", vec![wrapped.into(), "protected-profile".into()])).await.unwrap();
+    let update = || ExistingProfileUpdate { capabilities: BotCapabilities { name: Some("updated".into()), ..Default::default() }, avatar: AvatarChange::Keep };
+    assert_eq!(repo.update_profile_existing("protected-profile", update()).await.unwrap(), ProfileWrite::Updated);
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='protected-profile'")).await.unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&rows[0].get_string("bot_info").unwrap().unwrap()).unwrap();
+    assert_eq!(saved["future"], metadata["future"]);
+    assert_eq!(saved["caller"], metadata["caller"]);
+    let bad = serde_json::json!({"caller":null,"future":"keep"}).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid=?", vec![bad.clone().into(), "protected-profile".into()])).await.unwrap();
+    assert!(repo.update_profile_existing("protected-profile", update()).await.is_err());
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='protected-profile'")).await.unwrap();
+    assert_eq!(rows[0].get_string("bot_info").unwrap().as_deref(), Some(bad.as_str()));
+}
 
 #[tokio::test]
 async fn memory_avatar_contract() {

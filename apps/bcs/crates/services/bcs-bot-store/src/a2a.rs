@@ -146,6 +146,24 @@ pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResul
 
 impl DbA2aBotStore {
     async fn write_card(&self,record:&A2aBotRecord,expected:Option<u64>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<Option<A2aBotRecord>> {
+        for attempt in 0..2 {
+            let result = self.write_card_once(record, expected, visibility).await?;
+            if result.is_some() { return Ok(result); }
+            if attempt == 1 {
+                let rows = self.db.query(DbStatement::with_params(
+                    "SELECT bot_info FROM bcs_bots WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway'",
+                    vec![self.env.clone().into(), record.bot_uuid.clone().into(), record.provider_id.clone().into(), record.provider_bot_ref.clone().into()],
+                )).await.map_err(error)?;
+                if let Some(row) = rows.first() {
+                    let raw = row.get_string("bot_info").map_err(error)?;
+                    crate::persistent_repo::caller_config::validated_bot_info(raw.as_deref())?;
+                }
+                return Ok(None);
+            }
+        }
+        unreachable!("bounded Card retry always returns")
+    }
+    async fn write_card_once(&self,record:&A2aBotRecord,expected:Option<u64>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<Option<A2aBotRecord>> {
         use bcs_db_api::{DbTransactionStep,DbTransactionStepResult};
         let name=bcs_service_api::types::a2a_names::card_bot_name(&record.agent_card).map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
         ensure_provider_name_available(self.db.as_ref(),self.flavor,&self.env,&record.provider_id,name,Some(&record.bot_uuid)).await.map_err(|error|match error {
@@ -163,9 +181,18 @@ impl DbA2aBotStore {
         // since the immutable-source check. Caller retries the local CAS only.
         let expected=Some(expected.unwrap_or_else(||previous.as_ref().map_or(0,|v|v.revision)));
         let visibility_assignment=if let Some(value)=visibility {format!("visibility='{}',",value.as_str())} else {String::new()};
-        let mut params=vec![name.into(),name.into(),serde_json::to_string(&record.agent_card).map_err(error)?.into(),record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+        let info_rows = self.db.query(DbStatement::with_params(
+            "SELECT bot_info FROM bcs_bots WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway'",
+            vec![self.env.clone().into(), record.bot_uuid.clone().into(), record.provider_id.clone().into(), record.provider_bot_ref.clone().into()],
+        )).await.map_err(error)?;
+        let Some(info_row) = info_rows.first() else { return Ok(None); };
+        let original = info_row.get_string("bot_info").map_err(error)?;
+        let normalized = crate::persistent_repo::caller_config::validated_bot_info(original.as_deref())?.to_string();
+        let (cas, cas_params) = crate::persistent_repo::caller_config::bot_info_cas(self.flavor, original.as_deref());
+        let mut params=vec![name.into(),normalized.into(),name.into(),serde_json::to_string(&record.agent_card).map_err(error)?.into(),record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),
             self.env.clone().into(),record.bot_uuid.clone().into(),record.provider_id.clone().into(),record.provider_bot_ref.clone().into()];
         let predicate=if let Some(expected)=expected {params.push(i64::try_from(expected).map_err(error)?.into());" AND agent_card_revision=?"} else {""};
+        params.extend(cas_params);
         let mut params=crate::a2a_source::bound_params(params);
         params.push(crate::a2a_source::conflict_param(1));
         let results=self.db.transaction(vec![
@@ -174,7 +201,7 @@ impl DbA2aBotStore {
             } else {DbTransactionStep::Query(DbStatement::new("SELECT 1"))},
             DbTransactionStep::Query(crate::a2a_source::conflict_query(self.flavor,&self.env,record)?),
             DbTransactionStep::Execute(DbStatement::with_transaction_params(format!(
-                "UPDATE bcs_bots SET {visibility_assignment}name=?,bot_info=JSON_SET(COALESCE(bot_info,'{{}}'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate} AND ?=0"),params).with_transaction_stop_on_no_rows()),
+                "UPDATE bcs_bots SET {visibility_assignment}name=?,bot_info=JSON_SET(JSON_EXTRACT(?, '$'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate} AND {cas} AND ?=0"),params).with_transaction_stop_on_no_rows()),
             DbTransactionStep::Query(DbStatement::with_params(
                 "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
         ]).await.map_err(|failure|if failure.is_duplicate_key() {ServiceError::Conflict("Bot name is already in use in this Provider".into())} else {error(failure)})?;

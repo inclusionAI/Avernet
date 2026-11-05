@@ -21,11 +21,9 @@ use crate::{BotInfo, RegisteredBotInner, is_legacy_namespace};
 impl PersistentBotRepo {
 
     pub(super) async fn register_impl(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "register: received registration request");
-
-        // Sync binding channel index
-        self.sync_binding_channel_index(&bot_id, &capabilities)
-            .await;
 
         // Get token from memory for DB insert
         let session_token: Option<String> = {
@@ -40,6 +38,8 @@ impl PersistentBotRepo {
                 warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %e, "Failed to save bot to database during register");
                 e
             })?;
+
+        self.sync_binding_channel_index(&bot_id, &capabilities).await;
 
         // Update memory
         let mut bots = self.bots.write().await;
@@ -106,6 +106,8 @@ impl PersistentBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "register_with_owner_and_token: received registration request");
 
         self.save_to_db(&bot_id, &capabilities, Some(token), Some(created_by))
@@ -205,19 +207,34 @@ impl PersistentBotRepo {
         staff_no: &str,
         nick_name: &str,
     ) -> ServiceResult<bcs_service_api::EnsureHumanResult> {
+        let gate = self.metadata_gate(&format!("human_{}", staff_no)).await;
+        let _guard = gate.lock().await;
+        for attempt in 0..2 {
+            let result = self.ensure_human_actor_once(staff_no, nick_name).await;
+            if attempt == 0 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Human changed while updating metadata") { continue; }
+            if attempt == 1 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Human changed while updating metadata") {
+                let bot_uuid = format!("human_{}", staff_no);
+                if let Some(raw) = self.read_caller_bot_info_raw(&bot_uuid, &resolve_env(), None).await? {
+                    super::caller_config::validated_bot_info(raw.as_deref())?;
+                }
+            }
+            return result;
+        }
+        unreachable!("bounded human retry always returns")
+    }
+
+    async fn ensure_human_actor_once(&self, staff_no: &str, nick_name: &str) -> ServiceResult<bcs_service_api::EnsureHumanResult> {
         let env = resolve_env();
         let bot_uuid = format!("human_{}", staff_no);
         let default_summary = "写点什么介绍自己";
 
         // Fast path: already present → backfill missing fields, then return.
         if self.exists_in_db(&bot_uuid).await {
-            // Deserialize current bot_info into BotInfo struct (missing fields get defaults).
-            let existing_json = self
-                .read_bot_info_json(&bot_uuid)
-                .await
-                .unwrap_or_else(|| serde_json::json!({}));
-            let mut bot_info: BotInfo =
-                serde_json::from_value(existing_json.clone()).unwrap_or_default();
+            let original = self.read_caller_bot_info_raw(&bot_uuid, &env, None).await?
+                .ok_or_else(|| ServiceError::Conflict("Human changed while updating metadata".into()))?;
+            let mut existing_json = super::caller_config::validated_bot_info(original.as_deref())?;
+            let mut bot_info: BotInfo = serde_json::from_value(existing_json.clone())
+                .map_err(|_| ServiceError::InternalError("Bot metadata is unreadable".into()))?;
 
             // Check if summary needs backfill.
             let needs_summary = bot_info.summary.as_deref().map_or(true, |s| s.is_empty());
@@ -226,19 +243,23 @@ impl PersistentBotRepo {
             }
 
             // Re-serialize and compare to detect if anything actually changed.
-            let merged_str = serde_json::to_string(&bot_info).unwrap_or_default();
-            let needs_backfill = merged_str != existing_json.to_string();
+            let defaults = serde_json::to_value(&bot_info)
+                .map_err(|_| ServiceError::InternalError("Bot metadata is unreadable".into()))?;
+            let object = existing_json.as_object_mut().expect("validated object");
+            let mut needs_backfill = false;
+            for key in ["summary", "domains", "skills", "scopes", "hidden"] {
+                if !object.contains_key(key) || (key == "summary" && needs_summary) {
+                    object.insert(key.to_string(), defaults[key].clone());
+                    needs_backfill = true;
+                }
+            }
 
             if needs_backfill {
-                let sql = "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(
-                    sql,
-                    vec![
-                        Value::from(merged_str.as_str()),
-                        Value::from(bot_uuid.as_str()),
-                        Value::from(env.as_str()),
-                    ],
-                )
+                let (cas, cas_params) = super::caller_config::bot_info_cas(self.flavor, original.as_deref());
+                let sql = format!("UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = ? AND env = ? AND {cas}");
+                let mut params = vec![Value::from(existing_json.to_string()), Value::from(bot_uuid.as_str()), Value::from(env.as_str())];
+                params.extend(cas_params);
+                let affected = self.db_execute_affected(&sql, params)
                 .await
                 .map_err(|e| {
                     warn!(
@@ -252,15 +273,16 @@ impl PersistentBotRepo {
                         bot_uuid, e
                     ))
                 })?;
+                if affected == 0 {
+                    return Err(ServiceError::Conflict("Human changed while updating metadata".into()));
+                }
 
                 // Sync in-memory cache so subsequent reads (e.g. /bots/query)
                 // reflect the updated fields without waiting for a full reload.
-                {
+                if needs_summary {
                     let mut bots = self.bots.write().await;
                     if let Some(bot) = bots.get_mut(&bot_uuid) {
-                        if needs_summary {
-                            bot.capabilities.summary = Some(default_summary.to_string());
-                        }
+                        bot.capabilities.summary = Some(default_summary.to_string());
                     }
                 }
 

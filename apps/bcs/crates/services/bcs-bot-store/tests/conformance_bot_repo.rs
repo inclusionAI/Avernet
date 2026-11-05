@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bcs_bot_store::{PersistentBotRepo, MemoryBotRepo};
 use bcs_db_api::{
@@ -13,6 +14,101 @@ use bcs_service_api::{
 use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::bot_registration_create::atomic_registration_creation_contract;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
+
+fn sqlite_repo(db: Arc<dyn DbPlugin>) -> PersistentBotRepo {
+    PersistentBotRepo::with_sql_flavor(db, bcs_db_api::DbSqlFlavor::Sqlite)
+}
+
+struct PauseHumanRead {
+    db: Arc<dyn DbPlugin>, active: AtomicBool,
+    reached: tokio::sync::Notify, resume: tokio::sync::Notify,
+}
+#[async_trait::async_trait]
+impl DbPlugin for PauseHumanRead {
+    async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<DbRow>> {
+        self.db.query(statement).await
+    }
+    async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<DbExecuteResult> {
+        let target = statement.sql().contains("UPDATE bcs_bots SET bot_info = ?");
+        let result = self.db.execute(statement).await?;
+        if target && self.active.swap(false, Ordering::SeqCst) {
+            self.reached.notify_one();
+            self.resume.notified().await;
+        }
+        Ok(result)
+    }
+    async fn transaction(&self, steps: Vec<DbTransactionStep>) -> bcs_db_api::DbResult<Vec<DbTransactionStepResult>> { self.db.transaction(steps).await }
+    async fn health_check(&self) -> bcs_db_api::DbResult<DbHealth> { self.db.health_check().await }
+}
+
+#[tokio::test]
+async fn human_backfill_serializes_database_and_cache_publication() {
+    let db = sqlite_db().await;
+    let pause = Arc::new(PauseHumanRead { db: db.clone(), active: AtomicBool::new(false), reached: tokio::sync::Notify::new(), resume: tokio::sync::Notify::new() });
+    let repo = Arc::new(sqlite_repo(pause.clone()));
+    repo.ensure_human_actor("fence", "Human").await.unwrap();
+    repo.register("human_fence".into(), BotCapabilities { summary: Some(String::new()), ..Default::default() }).await.unwrap();
+    pause.active.store(true, Ordering::SeqCst);
+    let human_repo = repo.clone();
+    let human = tokio::spawn(async move { human_repo.ensure_human_actor("fence", "Human").await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), pause.reached.notified()).await.unwrap();
+    let writer_repo = repo.clone();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let writer_started = started.clone();
+    let mut writer = tokio::spawn(async move {
+        writer_started.notify_one();
+        writer_repo.update_capabilities("human_fence", BotCapabilities { summary: Some(String::new()), ..Default::default() }).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), started.notified()).await.unwrap();
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(100), &mut writer).await.is_err());
+    pause.resume.notify_one();
+    human.await.unwrap().unwrap(); writer.await.unwrap().unwrap();
+    assert_eq!(repo.try_get("human_fence").await.unwrap().unwrap().capabilities.summary.as_deref(), Some(""));
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='human_fence'")).await.unwrap();
+    let raw = rows[0].get_string("bot_info").unwrap().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(value["summary"], "");
+}
+
+#[tokio::test]
+async fn human_backfill_preserves_legacy_metadata_and_rejects_bad_caller() {
+    let db = sqlite_db().await;
+    let repo = sqlite_repo(db.clone());
+    repo.ensure_human_actor("legacy-human", "Human").await.unwrap();
+    let value = serde_json::json!({"summary":"", "future":{"keep":true}, "caller":{"source_revision":1,"caller_identity":{"enabled":true}}});
+    let wrapped = serde_json::json!(value.to_string()).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid=?", vec![wrapped.into(), "human_legacy-human".into()])).await.unwrap();
+    repo.ensure_human_actor("legacy-human", "Human").await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='human_legacy-human'")).await.unwrap();
+    let raw = rows[0].get_string("bot_info").unwrap().unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(saved["future"], value["future"]);
+    assert_eq!(saved["caller"], value["caller"]);
+    assert_ne!(saved["summary"], "");
+    let bad = serde_json::json!({"caller":null,"future":"keep"}).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid=?", vec![bad.clone().into(), "human_legacy-human".into()])).await.unwrap();
+    assert!(repo.ensure_human_actor("legacy-human", "Human").await.is_err());
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='human_legacy-human'")).await.unwrap();
+    assert_eq!(rows[0].get_string("bot_info").unwrap().as_deref(), Some(bad.as_str()));
+}
+
+#[tokio::test]
+async fn rejected_metadata_write_keeps_binding_index() {
+    let db = sqlite_db().await;
+    let repo = sqlite_repo(db.clone());
+    let caps = |key: &str| BotCapabilities {
+        binding_channels: Some(std::collections::HashMap::from([("channel".into(), bcs_service_api::BindingChannel { binding_key: key.into() })])),
+        ..Default::default()
+    };
+    repo.register("bound".into(), caps("old")).await.unwrap();
+    db.execute(DbStatement::new("UPDATE bcs_bots SET bot_info='{\"caller\":null}' WHERE bot_uuid='bound'")).await.unwrap();
+    assert!(repo.register("bound".into(), caps("new")).await.is_err());
+    assert_eq!(repo.find_bot_by_binding_channel("channel", "old").await.as_deref(), Some("bound"));
+    assert_eq!(repo.find_bot_by_binding_channel("channel", "new").await, None);
+    assert!(repo.save_to_storage("bound", &caps("new")).await.is_err());
+    assert_eq!(repo.find_bot_by_binding_channel("channel", "old").await.as_deref(), Some("bound"));
+    assert_eq!(repo.find_bot_by_binding_channel("channel", "new").await, None);
+}
 
 #[tokio::test]
 async fn conformance_memory_atomic_registration_creation() {
@@ -29,7 +125,7 @@ async fn conformance_persistent_atomic_registration_creation() {
 #[tokio::test]
 async fn persistent_bot_repo_passes_bot_repo_contract() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db);
+    let repo = sqlite_repo(db);
 
     bot_repo_port_contract_tests(&repo).await;
 }
@@ -70,7 +166,7 @@ async fn memory_unregister_soft_deletes_bot_from_default_reads() {
 #[tokio::test]
 async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_reads() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -113,7 +209,7 @@ async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails
     let db = Arc::new(FailActiveBotIdsQueryDb {
         inner: inner_db.clone(),
     });
-    let repo = PersistentBotRepo::new(db);
+    let repo = sqlite_repo(db);
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -164,7 +260,7 @@ async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails
 #[tokio::test]
 async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_deleted_column() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -213,7 +309,7 @@ async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_delete
 #[tokio::test]
 async fn persistent_bot_repo_passes_bot_metrics_snapshot_contract() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
 
     seed_metrics_bot(&repo).await;
     seed_metrics_human_row(db.as_ref()).await;
@@ -342,7 +438,7 @@ async fn connect_or_promote_streaming_creates_bot_when_absent() {
 #[tokio::test]
 async fn persistent_repo_keeps_v3_protocol_version_across_streaming_onboard() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db);
+    let repo = sqlite_repo(db);
     let bot_id = "plugin-v3-bot:alice";
 
     repo.connect_or_promote_streaming(bot_id.to_string())
@@ -409,7 +505,7 @@ async fn connect_or_promote_streaming_promote_persists_real_token_to_db_survives
     // resolves the bot by the promoted token — i.e. no half-state where memory
     // holds the real token while the DB still keeps the MOCK.
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
 
     // provider pre-registers a plugin bot → DB holds MOCK
     let mock = mock_token();
@@ -435,7 +531,7 @@ async fn connect_or_promote_streaming_promote_persists_real_token_to_db_survives
     assert!(!bcs_service_api::is_mock_token(&promoted));
 
     // Simulate a BCS restart: a fresh repo reading the SAME DB.
-    let repo_after = PersistentBotRepo::new(db);
+    let repo_after = sqlite_repo(db);
     let persisted = repo_after
         .load_token("plugin-bot:alice")
         .await
@@ -501,7 +597,7 @@ async fn connect_or_promote_streaming_refuses_real_token_connected_with_already_
 #[tokio::test]
 async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
 
     repo.register(
         "update-cap-bot".to_string(),
@@ -551,7 +647,7 @@ async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
     );
     assert_eq!(stored.capabilities.visibility, "protected");
 
-    let db_reader = PersistentBotRepo::new(
+    let db_reader = sqlite_repo(
         db,
     );
     let persisted = db_reader
@@ -566,7 +662,7 @@ async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
 #[tokio::test]
 async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() {
     let db = sqlite_db().await;
-    let registering_repo = PersistentBotRepo::new(
+    let registering_repo = sqlite_repo(
         db.clone(),
     );
     registering_repo
@@ -584,7 +680,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
 
     // A separate repository instance models a pod that shares the database
     // but has never loaded this bot into its process-local registry.
-    let updating_repo = PersistentBotRepo::new(
+    let updating_repo = sqlite_repo(
         db.clone(),
     );
     updating_repo
@@ -601,7 +697,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
         .await
         .expect("database-only capability update must succeed");
 
-    let verifying_repo = PersistentBotRepo::new(
+    let verifying_repo = sqlite_repo(
         db,
     );
     let stored = verifying_repo
@@ -628,7 +724,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
 #[tokio::test]
 async fn persistent_repo_update_capabilities_updates_memory_without_inserting_db_row() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(
+    let repo = sqlite_repo(
         db.clone(),
     );
     repo.register(
@@ -692,7 +788,7 @@ async fn persistent_repo_update_capabilities_updates_memory_without_inserting_db
 #[tokio::test]
 async fn persistent_repo_update_capabilities_returns_not_found_for_unknown_bot() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
 
     let err = repo
         .update_capabilities(
@@ -748,7 +844,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
 #[tokio::test]
 async fn stale_lifecycle_capabilities_preserve_card_owned_name() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::new(db.clone());
+    let repo = sqlite_repo(db.clone());
     repo.register("card-owned".into(), BotCapabilities {
         name: Some("Old Name".into()), ..Default::default()
     }).await.unwrap();
