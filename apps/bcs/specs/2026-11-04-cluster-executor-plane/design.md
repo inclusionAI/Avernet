@@ -77,8 +77,9 @@ Three kinds of traffic:
 - **Executor → session channels → gateways**: the owner publishes each
   session's events and deltas on a non-durable pub/sub channel; every
   gateway serving that session subscribes. This is BCN's fan-out.
-- **Gateway → supply agents**: outbound A2A or Provider streams. Every
-  supply agent is dial-out; BCN accepts no inbound agent connections.
+- **Gateway → supply agents**: outbound A2A streams. Every supply agent is
+  an A2A agent that BCN dials out to; BCN accepts no inbound agent
+  connections.
 
 Executors never coordinate with each other directly to decide anything. The
 shared database is the only place they meet.
@@ -357,7 +358,7 @@ that hashes on a session header just makes forwarding rarer.
 | PA → load balancer → gateway | The PA's SSE, WebSocket or gRPC stream | An L4 balancer passes the connection through. An L7 balancer must not buffer responses and must allow idle gaps longer than the gateway's SSE heartbeat (`: ping` every 15–30 s) |
 | Gateway ↔ executor | One long-lived, multiplexed, bidirectional channel per pair (e.g. gRPC over HTTP/2) | Carries rounds, deltas and control events from dispatches, dispatch commands and results; keepalive pings detect a dead peer in seconds |
 | Executor → gateways | **Session channels** on a non-durable, sharded pub/sub | BCN's fan-out: the owner publishes each session's events and deltas; every gateway serving that session subscribes (§7.4) |
-| Gateway → supply agent | A2A `SendStreamingMessage` / `SubscribeToTask`, or a Provider stream | One per dispatch, opened by the dispatch gateway |
+| Gateway → supply agent | A2A `SendStreamingMessage` / `SubscribeToTask` | One per dispatch, opened by the dispatch gateway |
 
 ### 7.2 Dispatch placement and results
 
@@ -405,7 +406,6 @@ durable:
 | `working` + progress text | "Searching flights…" | No | Fans it out; counts as liveness |
 | `input-required` / `auth-required` | "Which one should I book?" | **Yes** | Changes the Task's state, starts the human-wait timer, routes the PA's answer back to `ta-77` |
 | `completed` / `failed` | `final: true` | **Yes**, with the assembled output | Records the step result and decides what happens next |
-| Coordination tool calls | `tool_call_end` of a coordination tool | **Yes** | BCS acts on it mid-run |
 
 **Fan-out is BCN's logic, and it runs on the owner.** For every event the
 owner decides who sees it and in what form: the caller's stream, other
@@ -415,7 +415,7 @@ of recipient are handled differently:
 
 - **People's streams** (the PA, viewers, the workbench) get the event on the
   session's channel (§7.4).
-- **Other bots in a group** get a **delivery**: the owner dispatches the
+- **Other agents in a group** get a **delivery**: the owner dispatches the
   member's complete message to them as a durable record under the fence,
   never as a token stream. Mentions are parsed on the complete message.
 

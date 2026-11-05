@@ -11,12 +11,12 @@ The gateway tier (design §7) holds every long-lived connection. Item 2
 builds it to this contract:
 
 - **Hold every connection; hold no durable state.** PA streams, outbound
-  A2A and Provider streams terminate on gateways; every supply agent is
-  dial-out. Executors keep none.
+  A2A streams terminate on gateways; every supply agent is an A2A agent
+  that BCN dials out to. Executors keep none.
 - **Send every downstream event to the session's owner** (design §7.2–7.3):
   deltas in 200 ms batches without acknowledgement; control events (the
-  agent's task id, `input-required` / `auth-required`, coordination tool
-  calls, the final result with the assembled output) retried until
+  agent's task id, `input-required` / `auth-required`, the final
+  result with the assembled output) retried until
   acknowledged. Telling the two apart is part of the gateway–executor
   contract.
 - **Look the owner up per message** (hint cache + `NOT_OWNER`); never
