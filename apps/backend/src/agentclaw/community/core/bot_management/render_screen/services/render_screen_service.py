@@ -76,9 +76,7 @@ class RenderScreenService(RenderScreenServiceProtocol):
         """Resolve the scope and enforce collaborative access for coding bots."""
         scope = self._resolve_scope(bot_id)
         bot = self._bot_repo.get_by_id(bot_id)
-        if (bot and bot.get("bot_type") == "service"
-                and str(bot.get("entity_id") or "") == user_id
-                and str(bot.get("owner_id") or "") != user_id):
+        if bot and self._is_service_member_instance(bot, user_id):
             raise PermissionError("无权操作此 Bot 的 CDN 配置")
         if scope == "bot" and not self._bot_has_collaborative_access(bot_id, user_id):
             raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
@@ -101,6 +99,25 @@ class RenderScreenService(RenderScreenServiceProtocol):
                 raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {record.bot_id}")
         else:
             bot = self._bot_repo.get_by_id(record.bot_id)
+            # 创建侧(legacy 宽口 + openapi v1 COSEC MEMBER)允许协作者写入,且
+            # 记录 scope 统一落 Bot 归属者,编辑/删除若只认「记录 owner == 登录人」,
+            # 协作者刚创建的记录(落归属者 scope)立刻不可改删 — 回到「只能增加,
+            # 不能删除和编辑」的不对称。故放行归属者本人与在册协作者。
+            # 但「service Bot 个人定制」例外:记录挂在被服务成员个人名下、既非
+            # 归属者也非 entity 行,存量语义为仅本人可改删,不随协作关系放行 —
+            # 否则归属交接后新归属者也能改删他人定制,破坏 B6 预期。
+            personal_customization = bool(bot) and (
+                bot.get("bot_type") == "service"
+                and record.owner_id not in (
+                    str(bot.get("owner_id") or ""),
+                    str(bot.get("entity_id") or ""),
+                )
+            )
+            if bot and not personal_customization and not self._is_service_member_instance(bot, user_id):
+                if self._bot_has_collaborative_access(record.bot_id, user_id):
+                    return record
+            # 兜底保持存量语义:BCN 无 bot 行按「记录 owner == 登录人」判;
+            # 历史漂移行的创建人(记录挂在其名下但非归属者/协作者)仍可改删。
             expected_owner = record.owner_id
             if (bot and bot.get("bot_type") == "service"
                     and record.owner_id == str(bot.get("entity_id") or "")):
@@ -108,6 +125,19 @@ class RenderScreenService(RenderScreenServiceProtocol):
             if expected_owner != user_id:
                 raise PermissionError("无权操作此 Bot 的 CDN 配置")
         return record
+
+    @staticmethod
+    def _is_service_member_instance(bot: dict, user_id: str) -> bool:
+        """服务 Bot 的「被服务成员实例」:行 entity 归本人、归属者另有其人。
+
+        与 authorize_render_screen_bot 创建侧的拦截对称 — 这类成员实例
+        既不是归属者也不应经协作关系放行写操作。
+        """
+        return (
+            bot.get("bot_type") == "service"
+            and str(bot.get("entity_id") or "") == user_id
+            and str(bot.get("owner_id") or "") != user_id
+        )
 
     def list_render_screens(
         self,
@@ -160,6 +190,14 @@ class RenderScreenService(RenderScreenServiceProtocol):
                 raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
             existing = self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)
         else:
+            # 收口 legacy 宽口:历史代码对非共享 Bot 的创建不做归属校验,任何
+            # 登录人都能写入,是「记录 scope 漂移」这一整类 bug 的根源。BCN 等
+            # 无 bot 行的场景保持开放(无从归属判定)。服务 Bot 成员实例与创建侧
+            # authorize_render_screen_bot 的拦截对称,不经协作关系放行。
+            if bot and not self._is_service_member_instance(bot, current_user_id or creator_id or ""):
+                acting_user = current_user_id or creator_id or ""
+                if not acting_user or not self._bot_has_collaborative_access(bot_id, acting_user):
+                    raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
             existing = self._repo.list_by_bot_id(
                 bot_id=bot_id, owner_id=record_owner_id or None
             )
