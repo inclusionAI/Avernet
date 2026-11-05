@@ -15,7 +15,7 @@
   </defs>
   <rect x="0" y="0" width="960" height="680" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">两层:网关持有连接,执行器持有租约并负责扇出</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">输出路径:智能体 → 网关 → 所有者执行器 → 会话频道 → 订阅的网关 → PA。两层之间没有负载均衡器。</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">输出路径:智能体 → 网关 → 增量频道 → 所有者 → 会话频道 → 订阅的网关 → PA。两层之间没有负载均衡器。</text>
 
   <!-- top row -->
   <rect x="40" y="76" width="170" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
@@ -40,12 +40,12 @@
   <text x="254" y="214" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">网关 GW1</text>
   <text x="60" y="236" font-size="11" fill="#1c2420">• 会话 S 的 PA 流(订阅了 S 的频道)</text>
   <text x="60" y="254" font-size="11" fill="#1c2420">• 执行派发 D:到供给智能体的流</text>
-  <text x="60" y="272" font-size="11" fill="#1c2420">• 把 D 的增量和控制事件发给所有者</text>
+  <text x="60" y="272" font-size="11" fill="#1c2420">• 把 D 的增量发布到 deltas:{b};控制事件发给所有者</text>
   <text x="60" y="288" font-size="10.5" fill="#5c6a62">保留 D 的输出,直到所有者确认结果</text>
   <rect x="496" y="194" width="420" height="102" rx="8" fill="#ffffff" stroke="#2457a6"/>
   <text x="706" y="214" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">网关 GW2</text>
   <text x="512" y="236" font-size="11" fill="#1c2420">• 执行一个到 A2A 智能体 B 的派发</text>
-  <text x="512" y="254" font-size="11" fill="#1c2420">• 其增量和事件发给该会话的所有者</text>
+  <text x="512" y="254" font-size="11" fill="#1c2420">• 其增量发到该桶的增量频道</text>
   <text x="512" y="272" font-size="11" fill="#1c2420">• S 的一个观看者,也订阅了 S 的频道</text>
   <text x="512" y="288" font-size="10.5" fill="#5c6a62">按会话订阅,绝不按所有者订阅</text>
 
@@ -56,11 +56,11 @@
 
   <!-- pub/sub -->
   <rect x="560" y="326" width="356" height="44" rx="8" fill="#f7eed7" stroke="#9a6b0a" stroke-width="1.4"/>
-  <text x="738" y="345" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Pub/sub:每个会话一个频道</text>
-  <text x="738" y="361" font-size="10.5" text-anchor="middle" fill="#5c6a62">非持久、分片 · 所有者发布,网关订阅</text>
-  <line x1="600" y1="326" x2="430" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
-  <line x1="760" y1="326" x2="740" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
-  <text x="450" y="334" font-size="10.5" fill="#9a6b0a">S 的事件 + 增量</text>
+  <text x="738" y="345" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">消息队列(非持久、分片)</text>
+  <text x="738" y="361" font-size="10.5" text-anchor="middle" fill="#5c6a62">每个桶一个增量频道 · 每个会话一个会话频道</text>
+  <line x1="600" y1="326" x2="430" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-start="url(#ao)" marker-end="url(#ao)"/>
+  <line x1="820" y1="326" x2="800" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="612" y="320" font-size="10.5" fill="#9a6b0a">增量流入 · S 的事件 + 增量流出</text>
 
   <!-- executor tier -->
   <rect x="24" y="384" width="912" height="110" rx="12" fill="#e3f0e9" stroke="#157a55" stroke-width="1.6"/>
@@ -80,10 +80,10 @@
   <text x="650" y="474" font-size="11" fill="#5c6a62">把桶分配到执行器</text>
 
   <line x1="150" y1="296" x2="150" y2="414" stroke="#2457a6" stroke-width="1.8" marker-start="url(#ab)" marker-end="url(#ab)"/>
-  <text x="158" y="330" font-size="10.5" fill="#2457a6">控制通道:Submit · 增量 ·</text>
+  <text x="158" y="330" font-size="10.5" fill="#2457a6">控制通道:Submit ·</text>
   <text x="158" y="344" font-size="10.5" fill="#2457a6">控制事件 · StartDispatch · Ack</text>
-  <line x1="300" y1="418" x2="600" y2="372" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
-  <text x="330" y="372" font-size="10.5" fill="#9a6b0a">发布(令牌 n)</text>
+  <line x1="300" y1="418" x2="600" y2="372" stroke="#9a6b0a" stroke-width="1.8" marker-start="url(#ao)" marker-end="url(#ao)"/>
+  <text x="330" y="372" font-size="10.5" fill="#9a6b0a">订阅 deltas:{b} · 发布(令牌 n)</text>
 
   <!-- DB -->
   <rect x="24" y="520" width="912" height="140" rx="12" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
