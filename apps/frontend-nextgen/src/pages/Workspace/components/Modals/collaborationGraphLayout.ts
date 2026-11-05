@@ -7,9 +7,9 @@ import type {
 import type { ParticipantDefinition } from '@/services/workspace/collaborationDefinitionService';
 
 export const COLLABORATION_FLOW_NODE_WIDTH = 210;
-export const COLLABORATION_FLOW_NODE_HEIGHT = 84;
+export const COLLABORATION_FLOW_NODE_HEIGHT = 104;
 const HORIZONTAL_GAP = 56;
-const VERTICAL_GAP = 88;
+const VERTICAL_GAP = 56;
 
 export const COLLABORATION_NODE_KIND_LABELS: Record<CollaborationDefinitionGraphNode['kind'], string> = {
   bot_task: 'Bot 任务',
