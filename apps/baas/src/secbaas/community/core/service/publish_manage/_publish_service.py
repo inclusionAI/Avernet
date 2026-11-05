@@ -3060,10 +3060,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"(device_id={device_record.id}, publish_id={publish_record.id}, "
                         f"tenant={tenant}, env={env})"
                     )
-                    raise RuntimeError("Device configuration update affected no rows")
                 image_config_ready = True
-                # Only expose PROCESSING to callback/timeout retries after
-                # the operation's configuration is durable.
+                # Only expose PROCESSING after the configuration write returns
+                # without raising; a zero-row result is warning-only.
                 record_repo.update_result(
                     record_id=record.id,
                     tenant=tenant,
