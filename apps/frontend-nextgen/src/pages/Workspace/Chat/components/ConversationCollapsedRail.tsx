@@ -61,8 +61,13 @@ function BotTile({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* size 必须用 icon 的 p-0（2026-11-05 修复）：default 档残留的 px-4 会把 36px
+            按钮的内容盒吃到 4px，Tailwind preflight 的 img{max-width:100%} 再把真实头像
+            img（w-7）钳成 4px 竖线。字母/emoji 回退是带 shrink-0 的 span、Plus 图标是
+            svg，都不在钳制范围内，所以只有真实头像塌成竖线。 */}
         <Button
           variant="ghost"
+          size="icon"
           aria-label={`打开 ${bot.displayName}`}
           aria-current={selected ? 'true' : undefined}
           className="relative h-9 w-9 rounded-full hover:bg-muted"
@@ -119,6 +124,7 @@ function EmptyTile({ label, onExpand }: { label: string; onExpand(): void }) {
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
+          size="icon"
           aria-label={`展开侧栏，添加${label}`}
           className="relative h-9 w-9 rounded-full border border-dashed border-border text-muted-foreground hover:bg-muted"
           onClick={onExpand}
@@ -184,6 +190,7 @@ export function ConversationCollapsedRail({
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
+                        size="icon"
                         aria-label={`展开侧栏，查看${section.label}其余 ${overflow} 个`}
                         className="relative h-7 w-9 rounded-full bg-muted/50 text-[10px] font-normal text-content-soft hover:bg-muted"
                         onClick={onExpand}
