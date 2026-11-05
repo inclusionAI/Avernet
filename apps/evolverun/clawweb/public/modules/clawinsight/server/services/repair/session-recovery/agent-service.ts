@@ -269,10 +269,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   async bootstrap(task: RecoveryStoredTask) {
     const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, sessionReadCoverage, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
+    const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
+      && typeof (event.payload.result as Record<string, unknown> | undefined)?.initial_message === "boolean");
+    const timeline = business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60);
+    // Keep the latest send fact available even after many observation reads, within the existing bound.
+    if (latestMessage && !timeline.includes(latestMessage)) timeline.splice(0, 1, latestMessage);
     const engine = task.runtimeTarget?.target.activeEngine ?? { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw";
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
         sessionReadCoverage: boundedSessionReadCoverage(sessionReadCoverage ?? []),
-        timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
+        timeline: timeline.map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id,
+          ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
       timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", planProtocol: {

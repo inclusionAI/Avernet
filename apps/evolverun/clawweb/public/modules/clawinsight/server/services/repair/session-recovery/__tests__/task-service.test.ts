@@ -477,3 +477,37 @@ it("clears a paused summary when the same task resumes observation", async () =>
   expect(records.get(task_id)!).toMatchObject({ status: "running", requiresFreshObservation: true });
   expect(records.get(task_id)!.final_summary).toBeUndefined();
 });
+
+
+it.each(["observe", "verify"] as const)("preserves recovery at maintenance expiry after waiting for delivery in %s", async phase => {
+  let now = 100;
+  const { service, records, agent } = setup(false, () => now);
+  const { task_id } = await service.create(request, actor); await flush();
+  await service.recordDelivery(task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
+    result_text: "accepted", started_at_ms: 1, finished_at_ms: 2, error: null } });
+  const task = records.get(task_id)!; task.phase = phase;
+  task.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "runtime_inspect", location: "files", excerpt: "原失败步骤已成功" }];
+  const deadline = task.observationDeadlineAt!;
+  await service.observe(task_id, task.version, { delivery: "unconfirmed", response: "unknown", effect: "recovered",
+    summary: "原任务已恢复，等待触达证据", evidence_ids: ["proof"] }, [], "不应提前保存的最终总结");
+  expect(records.get(task_id)).toMatchObject({ status: "running", phase, pending_results: [], observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
+  expect(records.get(task_id)?.final_summary).toBeUndefined();
+  expect(agent.release).not.toHaveBeenCalled();
+  now = deadline;
+  await service.maintenance();
+  expect(records.get(task_id)).toMatchObject({ status: "completed", phase, observationDeadlineAt: deadline,
+    judgment: { effect: "recovered", delivery: "unconfirmed", evidence_ids: ["proof"] },
+    pending_results: [expect.objectContaining({ effect: "recovered", intervention_status: "unknown" })] });
+  expect(agent.release).toHaveBeenCalledOnce();
+});
+
+
+it("retains confirmed business recovery when an execution ends before delivery is confirmed", async () => {
+  const { service, records } = setup();
+  const { task_id } = await service.create(request, actor); await flush();
+  const task = records.get(task_id)!; task.phase = "observe";
+  task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务产物已恢复，等待触达证据", evidence_ids: [] };
+  await service.executionFailure(task_id, "AIS execution timed out");
+  expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" },
+    pending_results: [expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" })] });
+});

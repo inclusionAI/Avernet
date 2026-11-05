@@ -380,7 +380,8 @@ pub(super) fn is_chat_segment_boundary_stream(payload: &Value) -> bool {
     )
 }
 
-pub(super) async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value) {
+pub(super) async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value, managed_parent: bool) {
+    flow.native_tasks.record_start(flow, cmd, data, managed_parent);
     if cmd.group_id.is_empty() {
         return;
     }

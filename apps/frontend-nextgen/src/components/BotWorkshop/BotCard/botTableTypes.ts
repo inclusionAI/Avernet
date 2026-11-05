@@ -39,6 +39,8 @@ export interface BotTableProps {
   getCopyAvailability?: (bot: BotDomain) => { visible: boolean; enabled: boolean; disabledReason?: string } | undefined;
   /** 触发复制 Modal。仅在 getCopyAvailability(bot).enabled 时回调。 */
   onCopy?: (bot: BotDomain) => void;
+  /** 重试复制(dst bot);BotStatusCell 在 copy_state=FAILED 时浮现的重试入口。 */
+  onRetryCopy?: (bot: BotDomain) => void;
 }
 
 export type BotTableColumnOptions = Pick<
@@ -68,6 +70,7 @@ export type BotTableColumnOptions = Pick<
   | 'onGeneralConfig'
   | 'getCopyAvailability'
   | 'onCopy'
+  | 'onRetryCopy'
 > & {
   showOwner: boolean;
   showDescriptionColumn: boolean;
