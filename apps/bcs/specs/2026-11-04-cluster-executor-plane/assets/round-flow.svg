@@ -12,14 +12,14 @@
   </defs>
   <rect x="0" y="0" width="960" height="620" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">One round end to end</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">Blue: control channel (gateway ↔ owner). Orange: session channel on the pub/sub (owner → subscribed gateways). Green: fenced writes.</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Blue: control channel (gateway ↔ owner). Orange: message queue (delta channel of S's bucket → owner; session channel S → gateways). Green: fenced writes.</text>
 
   <rect x="20" y="72" width="130" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
   <text x="85" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">PA (via LB)</text>
   <rect x="210" y="72" width="150" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
   <text x="285" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Gateway GW1</text>
   <rect x="420" y="72" width="140" height="40" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
-  <text x="490" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Channel S</text>
+  <text x="490" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Message queue</text>
   <rect x="620" y="72" width="170" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
   <text x="705" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Executor E3 (owner)</text>
   <rect x="820" y="72" width="120" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
@@ -55,8 +55,10 @@
   <text x="6" y="322" font-size="11" font-weight="bold" fill="#5c6a62">4</text>
   <line x1="876" y1="318" x2="289" y2="318" stroke="#5c6a62" marker-end="url(#ar)"/>
   <text x="800" y="312" font-size="10.5" text-anchor="middle" fill="#1c2420">artifact chunks</text>
-  <line x1="289" y1="338" x2="701" y2="338" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
-  <text x="600" y="332" font-size="10.5" text-anchor="middle" fill="#2457a6">DispatchDelta (200 ms batches)</text>
+  <line x1="289" y1="334" x2="486" y2="334" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="388" y="346" font-size="10.5" text-anchor="middle" fill="#9a6b0a">deltas:{b} (200 ms)</text>
+  <line x1="494" y1="338" x2="701" y2="338" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="600" y="332" font-size="10.5" text-anchor="middle" fill="#9a6b0a">E3 subscribes to b</text>
   <rect x="712" y="326" width="104" height="24" rx="5" fill="#ffffff" stroke="#9a6b0a"/>
   <text x="764" y="342" font-size="10" text-anchor="middle" fill="#9a6b0a">fan-out logic</text>
   <line x1="701" y1="360" x2="494" y2="360" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
@@ -88,5 +90,5 @@
   <text x="600" y="580" font-size="10.5" text-anchor="middle" fill="#9a6b0a">Event #43: completed</text>
   <line x1="486" y1="578" x2="289" y2="578" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
   <line x1="281" y1="590" x2="89" y2="590" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
-  <text x="24" y="612" font-size="11" fill="#5c6a62">If E3 crashes during 4, the PA's stream stays open on GW1 and pauses; the new owner takes D's output from GW1 (FetchBuffer) and continues on channel S.</text>
+  <text x="24" y="612" font-size="11" fill="#5c6a62">If E3 crashes during 4, the PA's stream stays open on GW1 and pauses; the new owner subscribes to deltas:{b}, takes D's output from GW1 (FetchBuffer) and continues.</text>
 </svg>

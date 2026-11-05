@@ -42,7 +42,7 @@ or on the load balancer.
 
 ## 2. The big picture
 
-![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams and dial-out streams to supply agents); they send rounds, deltas and control events to the session's owner executor over a direct control channel; the owner applies BCN's fan-out logic and publishes on the session's pub/sub channel, which gateways subscribe to; executors hold leases and write the shared database.](assets/overview.svg)
+![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams and dial-out streams to supply agents); they send rounds and control events to the session's owner executor over a direct control channel and publish deltas on the message queue, where the owner subscribes to its buckets' delta channels; the owner applies BCN's fan-out logic and publishes on the session's channel, which gateways subscribe to; executors hold leases and write the shared database.](assets/overview.svg)
 
 BCN has **two tiers**, which can ship as two deployments of one codebase:
 
@@ -72,11 +72,15 @@ Three kinds of traffic:
   gateways.
 - **Gateway ↔ executor**: one long-lived, multiplexed control channel per
   pair, straight to the peer's advertised address (no load balancer). It
-  carries rounds, dispatch commands, and the deltas and control events of
+  carries rounds, dispatch commands, and the control events and results of
   running dispatches.
+- **Dispatch gateway → delta channels → owner**: a dispatch gateway publishes
+  a running dispatch's deltas on the **message queue**, on the channel of the
+  session's bucket; the owner subscribes to the delta channels of the buckets
+  it owns.
 - **Executor → session channels → gateways**: the owner publishes each
-  session's events and deltas on a non-durable pub/sub channel; every
-  gateway serving that session subscribes. This is BCN's fan-out.
+  session's events and deltas on the same message queue; every gateway
+  serving that session subscribes. This is BCN's fan-out.
 - **Gateway → supply agents**: outbound A2A streams. Every supply agent is
   an A2A agent that BCN dials out to; BCN accepts no inbound agent
   connections.
@@ -95,7 +99,8 @@ shared database is the only place they meet.
 | Owner | The executor whose `node_id` is on the lease row of S's bucket and whose heartbeat is fresh |
 | Entry gateway | The gateway that accepted the PA's connection for a request |
 | Dispatch gateway | The gateway running one dispatch: it holds the stream to the supply agent |
-| Session channel | S's topic on the pub/sub; the owner publishes, gateways subscribe (§7.4) |
+| Delta channel | Bucket b's topic on the message queue: dispatch gateways publish deltas of b's sessions, b's owner subscribes (§7.2) |
+| Session channel | S's topic on the message queue; the owner publishes, gateways subscribe (§7.4) |
 | Subscriber | A gateway subscribed to S's channel, relaying to a client stream |
 | Delta | A piece of output text or artifact (a "token" chunk); goes to the owner, is fanned out, never stored |
 | Control event | Anything that changes what should happen next; recorded by the owner (§7.3) |
@@ -388,13 +393,14 @@ that hashes on a session header just makes forwarding rarer.
 
 ### 7.1 Connections
 
-![One round end to end: PA's SSE reaches GW1 through the load balancer; GW1 submits the round to owner E3; E3 places the dispatch on GW1; GW1 streams from the supply agent and sends deltas and control events to E3; E3 applies BCN's fan-out logic and publishes on session S's channel; GW1, subscribed to S, relays to the PA.](assets/round-flow.svg)
+![One round end to end: PA's SSE reaches GW1 through the load balancer; GW1 submits the round to owner E3; E3 places the dispatch on GW1; GW1 streams from the supply agent, publishes deltas on the delta channel of S's bucket (E3 subscribes) and sends control events to E3; E3 applies BCN's fan-out logic and publishes on session S's channel; GW1, subscribed to S, relays to the PA.](assets/round-flow.svg)
 
 | Leg | Protocol | Notes |
 | --- | --- | --- |
 | PA → load balancer → gateway | The PA's SSE, WebSocket or gRPC stream | An L4 balancer passes the connection through. An L7 balancer must not buffer responses and must allow idle gaps longer than the gateway's SSE heartbeat (`: ping` every 15–30 s) |
-| Gateway ↔ executor | One long-lived, multiplexed, bidirectional channel per pair (e.g. gRPC over HTTP/2) | Carries rounds, deltas and control events from dispatches, dispatch commands and results; keepalive pings detect a dead peer in seconds |
-| Executor → gateways | **Session channels** on a non-durable, sharded pub/sub | BCN's fan-out: the owner publishes each session's events and deltas; every gateway serving that session subscribes (§7.4) |
+| Gateway ↔ executor | One long-lived, multiplexed, bidirectional channel per pair (e.g. gRPC over HTTP/2) | Carries rounds, control events and results from dispatches, and dispatch commands; keepalive pings detect a dead peer in seconds |
+| Dispatch gateway → owner | **Delta channels** on the message queue, one per bucket | The dispatch gateway publishes each in-flight dispatch's deltas to `deltas:{bucket(S)}`; the owner subscribes to the delta channels of the buckets it owns, so nobody looks an owner up for a delta (§7.2) |
+| Executor → gateways | **Session channels** on the same message queue | BCN's fan-out: the owner publishes each session's events and deltas; every gateway serving that session subscribes (§7.4) |
 | Gateway → supply agent | A2A `SendStreamingMessage` / `SubscribeToTask` | One per dispatch, opened by the dispatch gateway |
 
 ### 7.2 Dispatch placement and results
@@ -410,20 +416,25 @@ a new owner needs it to supervise, cancel or collect the dispatch after a
 takeover.
 
 The dispatch gateway sends everything the agent produces to S's current
-owner, looked up per message (hint cache + `NOT_OWNER`), never to a fixed
-node:
+owner, never to a fixed node:
 
-- **Deltas** in batches (every 200 ms), numbered by `chunk_seq`, without
-  acknowledgement: they are soft.
-- **Control events and the final result**, each with a per-dispatch sequence
-  number, **retried until the owner acknowledges** — an acknowledgement means
+- **Deltas** in batches (every 200 ms), numbered by `chunk_seq`, published
+  on the message queue to the delta channel of S's bucket. Whoever owns the
+  bucket is subscribed, so an owner change needs nothing from the gateway.
+  Deltas are soft: not acknowledged and not stored; one that reaches no
+  subscriber is recovered from the agent (§8.1, step 6).
+- **Control events and the final result** go over the control channel to
+  the owner, looked up per message (hint cache + `NOT_OWNER`). Each carries
+  a per-dispatch sequence number and is **retried until the owner
+  acknowledges** — an acknowledgement means
   the owner recorded it fenced. The owner drops repeats by `(dispatch, seq)`.
 - **Progress counts** every few seconds, for the stuck-dispatch watchdog.
 
 The dispatch gateway also **keeps the step's output so far** until the owner
 acknowledges the result (it needs it to assemble the result anyway). A new
-owner takes it over with `FetchBuffer(D)`, so an owner change loses no
-output. If the dispatch gateway dies first, the owner moves the dispatch
+owner asks for it with `FetchBuffer(D)`, and the gateway answers from that
+buffer or, if it has none, by querying the agent's task (`GetTask` or a
+`SubscribeToTask` snapshot), so an owner change loses no output. If the dispatch gateway dies first, the owner moves the dispatch
 (§7.6); the output is recovered from the agent's task, or the step is
 re-run.
 
@@ -604,60 +615,59 @@ time. Executors hold no streams, so **draining one only moves leases**.
 **Principle: move ownership before the process stops, and keep serving until
 the move.** Draining never means refusing work.
 
-![Executor drain timeline: stop signal; roster draining; each of A's buckets handed off to its successor; leftovers transferred at the deadline; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
+![Executor drain: A stops claiming; for each of its buckets, PREPARE to successor B; A keeps processing deltas, then unsubscribes from the bucket's delta channel and finishes what it received; A transfers the lease and tells B; at the deadline A transfers whatever is left; B re-reads what changed, subscribes and asks the agents for missed deltas; A's stop hook completes and it exits.](assets/drain-timeline.svg)
 
-### 8.1 The sequence for executor A
+### 8.1 The sequence
 
-1. **Stop signal:** roster `state = draining` (gateways and peers stop placing
-   on A), stop claiming. Keep serving every session A still owns.
-2. **Move buckets** — about 4096/N of them, the busiest first. Each goes to
-   its successor by handoff (§8.2). Cold sessions need nothing: they simply
-   belong to the new owner, which loads them on their next round. Warm
-   sessions move inside the handoff, including those whose step is still
-   streaming: the stream lives on a gateway, and its deltas and result go to
-   the successor.
-3. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
-   buckets are left, without a PREPARE.
-4. Delete the roster row and exit. On restart: same address and
-   `member_name`, new `node_id` → leftover buckets are claimable at once and
-   the executor gets its old buckets back.
+Executor A belongs to the group G being deployed. It hands each of its
+buckets b (about 4096/N of them, the busiest first, several at a time) to
+b's successor B, which is outside G:
+
+1. **Stop claiming.** Roster `state = draining`: gateways and peers stop
+   placing work on A, and A claims no new buckets. A keeps serving every
+   session it still owns.
+2. **PREPARE.** A asks B to load the state of b's warm sessions into memory.
+   B is not the owner yet; until the transfer, A keeps processing the deltas
+   it receives and forwarding them on the sessions' channels.
+3. **Stop b's deltas.** A unsubscribes from b's delta channel and finishes
+   processing the deltas it already received.
+4. **Transfer ownership.** A updates the lease table — owner of b = B,
+   token + 1 — then tells B: you own b now, start driving it (COMMIT).
+5. **Deadline.** When the drain deadline passes (set below the deploy
+   platform's stop-hook timeout), A transfers whatever buckets are left
+   straight away, without waiting for steps 2–3. B recovers the deltas this
+   loses in step 6.
+6. **B catches up.** B re-reads only what changed between PREPARE and COMMIT
+   (by each session's `write_seq`), subscribes to b's delta channel, and for
+   each in-flight dispatch asks the supply agent, through its dispatch
+   gateway, for the output it may have missed (`FetchBuffer`, §7.2). It
+   republishes each step's output as an `append: false` replacement, so the
+   PA's text has no gap and no duplicate (§7.4).
+7. **A's stop hook completes.** A deletes its roster row and exits. On
+   restart: same address and `member_name`, new `node_id` → leftover buckets
+   are claimable at once and the executor gets its old buckets back.
 
 Successors must be outside G, or a bucket would move twice: a draining node
-refuses a handoff and the next-ranked node is tried. If the deploy platform
+refuses a PREPARE and the next-ranked node is tried. If the deploy platform
 can mark a whole group draining at once, double moves disappear entirely.
 
-### 8.2 Handoff
+### 8.2 What the handoff guarantees
 
-![Handoff of bucket b: A sends PREPARE; B loads b's warm sessions and replies READY; A pauses b and queues new messages for it; A transfers b's lease to B with token n+1; A sends COMMIT with b's step buffers; B checks each session's write_seq, drives b's sessions and publishes on their channels; A passes the queued messages to B; later messages from gateways go to B.](assets/handoff-sequence.svg)
+![Handoff of bucket b from draining executor A to successor B: PREPARE; A keeps processing deltas; A unsubscribes from b's delta channel and drains it; TRANSFER and COMMIT; B re-reads changes, subscribes, asks the dispatch gateways for missed output and republishes it; failure cases below.](assets/handoff-sequence.svg)
 
-1. **PREPARE** — A asks successor B to load bucket b's warm sessions into
-   memory (B is not owner yet).
-2. **Pause** — A finishes its in-flight writes for b and, for a few
-   milliseconds, queues new messages for b's sessions instead of processing
-   them: rounds, control events, and deltas from dispatch gateways.
-3. **Transfer** — one database update: owner of b = B, token + 1.
-4. **COMMIT** — A tells B and hands it b's **step buffers**: for each
-   in-flight dispatch, the output so far, which the owner keeps to build
-   reconnect snapshots (§7.5). They are final now, because A is paused. B
-   starts driving b's sessions and publishing on their channels, re-reading
-   only what changed since PREPARE (by each session's `write_seq`).
-5. A passes the messages it queued in step 2 to B. Deltas need this: a
-   dispatch gateway sends each delta once, without acknowledgement (§7.2),
-   so a delta that reached A would otherwise never reach the PA. Rounds and
-   control events would be retried anyway; passing them on saves a round
-   trip. Later arrivals at A get `NOT_OWNER(B)`. Dispatch gateways send their
-   next message to B, because they look the owner up per message.
-   Subscribers notice nothing: they are on the sessions' channels, not on
-   A.
-
-The gap for b is one database write plus one network round trip: the PA's
-stream pauses for milliseconds. If anything fails midway, existing rules
-cover it: B dies → ordinary takeover; the COMMIT is lost → B finds b anyway
-and takes the step buffers from the dispatch gateways (`FetchBuffer`, §7.2);
-A dies before passing on its queue → a few deltas are missing from the live
-view, and the final result is still exact;
-A writes after the transfer → fenced out; A publishes after the transfer →
-subscribers drop its lower token.
+- **Nothing durable is lost.** Rounds and control events go over the control
+  channel and are retried until acknowledged; after step 4 they get
+  `NOT_OWNER(B)` and go to B.
+- **Deltas can only go missing from the live view**, between A unsubscribing
+  (step 3) and B subscribing (step 6). B fills that gap from the agent, and
+  the final result is exact either way.
+- **The gap for b is short.** Steps 3–4 are one database write plus one
+  round trip; at the deadline (step 5) it is the time B takes to catch up.
+  Clients stay connected to their gateways throughout: they are on the
+  sessions' channels, not on A.
+- **Failures:** B dies → ordinary takeover. The COMMIT is lost → B finds b
+  anyway (below). A writes after the transfer → fenced out. A publishes after
+  the transfer → subscribers drop its lower token.
 
 How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
 sets it `TRUE` in the same transaction; a new owner sets it `TRUE` when it
@@ -665,9 +675,8 @@ starts driving. Every executor reads, each heartbeat, its buckets that are
 not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed, at most
 a few hundred rows, usually none). There is no timestamp or cursor, so a
 transfer that commits late can't be skipped: an unadopted row stays visible
-until it is adopted.
-The same read covers transfers made without a PREPARE (drain deadline,
-watchdog).
+until it is adopted. The same read covers transfers made at the deadline and
+by the watchdog.
 
 ### 8.3 When is it safe to move a run mid-flight?
 
@@ -727,10 +736,10 @@ gateways; output pauses until the takeover, then continues.
    sessions whose pending flag is set but which nobody is driving.
 
 For each resumed session: reload state from the database (exactly like
-resuming a cold session — *failover is a cache miss*), check each in-flight
-dispatch's gateway in the roster (a live one hands over the step's output
-with `FetchBuffer` and sends further deltas to the new owner; a dead one
-means the dispatch is moved, §7.6), republish the session's latest event and
+resuming a cold session — *failover is a cache miss*), subscribe to the bucket's
+delta channel, check each in-flight dispatch's gateway in the roster (a live
+one hands over the step's output with `FetchBuffer`; a dead one means the
+dispatch is moved, §7.6), republish the session's latest event and
 step buffer (§7.4, rule 2), and resume.
 
 **Taking over earlier on evidence.** Because fencing makes a wrong guess
@@ -792,9 +801,9 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 | Rebalance pace after an executor joins | 5 buckets/s |
 | Bucket map refresh at gateways | 10 s |
 | Safety-net sweep | 30–60 s |
-| Executor drain deadline | 25 s |
+| Executor drain deadline | below the platform's stop-hook timeout (e.g. 25 s) |
 | Gateway–executor channel keepalive / dead after | 1 s / 3 s |
-| Delta batch interval (dispatch gateway → owner) | 200 ms |
+| Delta batch interval (dispatch gateway → delta channel) | 200 ms |
 | Catch-up while a pub/sub connection is down: interval / sessions per call | 2 s / 500 |
 | Safety check for an unfinished, silent session | 30 s |
 | Dispatch progress count | every 5 s |
@@ -837,13 +846,14 @@ single-node implementation and a no-op one):
   records use it).
 - **Gateway–executor protocol**:
   - gateway → executor: `Submit(round)`, `BucketMap()`, `Snapshot(S)`,
-    `ReadEvents(S, after_seq)`, `DispatchDelta(D, chunk_seq, chunk)`
-    (unacknowledged), `DispatchEvent(D, seq, event)`,
+    `ReadEvents(S, after_seq)`, `DispatchEvent(D, seq, event)`,
     `DispatchResult(D, seq, output)`, `Progress(D)`, `Abandoned(D)`;
   - executor → gateway: `Accepted(Task)`, `NOT_OWNER(X)`,
     `StartDispatch(D, target, request)`, `CancelDispatch(D)`, `Ack(D, seq)`,
     `FetchBuffer(D)`.
-- **Session channel** (owner → subscribers, on the pub/sub):
+- **Delta channel** (dispatch gateway → owner, on the message queue):
+  `Delta(D, chunk_seq, chunk)` on `deltas:{bucket}`.
+- **Session channel** (owner → subscribers, on the message queue):
   `Event(event_seq, token, event)` and `Delta(D, chunk_seq, token, chunk)`;
   with a pub/sub implementation, an in-process one for single-node mode and a
   no-op.
@@ -882,8 +892,8 @@ its local database, so the takeover path is exercised everywhere.
 | 6 | Physical home of the session event log | Extend item 3's delivery ledger rather than add an overlapping table |
 | 7 | Gateway and executor as separate deployments, or roles of one | Separate deployments from one codebase: gateways deploy rarely, executors often |
 | 8 | Exact replay by `Last-Event-ID` | Optional extension once the step buffer exists; snapshots are enough for A2A |
-| 9 | Pub/sub product for session channels | Redis 7+ sharded pub/sub or NATS core; TBase only if it supports sharded pub/sub |
-| 10 | Delta transport from dispatch gateway to owner if long-lived internal channels are not allowed | A per-dispatch channel on the same pub/sub, subscribed by the owner |
+| 9 | Message queue product for delta and session channels | A non-durable, sharded pub/sub: Redis 7+ sharded pub/sub or NATS core; TBase only if it supports sharded pub/sub. With a durable queue that keeps a short retention, B could replay b's delta channel from an offset instead of asking the agent (§8.1, step 6) |
+| 10 | Delta channel granularity | One channel per bucket (an owner subscribes to ~4096/N channels); per-session channels only if one bucket's delta rate is too high for one subscriber |
 | 11 | Shared row locks for the fence step | Use `FOR SHARE` if OceanBase supports it; otherwise `FOR UPDATE`, and measure per-bucket write rates for hot buckets |
 | 12 | Bucket count | 4,096, fixed before launch |
 

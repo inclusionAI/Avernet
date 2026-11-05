@@ -17,8 +17,8 @@
 | Transferred, not-yet-adopted buckets | 1 indexed query per executor per tick (`adopted = FALSE`, at most a few hundred rows; usually empty) | per executor per tick |
 | Session event (control event for subscribers) | +1 insert inside an existing fenced transaction, no extra round trip | per state change, interrupt or step result — a few per step, never per token |
 | Event log read | 1 indexed range read (`event_seq > :last`); catch-up reads up to 500 sessions per query | per gap or reconnect snapshot; batched catch-up only after a pub/sub disconnect, plus a safety check per unfinished session silent for 30 s — at 300 k streams ≤ 10 k sessions/s, i.e. ~20 queries/s |
-| Tokens (deltas) | **0** database statements. Per 200 ms batch: 1 message dispatch gateway → owner and 1 publish on the session channel, fanned out by the pub/sub | — (network and pub/sub capacity, never storage) |
-| Gateway ↔ executor messages | 1 per round, per control event, per delta batch and per dispatch result | — (network, not storage) |
+| Tokens (deltas) | **0** database statements. Per 200 ms batch: 1 publish on the bucket's delta channel (gateway → owner) and 1 on the session channel (owner → gateways), on the message queue | — (network and pub/sub capacity, never storage) |
+| Gateway ↔ executor messages | 1 per round, per control event and per dispatch result | — (network, not storage) |
 
 The rule behind every row: costs scale with **nodes and buckets**, never
 with **sessions**, except for work a session actually does — and never with
@@ -49,9 +49,10 @@ by the owner (for snapshots). At about 10 KB per step, 300 k concurrent
 dispatches need ~3 GB across gateways and ~3 GB across executors. No storage
 operations; both copies are dropped when the step's result is recorded.
 
-**Pub/sub.** At 200 ms batches a stream publishes 5 messages/s; 300 k
-concurrent streams are ~1.5 M publishes/s before fan-out (usually one
-subscriber per session). Size the sharded pub/sub for that, or raise the
+**Message queue.** At 200 ms batches a stream publishes 5 delta messages/s
+into its bucket's delta channel and the owner 5 more into the session
+channel; 300 k concurrent streams are ~3 M publishes/s before fan-out
+(usually one subscriber per channel). Size the sharded pub/sub for that, or raise the
 batch interval.
 
 ## 3. How to replace estimates with measurements

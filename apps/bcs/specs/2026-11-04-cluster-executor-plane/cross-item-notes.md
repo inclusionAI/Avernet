@@ -14,12 +14,13 @@ builds it to this contract:
   A2A streams terminate on gateways; every supply agent is an A2A agent
   that BCN dials out to. Executors keep none.
 - **Send every downstream event to the session's owner** (design §7.2–7.3):
-  deltas in 200 ms batches without acknowledgement; control events (the
+  deltas in 200 ms batches, published on the message queue to the delta
+  channel of the session's bucket, without acknowledgement; control events (the
   agent's task id, `input-required` / `auth-required`, the final
   result with the assembled output) retried until
   acknowledged. Telling the two apart is part of the gateway–executor
   contract.
-- **Look the owner up per message** (hint cache + `NOT_OWNER`); never
+- **Look the owner up per control message** (hint cache + `NOT_OWNER`); never
   remember an owner for the life of a run. This is what lets a session move
   without touching any connection.
 - **Subscribe by session, never by owner** (design §7.4): subscribe to S's
@@ -31,7 +32,9 @@ builds it to this contract:
   Fan-out decisions are the owner's; the gateway only relays what is
   published to it.
 - **Keep each in-flight dispatch's output** until the owner acknowledges the
-  result, and hand it to a new owner on `FetchBuffer` (design §7.2).
+  result, and hand it to a new owner on `FetchBuffer` (design §7.2); with no
+  buffer, answer by querying the agent's task (`GetTask` or a
+  `SubscribeToTask` snapshot).
 
 ## Item 3 — execution correctness
 
