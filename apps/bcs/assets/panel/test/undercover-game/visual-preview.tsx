@@ -39,7 +39,10 @@ const params = {
     ...(voting ? {} : { 'speech-human': 'human', 'speech-c': 'c' }),
   } : {
     ...Object.fromEntries(players.map((p) => [`speech-${p.actorId}`, p.actorId])),
-    ...(mode === 'vote' || finale ? { 'vote-human': 'human', 'tally': 'host' } : {}),
+    ...(mode === 'vote' || finale ? {
+      ...Object.fromEntries(players.map((p) => [`vote-${p.actorId}`, p.actorId])),
+      'tally': 'host',
+    } : {}),
   },
   currentViewerActorId: 'human',
   rules: { speechMaxChars: 25, forbidOwnWord: true, bluntness: mode === 'eliminated' ? 5 : undefined },

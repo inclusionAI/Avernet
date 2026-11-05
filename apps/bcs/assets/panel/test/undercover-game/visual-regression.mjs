@@ -35,6 +35,8 @@ await act(async()=>{
 });
 assert.ok(document.querySelector('[aria-label="游戏结束"]'),'?mode=finished must render the club finale dialog');
 assert.match(document.getElementById('root').textContent,/平民阵营获胜|平民胜利/,'finished alias uses the completed finale fixture');
+for(const actorId of ['a','human','c','d','e','f'])assert.equal(document.querySelector(`[data-actor-id="${actorId}"]`)?.getAttribute('data-player-state'),'voted',`finished preview maps vote-${actorId} to its player`);
+assert.match(document.getElementById('root').textContent,/6\/6 已完成/,'finished preview counts every mapped vote node');
 previewDom.window.close();
 
 // Observer-only speech previews must not turn the completed human speech into an action.
