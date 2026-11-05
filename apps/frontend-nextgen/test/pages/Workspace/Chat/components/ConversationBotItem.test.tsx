@@ -141,16 +141,23 @@ describe('ConversationBotItem 操作区', () => {
     expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开态收起指示器常显让位 pr-9,hover 全组让位 112px(2026-11-04 显隐重构)', () => {
+  it('展开态收起按钮随操作组显隐,静默态不再常驻让位(2026-11-05 回归修正)', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    // 收起指示器是展开状态的行级指示(同日修正:hover 别处不消失),静态让位单按钮 36px。
+    // 收起按钮只在 hover/键盘聚焦/触屏/菜单打开时出现;静默态不预留右侧按钮空间。
     const column = title?.parentElement as HTMLElement;
-    expect(column).toHaveClass('pr-9');
+    expect(column).not.toHaveClass('pr-9');
     expect(column.className).toContain('group-hover:pr-[112px]');
-    expect(screen.getByRole('button', { name: '收起会话列表' }).className).not.toContain('opacity-0');
+    const collapse = screen.getByRole('button', { name: '收起会话列表' });
+    const create = screen.getByRole('button', { name: '新建会话' });
+    expect(collapse.parentElement).toBe(create.parentElement);
+    expect(collapse.className).toContain('opacity-0');
+    expect(collapse.className).toContain('group-hover:opacity-100');
+    expect(collapse.className).toContain('group-focus-within:opacity-100');
+    expect(collapse.className).toContain('group-has-[[data-state=open]]:opacity-100');
+    expect(collapse.className).toContain('[@media(hover:none)]:opacity-100');
   });
 
   it('展开且有「更多操作」入口时 hover 让位 5 按钮 138px（紧凑几何）', () => {
@@ -578,13 +585,17 @@ describe('ConversationBotItem 行徽标', () => {
     expect(label.parentElement).not.toHaveClass('flex-col');
   });
 
-  it('展开态徽章让位于常显收起指示器(2026-11-04 收起常显修正):整徽章隐藏', () => {
+  it('展开态徽章静默常显:收起按钮 hover 显隐时不强制隐藏徽章(2026-11-05 回归修正)', () => {
     const { container } = renderBotItem({ expanded: true, bot: { engine: 'openclaw' } });
     const badge = Array.from(container.querySelectorAll('span')).find((el) =>
       el.textContent === 'OpenClaw',
     ) as HTMLElement;
-    // 收起指示器常显在操作组首位(距右 18px),静态让位 36px 下 badge 与其重叠,恒让位。
-    expect(badge).toHaveClass('hidden');
+    // 收起按钮不再常驻,徽章静默态保留,仅在 hover/聚焦/菜单打开/触屏时让位。
+    expect(badge).not.toHaveClass('hidden');
+    expect(badge.className).toContain('group-hover:hidden');
+    expect(badge.className).toContain('group-focus-within:hidden');
+    expect(badge.className).toContain('group-has-[[data-state=open]]:hidden');
+    expect(badge.className).toContain('[@media(hover:none)]:hidden');
   });
 
   it('收起态徽章静默常显:仅悬停/聚焦/菜单开/触屏类让位,不强制 hidden', () => {
