@@ -5,6 +5,7 @@ import type { UseBotSessionFilesResult } from '@/pages/Workspace/hooks/useBotSes
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { BotSessionFilesPanel } from './BotSessionFilesPanel';
+import type { BotResourceJump } from './BotSessionFilesPanel';
 import { BotUploadFilesModal } from './UploadFilesModal';
 
 interface BotSessionFileOverlaysProps {
@@ -22,6 +23,8 @@ interface BotSessionFileOverlaysProps {
   onOpenUpload(): void;
   onAddToSession(): void;
   onReference(file: BotSessionFileView): void;
+  /** 跳转 Bot 完整资源目录入口；不传则不渲染（好友 Bot 等场景）。 */
+  resourceJump?: BotResourceJump;
 }
 
 /**
@@ -68,6 +71,7 @@ export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
             onDelete={(file) => void files.deleteFile(file)}
             onDownload={(file) => void files.downloadFile(file)}
             onReference={props.onReference}
+            resourceJump={props.resourceJump}
           />
         ) : null}
       </ResizableWorkspaceSidebar>

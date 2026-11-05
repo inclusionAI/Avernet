@@ -2,6 +2,7 @@ import { IconButton } from '@/components/ui';
 import { ChatConnectionStatus } from '@/components/Workspace/ChatConnectionStatus';
 import { PrimaryNavToggle } from '@/components/Workspace/PrimaryNav';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { HISTORY_SEARCH_ENABLED } from '@/domain/conversation/featureFlags';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
@@ -256,7 +257,7 @@ export function GroupHeader({
                 onClick={() => onTogglePanel(activePanel === 'manage' ? 'none' : 'manage')}
               />
             ) : null}
-            {selectedSession ? (
+            {selectedSession && HISTORY_SEARCH_ENABLED ? (
               <HeaderIcon
                 label={activePanel === 'history' ? '关闭历史消息' : '历史消息'}
                 icon={<History className="size-4" aria-hidden />}

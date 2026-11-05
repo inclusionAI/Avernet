@@ -55,6 +55,8 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
+  /** 归属空间类型（后端 space.kind）；缺失时由 spaceId 与个人空间比对兜底。 */
+  spaceKind?: 'personal' | 'team';
   /** 会话运行阶段；对话页目录中的服务 Bot 使用 online，个人 Bot 使用 draft；调试页可显式选择阶段。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
@@ -241,6 +243,12 @@ function readTemplateName(dto: OwnedBotDto, templateType?: string): string | und
   return undefined;
 }
 
+/** 归一后端 space.kind（大小写/命名差异）到前端空间类型；缺失返回 undefined 由调用侧兜底。 */
+function normalizeSpaceKind(kind: string | undefined): 'personal' | 'team' | undefined {
+  if (!kind) return undefined;
+  return kind.toUpperCase() === 'TEAM' ? 'team' : 'personal';
+}
+
 function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   const botId = dto.bcn_bot_id || (dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`);
   const { realBotId, ownerId: legacyLocator } = splitBotId(botId);
@@ -275,6 +283,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     templateName: runtime.templateName,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
+    spaceKind: normalizeSpaceKind(dto.space?.kind),
   };
 }
 
