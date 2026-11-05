@@ -367,8 +367,7 @@ _ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
     Section.SCRIPT: ApplyPhase.PRE_CONTAINER,
     Category.IDENTITY: ApplyPhase.ON_CONTAINER,
     Category.RESOURCES: ApplyPhase.ON_CONTAINER,
-    Category.SKILLS: ApplyPhase.ON_CONTAINER,
-    Category.MCP: ApplyPhase.ON_CONTAINER,
+    Category.CAPABILITIES: ApplyPhase.ON_CONTAINER,
     Category.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,
     Category.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
 })

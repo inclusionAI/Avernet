@@ -116,4 +116,6 @@ class SkillSetApplyService:
             result["removed"],
             result["changed"],
             result["runtime_projection"],
+            result["default_changed"],
+            result["default_removed"],
         )
