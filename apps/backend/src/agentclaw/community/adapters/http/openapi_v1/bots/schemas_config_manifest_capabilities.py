@@ -146,5 +146,3 @@ class ConfigManifestCapabilities(BaseModel):
             "all, and a matrix cell says whether a *combination* is delivered."
         ),
     )
-
-
