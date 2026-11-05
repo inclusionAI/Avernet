@@ -14,6 +14,7 @@ import {
 import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import { useEffect, useState, type ReactNode } from 'react';
 import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
+import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 export const formatTime = (value?: string) =>
   value
     ? Number.isNaN(Date.parse(value))
@@ -141,7 +142,7 @@ export function RoutineDetail({
           <div className="space-y-3">
             {history.items.map((run, index) => (
               <article
-                key={`${key}-${run.id}-${run.startedAt}-${index}`}
+                key={`${key}-${page}-${pageSize}-${run.runtime_stage}-${run.device_uuid}-${run.operator_id}-${run.id}-${run.startedAt}-${index}`}
                 className="rounded-lg border border-border p-4 text-sm"
               >
                 <div className="flex justify-between gap-4">
@@ -156,6 +157,9 @@ export function RoutineDetail({
                   <div className="break-all">运行实例：{run.device_uuid || '未报告'}</div>
                   <div className="break-all">Caller：{run.operator_id || '未报告'}</div>
                 </dl>
+                <div className="mt-4 flex justify-end">
+                  <RoutineRunConversation run={run} />
+                </div>
               </article>
             ))}
           </div>

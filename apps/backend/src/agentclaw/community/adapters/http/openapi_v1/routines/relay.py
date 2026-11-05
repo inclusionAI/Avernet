@@ -22,7 +22,7 @@ def _job_log(data: dict) -> dict:
             projected[key] = safe_reason(value) if key == "reason" else value
     if isinstance(data.get("runs"), list):
         projected["runs"] = [
-            {**_map_run(row, "").model_dump(), "started_at_ms": row.get("started_at_ms"),
+            {**_map_run(row, "").model_dump(exclude={"input", "output", "error", "messages"}), "started_at_ms": row.get("started_at_ms"),
              "finished_at_ms": row.get("finished_at_ms"), "duration_ms": row.get("duration_ms"),
              "output": row.get("output")}
             for row in data["runs"] if isinstance(row, dict)
