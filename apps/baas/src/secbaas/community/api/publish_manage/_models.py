@@ -34,6 +34,8 @@ class UpdateDeviceStatusResult:
     device_uuid: str
     previous_status: str
     new_status: str
+    previous_provider_device_id: str | None = None
+    new_provider_device_id: str | None = None
 
 
 @dataclass
