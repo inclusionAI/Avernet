@@ -53,3 +53,10 @@ def test_offpath_three_or_more_candidates_forms_group_directly():
     result = _offpath_normal(["a:1", "b:2", "c:3", "d:4"])
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation.bot_ids == ["a:1", "b:2", "c:3"]
+
+
+def test_offpath_preserves_bare_candidate_without_owner():
+    result = _offpath_normal(["research"])
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "research"
+    assert result.owner_id is None

@@ -20,8 +20,11 @@ from agentclaw.community.core.task.repository.types import (
     TaskNodeRecord,
     TaskNodeRunInfoRecord,
 )
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 from agentclaw.community.core.task.task_center.task_service_support import (
-    resolve_coop_collab_mode,
+    resolve_coop_collab_mode
 )
 
 logger = logging.getLogger("task.service")
@@ -37,6 +40,9 @@ class TaskServiceExecutionMixin:
         message = f"/{wf_id} " + " ".join(args) if wf_id else " ".join(args)
 
         logger.error("[task][task_service] run_workflow, message=%s", message)
+        entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+            request.owner_bot_id, request.owner_user_id
+        )
         try:
             self._report_node_patch(
                 TaskNodePatch(
@@ -44,7 +50,7 @@ class TaskServiceExecutionMixin:
                     node_id=task_id,
                     status=Status.RUNNING,
                     run_mode="single_bot",
-                    assignee=request.owner_bot_id,
+                    assignee=entry_bot_id or request.owner_bot_id,
                     extend_props_patch={},
                 )
             )
@@ -59,9 +65,9 @@ class TaskServiceExecutionMixin:
                 ),
                 run_info=RuntimeInfo(
                     run_mode="single_bot",
-                    assignee=request.owner_bot_id,
+                    assignee=entry_bot_id or request.owner_bot_id,
                     extend_props={
-                        "assignee_owner_id": request.owner_user_id
+                        "assignee_owner_id": entry_bot_owner_id
                     }
                 ),
                 node_run_graph=None
@@ -96,9 +102,10 @@ class TaskServiceExecutionMixin:
         ).strip()
         # owner bot 寻址:_normalize 已在"归属≠执行用户"时保留 owner_bot_id 复合(真实归属),
         # 此处直接用 composite;bare(无内嵌归属)时才 compose 执行用户作归属。
-        _owner_bot = request.owner_bot_id or ""
-        if ":" not in _owner_bot:
-            _owner_bot = compose_bot_identity(_owner_bot, request.owner_user_id)
+        _entry_bot_id, _entry_bot_owner_id = resolve_entry_bot_identity(
+            request.owner_bot_id, request.owner_user_id
+        )
+        _owner_bot = compose_bot_identity(_entry_bot_id, _entry_bot_owner_id)
         gf = GroupFormation(
             bot_ids=[
                 _owner_bot,

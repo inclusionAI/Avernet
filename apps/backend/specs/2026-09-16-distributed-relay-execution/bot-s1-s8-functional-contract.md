@@ -454,7 +454,7 @@ Group 目标 -> root_node.run_info.run_mode == "coop_group"
            -> root_node.run_info.assignee == initial_target.target_id
 ```
 
-`TaskInfo.owner_bot_id` 是任务归属 Bot；Group 目标时它是 manager/master Bot，不是根节点执行者。`source_type` 是发起来源，不用于反推 Bot/Group 目标。
+`TaskInfo.owner_bot_id` 是任务归属 Bot 的规范 Bot UUID（`bot_id:bot_owner_id`）；Group 目标时它记录 manager/master Bot UUID，不是根节点执行者。`TaskInfo.owner_user_id` 是任务发起人/访问者，不是 Bot owner。根节点继续使用拆分字段：`run_info.assignee` 保存产品 `bot_id`，`run_info.extend_props["assignee_owner_id"]` 保存真实 Bot owner；执行侧用两者组装 Bot UUID。历史裸 `bot_id` 数据按唯一 resolver 兼容解析：`default` 使用任务发起人作 owner，非默认裸 Bot 反查 Bot 真实 owner。`source_type` 是发起来源，不用于反推 Bot/Group 目标。
 
 #### 处理函数
 

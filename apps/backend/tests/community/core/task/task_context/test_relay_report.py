@@ -554,3 +554,23 @@ def test_event_id_conflict_is_rejected_after_accepted_report() -> None:
     changed.event.output_patch["result"] = "changed"
     with pytest.raises(TaskStateError, match="event_id conflicts"):
         service.apply_relay_report(changed)
+
+
+def test_plan_splits_composite_single_bot_identity_for_node_projection() -> None:
+    """Runtime state stores split identity while S5D candidates stay composite."""
+    service = _graph_service()
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    command = _planned_single_bot_command(
+        event_id="plan-composite", assignee="bot-2:owner-2"
+    )
+    result = service.apply_relay_report(command)
+
+    assert result.target_node_id is not None
+    successor = service.query_task_dashboard("task-1").tasks[1]
+    assert successor.run_info.assignee == "bot-2"
+    assert successor.run_info.extend_props["assignee_owner_id"] == "owner-2"
+    context = service.get_node_context("task-1", result.target_node_id)
+    assert context.used_executor_ids == ["bot-1", "bot-2:owner-2"]

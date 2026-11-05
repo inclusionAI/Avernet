@@ -195,7 +195,7 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         """Return session rows ordered newest first for task-panel restoration.
 
         Callback convergence remains separate because its retry-first lookup has
-        a different contract. Rows without persisted timestamps remain last.
+        a different contract. The auto-increment id is the stable tiebreaker.
         """
         ...
 

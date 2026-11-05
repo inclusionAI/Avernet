@@ -14,6 +14,7 @@ from typing import Any
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.identity import (
     is_dispatchable_single_bot_assignee,
+    parse_scoped_bot_identity,
 )
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
@@ -436,6 +437,12 @@ def apply_relay_report(
                     if not is_dispatchable_single_bot_assignee(assignee):
                         raise TaskStateError("single_bot plan requires a real bot assignee")
                     assignee = str(assignee or "").strip()
+                    scoped_assignee = parse_scoped_bot_identity(assignee)
+                    if scoped_assignee is not None:
+                        assignee = scoped_assignee[0]
+                        next_node.run_info.extend_props["assignee_owner_id"] = (
+                            scoped_assignee[1]
+                        )
                     next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
