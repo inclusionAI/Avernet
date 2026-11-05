@@ -46,6 +46,16 @@ QualityTaskService service API. The task UUID uses an internally generated
 `baas_publish_id`, and the caller `operator`. The response adds
 `quality_task_id` and `quality_task_uuid`.
 
+Newly created records also carry `task_purpose=environment_publish` in `ext`.
+This is descriptive metadata, not an authorization signal. Existing records
+may lack it. An evaluation process request for an `eval` / `service_bot_single`
+task in `init`, `env_preparing`, or `env_ready` without an existing
+`set_task_uuid` requires both `set_uuid` and `version` before any transition or
+external call. Missing inputs return an explicit client error without changing
+the task or releasing its environment. Existing started and cleanup flows retain
+their previous behavior. The admin process endpoint preserves its response
+envelope and reports this specific error with `success=false` and code 400.
+
 Missing/hidden Bot or publication, including cross-Bot/environment references,
 returns the existing sanitized 404 envelope. Invalid parameters return 422.
 Unmapped publishing errors (including missing build artifacts and provider/write

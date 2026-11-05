@@ -26,6 +26,9 @@ class TaskProcessorProtocol(Protocol):
 
         Raises:
             ValueError: If task not found
+            EvaluationInputIncompleteError: For an unstarted single-bot
+                evaluation in an environment-preparation state with missing
+                evaluation inputs. No transition or external call is made.
         """
         ...
 

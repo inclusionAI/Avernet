@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.quality.models import QualityTaskRecord
+from agentclaw.community.core.quality.errors import EvaluationInputIncompleteError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -260,7 +261,10 @@ async def process_task(
 
     状态流程: init → env_preparing → env_ready → running → success/failed
     """
-    task = await processor.process(id)
+    try:
+        task = await processor.process(id)
+    except EvaluationInputIncompleteError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return ProcessTaskResponse(
         success=True,
         data=_record_to_response(task),
@@ -318,6 +322,8 @@ async def process_task_for_others(
             message="状态推进成功",
         )
 
+    except EvaluationInputIncompleteError as e:
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
     except HTTPException:
         raise
     except Exception as e:

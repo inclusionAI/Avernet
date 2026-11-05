@@ -51,7 +51,7 @@ async def test_publish_eval_env_handler(resource_services):
     assert task.uuid == service.eval_publish.await_args.kwargs["biz_id"]
     assert task.ext == {
         "publish_id": 7, "bot_uuid": "eval-bot", "baas_publish_id": 42,
-        "operator": "actor",
+        "operator": "actor", "task_purpose": "environment_publish",
     }
 
 

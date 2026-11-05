@@ -582,6 +582,60 @@ def process_task_from_init():
     """Process task from init status advances to env_preparing."""
 
 
+def _seed_incomplete_eval(world):
+    from tests.community.factories.quality import make_quality_task
+
+    _seed_operator(world)
+    _seed_super_admin(world)
+    _seed_other_user(world)
+    _seed_owner_with_bot(world)
+    make_quality_task(
+        world, task_type="eval", biz_type="service_bot_single", status="init",
+        bot_id="bot_test", owner_id="u_owner",
+        ext={"publish_id": 123, "baas_publish_id": 456},
+    )
+
+
+@endpoint_test(
+    method="POST", path="/api/quality/tasks/{id}/process",
+    scenario="error_incomplete_evaluation_input", seed=_seed_incomplete_eval,
+    input=CaseInput(path_params={"id": "1"}, headers={"x-user-id": "u_owner"}),
+    expect=ExpectError(status=400),
+)
+def process_task_incomplete_input():
+    """Incomplete evaluation input is rejected before provisioning."""
+
+
+@endpoint_test(
+    method="POST", path="/api/quality/tasks/{id}/process",
+    scenario="error_incomplete_evaluation_unauthorized", seed=_seed_incomplete_eval,
+    input=CaseInput(path_params={"id": "1"}, headers={"x-user-id": "u_other"}),
+    expect=ExpectError(status=403),
+)
+def process_task_incomplete_unauthorized():
+    """Collaborator authorization precedes input validation."""
+
+
+@endpoint_test(
+    method="POST", path="/api/quality/tasks/{id}/process_for_others",
+    scenario="error_incomplete_evaluation_input", seed=_seed_incomplete_eval,
+    input=CaseInput(path_params={"id": "1"}, headers={"x-user-id": "100000"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": False, "error_code": 400}),
+)
+def process_task_for_others_incomplete_input():
+    """Admin process retains its failure envelope for incomplete input."""
+
+
+@endpoint_test(
+    method="POST", path="/api/quality/tasks/{id}/process_for_others",
+    scenario="error_incomplete_evaluation_non_admin", seed=_seed_incomplete_eval,
+    input=CaseInput(path_params={"id": "1"}, headers={"x-user-id": "u_other"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": False, "error_code": 403}),
+)
+def process_task_for_others_incomplete_non_admin():
+    """Admin authorization is checked before input completeness."""
+
+
 # NOTE: The "not_found" scenario for process_task is intentionally not tested here.
 # When a task doesn't exist, the CollaboratorPermissionInterceptor's extract_from_task_id
 # returns empty PermissionParams(), which triggers a permission check failure (403)

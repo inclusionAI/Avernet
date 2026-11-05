@@ -110,6 +110,7 @@ async def publish_eval_env(
             "bot_uuid": deployment["bot_uuid"],
             "baas_publish_id": deployment["baas_publish_id"],
             "operator": operator,
+            "task_purpose": "environment_publish",
         },
         operator_id=operator,
         uuid=biz_id,

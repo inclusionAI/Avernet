@@ -304,14 +304,15 @@ class TestProcessTaskForOthers:
         assert resp.error_code == 400
         assert resp.data is None
 
-    def test_unexpected_exception_returns_500(self):
+    @pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+    def test_unexpected_exception_returns_500(self, error_type):
         """Test that unexpected exception returns 500 error (lines 318-320)."""
         service = FakeQualityTaskService()
         # Create a task so the lookup succeeds
         service.add_task(_make_record(id=1, bot_id="bot-1", owner_id="owner-1"))
 
         # Processor that raises unexpected error
-        processor = FailingTaskProcessor(RuntimeError("Database connection lost"))
+        processor = FailingTaskProcessor(error_type("Database connection lost"))
 
         super_admin_user = AuthenticatedUser(id="admin", staffId="100000", operatorName="admin")
 

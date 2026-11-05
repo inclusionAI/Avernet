@@ -11,6 +11,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository
 from agentclaw.community.core.quality.models import QualityTaskRecord
+from agentclaw.community.core.quality.errors import EvaluationInputIncompleteError
 from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
@@ -76,6 +77,19 @@ class TaskProcessor:
         logger.info("[process] task fetched: id=%s, status=%s, bot_id=%s", id, task.status if task else None, task.bot_id if task else None)
         if not task:
             raise ValueError(f"Task not found: {id}")
+
+        # Environment-publish records share the quality task type but do not
+        # necessarily have evaluation inputs. Check before provisioning or
+        # changing any state, including the exception-recording path below.
+        ext = task.ext or {}
+        if (
+            task.task_type == "eval"
+            and task.biz_type == "service_bot_single"
+            and task.status in {"init", "env_preparing", "env_ready"}
+            and not ext.get("set_task_uuid")
+            and (not ext.get("set_uuid") or not ext.get("version"))
+        ):
+            raise EvaluationInputIncompleteError("评测输入不完整，无法自动推进")
 
         try:
             current_status = task.status

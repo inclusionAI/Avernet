@@ -144,7 +144,7 @@ class TestTaskProcessor:
                 bot_id="test-bot-123",
                 uuid="task-uuid-123",
                 operator_id="operator-001",
-                ext={"publish_id": "100"},
+                ext={"publish_id": "100", "set_uuid": "suite", "version": 1},
             )
             task_env_preparing = make_task(
                 id=1,
@@ -399,7 +399,7 @@ class TestTaskProcessor:
                 status="init",
                 uuid="task-uuid-123",
                 operator_id="operator-001",
-                ext={"publish_id": "100"},
+                ext={"publish_id": "100", "set_uuid": "suite", "version": 1},
             )
             mock_repo.get_by_id.return_value = task_init
             mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
@@ -430,7 +430,7 @@ class TestTaskProcessor:
                 status="init",
                 uuid="task-uuid-123",
                 operator_id="operator-001",
-                ext={"publish_id": "100"},
+                ext={"publish_id": "100", "set_uuid": "suite", "version": 1},
             )
             mock_repo.get_by_id.return_value = task_init
             mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
@@ -461,7 +461,7 @@ class TestTaskProcessor:
                 status="init",
                 uuid="task-uuid-123",
                 operator_id="operator-001",
-                ext={"publish_id": "100"},
+                ext={"publish_id": "100", "set_uuid": "suite", "version": 1},
             )
             mock_repo.get_by_id.return_value = task_init
             mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
@@ -484,6 +484,8 @@ class TestTaskProcessor:
             task_init = make_task(
                 id=1,
                 status="init",
+                task_type="stress_test",
+                biz_type="multi_bot",
                 uuid="task-uuid-123",
                 operator_id="operator-001",
                 ext=None,  # ext is None
