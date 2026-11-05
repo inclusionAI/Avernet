@@ -1,0 +1,14 @@
+submodules/avernet
+  h_dac96fb4da302f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d32c4d103dffa7371e08cc3cab70c9f76a50e8d1",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

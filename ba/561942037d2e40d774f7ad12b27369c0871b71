@@ -1,0 +1,44 @@
+apps/agentclawscs/docker/bcn/Dockerfile
+  h_45bbed694cc8b0 3-14,19-21,24-31,33-38,40
+apps/agentclawscs/docker/bcn/README.md
+  h_45bbed694cc8b0 1-3
+apps/agentclawscs/docker/bcn/logrotate.conf
+  h_45bbed694cc8b0 1-23
+apps/agentclawscs/docker/bcn/nginx.conf
+  h_45bbed694cc8b0 1-231
+apps/agentclawscs/docker/bcn/scripts/admin/bin/health.sh
+  h_45bbed694cc8b0 1-56
+apps/agentclawscs/docker/bcn/scripts/admin/bin/init-mosn.sh
+  h_45bbed694cc8b0 1-30
+apps/agentclawscs/docker/bcn/scripts/admin/bin/preStop.sh
+  h_45bbed694cc8b0 1-10
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start-logrotate.sh
+  h_45bbed694cc8b0 1-54
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  h_45bbed694cc8b0 1-10,14-18,21-23,27-28
+apps/agentclawscs/docker/bcn/scripts/admin/bin/verify-bcs-lua.sh
+  h_45bbed694cc8b0 1-45
+apps/agentclawscs/docker/bcn/tests/master-resolver-test.lua
+  h_45bbed694cc8b0 1-80
+apps/agentclawscs/docker/bcn/validate-bcs-artifact.sh
+  h_45bbed694cc8b0 1-46
+apps/agentclawscs/docker/bcs/Dockerfile
+  h_45bbed694cc8b0 36-37
+apps/agentclawscs/docker/bcs/README.md
+  h_45bbed694cc8b0 2-3
+apps/agentclawscs/docker/utils/README.md
+  h_45bbed694cc8b0 1
+submodules/avernet
+  h_45bbed694cc8b0 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ba561942037d2e40d774f7ad12b27369c0871b71",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
