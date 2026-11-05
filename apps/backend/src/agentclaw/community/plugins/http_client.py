@@ -87,6 +87,7 @@ from typing import Any, Iterator, Mapping
 import httpx
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.plugin_api.http_client import HttpClient
+from agentclaw.community.utils.runtime_list_timing import mark
 
 # Transport-policy defaults. Once the composition root is wired to config it
 # passes explicit values for all four, so these govern only a direct
@@ -119,6 +120,10 @@ class _DiscardingCookieJar(http.cookiejar.CookieJar):
 
     def set_cookie(self, cookie: http.cookiejar.Cookie) -> None:
         return None
+
+
+def _mark_response_headers(response: httpx.Response) -> None:
+    mark("http.headers")
 
 
 class HttpxClient(LifecycleBase, HttpClient):
@@ -177,6 +182,7 @@ class HttpxClient(LifecycleBase, HttpClient):
                     limits=self._limits,
                     http2=self._http2,
                     cookies=_DiscardingCookieJar(),
+                    event_hooks={"response": [_mark_response_headers]},
                 )
             return self._client
 
@@ -299,7 +305,11 @@ class HttpxClient(LifecycleBase, HttpClient):
         # ``timeout`` is per-request now that the client outlives the call. A bare
         # float expands to the same connect/read/write/pool budget httpx applied
         # when it was a constructor argument, so the per-call budget is unchanged.
-        return self._pooled_client().request(method, path, timeout=timeout, **kwargs)
+        mark("http.request")
+        try:
+            return self._pooled_client().request(method, path, timeout=timeout, **kwargs)
+        finally:
+            mark("http.request_end")
 
     @contextmanager
     def stream(
