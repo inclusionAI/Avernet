@@ -137,6 +137,16 @@ class ApplySkillSetCommands:
                     data["mcp_codes"] = ()
                     data["resolution_error"] = "SKILL_MCP_METADATA_UNAVAILABLE"
                 skills.append(data)
+            references_by_id = {
+                int(asset.id): frozenset(
+                    self._skill_referencing_set_ids(
+                        session,
+                        skill_id=int(asset.id),
+                        skill_uuid=asset.skill_uuid,
+                    )
+                )
+                for asset in assets
+            }
             return SkillSetApplySnapshot(
                 scope,
                 sets,
@@ -163,13 +173,12 @@ class ApplySkillSetCommands:
                 bot_mcp_configs.get_all(
                     session, bot_id=scope.bot_id, owner_id=scope.owner_id, env=scope.env
                 ),
-                frozenset(
-                    int(asset.id)
+                frozenset(sid for sid, refs in references_by_id.items() if refs),
+                {
+                    int(asset.id): references_by_id[int(asset.id)]
                     for asset in assets
-                    if self._skill_referencing_set_ids(
-                        session, skill_id=int(asset.id), skill_uuid=asset.skill_uuid
-                    )
-                ),
+                    if str(asset.git_path or "").startswith("local://")
+                },
             )
 
     def replace_apply_skill_sets(
@@ -311,7 +320,7 @@ class ApplySkillSetCommands:
                     raise SkillSetControlPlaneConflictError(
                         "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
                     )
-            exclusion_changed = self._apply_exclusion_changes(
+            exclusion_changed, default_removed = self._apply_exclusion_changes(
                 session, scope, default_change
             )
             created, updated, unchanged, removed = [], [], [], []
@@ -398,8 +407,27 @@ class ApplySkillSetCommands:
                 except (TypeError, ValueError):
                     if skill_id in active_skills:
                         raise
-            install_changed = self._apply_installations(
-                session, scope, before_skills, before_mcps, active_skills, active_mcps
+            default_skill_ids = {
+                sid
+                for sid, (kind, _) in active_skills.items()
+                if kind is SkillInstallationSourceKind.DEFAULT
+            }
+            default_mcp_codes = {
+                code
+                for item in final
+                if item.is_default and item.is_active
+                for code in set(item.mcp_codes) | platform_default_codes
+                if (item.id, code) not in mcp_exclusions
+            }
+            install_changed, default_install_changed = self._apply_installations(
+                session,
+                scope,
+                before_skills,
+                before_mcps,
+                active_skills,
+                active_mcps,
+                default_skill_ids,
+                default_mcp_codes,
             )
             return DesiredStateMutation(
                 {},
@@ -416,6 +444,8 @@ class ApplySkillSetCommands:
                     updated=tuple(updated),
                     unchanged=tuple(unchanged),
                     removed=tuple(removed),
+                    default_changed=exclusion_changed or default_install_changed,
+                    default_removed=default_removed,
                 ),
                 mcp_codes=frozenset(affected_mcps),
             )
@@ -495,7 +525,7 @@ class ApplySkillSetCommands:
         return skills, mcps
 
     def _apply_exclusion_changes(self, session, scope, change):
-        changed = False
+        changed, removed = False, False
         for attr, operation, member_key in (
             ("add_skills", default_exclusions.exclude_skill, "skill_id"),
             ("remove_skills", default_exclusions.unexclude_skill, "skill_id"),
@@ -503,17 +533,16 @@ class ApplySkillSetCommands:
             ("remove_mcps", default_exclusions.unexclude_mcp, "server_code"),
         ):
             for set_id, member in sorted(getattr(change, attr)):
-                changed = (
-                    operation(
-                        session,
-                        bot_id=scope.bot_id,
-                        owner_id=scope.owner_id,
-                        set_id=set_id,
-                        **{member_key: member},
-                    )
-                    or changed
+                wrote = operation(
+                    session,
+                    bot_id=scope.bot_id,
+                    owner_id=scope.owner_id,
+                    set_id=set_id,
+                    **{member_key: member},
                 )
-        return changed
+                changed = changed or wrote
+                removed = removed or (wrote and attr.startswith("add_"))
+        return changed, removed
 
     def _replace_apply_members(self, session, scope, row, target):
         self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
@@ -610,21 +639,30 @@ class ApplySkillSetCommands:
             )
 
     def _apply_installations(
-        self, session, scope, before_skills, before_mcps, active_skills, active_mcps
+        self,
+        session,
+        scope,
+        before_skills,
+        before_mcps,
+        active_skills,
+        active_mcps,
+        default_skill_ids,
+        default_mcp_codes,
     ):
-        changed = False
+        changed, default_changed = False, False
         for skill_id, (kind, set_id) in active_skills.items():
-            changed = (
-                skill_installations.install(
-                    session,
-                    bot_id=scope.bot_id,
-                    owner_id=scope.owner_id,
-                    env=scope.env,
-                    skill_id=skill_id,
-                    source_kind=kind,
-                    source_set_id=set_id,
-                )
-                or changed
+            wrote = skill_installations.install(
+                session,
+                bot_id=scope.bot_id,
+                owner_id=scope.owner_id,
+                env=scope.env,
+                skill_id=skill_id,
+                source_kind=kind,
+                source_set_id=set_id,
+            )
+            changed = changed or wrote
+            default_changed = default_changed or (
+                wrote and skill_id in default_skill_ids
             )
         changed = (
             bool(
@@ -639,16 +677,15 @@ class ApplySkillSetCommands:
             or changed
         )
         for code in active_mcps:
-            changed = (
-                mcp_installations.install(
-                    session,
-                    bot_id=scope.bot_id,
-                    owner_id=scope.owner_id,
-                    env=scope.env,
-                    server_code=code,
-                )
-                or changed
+            wrote = mcp_installations.install(
+                session,
+                bot_id=scope.bot_id,
+                owner_id=scope.owner_id,
+                env=scope.env,
+                server_code=code,
             )
+            changed = changed or wrote
+            default_changed = default_changed or (wrote and code in default_mcp_codes)
         changed = (
             bool(
                 mcp_installations.uninstall(
@@ -661,4 +698,4 @@ class ApplySkillSetCommands:
             )
             or changed
         )
-        return changed
+        return changed, default_changed

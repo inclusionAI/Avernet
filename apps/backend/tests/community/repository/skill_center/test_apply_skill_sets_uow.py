@@ -585,3 +585,43 @@ def test_removing_stale_default_exclusion_does_not_restore_other_excluded_member
     after = repo.read_apply_snapshot(scope=SCOPE, platform_default_codes=frozenset())
     assert after.skill_exclusions == frozenset({(10, 1)})
     assert after.installed_skill_ids == frozenset()
+
+
+def test_default_confirmation_distinguishes_noop_exclusion_from_unrelated_set_creation():
+    from agentclaw.community.core.models.skill import Skill, SkillSet, SkillSetSkill
+
+    db = _Database()
+    repo = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        session.add(Skill(id=1, name="one", git_path="git://one", env="dev"))
+        session.add(
+            SkillSet(
+                id=10,
+                name="default",
+                is_default=True,
+                user_id="",
+                bolt_id="",
+                engine_type="openclaw",
+                env="dev",
+            )
+        )
+        session.add(SkillSetSkill(skill_set_id=10, skill_id=1, env="dev"))
+    change = DefaultExclusionChange(add_skills=frozenset({(10, 1)}))
+    first = repo.replace_apply_skill_sets(
+        scope=SCOPE,
+        sets=(),
+        remove_names=(),
+        default_change=change,
+        platform_default_codes=frozenset(),
+    )
+    assert first.details["default_removed"] is True
+    repeated = repo.replace_apply_skill_sets(
+        scope=SCOPE,
+        sets=(ResolvedSkillSetWrite("new"),),
+        remove_names=(),
+        default_change=change,
+        platform_default_codes=frozenset(),
+    )
+    assert repeated.changed is True
+    assert repeated.details["default_removed"] is False
+    assert repeated.details["default_changed"] is False

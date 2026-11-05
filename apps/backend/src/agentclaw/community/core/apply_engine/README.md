@@ -46,19 +46,25 @@ bot still locked. The one exception is the give-up hook: the queue has
 already retired the task, so it unlocks regardless, and a subscriber that
 raises there is logged and not retried. The genome subscribes; the Manifest does not.
 
-A desired Center skill is found by name and a shared-repository skill by
-path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
-skill.
+`CapabilitiesMaterialiser` converges Direct Skills, ordinary SkillSets/Default
+and Direct MCP as one category. It resolves a single aggregate declaration
+into one private intent and plan, including empty participating subtargets;
+`None` subtargets preserve current ownership. Local packages, shared Repo
+paths, existing Center UUIDs, public codes and legacy Genome Center names use
+one source resolver. Public exact previews are read-only; every necessary
+shared preparation precedes Bot Local uploads, then one Set/Default UoW,
+Direct Skills, actual dependency reads, MCP configuration and safe Local
+cleanup. Set Local uploads never establish temporary Direct claims.
 
-The skills and MCP materialisers speak only for the bot's Direct entries:
-what the bot's skill sets supply — an active ordinary set, the Default less
-its exclusions, the platform's default MCP servers — is never counted as
-current and never removed, for every compiler alike. Declaring a
-set-supplied entry is a conflict: before writing anything, the orchestrator
-asks each such materialiser (`ChecksSetSupply.set_conflicts`) and, on any
-conflict, refuses the whole apply — every declared category aborted, nothing
-written. The repository's claims refuse the same entries under their own
-lock, so Direct and set supply never share an Installation row.
+Ownership, current Direct names and final runtime names are checked in
+capability resolve. Any capability compile/resolve failure aborts that group;
+other constructs continue through the ordinary orchestrator loop. The former
+outer Set conflict hook is removed. Repository commands retain transactional
+scope and ownership guards. A control-plane failure stops later capability
+steps. Confirmed Bot writes use the existing partial-error contract; shared
+publication alone is not a confirmed Bot write. Device and Platform
+`SkillSetApplyPort` delegates choose `project=True` / `False` outside the
+materialiser. Reads use the SkillCenter Apply snapshot without reconciliation.
 
 An MCP entry carries a configuration action separately from its supply:
 Manifest treats an absent `config` and an explicit `{}` as clearing the
@@ -82,6 +88,10 @@ purpose: Converge one bot to a typed desired state — the DesiredState model, t
 provides:
   - CapabilityDeclaration  # one aggregate target, prefixed child report identities
   - DesiredCapabilities
+  - CapabilitiesMaterialiser
+  - SkillSetApplyPort
+  - DeviceSkillSetApply
+  - PlatformSkillSetApply
   - DesiredSkillSet
   - DefaultSkillSetRef
   - CenterSkillRef
@@ -95,7 +105,7 @@ provides:
   - ContentRef
   - DesiredScript
   - DesiredIdentityFile
-  - DesiredSkill  # LocalSkillPackage | CenterSkillByName | RepoSkillPath
+  - DesiredSkill  # LocalSkillPackage | RepoSkillPath | CenterSkillRef | CenterSkillByCode | legacy CenterSkillByName
   - DesiredResourceFile
   - DesiredResourceTree
   - DesiredMcpServer  # McpOverride, McpHeader, McpTransport, McpEndpointEnv
@@ -147,7 +157,7 @@ provides:
 consumes:
   - "ContentStoreProtocol (core.content_store) — the bytes every desired entry names, read by digest"
   - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort, SharedSkillPort (core.ports) — the narrow ports the materialisers call"
-  - "BotCapabilityStateReaderProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — the skills and MCP area state and the package gate"
+  - "SkillReferenceServiceProtocol, SkillSetManagementServiceProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — shared references, read-only Apply facts, bulk Set commands and existing package/Direct gates"
   - "MCPAuthServiceProtocol, MCPConfigServiceProtocol (core.mcp) — the MCP permission and override checks"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the script row"
   - "ResourceFileService, ResourceService (core.services, core.resources) — the resources root and its rows"
