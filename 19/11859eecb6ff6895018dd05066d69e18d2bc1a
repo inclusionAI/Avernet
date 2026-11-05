@@ -1,0 +1,19 @@
+apps/bcsfuse/tests/alipay/test_central_preparation.py
+  s_ce84d91f3d35be::t_20bb807e22323b 67-69,71-87,91-92,103-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1911859eecb6ff6895018dd05066d69e18d2bc1a",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
