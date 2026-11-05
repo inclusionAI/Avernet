@@ -218,7 +218,8 @@ This does not change the longer startup/write connection timeout.
 request ID, elapsed time, timeout and the upstream HTTP status where available.
 Reasons separate timeouts, depleted request budgets, wrapped HTTP 429 quota
 failures and other upstream rejections. Queries, Card bodies and exception messages are
-not included. Trace IDs are internal sample IDs, not yet a BCN trace contract.
+not included. The search service generates the request ID. A host can supply the
+transport trace ID separately.
 
 Each failure is counted; repeated keys are summarized rather than logged per
 request. `record()` performs no sink I/O. Hosts flush every five seconds on a
@@ -229,6 +230,15 @@ operational diagnostics, not a durable audit trail. Hosts retain responsibility
 for log rotation, retention and collection.
 
 ### Search stage timings
+
+For one HTTP or TR search, filter the INFO logs by `"event":"search_steps"`
+and the trace ID. Each line reports the operation, request ID, outcome, result
+count, result-cache status, service elapsed time and `stage_ms` for the stages
+that ran. Concurrent stages appear in completion order. The host flushes
+these lines in the background alongside the summaries. If the separate
+4,096-request buffer fills, `search_steps_dropped` counts omitted lines.
+Cache snapshots are emitted on the first poll and when their counters or size
+change.
 
 `CatalogSearchApplication` emits `search_timing` through that same background
 sink for HTTP and TR callers. Each five-second window is grouped by `reason`

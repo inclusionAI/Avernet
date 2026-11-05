@@ -181,7 +181,7 @@ def test_concurrent_requests_do_not_share_stages(timing_logs):
     assert sorted("reranker" in s["stages"] for s in samples) == [False, True]
 
 
-def test_cache_hit_does_not_replay_old_stage_timings(timing_logs):
+def test_cache_hit_does_not_replay_old_stage_timings(timing_logs, caplog):
     from search_core.application.cache import (
         CachedEmbedding,
         CachedRetrieval,
@@ -215,6 +215,27 @@ def test_cache_hit_does_not_replay_old_stage_timings(timing_logs):
     assert second == first
     assert sample["stages"]["result_cache_read"]["cache"] == "hit"
     assert not {"embedding", "vector", "keyword", "reranker"} & sample["stages"].keys()
+    steps = [
+        json.loads(r.message)
+        for r in caplog.records
+        if r.name == "search_core.events"
+        and json.loads(r.message)["event"] == "search_steps"
+    ]
+    assert [record["result_cache"] for record in steps] == ["miss", "hit"]
+    assert steps[0]["request_id"] != steps[1]["request_id"] == sample["request_id"]
+    assert steps[1]["stage_ms"] == {
+        name: stage["elapsed_ms"] for name, stage in sample["stages"].items()
+    }
+    assert "secret" not in json.dumps(steps)
+    caplog.set_level(logging.INFO, logger="search_core.application.cache")
+    state.log_stats()
+    baseline = len(caplog.records)
+    state.log_stats()
+    assert len(caplog.records) == baseline
+    result_cache.get(b"missing")
+    state.log_stats()
+    assert len(caplog.records) == baseline + 1
+    assert json.loads(caplog.records[-1].message)["cache"] == "result"
     result_cache.clear()
     before = len(timing_logs())
     asyncio.run(app.execute(command, identity))
