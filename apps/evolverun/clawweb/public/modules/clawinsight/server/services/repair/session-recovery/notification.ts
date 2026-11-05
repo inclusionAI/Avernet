@@ -77,13 +77,16 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
       return `${prefix}\n（完整事项见任务页）`;
     };
     const terminal = ["completed", "failed", "canceled"].includes(task.status);
+    const canConfirm = !terminal && request.status === "pending";
     const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
-      bot_id: clip(task.request.target.bot_id), title: request.reason === "permission" ? "请处理权限申请" : "请补充必要材料",
+      bot_id: clip(task.request.target.bot_id), session_key: clip(task.request.session_key), title: request.reason === "permission" ? "请处理权限申请" : "请补充必要材料",
       summary: clip(request.summary), instructions: clip(request.instructions), task_url: url.href,
       status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
         : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
-      confirm_enabled: String(!terminal && request.status === "pending"), confirm_label: "已处理，继续核验" };
+      confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
+      confirm_label: request.reason === "permission" ? "已获取权限，继续任务" : "已补齐材料，继续任务",
+      config: JSON.stringify({ autoLayout: true }) };
     const outTrackId = recoveryOwnerCardTrackId(task.taskId, environment);
     if (updateOnly) await this.sender.updateCard({ outTrackId, cardParamMap });
     else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
