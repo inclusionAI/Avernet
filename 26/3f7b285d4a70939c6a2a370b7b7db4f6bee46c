@@ -1,0 +1,23 @@
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/orchestration.rs
+  s_7d9f4f65cedfaf::t_ab41c51bed9293 359-363
+  s_7d9f4f65cedfaf::t_d49bed09168cbd 439-444
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_7d9f4f65cedfaf::t_5722e1657f1e79 840-843
+  s_7d9f4f65cedfaf::t_15f40a7a272fa4 844
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "263f7b285d4a70939c6a2a370b7b7db4f6bee46c",
+  "prompts": {},
+  "sessions": {
+    "s_7d9f4f65cedfaf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3e32aee1-425a-45d9-a866-5e98ac005613",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

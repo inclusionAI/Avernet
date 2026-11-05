@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/dual_case_run.py
+  s_cecdc98e721f4b::t_97a6ba20338092 278-280,290-292,299-308,310,316-318,404-405,415
+apps/bcs/scripts/e2e-runner/tests/test_authority_dual_case_run.py
+  s_cecdc98e721f4b::t_c69383721e7431 99-102,105-109,113-117,793-850
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a632d9749c518a71c8b048212808c5fe7134fb9a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
