@@ -1,6 +1,7 @@
 """TC composition root: owns Card synchronization and the legacy HTTP surface."""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,8 @@ from fastapi.responses import JSONResponse
 from app.tc.catalog import CardProfileStore, CardWorkerStore, TcCatalog
 from app.tc.providers import embedding_identity, storage
 from app.tc.search import CardProfileSource, TcSearch
+
+logger = logging.getLogger(__name__)
 
 
 class CardRuntimeStateStore:
@@ -24,6 +27,11 @@ class CardRuntimeStateStore:
 def create_tc_app(context, *, search_router=None):
     registry = context.registry
     startup = registry.require("startup_provider")
+    v1_storage = os.getenv(
+        "BCSFUSE_TC_V1_STORAGE", context.config.get("tc.v1_storage", "legacy")
+    )
+    if v1_storage not in {"legacy", "card"}:
+        raise ValueError("TC v1 storage must be legacy or card")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -31,8 +39,9 @@ def create_tc_app(context, *, search_router=None):
         from app.bootstrap.app_factory import _configure_fusion_dependencies
 
         stop = asyncio.Event()
-        task = None
-        runtime = None
+        tasks = []
+        runtimes = []
+        legacy_stores = ()
         index = None
         await startup.initialize()
         try:
@@ -46,7 +55,54 @@ def create_tc_app(context, *, search_router=None):
             if model_factory is not None:
                 model_factory()
             repository, index = storage(context)
-            catalog = TcCatalog(repository)
+            card_catalog = TcCatalog(repository)
+            card_runtime = TcSearch(
+                card_catalog,
+                index,
+                registry.require("embedding_provider"),
+                registry.require("reranker_provider"),
+                embedding_key=embedding_identity(
+                    context.config, registry.require("embedding_provider")
+                ),
+                instance_id=context.config.get("instance_id", "tc"),
+            )
+            runtimes.append(card_runtime)
+            registry.register("tc_card_catalog", card_catalog)
+            registry.register("tc_card_search", card_runtime)
+            catalog, runtime = card_catalog, card_runtime
+            if v1_storage == "legacy":
+                from app.tc.legacy_catalog import LegacyCatalog
+                from app.tc.legacy_index import LegacyRetrievalIndex, LegacyUpdates
+                from app.tc.legacy_providers import storage as old_storage
+
+                legacy_stores = old_storage(context)
+                workers, profiles, states, vectors, transaction = legacy_stores
+                if (
+                    vectors.dimension
+                    != registry.require("embedding_provider").dimension
+                ):
+                    raise ValueError(
+                        "legacy vector dimension differs from TC embedding"
+                    )
+                catalog = LegacyCatalog(workers, profiles, states, transaction)
+                updates = LegacyUpdates(
+                    catalog, vectors, registry.require("embedding_provider")
+                )
+                await asyncio.to_thread(updates.restore)
+                runtime = TcSearch(
+                    catalog,
+                    vectors,
+                    registry.require("embedding_provider"),
+                    registry.require("reranker_provider"),
+                    embedding_key=embedding_identity(
+                        context.config, registry.require("embedding_provider")
+                    ),
+                    instance_id=context.config.get("instance_id", "tc"),
+                    updates=updates,
+                    retrieval_index=LegacyRetrievalIndex(catalog, vectors, updates),
+                )
+                runtimes.append(runtime)
+                registry.register("tc_legacy_vectors", vectors)
             registry.register("tc_catalog_repository", repository)
             registry.register("tc_index", index)
             registry.register("tc_catalog", catalog)
@@ -57,33 +113,28 @@ def create_tc_app(context, *, search_router=None):
             )
             source = CardProfileSource(catalog)
             registry.register("worker_profile_source", source)
-            runtime = TcSearch(
-                catalog,
-                index,
-                registry.require("embedding_provider"),
-                registry.require("reranker_provider"),
-                embedding_key=embedding_identity(
-                    context.config, registry.require("embedding_provider")
-                ),
-                instance_id=context.config.get("instance_id", "tc"),
-            )
             registry.register("tc_search", runtime)
             dependencies.reset_fusion_services()
             _configure_fusion_dependencies(context)
             dependencies.set_profile_source(source)
-            await asyncio.to_thread(runtime.updates.run_once)
-            task = asyncio.create_task(runtime.updates.run(stop))
+            for service in runtimes:
+                await asyncio.to_thread(service.updates.run_once)
+                tasks.append(asyncio.create_task(service.updates.run(stop)))
             yield
         finally:
             stop.set()
-            if task is not None:
+            for task in tasks:
                 await task
-            if runtime is not None:
+            for service in runtimes:
                 await asyncio.to_thread(
-                    runtime.pool.shutdown, wait=True, cancel_futures=True
+                    service.pool.shutdown, wait=True, cancel_futures=True
                 )
             if index is not None:
                 await asyncio.to_thread(index.close)
+            for store in reversed(legacy_stores):
+                close = getattr(store, "close", None)
+                if close is not None:
+                    await asyncio.to_thread(close)
             temporary = registry.get("tc_temporary_directory")
             if temporary is not None:
                 temporary.cleanup()
@@ -113,8 +164,9 @@ def create_tc_app(context, *, search_router=None):
             create_admin_router(core_router, compatibility_router), prefix="/v1/admin"
         )
     app.include_router(fusion_router, prefix="/api/v1")
-    if search_router is not None:
-        app.include_router(search_router)
+    from app.tc.v2 import include_v2
+
+    include_v2(app, search_router=search_router)
 
     @app.get("/health")
     async def health():
@@ -128,7 +180,15 @@ def create_tc_app(context, *, search_router=None):
     @app.get("/ready")
     async def ready():
         runtime = registry.get("tc_search")
-        if runtime is None or not runtime.updates.ready:
+        card = registry.get("tc_card_search")
+        v1_ready = runtime is not None and runtime.updates.ready
+        if v1_ready and v1_storage == "legacy":
+            try:
+                await asyncio.to_thread(runtime.index.check_ready)
+            except Exception:  # noqa: BLE001 -- probes normalize backend failures without exposing credentials
+                logger.warning("TC legacy index readiness probe failed")
+                v1_ready = False
+        if not v1_ready:
             return JSONResponse(
                 status_code=503,
                 content={
@@ -136,10 +196,18 @@ def create_tc_app(context, *, search_router=None):
                     "provider_mode": context.mode,
                     "providers": len(registry.keys()),
                     "error": "INDEX_NOT_READY",
+                    "v1_storage": v1_storage,
+                    "card_ready": card is not None and card.updates.ready,
+                    "environment": registry.require(
+                        "tc_card_catalog"
+                    ).repository.environment,
                 },
             )
         return {
             "ready": True,
+            "v1_storage": v1_storage,
+            "card_ready": card is not None and card.updates.ready,
+            "environment": registry.require("tc_card_catalog").repository.environment,
             "provider_mode": context.mode,
             "index_key": runtime.updates.index_key,
             "providers": len(registry.keys()),

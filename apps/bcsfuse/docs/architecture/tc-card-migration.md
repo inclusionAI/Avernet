@@ -1,10 +1,11 @@
-# TC 后续接入 Card / Doc 的迁移计划
+# TC Card / Doc 迁移边界
 
-**待实施。TC 当前没有接入新的 Card 运维接口，也没有切换原有 sync、Worker/Profile、recommend 或 Fuse。**
-本文描述后续迁移必须保持的行为，不要求本轮启用、迁库或部署。
+**当前 TC 已接入 Card/Doc，默认 legacy 保留旧接口读写旧表，v2 始终读写新表；配置重启后旧接口整体切到新表。**
+当前规则以 [完整方案](../../../../docs/specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)及
+[部署步骤](../../../../docs/deploy/tc-card-migration.md)为准，以下原迁移约束与之不一致处由已确认方案取代。
 
 [Card 通用接口](../../packages/search-core/docs/card-management-api.md) 与 [Provider 契约](../../packages/search-core/docs/provider-contracts.md#card-management) 已由 Avernet 提供。
-TC 将来显式挂载接口并提供自己的构建器；不能把其他业务的字段解释、状态规则或推荐编排搬进 TC。
+TC 显式挂载接口并提供自己的构建器；不能把其他业务的字段解释、状态规则或推荐编排搬进 TC。
 
 ## 复用范围
 

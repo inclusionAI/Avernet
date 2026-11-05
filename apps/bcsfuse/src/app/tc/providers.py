@@ -99,7 +99,10 @@ def storage(context):
             )
 
             registry.register(
-                "fused_profile_store", SQLiteFusedProfileStore(db_path=path)
+                "fused_profile_store",
+                SQLiteFusedProfileStore(
+                    db_path=os.getenv("BCSFUSE_DATABASE_SQLITE_PATH") or path
+                ),
             )
     elif context.mode == "runtime":
         from app.infra.public.database.mysql_connection_pool import (

@@ -51,6 +51,53 @@ class TcDocumentConverter:
         return CardProjection(documents, labels)
 
 
+def sync_changes(current, payload):
+    data = current.card.source_card if current else {}
+    fields = {"name": payload["name"]}
+    if "handle" in payload:
+        fields["handle"] = payload["handle"]
+    for key, default in {
+        "type": "bot",
+        "description": None,
+        "domains": [],
+        "responsibilities": [],
+        "availability": "protected",
+        "trust_level": "guarded",
+        "runtime_state": "online",
+        "lifecycle_state": "active",
+    }.items():
+        if key in payload and (key != "runtime_state" or payload[key] is not None):
+            fields[key] = payload[key]
+        elif current is None:
+            fields[key] = default
+    profile = payload.get("profile", {})
+    fields["profile_id"] = (
+        data.get("profile_id") or profile.get("profile_id") or "default"
+    )
+    if "skill_sets" in profile:
+        fields["skills"] = profile["skill_sets"]
+    elif "skills" in payload:
+        fields["skills"] = [
+            {k: skill[k] for k in ("name", "description") if k in skill}
+            for skill in payload["skills"]
+        ]
+    elif current is None:
+        fields["skills"] = []
+    return fields
+
+
+def matches_row(row, filters, allowed_ids):
+    if row is None or (
+        allowed_ids is not None and row.card.agent_id not in allowed_ids
+    ):
+        return False
+    labels = TcDocumentConverter().convert(row.card).filters
+    return all(
+        values and set(values).intersection(labels.get(key, ()))
+        for key, values in filters.items()
+    )
+
+
 class TcCatalog:
     def __init__(self, repository):
         self.repository = repository
@@ -93,37 +140,7 @@ class TcCatalog:
     def sync(self, worker_id, payload):
         current = self.get(worker_id)
         data = current.card.source_card if current else {}
-        fields = {"name": payload["name"]}
-        if "handle" in payload:
-            fields["handle"] = payload["handle"]
-        defaults = {
-            "type": "bot",
-            "description": None,
-            "domains": [],
-            "responsibilities": [],
-            "availability": "protected",
-            "trust_level": "guarded",
-            "runtime_state": "online",
-            "lifecycle_state": "active",
-        }
-        for key, default in defaults.items():
-            if key in payload and (key != "runtime_state" or payload[key] is not None):
-                fields[key] = payload[key]
-            elif current is None:
-                fields[key] = default
-        profile = payload.get("profile", {})
-        fields["profile_id"] = (
-            data.get("profile_id") or profile.get("profile_id") or "default"
-        )
-        if "skill_sets" in profile:
-            fields["skills"] = profile["skill_sets"]
-        elif "skills" in payload:
-            fields["skills"] = [
-                {k: skill[k] for k in ("name", "description") if k in skill}
-                for skill in payload["skills"]
-            ]
-        elif current is None:
-            fields["skills"] = []
+        fields = sync_changes(current, payload)
         self.validate({**data, **fields})
         row = self.repository.upsert(
             worker_id, fields, resource_type="agent", search_config={}

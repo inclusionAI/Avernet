@@ -23,6 +23,11 @@ class StartupSpy:
         self.shutdown_called = True
 
 
+@pytest.fixture(autouse=True)
+def card_backend(monkeypatch):
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
+
+
 def build_context(*, startup=None):
     registry = build_opensource_provider_registry("test")
     startup = startup or StartupSpy()

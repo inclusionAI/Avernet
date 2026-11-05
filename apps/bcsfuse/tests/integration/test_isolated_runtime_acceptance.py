@@ -9,6 +9,7 @@ def test_current_card_config_and_search_survive_restart_without_reembedding(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "test")
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "tc.sqlite3"))
     monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "qdrant"))

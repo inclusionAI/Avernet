@@ -5,18 +5,18 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from search_core.api.errors import SearchOverloaded, SearchUnavailable
-from search_core.api.models import SearchCommand, VerifiedIdentity
-from search_core.adapters.http import create_search_router
 from fastapi import Request
 from fastapi.testclient import TestClient
+from search_core.adapters.http import create_search_router
+from search_core.api.errors import SearchOverloaded, SearchUnavailable
+from search_core.api.models import SearchCommand, VerifiedIdentity
+
 from app.application.search.service import TcSearchApplication
 from app.bootstrap.app_factory import create_bcsfuse_app
 from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-
 from tests.unit.bootstrap.test_app_factory import build_context
 
 
@@ -68,14 +68,17 @@ def test_optional_common_routes_preserve_tc_identity_and_v1_surface(monkeypatch)
     assert candidates.calls[0]["filters"]["profile_key"] == ["bot:owner:profile"]
 
 
-def test_tc_factory_does_not_enable_common_routes_implicitly():
+def test_tc_factory_mounts_new_search_on_the_card_backend(monkeypatch):
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "false")
     context, _ = build_context()
-    assert (
-        TestClient(create_bcsfuse_app(context))
-        .post("/api/v2/search", json={"query": "x"})
-        .status_code
-        == 404
-    )
+    with TestClient(
+        create_bcsfuse_app(context), headers={"Authorization": "Bearer test-token"}
+    ) as client:
+        response = client.post("/api/v2/search", json={"query": "x"})
+        assert response.status_code == 200, response.text
+        assert response.json()["items"] == []
 
 
 def test_cancelled_request_retains_capacity_until_sync_work_finishes():

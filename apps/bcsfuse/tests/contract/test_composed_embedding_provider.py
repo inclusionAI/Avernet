@@ -29,6 +29,7 @@ class FixedEmbedding:
 
 @pytest.fixture
 def runtime_factory(monkeypatch, tmp_path):
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     for key in ("EMBEDDING_BASE_URL", "EMBEDDING_AUTH_TOKEN", "EMBEDDING_MODEL"):
         monkeypatch.delenv(key, raising=False)

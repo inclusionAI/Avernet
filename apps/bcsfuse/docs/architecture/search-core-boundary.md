@@ -1,7 +1,7 @@
 # BCSFuse 公共能力与应用边界
 
 Avernet 维护可独立安装的 `search_core` 和 TC 应用 `app`。宿主维护内部平台连接及自己的业务应用。
-**TC 当前不挂载新 Card 运维接口，旧 sync/Worker/Profile、recommend 和 Fuse 流程不变。**
+**TC 在业务组装中挂载 v2 Card/搜索与配置接口，固定使用 TC 新表。旧 v1 通过 TC 专属配置整体选择旧表或新表，不向共享 search-core 加入切源逻辑。**
 
 ## 代码归属
 
@@ -62,7 +62,7 @@ TC 的旧 Profile 聚合和业务门槛不因复用公共 provider 自动切换�
 应用与公共包从同一不可变 Avernet 版本构建，宿主选择经过组合测试的版本。
 公共启动使用 app.* 和 search_core.*；不提供旧 src.* 包别名。
 应用可以分别发布；回退应恢复已验证的应用/公共依赖组合，数据变化另行核对。
-TC 后续迁移遵循 [Card / Doc 迁移计划](tc-card-migration.md)，本轮不实施迁库或切换。
+TC 迁移遵循 [Card / Doc 迁移边界](tc-card-migration.md)和关联的同实例方案，代码已实现，本地验证不代表已部署或完成线上迁库。
 
 独立导入、契约、存储和 TC 兼容测试用于验证上述边界；历史执行结果见 [验证归档](../archive/validation/retrieval-extraction-20261027.md)。
 本地合成模型或临时索引测试不是生产效果、容量或已部署的证据。
@@ -80,4 +80,4 @@ HTTP 搜索/推荐 → 公共检索流程 → Card 元数据回查 → 返回结
 `search_core.bootstrap.local` 组装 SQLite、Qdrant Local 和离线示例向量；
 真实业务在组装入口替换转换器、模型、索引与鉴权，复用同一加工和检索流程。
 具体步骤见 [独立启动指南](../../packages/search-core/docs/local-catalog.md)。
-本次抽取不新增表、不改变 TC 已有入口，也不改变支付宝历史 index_key 的计算方式。
+公共能力抽取本身不改变支付宝历史 index_key；TC 的新表、入口兼容和后端选择由 TC 业务组装负责。

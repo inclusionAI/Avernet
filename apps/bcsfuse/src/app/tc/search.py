@@ -19,7 +19,7 @@ from app.domain.models.candidate_recommendation import (
 from app.domain.models.context_fragment import ContextFragment
 from app.domain.models.retrieval_mode import RetrievalMode
 from app.domain.models.worker_profile import WorkerProfile, WorkerProfileScanResult
-from app.tc.catalog import FILTER_FIELDS, TcDocumentConverter
+from app.tc.catalog import FILTER_FIELDS, TcDocumentConverter, matches_row
 
 
 class InvalidTcFilters(ValueError):
@@ -28,9 +28,19 @@ class InvalidTcFilters(ValueError):
 
 class TcSearch:
     def __init__(
-        self, catalog, index, embedding, reranker, *, embedding_key, instance_id
+        self,
+        catalog,
+        index,
+        embedding,
+        reranker,
+        *,
+        embedding_key,
+        instance_id,
+        updates=None,
+        retrieval_index=None,
     ):
         self.catalog, self.index, self.reranker = catalog, index, reranker
+        self.storage_kind = "legacy" if updates is not None else "card"
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tc-search")
         self.caches = SearchCaches(
             result_entries=1024,
@@ -48,15 +58,24 @@ class TcSearch:
         self.embedding = CachedEmbedding(
             embedding, embedding_cache, embedding_key, singleflight_enabled=False
         )
-        self.updates = CardUpdates(
-            catalog.repository,
-            embedding,
-            index,
-            embedding_key=embedding_key,
-            instance_id=instance_id,
-            filter_fields=FILTER_FIELDS,
-            document_converter=TcDocumentConverter(),
-            on_change=self.caches.changing,
+        self.updates = (
+            updates
+            if updates is not None
+            else CardUpdates(
+                catalog.repository,
+                embedding,
+                index,
+                embedding_key=embedding_key,
+                instance_id=instance_id,
+                filter_fields=FILTER_FIELDS,
+                document_converter=TcDocumentConverter(),
+                on_change=self.caches.changing,
+            )
+        )
+        if updates is not None:
+            updates.on_change = self.caches.changing
+        self.retrieval_index = (
+            retrieval_index if retrieval_index is not None else DocumentIndex(index)
         )
         self.execution = {
             name: DeadlineExecutor(self.pool, name=name, timeout_seconds=timeout)
@@ -109,7 +128,7 @@ class TcSearch:
 
             selected_reranker = get_reranker(reranker_model)
         pipeline = HybridRetrievalService(
-            index=DocumentIndex(self.index),
+            index=self.retrieval_index,
             embedding=self.embedding,
             reranker=selected_reranker if rerank else None,
             group_by_source=True,
@@ -119,7 +138,7 @@ class TcSearch:
             execution=self.execution,
         )
         retrieval = CachedRetrieval(
-            CatalogRetrieval(pipeline, self.updates),
+            CatalogRetrieval(pipeline, self),
             self.result_cache,
             self.caches,
             namespace=(rerank, expand_factor, reranker_model),
@@ -130,7 +149,7 @@ class TcSearch:
         result = await retrieval.retrieve(request)
         # TC exact identity priority never bypasses visibility or lifecycle rules.
         exact = self.catalog.get(question.strip())
-        if exact and self.updates.eligible(exact.card.agent_id, request.filters, scope):
+        if exact and self.eligible(exact.card.agent_id, request.filters, scope):
             from dataclasses import replace
 
             from search_core.api.models import SearchItem
@@ -145,6 +164,11 @@ class TcSearch:
                 ],
             )
         return result
+
+    def eligible(self, worker_id, filters, allowed_ids):
+        return self.updates.eligible(worker_id, filters, allowed_ids) and matches_row(
+            self.catalog.get(worker_id), filters, allowed_ids
+        )
 
     def candidate(self, row, score, *, supplement=False, reasons=None):
         data = row.card.source_card
@@ -226,7 +250,7 @@ class TcSearch:
             selected_candidates=len(candidates),
             metadata={
                 "min_score_compat_mode": "deprecated_ignored",
-                "candidate_source": "tc_card",
+                "candidate_source": f"tc_{self.storage_kind}",
             },
         )
 
