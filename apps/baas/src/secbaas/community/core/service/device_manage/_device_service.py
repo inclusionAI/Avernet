@@ -128,6 +128,45 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
         missing.append(field_name)
 
 
+# Sandbox-absence phrases. Providers report an already-reclaimed sandbox as a
+# generic error rather than DEVICE_NOT_FOUND (Arca, for example, surfaces
+# "sandbox 'x' does not exist" as DEVICE_DESTROY_FAILED). These phrases mean
+# there is no resource left to destroy, so the destroy is idempotent.
+_ABSENT_SANDBOX_PHRASES = (
+    "not found",
+    "does not exist",
+    "sandbox destroyed",
+)
+
+# Error codes that can still be an absence report when the message says so.
+# DEVICE_UNAVAILABLE / PLATFORM_UNAVAILABLE / AUTH_FAILED / RATE_LIMITED /
+# COMMAND_TIMEOUT are deliberately excluded: those say nothing about whether
+# the sandbox exists, so treating them as success would leak a live sandbox.
+_ABSENCE_CAPABLE_CODES = frozenset(
+    {
+        ErrorCode.DEVICE_NOT_FOUND,
+        ErrorCode.DEVICE_DESTROY_FAILED,
+        ErrorCode.PLATFORM_ERROR,
+        ErrorCode.NOT_FOUND,
+    }
+)
+
+
+def _is_absent_sandbox_error(error_code: ErrorCode | None, message: str) -> bool:
+    """Return True when a PaaS destroy error means the sandbox is already gone.
+
+    Only errors that positively indicate absence qualify. A connection failure
+    or an auth/rate-limit error is *not* absence: the sandbox may still be
+    running, so the caller must keep treating it as a real failure.
+    """
+    if error_code == ErrorCode.DEVICE_NOT_FOUND:
+        return True
+    if error_code not in _ABSENCE_CAPABLE_CODES:
+        return False
+    lowered = (message or "").lower()
+    return any(phrase in lowered for phrase in _ABSENT_SANDBOX_PHRASES)
+
+
 def _build_arca_detail_config(
     deploy_config: Any,
     oss_mount_id: str | None,
@@ -2155,11 +2194,23 @@ class DefaultDeviceService(DeviceService):
             device_uuid, tenant=tenant, env=env
         )
         if not record:
-            logger.warning(f"Device not found: {device_uuid}")
-            return DestroyDeviceResponse(
-                success=True,  # Per D-05: already destroyed is success
-                error_message=None,
-                hook_result=None,
+            # A STOPPED device was already torn down in the provider at stop
+            # time but keeps its record for restart (ADR-0004). DESTROY must
+            # still release that record, otherwise the bot keeps a dangling
+            # binding forever. Mirror stop_device_by_uuid's fallback and let
+            # the provider report the absence, which the error classifier
+            # below treats as success.
+            record = repo.get_by_device_uuid_only(device_uuid=device_uuid)
+            if not record or record.status != DeviceStatus.STOPPED.value:
+                logger.warning(f"Device not found: {device_uuid}")
+                return DestroyDeviceResponse(
+                    success=True,  # Per D-05: already destroyed is success
+                    error_message=None,
+                    hook_result=None,
+                )
+            logger.info(
+                f"[destroy_device] device {device_uuid} is STOPPED; releasing "
+                "its preserved record"
             )
 
         logger.info(
@@ -2245,21 +2296,25 @@ class DefaultDeviceService(DeviceService):
                 await self._paas_facade.destroy_device(record.provider_device_id)
                 logger.info(f"Device destroyed: {record.provider_device_id}")
             except DeviceFacadeException as e:
-                # Handle NOT_FOUND as success per D-04 (idempotent destroy)
-                # Use getattr with defaults for safer attribute access
+                # Treat a positively-absent sandbox as success (idempotent
+                # destroy per D-04/D-05). Providers report an already-reclaimed
+                # sandbox as DEVICE_DESTROY_FAILED or PLATFORM_ERROR with
+                # messages like "does not exist" rather than DEVICE_NOT_FOUND,
+                # which previously failed the whole publish.
                 original_error = getattr(e, "original_error", None)
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
-                if error_code == ErrorCode.DEVICE_NOT_FOUND:
-                    logger.warning(f"Device already destroyed in PaaS: {device_uuid}")
+                message = getattr(getattr(e, "original_error", None), "message", str(e))
+                if _is_absent_sandbox_error(error_code, message):
+                    logger.warning(
+                        f"Device already destroyed in PaaS: {device_uuid} "
+                        f"(code={error_code}, message={message})"
+                    )
                 else:
                     # Capture error but continue with DB cleanup per D-04
                     paas_destroy_success = False
                     code_str = error_code.value if error_code else "UNKNOWN"
-                    message = getattr(
-                        getattr(e, "original_error", None), "message", str(e)
-                    )
                     error_msg = f"{code_str} - {message}"
                     error_parts.append(f"PaaS destroy failed: {error_msg}")
                     logger.error(
@@ -2408,14 +2463,15 @@ class DefaultDeviceService(DeviceService):
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
-                if error_code == ErrorCode.DEVICE_NOT_FOUND:
-                    logger.warning(f"Device already destroyed in PaaS: {device_uuid}")
+                message = getattr(getattr(e, "original_error", None), "message", str(e))
+                if _is_absent_sandbox_error(error_code, message):
+                    logger.warning(
+                        f"Device already destroyed in PaaS: {device_uuid} "
+                        f"(code={error_code}, message={message})"
+                    )
                 else:
                     paas_destroy_success = False
                     code_str = error_code.value if error_code else "UNKNOWN"
-                    message = getattr(
-                        getattr(e, "original_error", None), "message", str(e)
-                    )
                     error_msg = f"{code_str} - {message}"
                     error_parts.append(f"PaaS destroy failed: {error_msg}")
                     logger.error(
