@@ -50,6 +50,8 @@ export interface ConversationBotItemActionsProps {
   onCollapse(): void;
   /** 新建会话(新建埋点随入口内聚)。 */
   onCreateSession(): void;
+  /** 新建会话在途：按钮转 loading 并禁用，避免重复提交。 */
+  createSessionPending?: boolean;
   /** 检索按钮开关:展开联动与输入框开关态由父级承载(handleSearchToggle)。 */
   onSearchToggle(): void;
   /** 「更多操作」入口渲染开关(父级计算):「有菜单项才显示入口」——回调存在且
@@ -79,6 +81,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     onScopeChange,
     onCollapse,
     onCreateSession,
+    createSessionPending = false,
     onSearchToggle,
     showMenu,
     onOpenBotManagement,
@@ -123,6 +126,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         <IconButton
           label="新建会话"
           size="sm"
+          loading={createSessionPending}
           icon={<Plus className="h-3.5 w-3.5" />}
           className={cn('h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground', iconVisibility)}
           onClick={(event) => {

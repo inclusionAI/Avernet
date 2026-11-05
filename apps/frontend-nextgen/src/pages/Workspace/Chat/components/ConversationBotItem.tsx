@@ -65,6 +65,8 @@ export interface ConversationBotItemProps {
   replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读/好友分组区不消费。 */
   sessionActions?: ConversationSessionListActions;
+  /** Bot 级“新建会话”在途标记；行尾 + 与主舞台空态共享，防止重复提交。 */
+  createSessionPending?: boolean;
 }
 
 export const ConversationBotItem = React.memo(function ConversationBotItem({
@@ -90,6 +92,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   isFavoritePending,
   onOpenBotManagement,
   replyingSessionId,
+  createSessionPending = false,
   sessionActions,
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
@@ -250,6 +253,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           onScopeChange={onScopeChange}
           onCollapse={handleToggle}
           onCreateSession={onCreateSession}
+          createSessionPending={createSessionPending}
           onSearchToggle={handleSearchToggle}
           showMenu={showMenu}
           onOpenBotManagement={onOpenBotManagement}
