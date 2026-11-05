@@ -234,7 +234,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
         const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
         task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
-          tool_call_id: call.callId, request, result: { delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
+          tool_call_id: call.callId, request, result: { status: result.status, delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
             message: result.message, initial_message: result.initial_message, owner_request_id: result.owner_request_id, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
       }
       if (calls.length < 500) break;

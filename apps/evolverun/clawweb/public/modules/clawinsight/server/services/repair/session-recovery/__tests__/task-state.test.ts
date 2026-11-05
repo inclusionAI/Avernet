@@ -144,3 +144,42 @@ it("requires Cron actions to use the adapter tool even when their business scope
     summary: "删除重复任务", risk: "保留其他任务", verification: "读取任务列表", rollback: "恢复原定义" };
   expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow(/Cron/);
 });
+
+
+it.each(["OC", "CC", "TE"] as const)("retains recovered effects while an accepted message awaits confirmation: %s", engine => {
+  const before = state(); before.request.target.engine = engine;
+  before.delivery = { event_id: "event1", delivery: { delivery_key: "delivery1", status: "accepted",
+    result_text: "accepted", started_at_ms: 10, finished_at_ms: 20, error: null } };
+  const recovered = { ...unknown, effect: "recovered" as const, evidence_ids: ["E1"] };
+  const waiting = observeRecovery(before, recovered, 100);
+  expect(waiting).toMatchObject({ status: "running", phase: "observe", observationDeadlineAt: 1000, judgment: recovered });
+  expect(() => recoveryTaskResult(waiting)).toThrow();
+  expect(observeRecovery(waiting, { ...recovered, delivery: "confirmed" }, 200).status).toBe("completed");
+  expect(observeRecovery(waiting, recovered, 1000)).toMatchObject({ status: "completed", judgment: recovered });
+  const stopped = terminateRecoveryTask(waiting);
+  expect(stopped.status).toBe("canceled");
+  expect(() => observeRecovery(stopped, recovered, 300)).toThrow();
+});
+
+it.each(["accepted", "unknown", "failed"] as const)("uses the latest approved-plan message receipt without requiring an initial send: %s", status => {
+  const before = { ...state(), phase: "verify" as const, timeline: [{ event_id: "send", at_ms: 10, kind: "operation" as const,
+    actor: "agent" as const, summary: "方案内指引", payload: { status: status === "accepted" ? "succeeded" : status,
+      result: { initial_message: false, delivery_key: "retry-1", status } } }] };
+  const recovered = { ...unknown, effect: "recovered" as const, evidence_ids: ["E1"] };
+  expect(observeRecovery(before, recovered, 100)).toMatchObject({
+    status: status === "failed" ? "completed" : "running", phase: "verify", judgment: recovered,
+  });
+});
+
+it("does not hold recovery open for an unsent message or an unbounded observation", () => {
+  const recovered = { ...unknown, effect: "recovered" as const, evidence_ids: ["E1"] };
+  expect(observeRecovery(state(), recovered, 100).status).toBe("completed");
+  const delivery = { event_id: "event1", delivery: { delivery_key: "delivery1", status: "unknown" as const,
+    result_text: "unknown", started_at_ms: 10, finished_at_ms: 20, error: null } };
+  expect(observeRecovery({ ...state(), delivery }, recovered, 100).status).toBe("running");
+  expect(observeRecovery({ ...state(), delivery, observationDeadlineAt: null }, recovered, 100).status).toBe("completed");
+  for (const receipt of [{ initial_message: true, dry_run: true }, { initial_message: true, dispatched: false }]) {
+    const timeline = [{ event_id: "send", at_ms: 10, kind: "operation" as const, actor: "agent" as const, summary: "未发送", payload: { result: receipt } }];
+    expect(observeRecovery({ ...state(), timeline }, recovered, 100).status).toBe("completed");
+  }
+});

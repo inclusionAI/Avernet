@@ -1,7 +1,19 @@
 import { redactText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { DeliveryReceipt, RecoveryRequest, RecoveryResult } from "./contracts.js";
 import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
-import type { RecoveryInterventionStatus } from "./task-contracts.js";
+import type { RecoveryInterventionStatus, RecoveryStoredTask } from "./task-contracts.js";
+
+/** Latest audited message attempt; channel acceptance still needs session/trajectory confirmation. */
+export function recoveryMessagePending(task: Pick<RecoveryStoredTask, "delivery"> & Partial<Pick<RecoveryStoredTask, "timeline">>): boolean {
+  const message = [...(task.timeline ?? [])].reverse().find(event => event.kind === "operation"
+    && typeof (event.payload.result as Record<string, unknown> | undefined)?.initial_message === "boolean");
+  if (message) {
+    const receipt = message.payload.result as Record<string, unknown>;
+    return receipt.dry_run !== true && receipt.dispatched !== false
+      && !(message.payload.status === "failed" && receipt.status === "failed");
+  }
+  return task.delivery?.delivery.status === "accepted" || task.delivery?.delivery.status === "unknown";
+}
 
 /** Complete task audit, including prior executions. Acceptance alone does not confirm message presence. */
 export function recoveryInterventionStatus(calls: readonly AgentToolCall[], delivery?: RecoveryResult["delivery"]): RecoveryInterventionStatus {

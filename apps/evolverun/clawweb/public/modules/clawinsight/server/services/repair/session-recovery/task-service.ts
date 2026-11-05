@@ -443,7 +443,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   private failureJudgment(task: RecoveryStoredTask, summary: string): RecoveryJudgment {
     return { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
-      effect: "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
+      effect: task.judgment?.effect === "recovered" ? "recovered" : "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
   }
 
   async maintenance(): Promise<void> {
@@ -471,7 +471,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
-            effect: "unknown", summary: "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
+            effect: task.judgment?.effect === "recovered" ? "recovered" : "unknown",
+            summary: task.judgment?.effect === "recovered" ? `${task.judgment.summary}\n\n原任务已恢复；观察期限已到，触达按现有证据记录。${task.request.target.engine === "TE" ? "TE 的 AIVision 轨迹可能延迟，未确认触达不能认定消息未到达。" : ""}`
+              : "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
           continue;
         }
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
