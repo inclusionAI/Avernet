@@ -99,7 +99,7 @@ def test_generic_keyword_does_not_scroll_for_worker_id(monkeypatch):
         index.close()
 
 
-def test_scope_is_applied_before_top_k(tmp_path):
+def test_filters_are_applied_before_top_k(tmp_path):
     index = QdrantRetrievalIndex(path=str(tmp_path), dimension=2)
     try:
         index.upsert(
@@ -121,11 +121,11 @@ def test_scope_is_applied_before_top_k(tmp_path):
         ]:
             assert [
                 h.id
-                for h in method(query, 1, {"category": ("public",)}, frozenset({"0"}))
+                for h in method(query, 1, {"category": ("public",)})
             ] == ["0"]
-            assert method(query, 1, {}, frozenset()) == []
+            assert method(query, 1, {"category": ()}) == []
             with pytest.raises(ValueError):
-                method(query, 1, {"_external_id": ("1",)}, frozenset({"0"}))
+                method(query, 1, {"_external_id": ("1",)})
     finally:
         index.close()
 
@@ -152,7 +152,7 @@ def test_pipeline_errors_are_not_empty_success(invalid):
         index=index, embedding=embedding, reranker=reranker
     )
     with pytest.raises(SearchUnavailable):
-        asyncio.run(service.retrieve(RetrievalRequest("支付", 1, {}, frozenset({"a"}))))
+        asyncio.run(service.retrieve(RetrievalRequest("支付", 1, {})))
 
 
 def test_same_local_path_supports_distinct_collections(tmp_path):

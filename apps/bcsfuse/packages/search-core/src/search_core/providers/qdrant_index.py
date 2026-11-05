@@ -117,33 +117,30 @@ class QdrantRetrievalIndex:
             self._keyword.delete(ids)
 
     @staticmethod
-    def _filters(filters, allowed_ids, id_field):
+    def _filters(filters):
         if any(key.startswith("_") for key in filters):
             raise ValueError("internal index fields cannot be caller filters")
-        converted = {key: list(values) for key, values in filters.items()}
-        if allowed_ids is not None:
-            converted[id_field] = list(allowed_ids)
-        return converted
+        return {key: list(values) for key, values in filters.items()}
 
-    def vector_search(self, vector, limit, filters, allowed_ids):
-        if allowed_ids == frozenset() or any(not values for values in filters.values()):
+    def vector_search(self, vector, limit, filters):
+        if any(not values for values in filters.values()):
             return []
         with self._lock.read(self.read_timeout_seconds):
             return self._dense.search(
                 vector,
                 top_k=limit,
-                filters=self._filters(filters, allowed_ids, "_external_id"),
+                filters=self._filters(filters),
                 **self._query_options,
             )
 
-    def keyword_search(self, query, limit, filters, allowed_ids):
-        if allowed_ids == frozenset() or any(not values for values in filters.values()):
+    def keyword_search(self, query, limit, filters):
+        if any(not values for values in filters.values()):
             return []
         with self._lock.read(self.read_timeout_seconds):
             return self._keyword.search(
                 query,
                 limit,
-                self._filters(filters, allowed_ids, "_keyword_external_id"),
+                self._filters(filters),
                 **self._query_options,
             )
 

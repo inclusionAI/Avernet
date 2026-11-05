@@ -9,7 +9,7 @@ from search_core.core.timing import stage_timing
 
 
 class CatalogScope(Protocol):
-    def eligible(self, agent_id, filters, allowed_ids) -> bool: ...
+    def eligible(self, agent_id, filters) -> bool: ...
 
 
 class CatalogRetrieval:
@@ -25,7 +25,7 @@ class CatalogRetrieval:
                     i
                     for i in result.items
                     if self.catalog.eligible(
-                        i.item_id, request.filters, request.allowed_ids
+                        i.item_id, request.filters
                     )
                 ),
             )

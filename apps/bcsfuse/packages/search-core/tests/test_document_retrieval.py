@@ -17,7 +17,7 @@ def hit(doc, source, score, text):
 
 def test_documents_group_before_fusion_and_use_representative_text():
     class Index:
-        def vector_search(self, vector, limit, filters, allowed):
+        def vector_search(self, vector, limit, filters):
             assert limit == 60
             return [
                 hit("a1", "a", 0.9, "a vector"),
@@ -47,7 +47,7 @@ def test_documents_group_before_fusion_and_use_representative_text():
         vector_min_score=0.5,
         keyword_min_score=0.5,
     )
-    result = asyncio.run(service.retrieve(RetrievalRequest("query", 5, {}, None)))
+    result = asyncio.run(service.retrieve(RetrievalRequest("query", 5, {})))
     assert [i.item_id for i in result.items] == ["a", "b"]
 
 
@@ -65,11 +65,11 @@ def test_thresholds_can_return_valid_empty_results_and_are_optional():
     strict = HybridRetrievalService(
         index=Index(), embedding=Model(), vector_min_score=0.2, keyword_min_score=0.2
     )
-    result = asyncio.run(strict.retrieve(RetrievalRequest("q", 1, {}, None)))
+    result = asyncio.run(strict.retrieve(RetrievalRequest("q", 1, {})))
     assert result.status == "ok" and not result.items
     legacy = HybridRetrievalService(index=Index(), embedding=Model())
     assert (
-        asyncio.run(legacy.retrieve(RetrievalRequest("q", 1, {}, None)))
+        asyncio.run(legacy.retrieve(RetrievalRequest("q", 1, {})))
         .items[0]
         .item_id
         == "d"

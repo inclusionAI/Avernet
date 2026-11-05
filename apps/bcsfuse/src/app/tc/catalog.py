@@ -86,10 +86,8 @@ def sync_changes(current, payload):
     return fields
 
 
-def matches_row(row, filters, allowed_ids):
-    if row is None or (
-        allowed_ids is not None and row.card.agent_id not in allowed_ids
-    ):
+def matches_row(row, filters):
+    if row is None:
         return False
     labels = TcDocumentConverter().convert(row.card).filters
     return all(

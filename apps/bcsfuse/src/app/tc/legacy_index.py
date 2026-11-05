@@ -13,9 +13,9 @@ from app.tc.catalog import TcDocumentConverter
 logger = logging.getLogger(__name__)
 
 
-def matches(catalog, worker_id, filters, allowed_ids):
+def matches(catalog, worker_id, filters):
     row = catalog.get(worker_id)
-    if row is None or (allowed_ids is not None and worker_id not in allowed_ids):
+    if row is None:
         return False
     labels = TcDocumentConverter().convert(row.card).filters
     return all(
@@ -135,9 +135,9 @@ class LegacyUpdates:
             "local_applied_revision": self.applied.get(worker_id, 0),
         }
 
-    def eligible(self, worker_id, filters, allowed_ids):
+    def eligible(self, worker_id, filters):
         return worker_id not in self.catalog.dirty and matches(
-            self.catalog, worker_id, filters, allowed_ids
+            self.catalog, worker_id, filters
         )
 
     async def run(self, stop):
@@ -164,10 +164,10 @@ class LegacyRetrievalIndex:
     def __init__(self, catalog, vectors, updates):
         self.catalog, self.vectors, self.updates = catalog, vectors, updates
 
-    def _search(self, query, limit, filters, allowed_ids, *, keyword):
+    def _search(self, query, limit, filters, *, keyword):
         ids = [
             worker_id
-            for worker_id in self.catalog.candidate_ids(filters, allowed_ids)
+            for worker_id in self.catalog.candidate_ids(filters)
             if worker_id not in self.catalog.dirty
         ]
         if not ids:
@@ -190,8 +190,8 @@ class LegacyRetrievalIndex:
             if hit.payload.get("worker_id") in ids
         ]
 
-    def vector_search(self, vector, limit, filters, allowed_ids):
-        return self._search(vector, limit, filters, allowed_ids, keyword=False)
+    def vector_search(self, vector, limit, filters):
+        return self._search(vector, limit, filters, keyword=False)
 
-    def keyword_search(self, query, limit, filters, allowed_ids):
-        return self._search(query, limit, filters, allowed_ids, keyword=True)
+    def keyword_search(self, query, limit, filters):
+        return self._search(query, limit, filters, keyword=True)

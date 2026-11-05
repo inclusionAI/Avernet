@@ -67,7 +67,7 @@ def test_success_has_stage_timings_and_no_query_or_card(timing_logs):
     result = asyncio.run(
         application(reranker=Reranker()).execute(
             SearchCommand("private query", 1, "search"),
-            VerifiedIdentity("caller", None),
+            VerifiedIdentity("caller"),
         )
     )
     assert result.items[0].score == 0.8
@@ -87,8 +87,8 @@ def test_success_has_stage_timings_and_no_query_or_card(timing_logs):
         "fusion",
         "reranker",
         "result_build",
-        "authorization",
     } <= sample["stages"].keys()
+    assert "authorization" not in sample["stages"]
     for stage in sample["stages"].values():
         assert stage["elapsed_ms"] >= 0
     assert "private" not in json.dumps(logs)
@@ -107,7 +107,7 @@ def test_progress_shows_input_branch_counts_and_returned_ids(caplog, timing_logs
     asyncio.run(
         app.execute(
             SearchCommand(query, 1, "search", {"resource_type": ("agent",)}),
-            VerifiedIdentity("caller", None),
+            VerifiedIdentity("caller"),
         )
     )
     timing_logs()
@@ -148,7 +148,7 @@ def test_trace_id_is_captured_before_background_log_flush(timing_logs):
     try:
         asyncio.run(
             service.execute(
-                SearchCommand("q", 1, "search"), VerifiedIdentity("caller", None)
+                SearchCommand("q", 1, "search"), VerifiedIdentity("caller")
             )
         )
     finally:
@@ -176,7 +176,7 @@ def test_embedding_timeout_preserves_keyword_result_and_timing(timing_logs):
         )
         result = asyncio.run(
             app.execute(
-                SearchCommand("hidden", 1, "search"), VerifiedIdentity("x", None)
+                SearchCommand("hidden", 1, "search"), VerifiedIdentity("x")
             )
         )
     assert result.items[0].item_id == "a"
@@ -196,7 +196,7 @@ def test_validation_failure_still_has_request_timing(timing_logs):
         asyncio.run(
             application().execute(
                 SearchCommand("hidden", 1, "search", filters={"private": ("secret",)}),
-                VerifiedIdentity("x", None),
+                VerifiedIdentity("x"),
             )
         )
     sample = timing_logs()[-1]["sample"]
@@ -209,10 +209,10 @@ def test_concurrent_requests_do_not_share_stages(timing_logs):
     async def run():
         await asyncio.gather(
             application(reranker=Reranker()).execute(
-                SearchCommand("x", 1, "search"), VerifiedIdentity("x", None)
+                SearchCommand("x", 1, "search"), VerifiedIdentity("x")
             ),
             application(vector_enabled=False).execute(
-                SearchCommand("y", 1, "search"), VerifiedIdentity("y", None)
+                SearchCommand("y", 1, "search"), VerifiedIdentity("y")
             ),
         )
 
@@ -249,7 +249,7 @@ def test_cache_hit_does_not_replay_old_stage_timings(timing_logs, caplog):
     app = CatalogSearchApplication(CachedRetrieval(retrieval, result_cache, state))
     command, identity = (
         SearchCommand("secret", 1, "search"),
-        VerifiedIdentity("x", None),
+        VerifiedIdentity("x"),
     )
     first = asyncio.run(app.execute(command, identity))
     before = len(timing_logs())
@@ -301,7 +301,7 @@ def test_cancelled_request_records_elapsed_time(timing_logs):
         )
         task = asyncio.create_task(
             app.execute(
-                SearchCommand("secret", 1, "search"), VerifiedIdentity("x", None)
+                SearchCommand("secret", 1, "search"), VerifiedIdentity("x")
             )
         )
         await started.wait()
@@ -367,7 +367,7 @@ def test_default_candidates_metadata_cache_and_db_failure(
     )
 
     class Catalog:
-        def eligible(self, agent_id, filters, allowed_ids):
+        def eligible(self, agent_id, filters):
             return agent_id == "a"
 
     state = SearchCaches(
@@ -391,7 +391,7 @@ def test_default_candidates_metadata_cache_and_db_failure(
         app = CatalogSearchApplication(CatalogRetrieval(retrieval, Catalog()))
         command, identity = (
             SearchCommand("secret", 1, "search"),
-            VerifiedIdentity("x", None),
+            VerifiedIdentity("x"),
         )
         first = asyncio.run(app.execute(command, identity))
         first_stages = timing_logs()[-1]["sample"]["stages"]

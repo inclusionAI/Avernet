@@ -31,11 +31,9 @@ that application. Zero, negative, boolean, string, fractional and null HTTP
 values remain invalid. TR hosts reusing `SearchBody` must call the same
 application normalization; the transport itself does not read DRM.
 
-The authenticated caller and allowed IDs come from a required host callback,
-never from the body. The callback accepts `fastapi.Request`, returns
-`VerifiedIdentity`, and rejects invalid credentials with the host's 401/403
-policy. There is no unauthenticated default. Empty allowed IDs prohibit searching;
-`None` is valid only when trusted authentication explicitly grants full scope.
+The host's authentication callback accepts a FastAPI request, returns a verified
+caller identity and rejects invalid credentials using its 401/403 policy.
+Search uses the supported business filters before applying the result limit.
 
 Successful responses contain `items`, `status` (`ok` or `degraded`) and `reasons`.
 Each item has `id`, `name`, `summary`, finite `score`, `score_source` and
@@ -114,8 +112,7 @@ The business application supplies these values from the same configuration
 snapshot used to execute the request, after retrieval/cache lookup. It must not
 echo an unclamped request or reread configuration after a DRM update. Hosts that
 cannot determine provider switches omit `retrieval`; existing TC services omit
-`effective` entirely, preserving their response. No query text, authorization
-scope, internal provider configuration or credentials are echoed in this object.
+`effective` entirely, preserving their response. No query text, internal provider configuration or credentials are echoed in this object.
 Non-HTTP adapters must explicitly map it into their versioned response contract;
 adding it to the Python result does not update a generated RPC contract.
 
@@ -135,7 +132,7 @@ quotas and production overload/degradation behavior will be established with
 real retrieval providers and load tests.
 
 `api/services.py` is the in-process application boundary, not a second network
-service. `RetrievalService` must honor the requested prefilters and trusted scope,
+service. `RetrievalService` must honor the requested prefilters,
 report unsupported options, and report failures. Providers are supplied and
 closed by the host; neither importing the package nor constructing a router
 initializes storage, models or update jobs.
@@ -262,7 +259,7 @@ execution, and `sample.stages` contains each executed stage's `elapsed_ms` and
 Stages cover configuration/validation, result and embedding cache reads/writes,
 Embedding, keyword/vector recall, recall filtering/deduplication (`recall_merge`),
 RRF (`fusion`), reranking, result construction, Card hydration (`card_metadata`,
-including `card_fetch` for database reads), eligibility and authorization.
+including `card_fetch` for database reads), eligibility.
 Default TopK records `default_candidates`, including cache/refresh wait time.
 Optional business extensions can use `stage_timing` with fixed stage names.
 
@@ -295,7 +292,7 @@ retrieval result dataclasses and built-in containers/scalars; byte accounting is
 an estimate, not a process RSS bound.
 
 The primitive does not enable caching in TC or change the HTTP contract. A host
-that wraps retrieval owns complete cache keys, trusted scope separation, data
+that wraps retrieval owns complete cache keys, business-filter separation, data
 revision invalidation, successful-result admission and final eligibility checks.
 Hosts must keep authentication and overload protection outside cache shortcuts.
 
@@ -343,11 +340,7 @@ no probability interpretation or universal numerical default is defined. A
 successful branch with all candidates filtered is a valid empty result. These
 options are host configuration, not untrusted HTTP request fields.
 
-In grouped mode trusted allowed IDs refer to sources. The host index adapter
-must translate this into a `source_id` prefilter, not point-ID filtering. The
-service verifies returned source scope before thresholding/grouping. No implicit
-list of all sources is constructed. TC keeps document/item-ID semantics because
-it does not opt into grouping.
+In grouped mode the retrieval service groups document hits by their source ID.
 
 `SqlIndexDocuments.load_many(ids)` provides a bounded batch read (up to 256 IDs),
 scoped by environment and index key. Source manifests, leases, atomic group

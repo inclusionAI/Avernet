@@ -221,7 +221,7 @@ def test_shared_management_http_preserves_auth_status_and_conflicts(tmp_path):
     async def operator(request: Request):
         if request.headers.get("x-operator") != "test":
             raise HTTPException(403)
-        return VerifiedIdentity("test", None)
+        return VerifiedIdentity("test")
 
     app = FastAPI()
     app.include_router(create_index_build_router(service, operator))

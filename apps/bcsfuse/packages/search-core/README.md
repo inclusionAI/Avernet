@@ -39,9 +39,7 @@ host. See [the rebuild contract](docs/index-rebuild.md). Importing the package
 does not enable build jobs or change TC behavior.
 
 `HybridRetrievalService` accepts a `QdrantRetrievalIndex` or another `RetrievalIndex`,
-an Embedding provider, and an optional reranker. `RetrievalRequest.allowed_ids` is
-trusted input from the application; an empty set returns no candidates. Filters
-and authorized IDs apply before top-k. The application prepares `name`, `content`
+an Embedding provider, and an optional reranker. Business filters apply before top-k. The application prepares `name`, `content`
 and filter metadata from its own Profile/Card. No Worker-ID matching, TC fragment
 aggregation, Fuse, Card parsing or audience policy is implicit in this pipeline.
 Failures propagate as `SearchUnavailable`; fallback policy is not invented here.
