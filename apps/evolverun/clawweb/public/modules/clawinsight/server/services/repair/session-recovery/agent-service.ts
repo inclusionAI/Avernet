@@ -556,7 +556,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (body.owner_request !== undefined) {
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
-        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission" | "materials", instructions: request.instructions as string,
+        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission", instructions: request.instructions as string,
           summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
         return { ok: true };
       }

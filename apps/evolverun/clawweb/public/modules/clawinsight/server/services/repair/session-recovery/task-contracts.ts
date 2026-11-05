@@ -12,7 +12,7 @@ export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_in
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
-  reason: "permission" | "materials";
+  reason: "permission";
   summary: string;
   instructions: string;
   evidence_ids: string[];
