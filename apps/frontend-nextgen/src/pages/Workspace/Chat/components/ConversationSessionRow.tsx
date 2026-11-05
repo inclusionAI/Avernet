@@ -51,6 +51,9 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
   const timeText = formatRelativeTime(session.gmtModified);
+  // Browse-only Coding Bot 会隐藏已有 Session 的 mutation 入口（actions 和收藏回调都不传）。
+  // 此时 hover 没有右侧图标需要让位，标题热区和相对时间必须保持原位，避免时间先左移再消失。
+  const hasHoverActions = Boolean(actions) || Boolean(onToggleFavorite);
   return (
     <div className="group/row relative flex min-h-8 items-center">
       {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
@@ -96,13 +99,14 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           // - hover/键盘聚焦/触屏,以及「…」菜单打开期间(trigger 钉住 data-state=open,鼠标离行仍可见)
           //   → 让至「…」左界,右界 96px(收藏 mr-2→pr-88,非收藏 mr-4→pr-80)。
           // 只读行无任何图标,维持基础内边距。
-          !readOnly && [
-            favorite && 'pr-[52px]',
-            !favorite && selected && 'pr-[44px]',
-            'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
-            favorite &&
-              'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
-          ],
+          !readOnly &&
+            hasHoverActions && [
+              favorite && 'pr-[52px]',
+              !favorite && selected && 'pr-[44px]',
+              'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
+              favorite &&
+                'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
+            ],
         )}
       >
         <span
@@ -126,6 +130,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             className={cn(
               'ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint',
               !readOnly &&
+                hasHoverActions &&
                 'transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0',
             )}
           >

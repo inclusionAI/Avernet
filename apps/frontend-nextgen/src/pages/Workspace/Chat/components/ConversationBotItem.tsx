@@ -56,7 +56,7 @@ export interface ConversationBotItemProps {
   onCreateSession(): void;
   onSelectSession(sessionId: string): void;
   onLoadMore(): void;
-  onToggleFavorite(sessionId: string): void;
+  onToggleFavorite?(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
   /** 「Bot 管理」菜单项回调(#2990 还原):跳转该 Bot 所属空间的 Bot 管理页;
    *  好友 Bot 不传(菜单项不渲染);bot.spaceId 有值才显示菜单入口。 */
