@@ -177,10 +177,10 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
   renderModal();
 
-  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('gap-3');
+  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('gap-6');
   expect(screen.getByText('协作群名称')).toHaveClass('text-foreground');
   expect(screen.getByText('协作目标')).toHaveClass('text-foreground');
-  expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('gap-3');
+  expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('gap-5');
 
   const autoReply = screen.getByRole('switch', { name: '自动回复' });
   const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
@@ -189,7 +189,7 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   expect(autoReply).toBeChecked();
   expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('text-muted-foreground');
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass(
-    'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]',
+    'grid-cols-1', 'sm:grid-cols-2',
   );
 
   fireEvent.click(autoReply);
@@ -325,7 +325,7 @@ it('state_machine submits definitionYaml as content_yaml body', async () => {
   renderModal({ activeIdentity: botIdentity });
 
   fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
-  expect(screen.getByText('是否以任务执行')).toHaveClass('text-xs', 'font-semibold');
+  expect(screen.getByText('是否以任务执行')).toHaveClass('text-sm', 'font-medium');
   fireEvent.change(screen.getByLabelText('协作定义 YAML'), {
     target: { value: 'participants:\n  - alpha\nroles:\n  - driver' },
   });
@@ -389,26 +389,35 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
     expect(screen.getByRole('complementary', { name: '协作流程侧栏', hidden: true })).toBeInTheDocument();
   });
   expect(screen.getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
-  expect(screen.getByRole('dialog')).toHaveClass('max-w-2xl', 'xl:left-[calc(50%-208px)]', 'xl:overflow-visible');
+  expect(screen.getByRole('dialog')).toHaveClass('xl:max-w-[1320px]', 'xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]', 'overflow-hidden');
   expect(screen.getByRole('complementary', { name: '协作流程侧栏', hidden: true })).toHaveClass(
-    'absolute',
-    'left-[calc(100%+1rem)]',
+    'xl:col-start-2',
+    'xl:row-start-2',
     'flex-col',
-    'w-[400px]',
+    'min-w-0',
     'xl:flex',
   );
-  expect(screen.getByTestId('collaboration-flow-content')).toHaveClass('flex-1', 'items-center');
-  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('lg:overflow-y-auto');
-  expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-[420px]', 'pb-2');
-  expect(screen.getByText('协同剧本')).toHaveClass('text-xs', 'font-semibold');
+  expect(screen.getByTestId('collaboration-flow-content')).toHaveClass('flex-1', 'min-h-0');
+  expect(screen.getByTestId('collaboration-flow-content')).not.toHaveClass('items-center');
+  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('overflow-y-auto');
+  expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-none', 'overflow-visible', 'pb-2');
+  expect(screen.getByText('协同剧本')).toHaveClass('text-sm', 'font-medium');
   const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
-  const scriptFrame = screen.getByText('协同剧本').parentElement?.parentElement;
-  expect(scriptFrame).toHaveClass('border');
+  const scriptFrame = screen.getByText('协同剧本').parentElement;
+  expect(scriptFrame?.querySelector('.h-10')).toHaveClass('border');
   expect(scriptFrame).not.toContainElement(notifyField);
   expect(scriptFrame).toContainElement(screen.getByRole('button', { name: '重新编辑' }));
   expect(scriptFrame?.parentElement).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
   expect(scriptFrame?.nextElementSibling).toContainElement(notifyField);
   expect(screen.getByRole('button', { name: '重新编辑' })).toHaveClass('text-xs');
+  fireEvent.change(screen.getByLabelText('协作群名称'), { target: { value: '预览往返校验' } });
+  fireEvent.click(screen.getByRole('button', { name: '流程预览' }));
+  const expanded = screen.getByRole('dialog', { name: '协作流程预览' });
+  expect(within(expanded).getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
+  fireEvent.click(within(expanded).getByRole('button', { name: '返回配置' }));
+  expect(screen.queryByRole('dialog', { name: '协作流程预览' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('协作群名称')).toHaveValue('预览往返校验');
+  expect(screen.getByRole('button', { name: '选择角色 Alpha' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('previews a validation-only Loop but blocks creation until the server permits execution', async () => {
@@ -634,6 +643,19 @@ it('user identity cannot choose custom collaboration', async () => {
   expect(screen.getByRole('radio', { name: '自定义协作' })).toBeDisabled();
 });
 
+it('loads the next Bot page from the form scroll while keeping creation actions fixed', async () => {
+  cs.listFriends.mockResolvedValueOnce({ ok: true, data: { items: bots, total: 3, offset: 0, limit: 50, hasMore: true } });
+  cs.listFriends.mockResolvedValue({ ok: true, data: { items: [{ ...bots[0], id: 'b3', name: 'Gamma' }], total: 3, offset: 50, limit: 50, hasMore: false } });
+  renderModal({ activeIdentity: botIdentity });
+  await screen.findByRole('button', { name: /Alpha/ });
+  const body = screen.getByTestId('create-group-modal-body');
+  Object.defineProperties(body, { scrollHeight: { value: 900 }, clientHeight: { value: 500 } });
+  fireEvent.scroll(body, { target: { scrollTop: 400 } });
+  expect(await screen.findByRole('button', { name: /Gamma/ })).toBeInTheDocument();
+  expect(cs.listFriends).toHaveBeenLastCalledWith('actor-bot', { offset: 50, limit: 50, detailSource: 'collaboration' });
+  expect(body).not.toContainElement(screen.getByTestId('create-group-modal-footer'));
+});
+
 it('user identity shows the 已管理 Bot tab', async () => {
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
@@ -644,15 +666,15 @@ it('uses a taller viewport-aware shell without the previous 560px body cap', () 
   renderModal();
 
   expect(screen.getByRole('dialog')).toHaveClass(
-    'max-w-2xl',
-    'h-[min(860px,calc(100vh-2rem))]',
+    'max-w-[720px]',
+    'h-dvh', 'sm:h-[min(900px,calc(100dvh-3rem))]',
     'grid-rows-[auto_minmax(0,1fr)_auto]',
   );
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass(
     'h-full',
     'min-h-0',
     'overflow-y-auto',
-    'lg:overflow-y-hidden',
+    'overscroll-contain',
   );
   expect(screen.getByTestId('create-group-modal-body')).not.toHaveClass('max-h-[560px]');
 });
@@ -680,12 +702,10 @@ it('keeps the managed Bot picker within the modal width', async () => {
   );
   expect(screen.getByTestId('group-participant-picker')).toHaveClass(
     'w-full',
-    'min-h-0',
     'min-w-0',
     'max-w-full',
-    'flex-1',
   );
-  expect(screen.getByTestId('group-participant-list')).toHaveClass('h-full', 'max-h-none');
+  expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-none', 'overflow-visible');
   const managedTab = screen.getByRole('button', { name: '已管理 Bot' });
   expect(managedTab.parentElement).toHaveClass('w-full', 'min-w-0');
   fireEvent.click(managedTab);

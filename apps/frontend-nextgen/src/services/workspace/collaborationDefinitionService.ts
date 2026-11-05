@@ -155,9 +155,10 @@ export function parseCollaborationParticipants(yaml: string): ParticipantDefinit
  * 自定义协作定义数据层：校验 YAML 并解包 envelope.data。
  */
 export const collaborationDefinitionService = {
-  async validate(definitionYaml: string): Promise<DomainResult<DefinitionValidation>> {
+  async validate(definitionYaml: string, signal?: AbortSignal): Promise<DomainResult<DefinitionValidation>> {
     try {
-      const resp = await validateApi({ definition_yaml: definitionYaml });
+      const body = { definition_yaml: definitionYaml };
+      const resp = await (signal ? validateApi(body, signal) : validateApi(body));
       const data = resp.data;
       if (!data) {
         return { ok: false, error: toDomainError('VALIDATE_FAILED', 'YAML 校验请求失败') };
