@@ -6,7 +6,7 @@
   </defs>
   <rect x="0" y="0" width="960" height="520" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Draining executor A (group G restarts in place)</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">Executors hold no streams, so draining one only moves leases. Streams stay on gateways and never notice.</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Executors hold no streams, so draining one only moves leases. Streams stay open on gateways and pause for milliseconds.</text>
 
   <rect x="24" y="72" width="912" height="62" rx="8" fill="#ffffff" stroke="#5c6a62"/>
   <text x="44" y="96" font-size="13" font-weight="bold" fill="#1c2420">1 · Stop signal</text>
@@ -22,9 +22,9 @@
   <text x="58" y="290" font-size="11" fill="#5c6a62">round's preferred executor claims it</text>
   <rect x="340" y="184" width="580" height="136" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="630" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Everything else — including steps that are still streaming</text>
-  <text x="354" y="230" font-size="11.5" font-weight="bold" fill="#157a55">→ HANDOFF: PREPARE · pause · TRANSFER · COMMIT to B · MOVED(B) to subscribers</text>
-  <text x="354" y="254" font-size="11" fill="#1c2420">a streaming step keeps running on its dispatch gateway; its next event and its result go to B</text>
-  <text x="354" y="272" font-size="11" fill="#1c2420">PA streams re-subscribe to B with their cursor; nothing is replayed to the PA twice</text>
+  <text x="354" y="230" font-size="11.5" font-weight="bold" fill="#157a55">→ HANDOFF: PREPARE (+ step buffers) · pause · TRANSFER · COMMIT to B</text>
+  <text x="354" y="254" font-size="11" fill="#1c2420">a streaming step keeps running on its dispatch gateway; its next deltas, events and result go to B</text>
+  <text x="354" y="272" font-size="11" fill="#1c2420">PA streams stay subscribed to S's channel; B publishes there now, so they pause for milliseconds</text>
   <text x="354" y="296" font-size="11" fill="#5c6a62">only wait: a durable write or a dispatch start in progress (milliseconds)</text>
   <text x="354" y="312" font-size="11" fill="#5c6a62">successor ∉ G: a draining executor refuses PREPARE</text>
 

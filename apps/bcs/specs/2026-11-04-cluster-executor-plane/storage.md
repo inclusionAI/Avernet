@@ -19,7 +19,9 @@ OceanBase; Redis only for state that can be lost and rebuilt.**
 
 **Redis is a good fit for:** item 2's connection-location registry
 (rebuilt on reconnect, verified by forwarding), soft rate limits, read
-caches of rarely-changing content, best-effort wake-ups.
+caches of rarely-changing content, best-effort wake-ups, and the
+non-durable session channels that carry fan-out (design §7.4; sharded
+pub/sub only).
 
 ## 2. What a storage failover does
 

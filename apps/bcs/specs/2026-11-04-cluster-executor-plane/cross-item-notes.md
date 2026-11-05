@@ -13,21 +13,23 @@ builds it to this contract:
 - **Hold every connection; hold no durable state.** PA streams, outbound
   A2A and Provider streams, and dial-in bot sockets all terminate on
   gateways. Executors keep none.
-- **Classify every downstream event** (design §7.3): deltas go only to
-  subscribers and the step buffer; control events (the agent's task id,
-  `input-required` / `auth-required`, coordination tool calls, the final
-  result with the assembled output) go to the session's owner. The
-  classifier is part of the gateway–executor contract.
-- **Deliver control events and results to the current owner**, looked up per
-  message (hint cache + `NOT_OWNER`), each with a per-dispatch sequence
-  number, retried until acknowledged. Never remember an owner for the life
-  of a run. This is what lets a session move without touching any
-  connection.
-- **Be a subscriber with a cursor** (design §7.4): keep `last_seq` per
-  session, subscribe with it, re-subscribe on a channel break, a stale owner
-  or a `NOT_OWNER` / `MOVED`, and re-assert subscriptions every 5 s.
-- **Keep a step buffer per in-flight dispatch** and serve it, attached to the
-  live feed in one step, to any gateway rebuilding a snapshot (design §7.5).
+- **Send every downstream event to the session's owner** (design §7.2–7.3):
+  deltas in 200 ms batches without acknowledgement; control events (the
+  agent's task id, `input-required` / `auth-required`, coordination tool
+  calls, the final result with the assembled output) retried until
+  acknowledged. Telling the two apart is part of the gateway–executor
+  contract.
+- **Look the owner up per message** (hint cache + `NOT_OWNER`); never
+  remember an owner for the life of a run. This is what lets a session move
+  without touching any connection.
+- **Subscribe by session, never by owner** (design §7.4): subscribe to S's
+  channel before asking for a snapshot; drop messages the snapshot already
+  covers or that carry an older fencing token; read missing events from the
+  log on a gap in `event_seq`; poll the log while the channel is down.
+  Fan-out decisions are the owner's; the gateway only relays what is
+  published to it.
+- **Keep each in-flight dispatch's output** until the owner acknowledges the
+  result, and hand it to a new owner on `FetchBuffer` (design §7.2).
 - **Cluster-wide bot reachability:** "which gateway holds bot X's socket?"
   must be answerable from any node. This registry is soft state (rebuilt
   when bots reconnect, verified by forwarding), so a fast store such as

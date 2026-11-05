@@ -25,7 +25,7 @@
   <text x="165" y="146" font-size="11" text-anchor="middle" fill="#1c2420">B = HRW(S, roster − draining)</text>
   <text x="24" y="180" font-size="11" font-weight="bold" fill="#5c6a62">2</text>
   <line x1="169" y1="176" x2="791" y2="176" stroke="#5c6a62" marker-end="url(#ar)"/>
-  <text x="480" y="170" font-size="11" text-anchor="middle" fill="#1c2420">PREPARE(S)</text>
+  <text x="480" y="170" font-size="11" text-anchor="middle" fill="#1c2420">PREPARE(S) + step buffers</text>
   <text x="795" y="198" font-size="10.5" text-anchor="middle" fill="#157a55">loads S (reads only) — not owner yet</text>
   <line x1="791" y1="214" x2="169" y2="214" stroke="#157a55" marker-end="url(#ag)"/>
   <text x="480" y="208" font-size="11" text-anchor="middle" fill="#157a55">READY (or refuse if B is draining → try next-ranked)</text>
@@ -43,16 +43,16 @@
 
   <text x="24" y="352" font-size="11" font-weight="bold" fill="#5c6a62">5</text>
   <line x1="169" y1="348" x2="791" y2="348" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
-  <text x="480" y="342" font-size="11" text-anchor="middle" fill="#157a55">COMMIT(S, n+1) to B · MOVED(B) to S's subscribers</text>
+  <text x="480" y="342" font-size="11" text-anchor="middle" fill="#157a55">COMMIT(S, n+1) — B now publishes on S's channel</text>
   <text x="795" y="370" font-size="10.5" text-anchor="middle" fill="#157a55">drives S; if write_seq moved since</text>
   <text x="795" y="384" font-size="10.5" text-anchor="middle" fill="#157a55">PREPARE, re-reads only the change</text>
 
   <text x="24" y="414" font-size="11" font-weight="bold" fill="#5c6a62">6</text>
   <line x1="169" y1="410" x2="791" y2="410" stroke="#5c6a62" stroke-dasharray="5 4" marker-end="url(#ar)"/>
-  <text x="480" y="404" font-size="11" text-anchor="middle" fill="#1c2420">forward held rounds/events · later arrivals at A get NOT_OWNER(B) · gateways send the next event to B</text>
+  <text x="480" y="404" font-size="11" text-anchor="middle" fill="#1c2420">forward held rounds/events · later arrivals at A get NOT_OWNER(B) · gateways send the next delta or event to B</text>
 
   <rect x="24" y="452" width="912" height="92" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="44" y="476" font-size="13" font-weight="bold" fill="#1c2420">If something fails midway, existing mechanisms cover it</text>
   <text x="44" y="498" font-size="11.5" fill="#1c2420">B dies after step 4 → ordinary takeover · A dies between 4 and 5 → B finds S at its next unadopted-lease read ·</text>
-  <text x="44" y="516" font-size="11.5" fill="#1c2420">a MOVED is lost → periodic re-assertion · A stalls after 4 and writes → fenced out (token n). The PA's stream lives on a gateway and never notices.</text>
+  <text x="44" y="516" font-size="11.5" fill="#1c2420">A stalls after 4 and writes → fenced out; publishes → subscribers drop token n. Subscribers stay on S's channel throughout.</text>
 </svg>
