@@ -45,18 +45,18 @@ async def test_bulk_new_mcp_uses_catalog_snapshot_and_keeps_existing_snapshot():
         return {"runMode": "LOCAL", **catalog[code]}
 
     service._mcp_center.get_mcp_detail = detail
-    scope = service.read_apply_snapshot(
+    before = service.read_apply_snapshot(
         bot_id="bot-1", owner_id="true-owner", actor_id="true-owner"
-    ).scope
+    )
 
     async def replace(name, codes):
         return await service.replace_apply_skill_sets(
-            scope=scope,
+            scope=before.scope,
             actor_id="true-owner",
             sets=(ResolvedSkillSetWrite(name, is_active=False, mcp_codes=codes),),
             remove_names=(),
             default_change=DefaultExclusionChange(),
-            platform_default_codes=frozenset(),
+            platform_default_codes=before.platform_default_codes,
             project=False,
         )
 

@@ -1,5 +1,6 @@
 """Manifest supply cleanup through management, SQLite and real runtime projection."""
 
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -84,6 +85,54 @@ class _Device:
         return True
 
 
+class _Passport:
+    """External Passport boundary with a complete, overwrite-style scope."""
+
+    def __init__(self):
+        self.scope = {
+            "mcps": [],
+            "clis": [
+                {
+                    "cli_code": "kept-cli",
+                    "identity_mode": "owner",
+                    "cli_name": "Kept CLI",
+                    "cli_desc": "Existing unrelated permission",
+                }
+            ],
+        }
+        self.updates = []
+
+    def query_agent_passport(self, bot_id, owner_id):
+        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        return deepcopy(self.scope)
+
+    def query_passport_clis(self, bot_id, owner_id):
+        return self.query_agent_passport(bot_id, owner_id)["clis"]
+
+    def update_passport(self, *, bot_id, user_id, engine_type, resource_scope):
+        assert (bot_id, user_id, engine_type) == ("bot-1", "true-owner", "openclaw")
+        assert resource_scope["mcp_codes"] == [
+            item["mcp_code"] for item in resource_scope["mcp_items"]
+        ]
+        self.updates.append(deepcopy(resource_scope))
+        self.scope = {
+            "mcps": deepcopy(resource_scope["mcp_items"]),
+            "clis": deepcopy(resource_scope["cli_items"]),
+        }
+
+    def assert_scope(self, codes):
+        assert self.updates
+        assert {item["mcp_code"] for item in self.scope["mcps"]} == codes
+        assert self.scope["clis"] == [
+            {
+                "cli_code": "kept-cli",
+                "identity_mode": "owner",
+                "cli_name": "Kept CLI",
+                "cli_desc": "Existing unrelated permission",
+            }
+        ]
+
+
 @pytest.fixture
 def runtime_cleanup(tmp_path):
     db = _Database()
@@ -148,8 +197,7 @@ def runtime_cleanup(tmp_path):
     contexts = MagicMock()
     dispatcher = MagicMock()
     dispatcher.dispatch.return_value = device
-    passport = MagicMock()
-    passport.query_passport_clis.return_value = []
+    passport = _Passport()
     identity = MagicMock()
     identity.list_draft_call_types.return_value = {}
     sync = MCPSyncService(
@@ -226,6 +274,7 @@ def runtime_cleanup(tmp_path):
         service=management,
         direct=direct,
         device=device,
+        passport=passport,
         config=config,
         config_commands=ScopedMCPConfigRepository(db),
     )
@@ -266,6 +315,8 @@ async def test_bulk_inactive_removes_only_mcp_configuration_without_final_supply
     assert ("mcp.dependency" in device.configured) is protected
     assert ("mcp.dependency" in device.declared) is protected
     assert device.removed == ([] if protected else ["mcp.dependency"])
+    # LOCAL hitl remains on the device, outside Passport's remote scope.
+    runtime_cleanup.passport.assert_scope(device.declared - {"hitl"})
     after = service.read_apply_snapshot(
         bot_id="bot-1", owner_id="true-owner", actor_id="true-owner"
     )
@@ -322,5 +373,7 @@ async def test_manifest_removes_override_only_configuration_or_refreshes_retaine
     )
     assert device.removed == ([] if derived else ["mcp.dependency"])
     assert ("mcp.dependency" in device.configured) is derived
+    runtime_cleanup.passport.assert_scope(device.declared - {"hitl"})
     if derived:
-        assert device.headers["mcp.dependency"] == {}
+        # Clearing the user override retains the mandatory remote Bot identity.
+        assert device.headers["mcp.dependency"] == {"X-TC-Bot-Id": "bot-1"}
