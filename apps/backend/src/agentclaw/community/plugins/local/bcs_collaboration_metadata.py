@@ -5,7 +5,7 @@ network: presence is whatever ``existing`` was seeded with, delivered
 profiles are stored keyed by the stable BCS bot address, and every
 plugin call is recorded as ``(operation, payload)`` so consumer tests
 can pin the bounded single-pass call sequence (``exists`` →
-``profile`` → ``caller``) and script delivery outcomes.
+``profile``) and script delivery outcomes.
 
 Declared test-only: like the ownership/manager recording fakes, this is
 a fixture backend, not a production service. It never registers a
@@ -22,7 +22,6 @@ from dataclasses import replace
 
 from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     MetadataDeliveryError,
     MetadataDeliveryErrorCode,
     ProfileSnapshot,
@@ -59,8 +58,7 @@ class RecordingBcsCollaborationMetadataPlugin(BcsCollaborationMetadataPlugin):
         self.failures: dict[str, Exception] = (
             dict(failures) if failures is not None else {}
         )
-        #: every plugin call: ("exists", bcs_bot_id) / ("profile"|
-        #: "caller", snapshot), in consumer-observed order.
+        #: Every call: ("exists", bcs_bot_id) / ("profile", snapshot).
         self.calls: list[tuple[str, object]] = []
         #: delivered profiles keyed by the stable BCS bot address.
         self.profiles: dict[str, ProfileSnapshot] = {}
@@ -91,23 +89,8 @@ class RecordingBcsCollaborationMetadataPlugin(BcsCollaborationMetadataPlugin):
             self.profiles[snapshot.bcs_bot_id] = replace(
                 snapshot, summary=previous.summary if previous is not None else ""
             )
-            raise MetadataDeliveryError(
-                DeliveryFailure.UNKNOWN,
-                MetadataDeliveryErrorCode.COLLABORATION_SUMMARY_UNCONFIRMED,
-            )
+            return
         self.profiles[snapshot.bcs_bot_id] = snapshot
-
-    async def sync_caller(
-        self,
-        snapshot: CallerSnapshot,
-        *,
-        timeout_seconds: float,
-    ) -> None:
-        self.calls.append(("caller", snapshot))
-        self._require_existing(snapshot.bcs_bot_id)
-        failure = self.failures.get("caller")
-        if failure is not None:
-            raise failure
 
     async def aclose(self) -> None:
         """No owned resources — only mark, never close injected clients."""

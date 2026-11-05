@@ -1,4 +1,4 @@
-"""Collaboration metadata delivery Plugin API v1; no transport objects.
+"""Collaboration metadata delivery Plugin API v2; no transport objects.
 
 Core supplies current committed snapshots; the Plugin makes one
 bounded attempt per method and classifies failures; retry policy and
@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     MetadataDeliveryError,
     ProfileSnapshot,
 )
@@ -50,25 +49,9 @@ class BcsCollaborationMetadataPlugin(Plugin, Protocol):
         A returned ``None`` means BCS confirmed the update. Any outcome
         BCS did not confirm raises ``MetadataDeliveryError``; the
         explicit ``avatar_url`` clear (``""``) is a valid payload and is
-        transmitted as-is. The current onboard transport preserves empty/blank
-        summaries and does not echo them: those inputs raise UNKNOWN with
-        ``collaboration_summary_unconfirmed`` after acknowledgement, even if
-        name/avatar were applied. Consumers must preserve the partial result.
-        """
-        ...
-
-    async def sync_caller(
-        self,
-        snapshot: CallerSnapshot,
-        *,
-        timeout_seconds: float,
-    ) -> None:
-        """Deliver one caller-config update; unconfirmed delivery raises.
-
-        A disabled established config (``enabled=False``) is a valid
-        payload and is transmitted as-is, with the saved
-        ``source_revision``; the plugin never bumps the revision and
-        never treats ``enabled=False`` as "do not send".
+        transmitted as-is. Empty/blank summaries follow BCS's existing Keep
+        semantics: a valid onboard acknowledgement is success, not proof that
+        the remote summary was cleared.
         """
         ...
 

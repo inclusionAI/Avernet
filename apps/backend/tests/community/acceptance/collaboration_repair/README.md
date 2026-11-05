@@ -23,9 +23,11 @@ coverage and no delivery response is simulated.
 Stories prove:
 
 - avatar registration, edits, explicit clears, and Group/Session readback;
-- real repair restores saved name/avatar/caller config and confirms owner and
-  manager roster, returns the four ordered outcomes, creates no Bot, and
+- real repair restores saved name/avatar and confirms owner and
+  manager roster, returns the three ordered outcomes, creates no Bot, and
   enqueues no work;
+- empty/blank summaries return success after acknowledgement while retaining
+  BCS's stored summary;
 - a missing BCS target returns 404 after the real existence probe and is never
   created;
 - an unreadable saved avatar returns 409 without clearing any remote profile

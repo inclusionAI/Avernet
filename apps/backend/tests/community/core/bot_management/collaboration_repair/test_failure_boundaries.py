@@ -14,7 +14,6 @@ from agentclaw.community.kernel.bot_manager_sync import SnapshotUnavailable
 from agentclaw.community.kernel.collaboration_repair import RepairPreconditionError
 from agentclaw.community.plugins.community.bcs_managers import HttpBcsManagersPlugin
 from tests.community.core.bot_management.collaboration_repair.factories import (
-    default_repair_facts,
     make_repair_case,
 )
 
@@ -84,7 +83,6 @@ async def test_blocked_reader_returns_before_thread_finishes(phase):
             items = {item.component: item for item in report.items}
             assert items[phase].status == "failed"
             assert items[phase].error_code == "delivery_timeout"
-            assert items["caller_config"].status == "skipped_dependency"
             assert report.status == ("failed" if phase == "ownership" else "partial_failed")
         assert not finished.is_set()
     finally:
@@ -100,32 +98,26 @@ async def test_blocked_reader_returns_before_thread_finishes(phase):
         case.ownership.replace_ownership.assert_not_awaited()
         case.metadata.update_profile.assert_not_awaited()
     case.managers.replace_managers.assert_not_awaited()
-    case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("caller_present", [True, False])
-async def test_managers_read_failure_preserves_prior_successes(caller_present):
-    case = make_repair_case(
-        facts=default_repair_facts() if caller_present else default_repair_facts(caller=None)
-    )
+async def test_managers_read_failure_preserves_prior_successes():
+    case = make_repair_case()
     case.managers_reader.read_facts.side_effect = SnapshotUnavailable("read_error")
     report = await case.service.repair(case.command)
     assert [(item.component, item.status, item.error_code) for item in report.items] == [
         ("ownership", "succeeded", None),
         ("profile", "succeeded", None),
         ("managers", "failed", "collaboration_facts_read_error"),
-        ("caller_config", "skipped_dependency" if caller_present else "not_applicable", None),
     ]
     assert report.status == "partial_failed"
     case.ownership.replace_ownership.assert_awaited_once()
     case.metadata.update_profile.assert_awaited_once()
     case.managers.replace_managers.assert_not_awaited()
-    case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_real_managers_missing_response_stops_caller():
+async def test_real_managers_missing_response_is_reported():
     case = make_repair_case()
     requests = []
 
@@ -149,8 +141,6 @@ async def test_real_managers_missing_response_stops_caller():
     assert len(requests) == 1
     assert report.items[2].status == "failed"
     assert report.items[2].error_code == "collaboration_bot_not_found"
-    assert report.items[3].status == "skipped_dependency"
-    case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -167,4 +157,3 @@ async def test_reader_timeout_error_propagates_without_deadline_expiry(phase):
     with pytest.raises(TimeoutError, match="unclassified read error"):
         await case.service.repair(case.command)
     case.managers.replace_managers.assert_not_awaited()
-    case.metadata.sync_caller.assert_not_awaited()

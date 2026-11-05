@@ -100,7 +100,6 @@ succeded_report = RepairReport(
         RepairItem("ownership", "succeeded"),
         RepairItem("profile", "succeeded"),
         RepairItem("managers", "succeeded"),
-        RepairItem("caller_config", "not_applicable"),
     ),
 )
 
@@ -140,7 +139,6 @@ endpoint_test(
                     {"component": "ownership", "status": "succeeded", "error_code": None},
                     {"component": "profile", "status": "succeeded", "error_code": None},
                     {"component": "managers", "status": "succeeded", "error_code": None},
-                    {"component": "caller_config", "status": "not_applicable", "error_code": None},
                 ],
             }
         },
