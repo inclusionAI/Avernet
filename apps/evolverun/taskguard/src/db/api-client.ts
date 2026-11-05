@@ -58,7 +58,7 @@ function signRequest(
   timestamp: number,
   body: any,
 ): { signature: string; timestamp: number } {
-  const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
+  const bodyStr = body === undefined ? "" : typeof body === "string" ? body : JSON.stringify(body);
   const message = `${timestamp}.${bodyStr}`;
 
   let privateKey: crypto.KeyObject;
