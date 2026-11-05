@@ -541,7 +541,7 @@ describe('BotTable 公开设置菜单项（collab-permission-entry-migration AC-
   test('门禁不可用时菜单项禁用', () => {
     renderTable(bot, {
       onAction: jest.fn(),
-      getGeneralConfigAvailability: () => ({ enabled: false, disabledReason: '仅 Bot 管理员可变更公开设置' }),
+      getGeneralConfigAvailability: () => ({ enabled: false, disabledReason: '仅 Bot Owner 可变更公开设置' }),
       onGeneralConfig: jest.fn(),
     });
     fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));

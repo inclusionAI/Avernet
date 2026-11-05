@@ -117,6 +117,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
     onOpenBotWorkshop: jest.fn(),
+    onCreateBotInSpace: jest.fn(),
     replyingSessionId: null,
     ...over,
   };

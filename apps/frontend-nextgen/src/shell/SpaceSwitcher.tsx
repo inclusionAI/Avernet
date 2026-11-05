@@ -17,6 +17,7 @@ import { Button, Empty, IconButton, Popover, PopoverContent, PopoverTrigger, Ske
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import type { Space } from '@/domain/admin/models';
+import { sortSpacesBySidebarOrder } from '@/domain/spaceContext';
 import { initSpaceContext, refreshSpaceContext, switchSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
 import { cn } from '@/utils/cn';
 import { useNavigate } from '@umijs/max';
@@ -122,11 +123,9 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
     void refreshSpaceContext();
   };
 
-  // 列表排序：个人空间置顶，团队按 gmtModified 倒序（与空间管理页一致）
-  const ordered = [...spaces].sort((a, b) => {
-    if (a.spaceType !== b.spaceType) return a.spaceType === 'PERSONAL' ? -1 : 1;
-    return (b.gmtModified || '').localeCompare(a.gmtModified || '');
-  });
+  // 列表排序(共享函数,个人空间置顶+团队按 gmtModified 倒序,与空间管理页一致):
+  // 对话菜单创建入口弹窗同用此序,保证两处空间菜单顺序一致(2026-11-05 验收对齐)。
+  const ordered = sortSpacesBySidebarOrder(spaces);
 
   let listBody: React.ReactNode;
   if (loading && spaces.length === 0) {
