@@ -488,3 +488,16 @@ it.each([
   expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
   expect(sender.sendCard).not.toHaveBeenCalled(); expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
+
+
+it.each([
+  { summary: undefined, owner_request: { reason: "permission" } },
+  { summary: "完整调查报告", owner_request: { reason: "permission", instructions: "另一份不一致的处理事项" } },
+])("rejects permission handoff without the full report or with conflicting actions: %j", async fields => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "invalid-permission-brief"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", handoff: { summary: "原资料读取缺少权限", instructions: "请申请原资料读取权限" },
+    evidence_ids: [read.evidenceId], ...fields })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled();
+});
