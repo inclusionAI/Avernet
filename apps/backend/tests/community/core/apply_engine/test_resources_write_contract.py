@@ -2,67 +2,44 @@
 
 from __future__ import annotations
 
+
+from typing import Any
+
+
+from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
+    FetchedEntry,
+)
+
+
+from ._fakes import (
+    FakeResourceFileService,
+    make_context,
+)
+
+
 from ._resources_test_support import (
-    Any as Any,
-    ApplyOrchestrator as ApplyOrchestrator,
-    ArcaDelivery as ArcaDelivery,
-    BlobDelivery as BlobDelivery,
-    ConfirmedPartialWriteError as ConfirmedPartialWriteError,
-    EmptyCliTools as EmptyCliTools,
-    EngineRig as EngineRig,
-    EntryFetchError as EntryFetchError,
-    FakeActivationService as FakeActivationService,
-    FakeCapabilityReader as FakeCapabilityReader,
-    FakeIdentityService as FakeIdentityService,
-    FakeManifestContent as FakeManifestContent,
-    FakeMcpAuth as FakeMcpAuth,
-    FakeResourceFileService as FakeResourceFileService,
-    FakeResourceRows as FakeResourceRows,
-    FakeSkillUploadService as FakeSkillUploadService,
-    FakeStartupScriptService as FakeStartupScriptService,
-    FetchRefusedError as FetchRefusedError,
-    FetchedEntry as FetchedEntry,
-    GitDelivery as GitDelivery,
-    GitEntrySource as GitEntrySource,
-    ROOT_NOT_CLEARED_REASON as ROOT_NOT_CLEARED_REASON,
-    ROOT_NOT_LISTED_REASON as ROOT_NOT_LISTED_REASON,
-    ResourcesRootNotCleared as ResourcesRootNotCleared,
-    ResourcesRootNotListed as ResourcesRootNotListed,
-    SimpleNamespace as SimpleNamespace,
-    WorkspaceEntry as WorkspaceEntry,
-    WrittenFile as WrittenFile,
+    _arca_steps as _arca_steps,
     _BUCKET as _BUCKET,
     _DOCUMENT as _DOCUMENT,
     _REPO as _REPO,
-    _RecordingStore as _RecordingStore,
-    _StubCheckout as _StubCheckout,
-    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
     _TREE as _TREE,
-    _arca_steps as _arca_steps,
-    _compose as _compose,
-    _ctx as _ctx,
-    _git_rig as _git_rig,
-    _git_session as _git_session,
-    _materialiser as _materialiser,
-    _resources_category as _resources_category,
-    _resources_engine as _resources_engine,
     _run as _run,
+    _materialiser as _materialiser,
     _src as _src,
+    _RecordingStore as _RecordingStore,
+    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
+    _compose as _compose,
+    _StubCheckout as _StubCheckout,
     _stub_git_source as _stub_git_source,
     _tgz as _tgz,
     _write_through as _write_through,
-    asyncio as asyncio,
-    build_materialisers as build_materialisers,
-    build_skill_tgz as build_skill_tgz,
-    compiling_resources as compiling_resources,
-    datetime as datetime,
-    declared_session as declared_session,
-    make_context as make_context,
-    manifest_compiler as manifest_compiler,
-    pytest as pytest,
-    real_validator as real_validator,
-    resource_rows_for as resource_rows_for,
+    _resources_engine as _resources_engine,
+    _resources_category as _resources_category,
+    _git_session as _git_session,
+    _git_rig as _git_rig,
+    _ctx as _ctx,
 )
+
 
 def test_duplicate_declared_paths_abort_the_category():
     """The schema refuses a duplicate resource path at PUT; the belt must
@@ -168,9 +145,19 @@ def test_the_port_mirrors_the_apply_side_call_surface():
         assert "entity_type" in _kwparams(ResourceFilePort.exists)
     # The listing and the directory delete are general: a prefix (``""`` is the root) and the engine's
     # own recursive flag, a path, and the stage addressing of a service bot — and the fake copies the shape.
-    addressing = {"entity_type", "entity_id", "bot_id", "engine_type", "publish_id", "device_uuid"}
+    addressing = {
+        "entity_type",
+        "entity_id",
+        "bot_id",
+        "engine_type",
+        "publish_id",
+        "device_uuid",
+    }
     for cls in (ResourceFilePort, FakeResourceFileService):
-        assert set(_kwparams(cls.list_entries)) == addressing | {"prefix", "recursive"}, cls
+        assert set(_kwparams(cls.list_entries)) == addressing | {
+            "prefix",
+            "recursive",
+        }, cls
         assert set(_kwparams(cls.delete_dir)) == addressing | {"path"}, cls
 
 
@@ -251,9 +238,7 @@ def test_a_directory_entry_over_git_declares_no_unpack():
     svc = FakeResourceFileService()
     stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = _git_rig(svc, stub, subpath="kb")
-    resolved = _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
+    resolved = _run(m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}]))
     assert resolved.ok, resolved.failures
 
 
@@ -264,12 +249,16 @@ def test_a_file_removed_upstream_disappears_on_the_next_apply():
     second apply's ``removals``."""
     svc = FakeResourceFileService()
     ctx = _ctx()
-    m = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}), subpath="kb")
+    m = _git_rig(
+        svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}), subpath="kb"
+    )
     _write_through(m, ctx, [{"path": "data/kb/", "from": "content"}])
     assert "data/kb/pricing.csv" in svc.present
 
     shrunk = {k: v for k, v in _TREE.items() if k != "kb/pricing.csv"}
-    m2 = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: shrunk}), subpath="kb")
+    m2 = _git_rig(
+        svc, _StubDeclaredSourceResolver(git_trees={_REPO: shrunk}), subpath="kb"
+    )
     plan, _results = _write_through(m2, ctx, [{"path": "data/kb/", "from": "content"}])
     assert plan.removals == ("data/kb/pricing.csv",)
     # The clear is what makes the removal happen on the bot rather than only
@@ -284,10 +273,10 @@ def test_a_member_refused_by_admission_aborts_with_the_root_still_standing():
     svc = FakeResourceFileService()
     svc.record_present("data/kb/ok.md")
     oversized = {"kb/ok.md": b"fine\n", "kb/bad.exe": b"\x00" * 8}
-    m = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: oversized}), subpath="kb")
-    resolved = _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
+    m = _git_rig(
+        svc, _StubDeclaredSourceResolver(git_trees={_REPO: oversized}), subpath="kb"
     )
+    resolved = _run(m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}]))
     assert not resolved.ok
     assert resolved.intents == ()
     assert "bad.exe" in resolved.failures[0].reason
@@ -347,9 +336,7 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
     svc = FakeResourceFileService()
     stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = _git_rig(svc, stub, subpath="kb")
-    _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
+    _run(m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}]))
     assert len(stub.filed) == 1
     assert stub.filed[0]["entry_identity"] == "data/kb/"
     # The canonical form is deterministic and injective: same tree, same bytes.
@@ -357,9 +344,7 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
         canonical_tree_bytes,
     )
 
-    assert canonical_tree_bytes([("a", b"bc")]) == canonical_tree_bytes(
-        [("a", b"bc")]
-    )
+    assert canonical_tree_bytes([("a", b"bc")]) == canonical_tree_bytes([("a", b"bc")])
     # A path/payload pair that a delimiter-joined encoding would confuse.
     assert canonical_tree_bytes([("a", b"b"), ("c", b"d")]) != (
         canonical_tree_bytes([("a", b"b\nc"), ("", b"d")])
@@ -384,9 +369,7 @@ def test_a_moved_ref_rides_into_the_entrys_note():
 def test_an_undeclared_from_fails_the_entry_not_the_process():
     svc = FakeResourceFileService()
     m = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}))
-    resolved = _run(
-        m.resolve(_ctx(), [{"path": "data/x.md", "from": "nowhere"}])
-    )
+    resolved = _run(m.resolve(_ctx(), [{"path": "data/x.md", "from": "nowhere"}]))
     assert not resolved.ok
     assert "nowhere" in resolved.failures[0].reason
 
@@ -454,9 +437,7 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
         ),
     )
     m = _git_rig(svc, stub, subpath="kb")
-    resolved = _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
+    resolved = _run(m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}]))
     assert resolved.ok, resolved.failures
     assert {i.identity: i.value for i in resolved.intents} == {
         "data/kb/deep/notes.md": b"# nested\n",
@@ -476,12 +457,14 @@ def test_a_real_archive_still_takes_the_unpack_road():
     resolved = _run(
         m.resolve(
             make_context(engine_type="claude_code"),
-            [{
-                "path": "data/kb/",
-                "source": _src("kb.tgz"),
-                "unpack": "tar.gz",
-                "strip_components": 1,
-            }],
+            [
+                {
+                    "path": "data/kb/",
+                    "source": _src("kb.tgz"),
+                    "unpack": "tar.gz",
+                    "strip_components": 1,
+                }
+            ],
         )
     )
     assert resolved.ok, resolved.failures
@@ -514,12 +497,14 @@ def test_an_invalid_strip_components_is_also_refused_before_the_fetch():
     resolved = _run(
         m.resolve(
             make_context(engine_type="claude_code"),
-            [{
-                "path": "data/kb/",
-                "source": _src("kb.zip"),
-                "unpack": "zip",
-                "strip_components": -1,
-            }],
+            [
+                {
+                    "path": "data/kb/",
+                    "source": _src("kb.zip"),
+                    "unpack": "zip",
+                    "strip_components": -1,
+                }
+            ],
         )
     )
     assert not resolved.ok
@@ -533,8 +518,6 @@ def test_a_git_directory_entry_still_fetches_without_declaring_unpack():
     svc = FakeResourceFileService()
     stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = _git_rig(svc, stub, subpath="kb")
-    resolved = _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
+    resolved = _run(m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}]))
     assert resolved.ok, resolved.failures
     assert stub.calls, "the git road did not fetch"

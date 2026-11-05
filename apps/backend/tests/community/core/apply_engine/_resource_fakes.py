@@ -5,8 +5,8 @@ Each one **counts its calls**, because most of what these tests assert is the
 write", and all-or-nothing is "a category that could not be materialised wrote
 nothing". Equal-looking output would prove neither.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 
 from typing import Any
@@ -25,7 +25,9 @@ class FakeResourceRows:
     async def replace_rows(self, *, files, owner_id, created_by):
         if self.fail:
             raise RuntimeError("rows unavailable")
-        self.replacements.append({"files": list(files), "owner_id": owner_id, "created_by": created_by})
+        self.replacements.append(
+            {"files": list(files), "owner_id": owner_id, "created_by": created_by}
+        )
 
     @property
     def rows(self) -> list[WrittenFile]:
@@ -146,9 +148,7 @@ class FakeResourceFileService:
             return False
         self.deleted.append(path)
         self._exists = {
-            p
-            for p in self._exists
-            if p != path and not p.startswith(f"{path}/")
+            p for p in self._exists if p != path and not p.startswith(f"{path}/")
         }
         return True
 
@@ -189,7 +189,12 @@ class FakeResourceFileService:
         publish_id: str | None = None,
         device_uuid: str | None = None,
     ) -> tuple[WorkspaceEntry, ...]:
-        coords = {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
+        coords = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "bot_id": bot_id,
+            "engine_type": engine_type,
+        }
         self.list_calls.append({**coords, "prefix": prefix, "recursive": recursive})
         if recursive:
             self.listing_calls.append(coords)
@@ -202,14 +207,16 @@ class FakeResourceFileService:
         for present in sorted(self._exists):
             if base and not present.startswith(base):
                 continue
-            segments = present[len(base):].split("/")
+            segments = present[len(base) :].split("/")
             if recursive:
                 for depth in range(1, len(segments)):
                     entries[base + "/".join(segments[:depth])] = True
                 entries[present] = False
             else:
                 entries[base + segments[0]] = len(segments) > 1
-        return tuple(WorkspaceEntry(path, is_dir) for path, is_dir in sorted(entries.items()))
+        return tuple(
+            WorkspaceEntry(path, is_dir) for path, is_dir in sorted(entries.items())
+        )
 
     async def delete_dir(
         self,
@@ -224,13 +231,20 @@ class FakeResourceFileService:
     ) -> bool:
         """The port's tree delete; ``fail_clear`` answers the transports' silent ``False``."""
         self.delete_dir_calls.append(
-            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type,
-             "path": path}
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "path": path,
+            }
         )
         if self.fail_clear or path in self._fail_deletes:
             return False
         self.deleted.append(path)
-        self._exists = {p for p in self._exists if p != path and not p.startswith(f"{path}/")}
+        self._exists = {
+            p for p in self._exists if p != path and not p.startswith(f"{path}/")
+        }
         return True
 
 

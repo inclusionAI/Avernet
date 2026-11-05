@@ -2,67 +2,64 @@
 
 from __future__ import annotations
 
+
+from datetime import datetime
+
+
+import pytest
+
+
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
+
+from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
+    FetchedEntry,
+)
+
+
+from agentclaw.community.core.apply_engine.materialisers.resources import (
+    ROOT_NOT_CLEARED_REASON,
+    ResourcesRootNotCleared,
+)
+
+
+from agentclaw.community.core.apply_engine.registry import (
+    ConfirmedPartialWriteError,
+)
+
+from ._empty_cli_tools import EmptyCliTools
+
+from ._fakes import (
+    FakeResourceFileService,
+    FakeResourceRows,
+    make_context,
+    resource_rows_for,
+)
+
+
+from ._capability_facts import build_test_materialisers as build_materialisers
 from ._resources_test_support import (
-    Any as Any,
-    ApplyOrchestrator as ApplyOrchestrator,
-    ArcaDelivery as ArcaDelivery,
-    BlobDelivery as BlobDelivery,
-    ConfirmedPartialWriteError as ConfirmedPartialWriteError,
-    EmptyCliTools as EmptyCliTools,
-    EngineRig as EngineRig,
-    EntryFetchError as EntryFetchError,
-    FakeActivationService as FakeActivationService,
-    FakeCapabilityReader as FakeCapabilityReader,
-    FakeIdentityService as FakeIdentityService,
-    FakeManifestContent as FakeManifestContent,
-    FakeMcpAuth as FakeMcpAuth,
-    FakeResourceFileService as FakeResourceFileService,
-    FakeResourceRows as FakeResourceRows,
-    FakeSkillUploadService as FakeSkillUploadService,
-    FakeStartupScriptService as FakeStartupScriptService,
-    FetchRefusedError as FetchRefusedError,
-    FetchedEntry as FetchedEntry,
-    GitDelivery as GitDelivery,
-    GitEntrySource as GitEntrySource,
-    ROOT_NOT_CLEARED_REASON as ROOT_NOT_CLEARED_REASON,
-    ROOT_NOT_LISTED_REASON as ROOT_NOT_LISTED_REASON,
-    ResourcesRootNotCleared as ResourcesRootNotCleared,
-    ResourcesRootNotListed as ResourcesRootNotListed,
-    SimpleNamespace as SimpleNamespace,
-    WorkspaceEntry as WorkspaceEntry,
-    WrittenFile as WrittenFile,
+    _arca_steps as _arca_steps,
     _BUCKET as _BUCKET,
     _DOCUMENT as _DOCUMENT,
     _REPO as _REPO,
-    _RecordingStore as _RecordingStore,
-    _StubCheckout as _StubCheckout,
-    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
     _TREE as _TREE,
-    _arca_steps as _arca_steps,
-    _compose as _compose,
-    _ctx as _ctx,
-    _git_rig as _git_rig,
-    _git_session as _git_session,
-    _materialiser as _materialiser,
-    _resources_category as _resources_category,
-    _resources_engine as _resources_engine,
     _run as _run,
+    _materialiser as _materialiser,
     _src as _src,
+    _RecordingStore as _RecordingStore,
+    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
+    _compose as _compose,
+    _StubCheckout as _StubCheckout,
     _stub_git_source as _stub_git_source,
     _tgz as _tgz,
     _write_through as _write_through,
-    asyncio as asyncio,
-    build_materialisers as build_materialisers,
-    build_skill_tgz as build_skill_tgz,
-    compiling_resources as compiling_resources,
-    datetime as datetime,
-    declared_session as declared_session,
-    make_context as make_context,
-    manifest_compiler as manifest_compiler,
-    pytest as pytest,
-    real_validator as real_validator,
-    resource_rows_for as resource_rows_for,
+    _resources_engine as _resources_engine,
+    _resources_category as _resources_category,
+    _git_session as _git_session,
+    _git_rig as _git_rig,
+    _ctx as _ctx,
 )
+
 
 def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log():
     """A transport that could not delete may not list either; the port
@@ -79,7 +76,9 @@ def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log()
     with pytest.raises(ResourcesRootNotCleared) as caught:
         _run(m.write(ctx, plan))
     assert str(caught.value) == ROOT_NOT_CLEARED_REASON
-    assert isinstance(caught.value.__cause__, RuntimeError) and "token" in str(caught.value.__cause__)
+    assert isinstance(caught.value.__cause__, RuntimeError) and "token" in str(
+        caught.value.__cause__
+    )
     assert svc.writes == {}
 
 
@@ -119,12 +118,16 @@ def test_write_addresses_the_bot_owner():
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert len(svc.clear_calls) == 2
-    assert all(call == {
-        "entity_type": "staff",
-        "entity_id": "u_owner",
-        "bot_id": "b_1",
-        "engine_type": "claude_code",
-    } for call in svc.clear_calls)
+    assert all(
+        call
+        == {
+            "entity_type": "staff",
+            "entity_id": "u_owner",
+            "bot_id": "b_1",
+            "engine_type": "claude_code",
+        }
+        for call in svc.clear_calls
+    )
     assert svc.upload_calls == [
         {
             "entity_type": "staff",
@@ -149,7 +152,9 @@ def test_write_is_player_setup_convergent():
     svc = FakeResourceFileService()
     factory, rows = resource_rows_for()
     for _ in range(2):
-        m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
+        m = _materialiser(
+            svc, _StubDeclaredSourceResolver(archive), resource_rows=factory
+        )
         ctx = make_context(engine_type="claude_code")
         _write_through(
             m,
@@ -192,7 +197,9 @@ def test_write_failure_yields_failed_entry_per_member():
         for r in results
         if r.outcome.value == "failed"
     )
-    assert [r.reason for r in results if r.outcome.value == "failed"] == ["resource delivery failed"]
+    assert [r.reason for r in results if r.outcome.value == "failed"] == [
+        "resource delivery failed"
+    ]
     assert svc.writes == {("data/wrap", "a.txt"): b"A"}
     # The rows describe what landed, not what was declared.
     assert rows.rows == [WrittenFile("data/wrap/a.txt", 1)]
@@ -305,9 +312,7 @@ def test_keep_last_fallback_surfaces_as_the_entries_note():
     svc = FakeResourceFileService()
     m = _materialiser(svc, _FallingBack())
     ctx = make_context(engine_type="claude_code")
-    resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.md", "source": _src("a.bin")}])
-    )
+    resolved = _run(m.resolve(ctx, [{"path": "data/a.md", "source": _src("a.bin")}]))
     assert resolved.ok, [f.reason for f in resolved.failures]
     assert (
         resolved.intents[0].note
@@ -389,9 +394,7 @@ def test_inline_content_over_the_size_cap_fails_at_resolve(
     svc = FakeResourceFileService()
     m = _materialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
-    resolved = _run(
-        m.resolve(ctx, [{"path": "data/big.md", "content": "x" * 32}])
-    )
+    resolved = _run(m.resolve(ctx, [{"path": "data/big.md", "content": "x" * 32}]))
     assert not resolved.ok
     # The write chain's own words — the gate delegates to the same
     # predicate ``upload_file`` enforces, so the refusal texts agree.
@@ -433,13 +436,19 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     svc = FakeResourceFileService()
     svc.record_present("data/stale.md")
     factory, rows = resource_rows_for()
-    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
+    engine = _resources_engine(
+        svc, _StubDeclaredSourceResolver(archive), resource_rows=factory
+    )
     ctx = make_context(engine_type="claude_code")
 
     dry = _run(
         engine.apply(
-            ctx, _DOCUMENT, apply_id="a1", trigger="explicit",
-            started_at=datetime.now(), dry_run=True,
+            ctx,
+            _DOCUMENT,
+            apply_id="a1",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=True,
         )
     )
     # The preview wrote nothing: the root still holds the stale file.
@@ -449,8 +458,12 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
 
     real = _run(
         engine.apply(
-            ctx, _DOCUMENT, apply_id="a2", trigger="explicit",
-            started_at=datetime.now(), dry_run=False,
+            ctx,
+            _DOCUMENT,
+            apply_id="a2",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=False,
         )
     )
 
@@ -464,10 +477,16 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     assert dry_rows == {"data/notes/r.md": "created", "data/wrap/a.txt": "created"}
     assert real_rows == {"data/notes/r.md": "created", "data/wrap/a.txt": "created"}
     # The execution delivered.
-    assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
+    assert svc.writes == {
+        ("data/notes", "r.md"): b"# rules",
+        ("data/wrap", "a.txt"): b"AAA",
+    }
     assert svc.deleted == ["data"]  # the root entry, whole
     assert svc.present == {"data/notes/r.md", "data/wrap/a.txt"}
-    assert rows.rows == [WrittenFile("data/wrap/a.txt", 3), WrittenFile("data/notes/r.md", 7)]
+    assert rows.rows == [
+        WrittenFile("data/wrap/a.txt", 3),
+        WrittenFile("data/notes/r.md", 7),
+    ]
 
 
 def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
@@ -479,21 +498,31 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
     svc = FakeResourceFileService()
     svc.record_present("data/gone/old.md", "data/x.csv", "SOUL.md")
     factory, rows = resource_rows_for()
-    engine = _resources_engine(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
+    engine = _resources_engine(
+        svc, _StubDeclaredSourceResolver(), resource_rows=factory
+    )
     ctx = make_context(engine_type="claude_code")
     document = {"schema_version": 1, "manifest": {"resources": []}}
 
     dry = _run(
         engine.apply(
-            ctx, document, apply_id="a1", trigger="explicit",
-            started_at=datetime.now(), dry_run=True,
+            ctx,
+            document,
+            apply_id="a1",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=True,
         )
     )
     assert svc.deleted == [] and len(svc.clear_calls) == 1 and rows.replacements == []
     real = _run(
         engine.apply(
-            ctx, document, apply_id="a2", trigger="explicit",
-            started_at=datetime.now(), dry_run=False,
+            ctx,
+            document,
+            apply_id="a2",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=False,
         )
     )
 
@@ -507,7 +536,9 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
     assert svc.deleted == ["data"]  # the root entry, whole
     assert svc.writes == {}
     assert svc.present == {"SOUL.md"}
-    assert rows.replacements == [{"files": [], "owner_id": ctx.owner_id, "created_by": ctx.actor_id}]
+    assert rows.replacements == [
+        {"files": [], "owner_id": ctx.owner_id, "created_by": ctx.actor_id}
+    ]
 
 
 def test_a_rows_failure_reports_a_confirmed_partial_write():
@@ -518,23 +549,36 @@ def test_a_rows_failure_reports_a_confirmed_partial_write():
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
     factory, _rows = resource_rows_for(FakeResourceRows(fail=True))
-    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
+    engine = _resources_engine(
+        svc, _StubDeclaredSourceResolver(archive), resource_rows=factory
+    )
     ctx = make_context(engine_type="claude_code")
 
     report = _run(
         engine.apply(
-            ctx, _DOCUMENT, apply_id="a1", trigger="explicit",
-            started_at=datetime.now(), dry_run=False,
+            ctx,
+            _DOCUMENT,
+            apply_id="a1",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=False,
         )
     )
 
     resources = _resources_category(report)
-    assert resources.aborted and resources.partially_written and resources.confirmed_partial
+    assert (
+        resources.aborted
+        and resources.partially_written
+        and resources.confirmed_partial
+    )
     assert {e.identity for e in report.entries} == {"data/wrap/", "data/notes/r.md"}
     assert all(e.outcome.value == "failed" for e in report.entries)
     assert all((e.reason or "").startswith("write failed") for e in report.entries)
     # The files did land; it is the rows that did not.
-    assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
+    assert svc.writes == {
+        ("data/notes", "r.md"): b"# rules",
+        ("data/wrap", "a.txt"): b"AAA",
+    }
 
 
 def test_a_refused_member_blames_the_declared_entry_in_the_report():
@@ -567,8 +611,10 @@ def test_a_refused_member_blames_the_declared_entry_in_the_report():
                     ]
                 },
             },
-            apply_id="a1", trigger="explicit",
-            started_at=datetime.now(), dry_run=False,
+            apply_id="a1",
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=False,
         )
     )
 

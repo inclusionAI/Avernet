@@ -2,66 +2,58 @@
 
 from __future__ import annotations
 
+
+
+
+
+import pytest
+
+from agentclaw.community.core.ports.resource_file_port import WorkspaceEntry
+
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
+
+
+
+from agentclaw.community.core.apply_engine.materialisers.resources import (
+    ROOT_NOT_CLEARED_REASON,
+    ROOT_NOT_LISTED_REASON,
+    ResourcesRootNotCleared,
+    ResourcesRootNotListed,
+)
+
+
+
+
+
+from ._fakes import (
+    FakeResourceFileService,
+    make_context,
+    resource_rows_for,
+)
+
+
 from ._resources_test_support import (
-    Any as Any,
-    ApplyOrchestrator as ApplyOrchestrator,
-    ArcaDelivery as ArcaDelivery,
-    BlobDelivery as BlobDelivery,
-    ConfirmedPartialWriteError as ConfirmedPartialWriteError,
-    EmptyCliTools as EmptyCliTools,
-    EngineRig as EngineRig,
-    EntryFetchError as EntryFetchError,
-    FakeActivationService as FakeActivationService,
-    FakeCapabilityReader as FakeCapabilityReader,
-    FakeIdentityService as FakeIdentityService,
-    FakeManifestContent as FakeManifestContent,
-    FakeMcpAuth as FakeMcpAuth,
-    FakeResourceFileService as FakeResourceFileService,
-    FakeResourceRows as FakeResourceRows,
-    FakeSkillUploadService as FakeSkillUploadService,
-    FakeStartupScriptService as FakeStartupScriptService,
-    FetchRefusedError as FetchRefusedError,
-    FetchedEntry as FetchedEntry,
-    GitDelivery as GitDelivery,
-    GitEntrySource as GitEntrySource,
-    ROOT_NOT_CLEARED_REASON as ROOT_NOT_CLEARED_REASON,
-    ROOT_NOT_LISTED_REASON as ROOT_NOT_LISTED_REASON,
-    ResourcesRootNotCleared as ResourcesRootNotCleared,
-    ResourcesRootNotListed as ResourcesRootNotListed,
-    SimpleNamespace as SimpleNamespace,
-    WorkspaceEntry as WorkspaceEntry,
-    WrittenFile as WrittenFile,
+    _arca_steps as _arca_steps,
     _BUCKET as _BUCKET,
     _DOCUMENT as _DOCUMENT,
     _REPO as _REPO,
-    _RecordingStore as _RecordingStore,
-    _StubCheckout as _StubCheckout,
-    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
     _TREE as _TREE,
-    _arca_steps as _arca_steps,
-    _compose as _compose,
-    _ctx as _ctx,
-    _git_rig as _git_rig,
-    _git_session as _git_session,
-    _materialiser as _materialiser,
-    _resources_category as _resources_category,
-    _resources_engine as _resources_engine,
+
     _run as _run,
+    _materialiser as _materialiser,
     _src as _src,
+    _RecordingStore as _RecordingStore,
+    _StubDeclaredSourceResolver as _StubDeclaredSourceResolver,
+    _compose as _compose,
+    _StubCheckout as _StubCheckout,
     _stub_git_source as _stub_git_source,
     _tgz as _tgz,
     _write_through as _write_through,
-    asyncio as asyncio,
-    build_materialisers as build_materialisers,
-    build_skill_tgz as build_skill_tgz,
-    compiling_resources as compiling_resources,
-    datetime as datetime,
-    declared_session as declared_session,
-    make_context as make_context,
-    manifest_compiler as manifest_compiler,
-    pytest as pytest,
-    real_validator as real_validator,
-    resource_rows_for as resource_rows_for,
+    _resources_engine as _resources_engine,
+    _resources_category as _resources_category,
+    _git_session as _git_session,
+    _git_rig as _git_rig,
+    _ctx as _ctx,
 )
 
 def test_fake_resource_service_records_uploads_listings_and_deletes():

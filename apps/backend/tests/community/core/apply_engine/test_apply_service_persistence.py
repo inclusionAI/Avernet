@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 
-
 import pytest
 
 
-
-
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
+    MANIFEST_STATE,
+)
 
 from agentclaw.community.core.apply_engine.compiler import CompileRefused
 
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
 )
-
 
 
 from agentclaw.community.utils.env_utils import get_current_env
@@ -32,12 +30,8 @@ from agentclaw.community.core.bot_config_manifest.repository.models import (  # 
 )
 
 
-
-
-
-
-
 from .test_apply_service_lifecycle import (
+    world as world,
     _ENTITY,
     _BOT,
     _BOT_RECORD,
@@ -46,6 +40,7 @@ from .test_apply_service_lifecycle import (
     _dry_run,
     _drain,
 )
+
 
 def test_materialised_constructs_reports_what_is_registered_today(world):
     """W4 registered two; W5 brought the count to four, W6 to five, W9 to six.
@@ -117,6 +112,7 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         actor_id=_ENTITY,
         state=MANIFEST_STATE,
     )
+
     # A second apply, whose compile will fail.
     async def _refuse(*_args, **_kwargs):
         raise RuntimeError("the stored document no longer validates")
@@ -188,10 +184,14 @@ def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(worl
     report = _drain(service)
     assert report.apply_id == accepted.apply_id
     assert report.status is ApplyStatus.FAILED and report.categories == ()
-    assert report.notes == ("compile refused: promotion p1 moved active to r1, but active is r2 now; "
-                            "a superseded promotion is not delivered",)
+    assert report.notes == (
+        "compile refused: promotion p1 moved active to r1, but active is r2 now; "
+        "a superseded promotion is not delivered",
+    )
     assert scripts.writes == 0
-    assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, "the lock is released after a refusal"
+    assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, (
+        "the lock is released after a refusal"
+    )
 
 
 def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
@@ -202,21 +202,33 @@ def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
     service._compilers = {MANIFEST_STATE.kind: _RefusingCompiler()}
     with pytest.raises(_DomainRefusal, match="superseded") as raised:
         _dry_run(service)
-    assert raised.value.__context__ is None, "the worker-only refusal is not on the domain error's chain"
-    assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, "a dry run leaves no record, refused or not"
+    assert raised.value.__context__ is None, (
+        "the worker-only refusal is not on the domain error's chain"
+    )
+    assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, (
+        "a dry run leaves no record, refused or not"
+    )
 
 
-def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_error(world):
+def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_error(
+    world,
+):
     """The real road: the stored document fails the validator (a resource naming a protected workspace entry),
     and the caller gets ``ManifestValidationError`` with its violations, as the route maps it."""
-    from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError, validate_document
+    from agentclaw.community.core.bot_config_manifest.schema import (
+        ManifestValidationError,
+        validate_document,
+    )
 
     class _ValidatingManifests(_ManifestService):
         """The fixture's document fake, with the real validator behind ``validate``."""
 
         def validate(self, *, document, active_engine, bot_type):
             return validate_document(
-                document, self.capabilities_for_bot({"active_engine": active_engine, "bot_type": bot_type})
+                document,
+                self.capabilities_for_bot(
+                    {"active_engine": active_engine, "bot_type": bot_type}
+                ),
             )
 
     service, *_ = world
@@ -226,4 +238,6 @@ def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_e
     with pytest.raises(ManifestValidationError) as refused:
         _dry_run(service)
     assert refused.value.violations
-    assert refused.value.__context__ is None, "the route sees the validator's error alone"
+    assert refused.value.__context__ is None, (
+        "the route sees the validator's error alone"
+    )

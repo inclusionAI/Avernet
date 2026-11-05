@@ -5,6 +5,7 @@ Each one **counts its calls**, because most of what these tests assert is the
 write", and all-or-nothing is "a category that could not be materialised wrote
 nothing". Equal-looking output would prove neither.
 """
+
 from __future__ import annotations
 
 
@@ -12,7 +13,6 @@ from agentclaw.community.core.mcp.config_comparison import comparable_config
 from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 from typing import Any
-
 
 
 class FakeStartupScriptService:
@@ -112,10 +112,17 @@ class FakeActivationService:
     def set_supplied_capabilities(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> tuple[frozenset[str], frozenset[str]]:
-        return frozenset(self.set_skill_names), frozenset(self.set_managed | self.platform_defaults)
+        return frozenset(self.set_skill_names), frozenset(
+            self.set_managed | self.platform_defaults
+        )
 
     async def activate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
@@ -145,7 +152,12 @@ class FakeActivationService:
         return {}
 
     async def deactivate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
@@ -156,74 +168,116 @@ class FakeActivationService:
         return {}
 
     async def activate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_governed(skill_id)
+        changed = int(skill_id) not in self.installed_skills
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
-        return {"id": skill_id, "changed": True}
+        return {"id": skill_id, "changed": changed}
 
     async def deactivate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_governed(skill_id)
+        changed = int(skill_id) in self.installed_skills
         self.installed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))
-        return {"id": skill_id, "changed": True}
+        return {"id": skill_id, "changed": changed}
 
     async def claim_apply_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, project: bool = True,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_governed(skill_id)
+        changed = int(skill_id) not in self.installed_skills
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
-        return {"id": skill_id, "changed": True}
+        return {"id": skill_id, "changed": changed}
 
     async def remove_apply_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, project: bool = True,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_governed(skill_id)
+        changed = int(skill_id) in self.installed_skills
         self.installed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))
-        return {"id": skill_id, "changed": True}
+        return {"id": skill_id, "changed": changed}
 
     async def claim_apply_mcp(
-        self, *, server_code: str, config: McpConfigWriteIntent[dict[str, Any]], bot_id: str,
-        owner_id: str, actor_id: str, apply_id: str | None,
+        self,
+        *,
+        server_code: str,
+        config: McpConfigWriteIntent[dict[str, Any]],
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_set_supplied(server_code)
+        changed = server_code not in self.installed
         if server_code not in self.installed:
             self.activated.append(server_code)
         self.installed.add(server_code)
-        if comparable_config(self.mcp_overrides.get(server_code)) == comparable_config(config):
-            return {}
+        if comparable_config(self.mcp_overrides.get(server_code)) == comparable_config(
+            config
+        ):
+            return {"changed": changed}
         self.configured.append((server_code, config))
         if config:
             self.mcp_overrides[server_code] = dict(config)
         else:
             self.mcp_overrides.pop(server_code, None)
-        return {}
+        return {"changed": True}
 
     async def remove_apply_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, project: bool = True,
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_set_supplied(server_code)
+        changed = server_code in self.installed or server_code in self.mcp_overrides
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
-        return {}
+        return {"changed": changed}
 
     def _refuse_if_set_supplied(self, server_code: str) -> None:
         if server_code in self.set_managed | self.platform_defaults:

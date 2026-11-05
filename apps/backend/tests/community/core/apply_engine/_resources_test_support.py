@@ -18,28 +18,21 @@ Pins, by the work item's acceptance criteria:
 - archive limits (member count / unpacked size) apply with W1's keys.
 """
 
-
 from __future__ import annotations
 
 
-from tests.community.core.apply_engine._capability_facts import build_test_materialisers as build_materialisers
+from tests.community.core.apply_engine._capability_facts import (
+    build_test_materialisers as build_materialisers,
+)
 
 
 import asyncio
-
-
 
 
 from types import SimpleNamespace
 
 
 from typing import Any
-
-
-
-
-
-
 
 
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
@@ -56,16 +49,12 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 )
 
 
-
-
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
 
 
 from agentclaw.community.core.apply_engine.orchestrator import (
     ApplyOrchestrator,
 )
-
-
 
 
 from ._empty_cli_tools import EmptyCliTools
@@ -109,7 +98,11 @@ def _materialiser(svc, resolver, *, source_session=None, resource_rows=None):
     nobody looks at.
     """
     return compiling_resources(
-        svc, resolver, FakeManifestContent(), source_session=source_session, resource_rows=resource_rows
+        svc,
+        resolver,
+        FakeManifestContent(),
+        source_session=source_session,
+        resource_rows=resource_rows,
     )
 
 
@@ -118,7 +111,13 @@ _BUCKET = "cdn"
 
 def _src(key: str, **extra) -> dict:
     """The declared ``source`` an entry carries to read one object."""
-    return {"protocol": "oss", "bucket": _BUCKET, "key": key, "auth": "oss-cred", **extra}
+    return {
+        "protocol": "oss",
+        "bucket": _BUCKET,
+        "key": key,
+        "auth": "oss-cred",
+        **extra,
+    }
 
 
 class _RecordingStore:
@@ -288,9 +287,7 @@ class _StubDeclaredSourceResolver:
                 digest=entry.get("digest"),
                 auth=(decl or {}).get("auth", entry.get("auth")),
                 category=category,
-                keep_last=(
-                    entry.get("on_fetch_failure", "keep_last") == "keep_last"
-                ),
+                keep_last=(entry.get("on_fetch_failure", "keep_last") == "keep_last"),
                 entry_identity=entry_identity,
             )
         )
@@ -326,7 +323,7 @@ class _StubCheckout:
             return sorted(self._members.items())
         prefix = subpath.rstrip("/") + "/"
         found = sorted(
-            (name[len(prefix):], data)
+            (name[len(prefix) :], data)
             for name, data in self._members.items()
             if name.startswith(prefix)
         )
@@ -394,7 +391,7 @@ def _resources_engine(svc, fetcher, *, resource_rows=None):
             cli_tool_service=EmptyCliTools(),
             shared_skills=object(),
         ),
-        steps=_arca_steps
+        steps=_arca_steps,
     )
     return EngineRig(orchestrator, manifest_compiler(content=content, resolver=fetcher))
 
@@ -445,7 +442,9 @@ def _git_session(*, subpath=None, auth=None):
 
 def _git_rig(svc, stub, *, subpath=None, auth=None):
     """The materialiser over ``stub``, resolving ``from: content`` through :func:`_git_session`."""
-    return _materialiser(svc, stub, source_session=_git_session(subpath=subpath, auth=auth))
+    return _materialiser(
+        svc, stub, source_session=_git_session(subpath=subpath, auth=auth)
+    )
 
 
 def _ctx():

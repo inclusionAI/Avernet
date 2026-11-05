@@ -5,6 +5,7 @@ Each one **counts its calls**, because most of what these tests assert is the
 write", and all-or-nothing is "a category that could not be materialised wrote
 nothing". Equal-looking output would prove neither.
 """
+
 from __future__ import annotations
 
 from ._resource_fakes import (
@@ -22,8 +23,6 @@ from ._capability_io_fakes import (
     FakeMcpAuth as FakeMcpAuth,
     FakeMcpConfigService as FakeMcpConfigService,
 )
-
-
 
 
 import hashlib
@@ -51,7 +50,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
 
 
 def fetched_object(
-    body: bytes, *, url: str = "https://content.example/a.bin",
+    body: bytes,
+    *,
+    url: str = "https://content.example/a.bin",
     content_type: str | None = "application/octet-stream",
 ) -> FetchedObject:
     """A receipt-bearing fetch result, the shape a source fetcher returns."""
@@ -165,10 +166,14 @@ class FakeManifestContent:
         )
         return record
 
-    def is_reachable(self, scope, digest: str, *, produced_by: str | None = None) -> bool:
+    def is_reachable(
+        self, scope, digest: str, *, produced_by: str | None = None
+    ) -> bool:
         prefix = f"produced://{produced_by}/" if produced_by else None
         return any(
-            r.digest == digest and (prefix is None or str(r.source_url).startswith(prefix)) for r in self.receipts
+            r.digest == digest
+            and (prefix is None or str(r.source_url).startswith(prefix))
+            for r in self.receipts
         )
 
     def read(self, digest: str) -> bytes:
@@ -249,7 +254,9 @@ class FakeObjectStore:
         if access_key_id is not None:
             holder.access_key_id = access_key_id
 
-    def make_unavailable(self, bucket: str, detail: str = "endpoint unreachable") -> None:
+    def make_unavailable(
+        self, bucket: str, detail: str = "endpoint unreachable"
+    ) -> None:
         self.buckets.setdefault(bucket, FakeBucket()).unavailable = detail
 
     def reset(self) -> None:
@@ -568,7 +575,12 @@ class FakeSkillUploadService:
         }
 
     async def delete_local_skill(
-        self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
+        self,
+        *,
+        skill_id: str,
+        name: str,
+        bot_id: str,
+        owner_id: str,
         actor_id: str,
     ) -> None:
         self.deleted.append(skill_id)
@@ -589,9 +601,7 @@ class FakeSkillUploadService:
         return "sha256:" + hashlib.sha256(package).hexdigest()
 
     def uploaded_packages(self, *, name: str) -> list[bytes]:
-        return [
-            call["package"] for call in self.uploads if call["name"] == name
-        ]
+        return [call["package"] for call in self.uploads if call["name"] == name]
 
 
 class FakeLocalSkillDeleteService:
@@ -700,7 +710,9 @@ def skill_asset(
     )
 
 
-def build_skill_zip(name: str, *, extra: list[tuple[str, bytes]] | None = None) -> bytes:
+def build_skill_zip(
+    name: str, *, extra: list[tuple[str, bytes]] | None = None
+) -> bytes:
     """A real, valid skill package zip: SKILL.md with front matter, plus any
     extra members — the discipline of driving fakes with true bytes."""
     import io
@@ -742,9 +754,6 @@ def real_validator() -> Any:
     )
 
     return SkillPackageValidator(SkillParser())
-
-
-
 
 
 def make_context(
@@ -794,7 +803,6 @@ def make_context(
     )
 
 
-
 def arca_only_engine_test(_engine: str | None) -> bool:
     """Every bot is ARCA."""
     return False
@@ -821,30 +829,47 @@ class FakeSharedSkills(SharedSkillPort):
     """
 
     def __init__(
-        self, center: dict[str, list[str]] | None = None, repo: dict[str, tuple[str, str]] | None = None
+        self,
+        center: dict[str, list[str]] | None = None,
+        repo: dict[str, tuple[str, str]] | None = None,
     ) -> None:
         self.center = dict(center or {})
         self.repo = dict(repo or {})
         self.asked: list[tuple[str, str, str]] = []
 
-    def find_center_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str) -> str:
-        from agentclaw.community.core.ports.shared_skill_port import SharedSkillAmbiguous, SharedSkillNotFound
+    def find_center_skill(
+        self, *, bot_id: str, owner_id: str, actor_id: str, name: str
+    ) -> str:
+        from agentclaw.community.core.ports.shared_skill_port import (
+            SharedSkillAmbiguous,
+            SharedSkillNotFound,
+        )
 
         self.asked.append(("center", name, actor_id))
         ids = self.center.get(name, [])
         if not ids:
-            raise SharedSkillNotFound(f"no Skill Center skill named {name!r} is available to this bot")
+            raise SharedSkillNotFound(
+                f"no Skill Center skill named {name!r} is available to this bot"
+            )
         if len(ids) > 1:
-            raise SharedSkillAmbiguous(f"{len(ids)} Skill Center skills named {name!r} are available to this bot")
+            raise SharedSkillAmbiguous(
+                f"{len(ids)} Skill Center skills named {name!r} are available to this bot"
+            )
         return ids[0]
 
-    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
+    def find_repo_skill(
+        self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str
+    ) -> str:
         from agentclaw.community.core.ports.shared_skill_port import SharedSkillNotFound
 
         self.asked.append(("repo", path, actor_id))
         if path not in self.repo:
-            raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
+            raise SharedSkillNotFound(
+                f"no shared-repository skill at {path!r} is available to this bot"
+            )
         skill_id, found = self.repo[path]
         if found != name:
-            raise SharedSkillNotFound(f"the shared-repository skill at {path!r} is named {found!r}, not {name!r}")
+            raise SharedSkillNotFound(
+                f"the shared-repository skill at {path!r} is named {found!r}, not {name!r}"
+            )
         return skill_id

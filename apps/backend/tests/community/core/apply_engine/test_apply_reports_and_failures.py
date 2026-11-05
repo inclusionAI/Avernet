@@ -5,6 +5,7 @@ unchanged document performs no write"; all-or-nothing is "a category that could
 not be materialised wrote nothing". Equal-looking output would prove neither, so
 the fakes count their calls and the tests read those counts.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -47,6 +48,7 @@ from .test_apply_engine import (
     _category,
     _outcomes,
 )
+
 
 def test_the_report_payload_names_every_field_it_emits():
     """``as_payload`` copies no dict through, so nothing can ride along.
@@ -92,24 +94,53 @@ def test_a_stored_source_mode_outside_the_enum_reads_as_no_opinion_and_the_rest_
     from types import SimpleNamespace
 
     from agentclaw.community.core.apply_engine.outcomes import SourceMode
-    from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
+    from agentclaw.community.core.apply_engine.run.report_codec import (
+        report_from_payload,
+    )
 
     started = datetime.now()
-    record = SimpleNamespace(apply_id="a", bot_id="b", trigger="explicit", started_at=started, finished_at=started)
+    record = SimpleNamespace(
+        apply_id="a",
+        bot_id="b",
+        trigger="explicit",
+        started_at=started,
+        finished_at=started,
+    )
     payload = {
         "state": {"kind": "manifest", "reference": None},
         "sources": [
-            {"name": "content", "url": "https://git.example/c.git", "ref": "v1",
-             "mode": "bogus", "resolved_sha": "1" * 40},
-            {"name": "docs", "url": "https://git.example/d.git", "ref": "main",
-             "mode": "strict", "resolved_sha": "2" * 40},
+            {
+                "name": "content",
+                "url": "https://git.example/c.git",
+                "ref": "v1",
+                "mode": "bogus",
+                "resolved_sha": "1" * 40,
+            },
+            {
+                "name": "docs",
+                "url": "https://git.example/d.git",
+                "ref": "main",
+                "mode": "strict",
+                "resolved_sha": "2" * 40,
+            },
         ],
-        "entries": [{"category": "capabilities", "name": "mcp/gh", "action": "created"}],
-        "categories": [{"category": "capabilities", "aborted": False, "partially_written": False, "removed": []}],
+        "entries": [
+            {"category": "capabilities", "name": "mcp/gh", "action": "created"}
+        ],
+        "categories": [
+            {
+                "category": "capabilities",
+                "aborted": False,
+                "partially_written": False,
+                "removed": [],
+            }
+        ],
     }
     report = report_from_payload(payload, record=record, status=ApplyStatus.SUCCEEDED)
     assert [source.mode for source in report.sources] == [None, SourceMode.STRICT]
-    assert [(entry.identity, entry.outcome.value) for entry in report.entries] == [("mcp/gh", "created")]
+    assert [(entry.identity, entry.outcome.value) for entry in report.entries] == [
+        ("mcp/gh", "created")
+    ]
 
 
 # ── platform-owned MCP codes ────────────────────────────────────────────────
@@ -128,7 +159,10 @@ async def test_a_declared_platform_default_refuses_the_whole_apply():
     )
 
     assert report.status is ApplyStatus.FAILED
-    assert _outcomes(report) == {"ordinary": EntryOutcome.SKIPPED, "platform-owned": EntryOutcome.FAILED}
+    assert _outcomes(report) == {
+        "ordinary": EntryOutcome.SKIPPED,
+        "platform-owned": EntryOutcome.FAILED,
+    }
     assert activations.writes == 0
 
 
@@ -159,7 +193,10 @@ async def test_an_omitted_platform_default_is_left_alone():
     )
 
     assert report.status is ApplyStatus.SUCCEEDED
-    assert activations.deactivated == [] and _category(report, Category.CAPABILITIES).removals == ()
+    assert (
+        activations.deactivated == []
+        and _category(report, Category.CAPABILITIES).removals == ()
+    )
     assert "a-default" in activations.installed
 
 
@@ -178,7 +215,10 @@ async def test_an_unanswerable_set_supply_lookup_refuses_the_apply_and_writes_no
     )
 
     assert activations.writes == 0
-    assert report.status is ApplyStatus.FAILED and _category(report, Category.CAPABILITIES).aborted is True
+    assert (
+        report.status is ApplyStatus.FAILED
+        and _category(report, Category.CAPABILITIES).aborted is True
+    )
 
 
 # ── an aborted category must never read as success ──────────────────────────
@@ -194,9 +234,7 @@ async def test_a_declared_empty_category_that_fails_is_not_reported_successful()
     the apply as ``SUCCEEDED``, telling a poller its bot had converged on an
     empty set that was in fact untouched.
     """
-    activations = FakeActivationService(
-        installed={"stuck"}, platform_defaults=set()
-    )
+    activations = FakeActivationService(installed={"stuck"}, platform_defaults=set())
 
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
@@ -301,8 +339,7 @@ async def test_first_mcp_post_commit_failure_reports_partial():
     activations.claim_apply_mcp = _commit_then_fail
     report = await _apply(
         _engine(activations=activations),
-        "schema_version: 1\nmanifest:\n  mcp:\n"
-        "    - server_code: committed\n",
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: committed\n",
     )
 
     assert report.status is ApplyStatus.PARTIAL
@@ -332,9 +369,7 @@ async def test_failed_skill_write_stops_later_mcp_and_preserves_configuration():
         ]
     )
     activations = FakeActivationService(installed={"mcp.actual"})
-    activations.mcp_overrides["mcp.actual"] = {
-        "headers": {"X-Stale": "value"}
-    }
+    activations.mcp_overrides["mcp.actual"] = {"headers": {"X-Stale": "value"}}
 
     async def _fail_claim(**_kwargs):
         raise RuntimeError("Direct claim failed after package upload")
@@ -365,7 +400,7 @@ async def test_failed_skill_write_stops_later_mcp_and_preserves_configuration():
     assert skills.partially_written is True
     assert mcp.removals == ()
     assert activations.configured == [] and activations.deactivated == []
-    assert activations.mcp_overrides['mcp.actual'] == {'headers': {'X-Stale': 'value'}}
+    assert activations.mcp_overrides["mcp.actual"] == {"headers": {"X-Stale": "value"}}
     assert report.status is ApplyStatus.PARTIAL
 
 
@@ -373,10 +408,14 @@ async def test_failed_skill_write_stops_later_mcp_and_preserves_configuration():
 async def test_failed_local_asset_cleanup_reports_partial_and_no_removal():
     uploads = FakeSkillUploadService()
     reader = FakeCapabilityReader(
-        assets=[SimpleNamespace(
-            skill_id=71, name="stale-local", git_path="local://stale-local",
-            mcp_dependencies=(),
-        )]
+        assets=[
+            SimpleNamespace(
+                skill_id=71,
+                name="stale-local",
+                git_path="local://stale-local",
+                mcp_dependencies=(),
+            )
+        ]
     )
 
     async def _fail_delete(**_kwargs):
@@ -491,8 +530,11 @@ script:
 
     # skills delivered, after identity per APPLY_ORDER position (1 < 3).
     assert [c.construct for c in report.categories] == [
-        Section.SCRIPT, Category.IDENTITY, Category.RESOURCES,
-        Category.CAPABILITIES, Category.CLI_TOOLS,
+        Section.SCRIPT,
+        Category.IDENTITY,
+        Category.RESOURCES,
+        Category.CAPABILITIES,
+        Category.CLI_TOOLS,
     ]
     assert outcomes["quality-check"] is EntryOutcome.CREATED
     assert uploads.uploads[0]["name"] == "quality-check"
@@ -550,7 +592,11 @@ async def test_the_compilers_resolutions_ride_into_the_report():
 
     # No resolutions handed over — the section is empty, not absent.
     plain = await engine.orchestrator.apply(
-        make_context(), state, apply_id="a1", trigger="explicit", started_at=datetime.now()
+        make_context(),
+        state,
+        apply_id="a1",
+        trigger="explicit",
+        started_at=datetime.now(),
     )
     assert plain.as_payload()["sources"] == []
 
@@ -563,15 +609,30 @@ async def test_the_compilers_resolutions_ride_into_the_report():
 def test_a_removal_that_landed_makes_an_otherwise_failed_apply_partial():
     """Review finding: ``script: null`` deleting the script while the only declared entry failed read as FAILED,
     so a genome promotion left the refs alone although the bot had changed."""
-    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryResult, derive_status
+    from agentclaw.community.core.apply_engine.outcomes import (
+        CategoryResult,
+        EntryResult,
+        derive_status,
+    )
 
-    cleared = CategoryResult(construct=Section.SCRIPT, entries=(), removals=("script",), aborted=False)
+    cleared = CategoryResult(
+        construct=Section.SCRIPT, entries=(), removals=("script",), aborted=False
+    )
     failed = CategoryResult(
         construct=Category.CAPABILITIES,
-        entries=(EntryResult(Category.CAPABILITIES, "refund-policy", EntryOutcome.FAILED, reason="not found"),),
+        entries=(
+            EntryResult(
+                Category.CAPABILITIES,
+                "refund-policy",
+                EntryOutcome.FAILED,
+                reason="not found",
+            ),
+        ),
         removals=(),
         aborted=True,
     )
     assert derive_status((cleared, failed)) is ApplyStatus.PARTIAL
-    assert derive_status((failed,)) is ApplyStatus.FAILED, "nothing landed: still FAILED"
+    assert derive_status((failed,)) is ApplyStatus.FAILED, (
+        "nothing landed: still FAILED"
+    )
     assert derive_status((cleared,)) is ApplyStatus.SUCCEEDED
