@@ -84,7 +84,7 @@ starts from.
 ## Context Boundary
 
 ```yaml
-purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the six materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome), with an execution-scoped content-fetch allowance and no document parsing.
+purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the five registered materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome), with an execution-scoped content-fetch allowance and no document parsing.
 provides:
   - CapabilityDeclaration  # one aggregate target, prefixed child report identities
   - DesiredCapabilities

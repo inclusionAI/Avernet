@@ -9,6 +9,8 @@ and the bot service are stood in for.
 """
 from __future__ import annotations
 
+from tests.community.core.apply_engine._capability_facts import materialiser_ports
+
 from agentclaw.community.core.bot_management.creation_source import validate_creation_source
 
 import pytest
@@ -135,7 +137,7 @@ def _build(db):
     fetcher = lambda: DeclaredSourceResolver(content, FakeCredentials(), FakeObjectStore())  # noqa: E731
 
     def platform_ports() -> MaterialiserPorts:
-        return MaterialiserPorts(
+        return materialiser_ports(
             script_service=scripts,
             activation_service=FakeActivationService(),
             mcp_auth_service=FakeMcpAuth(),

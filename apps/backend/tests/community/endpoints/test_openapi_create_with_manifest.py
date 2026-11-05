@@ -24,10 +24,10 @@ so a caller can see it exists. A caller must never have to read prose to tell
 
 from __future__ import annotations
 
+from .manifest_creation_worker import _Worker as _Worker
 import time
-
+import json
 import jwt
-
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.bot_config_manifest.create_job import (
     CREATE_JOB_TASK_TYPE,
@@ -50,7 +50,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
-from tests.community.endpoints.manifest_device_seed import seed_empty_manifest_device
+from tests.community.endpoints.manifest_device_seed import seed_empty_manifest_device, seed_empty_default_scope
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -58,6 +58,30 @@ from tests.community.framework import (
     bind_overrides,
     endpoint_test,
 )
+import pytest
+from fastapi.testclient import TestClient
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
+)
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    BotCreationManifestSeam,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestRepositoryProtocol,
+)
+from agentclaw.community.core.task_queue.types import Complete, Fail
+
+
+
+
 
 _OWNER = "create-manifest-owner"
 _BOT_ID = "create-manifest-bot"
@@ -386,33 +410,7 @@ def a_bot_id_with_no_creation_is_a_404():
 # deterministic: no poll interval, no lease, nothing racing the fixture's engine
 # disposal.
 
-import pytest
-from fastapi.testclient import TestClient
 
-from agentclaw.community.api.apply_run_service import (
-    ApplyRunServiceProtocol,
-)
-from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.api.bot_startup_script_service import (
-    BotStartupScriptServiceProtocol,
-)
-from agentclaw.community.core.apply_engine.apply_task import (
-    APPLY_TASK_TYPE,
-)
-from agentclaw.community.core.bot_config_manifest.create_job import (
-    BotCreateWithManifestHandler,
-)
-from agentclaw.community.core.bot_config_manifest.creation import (
-    BotCreationManifestSeam,
-)
-from agentclaw.community.core.bot_management.manifest_seam import (
-    ManifestCreationSeam,
-)
-from agentclaw.community.core.repository.protocols.bot import (
-    BotConfigManifestRepositoryProtocol,
-)
-from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 
 _SCRIPT = "echo provisioned"
 _FLOW_DOCUMENT = f'schema_version: 1\nscript:\n  body: "{_SCRIPT}"\n'
@@ -470,6 +468,7 @@ def _stand_in_for_provisioning(world, *, status: str = "ACTIVE") -> list[dict]:
                 "active_engine": kwargs.get("engine_type") or "claude_code",
             }
         )
+        seed_empty_default_scope(world, record['active_engine'])
         created.append(record)
         return record
 
@@ -485,78 +484,6 @@ def _stand_in_for_provisioning(world, *, status: str = "ACTIVE") -> list[dict]:
     return created
 
 
-class _Worker:
-    """A worker, reduced to one deployment and driven a turn at a time.
-
-    It claims, dispatches and **applies the outcome to the row**, because that
-    last part is what the poll reads: a job that returned ``Fail`` but whose row
-    was never transitioned still looks live, and the poll would go on reporting
-    `AWAITING_AUTHORIZATION` for a creation that had already been declined.
-    Running the handlers without the transitions would have made these cases
-    assert against a state the real system never produces.
-
-    Two liberties, both deliberate. Rescheduled tasks come back immediately
-    rather than after the job's five-second poll delay — the delay is latency,
-    not sequencing, and waiting it out would only make the suite slow. And a
-    task type this file does not drive is put back far enough not to return,
-    rather than completed, so nothing else in the app is quietly retired.
-    """
-
-    _WORKER = "test-worker"
-
-    def __init__(self, world) -> None:
-        self._world = world
-        self._repo = world.get(TaskQueueRepositoryProtocol)
-
-    def _dispatch(self, task):
-        if task.task_type == CREATE_JOB_TASK_TYPE:
-            return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
-        if task.task_type == APPLY_TASK_TYPE:
-            self._world.get(ApplyRunServiceProtocol).run_apply_task(
-                task.payload
-            )
-            return Complete()
-        return None
-
-    def _settle(self, task, outcome) -> None:
-        if outcome is None or isinstance(outcome, Reschedule):
-            self._repo.reschedule(
-                task_id=task.id,
-                worker_id=self._WORKER,
-                delay_seconds=0 if outcome is not None else 3600,
-            )
-        elif isinstance(outcome, Fail):
-            self._repo.fail(
-                task_id=task.id, worker_id=self._WORKER, error=outcome.error
-            )
-        else:
-            self._repo.complete(task_id=task.id, worker_id=self._WORKER)
-
-    def turn(self) -> list:
-        claimed = self._repo.claim_batch(
-            worker_id=self._WORKER,
-            env=get_current_env(),
-            app=DEFAULT_APP,
-            limit=10,
-            lease_seconds=300,
-        )
-        settled = []
-        for task in claimed:
-            outcome = self._dispatch(task)
-            self._settle(task, outcome)
-            if task.task_type == CREATE_JOB_TASK_TYPE:
-                settled.append(outcome)
-        return settled
-
-    def run_to_the_end(self, *, turns: int = 8):
-        for _ in range(turns):
-            for outcome in self.turn():
-                if isinstance(outcome, (Complete, Fail)):
-                    # Drain whatever this last turn enqueued — the
-                    # post-container apply is started by the job's final turn.
-                    self.turn()
-                    return outcome
-        raise AssertionError("the creation never reached a terminal outcome")
 
 
 @pytest.fixture
@@ -609,7 +536,7 @@ def test_a_creation_runs_from_submission_to_ready(client, world):
     assert isinstance(outcome, Complete), outcome
 
     ready = _poll(client, bot_id).json()["data"]
-    assert ready["state"] == "READY", ready
+    assert ready["state"] == "READY", json.dumps(ready, indent=2)
     assert ready["bot"]["bot_id"] == bot_id
     assert ready["apply"]["result"] == "SUCCEEDED"
     assert any(
@@ -642,7 +569,7 @@ def test_a_creation_declaring_nothing_is_still_ready(client, world):
     _Worker(world).run_to_the_end()
 
     ready = _poll(client, bot_id).json()["data"]
-    assert ready["state"] == "READY", ready
+    assert ready["state"] == "READY", json.dumps(ready, indent=2)
 
 
 def test_a_construct_with_no_materialiser_is_refused_at_submission(client, world):
@@ -896,6 +823,7 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
         ApplyRunService,
     )
 
+    seed_empty_default_scope(world, 'teclaw')
     order: list[str] = []
     bot_repo = world.get(BotRepository)
 

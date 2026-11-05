@@ -4,6 +4,7 @@ These assert properties of the *source*, not of a run. Each one protects a
 promise that is easy to break by accident and impossible to notice afterwards.
 """
 from __future__ import annotations
+from agentclaw.community.core.apply_engine.constructs import CURRENT_CATEGORIES
 
 import inspect
 import re
@@ -94,7 +95,7 @@ def test_the_category_guard_would_catch_a_real_special_case():
 def test_the_order_table_covers_every_construct_the_vocabulary_defines():
     """A construct with no row is one an apply would silently walk past."""
     declared = {step.construct for step in order.APPLY_ORDER}
-    expected = set(Category) | set(Section)
+    expected = set(CURRENT_CATEGORIES) | set(Section)
     assert declared == expected, (
         "APPLY_ORDER must name every category and section. Missing: "
         f"{sorted(c.value for c in expected - declared)}"
@@ -117,7 +118,8 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             mcp_config_service=object(),
             identity_service=object(),
             upload_service=object(),
-            capability_reader=object(),
+            skill_references=object(),
+            skill_sets=object(),
             package_validator=object(),
             content=object(),
             resource_service=object(),
@@ -150,11 +152,10 @@ def test_phase_b_keeps_the_declared_category_order():
         for step in sorted(order.APPLY_ORDER, key=lambda s: s.position)
         if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.ON_CONTAINER
     ]
-    assert on_container[:4] == [
+    assert on_container[:3] == [
         Category.IDENTITY,
         Category.RESOURCES,
-        Category.SKILLS,
-        Category.MCP,
+        Category.CAPABILITIES,
     ]
 
 

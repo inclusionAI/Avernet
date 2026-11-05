@@ -7,6 +7,8 @@ that the strategy's closing step runs once and lands on the report.
 """
 from __future__ import annotations
 
+from tests.community.core.apply_engine._capability_facts import materialiser_ports
+
 from contextlib import contextmanager
 
 import pytest
@@ -19,7 +21,6 @@ from agentclaw.community.core.apply_engine.delivery import (
     ArcaDelivery,
     DeliveryStrategyFactory,
     EngineFamily,
-    MaterialiserPorts,
     TeclawDeliveryMode,
     TeclawDeviceDelivery,
     TeclawPlatformDelivery,
@@ -148,7 +149,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
     platform_activation = platform_activation or FakeActivationService()
 
     def platform_ports():
-        return MaterialiserPorts(
+        return materialiser_ports(
             script_service=FakeStartupScriptService(),
             activation_service=platform_activation,
             mcp_auth_service=FakeMcpAuth(),
@@ -247,7 +248,7 @@ def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
     assert [c.construct.value for c in report.categories] == [
-        "identity", "resources", "skills", "mcp", "cli_tools",
+        "identity", "resources", "capabilities", "cli_tools",
     ]
     # The platform ports were used, the device ports were not.
     assert platform_activation.installed == {"github"}
@@ -286,7 +287,7 @@ def test_the_device_shape_is_the_pre_w8_shape() -> None:
     assert [c.construct.value for c in pre.categories] == ["cli_tools"]
     on = _apply(service, _TECLAW_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == [
-        "identity", "resources", "skills", "mcp",
+        "identity", "resources", "capabilities",
     ]
     assert device_activation.installed == {"github"}
     assert device_activation.configured == []
@@ -310,7 +311,7 @@ def test_arca_is_unaffected_by_the_deployments_teclaw_mode() -> None:
     assert [c.construct.value for c in pre.categories] == ["script"]
     on = _apply(service, _ARCA_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == [
-        "identity", "resources", "skills", "mcp", "cli_tools",
+        "identity", "resources", "capabilities", "cli_tools",
     ]
     assert device_activation.installed == {"github"}
     assert device_activation.configured == []
@@ -337,7 +338,7 @@ async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
         entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY, state=MANIFEST_STATE
     )
     assert [c.construct.value for c in report.categories] == [
-        "identity", "resources", "skills", "mcp", "cli_tools",
+        "identity", "resources", "capabilities", "cli_tools",
     ]
     assert platform_activation.activated == []
     assert device_activation.activated == []

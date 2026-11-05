@@ -56,6 +56,25 @@
 
 ---
 
+### 升级到聚合能力后的兼容
+
+新版本继续接受 schema v1 的旧 `manifest.skills` / `manifest.mcp` 写法，并在内部统一成
+`manifest.capabilities`。新旧位置不能混用。每一份有效 Manifest 都是完整能力目标：
+省略 `skill_sets` 等价于空列表，会清空普通集并排除当前适用 Default 成员；需要保留的
+普通集必须完整声明，Default 必须显式写 `{name: default}`。省略 MCP `config` 或写 `{}`
+都会清除 Bot override，非空配置完整替换。升级前应补齐希望保留的内容，再 Apply。
+普通集合不能创建或改名为保留名 `default`。适用 Default 成员被排除后，可沿原权限与资产
+归属规则显式 Direct 控制或加入普通集；恢复 Default 时若该成员已被占用，整组能力会拒绝。
+
+没有 Manifest 记录时不清理能力。Genome 的旧 Direct Skills/MCP 目标继续保留集合和
+Default 的不参与范围，本期不扩充 Genome schema 或迁移历史 revision ID。
+新执行报告只有一个 `capabilities` 类别，条目与移除名称带 `skills/`、`skill_sets/`、
+`mcp/` 前缀；历史报告保留原值读取。Backend、worker 与读取报告/任务的消费者应一起升级，
+降级前先处理在途任务，不承诺旧服务续跑新类别任务。
+
+Device 创建在容器可用后的 ON 阶段写能力；Platform 在真实 Bot 记录已建立后的 PRE 阶段
+写能力，然后合成首个 artifact。权限、Bot 地址、异步任务与报告 envelope 保持既有合同。
+
 ## 2. 上手：两条路径
 
 先分清你在哪条路上——它决定第一步做什么。**两条路的清单文档一模一样**，区别
@@ -313,10 +332,11 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 
 | 类目 | 被覆盖的区域 |
 | --- | --- |
-| `skills` | 受管理的 Direct 安装和未被 Set 引用的 Bot 本地技能包 |
+| `capabilities.skills` | 受管理的 Direct 安装和未被任何持久 Set 引用的 Bot 本地技能包 |
 | `identity` | **identity 文件集合**，减去保留名单（见 §8） |
 | `resources` | workspace 中的非保护根条目，包括手工上传和 Bot 生成的普通文件 |
-| `mcp` | 受管理的 Direct 安装和 Bot override，保留现有 Set、平台默认及 Skill 依赖供应规则 |
+| `capabilities.skill_sets` | 按名称替换普通集（含停用集）及成员；`name: default` 恢复适用默认成员，否则排除当前默认成员 |
+| `capabilities.mcp` | 受管理的 Direct 安装和 Bot override；在 Set 收敛后保留最终有效 Set/Default 与 Skill 依赖供应规则 |
 
 设备模式下，非保护目录会递归删除，包括首次创建时容器启动后生成的普通文件。
 
@@ -338,7 +358,12 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 这是在保护你：在覆盖语义下，一个不完整的集合是**破坏性**的。声明 `{A, B}` 却只
 写进 `{A}`，就等于把 B 删了——一次网络抖动删掉一个正在工作的 skill，这不能接受。
 
-一个类目的失败**不牵连**别的类目：`skills` 全军覆没时，`identity` 该怎么写还怎么写。
+能力共用一个 `capabilities` 类别：Direct Skills、SkillSet/Default 和 MCP 在同一次解析、规划中校验。
+其中一个编译或解析失败时，能力整组不写；`identity`、`resources` 等其他类别继续。
+写入阶段按共享资产准备、本地上传、Set/Default 关系、Direct Skills、MCP、Local 清理执行。
+这些步骤不构成跨资产和 Runtime 的整体事务；后续失败停止能力内剩余步骤，
+本轮实际改变并确认提交的 Bot 写入可使报告为 `PARTIAL`。写入异常沿既有保守报告，
+不保证逐项保留已成功条目，也不会把未执行的删除报为完成。
 
 ### 3.5 secret 永远不进清单
 
