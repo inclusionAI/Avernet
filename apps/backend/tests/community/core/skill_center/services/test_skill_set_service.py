@@ -716,19 +716,44 @@ class TestSyncMcpDelivery:
         svc.mcp_center.get_mcp_detail.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_catalogue_gap_on_a_claimed_code_fails_delivery(self):
-        """Still fails closed — but only for a code being installed.
+    async def test_catalogue_gap_on_a_claimed_code_is_skipped(self):
+        """Missing catalogue detail is skipped, not failed.
 
-        The old combined method resolved every projected code, so an
-        unrelated delisted MCP blocked every add.
+        Session-scoped or virtual MCPs can appear in the passport without
+        catalogue data.  The delivery skips them gracefully and continues
+        with the remaining MCPs — a single gap no longer blocks the entire
+        sync.
         """
         svc = self._make_svc()
         svc.mcp_center.get_mcp_detail.side_effect = lambda code: None
 
         assert await svc.sync_mcp_delivery(
             claimed=frozenset({"mcp.delisted"}), released=frozenset()
-        ) is False
+        ) is True
         svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mixed_catalogue_skips_missing_and_pushes_present(self):
+        """One missing catalogue entry does not suppress the valid ones.
+
+        When a batch contains both a resolvable MCP and one without
+        catalogue data, the valid one is still pushed to the device.
+        """
+        svc = self._make_svc()
+        svc.mcp_center.get_mcp_detail.side_effect = lambda code: (
+            {"server_code": code} if code == "mcp.ok" else None
+        )
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.ok", "mcp.missing"}), released=frozenset()
+        ) is True
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_awaited_once_with(
+            user_id="user1",
+            mcp_entries=[{"server_code": "mcp.ok"}],
+            bot_id="bot1",
+            entity_id="staff_user1",
+            engine_type="moltis",
+        )
 
     @pytest.mark.asyncio
     async def test_failed_push_reports_failure(self):
