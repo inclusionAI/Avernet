@@ -11,8 +11,8 @@ _stages = ContextVar("search_stage_timings", default=None)
 
 
 @contextmanager
-def request_timing():
-    """One sampled summary; callers supply only internal names/counts/statuses."""
+def request_timing(operation):
+    """Log each search and retain detailed slow samples for window statistics."""
     stages = {}
     token = _stages.set(stages)
     summary = {"outcome": "ok"}
@@ -27,11 +27,14 @@ def request_timing():
         raise
     finally:
         _stages.reset(token)
+        outcome = summary.pop("outcome")
+        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+        events.record_steps(operation, outcome, elapsed_ms, stages, summary)
         events.record(
             "search_timing",
             "request",
-            summary.pop("outcome"),
-            elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+            outcome,
+            elapsed_ms=elapsed_ms,
             stages={name: dict(value) for name, value in stages.items()},
             **summary,
         )

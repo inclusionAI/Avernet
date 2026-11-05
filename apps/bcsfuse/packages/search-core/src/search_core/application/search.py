@@ -47,7 +47,7 @@ class CatalogSearchApplication:
     async def execute(
         self, command: SearchCommand, identity: VerifiedIdentity
     ) -> SearchResult:
-        with request_budget(self._budget), request_timing() as timing:
+        with request_budget(self._budget), request_timing(command.operation) as timing:
             if self._trace_id_provider is not None:
                 trace_id = self._trace_id_provider()
                 if trace_id:
