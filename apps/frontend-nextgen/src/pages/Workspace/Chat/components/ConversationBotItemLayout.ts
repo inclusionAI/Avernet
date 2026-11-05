@@ -73,10 +73,10 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
       : actionButtonCount >= 4
         ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px] [@media(hover:none)]:pr-[112px]'
         : 'group-hover:pr-[86px] group-focus-within:pr-[86px] [@media(hover:none)]:pr-[86px]';
-  // 常显 icon 让位(2026-11-04 显隐重构与同日修正):收起指示器(展开态常显,
-  // 用户反馈 hover 别处时它消失是误伤——它是展开状态的行级指示)与激活标记
-  // (🔍 检索/实例、归属/范围筛选非默认项)共同按数量预留静态让位;检索标记仅在 🔍 渲染(scope=all)时计入。
-  const pinnedMarkCount = (expanded ? 1 : 0) + (searchMarked && searchVisible ? 1 : 0) + (filterActive ? 1 : 0);
+  // 常显 icon 让位只保留真正常驻的激活标记(🔍 检索/实例、归属/范围筛选非默认项)。
+  // 2026-11-05 回归修正:展开态收起按钮是 hover 操作,不再计入静态让位;若仍常驻会让
+  // Bot 行静默态保留一块右侧空位,并连带隐藏徽章。
+  const pinnedMarkCount = (searchMarked && searchVisible ? 1 : 0) + (filterActive ? 1 : 0);
   const pinnedMarked = !unavailable && pinnedMarkCount > 0;
   const pinnedMarkPadding = pinnedMarkCount >= 3 ? 'pr-[86px]' : pinnedMarkCount >= 2 ? 'pr-[60px]' : 'pr-9';
   return {

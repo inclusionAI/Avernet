@@ -225,11 +225,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             className={cn(
               stripVisible &&
                 'group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden [@media(hover:none)]:hidden',
-              // 收起指示器常显(展开态,同日修正)与不可用「更多」常驻时 badge 恒让位——
-              // 收起按钮在操作组首位(距右 18px),静态让位 36px 下 badge 尾部会与其重叠
-              // (用户反馈 2026-11-04 实测);激活 icon 仅让 36px 且位于透明按钮之后,
-              // badge 保持显示不重叠。
-              stripVisible && (expanded || unavailable) && 'hidden',
+              // 仅不可用「更多」常驻时 badge 恒让位。展开态收起按钮现在只在 hover/键盘/
+              // 触屏/菜单打开时出现,由下方 group 变体按需让位,静默态不再为保留空间隐藏 badge。
+              stripVisible && unavailable && 'hidden',
             )}
           />
         </div>
