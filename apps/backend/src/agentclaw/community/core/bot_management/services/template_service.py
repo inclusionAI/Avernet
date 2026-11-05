@@ -154,7 +154,7 @@ class TemplateService:
             bot_id=bot_id,
             template_config=template_config,
             source=source,
-            existing_ext=self.get_template_config(bot_id),
+            existing_ext=self.get_template_config_strict(bot_id),
         )
         if candidate is None:
             return template_config

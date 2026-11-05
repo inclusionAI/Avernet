@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any, Optional
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -172,3 +173,18 @@ def test_noop_default_with_no_explicit_binding(service: TemplateService) -> None
     assert isinstance(service._write_extension, NoopTemplateWriteExtension)
     service.create_template("b2", {"k": 9})
     assert service.get_template_config("b2") == {"k": 9}
+
+
+@pytest.mark.parametrize("method", ["create_template", "update_template"])
+def test_existing_snapshot_read_failure_never_reaches_write(service, method):
+    service.create_template("b1", {"k": "kept"})
+    with patch.object(
+        service._repository, "get_by_bot_id", side_effect=RuntimeError("read unavailable")
+    ), patch.object(service._repository, "insert") as insert, patch.object(
+        service._repository, "update_by_bot_id"
+    ) as update:
+        with pytest.raises(RuntimeError, match="read unavailable"):
+            getattr(service, method)("b1", {"k": "replacement"})
+        insert.assert_not_called()
+        update.assert_not_called()
+    assert service.get_template_config("b1") == {"k": "kept"}
