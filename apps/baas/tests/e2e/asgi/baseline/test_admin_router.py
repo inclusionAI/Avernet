@@ -211,9 +211,9 @@ class TestAdminPublish:
     async def test_admin_update_device_status_nonexistent(
         self, api: APITestHelper
     ) -> None:
-        """POST /api/v1/admin/devices/{uuid}/status on nonexistent device returns 404."""
+        """POST /api/v1/admin/devices/{uuid}/repair on nonexistent device returns 404."""
         response = await api.client.post(
-            "/api/v1/admin/devices/nonexistent-device-uuid/status",
+            "/api/v1/admin/devices/nonexistent-device-uuid/repair",
             params=api.params(),
             json={"status": "ACTIVE", "operator": "e2e-test"},
         )
@@ -227,9 +227,9 @@ class TestAdminPublish:
     async def test_admin_update_device_status_missing_params(
         self, api: APITestHelper
     ) -> None:
-        """POST /api/v1/admin/devices/{uuid}/status with missing params returns 422."""
+        """POST /api/v1/admin/devices/{uuid}/repair with missing params returns 422."""
         response = await api.client.post(
-            "/api/v1/admin/devices/test-device-uuid/status",
+            "/api/v1/admin/devices/test-device-uuid/repair",
             params=api.params(),
             json={},
         )
