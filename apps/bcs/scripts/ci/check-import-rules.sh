@@ -37,8 +37,12 @@ fi
 
 while IFS=$'\t' read -r path_glob pattern doc; do
   [[ -z "$path_glob" || "$path_glob" =~ ^# ]] && continue
-  # 用 rg 直接支持 glob
-  if rg --no-heading -n -F "$pattern" -g "$path_glob" . 2>/dev/null; then
+  # Rule 5 permits composition in Cargo's crate-level integration tests.
+  # Keep src/** (even src/tests/**) and contract-layer checks unchanged.
+  if rg --no-heading -n -F "$pattern" -g "$path_glob" \
+    -g '!crates/services/*/tests/**' \
+    -g '!crates/adapters/*/*/tests/**' \
+    -g '!crates/external-clients/*/tests/**' . 2>/dev/null; then
     echo "FAIL [LINT-1]: matched \"${pattern}\" (${doc})"
     fail=1
   fi

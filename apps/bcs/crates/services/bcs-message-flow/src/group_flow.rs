@@ -66,6 +66,7 @@ pub(crate) async fn human_controls_bot(
 }
 
 pub struct BcsMessageFlow {
+    pub(crate) native_tasks: crate::native_task::NativeTaskCorrelation,
     pub execution_cache: Option<Arc<dyn bcs_cache_api::CachePlugin>>,
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
@@ -163,6 +164,7 @@ impl BcsMessageFlow {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         Self {
+            native_tasks: Default::default(),
             execution_cache: None,
             direct_chat: None,
             group,
@@ -763,6 +765,12 @@ impl MessageFlowService for BcsMessageFlow {
         cmd: TaskDispatchCommand,
     ) -> ServiceResult<TaskDispatchOutcome> {
         crate::task_flow::handle_task_dispatch(self, cmd).await
+    }
+
+    async fn handle_native_task_dispatch(
+        &self, request_id: &str, cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        crate::native_task::dispatch(self, request_id, cmd).await
     }
 
     async fn handle_task_message(

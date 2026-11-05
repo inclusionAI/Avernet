@@ -453,3 +453,17 @@ resolver. A failed Card refresh therefore cannot block cancellation of an
 already-submitted A2A Run. Immutable owner checks and canonical scope remain;
 the adapter loads the original endpoint/Task from durable correlation. New send
 preparation still uses normal target resolution and rejects an unavailable Card.
+
+## Native task Caller correlation
+
+`handle_native_task_dispatch` correlates a prior accepted native tool start with
+an authenticated Bot request, then validates exact parent Run/attempt material
+before admitting a Caller Worker. Owner parents use existing delegation-only
+Human-origin lineage, never a synthetic execution token. Caller parents require
+their exact ParentExecutionTokenRef. Native dispatch cannot redeem the latest
+session capture. Ordinary targets and legacy coordination keep their delivery
+paths. Correlation/receipts are bounded owner-local memory, not durable exactly-once
+semantics; missing, reordered or ambiguous starts fail closed. Incremental parent
+reads use canonical scoped LIMIT 2 and existing Run-context/config caches, with no
+new queue scan or schema. See `docs/native-task-caller.md` for costs, retention,
+SDK-ordering prerequisites and conformance coverage.
