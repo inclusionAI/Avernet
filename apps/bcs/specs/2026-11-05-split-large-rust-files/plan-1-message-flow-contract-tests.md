@@ -182,7 +182,7 @@
 
 ## 执行前基线（并入 Task 1，不单独交付脚手架）
 
-- [ ] 确认当前工作区干净、工具存在；读取上节指令和实际源码。
+- [x] 确认当前工作区干净、工具存在；读取上节指令和实际源码。
 
 ```bash
 set -euo pipefail
@@ -206,7 +206,7 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow \
 不是要求默认执行依赖外部环境的 ignored 测试。失败就保留日志并报告，不能静默记为绿色。
 如需特定 features，前后所有发现/执行命令都使用同一组 features 并在证据里记录。
 
-- [ ] 执行现状大小断言，预期内部检查 **FAIL**，确认能发现原超大文件。下列 `if`
+- [x] 执行现状大小断言，预期内部检查 **FAIL**，确认能发现原超大文件。下列 `if`
   记录预期失败而不结束 Bash 会话；如果检查意外通过，停止并重新核实是否仍需要拆分。
 
 ```bash
@@ -224,7 +224,7 @@ else
 fi
 ```
 
-- [ ] 审计路径与过滤消费者，并把命中及处理决定放进 `$EVIDENCE/path-audit.txt`。
+- [x] 审计路径与过滤消费者，并把命中及处理决定放进 `$EVIDENCE/path-audit.txt`。
 
 ```bash
 rg -n --glob '*.rs' --glob '*.py' --glob '*.sh' --glob '*.toml' \
@@ -243,8 +243,8 @@ Create 上表 `session_history.rs`、`group_history.rs` 与六个 `support/*.rs`
 **Interfaces:** Consumes 原 `FlowTestSupport` 与 Session support；Produces 本 plan“内部接口”
 列出的跨主题 helper，后续主题从根模块导入，不相互调用测试。
 
-- [ ] 完成“执行前基线”，核实静态 84 条归属与实际发现；保留源文件快照。
-- [ ] 将六组 support 完整定义从原文件移入表内路径，保留 trait impl、derive、注释与函数体；
+- [x] 完成“执行前基线”，核实静态 84 条归属与实际发现；保留源文件快照。
+- [x] 将六组 support 完整定义从原文件移入表内路径，保留 trait impl、derive、注释与函数体；
   原入口只留下下面的挂载/导入，不留下重复实现。
 
 ```rust
@@ -271,7 +271,7 @@ use runs::{register_active_run, register_active_run_with_downstream};
 support 文件使用 `use super::*;` 获得原依赖；原入口已有的 `support` / `session_support`
 声明保持不变。先迁移 support 后运行一次原 target，确认可见性调整未改变行为。
 
-- [ ] 按归属表移入 17 个历史测试及各自局部 fake，主题文件首行 `use super::*;`，挂载：
+- [x] 按归属表移入 17 个历史测试及各自局部 fake，主题文件首行 `use super::*;`，挂载：
 
 ```rust
 #[path = "contract_message_flow/session_history.rs"]
@@ -280,13 +280,13 @@ mod session_history;
 mod group_history;
 ```
 
-- [ ] 执行以下命令，预期原 target 全部未忽略测试通过；两个历史模块没有丢失场景。
+- [x] 执行以下命令，预期原 target 全部未忽略测试通过；两个历史模块没有丢失场景。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contract_message_flow
 ```
 
-- [ ] 检查新文件不超过 1000 行、`git diff --check` 无错误；仅暂存本任务路径并提交：
+- [x] 检查新文件不超过 1000 行、`git diff --check` 无错误；仅暂存本任务路径并提交：
   `refactor(bcs): isolate message-flow history contract tests`。不推送中间超大根文件。
 
 ### Task 2：Web send 与 Group chat 主题化
@@ -294,9 +294,9 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contra
 **Files:** Modify 原入口；Create 上表四个 `web_send_*.rs`、`group_chat.rs`。
 **Interfaces:** Consumes Task 1 helper；Produces 原样 MessageFlowService 测试，公开接口不变。
 
-- [ ] 对照归属表把 33 个测试及 Provider 局部 fake/helper 连同属性/函数体迁移，
+- [x] 对照归属表把 33 个测试及 Provider 局部 fake/helper 连同属性/函数体迁移，
   尤其保留 accepted Run context、Human-only audience、gray-list 与 bypass headers。
-- [ ] 根入口加入以下接线；各新文件使用 `use super::*;`。只在自身文件内使用的 helper 私有。
+- [x] 根入口加入以下接线；各新文件使用 `use super::*;`。只在自身文件内使用的 helper 私有。
 
 ```rust
 #[path = "contract_message_flow/web_send_routing.rs"]
@@ -311,7 +311,7 @@ mod web_send_sessions;
 mod group_chat;
 ```
 
-- [ ] 执行原 target 全量测试，并核实脚本保留的过滤方式仍能发现对应测试。
+- [x] 执行原 target 全量测试，并核实脚本保留的过滤方式仍能发现对应测试。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contract_message_flow
@@ -322,7 +322,7 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contra
 `apps/bcs/scripts/test_provider_downlink.sh:178-182` 使用上述过滤，函数名保持不变，
 不修改该脚本、不额外运行依赖 live stack 的脚本作为近端单测。
 
-- [ ] 核实每个新文件不超过 1000 行，检查最小差异后提交：
+- [x] 核实每个新文件不超过 1000 行，检查最小差异后提交：
   `refactor(bcs): separate message-flow send contract scenarios`。
 
 ### Task 3：持久化、回调与取消主题化
@@ -330,9 +330,9 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contra
 **Files:** Modify 原入口；Create `persistent_send.rs`、`bot_event_callback.rs`、`abort.rs`。
 **Interfaces:** Consumes `RecordingMessageRepo` / runs；Produces 原 trait 观察结果，不新增 store 调用。
 
-- [ ] 迁移归属表 19 个测试，`EnabledEventFactory` 只进入 `persistent_send.rs`，
+- [x] 迁移归属表 19 个测试，`EnabledEventFactory` 只进入 `persistent_send.rs`，
   `request_id_for_method(&[BcsFrame], &str) -> String` 只进入 `bot_event_callback.rs`。
-- [ ] 删除根中的原定义，新增以下接线，三个主题各以 `use super::*;` 开头。
+- [x] 删除根中的原定义，新增以下接线，三个主题各以 `use super::*;` 开头。
 
 ```rust
 #[path = "contract_message_flow/persistent_send.rs"]
@@ -343,14 +343,14 @@ mod bot_event_callback;
 mod abort;
 ```
 
-- [ ] 运行原 target 全量测试，预期持久化失败阻断投递、前端失败继续回调、scope 拒绝及
+- [x] 运行原 target 全量测试，预期持久化失败阻断投递、前端失败继续回调、scope 拒绝及
   原 downstream Session/Run identity 的既有测试原样通过。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contract_message_flow
 ```
 
-- [ ] 核实新文件大小、属性及原 body 差异后提交：
+- [x] 核实新文件大小、属性及原 body 差异后提交：
   `refactor(bcs): isolate persistence callback and abort contract tests`。
 
 ### Task 4：附件/通知迁移与独立验收
@@ -358,7 +358,7 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow --test contra
 **Files:** Modify 原入口；Create `attachments.rs`、`human_mentions.rs`；最终只调整本套件必要 import。
 **Interfaces:** Consumes Task 1 `BlockingInterceptor` / DM setup；Produces 完整一一映射的 84 个原测试。
 
-- [ ] 迁移归属表 15 个测试及各自私有 builder；将原 mention 文本持久化测试留在
+- [x] 迁移归属表 15 个测试及各自私有 builder；将原 mention 文本持久化测试留在
   `web_send_projection`，不复制到通知模块；根入口加入：
 
 ```rust
@@ -368,9 +368,9 @@ mod attachments;
 mod human_mentions;
 ```
 
-- [ ] 确认根入口无残留测试体、单主题 fake 或重复定义。执行下方清单检查和全量/大小检查；
+- [x] 确认根入口无残留测试体、单主题 fake 或重复定义。执行下方清单检查和全量/大小检查；
   映射应覆盖 84 个迁移测试，所属 crate 其他测试身份不变。
-- [ ] 检查目录中每个 `.rs` 的大小并审阅迁移差异，确认没有 body/断言语义变化；提交：
+- [x] 检查目录中每个 `.rs` 的大小并审阅迁移差异，确认没有 body/断言语义变化；提交：
   `refactor(bcs): complete message-flow contract test decomposition`。
 - [ ] 在最终源码提交上执行下方架构、覆盖率和统一 Singlebox gate；完成交付记录。
 
@@ -428,7 +428,7 @@ CHECK
 
 ## 末任务的交付验证与提交边界
 
-- [ ] 执行所属 crate 全量测试、编译及路径/属性差异审查。
+- [x] 执行所属 crate 全量测试、编译及路径/属性差异审查。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-message-flow
@@ -494,9 +494,9 @@ endpoint/CLI leaf-command 100%，E2E scope 至少 20 条 changed lines 时 >65%�
 不通过设置 opt-out 环境变量、缩小默认模块集合或降低阈值绕过。组合交付可以复用同一
 最终 SHA 的共享栈报告，但必须注明覆盖本 plan；独立交付不能等待另一个 plan 才验收。
 
-- [ ] 在本 plan 的交付记录中填写执行起止 SHA、修改文件行数、测试映射、每条验证命令
+- [x] 在本 plan 的交付记录中填写执行起止 SHA、修改文件行数、测试映射、每条验证命令
   的结果和报告位置。没有工具、服务或网络时，明确标记未验收，不能声称实施完成。
-- [ ] 最后审查 AC-1 至 AC-10；业务修复另开任务，数据库/缓存/网络访问成本变化应为零。
+- [x] 最后审查 AC-1 至 AC-10；业务修复另开任务，数据库/缓存/网络访问成本变化应为零。
   回滚只回滚本 plan 的源码迁移及记录，不改数据库、配置或另外两个 plan 的文件。
 
 ## Spec 覆盖与编写状态
@@ -512,5 +512,169 @@ endpoint/CLI leaf-command 100%，E2E scope 至少 20 条 changed lines 时 >65%�
 | AC-9 / AC-10：统一 E2E 与报告、不弱化门禁 | 末任务统一 Singlebox、artifact verifier 与固定阈值 |
 | 独立交付、回滚和运行成本不变 | Global Constraints、范围审查、最后的交付/回滚记录 |
 
-本文件是待执行计划；所有复选框保持未勾选。编写阶段只做源码归属、命令接口和文档
-自检，没有执行迁移、Rust 测试、覆盖率或 Singlebox，不能把文中预期结果记为实际通过。
+编写阶段只做源码归属、命令接口和文档自检，没有执行迁移、Rust 测试、覆盖率或
+Singlebox；上述预期结果不是编写阶段的实测结果。实施与验收的实际值见下节
+“交付记录”，未通过或未验证的门禁保持未勾选并逐条说明。
+
+## 交付记录
+
+### 执行范围与提交
+
+| 阶段 | 提交 SHA |
+| --- | --- |
+| 执行基线 `SOURCE_BASE` | `5b6952f7eb07f0a25df5288274247735840dd471` |
+| Task 1 `refactor(bcs): isolate message-flow history contract tests` | `9f8c2c315ab8b137f54359a7861aeea552e1853d` |
+| Task 2 `refactor(bcs): separate message-flow send contract scenarios` | `8f51ff98633ee7081efa637b57e61851c439878d` |
+| Task 3 `refactor(bcs): isolate persistence callback and abort contract tests` | `ae530e0f58295363ebfdd637506eac7b24eb5a1b` |
+| Task 4 `refactor(bcs): complete message-flow contract test decomposition`（验收 HEAD） | `1af0d1326c794646185b11e45be2aa3b304f1713` |
+
+门禁在 `1af0d1326c` 上执行；本文档记录单独提交为
+`docs(bcs): record plan-1 contract test decomposition delivery`，位于源码提交之后。
+未推送任何提交。验收合并基线由计划脚本计算：`origin/dev` →（fetch 时刻记录）
+`520be5ed6e695b9c379e99c007730e37df8ae95e`，`RANGE_BASE =
+41f728aaada7684543da36c0807e7b945314ebc2`；`git merge-base origin/dev HEAD` 至今仍
+解析到 `41f728aa…`，因此下文记录的 RANGE_BASE 口径与数值保持有效。
+
+### 最终文件行数（物理行）
+
+| 文件 | 行数 |
+| --- | ---: |
+| `tests/contract_message_flow.rs` | 74 |
+| `contract_message_flow/session_history.rs` | 521 |
+| `contract_message_flow/group_history.rs` | 529 |
+| `contract_message_flow/web_send_routing.rs` | 410 |
+| `contract_message_flow/web_send_projection.rs` | 588 |
+| `contract_message_flow/web_send_provider.rs` | 443 |
+| `contract_message_flow/web_send_sessions.rs` | 309 |
+| `contract_message_flow/group_chat.rs` | 306 |
+| `contract_message_flow/persistent_send.rs` | 291 |
+| `contract_message_flow/bot_event_callback.rs` | 271 |
+| `contract_message_flow/abort.rs` | 423 |
+| `contract_message_flow/attachments.rs` | 187 |
+| `contract_message_flow/human_mentions.rs` | 403 |
+| `contract_message_flow/support/authority.rs` | 22 |
+| `contract_message_flow/support/group_setup.rs` | 31 |
+| `contract_message_flow/support/history.rs` | 38 |
+| `contract_message_flow/support/message_repo.rs` | 81 |
+| `contract_message_flow/support/policy.rs` | 15 |
+| `contract_message_flow/support/runs.rs` | 58 |
+
+大小门禁：19 个文件全部 ≤1000 行（最大 588 行，原入口 4936 → 74 行）。根入口只保留
+原公共 import、共享 `support`/`session_support` 挂载、12 个主题与 6 个 support 的
+`#[path]` 接线及 6 条 `use`，无测试体、无单主题 fake、无重复定义。根 import 经
+`cargo check --all-targets` 验证后未删除任何一条（子模块通过 `use super::*` 使用，
+未出现新增 unused-import 警告）。
+
+### 84 个测试映射
+
+- `cargo nextest list` 前后清单（同一工具链、同一 features）：
+  `$EVIDENCE/package.before.json` / `package.after.json`、
+  `$EVIDENCE/target.before.json` / `target.after.json`（`$EVIDENCE` =
+  `/private/var/folders/5s/v4sf5jfn18qfxvjvtdbbcnnw0000gn/T/opencode/avernet-split-p1`，
+  本地临时证据，不随仓库交付）。
+- 计划的清单一致性检查输出：`PASS: full package discovery stable; mapped 84 moved
+  tests`；crate 其余测试完整名称与 `ignored` 状态不变，1 个 target suite 未变。
+- 逐测试映射写入 `$EVIDENCE/test-map.tsv`；与“测试迁移清单”逐行核对：84 行，
+  **0 处模块前缀不符**。各模块数量：`session_history` 10、`group_history` 7、
+  `web_send_routing` 7、`web_send_projection` 8、`web_send_provider` 7、
+  `web_send_sessions` 4、`group_chat` 7、`persistent_send` 5、
+  `bot_event_callback` 6、`abort` 8、`attachments` 4、`human_mentions` 11（合计 84）。
+- 迁移保真：从 `$EVIDENCE/source.rs` 抽取的 84 个测试块（属性行至函数结尾）与拆分后
+  文件中的 84 个块逐字节相同；无重复函数名。84 个测试全部为 `#[tokio::test]`，
+  源文件不存在 `ignore`/`cfg`/`timeout` 等附加属性，`ignored` 前后比对一致。
+- `attachments.rs` 与 `human_mentions.rs` 的整段内容与基线同区域逐字节相同（仅去掉
+  文件末尾用于分隔的空行，保证 EOF 只有一个换行）；附件段落注释
+  `// ==== Workbench realtime attachment echo ====` 随主题迁入 `attachments.rs`。
+- `web_send_persists_raw_mention_text_while_bots_receive_cleaned_text` 只存在于
+  `web_send_projection`，未复制到 `human_mentions`。
+- 测试 ID 兼容性：拆分后完整测试 ID 带模块前缀（如 `abort::…`、`web_send_provider::…`）；
+  仓库内消费者已审计且安全（`apps/bcs/scripts/test_provider_downlink.sh` 的子串过滤已
+  重新验证），但外部按完整扁平测试 ID 保存的过滤/报告需要补上新前缀。
+
+### 验证命令与实际结果
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `cargo test -p bcs-message-flow --test contract_message_flow` | 84 passed / 0 failed / 0 ignored，exit 0（`task4-target.log`） |
+| `cargo nextest list`（package + target）+ 计划清单脚本 | exit 0；`mapped 84 moved tests`（`task4-inventory.log`） |
+| `git diff --check`（含新文件 intent-to-add 后） | 无输出、exit 0；`git show --check` 亦无空白错误（`task4` 提交） |
+| 目录大小断言（计划 python 块） | 19 个文件全部 ≤1000，exit 0（`task4-size-gate.log`） |
+| `cargo test -p bcs-message-flow` | 991 passed / 0 failed / 0 ignored，exit 0（`task4-crate-test.log`） |
+| `cargo check -p bcs-message-flow --all-targets` | exit 0；11 条 warning 全部来自 `bcs-bot-store`、`caller_dispatch_stage_timeout_contract`、`caller_owner_relay_contract`、`delivery_runtime` 等既有 target，`contract_message_flow` 0 条（`task4-check.log`） |
+| `git diff --name-only "$SOURCE_BASE"`（在源码提交 `1af0d1326c` 上） | 19 个路径，全部为本 plan 范围（测试入口 + `tests/contract_message_flow/` 内部），无其他文件（`task4-scope.txt`） |
+| Task 2 过滤发现：`... --test contract_message_flow provider -- --list` | exit 0，13 条匹配（`task4-filter-provider.list`） |
+| Task 2 过滤发现：`... accepted_chat_send_records_run_context_for_callback -- --list` | exit 0，1 条匹配（`task4-filter-accepted.list`） |
+| `BCS_BASE_REF="$RANGE_BASE" bash apps/bcs/scripts/ci/arch-check.sh` | **exit 5（未通过）**：Total 15 / Pass 8 / Skip 2 / Fail 5，失败为 `DEP-1~8`、`LINT-1`、`LINT-4`、`TEST-1`、`R25`；SKIP 为 `DEP-8`（cargo-machete 未安装）、`PR-1`（非 PR 环境）、`API-1`（cargo-public-api 未安装）（`Skip 2` 只统计 15 个顶层 check 中退出码 77 的两项，即 `PR-1` 与 `API-1`；`DEP-8` 是 `check-deps.sh` 组内打印的 SKIP 行，该组整体按 FAIL 计数——脚本 `CHECKS` 循环与 `check-deps.sh` 的 `log SKIP 8` 逻辑如此）。全部失败项均在 merge-base `41f728aa` 上复现且失败集合相同（并行扫描导致行序不同，排序后一致；覆盖 DEP、LINT-1、LINT-4、R25.1/R25.2）；`TEST-1` 是 `check-r25-conformance.sh` 的包装。`R25.3` 另有既有脚本缺陷：`set -o pipefail` 下 `echo "$listed" \| rg -q` 因 echo 收到 SIGPIPE 返回 141，实测手动执行同一命令可匹配 27 条、`pipefail` 下流水线状态为 141。日志中 **0 处**提及本 plan 路径（`task4-arch-check-full.log`、`task4-r25-rerun.log`、`base/head-*` 对比日志） |
+| `bash apps/bcs/scripts/ci_test.sh --base "$RANGE_BASE" --head HEAD --fast-fail --coverage` | **exit 100（未通过）**：2745 passed / 2 failed / 65 skipped，fast-fail 停在 2747/9250；2 个失败均在 `bcs-bot-store::conformance_bot_control_plane_repo`（与本 plan 无关，`task4-ci-test.log`） |
+| 上述 2 个失败用例的基线复核（HEAD 与 merge-base） | 两处均为 18 tests / 16 passed / 2 failed，失败用例相同（`task4-control-plane-head.log`、`task4-control-plane-base.log`）→ 既有失败，非本 plan 引入 |
+| `bash apps/bcs/scripts/ci_test.sh --base "$RANGE_BASE" --head HEAD --coverage`（非 fast-fail，用于产出完整报告） | exit 0（脚本在非 fast-fail 模式不阻塞）；9250 tests / 9248 passed / 2 failed / 65 skipped；`apps/bcs/testresult/junit.xml` 生成（`task4-ci-test-runall.log`） |
+| `python3 scripts/cov_gate.py --base-ref "$RANGE_BASE" ... --pass-rate-min 100 --overall-line-min 87 --changed-line-min 85 --changed-line-min-lines 51` | **exit 1**：`[pass-rate] tests=9250 passed=9248 ... 99.98%` → 未达 100%（2 个既有失败）；`[overall-line-cov] 87.29% > 87%` OK；`[changed-line-cov] no instrumentable changed source lines mapped` → N/A（`task4-cov-gate.log`）。`cargo llvm-cov` 未在测试非零退出时写 cobertura，故用 `cargo llvm-cov report --cobertura` 从同一批 profraw 生成 `apps/bcs/testresult/cobertura.xml`（`task4-llvmcov-report.log`） |
+| `BCS_E2E_CHANGED_BASE_REF="$RANGE_BASE" SINGLEBOX_BASE_REF="$RANGE_BASE" bash singlebox/ci/singlebox_coverage.sh`（第 1 次） | **exit 1**：8000 端口被 checkout 外进程占用（`/Users/zony/teamclaw-coding/fe/frontend-nextgen`），脚本拒绝终止外部进程，frontend start 失败（`task4-singlebox.log`） |
+| 同上，加 `FRONTEND_PORT=8021`（第 2 次，完整运行） | **exit 1（未通过）**：栈启动成功并执行完整验收；BCS E2E 全部故事通过且门禁 PASS：runtime line 56.61%（≥54）、method 50.25%（≥48）、Router API 173/173（100%）、CLI leaf command 66/66（100%）、E2E changed-line 为 N/A（19 个 changed test-only 文件不计入）。Backend acceptance 61 passed / 5 failed（`expert_chat` 1、`files` 2、`harness` 2），失败现场为 live personal bot 创建返回 `BaaS publish FAILED`（`reports/acceptance.log` 记录 5 次，`task4-singlebox-retry.log` 同样可查）；确切原因未保留在工件中（BaaS 日志已被后续运行清理），交互式观察到的现场为 BaaS 设备端口池被其它 worktree 的孤儿 engine adapter 占用，作为现场记录而非工件证据；因此 `expert_chat`、`files`、`harness` 模块覆盖率阈值不达标，`summary.status=failed`（`task4-singlebox-retry.log`、`reports/acceptance.log`、`reports/summary.json`、`reports/bcs/e2e.log`） |
+| `python3 singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/singlebox/reports` | **exit 1**：`summary.status expected 'passed', got 'failed'`；`acceptance JUnit has failures/errors: failures=5, errors=0`（`task4-artifact-verifier.log`） |
+
+报告位置：`apps/bcs/testresult/`（junit/cobertura）、
+`singlebox/.dependencies/coverage/singlebox/reports/`（`summary.json`、`summary.md`、
+`dashboard.html`、`acceptance.log`、`acceptance-junit.xml`、`backend-*`、`baas-*`、
+`bcs/e2e.log`、`bcs/summary.json`、`bcs/cobertura.xml`、`bcs/coverage.txt`、
+`bcs/endpoint_coverage.*`、`bcs/cli_command_coverage.txt`、`html/`）。
+所有运行日志另存于 `$EVIDENCE`（见“偏差”）。
+
+### 未通过 / 未验证项与原因
+
+- **架构门禁未通过（既有问题，非本 plan 引入）**：`DEP-1~8`、`LINT-1`、`LINT-4`、
+  `TEST-1`、`R25` 在 merge-base 上失败集合相同（并行扫描只影响行序，排序后一致）；
+  日志中没有任何一条指向本 plan 的路径。`R25.3` 是脚本 `pipefail` + `rg -q` 的既有缺陷，
+  已单独复现。`DEP-8`、`API-1` 因本机缺 `cargo-machete`、`cargo-public-api` 而 SKIP；
+  `PR-1` 因非 PR 环境 SKIP。上述 SKIP 不记为通过（`Skip 2` 只统计顶层 check，
+  `DEP-8` 是 `check-deps.sh` 组内的 SKIP 行，详情见上文 arch-check 行）。
+- **单元测试通过率门禁未通过**：2 个 `bcs-bot-store` control-plane 用例既有失败，
+  在 HEAD 与 merge-base 行为一致；本 plan 未修改该 crate，也未降低阈值。
+- **AC-9 统一 Singlebox 门禁未通过（环境性，未验收）**：5 个与本 plan 无关的
+  Backend acceptance 故事（`expert_chat` 1、`files` 2、`harness` 2）在 live personal
+  bot 创建处返回 `BaaS publish FAILED`，`summary.status=failed`；这两点由
+  `reports/acceptance.log` 与 `reports/summary.json` 工件直接支持。确切原因未保留在
+  工件中（BaaS 日志已被后续运行清理）；交互式观察到的现场为 BaaS 单机设备端口池
+  20010–20099 被其它 worktree（`bot-avatar-backend`，2026-11-04 启动、父进程为 1）
+  遗留的孤儿 engine adapter 进程占用、剩余端口不足以创建 live personal bot——该描述是
+  现场记录，**不作为工件证据**。未终止这些外部进程、未缩小模块集合、未使用 opt-out
+  环境变量、未改阈值。BCS E2E 与 BCS 覆盖率门禁（本 plan 影响面）已实测通过。
+- **未执行**：未推送、未创建 PR；未以旧独立 E2E 入口替代统一 Singlebox。
+- **推送后果（下一个人必读）**：仓库 pre-push hook 默认 lint-only，本分支会通过；
+  若用 `OCB_PRE_PUSH_RUN_CI=1 git push` 运行完整 BCS 门禁，则会被上文已记录的既有失败
+  拒绝（2 × `bcs-bot-store::conformance_bot_control_plane_repo` 通过率、arch-check 的
+  DEP/LINT/R25 集合、singlebox `summary.status=failed`）——这些失败均已在本 plan 的
+  merge-base `41f728aa` 上复现，无一由本次改动引入。
+
+### AC 复核
+
+- AC-1 通过（19 个文件 ≤1000 行）；AC-2 通过（无业务逻辑、无格式化、无新依赖）；
+  AC-3 通过（仅新增 `#[path]` 接线，审计见 `$EVIDENCE/path-audit.txt`，
+  `test_provider_downlink.sh` 依赖的两个过滤仍能发现 13 / 1 个测试）。
+- AC-4 通过（84 → 84 一一映射，无重复挂载，`ignored` 不变）；AC-5 通过（84 个测试块
+  逐字节相同）；AC-6 近端与 crate 全量通过（84/84、991/991）。
+- AC-7 通过（`cargo check --all-targets` 成功）；AC-8 部分通过（overall line 87.29%
+  > 87%；changed-line N/A；pass-rate 因既有失败未达 100%）。
+- AC-9 **未通过/未验收**（见上）；AC-10 通过（未替换、未弱化任何 gate）。
+- 运行时访问成本：纯测试文件迁移，未改变数据库/缓存/网络调用次数与顺序，无 schema、
+  配置或迁移变更。
+
+### 回滚
+
+回滚 = 依次 revert 本 plan 的 4 个源码提交与本记录提交；不涉及数据库、缓存、配置或
+schema 变更，不影响 plan-2 / plan-3 的文件。
+
+### 与计划的偏差
+
+- `EVIDENCE` 使用预先创建的
+  `/private/var/folders/5s/v4sf5jfn18qfxvjvtdbbcnnw0000gn/T/opencode/avernet-split-p1`
+  代替 `mktemp -d /tmp/avernet-split-p1.XXXXXX`，以便多个子任务复用同一证据目录
+  （见 `$EVIDENCE/deviation-notes.txt`）。
+- Singlebox 需以 `FRONTEND_PORT=8021` 运行，因为默认 8000 端口被 checkout 外进程占用
+  （脚本自身提示“Stop it manually or choose another port”）；除端口外未改动任何运行
+  参数或门禁。
+- `ci_test.sh --fast-fail --coverage` 因既有失败中断；为取得完整覆盖率报告，另以
+  非 fast-fail 的同一脚本（CI 默认模式）跑完整套件，并用 `cargo llvm-cov report`
+  生成 cobertura。两者均如实记录，未把非 fast-fail 结果当作 fast-fail 通过。
+- Singlebox 运行中的 `uv sync` 会重写 `apps/bcsfuse/uv.lock`（61 行增删，仅依赖解析
+  顺序/元数据抖动）；该本地状态改动已用 `git checkout` 还原，未纳入任何提交。
