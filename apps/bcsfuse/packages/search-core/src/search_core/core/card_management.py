@@ -22,8 +22,10 @@ class CardManagementService(ABC):
     def __init__(self, repository: CardStore):
         self.repository = repository
 
-    def upsert(self, agent_id, fields, resource_type, search_config):
-        return self.repository.upsert(agent_id, fields, resource_type, search_config)
+    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
+        return self.repository.upsert(
+            agent_id, fields, resource_type, search_config, labels=labels
+        )
 
     def remove(self, agent_id):
         self.repository.remove(agent_id)

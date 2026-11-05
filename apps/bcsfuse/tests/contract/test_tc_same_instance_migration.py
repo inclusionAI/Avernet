@@ -65,7 +65,13 @@ def old_sync(client, key, description):
 
 
 def new_card(client, key, **fields):
-    response = client.put(f"/api/v2/agent-cards/{key}", json={"card": fields})
+    response = client.put(
+        f"/api/v2/agent-cards/{key}",
+        json={
+            "card": fields,
+            "labels": {"visibility": ["public"], "user_visibility": ["public"]},
+        },
+    )
     assert response.status_code == 202, response.text
     version = response.json()["card_version"]
     deadline = time.monotonic() + 10
@@ -222,7 +228,10 @@ def test_each_api_deletes_only_its_selected_store_for_the_same_id(service):
         old_sync(client, "both:delete", "old delete target")
         saved = client.put(
             "/api/v2/agent-cards/both:delete",
-            json={"card": {"name": "new delete target"}},
+            json={
+                "card": {"name": "new delete target"},
+                "labels": {"visibility": ["private"], "user_visibility": ["private"]},
+            },
         )
         assert saved.status_code == 202, saved.text
         assert client.delete("/api/v1/workers/both:delete").status_code == 200
@@ -561,3 +570,36 @@ def test_native_search_projects_tc_name_and_description(service):
         item = result.json()["items"][0]
         assert item["name"] == "display:owner"
         assert item["summary"] == "MySQL database backup"
+
+
+def test_private_v2_card_is_discoverable_without_changing_v1_defaults(service):
+    start, _ = service
+    with start("card") as (client, registry):
+        path = "/api/v2/agent-cards/private:one"
+        data = {"name": "invoice", "description": "invoice lookup"}
+        saved = client.put(
+            path,
+            json={
+                "card": data,
+                "labels": {"visibility": ["private"], "user_visibility": ["public"]},
+            },
+        )
+        assert saved.status_code == 202, saved.text
+        registry.require("tc_card_search").updates.run_once()
+        assert client.get(path).json()["card"] == data
+        for route in ("search", "recommend"):
+            for visibility, expected in [("private", ["private:one"]), ("public", [])]:
+                response = client.post(
+                    "/api/v2/" + route,
+                    json={
+                        "query": "private:one",
+                        "filters": {
+                            "resource_type": ["agent"],
+                            "labels.visibility": [visibility],
+                        },
+                    },
+                )
+                assert response.status_code == 200, response.text
+                assert [item["id"] for item in response.json()["items"]] == expected
+        response = client.post("/v1/search", json={"query": "private:one"})
+        assert response.status_code == 200 and not response.json()["results"]

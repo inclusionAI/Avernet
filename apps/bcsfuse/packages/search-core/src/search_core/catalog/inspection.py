@@ -8,13 +8,14 @@ def vector_preview(vector):
 
 
 def content(point, filter_fields):
+    payload = dict(point.payload)
+    if isinstance(payload.get("labels"), dict):
+        payload.update({f"labels.{k}": v for k, v in payload["labels"].items()})
     return {
         "id": point.id,
         "search_text": point.payload.get("search_text", ""),
         "filters": {
-            key: point.payload[key]
-            for key in sorted(filter_fields)
-            if key in point.payload
+            key: payload[key] for key in sorted(filter_fields) if key in payload
         },
     }
 

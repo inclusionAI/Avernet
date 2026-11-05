@@ -19,6 +19,7 @@ from search_core.api.models import (
 )
 from search_core.api.services import RetrievalService
 from search_core.application.emergency import EmergencyControl
+from search_core.catalog.cards import is_label_filter
 from search_core.core.observation import (
     events,
     logger,
@@ -176,11 +177,12 @@ class CatalogSearchApplication:
                 raise UnsupportedSearchOption(
                     "only the default catalog policy is configured"
                 )
-            if command.filters.keys() - self._filter_fields:
-                raise UnsupportedSearchOption("unsupported catalog filter")
             if any(
-                not values for values in command.filters.values()
+                not is_label_filter(k)
+                for k in command.filters.keys() - self._filter_fields
             ):
+                raise UnsupportedSearchOption("unsupported catalog filter")
+            if any(not values for values in command.filters.values()):
                 return SearchResult()
         return await self._execute(command)
 

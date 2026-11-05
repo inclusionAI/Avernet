@@ -266,7 +266,7 @@ def create_catalog_search_app(
         timeout_seconds=settings.request_timeout,
         max_inflight_requests=settings.max_inflight_requests,
         emergency=emergency,
-        operations=("search",),
+        operations=("search", "recommend"),
     )
     app.state.catalog_updates = updates
     app.state.search_emergency = emergency

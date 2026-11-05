@@ -32,6 +32,8 @@ class MigrationRepository(Protocol):
         fields: dict[str, Any],
         resource_type: str,
         search_config: dict[str, Any],
+        *,
+        labels: dict[str, list[str]] | None = None,
     ) -> CardRecord: ...
 
     def save_config(
@@ -229,10 +231,15 @@ def _migrate_row(
         return "skipped_tombstone", {}, historical
     legacy = _legacy(old)
     fields = _fields(row, current, legacy, environment)
+    labels = {"visibility": [fields["availability"]]}
+    if row.get("user_visibility"):
+        if row["user_visibility"] not in {"private", "protected", "public"}:
+            raise _InvalidRow("invalid_user_visibility")
+        labels["user_visibility"] = [row["user_visibility"]]
     config = _config(current, legacy)
     if not dry_run:
         record = repository.upsert(
-            worker_id, fields, resource_type="agent", search_config={}
+            worker_id, fields, resource_type="agent", search_config={}, labels=labels
         )
         if (
             config is not None

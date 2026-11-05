@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Request
 from search_core.adapters.http.cards import create_card_router
 from search_core.adapters.http.routes import create_search_router
-from search_core.api.models import VerifiedIdentity
+from search_core.api.models import SearchResult, VerifiedIdentity
 from search_core.application.search import CatalogSearchApplication
 from search_core.core.card_management import merge_fields
 
@@ -26,11 +26,25 @@ class CardOperations:
     def __init__(self, app):
         self.app = app
 
-    def upsert(self, agent_id, fields, resource_type, search_config):
+    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
         catalog, runtime = services(self.app)
         current = catalog.get(agent_id)
         if resource_type not in (None, "agent"):
             raise ValueError("TC accepts Worker Cards")
+        if not current and not fields:
+            raise ValueError("card required for creation")
+        # Legacy Worker imports carry both Worker state fields. Historical CSVs
+        # may lack user_visibility; never infer it from runtime_state.
+        legacy_worker = "runtime_state" in fields and "availability" in fields
+        for key in ("visibility", "user_visibility"):
+            if key in (labels or {}) or (not current and not legacy_worker):
+                values = (labels or {}).get(key, [])
+                if len(values) != 1 or values[0] not in {
+                    "private",
+                    "protected",
+                    "public",
+                }:
+                    raise ValueError(f"invalid {key}")
         defaults = {
             "type": "bot",
             "runtime_state": "offline",
@@ -42,13 +56,19 @@ class CardOperations:
             "skills": [],
             "profile_id": "default",
         }
-        data = merge_fields(current.card.source_card if current else defaults, fields)
+        data = merge_fields(
+            {**defaults, **(current.card.source_card if current else {})}, fields
+        )
         if not data.get("name"):
             raise ValueError("TC Card name is required")
         TcCatalog.validate(data)
         with runtime.caches.changing():
             return runtime.updates.upsert(
-                agent_id, fields if current else data, resource_type, search_config
+                agent_id,
+                data if not current and legacy_worker else fields,
+                resource_type,
+                search_config,
+                labels=labels,
             )
 
     def remove(self, agent_id):
@@ -68,8 +88,11 @@ class NewRetrieval:
         self.app = app
 
     async def retrieve(self, request):
+        filters = dict(request.filters)
+        if "agent" not in filters.pop("resource_type", ("agent",)):
+            return SearchResult()
         return await services(self.app)[1].retrieve(
-            request.query, request.limit, filters=dict(request.filters)
+            request.query, request.limit, filters=filters, legacy_defaults=False
         )
 
 
@@ -77,7 +100,7 @@ def include_v2(app, *, search_router=None):
     app.include_router(create_card_router(CardOperations(app), authenticate))
     search = CatalogSearchApplication(
         NewRetrieval(app),
-        filter_fields=FILTER_FIELDS | {"worker_id", "profile_key"},
+        filter_fields=FILTER_FIELDS | {"worker_id", "profile_key", "resource_type"},
         request_timeout=35,
     )
     app.include_router(

@@ -4,7 +4,7 @@ import asyncio
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from search_core.adapters.http.routes import Authenticator
 from search_core.api.cards import CardManagement, CatalogConflict
@@ -16,9 +16,17 @@ CardId = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^\S+$")]
 
 class CardWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    card: dict[str, JsonValue] = Field(min_length=1)
+    card: dict[str, JsonValue] | None = Field(default=None, min_length=1)
+    labels: dict[str, list[str]] | None = None
+
     # Omission preserves an existing type; new resources default to agent.
     resource_type: Literal["agent", "group"] | None = None
+
+    @model_validator(mode="after")
+    def ensure_changes(self):
+        if self.card is None and self.labels is None:
+            raise ValueError("provide card or labels")
+        return self
 
 
 class Saved(BaseModel):
@@ -31,6 +39,7 @@ class Deleted(BaseModel):
 
 
 class CardDetails(BaseModel):
+    labels: dict[str, list[str]]
     card: dict[str, JsonValue]
     resource_type: Literal["agent", "group"]
     card_version: int
@@ -90,9 +99,10 @@ def create_card_router(
             row = await asyncio.to_thread(
                 service.upsert,
                 agent_id,
-                body.card,
+                body.card or {},
                 body.resource_type,
                 {},
+                labels=body.labels,
             )
         except CatalogConflict as error:
             raise HTTPException(409, "Card resource type cannot change") from error
@@ -147,6 +157,7 @@ def create_card_router(
         except Exception as error:
             raise HTTPException(503, "Card read unavailable") from error
         return CardDetails(
+            labels=row.card.labels,
             card=business_card(row.card),
             resource_type=row.card.resource_type,
             card_version=row.revision,
