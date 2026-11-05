@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only TC CSV inventory by default; explicit --sqlite selects local writes."""
+"""Read-only TC CSV inventory; --sqlite writes locally, --url imports through v2."""
 
 from __future__ import annotations
 
@@ -13,12 +13,15 @@ import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 
+import httpx
+
 APP_ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(APP_ROOT / "src"), str(APP_ROOT / "packages/search-core/src")]
 
 from search_core.providers.sql_catalog import sqlite_catalog_repository
 
 from app.tc.migration import MigrationWriteError, migrate_rows
+from app.tc.migration_api import ApiMigrationRepository
 
 
 def _legacy_index(path: str, stack: ExitStack):
@@ -63,9 +66,11 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--environment", required=True, help="select exactly one source environment"
     )
-    parser.add_argument(
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
         "--sqlite", help="explicitly write this isolated local SQLite catalog"
     )
+    target.add_argument("--url", help="explicit TC service URL; import only through v2")
     parser.add_argument(
         "--legacy-jsonl",
         help="optional selected identity/state/config and archival material",
@@ -80,6 +85,18 @@ def main(argv=None) -> int:
                 _legacy_index(args.legacy_jsonl, stack) if args.legacy_jsonl else None
             )
             repository = None
+            if args.url:
+                token = os.environ.get("BCSFUSE_AUTH_TOKEN")
+                if not token:
+                    raise ValueError("BCSFUSE_AUTH_TOKEN is required for API migration")
+                client = stack.enter_context(
+                    httpx.Client(
+                        base_url=args.url.rstrip("/"),
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=60,
+                    )
+                )
+                repository = ApiMigrationRepository(client, args.environment)
             if args.sqlite:
                 descriptor = os.open(args.sqlite, os.O_RDWR | os.O_CREAT, 0o600)
                 os.close(descriptor)
@@ -113,15 +130,25 @@ def main(argv=None) -> int:
                 environment=args.environment,
                 legacy_lookup=lookup,
                 archive=archive,
-                dry_run=args.sqlite is None,
+                dry_run=repository is None,
             )
         print(json.dumps(report.as_dict(), ensure_ascii=False))
         return 1 if report.counts.get("invalid") else 0
     except MigrationWriteError as error:
         print(json.dumps(error.report.as_dict(), ensure_ascii=False))
         return 1
-    except (OSError, ValueError, TypeError, sqlite3.Error):
-        print(json.dumps({"error": "invalid_or_unavailable_input_or_local_catalog"}))
+    except (OSError, ValueError, TypeError, sqlite3.Error, httpx.HTTPError):
+        print(
+            json.dumps(
+                {
+                    "error": (
+                        "invalid_or_unavailable_input_or_target"
+                        if args.url
+                        else "invalid_or_unavailable_input_or_local_catalog"
+                    )
+                }
+            )
+        )
         return 1
 
 

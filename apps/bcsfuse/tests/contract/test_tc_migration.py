@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from search_core.providers.sql_catalog import sqlite_catalog_repository
 
@@ -46,6 +47,31 @@ def row(worker_id="bot:owner:worker", **changes):
 @pytest.fixture
 def repo(tmp_path):
     return sqlite_catalog_repository(str(tmp_path / "cards.sqlite"), environment="pre")
+
+
+@pytest.mark.parametrize("missing_route", ["card", "status"])
+def test_api_import_does_not_count_route_404_as_deleted(missing_route):
+    from app.tc.migration import MigrationWriteError
+    from app.tc.migration_api import ApiMigrationRepository
+
+    def route(request):
+        if request.url.path == "/ready":
+            return httpx.Response(200, json={"environment": "pre"})
+        canonical = missing_route == "status" and not request.url.path.endswith(
+            "index-status"
+        )
+        return httpx.Response(
+            404, json={"detail": "Card not found" if canonical else "Not Found"}
+        )
+
+    with httpx.Client(
+        base_url="http://tc.test", transport=httpx.MockTransport(route)
+    ) as client:
+        repository = ApiMigrationRepository(client, "pre")
+        with pytest.raises(MigrationWriteError) as failure:
+            migrate([row(is_deleted="1")], repository, environment="pre", dry_run=False)
+        assert failure.value.report.counts.get("deleted", 0) == 0
+        assert failure.value.report.counts["failed"] == 1
 
 
 def test_csv_maps_real_fields_without_md_expert_or_credentials(repo):

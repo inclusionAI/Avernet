@@ -1,50 +1,72 @@
-# TC 双实例迁移与离线工具
+# TC 同实例读写切换与数据迁移
 
-## 服务入口与读写边界
+> 2026-11-05：代码及本地同实例验证已完成，未部署或迁移线上数据。部署前仍须核对实际表结构、权限、模型与数据清单。
 
-旧实例继续运行旧版本并读写旧 Worker/Profile/向量表。新实例运行本次 TC 改造版本，
-所有查询和写入都使用新 Card/Doc 与独立 Qdrant 集合；没有旧表混合读取或应用内切源开关。
-新实例必须使用独立部署、独立地址，导入完成前不加入原业务入口的负载均衡。
+## 同一服务内的接口绑定
 
-“旧接口”在这里指业务系统现有的服务入口；“新接口”指新实例的独立入口。
-路径、请求和响应仍可使用原 sync、online/offline、availability、config、search、recommend、Fuse。
-不新增一套请求格式或逐请求迁移参数。读写目标由入口指向的实例决定：
+同一套新部署的 TC 服务，在同一个服务地址提供旧 API 与新 `/api/v2` API。
+旧接口原路径和格式保持；新接口不是另一个实例的独立地址。
 
-| 阶段 | 原业务入口：查询 | 原业务入口：写入/更新 | 新实例独立入口 |
-| --- | --- | --- | --- |
-| 切流前 | 旧实例读取旧表/旧索引 | 旧实例更新旧表/旧索引 | 查询和更新均使用新表/新索引 |
-| 切流后 | 新实例读取新表/新索引 | 新实例更新新表/新索引 | 查询和更新仍使用新表/新索引 |
+| 接口 | 切换前 | 配置修改并重启后 |
+| --- | --- | --- |
+| 旧 search/recommend/Fuse 和资料/配置/状态读取 | 旧表及旧索引 | 新表及新索引 |
+| 旧 sync/online/offline/availability/config/DELETE 等更新 | 只更新旧表及旧索引 | 只更新新表及新索引 |
+| 新 API 的读取、查询和写入 | 只使用新表及新索引 | 仍只使用新表及新索引 |
 
-## 迁移与切流
+TC 专属启动配置为 `BCSFUSE_TC_V1_STORAGE=legacy|card`，默认 legacy，修改后重启生效。
+它一次选择旧接口整套数据、状态、配置和索引后端。新 API 不读取此配置。
+不接受仅切索引的旧配置作为别名，不做混合优先读取、缺失回查、自动搬迁或双写。
+card 模式两套 API 共用一套新服务和索引加工任务，不再初始化旧资料/状态/向量仓储；融合历史仍使用原权威存储。配置非法或目标失败不能自动回退。
 
-1. 确认两张 TC 新表、权限、部署版本和模型配置；将新版本部署到独立地址。
-   TC 新 Qdrant 从新 Doc 准备，旧实例的表和集合不变。
-2. 正常业务继续调用旧入口，旧实例持续更新旧数据。迁移脚本从权威旧资料读取，
-   对新入口调用原 sync 导入当前资料，调用 config/状态接口补齐配置与状态。
-   画像/历史按既定保留范围归档，不从 CSV 默认值覆盖当前状态。
-3. 在新入口验证旧查询接口、过滤、配置和新 Card/Doc 数量与版本。
-   `/ready=200` 只证明当前实例索引就绪，不证明全量迁移完成。
-4. 短暂停止原业务的全部写入口并排空旧后台任务，确定性重读、重放及核对最后的
-   资料、配置、状态和删除。不依赖未经验证的修改时间或增量日志。
-5. 新索引及旧查询接口验收完成后，将原业务入口整体切到新实例；search/recommend/Fuse
-   和 sync/online/availability/config 必须一并切流，不能只切查询或只切写入。
-   排空旧连接与旧后台任务，确认所有调用方均进入新实例，再恢复业务写入。
+## 新接口与正式导入入口
 
-新实例没有 `legacy/card` 模式。旧部署配置中试用过的 `BCSFUSE_TC_INDEX_SOURCE` / `tc.index_source`
-应移除，不能用它改变新实例的读写目标。切换发生在服务路由/部署入口，不在应用内切换表。
-不做双写；新业务写入开始后，回旧实例前仍需停写并反向补齐新增、更新、删除及配置。
-融合历史沿用原有权威存储，首次部署和回退均须确认环境及连接配置一致。
+复用现有公共 `/api/v2/agent-cards/{id}` 的 PUT/GET/DELETE 和 index-status，显式绑定 TC 新服务。
+`/api/v2/search`、`/api/v2/recommend` 固定查询 TC 新索引。
+TC 仅补 GET/PUT `/api/v2/workers/{id}/config`，沿用已有配置请求/响应并固定保存新配置。
+状态和 availability 通过新 Card 字段更新，不复制整套 v2 sync/online/Fuse 路由。
 
-## 离线工具
+正式迁移脚本读取权威旧资料，构造规范 Card 后调用新 API；切换前不能用旧 sync 导入新表。
+Card 返回 202 只表示源资料提交，须继续核对 index-status、新查询和完整计数。
+现有 `migrate_tc_cards.py --url` 复用相同字段转换，经 v2 串行导入并等待当前版本索引完成。
+启动时从 `/ready.environment` 核对目标环境；请求或加工失败即停止并返回脱敏的部分结果。
+配置版本属于各自仓储，不能把旧 GET 的 version 当作新表版本重放；工具使用新表当前版本写配置。
 
-工具读取用户提供的 `bcs_bots` CSV，默认只读盘点；只有显式传入 `--sqlite` 才写入隔离的本地库。
-它不访问部署数据库、不调用模型、不构建 Doc / 索引，也不切换运行中的应用。
+## 部署、追平与切换
+
+1. 核对两仓配套版本、旧表及 TC 新表结构/权限、环境与索引隔离。迁移时沿用已验证的模型/维度，
+   不同时做模型换代。默认 legacy 部署同一新版本服务。
+2. 用同一地址验证旧接口实际读写旧表、新接口实际读写新表，包含相同 Worker ID 的资料/配置/状态隔离。
+   旧接口业务继续工作，新 API 准备新数据；旧接口成功不能拿新 Doc 就绪冒充旧写入成功。
+3. 分页、幂等调用新 API 导入与核对。迁移清单内旧表仍为权威，新 API 用于同步导入，
+   避免另一业务写方同时修改这些对象；新 API 独有记录不按旧表清单删除。
+4. 短暂停止两套 API 的业务写入，只允许迁移脚本写新表；排空旧后台写任务。
+   确定性重读、重放，核对资料、当前 Profile 标识、画像归档、配置、状态、删除和新索引。
+5. 将旧接口后端配置改成 card 并重启同一服务。地址和路径不变，旧查询与旧更新一起改用新服务，
+   新 API 保持原绑定。核对每个实例实际配置及旧 search/recommend/Fuse、写入冒烟后恢复业务写入。
+
+`/ready` 需报告实际加载的旧接口后端和相关索引准备状态；不能把进程存活、空索引就绪或单次 sync
+成功当作全量迁移完成。旧接口后端 card 下，撤去旧 Worker/Profile/运行状态/向量表的访问后两套 API 仍必须正常工作。
+融合历史可能与旧资料处在同一物理库，不能把其访问一起撤掉。
+新业务写入发生后，回退须停写并反向补齐旧表/旧索引，再改配置重启；不能只把开关拨回去。
+融合历史沿用原权威存储，不因切换清空。zbcsfuse 代码、配置、表和集合不随 TC 切换改变。
+
+## 导入工具
+
+工具读取用户提供的 `bcs_bots` CSV，默认只读盘点；显式 `--sqlite` 写隔离本地库，显式 `--url` 调用同一 TC 服务的新 API。
+两种目标互斥。SQLite 模式不调用模型或构建索引；API 模式由服务生成 Doc/索引，逐条等待成功。
+工具不会修改后端选择或重启服务。
 CSV 只有基础信息，不能据此声称配置、历史画像、会话和所有运行状态已完成全量迁移。
 
 从仓库根目录运行：
 
 ```bash
 python apps/bcsfuse/scripts/migrate_tc_cards.py /path/to/bcs_bots.csv --environment pre
+
+# BCSFUSE_AUTH_TOKEN 通过环境安全注入，不写入命令参数或归档
+python apps/bcsfuse/scripts/migrate_tc_cards.py /path/to/bcs_bots.csv \
+  --environment pre --url "$TC_BASE_URL" \
+  --legacy-jsonl /path/to/selected-legacy.jsonl \
+  --archive /path/to/api-migration-audit.jsonl
 
 python apps/bcsfuse/scripts/migrate_tc_cards.py /path/to/bcs_bots.csv \
   --environment pre --sqlite /path/to/isolated-tc.sqlite \
@@ -116,23 +138,15 @@ SHA-256 按排序键、UTF-8、`ensure_ascii=False` 的行对象 JSON 计算；�
 重跑使用新归档路径；相同 Card / 配置在公共 catalog 中幂等保存。归档失败可能发生在 Card 已提交之后，
 修复归档位置后重跑即可，不回滚已保存资料。
 
-部署迁移调用同一个函数，仓储在 OCB 组装入口注入实际公共 `SqlCatalogRepository`：
+正式部署迁移以本页前半部分的新 API 为写入入口。复用离线工具的字段归一化、
+权威资料补齐和安全审计格式；不要把本地 SQLite 写入能力当作现成的线上接口迁移能力。
+Doc 和索引由服务在新链路中加工，脚本核对发布状态后再执行最终追平。
+回退须覆盖新业务接收的资料、配置、状态和删除，不能仅回滚镜像或配置。
 
-```python
-from app.tc.migration import migrate_rows
+## 旧模式恢复边界
 
-report = migrate_rows(
-    csv_rows, repository,
-    environment="pre", legacy_lookup=lookup_authoritative_record,
-    archive=write_local_audit_record, dry_run=False,
-)
-```
-
-仓储 `environment` 必须与选定环境一致。`legacy_lookup(environment, worker_id)` 返回上述补充对象，
-但不再包含 `environment / worker_id`；未找到时返回 None。`archive` 接收一个可 JSON 序列化的记录。
-`MigrationWriteError.report` 提供安全的部分统计，不暴露底层数据库异常内容。
-
-工具写 Card 不代表 Doc 已发布或索引就绪。后续隔离重建、冻结全部旧写入口、确定性重读追平、
-配置 / 删除对账、应用重启及多实例 readiness 验证按批准的
-[迁移方案](../specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)执行。
-恢复旧应用前应先停写并反向补齐新系统接收的资料、配置和删除，不能仅回滚镜像。
+旧 SQL 的 Worker/Profile/运行状态变更共用一次事务；索引发布前校验当前 Worker 版本，
+生产 SQL 使用短期行锁把版本校验与发布串行，Embedding 计算不持该锁。
+原仓储格式不变，恢复标记仅在本适配写入过的当前 Profile 元数据内保存。
+已有无标记历史向量启动直接沿用；缺向量、孤儿向量或受管对象版本不一致才修复旧索引，
+不从旧表自动生成新 Card。SQLite 为单实例开发后端，跨实例事务与行锁须在真实 ZDAS/MySQL 验收。
