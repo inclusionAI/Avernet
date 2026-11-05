@@ -2157,6 +2157,7 @@ class DefaultDeviceService(DeviceService):
         device_uuid: str,
         modifier: str,
         for_restart: bool = False,
+        allow_residue_success: bool = False,
     ) -> DestroyDeviceResponse:
         """
         Destroy device by UUID: terminates PaaS container, soft-deletes DB record.
@@ -2299,19 +2300,24 @@ class DefaultDeviceService(DeviceService):
                 await self._paas_facade.destroy_device(record.provider_device_id)
                 logger.info(f"Device destroyed: {record.provider_device_id}")
             except DeviceFacadeException as e:
-                # DEVICE_NOT_FOUND is the provider's typed "sandbox does not
-                # exist" (ArcaSandboxNotFoundError), so the destroy is already
-                # done - idempotent success per D-04/D-05. Every other code
-                # stays a failure; the sandbox may still be running.
+                # A teardown whose sandbox is already gone is an idempotent
+                # success, but only where that is the expected outcome. DESTROY
+                # and STOP pass allow_residue_success; SCALE_DOWN does not,
+                # because there the bot keeps running and a failure reported as
+                # success would hide a container that is still up.
                 original_error = getattr(e, "original_error", None)
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
                 message = getattr(getattr(e, "original_error", None), "message", str(e))
-                if _is_absent_sandbox_error(error_code):
+                is_resolved_by_absence = _is_absent_sandbox_error(error_code) and (
+                    allow_residue_success or error_code is ErrorCode.DEVICE_NOT_FOUND
+                )
+                if is_resolved_by_absence:
                     logger.warning(
                         f"Device already destroyed in PaaS: {device_uuid} "
-                        f"(code={error_code}, message={message})"
+                        f"(code={error_code}, message={message}, "
+                        f"allow_residue_success={allow_residue_success})"
                     )
                 else:
                     # Capture error but continue with DB cleanup per D-04

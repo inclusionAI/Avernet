@@ -3736,6 +3736,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     tenant=tenant,
                     device_uuid=device_record.device_uuid,
                     modifier=operator,
+                    allow_residue_success=True,
                 )
 
                 if not destroy_response.success:
