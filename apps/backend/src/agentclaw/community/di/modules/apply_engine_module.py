@@ -109,8 +109,10 @@ from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
+from agentclaw.community.core.skill_center.skill_reference_contract import SkillReferenceServiceProtocol
+from agentclaw.community.core.skill_center.skill_set_management_service_protocol import SkillSetManagementServiceProtocol
+from agentclaw.community.core.apply_engine.skill_set_apply_delegates import (
+    DeviceSkillSetApply, PlatformSkillSetApply,
 )
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
@@ -142,7 +144,6 @@ class ApplyEngineModule(Module):
         mcp_config_service_provider: Callable[[], MCPConfigServiceProtocol],
         identity_service_provider: Callable[[], IdentityFilePort],
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         content_store: ContentStoreProtocol,
         delete_service_provider: Callable[[], LocalSkillDeleteServiceProtocol],
@@ -186,7 +187,8 @@ class ApplyEngineModule(Module):
                 upload_service=DeviceSkillPackageUpload(
                     upload_service_provider(), delete_service_provider()
                 ),
-                capability_reader=capability_reader_provider(),
+                skill_references=injector.get(SkillReferenceServiceProtocol),
+                skill_sets=DeviceSkillSetApply(injector.get(SkillSetManagementServiceProtocol)),
                 package_validator=package_validator_provider(),
                 content=content_store,
                 resource_service=DeviceResource(resource_service_provider()),
@@ -209,7 +211,6 @@ class ApplyEngineModule(Module):
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
         mcp_config_service_provider: Callable[[], MCPConfigServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         content_store: ContentStoreProtocol,
         resource_services: ResourceServiceFactoryProtocol,
@@ -220,7 +221,7 @@ class ApplyEngineModule(Module):
         The three file categories write to the managed-files store instead of
         a container; activation records without projecting. Everything the
         family shares with ARCA — the script service, the permission check,
-        the capability reader, the validator, the fetch pipeline — is the
+        the reference service, the validator, the fetch pipeline — is the
         same object ARCA's ports carry.
 
         Read by the platform-managed strategy's provider and by nothing else,
@@ -244,7 +245,8 @@ class ApplyEngineModule(Module):
                         else injector.get(NoopLocalSkillSecurityUploadHook)
                     ),
                 ),
-                capability_reader=capability_reader_provider(),
+                skill_references=injector.get(SkillReferenceServiceProtocol),
+                skill_sets=PlatformSkillSetApply(injector.get(SkillSetManagementServiceProtocol)),
                 package_validator=validator,
                 content=content_store,
                 resource_service=PlatformResource(store),

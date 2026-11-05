@@ -231,8 +231,11 @@ also fit.
 ## Applying (W4, #1472; the fetching categories W5, #1473)
 
 `apply/` holds the engine: an orchestrator, an ordering table, a materialiser
-registry, and the four materialisers shipped so far — `mcp` and `script` with
-W4, `identity` and `skills` with W5.
+registry, and five registered materialisers: `script`, `identity`, `resources`,
+`capabilities` and `cli_tools`. `capabilities` owns Direct Skills, SkillSets/Default
+and MCP together; historical Skills/MCP classes are not registered separately.
+A valid Manifest declares their complete target (omitted lists become empty),
+while the legacy Genome producer leaves SkillSets/Default nonparticipating.
 
 **The ordering table is complete; the registry is sparse.** `APPLY_ORDER` names
 every construct the vocabulary defines, including the ones nothing can act on

@@ -134,7 +134,7 @@ async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configura
     entry = {"server_code": "mcp.test"}
     if case != "omitted":
         entry["config"] = {} if case == "clear" else {"headers": {"X-Bot": "new"}}
-    assert (await world.apply_manifest([entry])).status is ApplyStatus.SUCCEEDED
+    assert (await world.apply_manifest([entry], retain_fixture_supplies=True)).status is ApplyStatus.SUCCEEDED
     _save_dormant(world)
     composer = _artifact_composer(world, tmp_path)
     ext = MagicMock()
@@ -163,7 +163,7 @@ async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configura
         redeliver=TeclawRedeliver(resolve=lambda *args: object(), dispatch=lambda device: sync, not_bound=LookupError),
     )
     _save_target(world, "edited")
-    assert (await world.apply_manifest([entry])).status is ApplyStatus.SUCCEEDED
+    assert (await world.apply_manifest([entry], retain_fixture_supplies=True)).status is ApplyStatus.SUCCEEDED
     _save_dormant(world)
     assert await closing.finish(world.context, None) is None
     delivered = io["http_client"].post.call_args.kwargs["json"]["bot_config"]
