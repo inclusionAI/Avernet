@@ -36,6 +36,9 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from agentclaw.community.core.skill_center.skill_reference_contract import (
     SkillReferenceServiceProtocol,
 )
+from agentclaw.community.core.skill_center.services.mcp_admission import (
+    require_mcp_delivery_eligibility,
+)
 from .capabilities_types import CapabilityPlan, SkillSet
 from .capabilities_skills import resolve_skill
 from .capabilities_resolve import resolve_supply
@@ -83,6 +86,19 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
         )
         if not validation.get("valid"):
             raise ValueError(str(validation.get("error") or "invalid MCP config"))
+        return validation
+
+    def _validate_set_mcp(self, ctx, code, config):
+        validation = self._validate_mcp(ctx, code, config)
+        require_mcp_delivery_eligibility(
+            mcp_config=self._config,
+            engine_type=ctx.engine_type,
+            owner_id=ctx.owner_id,
+            bot_id=ctx.bot_id,
+            entity_id=ctx.entity_id,
+            server_code=code,
+            detail=validation["mcp_data"],
+        )
 
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[DesiredCapabilities]
@@ -126,7 +142,7 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
                 for code in group.mcp:
                     try:
                         await asyncio.to_thread(
-                            self._validate_mcp,
+                            self._validate_set_mcp,
                             ctx,
                             code,
                             snapshot.mcp_overrides.get(code),
@@ -169,7 +185,7 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
             for code in sorted(resolved.set_codes):
                 try:
                     await asyncio.to_thread(
-                        self._validate_mcp, ctx, code, snapshot.mcp_overrides.get(code)
+                        self._validate_set_mcp, ctx, code, snapshot.mcp_overrides.get(code)
                     )
                 except Exception as exc:
                     failures.append(

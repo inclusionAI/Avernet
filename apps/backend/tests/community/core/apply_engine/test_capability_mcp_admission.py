@@ -12,7 +12,7 @@ from agentclaw.community.core.models.mcp import BotMCPConfig, SkillSetMCPServer
 from agentclaw.community.core.models.skill import SkillSet
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 from ._capabilities_world import CapabilityWorld
-from .test_unified_capabilities import apply
+from .test_unified_capabilities import apply, local_skill
 
 
 def _pre_override_world(*, default: bool):
@@ -74,3 +74,41 @@ async def test_management_add_or_restore_uses_effective_bot_override(default: bo
     assert after.installed_mcp_codes == frozenset({"mcp.one"})
     assert after.mcp_overrides == before.mcp_overrides
     assert after.mcp_exclusions == frozenset()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("default", [False, True])
+@pytest.mark.parametrize("url", [None, ""])
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_set_endpoint_without_url_aborts_before_local_upload(
+    monkeypatch, default, url, dry_run,
+):
+    world, _ = _pre_override_world(default=default)
+    detail = world.center.get_mcp_detail("mcp.one")
+    for endpoint in detail["endpoints"]:
+        if url is None:
+            endpoint.pop("url")
+        else:
+            endpoint["url"] = url
+    monkeypatch.setattr(world.center, "get_mcp_detail", lambda _code: detail)
+    target = DesiredCapabilities(
+        skills=Declaration((local_skill(world, "draft"),)),
+        skill_sets=Declaration((
+            DefaultSkillSetRef()
+            if default else DesiredSkillSet("expert", True, (), ("mcp.one",)),
+        )),
+    )
+    before = world.snapshot()
+
+    report = await apply(world.ctx, world.materialiser, target, dry_run=dry_run)
+
+    category = report.categories[0]
+    assert category.aborted
+    assert any(
+        "MCP_NO_COMPATIBLE_SECURE_ENDPOINT" in (entry.reason or "")
+        for entry in category.entries
+    )
+    assert world.uploads.packages == {}
+    assert world.skills.get_by_git_path("local://draft") is None
+    assert world.snapshot() == before
+    assert world.runtime.scopes == []

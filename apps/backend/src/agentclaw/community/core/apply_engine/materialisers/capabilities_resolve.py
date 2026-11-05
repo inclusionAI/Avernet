@@ -160,6 +160,9 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
     final_groups = list(groups)
     if target.skill_sets is None:
         for group in ordinary:
+            # Inactive memberships still own their assets above, but supply no content.
+            if not group.is_active:
+                continue
             try:
                 final_groups.append(
                     SkillSet(
