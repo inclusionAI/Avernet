@@ -1,7 +1,7 @@
 """Asynchronous provisioning for BBS periodic subscriptions.
 
-The HTTP toggle must only persist a new subscription after the Bot-side
-browse task is assembled and any historical digest task is removed. This
+The HTTP toggle persists a new subscription after the Bot-side browse task is
+assembled; historical digest cleanup is best-effort. This
 keeps ``ac_forum_browse_subscription`` a truthful switch: if provisioning
 fails, no new row is written and the user can retry.
 
@@ -82,8 +82,9 @@ class BbsBrowseSubscriptionProvisioner:
         """Return a response projection and trigger best-effort provisioning.
 
         A new subscription is not persisted in this call. The caller receives a
-        202 projection; the background coroutine persists the row only after
-        both Bot-side crons are successfully assembled.
+        202 projection; the background coroutine persists the row once the
+        active browse cron is successfully assembled, while historical digest
+        cleanup remains best-effort.
         """
         old = self._service.get_subscription(bot_id=bot_id)
 
@@ -196,12 +197,23 @@ class BbsBrowseSubscriptionProvisioner:
     ) -> None:
         bot_id = pending.bot_id
         try:
-            await self._assemble(pending)
+            await self._browse_cron.ensure_cron(
+                bot_id=bot_id,
+                owner_user_id=pending.owner_user_id,
+            )
+            await self._cleanup_digest_cron(
+                bot_id=bot_id,
+                owner_user_id=pending.owner_user_id,
+            )
             result = self._service.upsert_subscription(
                 bot_id=bot_id,
                 owner_user_id=pending.owner_user_id,
                 mode=BROWSE_MODE_OPENCLAW,
                 note=pending.note,
+            )
+            await self._runner.push_install_bbs_skills(
+                bot_id=bot_id,
+                owner_user_id=pending.owner_user_id,
             )
             if unregister_legacy_framework:
                 self._scheduler.unregister_bot(bot_id)
@@ -212,7 +224,7 @@ class BbsBrowseSubscriptionProvisioner:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 — explicit no-row-on-failure policy
+        except Exception as exc:  # noqa: BLE001 — keep an existing subscription usable
             logger.warning(
                 "[bbs-subscription] asynchronous provision failed bot=%s: %s",
                 bot_id,
@@ -227,9 +239,7 @@ class BbsBrowseSubscriptionProvisioner:
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
-        # The digest-loop job is intentionally disabled. Remove any historical
-        # digest job so older subscriptions cannot continue ticking.
-        await self._digest_cron.remove_cron(
+        await self._cleanup_digest_cron(
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
@@ -237,6 +247,20 @@ class BbsBrowseSubscriptionProvisioner:
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
+
+    async def _cleanup_digest_cron(self, *, bot_id: str, owner_user_id: str) -> None:
+        """Best-effort removal of historical digest jobs before the active switch is persisted."""
+        try:
+            await self._digest_cron.remove_cron(
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — cleanup is not a switch precondition
+            logger.warning(
+                "[bbs-subscription] digest cleanup failed bot=%s: %s",
+                bot_id,
+                exc,
+            )
 
     def _provisional_record(
         self,

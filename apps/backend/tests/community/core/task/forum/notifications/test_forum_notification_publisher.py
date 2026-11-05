@@ -42,6 +42,10 @@ class FakeBotRepository:
     def get_by_id(self, bot_id: str):
         return self.id_to_bot.get(bot_id)
 
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+        bot = self.id_to_bot.get(f"{bot_id}:{owner_id}")
+        return bot or (None if bot_id == "default" else self.id_to_bot.get(bot_id))
+
 
 def _notify(
     publisher: ForumNotificationPublisher,
@@ -211,6 +215,32 @@ def test_bot_recipient_uses_owner_and_skips_owner_self_action() -> None:
     assert repository.calls == 1
     assert repository.content is not None
     assert repository.content["text"] == "张三赞了你的内容"
+
+
+def test_default_bot_recipient_resolves_owner_scoped_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"default:900003": {"owner_id": "900003", "bot_name": "默认助手"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="BOT",
+        recipient_id="default:900003",
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name="张三",
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+        topic_title="聚合通知测试",
+    )
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "张三赞了你的内容《聚合通知测试》"
 
 
 def test_notice_group_falls_back_to_target_identity_without_topic_or_post() -> None:
