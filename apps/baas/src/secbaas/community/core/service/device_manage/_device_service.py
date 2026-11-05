@@ -128,43 +128,22 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
         missing.append(field_name)
 
 
-# Sandbox-absence phrases. Providers report an already-reclaimed sandbox as a
-# generic error rather than DEVICE_NOT_FOUND (Arca, for example, surfaces
-# "sandbox 'x' does not exist" as DEVICE_DESTROY_FAILED). These phrases mean
-# there is no resource left to destroy, so the destroy is idempotent.
-_ABSENT_SANDBOX_PHRASES = (
-    "not found",
-    "does not exist",
-    "sandbox destroyed",
-)
-
-# Error codes that can still be an absence report when the message says so.
-# DEVICE_UNAVAILABLE / PLATFORM_UNAVAILABLE / AUTH_FAILED / RATE_LIMITED /
-# COMMAND_TIMEOUT are deliberately excluded: those say nothing about whether
-# the sandbox exists, so treating them as success would leak a live sandbox.
-_ABSENCE_CAPABLE_CODES = frozenset(
-    {
-        ErrorCode.DEVICE_NOT_FOUND,
-        ErrorCode.DEVICE_DESTROY_FAILED,
-        ErrorCode.PLATFORM_ERROR,
-        ErrorCode.NOT_FOUND,
-    }
-)
-
-
-def _is_absent_sandbox_error(error_code: ErrorCode | None, message: str) -> bool:
+def _is_absent_sandbox_error(error_code: ErrorCode | None) -> bool:
     """Return True when a PaaS destroy error means the sandbox is already gone.
 
-    Only errors that positively indicate absence qualify. A connection failure
-    or an auth/rate-limit error is *not* absence: the sandbox may still be
-    running, so the caller must keep treating it as a real failure.
+    Classification is by error code only, never by message text. The Arca SDK
+    plugin translates an SDK ``NotFoundException`` to
+    ``ArcaSandboxNotFoundError``, which the PaaS adapter deterministically maps
+    to ``DEVICE_NOT_FOUND`` - that is the single provider-reported signal that
+    guarantees the sandbox does not exist.
+
+    Every other code stays a failure, even when its message happens to read
+    like absence: ``DEVICE_DESTROY_FAILED`` / ``PLATFORM_UNAVAILABLE`` /
+    ``DEVICE_UNAVAILABLE`` / ``AUTH_FAILED`` / ``RATE_LIMITED`` /
+    ``COMMAND_TIMEOUT`` all leave open the possibility that the sandbox is
+    still running, and releasing the device then would leak it silently.
     """
-    if error_code == ErrorCode.DEVICE_NOT_FOUND:
-        return True
-    if error_code not in _ABSENCE_CAPABLE_CODES:
-        return False
-    lowered = (message or "").lower()
-    return any(phrase in lowered for phrase in _ABSENT_SANDBOX_PHRASES)
+    return error_code == ErrorCode.DEVICE_NOT_FOUND
 
 
 def _build_arca_detail_config(
@@ -2296,17 +2275,16 @@ class DefaultDeviceService(DeviceService):
                 await self._paas_facade.destroy_device(record.provider_device_id)
                 logger.info(f"Device destroyed: {record.provider_device_id}")
             except DeviceFacadeException as e:
-                # Treat a positively-absent sandbox as success (idempotent
-                # destroy per D-04/D-05). Providers report an already-reclaimed
-                # sandbox as DEVICE_DESTROY_FAILED or PLATFORM_ERROR with
-                # messages like "does not exist" rather than DEVICE_NOT_FOUND,
-                # which previously failed the whole publish.
+                # DEVICE_NOT_FOUND is the provider's typed "sandbox does not
+                # exist" (ArcaSandboxNotFoundError), so the destroy is already
+                # done - idempotent success per D-04/D-05. Every other code
+                # stays a failure; the sandbox may still be running.
                 original_error = getattr(e, "original_error", None)
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
                 message = getattr(getattr(e, "original_error", None), "message", str(e))
-                if _is_absent_sandbox_error(error_code, message):
+                if _is_absent_sandbox_error(error_code):
                     logger.warning(
                         f"Device already destroyed in PaaS: {device_uuid} "
                         f"(code={error_code}, message={message})"
@@ -2464,7 +2442,7 @@ class DefaultDeviceService(DeviceService):
                     getattr(original_error, "code", None) if original_error else None
                 )
                 message = getattr(getattr(e, "original_error", None), "message", str(e))
-                if _is_absent_sandbox_error(error_code, message):
+                if _is_absent_sandbox_error(error_code):
                     logger.warning(
                         f"Device already destroyed in PaaS: {device_uuid} "
                         f"(code={error_code}, message={message})"
