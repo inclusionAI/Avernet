@@ -1,0 +1,14 @@
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 162-163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b60b854ed9f878fa87ac42fe5b94d1d7f61b79a7",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

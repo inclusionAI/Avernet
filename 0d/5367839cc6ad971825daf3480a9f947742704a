@@ -1,0 +1,41 @@
+apps/agentclawscs/docker/bcn/Dockerfile
+  s_63347400243a1a::t_a6f55c24682c95 19,22-23
+apps/agentclawscs/docker/bcn/scripts/admin/bin/init-mosn.sh
+  s_63347400243a1a::t_c37e4cbfbc2fca 1-5,8-10,12-14
+apps/agentclawscs/docker/bcn/scripts/admin/bin/preStop.sh
+  s_63347400243a1a::t_7fee672038004c 10-16
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  s_63347400243a1a::t_d3c078948cb261 12-19,30-39
+apps/agentclawscs/docker/bcn/validate-bcs-artifact.sh
+  s_63347400243a1a::t_8f1a1efc77ea2c 33-35
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  s_63347400243a1a::t_4c5d8f6c3bc8ec 1-12
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  s_63347400243a1a::t_26b5fdc4868c27 1-13
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  s_63347400243a1a::t_025745f76294b4 1-12
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  s_63347400243a1a::t_cbb011faa9d71e 1-13
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  s_63347400243a1a::t_ffc17891728ce4 1-60
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_63347400243a1a::t_f4b7c6e8f1aeb8 61-69
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_63347400243a1a::t_40593f5aa0e181 2,71-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d5367839cc6ad971825daf3480a9f947742704a",
+  "prompts": {},
+  "sessions": {
+    "s_63347400243a1a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a47f-dc79-7492-a369-5971c956975b",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

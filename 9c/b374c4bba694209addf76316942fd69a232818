@@ -1,0 +1,22 @@
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/sofa_rpc.rs
+  h_fa66fe7c023b4b 9-11,47-62,65-68,138,152-182
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/health.rs
+  h_fa66fe7c023b4b 8
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/mod.rs
+  h_fa66fe7c023b4b 3-6
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 3,88-94,96-108
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 131-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9cb374c4bba694209addf76316942fd69a232818",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
