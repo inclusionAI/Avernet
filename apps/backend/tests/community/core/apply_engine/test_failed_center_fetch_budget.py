@@ -36,11 +36,15 @@ def target(location):
         return DesiredCapabilities(skills=Declaration(entries))
     if location == "set":
         return DesiredCapabilities(
-            skill_sets=Declaration((DesiredSkillSet("expert", skills=entries),))
+            skill_sets=Declaration(
+                (DesiredSkillSet("expert", is_active=True, skills=entries, mcp=()),)
+            )
         )
     return DesiredCapabilities(
         skills=Declaration(entries[:1]),
-        skill_sets=Declaration((DesiredSkillSet("expert", skills=entries[1:]),)),
+        skill_sets=Declaration(
+            (DesiredSkillSet("expert", is_active=True, skills=entries[1:], mcp=()),)
+        ),
     )
 
 
