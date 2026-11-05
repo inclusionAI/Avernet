@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 
@@ -77,27 +78,26 @@ beforeEach(() => {
   jest.clearAllMocks();
   useTaskConversationNavigationStore.getState().resetAll();
   useTaskSidePanelStore.getState().resetAll();
+  useTaskSessionAssociationStore.getState().reset();
   mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
-  mockListMyTasks.mockResolvedValue({ ok: true, data: [] });
+  mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
   window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
 });
 
-it('打开已存在的单 bot 会话时 by_session 命中即恢复任务副屏', async () => {
+it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务副屏', async () => {
   const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
   mockGetTaskBySession.mockResolvedValue({
     ok: true,
-    data: {
-      task_id: 'task-root',
-      owner_user_id: 'u1',
-      node_id: 'task-root',
-    },
+    data: [
+      { task_id: 'task-root', owner_user_id: 'u1', node_id: 'node-root', updated_at: null },
+    ],
   });
 
   renderHook(() => useChatHeaderPanels(options));
 
   await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
   expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
-  expect(mockListMyTasks).not.toHaveBeenCalled();
+  expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
   expect(openTab.mock.calls[0][0]).toMatchObject({
     id: 'task-task-root',
     type: 'taskPanel.TaskLoopView',

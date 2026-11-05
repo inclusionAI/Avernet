@@ -32,7 +32,7 @@ from agentclaw.community.adapters.http.task.schemas_artifact import (
 )
 from agentclaw.community.adapters.http.task.schemas_task_session import (
     BySessionDTO,
-    by_session_ref_to_dto,
+    by_session_refs_to_dto,
 )
 from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
@@ -95,10 +95,10 @@ async def get_task_by_session_internal(
 ) -> Envelope[BySessionDTO]:
     """Resolve a chat session to its relay task node (internal mirror)."""
     del user
-    ref = service.get_task_node_by_session(session_id)
-    if ref is None:
+    refs = service.get_task_nodes_by_session(session_id)
+    if not refs:
         raise NotFound("task session not found")
-    return envelope(by_session_ref_to_dto(ref), request)
+    return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
 def _validate_task_status_filter(status: str | None) -> None:
