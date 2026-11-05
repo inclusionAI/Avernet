@@ -388,22 +388,22 @@ def test_cli_defaults_to_dry_run_and_explicit_sqlite_write_is_isolated(tmp_path)
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-    assert "bcsfuse_tc_agent_cards" in tables
-    assert "bcsfuse_agent_cards" not in tables
-    assert "tc_search_index_documents" in tables
-    assert "search_index_documents" not in tables
+    assert "bcsfuse_agent_cards" in tables
+    assert "bcsfuse_tc_agent_cards" not in tables
+    assert "search_index_documents" in tables
+    assert "tc_search_index_documents" not in tables
     assert sqlite_catalog_repository(
         str(database),
         environment="pre",
-        table="bcsfuse_tc_agent_cards",
-        document_table="tc_search_index_documents",
+        table="bcsfuse_agent_cards",
+        document_table="search_index_documents",
     ).read_card("bot:owner:worker")
     assert (
         sqlite_catalog_repository(
             str(database),
             environment="prod",
-            table="bcsfuse_tc_agent_cards",
-            document_table="tc_search_index_documents",
+            table="bcsfuse_agent_cards",
+            document_table="search_index_documents",
         ).read_card("bot:owner:worker")
         is None
     )
@@ -451,8 +451,8 @@ def test_cli_legacy_jsonl_joins_full_identity_and_archives_material(tmp_path):
     record = sqlite_catalog_repository(
         str(database),
         environment="pre",
-        table="bcsfuse_tc_agent_cards",
-        document_table="tc_search_index_documents",
+        table="bcsfuse_agent_cards",
+        document_table="search_index_documents",
     ).read_card("bot:owner:worker")
     assert record.card.source_card["runtime_state"] == "offline"
     assert record.card.source_card["profile_id"] == "legacy:profile"

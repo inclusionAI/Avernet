@@ -137,8 +137,9 @@ Qdrant Server 使用不同 collection；Local 使用独立目录，避免两个�
 
 ### 4.1 数据分工
 
-沿用公共 Card/Doc 存储结构；TC 新表显式使用 `bcsfuse_tc_agent_cards` 和
-`tc_search_index_documents`，不占用 zbcsfuse 的默认表。生产 DDL 以实际数据库核对结果为准。
+沿用公共 Card/Doc 存储结构及表名 `bcsfuse_agent_cards`、`search_index_documents`。
+TC 继续使用原有 Worker Registry 数据源，与 zbcsfuse 的数据源独立；不使用 TC 表名前缀，不把 TC 切到 zbcsfuse 数据源。
+生产 DDL 以实际数据库核对结果为准；启动不自动创建或升级内部数据库。
 `card_json / profile_json / config` 已提供源资料、加工画像和配置的存放位置。
 先复用这些能力，不为 TC 再建立多 Profile 表、激活关系表或版本注册平台。
 
@@ -570,7 +571,7 @@ G9 的 `extend_result.fused_profile / group_conversation / timing` 等既有扩�
    所选后端失败、非法配置不得触发跨表回退或双写。
 6. 验证正常调用的状态码/成功边界：旧 sync 不能拿另一后端就绪冒充成功；v2 的 202 不代表索引完成。
    补齐写入/索引失败、重试、删除恢复以及切换前后各 Fuse 模式。
-7. zbcsfuse 使用原业务代码、模型/配置、表及集合；执行其回归及同物理库同 ID 的跨业务删除隔离检查。
+7. zbcsfuse 使用原业务代码、模型/配置、表及集合；执行其回归及独立数据源的同 ID 跨业务删除隔离检查。
 
 只保留覆盖上述风险的契约/流程测试，删除双实例代理切流、旧接口偷写新表、混合优先读新表等错误断言。
 现有新链路测试显式选择 card；另以默认 legacy 覆盖同实例迁移流程，不用测试模式的隐含例外掩盖部署默认值。

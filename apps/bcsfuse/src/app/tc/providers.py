@@ -84,8 +84,6 @@ def storage(context):
         repository = sqlite_catalog_repository(
             path,
             environment=environment,
-            table="bcsfuse_tc_agent_cards",
-            document_table="tc_search_index_documents",
         )
         connection = (
             QdrantConnection(mode="local")
@@ -115,8 +113,8 @@ def storage(context):
         pool = registry.get("mysql_connection_pool") or MySQLConnectionPoolProvider()
         repository = SqlCatalogRepository(
             pool.get_connection,
-            table="bcsfuse_tc_agent_cards",
-            document_table="tc_search_index_documents",
+            table="bcsfuse_agent_cards",
+            document_table="search_index_documents",
             environment=environment,
             placeholder="%s",
         )
