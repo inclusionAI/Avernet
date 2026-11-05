@@ -49,7 +49,6 @@ from agentclaw.community.kernel.bot_ownership_sync import (
     OwnershipFacts,
 )
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     ProfileSnapshot,
     RepairCommand,
     RepairFacts,
@@ -64,10 +63,6 @@ from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipPlugin
 KEY = SyncKey("tenant-a", "dev", 7)
 STABLE = "b:e"
 CURRENT_OWNER = "owner-new"
-
-#: The default caller-config facts: an established, enabled config.
-DEFAULT_CALLER = CallerSnapshot(STABLE, enabled=True, source_revision=9)
-
 
 class Clock:
     """Deterministic monotonic clock; tests move ``now`` to trip deadlines."""
@@ -96,14 +91,12 @@ def default_repair_facts(
     *,
     key: SyncKey = KEY,
     owner_user_id: str = CURRENT_OWNER,
-    caller: CallerSnapshot | None = DEFAULT_CALLER,
 ) -> RepairFacts:
     """The one-pass repair facts exactly as Task 4's reader projects them."""
     return RepairFacts(
         key=key,
         profile=default_profile(),
         owner_user_id=owner_user_id,
-        caller=caller,
     )
 
 

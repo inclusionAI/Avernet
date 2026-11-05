@@ -1,9 +1,8 @@
 """Collaboration repair report aggregation — the plan's fixed semantics.
 
 ``report_status`` derives the whole-report status from per-item statuses only:
-``failed`` / ``unknown`` / ``skipped_dependency`` are bad, ``not_applicable``
-is not a bad item, and an empty report is a programming error because the
-service always produces the fixed four components.
+``failed`` / ``unknown`` / ``skipped_dependency`` are bad. An empty report is a programming error
+because the service always produces the fixed three components.
 """
 
 from __future__ import annotations
@@ -25,15 +24,6 @@ def test_unknown_is_not_success() -> None:
     assert report_status(items) == "partial_failed"
     assert (
         report_status((RepairItem("ownership", "failed", "owner_drift"),)) == "failed"
-    )
-    assert (
-        report_status(
-            (
-                RepairItem("ownership", "succeeded"),
-                RepairItem("caller_config", "not_applicable"),
-            )
-        )
-        == "succeeded"
     )
 
 
@@ -59,29 +49,20 @@ def test_bad_alongside_succeeded_is_partial_failed() -> None:
     assert report_status(items) == "partial_failed"
 
 
-def test_bad_with_only_not_applicable_still_lacks_success() -> None:
-    items = (
-        RepairItem("profile", "unknown", "delivery_timeout"),
-        RepairItem("caller_config", "not_applicable"),
-    )
-    assert report_status(items) == "failed"
-
-
-def test_full_success_report_all_four_components() -> None:
+def test_full_success_report_all_three_components() -> None:
     items = (
         RepairItem("ownership", "succeeded"),
         RepairItem("profile", "succeeded"),
         RepairItem("managers", "succeeded"),
-        RepairItem("caller_config", "succeeded"),
     )
     assert report_status(items) == "succeeded"
 
 
-def test_component_order_declares_exactly_four_components() -> None:
+def test_component_order_declares_exactly_three_components() -> None:
     """The kernel order IS the report shape, so its length is a contract.
 
     The service builds its report with ``zip(items, COMPONENT_ORDER,
-    strict=True)``, which fails at runtime for every repair if a fifth
+    strict=True)``, which fails at runtime for every repair if a fourth
     component is ever added here without the service and schema catching
     up. Pinning the length turns that runtime failure into a CI failure.
     """
@@ -89,6 +70,5 @@ def test_component_order_declares_exactly_four_components() -> None:
         "ownership",
         "profile",
         "managers",
-        "caller_config",
     )
-    assert len(COMPONENT_ORDER) == 4
+    assert len(COMPONENT_ORDER) == 3

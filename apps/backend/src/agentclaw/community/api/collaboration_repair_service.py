@@ -1,4 +1,4 @@
-"""Collaboration repair Service API v1, re-exported for adapters.
+"""Collaboration repair Service API v2, re-exported for adapters.
 
 The Protocol is defined in its owning Core module
 (``core/bot_management/collaboration_repair/service_protocol.py``);

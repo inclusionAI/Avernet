@@ -1,5 +1,12 @@
 # Backend Bot Avatar and Collaboration Repair Implementation Plan
 
+> Historical implementation plan. The 2026-11-05 scope update supersedes its
+> caller-repair and blank-summary-unconfirmed steps: repair now returns only
+> ownership/profile/managers, and acknowledged blank summaries succeed.
+> See [the current design](design.md) and
+> [the follow-up plan](repair-scope-update-plan.md).
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让现有 Bot 注册/名称描述更新链路同步头像，并提供 `POST /openapi/v1/bots/{bot_id}/collaboration/repair`，手动修复已存在 BCS Bot 的当前协作资料。
