@@ -37,6 +37,11 @@ def _projection_note(result):
     return None
 
 
+def _confirmed_mutation(result):
+    """A completed command can be a no-op; unknown receipts prove no change."""
+    return isinstance(result, dict) and result.get("changed") is True
+
+
 async def write_capabilities(owner, ctx, plan):
     resolved = plan.resolved
     snapshot = resolved.snapshot
@@ -144,7 +149,7 @@ async def write_capabilities(owner, ctx, plan):
             result = await owner._activation.claim_apply_skill(
                 **who, skill_id=prepared[skill.key], apply_id=ctx.apply_id
             )
-            confirmed = True
+            confirmed = confirmed or _confirmed_mutation(result)
             note = _projection_note(result) or skill.note
             results[identity] = EntryResult(
                 Category.CAPABILITIES, identity, EntryOutcome(entry.outcome), note=note
@@ -156,11 +161,12 @@ async def write_capabilities(owner, ctx, plan):
             asset = catalog.get(sid)
             if asset is None or asset["name"] not in plan.remove_skills:
                 continue
-            await owner._activation.remove_apply_skill(
+            result = await owner._activation.remove_apply_skill(
                 **who, skill_id=str(asset["id"]), apply_id=ctx.apply_id
             )
-            confirmed = True
-            removals.add("skills/" + asset["name"])
+            if _confirmed_mutation(result):
+                confirmed = True
+                removals.add("skills/" + asset["name"])
         # Re-observe actual effective supply after all Skill commands. No predicted context handoff.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
         set_ids, supplied_mcps = effective_sets(actual)
@@ -184,7 +190,7 @@ async def write_capabilities(owner, ctx, plan):
                 result = await owner._activation.claim_apply_mcp(
                     **who, server_code=code, config=config, apply_id=ctx.apply_id
                 )
-                confirmed = True
+                confirmed = confirmed or _confirmed_mutation(result)
                 results["mcp/" + code] = EntryResult(
                     Category.CAPABILITIES,
                     "mcp/" + code,
@@ -197,9 +203,11 @@ async def write_capabilities(owner, ctx, plan):
                 - declared
             )
             for code in sorted(candidates):
-                await owner._activation.remove_apply_mcp(
+                result = await owner._activation.remove_apply_mcp(
                     **who, server_code=code, apply_id=ctx.apply_id
                 )
+                if not _confirmed_mutation(result):
+                    continue
                 confirmed = True
                 identity = "mcp/" + code
                 if code in dependencies:

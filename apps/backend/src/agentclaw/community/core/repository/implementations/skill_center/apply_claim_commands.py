@@ -246,19 +246,18 @@ class ApplyClaimCommands:
                 env=get_current_env(),
                 server_code=server_code,
             )
-            override_changed = bot_mcp_configs.replace(
+            config_written, override_changed = bot_mcp_configs.replace_apply(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 env=get_current_env(),
                 server_code=server_code,
                 config=config,
-                preserve_equivalent=True,
             )
             session.flush()
             return DesiredStateMutation(
                 {},
-                installed or override_changed,
+                installed or config_written,
                 old,
                 mcp_codes=frozenset({server_code}) if installed else frozenset(),
                 updated_mcp_codes=(
