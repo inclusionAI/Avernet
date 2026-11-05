@@ -264,3 +264,54 @@ is required.
 
 Preview PK with `?width=560&height=800&mode=pk-vote` or
 `?width=360&height=600&mode=pk-speech`; these fixtures use simulated API responses.
+
+## 可换肤主题：作战指挥台（Ops 终端风副屏）
+
+仓库自带一套与像素俱乐部房并列的备用副屏主题 **`bcsPanel.UndercoverGameOpsPanel`**（作战指挥台/终端风）。它复用同一套数据层 —— `api.ts`、`viewModel.ts`、`actionContext.ts`、`contracts.ts`（不改动任何数据层、主持脚本或 BCS 接口），只替换展示/交互视图。
+
+### 主题定位与视觉
+
+- 高对比“指挥终端”排版，配色全部取自工作台共享语义 token（`--background`、`--card`、`--foreground`、`--border`、`--primary`、`--success`、`--warning`、`--destructive`、`--info`、`--muted-foreground`），随亮/暗主题自动切换，不再自带独立字面色板。居右圆桌换成一个**左右分层的工作流图**，玩家状态用“座位表”式行卡呈现。
+- 左边是**本轮实际运行的 workflow 图**：发言 run 呈现为按回合顺序连号的串行传递闭包链（后手可读齐前序原话）；投票 run 呈现为「入口 → 各玩家并行 `vote_N`（彼此无边）→ 主持人 `tally`」的末节点计票结构。
+- 全部通过 CSS 自定义属性（`var(--bg/--panel/--accent/--run/--done/--bad/…)`）驱动，这些属性只是上面共享语义 token 的别名，因此调色跟随工作台主题；`prefers-reduced-motion` 关闭动画。
+- `showHostOutput` 开启时保留**主持人公开播报**区（最新一条直接展示，更早的折叠收纳），计票、出局/PK 公告与阶段交接不会在 Ops 视图中消失。
+- 独立保留**历轮公开发言**区，按轮次/PK 阶段分组折叠展示 `publicHistory`；某玩家投完票后行卡只剩“已投票”时，此前描述仍可从历史区回读。
+
+### 覆盖的 5 个状态
+
+1. **发言**：公开文本框 + 词隐藏/显示 + 上游发言 + 轮次/字数约束；窄屏(≤360px)自动压缩图与表。
+2. **投票（含弃权二次确认）**：候选玩家 `vote_N` 卡片 + 「弃权」；需勾选“我已确认”二次确认后才可提交，**改选候选人或切换到弃权会立即重置确认**，不会把确认带给新的票；PK 阶段根据 `allowAbstain:false` 隐藏弃权。
+3. **平票 PK**：`pk_speaking / pk_voting` 阶段；候选人仅限 `pkCandidates` 且不可自投；已公布的两轮票面（常规 + PK）以“已公布票面”区展示。
+4. **出局**：被淘汰玩家保留原始座位号，行卡加删除线 + 红边 + “出局”徽标。
+5. **终局**：结构化 `resultFile`（或旧版主持人判词兼容）展示平民/卧底阵营获胜，并在判词旁显示公开复盘总结（词对与复盘，`result.summary`），作为独立结果卡；所有终局信息仅在公开 `showPublicReveal`（总结另受 `showHostOutput`）开启时展示。
+
+### Workflow 视图接入方式
+
+面板通过既有 `GET /state-machine-runs/{run_id}/graph` 拿到当前 run 的 `nodes + edges`，用 `nodeActorMap` 将节点映射到座位/主持人，再做跨栏 `Kahn` 分层：
+- 发言 run：`speech_{i}` 依次从左到右排列，`collect`（聚焦）作为末列最后一次汇合；
+- 投票 run：`vote_start` 为入口列，`vote_N` 同一列并行（彼此无依赖边），`tally` 强制放到**最终列**，让“计票最后完成”在图上直观可见。
+- 图例区分运行中/完成/失败/等待，节点按状态着色；该视图只展示节点与公开标签，不暴露发言原文或票向（详见下方隐私边界）。
+
+### 隐私边界（与像素房一致）
+
+- 词、身份、原始发言、原始票面只通过本人 HumanInput 的 `UNDERCOVER_UI_CONTEXT_V1` 认证上下文进入副屏；**不写入 localStorage、URL、console、`onNode` 等任何可回溯位置**（由新增 `ops-theme.mjs` 测试断言）。
+- 投票进行中，房间视图与 workflow 视图都**不显示票向**和未遮蔽的发言原文；节点详情仅显示“已投票”或公开主持判词。
+- 复用现有 `visual-preview` 的 mock 数据层，可在浏览器直接切换 `?theme=ops&mode=…` 查看五种状态。
+
+### 如何复现（≤15 分钟）
+
+```bash
+cd apps/bcs/assets/panel
+npm exec vite -- --host 127.0.0.1 --port 4178
+# 打开 http://127.0.0.1:4178/test/undercover-game/visual-preview.html?theme=ops&mode=speech&width=760&height=760
+# 右上角可一键切换 theme=club / theme=ops
+```
+
+状态速览：`mode=speech` 发言、`mode=vote` 投票（含弃权确认）、`mode=pk-vote` 平票 PK、`mode=eliminated` 出局、`mode=finale` 终局，`narrow` 窄屏用 `width=320`。
+
+`npm run verify` 会额外执行新增的 `test/undercover-game/ops-theme.mjs`（主题生命周期 + 隐私 + workflow 布局）。
+
+### 主题说明与答案（给评委）
+
+- **为什么发言图用传递闭包而不是链？** 发言 run 中每个玩家节点直接连向其后所有尚未发言的玩家（而非仅相邻节点）。这样后发言的玩家能拿到本轮**全部前序原话**（而不仅是上一位），证据图里呈现为逐步变宽的“扇出”，而不是线性顺序——体现的是“每个新发言人看到的信息增量”这一多智能体语义。
+- **为什么主持人必须是末节点、不能在汇总节点里直接开投？** BCS 契约要求恰好一个零入度入口与一个 final_output 末节点，且单个 run 内部不允许并行入口。主持人若在 `collect/tally` 汇总里直接“开投”，就会把两轮阶段塞进同一个 run，破坏“发言一次收齐 → 结束 → 再开投票 run”的槽位隔离与并发契约。因此必须让汇总/计票作为本 run 的**末节点**结算，再把结果回灌给主持人会话去启动下一个投票 run。
