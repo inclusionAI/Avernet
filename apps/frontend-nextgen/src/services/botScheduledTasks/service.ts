@@ -60,6 +60,10 @@ function mapRun(row: RoutineRunDto): RoutineRun {
     status: row.status || '未知',
     startedAt: row.started_at ?? undefined,
     finishedAt: row.finished_at ?? undefined,
+    input: row.input ?? undefined,
+    output: row.output ?? undefined,
+    error: row.error ?? undefined,
+    messages: row.messages ?? [],
     duration: Number.isFinite(start) && Number.isFinite(end) && end >= start ? `${(end - start) / 1000} 秒` : undefined,
   };
 }

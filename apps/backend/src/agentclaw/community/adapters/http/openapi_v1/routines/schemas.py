@@ -270,6 +270,13 @@ class RoutineUpdate(BaseModel):
     )
 
 
+class RoutineRunMessage(BaseModel):
+    """Text-only conversation entry; provider/authentication extensions are excluded."""
+
+    role: str = Field(description="Reported message role, or assistant when absent.")
+    content: str = Field(description="Reported text content; never interpreted as HTML.")
+
+
 class RoutineRun(BaseModel):
     """One execution of a routine."""
 
@@ -296,6 +303,10 @@ class RoutineRun(BaseModel):
         "across a routine's history — treat the list positionally."
     )
     routine_id: str = Field(description="The routine that ran.")
+    input: str | None = Field(default=None, description="Historical run input, or the enclosing history response input; null when unreported.")
+    output: str | None = Field(default=None, description="Reported execution output; null when unreported.")
+    error: str | None = Field(default=None, description="Reported execution error; null when unreported.")
+    messages: list[RoutineRunMessage] = Field(default_factory=list, description="Reported conversation text in order, normalized from messages/conversation/turns. Empty does not imply a complete transcript.")
     # Two producers, two vocabularies — the run-now endpoint synthesizes its
     # own three values, the history read passes the engine's through — so this
     # is documented as open rather than published as an enum either endpoint
