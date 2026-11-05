@@ -309,6 +309,135 @@ async def test_executor_send_flow():
     assert repo.update_result.call_args[1]["content_long"] == "hello back"
 
 
+# ----------------------------- _do_send wait_result (ignore flags) -----------------------------
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("ignore_result", "true"),
+        ("ignore_result", True),
+        ("ignore_content", "true"),
+        ("ignore_content", True),
+    ],
+)
+async def test_executor_do_send_ignore_flags_wait_result_false(flag, value):
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-ignore",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", flag: value},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-ignore", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    bot_svc.send_message.assert_awaited_once()
+    assert bot_svc.send_message.call_args.kwargs["wait_result"] is False
+    extra = repo.update_result.call_args[1]["extra"]
+    assert extra["ignore_result"] == "true"
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("ignore_result", "false"),
+        ("ignore_result", False),
+        ("ignore_result", 0),
+        ("ignore_content", "false"),
+        ("ignore_content", False),
+        ("ignore_content", 0),
+    ],
+)
+async def test_executor_do_send_falsy_ignore_flags_wait_result_true(flag, value):
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-ignore",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", flag: value},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-ignore", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    bot_svc.send_message.assert_awaited_once()
+    assert bot_svc.send_message.call_args.kwargs["wait_result"] is True
+    assert "ignore_result" not in repo.update_result.call_args[1]["extra"]
+
+
+async def test_executor_do_send_ignore_content_takes_priority():
+    """ignore_content 与 ignore_result 同时存在时，ignore_content 优先（与 runner 路径一致）。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-ignore",
+        bot_id="bot-1:ent",
+        metadata={
+            "request_type": "chat",
+            "ignore_result": False,
+            "ignore_content": "true",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-ignore", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    assert bot_svc.send_message.call_args.kwargs["wait_result"] is False
+
+
 async def test_executor_caller_meta_sandbox_builds_caller_binding():
     """caller 模式：queue meta 带 sandbox 直接组 binding，不走正常解析。"""
     repo = MagicMock()

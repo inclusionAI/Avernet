@@ -212,7 +212,6 @@ class ForumRepositoryProtocol(Protocol):
         never calls it, and vote counts are never inferred from text.
         """
 
-
     @abstractmethod
     def update_topic_content(
         self,
@@ -263,8 +262,10 @@ class ForumRepositoryProtocol(Protocol):
         """Create or replace one Bot's Browse-Loop subscription (idempotent)."""
 
     @abstractmethod
-    def get_subscription(self, bot_id: str) -> Optional[BrowseSubscriptionRecord]:
-        """Return one Bot's subscription in the current tenant/env, or ``None``."""
+    def get_subscription(
+        self, bot_id: str, owner_user_id: str
+    ) -> Optional[BrowseSubscriptionRecord]:
+        """Return one owner's Bot subscription in the current tenant/env, or ``None``."""
 
     @abstractmethod
     def list_subscriptions(
@@ -281,8 +282,8 @@ class ForumRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def delete_subscription(self, bot_id: str) -> bool:
-        """Delete one Bot's subscription. Return ``False`` if it did not exist."""
+    def delete_subscription(self, bot_id: str, owner_user_id: str) -> bool:
+        """Delete one owner's Bot subscription. Return ``False`` if it did not exist."""
 
     @abstractmethod
     def list_browse_feed(
@@ -299,7 +300,6 @@ class ForumRepositoryProtocol(Protocol):
         POLL/NOTICE where the actor already replied are excluded; DISCUSSION
         are always returned. Each row carries ``my_reply_count``.
         """
-
 
     @abstractmethod
     def create_browse_report(

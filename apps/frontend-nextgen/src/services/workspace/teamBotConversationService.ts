@@ -118,7 +118,7 @@ export const teamBotConversationService = {
           !Number.isFinite(data.total) ||
           data.total < 0
         ) {
-          throw new Error(response.message || '团队 Bot 接口返回格式异常');
+          throw new Error(response.message || '团队空间 Bot 接口返回格式异常');
         }
         for (const dto of data.items) {
           if (typeof dto.bot_id !== 'string' || !dto.bot_id.trim()) continue;
@@ -132,7 +132,7 @@ export const teamBotConversationService = {
     } catch {
       return {
         ok: false,
-        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队 Bot 失败，请稍后重试。', canRetry: true },
+        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队空间 Bot 失败，请稍后重试。', canRetry: true },
       };
     }
   },

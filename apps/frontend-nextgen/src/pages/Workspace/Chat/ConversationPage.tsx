@@ -38,7 +38,7 @@ export default function ConversationPage(): JSX.Element {
   const { identityChanged } = useConversationIdentityReset(userId);
 
   const directory = useConversationDirectory(userId);
-  // 团队 Bot 独立目录(section=team)与会话模型合并消费:
+  // 团队空间 Bot 独立目录(section=team)与会话模型合并消费:
   // 会话加载/选中/URL 同步等按「管理域全集」(managed + team)装配。
   const managedAndTeamBots = useMemo(
     () => [...directory.managedBots, ...directory.teamBots],

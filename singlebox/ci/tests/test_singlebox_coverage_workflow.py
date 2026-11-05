@@ -15,3 +15,10 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert 'SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"' in workflow
     assert "--bcs-router-min 100" in workflow
     assert "--bcs-cli-min 100" in workflow
+
+
+def test_workflow_excludes_provider_credentials_from_artifacts():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    upload = workflow.split("- name: Upload singlebox artifacts", 1)[1]
+    assert "!singlebox/.dependencies/coverage/**/collaboration-repair-provider.json" in upload
+    assert "!singlebox/.dependencies/coverage/**/.repair-provider-*" in upload

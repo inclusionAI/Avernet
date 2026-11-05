@@ -24,6 +24,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 from agentclaw.community.core.task.task_center.task_service_support import (
     parse_status_filter,
@@ -101,6 +102,39 @@ def _hydrate_root_dashboard_runtime(
         main_session_id = config.get("main_session_id")
         if main_session_id:
             root.run_info.extend_props["session_id"] = main_session_id
+
+
+def get_task_nodes_by_session(
+    self, session_id: str
+) -> list[TaskNodeSessionRef]:
+    """Resolve a chat session to every visible task node, newest first.
+
+    The run-info lookup is deliberately not tenant scoped. After each run row
+    yields a task handle, the env-scoped task repository must resolve the owner.
+    A task outside the current scope therefore behaves as no match and cannot
+    expose the run-info owner. Duplicate task rows are collapsed by task id.
+    """
+    if not session_id or self._run_info_repo is None or self._task_info_repo is None:
+        return []
+    runs = self._run_info_repo.list_by_session_id(session_id)
+    refs: list[TaskNodeSessionRef] = []
+    seen_task_ids: set[str] = set()
+    for run in runs:
+        if run.task_id in seen_task_ids:
+            continue
+        task = self._task_info_repo.get(run.task_id)
+        if task is None:
+            continue
+        seen_task_ids.add(run.task_id)
+        refs.append(
+            TaskNodeSessionRef(
+                task_id=run.task_id,
+                node_id=run.node_id,
+                owner_user_id=task.owner_user_id,
+                updated_at=run.gmt_modified or run.gmt_create,
+            )
+        )
+    return refs
 
 
 def get_task_context(self, task_id: str) -> TaskContext:

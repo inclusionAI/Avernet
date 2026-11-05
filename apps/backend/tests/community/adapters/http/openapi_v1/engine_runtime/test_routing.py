@@ -157,10 +157,18 @@ def test_literal_groups_are_registered_before_the_bot_id_wildcard():
 
 
 def test_engine_runtime_routes_document_501_and_504():
-    """And the rest of the surface does not — they cannot return them."""
+    """And the rest of the surface does not — they cannot return them.
+
+    The collaboration repair endpoint is the one exception: its single request
+    budget can be exhausted before any item is attempted, which is a real 504.
+    It cannot return 501, so that status stays engine-runtime-only.
+    """
     schema = _document()
 
     runtime_paths = _all_engine_runtime_paths()
+    timeout_only_paths = {
+        "/openapi/v1/bots/{bot_id}/collaboration/repair": {"504"},
+    }
     for path, methods in schema["paths"].items():
         for method, operation in methods.items():
             documented = set(operation["responses"])
@@ -168,6 +176,10 @@ def test_engine_runtime_routes_document_501_and_504():
             if path in runtime_paths:
                 assert extras == {"501", "504"}, (
                     f"{method.upper()} {path} missing {extras}"
+                )
+            elif path in timeout_only_paths:
+                assert extras == timeout_only_paths[path], (
+                    f"{method.upper()} {path} advertises {extras}"
                 )
             else:
                 assert not extras, f"{method.upper()} {path} advertises {extras}"

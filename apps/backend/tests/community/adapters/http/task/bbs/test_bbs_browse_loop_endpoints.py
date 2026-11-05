@@ -200,11 +200,12 @@ async def test_upsert_subscription_existing_openclaw_updates_persisted_record():
 async def test_get_subscription_returns_envelope_when_found():
     class Service:
         def get_subscription(self, **kwargs):
-            assert kwargs == {"bot_id": "bot-a"}
+            assert kwargs == {"bot_id": "bot-a", "owner_user_id": "111111"}
             return _record()
 
     payload = await get_subscription_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("GET", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
     )
@@ -220,6 +221,7 @@ async def test_get_subscription_raises_not_found_when_missing():
     with pytest.raises(NotFound):
         await get_subscription_internal(
             bot_id="bot-a",
+            owner_user_id="111111",
             request=_request("GET", "/api/v1/bots/bot-a/bbs/browse-subscription"),
             service=Service(),
         )
@@ -232,7 +234,7 @@ async def test_delete_subscription_openclaw_removes_cron():
             return _record(mode="openclaw")
 
         def delete_subscription(self, **kwargs):
-            assert kwargs == {"bot_id": "bot-a"}
+            assert kwargs == {"bot_id": "bot-a", "owner_user_id": "111111"}
             return True
 
     cron_manager = _FakeCronManager()
@@ -240,6 +242,7 @@ async def test_delete_subscription_openclaw_removes_cron():
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
@@ -275,6 +278,7 @@ async def test_delete_subscription_framework_unregisters_scheduler():
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
@@ -307,6 +311,7 @@ async def test_delete_subscription_missing_subscription_still_idempotent():
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
@@ -384,7 +389,8 @@ class _FakeSkillInstallRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def trigger_install_bbs_skills(self, *, bot_id: str):
+    async def trigger_install_bbs_skills(self, *, bot_id: str, owner_user_id: str):
+        assert owner_user_id == "111111"
         self.calls.append(bot_id)
         return {
             "run_id": "run_x",
@@ -400,6 +406,7 @@ async def test_trigger_skills_install_internal_delegates_to_runner():
     runner = _FakeSkillInstallRunner()
     payload = await trigger_skills_install_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
         runner=runner,
     )
@@ -416,12 +423,13 @@ async def test_trigger_skills_install_internal_delegates_to_runner():
 @pytest.mark.asyncio
 async def test_trigger_skills_install_internal_propagates_not_found():
     class Runner:
-        async def trigger_install_bbs_skills(self, *, bot_id):
+        async def trigger_install_bbs_skills(self, *, bot_id, owner_user_id):
             raise NotFound("subscription not found")
 
     with pytest.raises(NotFound):
         await trigger_skills_install_internal(
             bot_id="bot-a",
+            owner_user_id="111111",
             request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
             runner=Runner(),
         )
@@ -449,7 +457,8 @@ class _FakeProvisioner:
         )
         return self._result
 
-    async def cancel_pending(self, *, bot_id: str) -> None:
+    async def cancel_pending(self, *, bot_id: str, owner_user_id: str) -> None:
+        assert owner_user_id == "111111"
         self.cancels.append(bot_id)
 
 
@@ -515,7 +524,10 @@ class _FakeRunner:
         self.calls: list[dict[str, Any]] = []
         self._fail = fail
 
-    async def push_browse_once(self, *, bot_id, expected_mode, timeout=60.0):
+    async def push_browse_once(
+        self, *, bot_id, owner_user_id, expected_mode, timeout=60.0
+    ):
+        assert owner_user_id == "111111"
         self.calls.append(
             {"op": "browse", "bot_id": bot_id, "expected_mode": expected_mode}
         )
@@ -525,7 +537,8 @@ class _FakeRunner:
             raise ValidationError("mode mismatch (test)")
         return {"run_id": "run_b_x", "session_id": "sess_b_x"}
 
-    async def push_cron_event(self, *, bot_id, action, timeout=30.0):
+    async def push_cron_event(self, *, bot_id, owner_user_id, action, timeout=30.0):
+        assert owner_user_id == "111111"
         self.calls.append({"op": "cron", "bot_id": bot_id, "action": action})
         return {"run_id": "run_cron", "session_id": None}
 
@@ -538,10 +551,11 @@ class _FakeRunner:
 async def test_trigger_framework_pushes_with_framework_mode():
     runner = _FakeRunner()
     payload = await trigger_framework_browse_internal(
+        bot_id="bot-a",
+        owner_user_id="111111",
         request=_request(
             "POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"
         ),
-        bot_id="bot-a",
         runner=runner,
     )
     assert runner.calls == [
@@ -555,6 +569,7 @@ async def test_trigger_self_pushes_with_openclaw_mode():
     runner = _FakeRunner()
     payload = await trigger_self_browse_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-self"),
         runner=runner,
     )
@@ -569,6 +584,7 @@ async def test_trigger_cron_register_forwards_register_action():
     runner = _FakeRunner()
     payload = await trigger_cron_register_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/cron-register"),
         runner=runner,
     )
@@ -581,6 +597,7 @@ async def test_trigger_cron_remove_forwards_remove_action():
     runner = _FakeRunner()
     await trigger_cron_remove_internal(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/cron-remove"),
         runner=runner,
     )
@@ -600,9 +617,10 @@ async def test_trigger_framework_propagates_runner_validation_error():
     runner = _FakeRunner(fail="validation")
     with pytest.raises(ValidationError):
         await trigger_framework_browse_internal(
+            bot_id="bot-a",
+            owner_user_id="111111",
             request=_request(
                 "POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"
             ),
-            bot_id="bot-a",
             runner=runner,
         )

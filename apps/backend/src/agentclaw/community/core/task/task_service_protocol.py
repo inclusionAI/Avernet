@@ -24,6 +24,7 @@ from agentclaw.community.core.task.domain.intake import (
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 
 
@@ -143,6 +144,10 @@ class TaskServiceProtocol(Protocol):
         failure_reason: str | None = None,
         extend_props_patch: dict | None = None,
     ) -> NodeOpResult: ...
+
+    def get_task_nodes_by_session(self, session_id: str) -> list[TaskNodeSessionRef]:
+        """Return every visible task node linked to a chat session, newest first."""
+        ...
 
     async def converge_by_session(
         self, session_id: str, *, success: bool, output: object = None,

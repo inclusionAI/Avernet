@@ -100,7 +100,9 @@ export function useCommunityInteractions({
     const targetOnly = { target };
     const actorTarget = { actor: viewer, target };
     if (target.targetType === 'HUMAN' || target.targetType === 'BOT') {
-      const actor: ForumActorRef = { actorType: target.targetType, id: target.id };
+      const actor: ForumActorRef = target.idAlias
+        ? { actorType: target.targetType, id: target.id, idAlias: target.idAlias }
+        : { actorType: target.targetType, id: target.id };
       return [targetOnly, { actor }, actorTarget];
     }
     return [targetOnly, actorTarget];

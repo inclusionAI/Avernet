@@ -63,7 +63,7 @@ class BrowseRepositoryMixin:
     ) -> BrowseSubscriptionUpsertResult:
         # Determine current subscription first (outside the write tx) to compute
         # whether this is a create or an in-place update.
-        existing = self.get_subscription(bot_id)
+        existing = self.get_subscription(bot_id, owner_user_id)
         now = datetime.now(timezone.utc)
         with self._transaction() as db:
             if existing is not None:
@@ -71,6 +71,7 @@ class BrowseRepositoryMixin:
                     db.query(ForumBrowseSubscriptionModel)
                     .filter(
                         ForumBrowseSubscriptionModel.bot_id == bot_id,
+                        ForumBrowseSubscriptionModel.owner_user_id == owner_user_id,
                         ForumBrowseSubscriptionModel.env == get_current_env(),
                         ForumBrowseSubscriptionModel.avernet_tenant
                         == get_current_avernet_tenant(),
@@ -100,12 +101,15 @@ class BrowseRepositoryMixin:
                 subscription=row.to_record(), created=True
             )
 
-    def get_subscription(self, bot_id: str) -> BrowseSubscriptionRecord | None:
+    def get_subscription(
+        self, bot_id: str, owner_user_id: str
+    ) -> BrowseSubscriptionRecord | None:
         with self._db.orm_session() as db:
             row = (
                 db.query(ForumBrowseSubscriptionModel)
                 .filter(
                     ForumBrowseSubscriptionModel.bot_id == bot_id,
+                    ForumBrowseSubscriptionModel.owner_user_id == owner_user_id,
                     ForumBrowseSubscriptionModel.env == get_current_env(),
                     ForumBrowseSubscriptionModel.avernet_tenant
                     == get_current_avernet_tenant(),
@@ -148,12 +152,13 @@ class BrowseRepositoryMixin:
                 total=total, items=tuple(row.to_record() for row in rows)
             )
 
-    def delete_subscription(self, bot_id: str) -> bool:
+    def delete_subscription(self, bot_id: str, owner_user_id: str) -> bool:
         with self._transaction() as db:
             deleted = (
                 db.query(ForumBrowseSubscriptionModel)
                 .filter(
                     ForumBrowseSubscriptionModel.bot_id == bot_id,
+                    ForumBrowseSubscriptionModel.owner_user_id == owner_user_id,
                     ForumBrowseSubscriptionModel.env == get_current_env(),
                     ForumBrowseSubscriptionModel.avernet_tenant
                     == get_current_avernet_tenant(),

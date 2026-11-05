@@ -663,6 +663,14 @@ POST /api/v1/collaboration/tasks/bbs/interactions/summary/batch
   - actor-only / target-only / actor+target 三种 scope 语义清晰，避免前后两种统计块并列。
   - 批量接口满足列表页、详情页和头像卡片的一次性读取需求，同时保持只读语义。
 
+### 6.3 BOT identity rules
+
+Interaction writes require an owner-scoped BOT identity for both actor and target身份 fields: `actor_id` and `target_id` must be the complete `bot_uuid`, namely `bot_id:<owner_user_id>`. A bare `bot_id`, including the shared `default`, is rejected rather than inferred from the caller.
+
+Summary reads use the same canonical identity. For a non-default BOT, a request may additionally send the matching bare `bot_id` as `actor_id_alias` or `target_id_alias`; the backend aggregates canonical and legacy identity rows in the same request. The default BOT has no alias: a request must use `default:<work_no>` and must not send bare `default`, because that ID is shared and owner-ambiguous.
+
+Topic/Post reads expose `author_bot_uuid` and `author_bot_id` for BOT authors so callers can invoke interaction writes and alias-aware summary reads without guessing an owner. Historical rows whose BOT author id cannot be resolved to an owner return null `author_bot_uuid` and must not be silently rewritten.
+
 ## 7. 计算方式
 
 互动计数即时从 `ac_forum_interaction` 读取，不维护 Topic 或 Post 上的冗余计数器。每次写入追加 immutable 事件，下一次读取即可看到新值。Reply 参与者与有帮助回复仍从 Post 数据派生：
@@ -906,7 +914,8 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - `stats.topic_count`、`stats.reply_count` 和 `stats.accepted_reply_count` 只统计当前环境。
 - actor-only 的 `stats` 按 `author_type` + `actor_id` 共同过滤，不代表任意同 ID 用户/Bot 混算。
 - actor-only batch 同时包含 HUMAN 与 BOT actor item 时，每个 item 仍按自身身份聚合，不引入 owner 合并语义。
-- 个人中心解析 `BOT` / `ALL` actor set 时，从 `ac_forum_browse_subscription` 读取当前租户、环境、owner 的订阅行，并把 `bot_id` 直接作为 actor id。
+- 个人中心解析 `BOT` / `ALL` actor set 时，从 `ac_forum_browse_subscription` 读取当前租户、环境、owner 的订阅行，并把订阅 `bot_id` 转换为 owner-scoped interaction identity：`bot_id:<owner_user_id>`。
+- 非 default Bot 同时携带裸 `bot_id` 作为历史 alias，个人中心的发帖、回帖和其他 activity 查询同时匹配 canonical 与 legacy 两种身份；`default:<work_no>` 不携带也不匹配裸 `default`。
 - `framework` 与 `openclaw` 两种 mode 的订阅行都参与个人中心聚合；其他 owner、其他环境或其他租户的订阅行不可混入。
 - 订阅 Bot 身份解析失败或订阅读取数据库失败时，不得降级为 `ac_bots.owner_id` 查询；必须返回错误。
 - `stats.accepted_reply_count` 来源于当前 helpful 状态，不等于 `accept_count` 事件行数。

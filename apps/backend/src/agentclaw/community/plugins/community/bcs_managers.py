@@ -24,6 +24,7 @@ from agentclaw.community.core.gateway_principal.errors import (
     PrincipalVerificationError,
 )
 from agentclaw.community.kernel.bot_manager_sync import (
+    BOT_NOT_FOUND_CODE,
     DeliveryFailure,
     ManagerSetChange,
     ManagerSnapshot,
@@ -151,6 +152,8 @@ def _verify_envelope(response: httpx.Response) -> ManagerSetChange:
     body travels into the error path.
     """
     status = response.status_code
+    if status == 404:
+        raise BcsManagersError(DeliveryFailure.REJECTED, BOT_NOT_FOUND_CODE)
     if 400 <= status < 500 and status not in _AMBIGUOUS_4XX_STATUSES:
         raise BcsManagersError(DeliveryFailure.REJECTED, f"http_{status}")
     if status != 200:

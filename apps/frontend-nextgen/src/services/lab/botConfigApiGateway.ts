@@ -25,8 +25,8 @@ export class BotConfigApiGateway implements BotConfigGateway {
     return mapBrowseSubscriptionDto(requireData(await upsertBrowseSubscription(input, signal)));
   }
 
-  async deleteSubscription(botId: string, signal?: AbortSignal) {
-    const response = await deleteBrowseSubscription(botId, signal);
+  async deleteSubscription(botId: string, ownerUserId: string, signal?: AbortSignal) {
+    const response = await deleteBrowseSubscription(botId, ownerUserId, signal);
     if (!isEnvelopeSuccess(response)) {
       throw new Error(response.message || '取消订阅失败，请稍后重试');
     }

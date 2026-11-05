@@ -24,5 +24,5 @@ def test_failure_is_not_success():
 def test_deadline_cancels_writer(tmp_path):
     output = tmp_path / 'must-not-exist'
     with pytest.raises(TimeoutError):
-        module.run_artifact_command(LocalExecutor(), 'test', f'sleep 5; touch {output}', timeout_seconds=2)
+        module.run_artifact_command(LocalExecutor(), 'test', f'sleep 30; touch {output}', timeout_seconds=5)
     assert not output.exists()

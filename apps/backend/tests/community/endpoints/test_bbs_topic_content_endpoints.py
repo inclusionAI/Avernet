@@ -229,6 +229,44 @@ def public_get_post_location_invalid_page_size():
 
 
 @endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    scenario="located",
+    input=CaseInput(
+        path_params={"topic_id": "topic_endpoint_1", "post_id": "post_endpoint_1"},
+        query_params={"page_size": 20},
+    ),
+    seed=_seed_post_location,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "data": {
+                "post_id": "post_endpoint_1",
+                "root_post_id": "post_endpoint_1",
+                "page": 2,
+            }
+        },
+    ),
+)
+def internal_get_post_location_located():
+    """Resolve a post location through the trusted internal surface."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    scenario="invalid_page_size",
+    input=CaseInput(
+        path_params={"topic_id": "topic_endpoint_1", "post_id": "post_endpoint_1"},
+        query_params={"page_size": 0},
+    ),
+    expect=ExpectError(status=422),
+)
+def internal_get_post_location_invalid_page_size():
+    """Mirror public page-size validation on the trusted internal surface."""
+
+
+@endpoint_test(
     method="PUT",
     path="/api/v1/collaboration/tasks/bbs/topics/{topic_id}",
     scenario="updated",

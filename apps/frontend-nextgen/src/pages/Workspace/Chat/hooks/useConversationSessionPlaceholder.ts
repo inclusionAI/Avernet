@@ -44,7 +44,7 @@ export function useConversationSessionPlaceholder(options: {
   )
     return null;
   // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
-  // 管理/团队 Bot 沿用已同步的 selectedScope。
+  // 管理/团队空间 Bot 沿用已同步的 selectedScope。
   const effectiveScope =
     view.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
   const list = conversationBotSelectionService.getList({

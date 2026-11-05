@@ -4,6 +4,7 @@
 import type { SessionView } from '@/domain/collaboration';
 import { useGroupChatHeaderPanels } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { act, renderHook } from '@testing-library/react';
@@ -56,6 +57,7 @@ function makePanelHandle() {
 beforeEach(() => {
   jest.clearAllMocks();
   useTaskConversationNavigationStore.getState().resetAll();
+  useTaskSessionAssociationStore.getState().reset();
   window.history.pushState({}, '', '/workspace/collaboration?group=g1&session=sess-1');
 });
 
@@ -172,6 +174,45 @@ it('toggleSidePane 打开按消息幂等重建 tabs、关闭走 closePanel；切
   // 复位后再次开合仍正常。
   act(() => result.current.toggleSidePane());
   expect(openTab).toHaveBeenCalledTimes(3);
+});
+
+it('TaskPanel-only 群会话在关闭后 Monitor 仍可点，并用 task tab 快照重开', () => {
+  const { ref: handle, openTab, closePanel } = makePanelHandle();
+  useTaskSessionAssociationStore.getState().setActiveSession('sess-1');
+  useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-1', ['task-1']);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('task-1', {
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+    closable: true,
+    params: { taskId: 'task-1' },
+  });
+
+  const { result } = renderHook(() =>
+    useGroupChatHeaderPanels({
+      userId: null,
+      session: makeSession(),
+      messages: makeMessages(),
+      panelRef: handle,
+      toggleFavorite: jest.fn(),
+    }),
+  );
+
+  expect(result.current.sidePaneDisabled).toBe(false);
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(1);
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+  });
+
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(2);
 });
 
 it('任务节点真实路由切群会话时保留 TaskPanel 的头部开合镜像态', () => {

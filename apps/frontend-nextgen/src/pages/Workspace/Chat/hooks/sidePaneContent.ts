@@ -44,7 +44,11 @@ const CARD_PANEL_KEY = 'aix-card-panel';
  * （不重挂内容、不抢焦点），tab 缺失时原样重建，且 openTab 自动展开面板、
  * 重建后 tab 必在，autoCloseWhenEmpty 不会再弹回。返回是否开出至少一个 tab。
  */
-export function reopenSidePaneTabsFromMessages(messages: ChatMessage[], panel: PanelHandle): boolean {
+export function reopenSidePaneTabsFromMessages(
+  messages: ChatMessage[],
+  panel: PanelHandle,
+  fallbackTab?: PanelTab | null,
+): boolean {
   let openedAny = false;
   for (const message of messages) {
     const content = message.content;
@@ -109,6 +113,11 @@ export function reopenSidePaneTabsFromMessages(messages: ChatMessage[], panel: P
         openedAny = true;
       }
     }
+  }
+
+  if (!openedAny && fallbackTab) {
+    panel.openTab(fallbackTab);
+    openedAny = true;
   }
   return openedAny;
 }

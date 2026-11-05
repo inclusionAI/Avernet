@@ -6,7 +6,7 @@ import type { CapabilitySetSkillView, CapabilitySetView } from '@/components/Wor
 import { botEditorController } from '@/services/backendApi/bots/botEditorController';
 
 /** 拉取 Bot 已激活能力集(过滤 is_active;默认集置顶,展示顺序与 botEditorService 同语义)。
- *  ownerId 透传 controller 可选语义(团队 Bot 实体必须由调用方显式传 bot.ownerId)。 */
+ *  ownerId 透传 controller 可选语义(团队空间 Bot 实体必须由调用方显式传 bot.ownerId)。 */
 export async function listActiveCapabilitySets(botId: string, ownerId?: string): Promise<CapabilitySetView[]> {
   const res = await botEditorController.listSkillSetResources(botId, ownerId);
   const activeSets: CapabilitySetView[] = (res.data ?? [])
