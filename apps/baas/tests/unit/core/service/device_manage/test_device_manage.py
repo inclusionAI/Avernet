@@ -789,7 +789,7 @@ class TestDefaultDeviceService:
             (ErrorCode.DEVICE_NOT_FOUND, True),
             (ErrorCode.DEVICE_DESTROY_FAILED, False),
             (ErrorCode.NOT_FOUND, False),
-            (ErrorCode.DEVICE_UNAVAILABLE, False),
+            (ErrorCode.DEVICE_UNAVAILABLE, True),
             (ErrorCode.PLATFORM_UNAVAILABLE, False),
             (ErrorCode.AUTH_FAILED, False),
             (ErrorCode.RATE_LIMITED, False),
@@ -829,21 +829,28 @@ class TestDefaultDeviceService:
             (ErrorCode.DEVICE_NOT_FOUND, "Device not found: sandbox 'x' not found"),
             (ErrorCode.DEVICE_NOT_FOUND, ""),
             (ErrorCode.DEVICE_NOT_FOUND, "does not exist"),
+            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
+            (ErrorCode.DEVICE_UNAVAILABLE, "connection error"),
+            (ErrorCode.DEVICE_UNAVAILABLE, ""),
         ],
         ids=[
             "device_not_found_typed",
             "device_not_found_empty_message",
             "device_not_found_absence_text",
+            "device_unavailable",
+            "device_unavailable_connection",
+            "device_unavailable_empty_message",
         ],
     )
     async def test_destroy_absent_sandbox_is_success(
         self, service, mock_repo, mock_paas_facade, mock_env, code, message
     ):
-        """DEVICE_NOT_FOUND is the provider's typed "sandbox is gone" signal.
+        """A device that is gone or unreachable is an idempotent destroy success.
 
-        Arca surfaces an SDK NotFoundException as ArcaSandboxNotFoundError,
-        which the PaaS adapter maps deterministically to DEVICE_NOT_FOUND, so
-        this code alone means there is no resource left to destroy.
+        DEVICE_NOT_FOUND is the typed SDK NotFoundException. DEVICE_UNAVAILABLE
+        is what a sandbox that has already gone down reports - it is not
+        reachable because it is no longer there - so the teardown is treated as
+        complete rather than failing the publish.
         """
         record = MagicMock(spec=DeviceRecord)
         record.id = 9
@@ -880,9 +887,8 @@ class TestDefaultDeviceService:
             (ErrorCode.DEVICE_DESTROY_FAILED, "sandbox destroyed"),
             (ErrorCode.DEVICE_DESTROY_FAILED, "sandbox not found"),
             (ErrorCode.DEVICE_DESTROY_FAILED, ""),
-            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
-            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox not found?"),
             (ErrorCode.PLATFORM_UNAVAILABLE, "not found endpoint down"),
+            (ErrorCode.PLATFORM_UNAVAILABLE, "connection refused"),
             (ErrorCode.PLATFORM_ERROR, "sandbox not found"),
             (ErrorCode.PLATFORM_ERROR, "internal server error"),
             (ErrorCode.NOT_FOUND, "does not exist"),
@@ -897,9 +903,8 @@ class TestDefaultDeviceService:
             "destroy_failed_absence_text_sandbox_destroyed",
             "destroy_failed_absence_text_not_found",
             "destroy_failed_empty_message",
-            "device_unavailable",
-            "unavailable_absence_text",
             "platform_unavailable",
+            "platform_unavailable_conn_refused",
             "platform_error_absence_text",
             "generic_platform_error",
             "bare_not_found_code",

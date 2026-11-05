@@ -128,22 +128,34 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
         missing.append(field_name)
 
 
+# Codes that mean the sandbox can be treated as gone on a destroy/stop path.
+#
+# DEVICE_NOT_FOUND is the Arca SDK's typed NotFoundException, which the SDK
+# plugin translates to ArcaSandboxNotFoundError and _arca_paas_service maps
+# deterministically to DEVICE_NOT_FOUND.
+#
+# DEVICE_UNAVAILABLE is included because a device whose sandbox has already
+# gone down surfaces as "not reachable" rather than "not found". Note that the
+# Arca adapter also emits it from its catch-all `except Exception` branch, so
+# this deliberately accepts that a local/transport failure is reported as a
+# successful teardown; the destroy/stop path already releases the device record
+# either way, and a warning is logged for every such case.
+_ABSENT_SANDBOX_CODES = frozenset(
+    {
+        ErrorCode.DEVICE_NOT_FOUND,
+        ErrorCode.DEVICE_UNAVAILABLE,
+    }
+)
+
+
 def _is_absent_sandbox_error(error_code: ErrorCode | None) -> bool:
     """Return True when a PaaS destroy error means the sandbox is already gone.
 
-    Classification is by error code only, never by message text. The Arca SDK
-    plugin translates an SDK ``NotFoundException`` to
-    ``ArcaSandboxNotFoundError``, which the PaaS adapter deterministically maps
-    to ``DEVICE_NOT_FOUND`` - that is the single provider-reported signal that
-    guarantees the sandbox does not exist.
-
-    Every other code stays a failure, even when its message happens to read
-    like absence: ``DEVICE_DESTROY_FAILED`` / ``PLATFORM_UNAVAILABLE`` /
-    ``DEVICE_UNAVAILABLE`` / ``AUTH_FAILED`` / ``RATE_LIMITED`` /
-    ``COMMAND_TIMEOUT`` all leave open the possibility that the sandbox is
-    still running, and releasing the device then would leak it silently.
+    Classification is by error code only, never by message text, so an
+    absence-sounding message under an unrelated code cannot release a device
+    that may still be running. See ``_ABSENT_SANDBOX_CODES``.
     """
-    return error_code == ErrorCode.DEVICE_NOT_FOUND
+    return error_code in _ABSENT_SANDBOX_CODES
 
 
 def _build_arca_detail_config(
