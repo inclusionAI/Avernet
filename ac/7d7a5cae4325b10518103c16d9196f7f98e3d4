@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_0e0389a35f491c::t_8b37b1382ea9d9 16-18,20-23
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_0e0389a35f491c::t_8b37b1382ea9d9 13,28-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac7d7a5cae4325b10518103c16d9196f7f98e3d4",
+  "prompts": {},
+  "sessions": {
+    "s_0e0389a35f491c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a56a-2741-7ad2-b03c-29b728d6311b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
