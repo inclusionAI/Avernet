@@ -44,6 +44,7 @@ from ._bot_run_utils import (
     CALLER_SANDBOX_META_KEY,
     build_caller_binding,
     build_chat_metadata,
+    parse_wait_result,
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
@@ -437,20 +438,7 @@ class BotRunRequestExecutor:
         attachments: list[Any] | None = None,
         session_pending: bool = False,
     ) -> None:
-        wait_result = True
-        if "ignore_result" in metadata:
-            raw = metadata["ignore_result"]
-            ignore = (
-                raw
-                if isinstance(raw, bool)
-                else (
-                    str(raw).strip().lower() == "true"
-                    if isinstance(raw, str)
-                    else bool(raw)
-                )
-            )
-            if ignore:
-                wait_result = False
+        wait_result = parse_wait_result(metadata)
 
         response = await bot_service.send_message(
             session_id=session_id,

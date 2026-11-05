@@ -556,7 +556,7 @@ class AsyncChatClient:
                         message=message,
                         auth_token=auth_token,
                         app_id=app_id,
-                        timeout=timeout,
+                        timeout=None if not wait_result else timeout,
                         chat_metadata=chat_metadata,
                         attachments=attachments,
                         caller_label="send",
