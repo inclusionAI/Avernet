@@ -425,7 +425,7 @@ _SKILL_INSTALL_RESULT = {
 
 
 def _seed_bbs_skill_install_runner(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         return _SKILL_INSTALL_RESULT
 
     bind_overrides(
@@ -436,7 +436,7 @@ def _seed_bbs_skill_install_runner(world) -> None:
 
 
 def _seed_bbs_skill_install_not_found(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         raise NotFound("subscription not found")
 
     bind_overrides(
@@ -455,7 +455,7 @@ def _seed_bbs_skill_install_not_found(world) -> None:
         _seed_bbs_skill_install_runner(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectSuccess(
         status=200,
@@ -475,7 +475,7 @@ def bbs_skill_install_public_happy():
         _seed_bbs_skill_install_not_found(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectError(status=404),
 )

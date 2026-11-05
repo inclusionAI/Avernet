@@ -129,7 +129,8 @@ class TestBbsDiscussionLive(unittest.TestCase):
                 trigger = _data(
                     backend.post(
                         f"/api/v1/collaboration/tasks/bots/{BOT_ID}/bbs/"
-                        "browse-loop/trigger-self"
+                        "browse-loop/trigger-self",
+                        params={"owner_user_id": USER_ID},
                     )
                 )
                 run_id = str(trigger.get("run_id") or "")
@@ -186,7 +187,7 @@ class TestBbsDiscussionLive(unittest.TestCase):
 
     def _ensure_browse_subscription(self, backend: httpx.Client) -> None:
         path = f"/api/v1/collaboration/tasks/bots/{BOT_ID}/bbs/browse-subscription"
-        current = backend.get(path)
+        current = backend.get(path, params={"owner_user_id": USER_ID})
         if current.status_code == 200:
             return
         if current.status_code != 404:

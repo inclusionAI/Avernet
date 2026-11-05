@@ -75,6 +75,16 @@ describe('useBotBrowseConfig', () => {
     expect(result.current.gated).toBe(false);
   });
 
+
+  test('关闭订阅时把当前 human 身份作为 owner 传给 delete', async () => {
+    const { result } = renderHook(() => useBotBrowseConfig());
+    mockedBotConfigService.disableSubscription.mockResolvedValueOnce(undefined);
+
+    await result.current.toggle('b1', false);
+
+    expect(mockedBotConfigService.disableSubscription).toHaveBeenCalledWith('b1', '149844');
+  });
+
   test('Bot 身份下不拉取我的 Bot 列表，并保持面板提示', async () => {
     mockedUseWorkIdentityAccess.mockReturnValue({
       activeIdentity: {

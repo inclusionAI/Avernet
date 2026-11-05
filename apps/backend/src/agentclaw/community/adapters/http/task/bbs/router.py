@@ -101,11 +101,24 @@ from agentclaw.community.core.task.forum.interaction.models import (
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
+
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
     enrich_personal_center_bot_display_names,
 )
+
+OwnerUserIdQuery = Annotated[
+    str,
+    Query(
+        min_length=1,
+        max_length=256,
+        description=(
+            "订阅发起人（Bot owner 工号）。default 等共享 Bot 按 owner 分别"
+            "寻址，因此单订阅读取、删除和手动触发都必须显式声明 owner。"
+        ),
+    ),
+]
 
 router = APIRouter(
     prefix="/api/v1/collaboration/tasks/bots/{bot_id}/bbs", tags=["bbs-internal"]
@@ -479,11 +492,15 @@ async def upsert_subscription_internal(
 @envelope_errors
 async def get_subscription_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[SubscriptionItem]:
     """查看当前 Bot 是否已订阅逛论坛。"""
-    sub = service.get_subscription(bot_id=bot_id)
+    sub = service.get_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     if sub is None:
         raise NotFound("subscription not found")
     return envelope(SubscriptionItem.from_record(sub), request)
@@ -493,6 +510,7 @@ async def get_subscription_internal(
 @envelope_errors
 async def delete_subscription_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
     cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
@@ -503,8 +521,11 @@ async def delete_subscription_internal(
     ),
 ) -> Envelope[SubscriptionDeleted]:
     """退出逛论坛订阅（不存在也返回 deleted=false，幂等）；同时卸下定时触发。"""
-    await provisioner.cancel_pending(bot_id=bot_id)
-    sub = service.get_subscription(bot_id=bot_id)
+    await provisioner.cancel_pending(bot_id=bot_id, owner_user_id=owner_user_id)
+    sub = service.get_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     if sub is not None:
         if sub.mode == BROWSE_MODE_OPENCLAW:
             await cron_manager.remove_cron(
@@ -515,7 +536,10 @@ async def delete_subscription_internal(
             )
         else:
             scheduler.unregister_bot(bot_id=bot_id)
-    deleted = service.delete_subscription(bot_id=bot_id)
+    deleted = service.delete_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     return envelope(SubscriptionDeleted(deleted=deleted), request)
 
 
@@ -612,15 +636,18 @@ async def list_subscriptions_internal(
 @envelope_errors
 async def trigger_skills_install_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """向已订阅的 Bot 重发一次 BBS skill 安装/自检消息。
 
-    输入只有 path 中的 product Bot id。owner 从持久化订阅读取，并由 service
-    层拼成 BaaS OpenAPI 的复合 Bot 身份，调用方不需要理解 BaaS host。
+    输入是 path 中的 product Bot id 和必填 owner query。runner 负责拼成 BaaS
+    OpenAPI 的复合 Bot 身份，调用方不需要理解 BaaS host。
     """
-    result = await runner.trigger_install_bbs_skills(bot_id=bot_id)
+    result = await runner.trigger_install_bbs_skills(
+        bot_id=bot_id, owner_user_id=owner_user_id
+    )
     return envelope(dict(result), request)
 
 
@@ -631,6 +658,7 @@ async def trigger_skills_install_internal(
 @envelope_errors
 async def trigger_framework_browse_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
@@ -640,7 +668,9 @@ async def trigger_framework_browse_internal(
     Bot 推送的 run/session 句柄,用于运维核对。
     """
     result = await runner.push_browse_once(
-        bot_id=bot_id, expected_mode=BROWSE_MODE_FRAMEWORK
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        expected_mode=BROWSE_MODE_FRAMEWORK,
     )
     return envelope(dict(result), request)
 
@@ -652,6 +682,7 @@ async def trigger_framework_browse_internal(
 @envelope_errors
 async def trigger_self_browse_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
@@ -662,7 +693,9 @@ async def trigger_self_browse_internal(
     这里只做单次触发验证。
     """
     result = await runner.push_browse_once(
-        bot_id=bot_id, expected_mode=BROWSE_MODE_OPENCLAW
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        expected_mode=BROWSE_MODE_OPENCLAW,
     )
     return envelope(dict(result), request)
 
@@ -674,11 +707,16 @@ async def trigger_self_browse_internal(
 @envelope_errors
 async def trigger_cron_register_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """通知 openclaw 订阅的 Bot 注册其本地 ``*/30`` cron(B 模式装配步骤)。"""
-    result = await runner.push_cron_event(bot_id=bot_id, action="register")
+    result = await runner.push_cron_event(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        action="register",
+    )
     return envelope(dict(result), request)
 
 
@@ -689,11 +727,16 @@ async def trigger_cron_register_internal(
 @envelope_errors
 async def trigger_cron_remove_internal(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """通知 openclaw 订阅的 Bot 移除其本地 bbs-browse cron(退出/降级)。"""
-    result = await runner.push_cron_event(bot_id=bot_id, action="remove")
+    result = await runner.push_cron_event(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        action="remove",
+    )
     return envelope(dict(result), request)
 
 
