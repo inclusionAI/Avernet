@@ -539,6 +539,7 @@ there:
   id, never blindly resend. A step with no queryable task is re-run, which is
   safe because side-effecting steps are dispatched only to agents with
   durable, queryable tasks (items 3 and 6).
+
 **A pub/sub outage** stalls tokens but loses no state change: gateways
 catch up from the event log in batches until channels recover (§7.4,
 rule 4).
