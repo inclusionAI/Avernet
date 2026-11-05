@@ -3,9 +3,11 @@
 // 无贯穿线），但语义取 spec 裁决（collaboration-sidebar）：群头像是「展开+直达」，
 // 不做收起态挂机径，也不设溢出封顶（群列表数量级远小于会话）。
 import { Button, IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
 import type { GroupView } from '@/domain/collaboration/types';
 import { ChevronRight, Plus, Users } from 'lucide-react';
 import { AvatarTile } from '../AvatarTile';
+import { GroupAvatarStack } from './GroupAvatarStack';
 
 export interface GroupSidebarCollapsedRailProps {
   groups: GroupView[];
@@ -44,6 +46,8 @@ export function GroupSidebarCollapsedRail({
         )}
         {groups.map((group) => {
           const selected = selectedGroupId === group.groupId;
+          const displayParticipants = getDisplayParticipants(group);
+          const totalCount = getParticipantDisplayCount(group.participantCount, displayParticipants);
           return (
             <Tooltip key={group.groupId}>
               <TooltipTrigger asChild>
@@ -58,11 +62,15 @@ export function GroupSidebarCollapsedRail({
                   className="relative h-9 w-9 rounded-full hover:bg-muted"
                   onClick={() => onOpenGroup(group.groupId)}
                 >
-                  <AvatarTile
-                    label={group.name}
-                    className="h-7 w-7 rounded-full"
-                    fallbackContent={<Users className="h-3.5 w-3.5" aria-hidden="true" />}
-                  />
+                  {displayParticipants.length > 0 ? (
+                    <GroupAvatarStack participants={displayParticipants} totalCount={totalCount} size={16} />
+                  ) : (
+                    <AvatarTile
+                      label={group.name}
+                      className="h-7 w-7 rounded-full"
+                      fallbackContent={<Users className="h-3.5 w-3.5" aria-hidden="true" />}
+                    />
+                  )}
                   {selected && (
                     <span
                       aria-hidden="true"

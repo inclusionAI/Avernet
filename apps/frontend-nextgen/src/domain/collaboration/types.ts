@@ -42,6 +42,13 @@ export interface ParticipantView {
   /** 消息可见域回显（只读；bot 恒为 full）。 */
   messageViewScope?: MessageViewScope;
 }
+/** 轻量成员摘要：列表接口已下发时优先展示；缺省时回退到完整成员详情。 */
+export interface ParticipantSummaryView {
+  actorId: string;
+  kind: 'human' | 'bot';
+  name: string;
+  avatarUrl?: string;
+}
 export interface SidePanelConfig {
   initializeSidePanel?: boolean;
   sidePanelId?: string;
@@ -62,6 +69,11 @@ export interface GroupView {
   kind: GroupKind;
   status: GroupStatus;
   participants: ParticipantView[];
+  /** 列表接口下发的轻量成员；缺省表示旧响应，展示时回退 participants。 */
+  participantSummaries?: ParticipantSummaryView[];
+  /** 内部加载标记：新列表为 false，完整详情为 true；缺省时沿用 participants.length 判断。
+   *  Group 头像兼容补拉只返回成员数组、不含完整群配置，不得置 true。不进入 wire 或授权契约。 */
+  participantDetailsLoaded?: boolean;
   sessions: SessionView[];
   lastMessageAt: number;
   createdAt: number;
@@ -98,6 +110,10 @@ export interface SessionView {
   kind: SessionKind;
   status: SessionStatus;
   participants: ParticipantView[];
+  /** 列表接口下发的轻量成员；缺省表示旧响应，展示时回退 participants。 */
+  participantSummaries?: ParticipantSummaryView[];
+  /** 内部加载标记：新列表为 false，完整详情为 true；缺省时沿用 participants.length 判断。 */
+  participantDetailsLoaded?: boolean;
   /** 会话成员总数（列表接口返回；未返回时可用 participants.length 兜底）。 */
   participantCount?: number;
   lastMessageAt: number;

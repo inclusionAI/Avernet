@@ -378,6 +378,132 @@ describe('useCollaborationPrivacy fixedBotId（BotWorkshop 通用配置弹窗形
   });
 });
 
+describe('useCollaborationPrivacy 在途读取与共享 Store 的过期隔离', () => {
+  const readyIdentity = () =>
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+  const overviewA: CollaborationPrivacyOverview = { ...overview, bots: [makeBot('bot-a', 'Bot A')] };
+  const overviewB: CollaborationPrivacyOverview = { ...overview, bots: [makeBot('bot-b', 'Bot B')] };
+
+  // 只 mock service，真实 Hook 与真实共享 Store 参与，deferred Promise 故意忽略 abort。
+  function mockDeferredLoads() {
+    const deferreds: Array<{
+      resolve: (value: CollaborationPrivacyOverview) => void;
+      reject: (reason: unknown) => void;
+    }> = [];
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockImplementation(
+      () =>
+        new Promise((resolve, reject) => {
+          deferreds.push({ resolve, reject });
+        }),
+    );
+    return { deferreds };
+  }
+
+  it('卸载后手动刷新迟到的成功与 finally 不改写已 reset 的共享 Store', async () => {
+    readyIdentity();
+    const { deferreds } = mockDeferredLoads();
+    const { result, unmount } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-a' }));
+    await waitFor(() => expect(deferreds).toHaveLength(1));
+    let manual!: Promise<void>;
+    act(() => {
+      manual = result.current.load();
+    });
+    await waitFor(() => expect(deferreds).toHaveLength(2));
+    unmount();
+    expect(useCollaborationPrivacyStore.getState().overview).toBeNull();
+    expect(useCollaborationPrivacyStore.getState().loading).toBe(true);
+
+    await act(async () => {
+      deferreds[1].resolve(overviewA);
+      await manual;
+    });
+
+    const state = useCollaborationPrivacyStore.getState();
+    expect(state.overview).toBeNull();
+    expect(state.error).toBeNull();
+    expect(state.loading).toBe(true);
+  });
+
+  it('卸载后手动刷新迟到的失败不改写已 reset 的共享 Store', async () => {
+    readyIdentity();
+    const { deferreds } = mockDeferredLoads();
+    const { result, unmount } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-a' }));
+    await waitFor(() => expect(deferreds).toHaveLength(1));
+    let manual!: Promise<void>;
+    act(() => {
+      manual = result.current.load();
+    });
+    await waitFor(() => expect(deferreds).toHaveLength(2));
+    unmount();
+
+    await act(async () => {
+      deferreds[1].reject(new Error('读取失败'));
+      await manual;
+    });
+
+    const state = useCollaborationPrivacyStore.getState();
+    expect(state.overview).toBeNull();
+    expect(state.error).toBeNull();
+    expect(state.loading).toBe(true);
+  });
+
+  it('切换固定 Bot 后旧 Bot 的迟到成功不覆盖新 Bot 的 overview', async () => {
+    readyIdentity();
+    const { deferreds } = mockDeferredLoads();
+    const { result, rerender } = renderHook(
+      ({ botId }: { botId: string }) => useCollaborationPrivacy({ fixedBotId: botId }),
+      { initialProps: { botId: 'bot-a' } },
+    );
+    await waitFor(() => expect(deferreds).toHaveLength(1));
+    rerender({ botId: 'bot-b' });
+    await waitFor(() => expect(deferreds).toHaveLength(2));
+
+    await act(async () => {
+      deferreds[1].resolve(overviewB);
+    });
+    await waitFor(() => expect(result.current.visibleBots.map((bot) => bot.id)).toEqual(['bot-b']));
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      deferreds[0].resolve(overviewA);
+      await Promise.resolve();
+    });
+
+    expect(result.current.overview?.bots.map((bot) => bot.id)).toEqual(['bot-b']);
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('切换固定 Bot 后旧 Bot 的迟到失败不污染新 Bot 的 error/loading', async () => {
+    readyIdentity();
+    const { deferreds } = mockDeferredLoads();
+    const { result, rerender } = renderHook(
+      ({ botId }: { botId: string }) => useCollaborationPrivacy({ fixedBotId: botId }),
+      { initialProps: { botId: 'bot-a' } },
+    );
+    await waitFor(() => expect(deferreds).toHaveLength(1));
+    rerender({ botId: 'bot-b' });
+    await waitFor(() => expect(deferreds).toHaveLength(2));
+
+    await act(async () => {
+      deferreds[1].resolve(overviewB);
+    });
+    await waitFor(() => expect(result.current.visibleBots.map((bot) => bot.id)).toEqual(['bot-b']));
+
+    await act(async () => {
+      deferreds[0].reject(new Error('旧 Bot 读取失败'));
+      await Promise.resolve();
+    });
+
+    expect(result.current.overview?.bots.map((bot) => bot.id)).toEqual(['bot-b']);
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
+});
+
 describe('useCollaborationPrivacy 外部 Bot 不查询公开风险', () => {
   it.each([true, false])('通用配置打开、重载及编辑对 Bot 可见性（isExternalBot=%s）', async (isExternalBot) => {
     mockedUseHumanIdentity.mockReturnValue({
@@ -399,5 +525,78 @@ describe('useCollaborationPrivacy 外部 Bot 不查询公开风险', () => {
 
     const expectedCalls = isExternalBot ? [] : [['bot-2', '900004', { public_scope: 'user' }]];
     expect(currentRisk.mock.calls).toEqual(expectedCalls);
+  });
+});
+
+describe('静默刷新（silent 选项，修复后自动刷新不闪整面板）', () => {
+  const readyHuman = () =>
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+
+  it('silent 刷新不再进入 loading，成功后照常更新 overview', async () => {
+    readyHuman();
+    let finish!: (value: typeof overviewWithBots) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.load(undefined, { silent: true });
+    });
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      finish(overviewWithBots);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.overview).toEqual(overviewWithBots);
+  });
+
+  it('silent 刷新失败时写 error，但不翻转 loading', async () => {
+    readyHuman();
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockRejectedValueOnce(new Error('网络异常'));
+    const { result } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      await result.current.load(undefined, { silent: true });
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.overview).toEqual(overviewWithBots);
+  });
+
+  it('silent 读取同样按 loadId 失效：卸载后迟到响应不写共享 Store', async () => {
+    readyHuman();
+    let late!: (value: typeof overviewWithBots) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockImplementationOnce(() => new Promise((resolve) => { late = resolve; }));
+    const { result, unmount } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.load(undefined, { silent: true });
+    });
+    unmount();
+    const storeAfterReset = useCollaborationPrivacyStore.getState();
+
+    await act(async () => {
+      late({ ...overviewWithBots, bots: [] as never });
+    });
+    const state = useCollaborationPrivacyStore.getState();
+    expect(state.overview).toEqual(storeAfterReset.overview);
+    expect(state.error).toEqual(storeAfterReset.error);
+    expect(state.loading).toEqual(storeAfterReset.loading);
   });
 });
