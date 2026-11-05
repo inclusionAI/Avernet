@@ -63,6 +63,8 @@
 省略 `skill_sets` 等价于空列表，会清空普通集并排除当前适用 Default 成员；需要保留的
 普通集必须完整声明，Default 必须显式写 `{name: default}`。省略 MCP `config` 或写 `{}`
 都会清除 Bot override，非空配置完整替换。升级前应补齐希望保留的内容，再 Apply。
+普通集合不能创建或改名为保留名 `default`。适用 Default 成员被排除后，可沿原权限与资产
+归属规则显式 Direct 控制或加入普通集；恢复 Default 时若该成员已被占用，整组能力会拒绝。
 
 没有 Manifest 记录时不清理能力。Genome 的旧 Direct Skills/MCP 目标继续保留集合和
 Default 的不参与范围，本期不扩充 Genome schema 或迁移历史 revision ID。
@@ -359,7 +361,9 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 能力共用一个 `capabilities` 类别：Direct Skills、SkillSet/Default 和 MCP 在同一次解析、规划中校验。
 其中一个编译或解析失败时，能力整组不写；`identity`、`resources` 等其他类别继续。
 写入阶段按共享资产准备、本地上传、Set/Default 关系、Direct Skills、MCP、Local 清理执行。
-这些步骤不构成跨资产和 Runtime 的整体事务；后续失败停止能力内剩余步骤，已经提交的 Bot 写入可使报告为 `PARTIAL`。
+这些步骤不构成跨资产和 Runtime 的整体事务；后续失败停止能力内剩余步骤，
+本轮实际改变并确认提交的 Bot 写入可使报告为 `PARTIAL`。写入异常沿既有保守报告，
+不保证逐项保留已成功条目，也不会把未执行的删除报为完成。
 
 ### 3.5 secret 永远不进清单
 
