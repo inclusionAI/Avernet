@@ -237,6 +237,11 @@ class DeviceRepository(
                     or_(BotModel.entity_id == owner_id, BotModel.owner_id == owner_id),
                     BotModel.is_delete == 0,
                     self._bot_env(),
+                    # Exclude STOPPED/FAILED bindings: a stopped or failed device
+                    # cannot serve requests. The NULL guard keeps bots *without*
+                    # a binding (outer join → all EntityDeviceBinding columns
+                    # NULL) from being excluded by the status check.
+                    or_(EntityDeviceBinding.id == None, EntityDeviceBinding.status.notin_(["STOPPED", "FAILED"])),
                 )
                 .limit(2)
                 .all()
