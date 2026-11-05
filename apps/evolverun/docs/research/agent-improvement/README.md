@@ -21,6 +21,8 @@ check.
 - [`rsi/outer-loop-integration.md`](rsi/outer-loop-integration.md): how an
   outer improvement loop can exchange evidence with the existing Bot Genome,
   evaluation, and promotion boundaries.
+- [`rsi/candidate-version-binding.md`](rsi/candidate-version-binding.md): evidence
+  for binding harness, model, environment, and observed execution identities.
 
 The accepted decisions remain authoritative:
 
