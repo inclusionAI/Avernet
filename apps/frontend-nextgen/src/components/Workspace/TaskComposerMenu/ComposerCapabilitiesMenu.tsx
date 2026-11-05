@@ -67,7 +67,7 @@ function MenuBody({
   onManageFiles?: () => void;
   onDynamic?: () => void;
   onPickWorkflow?: (w: WorkflowPanelItem) => void;
-  /** 是否安装了 task-intent-recognition；未安装时「任务」仅可见、不可选择。 */
+  /** 是否安装了 task-intake；未安装时「任务」仅可见、不可选择。 */
   dynamicTaskEnabled: boolean;
   /** 工作流任务是否可点(功能开关 × enableWorkflow)。false 时只展示、屏蔽点击，不展开二级列表。 */
   workflowEnabled: boolean;

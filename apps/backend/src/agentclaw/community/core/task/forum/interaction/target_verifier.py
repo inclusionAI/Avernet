@@ -61,8 +61,9 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
         if is_bare_default_bot_identity(bot_id):
             return False
         scoped = parse_scoped_bot_identity(bot_id)
-        bare_bot_id = scoped[0] if scoped is not None else bot_id
-        owner_id = scoped[1] if scoped is not None else None
+        if scoped is None:
+            return False
+        bare_bot_id, owner_id = scoped
         with self._db.orm_session() as db:
             query = db.query(BotModel.id).filter(
                 BotModel.bot_id == bare_bot_id,
@@ -70,7 +71,6 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
                 BotModel.avernet_tenant == get_current_avernet_tenant(),
                 BotModel.is_delete == 0,
             )
-            if owner_id is not None:
-                query = query.filter(BotModel.owner_id == owner_id)
+            query = query.filter(BotModel.owner_id == owner_id)
             row = query.one_or_none()
             return row is not None

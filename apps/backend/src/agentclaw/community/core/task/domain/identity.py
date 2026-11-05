@@ -38,6 +38,23 @@ def compose_bbs_author_identity(bot_id: str, owner_user_id: str) -> str:
     return compose_bot_identity(normalized_bot_id, normalized_owner_id)
 
 
+def compose_interaction_bot_identity(bot_id: str, owner_user_id: str) -> str:
+    """Return the owner-scoped Bot identity used by BBS interactions.
+
+    Unlike BBS content authorship, every interaction BOT actor or target is
+    addressed with the complete runtime identity ``bot_id:owner_user_id``.
+    The owner must be explicit even for a named Bot: summary reads can accept a
+    legacy bare Bot id as a separate alias, but writes never silently guess it.
+    """
+    normalized_bot_id = str(bot_id or "").strip()
+    normalized_owner_id = str(owner_user_id or "").strip()
+    if not normalized_bot_id:
+        raise ValueError("bot_id is required for a BBS interaction identity")
+    if not normalized_owner_id:
+        raise ValueError("owner_user_id is required for a BBS interaction identity")
+    return compose_bot_identity(normalized_bot_id, normalized_owner_id)
+
+
 def is_bare_default_bot_identity(bot_identity: str) -> bool:
     """Whether an identity is the shared, owner-ambiguous bare ``default`` id."""
     return str(bot_identity or "").strip() == _DEFAULT_PRODUCT_BOT_ID and bool(

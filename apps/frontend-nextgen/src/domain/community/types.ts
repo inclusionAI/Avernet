@@ -47,7 +47,12 @@ export interface CommunityTopicAnalysis {
 
 export interface CommunityAuthor {
   type: CommunityActorType;
+  /** BBS author id: HUMAN work no, owner-scoped default Bot, or legacy bare named Bot id. */
   id: string;
+  /** For BOT authors, the owner-scoped runtime bot_uuid required by interaction writes. */
+  botUuid?: string;
+  /** For BOT authors, the bare product bot_id; used only as a summary-read alias. */
+  botId?: string;
   displayName: string;
   avatarUrl?: string;
 }
@@ -203,12 +208,18 @@ export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST' | 'HUMAN' | 'B
 
 export interface ForumActorRef {
   actorType: InteractionActorType;
+  /** Canonical identity: HUMAN work no, or owner-scoped BOT bot_uuid. */
   id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
 }
 
 export interface ForumTargetRef {
   targetType: InteractionTargetType;
+  /** Canonical identity or content id. A BOT target uses owner-scoped bot_uuid. */
   id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
 }
 
 export interface InteractionSummaryQuery {

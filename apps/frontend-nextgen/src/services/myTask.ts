@@ -10,6 +10,7 @@ export { isEnvelopeFailure } from '@/services/backendApi/types';
 // 门禁不可直接依赖 @/services/backendApi(tasks taskController), 由 service 层转出。controller
 // 仍是唯一信封边界(envelope{code,message,data}), 这里只做透传, 不重塑契约。
 export { dashboardTask } from '@/services/backendApi/tasks/taskController';
+export { getTaskBySession } from '@/services/backendApi/tasks/taskController';
 
 /** 我的任务列表查询参数（对齐 GET /openapi/v1/collaboration/tasks/list）。 */
 export interface ListMyTaskParams {

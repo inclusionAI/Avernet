@@ -41,9 +41,9 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     expect(mockedMatch.matchTaskConfig).not.toHaveBeenCalled();
   });
 
-  it('属主 bot(combotId 无 owner 尾)走技能列表,命中 task-intent-recognition → true', async () => {
+  it('属主 bot(combotId 无 owner 尾)走技能列表,命中 task-intake → true', async () => {
     mocked.listBotSkillsByBot.mockResolvedValue(
-      skillsEnvelope([{ skill_id: 's1', name: 'task-intent-recognition', active: true }]),
+      skillsEnvelope([{ skill_id: 's1', name: 'task-intake', active: true }]),
     );
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'bot-main',

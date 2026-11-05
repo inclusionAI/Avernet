@@ -2,11 +2,22 @@
  * @jest-environment jsdom
  */
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { beforeEach, expect, it, jest } from '@jest/globals';
+
+const mockGetTaskBySession = jest.fn();
+const mockListMyTasks = jest.fn();
+
+jest.mock('@/services/myTask', () => ({
+  getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
+  isEnvelopeFailure: (result?: { code?: number }) => result?.code !== 0,
+  listMyTasks: (...args: unknown[]) => mockListMyTasks(...args),
+  normalizeMyTaskPage: (data: unknown) => ({ items: Array.isArray(data) ? data : [], total: 0, page: 1, pageSize: 10 }),
+}));
 import { sessionHasSidePaneContent, useChatHeaderPanels } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import { beforeEach, expect, it, jest } from '@jest/globals';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
   return {
@@ -39,7 +50,7 @@ function makePanelMessages(): ChatMessage[] {
   return [...makeMessages(), PANEL_MESSAGE] as never;
 }
 
-function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.RefObject<PanelHandle | null> }) {
+function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.RefObject<PanelHandle | null>; userId?: string | null }) {
   const openTab = jest.fn();
   const closePanel = jest.fn();
   const handle = { openTab, closePanel, openPanel: jest.fn(), closePanelForce: jest.fn() } as unknown as PanelHandle;
@@ -51,7 +62,7 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
       messages: overrides.messages ?? makeMessages(),
       panelRef: overrides.panelRef ?? ({ current: handle } as React.RefObject<PanelHandle | null>),
       section: 'managed' as const,
-      userId: null,
+      userId: overrides.userId ?? null,
       botId: 'bot-1',
       toggleFavorite: jest.fn().mockResolvedValue(true),
       favoritePending: jest.fn().mockReturnValue(false),
@@ -65,7 +76,33 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
 beforeEach(() => {
   jest.clearAllMocks();
   useTaskConversationNavigationStore.getState().resetAll();
+  useTaskSidePanelStore.getState().resetAll();
+  mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
+  mockListMyTasks.mockResolvedValue({ ok: true, data: [] });
   window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
+});
+
+it('打开已存在的单 bot 会话时 by_session 命中即恢复任务副屏', async () => {
+  const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
+  mockGetTaskBySession.mockResolvedValue({
+    ok: true,
+    data: {
+      task_id: 'task-root',
+      owner_user_id: 'u1',
+      node_id: 'task-root',
+    },
+  });
+
+  renderHook(() => useChatHeaderPanels(options));
+
+  await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+  expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
+  expect(mockListMyTasks).not.toHaveBeenCalled();
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-root',
+    type: 'taskPanel.TaskLoopView',
+  });
+  expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-root');
 });
 
 it('定位历史消息时收起覆盖面板，露出会话中的高亮消息', () => {
