@@ -15,10 +15,21 @@ through `DesiredStateCompiler`:
   in the content store;
 - the **Genome Registry** (`core/bot_genome/compile.py`) compiles a revision.
 
-The engine never reads a Manifest document and never fetches: every file in
-a desired state is already in the content store, named by digest. That is
-what lets a revision be delivered with no Manifest document in between
-(RSI-04) and what keeps a grammar change out of the materialisers.
+The engine never reads a Manifest document. A compiled file names content
+already in the content store by digest; a first public Center reference may
+need read-only preview during capability resolution. The private
+`fetch_budget` leaf owns one 500 MiB / 300 second allowance per execution.
+`ApplyRunService` opens it across compile, orchestration and delivery finish
+(and across compile and plan for dry-run). `CompileSession` reuses it; a
+standalone compile creates its own bounded ledger. Public preview consumers
+check `current_fetch_budget()` before acquisition, charge actual downloaded
+bytes and check exhaustion again. Ready references require no download and
+consume no bytes. Nested executions get a fresh allowance, then restore
+their caller; sibling asyncio executions stay isolated and `to_thread`
+shares the active ledger. No budget travels in DesiredState, ApplyContext
+or persisted reports. Manifest's old budget and total-limit imports remain
+compatibility re-exports. A revision still needs no Manifest document
+(RSI-04), and grammar remains outside the materialisers.
 
 A producer can also subscribe to how its applies end (`completion.py`): a
 second map keyed by state kind, beside the compilers. Every terminal path of
@@ -67,7 +78,7 @@ starts from.
 ## Context Boundary
 
 ```yaml
-purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the six materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome) and never by a document or a fetch.
+purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the six materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome), with an execution-scoped content-fetch allowance and no document parsing.
 provides:
   - CapabilityDeclaration  # one aggregate target, prefixed child report identities
   - DesiredCapabilities
@@ -76,6 +87,8 @@ provides:
   - CenterSkillRef
   - CenterSkillByCode
   - CURRENT_CATEGORIES  # active vocabulary; historical Skills/MCP are decode-only
+  - ApplyFetchBudget  # fetch_budget leaf: execution-scoped content allowance
+  - current_fetch_budget
   - DesiredState  # the typed input; one Declaration per construct, None when not declared
   - Declaration
   - EntryFailure
