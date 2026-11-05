@@ -1,0 +1,32 @@
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_b25382298b2a54::t_a914873dc67052 4,14-15,27-30
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_b25382298b2a54::t_3a2f5e5b0fcb13 41-43
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/http_clients.rs
+  s_b25382298b2a54::t_bc00937ae3c173 1-98,100-128,130-149,151,154-193,195-216,218-228,230-244
+  s_b25382298b2a54::t_ed6f50d88a4408 99,129,150,152-153,194,217,229
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_b25382298b2a54::t_a914873dc67052 1-57
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_b25382298b2a54::t_a914873dc67052 38,66-67,129,189-217,225,250-252,279-280
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_b25382298b2a54::t_a914873dc67052 23,27
+apps/bcs/Cargo.lock
+  s_b25382298b2a54::t_a178fc616ce022 460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f02bf50ebb6be814f3c00f7cd8d3403da463159d",
+  "prompts": {},
+  "sessions": {
+    "s_b25382298b2a54": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a984-23f2-7ec0-a706-9456f7544a6d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

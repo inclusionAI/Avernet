@@ -1,0 +1,86 @@
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/otel.rs
+  s_af7e4aa7877e04::t_fe142830c767b0 1-25
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_af7e4aa7877e04::t_f076e9e0564591 46-50
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_af7e4aa7877e04::t_2214ac38b70183 36-47,50-56,59,68-71
+  s_af7e4aa7877e04::t_499c13d117e250 48-49
+  s_af7e4aa7877e04::t_dcaef8617423a4 57-58
+  s_af7e4aa7877e04::t_4590b44ae16cbb 72-74
+apps/bcs/crates/plugins/bcs-storage-baas/tests/tracing_scope.rs
+  s_af7e4aa7877e04::t_de82d76f971add 18
+  s_af7e4aa7877e04::t_fc24334b9fc563 4
+  s_af7e4aa7877e04::t_00a32fc92bf02f 15
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/http_clients.rs
+  s_af7e4aa7877e04::t_f5e0de05291889 13,38,122,208
+  s_af7e4aa7877e04::t_00a32fc92bf02f 31,37
+  s_af7e4aa7877e04::t_815edb16280da0 34
+  s_af7e4aa7877e04::t_fc24334b9fc563 5
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_hook.rs
+  s_af7e4aa7877e04::t_f076e9e0564591 125,144
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  s_af7e4aa7877e04::t_00a32fc92bf02f 54
+  s_af7e4aa7877e04::t_f076e9e0564591 49-51,55
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_af7e4aa7877e04::t_90a83f979867c6 49-52,89-90
+  s_af7e4aa7877e04::t_2214ac38b70183 6-7,17-48,63-65,70-81
+  s_af7e4aa7877e04::t_20b93981ca951f 82
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_af7e4aa7877e04::t_a934cb70b5688f 16-17,36-46,51-55,62,90-91,98-105,116-119
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_af7e4aa7877e04::t_099f1a137863b0 50-59
+apps/bcs/crates/adapters/http/bcs-http/src/gateway_trace.rs
+  s_af7e4aa7877e04::t_499c13d117e250 79
+  s_af7e4aa7877e04::t_fe142830c767b0 78,80-81
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/lib.rs
+  s_af7e4aa7877e04::t_fe142830c767b0 8-14,37,50-51,53-59
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/routes.rs
+  s_af7e4aa7877e04::t_f5e0de05291889 1-39
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_af7e4aa7877e04::t_fc24334b9fc563 4
+  s_af7e4aa7877e04::t_00a32fc92bf02f 25,27
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_af7e4aa7877e04::t_099f1a137863b0 652,657
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/blocking.rs
+  s_af7e4aa7877e04::t_00a32fc92bf02f 22
+  s_af7e4aa7877e04::t_f076e9e0564591 17-19,23
+apps/bcs/crates/adapters/http/bcs-http/tests/network_tracing_otel.rs
+  s_af7e4aa7877e04::t_499c13d117e250 290-317
+  s_af7e4aa7877e04::t_4ee70574f09d50 1-30,32,43-182,184-200,202-216,218-242,244
+  s_af7e4aa7877e04::t_ae9dfadc39c872 318-362
+  s_af7e4aa7877e04::t_de7e6152055e26 31,33-42,183,201,217,243
+  s_af7e4aa7877e04::t_dcaef8617423a4 245-289
+apps/bcs/crates/services/bcs-message-flow/Cargo.toml
+  s_af7e4aa7877e04::t_f076e9e0564591 18
+  s_af7e4aa7877e04::t_de7e6152055e26 43-47
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_af7e4aa7877e04::t_f5e0de05291889 57-59
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_tracing_tests.rs
+  s_af7e4aa7877e04::t_710f8b94dd3a8e 139
+  s_af7e4aa7877e04::t_7b5ffa06b84054 82
+  s_af7e4aa7877e04::t_099f1a137863b0 1,8-10,62-63,78-81,83-113,115-119,130-132,135,137,141-144,154,156-157
+  s_af7e4aa7877e04::t_a75aeb9412c399 2-7,11-61,64-77,114,120-129,133-134,136,138,140,145-153,155,158-159
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_hook_tests.rs
+  s_af7e4aa7877e04::t_de7e6152055e26 6-8
+apps/bcs/crates/auxiliary/bcs-network-tracing/Cargo.toml
+  s_af7e4aa7877e04::t_fe142830c767b0 10,17-19
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/conformance.rs
+  s_af7e4aa7877e04::t_fc24334b9fc563 6
+  s_af7e4aa7877e04::t_00a32fc92bf02f 17,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8acbb37baa23bae4c4c5024f15d55168f39bbc94",
+  "prompts": {},
+  "sessions": {
+    "s_af7e4aa7877e04": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9a1-4d83-7d53-9a74-f03170cbacd0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
