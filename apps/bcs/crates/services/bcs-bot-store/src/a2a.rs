@@ -136,6 +136,8 @@ pub(crate) fn validate_registration_card(bot:&bcs_service_api::bot_provider::Bot
     bcs_service_api::types::a2a_bot::a2a_management::source_agent(&card.agent_card)?;
     Ok(())
 }
+// The sole caller inserts a freshly serialized Bot row earlier in the same
+// transaction; existing rows must instead use the validated write_card path.
 pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResult<Vec<bcs_db_api::DbTransactionStep>> {
     let name=bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(error)?;
     Ok(vec![bcs_db_api::DbTransactionStep::ExecuteChecked {statement:DbStatement::with_params(
