@@ -135,25 +135,37 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
 # deterministically to DEVICE_NOT_FOUND.
 #
 # DEVICE_UNAVAILABLE is included because a device whose sandbox has already
-# gone down surfaces as "not reachable" rather than "not found". Note that the
-# Arca adapter also emits it from its catch-all `except Exception` branch, so
-# this deliberately accepts that a local/transport failure is reported as a
-# successful teardown; the destroy/stop path already releases the device record
-# either way, and a warning is logged for every such case.
+# gone down surfaces as "not reachable" rather than "not found".
+#
+# DEVICE_DESTROY_FAILED is the default code for destroy/stop and is what the
+# remaining provider failures arrive as. Arca's connect_sync_sandbox collapses
+# every connect failure - transport error, not-running status, even a 404 - into
+# a bare SandboxException that _translate_sdk_exception maps to
+# ArcaSandboxError, which the adapter then reports as DEVICE_DESTROY_FAILED.
+# A sandbox that cannot be connected to is a sandbox whose teardown is done, so
+# that landing here is folded into the same idempotent success.
+#
+# Collectively these make every destroy/stop path report success: the device
+# record is released and soft-deleted regardless, and a warning logs the code
+# and message so a sandbox that turns out to be alive stays traceable in logs
+# and CDO. CREATE / UPDATE / RESTART / SCALE paths are unaffected; they do not
+# use this classifier.
 _ABSENT_SANDBOX_CODES = frozenset(
     {
         ErrorCode.DEVICE_NOT_FOUND,
         ErrorCode.DEVICE_UNAVAILABLE,
+        ErrorCode.DEVICE_DESTROY_FAILED,
     }
 )
 
 
 def _is_absent_sandbox_error(error_code: ErrorCode | None) -> bool:
-    """Return True when a PaaS destroy error means the sandbox is already gone.
+    """Return True when a PaaS destroy/stop error counts as a completed teardown.
 
     Classification is by error code only, never by message text, so an
     absence-sounding message under an unrelated code cannot release a device
-    that may still be running. See ``_ABSENT_SANDBOX_CODES``.
+    that may still be running. See ``_ABSENT_SANDBOX_CODES`` for why each code
+    qualifies.
     """
     return error_code in _ABSENT_SANDBOX_CODES
 

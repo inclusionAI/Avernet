@@ -671,9 +671,9 @@ class TestDefaultDeviceService:
     ):
         """A STOPPED device with a genuine provider failure still fails.
 
-        Releasing a STOPPED device must not blanket-succeed: if the provider
-        reports a real error the sandbox state is unknown, so the publish must
-        surface it rather than claim success.
+        Releasing a STOPPED device must not blanket-succeed: an error that is
+        not a completion signal (here a timeout) means the teardown outcome is
+        unknown, so the publish must surface it rather than claim success.
         """
         record = MagicMock(spec=DeviceRecord)
         record.id = 8
@@ -692,9 +692,7 @@ class TestDefaultDeviceService:
             platform_type="ARCA",
             template_id=1,
             paas_device_id="sb-stopped-bad",
-            original_error=PaasError(
-                ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"
-            ),
+            original_error=PaasError(ErrorCode.COMMAND_TIMEOUT, "timed out"),
         )
 
         result = await service.destroy_device_by_uuid(
@@ -703,7 +701,7 @@ class TestDefaultDeviceService:
 
         assert result.success is False
         assert result.error_message is not None
-        assert "connection refused" in result.error_message
+        assert "timed out" in result.error_message
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -787,7 +785,7 @@ class TestDefaultDeviceService:
         "code,expected",
         [
             (ErrorCode.DEVICE_NOT_FOUND, True),
-            (ErrorCode.DEVICE_DESTROY_FAILED, False),
+            (ErrorCode.DEVICE_DESTROY_FAILED, True),
             (ErrorCode.NOT_FOUND, False),
             (ErrorCode.DEVICE_UNAVAILABLE, True),
             (ErrorCode.PLATFORM_UNAVAILABLE, False),
@@ -832,6 +830,16 @@ class TestDefaultDeviceService:
             (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
             (ErrorCode.DEVICE_UNAVAILABLE, "connection error"),
             (ErrorCode.DEVICE_UNAVAILABLE, ""),
+            (ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"),
+            (
+                ErrorCode.DEVICE_DESTROY_FAILED,
+                "Failed to connect sync sandbox, sandbox id: sb-1",
+            ),
+            (
+                ErrorCode.DEVICE_DESTROY_FAILED,
+                "sandbox is not running, status: STOPPED",
+            ),
+            (ErrorCode.DEVICE_DESTROY_FAILED, ""),
         ],
         ids=[
             "device_not_found_typed",
@@ -840,17 +848,22 @@ class TestDefaultDeviceService:
             "device_unavailable",
             "device_unavailable_connection",
             "device_unavailable_empty_message",
+            "destroy_failed_connection_refused",
+            "destroy_failed_unreachable_sandbox",
+            "destroy_failed_not_running",
+            "destroy_failed_empty_message",
         ],
     )
     async def test_destroy_absent_sandbox_is_success(
         self, service, mock_repo, mock_paas_facade, mock_env, code, message
     ):
-        """A device that is gone or unreachable is an idempotent destroy success.
+        """A teardown that cannot reach the sandbox is reported as complete.
 
         DEVICE_NOT_FOUND is the typed SDK NotFoundException. DEVICE_UNAVAILABLE
-        is what a sandbox that has already gone down reports - it is not
-        reachable because it is no longer there - so the teardown is treated as
-        complete rather than failing the publish.
+        is an unreachable sandbox. DEVICE_DESTROY_FAILED is what Arca's
+        connect_sync_sandbox collapses every connect failure into (transport
+        error, not-running status, even a 404), so a sandbox that cannot be
+        connected to is treated as already torn down.
         """
         record = MagicMock(spec=DeviceRecord)
         record.id = 9
@@ -882,11 +895,6 @@ class TestDefaultDeviceService:
     @pytest.mark.parametrize(
         "code,message",
         [
-            (ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"),
-            (ErrorCode.DEVICE_DESTROY_FAILED, "sandbox 'x' does not exist"),
-            (ErrorCode.DEVICE_DESTROY_FAILED, "sandbox destroyed"),
-            (ErrorCode.DEVICE_DESTROY_FAILED, "sandbox not found"),
-            (ErrorCode.DEVICE_DESTROY_FAILED, ""),
             (ErrorCode.PLATFORM_UNAVAILABLE, "not found endpoint down"),
             (ErrorCode.PLATFORM_UNAVAILABLE, "connection refused"),
             (ErrorCode.PLATFORM_ERROR, "sandbox not found"),
@@ -898,11 +906,6 @@ class TestDefaultDeviceService:
             (ErrorCode.COMMAND_TIMEOUT, "timed out"),
         ],
         ids=[
-            "destroy_failed_conn_refused",
-            "destroy_failed_absence_text_does_not_exist",
-            "destroy_failed_absence_text_sandbox_destroyed",
-            "destroy_failed_absence_text_not_found",
-            "destroy_failed_empty_message",
             "platform_unavailable",
             "platform_unavailable_conn_refused",
             "platform_error_absence_text",
@@ -917,7 +920,7 @@ class TestDefaultDeviceService:
     async def test_destroy_real_failure_is_not_success(
         self, service, mock_repo, mock_paas_facade, mock_env, code, message
     ):
-        """Only DEVICE_NOT_FOUND means absent; everything else stays a failure.
+        """Codes outside the completion set still report a failed teardown.
 
         Message text is deliberately ignored: an absence-sounding message under
         another code (or under DEVICE_NOT_FOUND's sibling NOT_FOUND) does not
