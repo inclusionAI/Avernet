@@ -95,6 +95,49 @@ def test_success_has_stage_timings_and_no_query_or_card(timing_logs):
     assert "caller" not in json.dumps(logs)
 
 
+def test_progress_shows_input_branch_counts_and_returned_ids(caplog, timing_logs):
+    app = CatalogSearchApplication(
+        HybridRetrievalService(
+            index=Index(), embedding=Embedding(), reranker=Reranker()
+        ),
+        filter_fields=frozenset({"resource_type"}),
+        trace_id_provider=lambda: "incoming",
+    )
+    query = '查"账单" 13800138000'
+    asyncio.run(
+        app.execute(
+            SearchCommand(query, 1, "search", {"resource_type": ("agent",)}),
+            VerifiedIdentity("caller", None),
+        )
+    )
+    timing_logs()
+    records = [
+        json.loads(r.message) for r in caplog.records if r.name == "search_core.events"
+    ]
+    progress = {r["stage"]: r for r in records if r["event"] == "search_progress"}
+    assert progress["received"]["query"] == '查"账单" [redacted]'
+    assert progress["received"]["filters"] == {"resource_type": ["agent"]}
+    assert progress["vector"]["raw_count"] == progress["keyword"]["raw_count"] == 1
+    assert (
+        progress["recall_merge"]["vector_count"]
+        == progress["recall_merge"]["keyword_count"]
+        == 1
+    )
+    assert progress["fusion"]["candidate_count"] == 1
+    assert (
+        progress["reranker"]["input_count"] == progress["reranker"]["result_count"] == 1
+    )
+    final = next(r for r in records if r["event"] == "search_steps")
+    assert final["results"] == [
+        {"rank": 1, "item_id": "a", "score": 0.8, "score_source": "reranker"}
+    ]
+    assert all(
+        r["request_id"] == final["request_id"] and r["trace_id"] == "incoming"
+        for r in progress.values()
+    )
+    assert "private card" not in json.dumps(records)
+
+
 def test_trace_id_is_captured_before_background_log_flush(timing_logs):
     active_trace = ContextVar("caller_trace", default="")
     service = CatalogSearchApplication(

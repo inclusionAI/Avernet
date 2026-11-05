@@ -119,8 +119,8 @@ class HybridRetrievalService:
                     raise _StageFailure("embedding_unavailable")
                 query_vector = tuple(vector)
                 stage["dimension"] = len(vector)
-            with stage_timing("vector"):
-                return await self._call(
+            with stage_timing("vector") as stage:
+                hits = await self._call(
                     "vector",
                     self._index.vector_search,
                     vector,
@@ -128,12 +128,14 @@ class HybridRetrievalService:
                     request.filters,
                     request.allowed_ids,
                 )
+                stage["raw_count"] = len(hits)
+                return hits
 
         async def keyword():
             if not self._keyword_enabled:
                 return None
-            with stage_timing("keyword"):
-                return await self._call(
+            with stage_timing("keyword") as stage:
+                hits = await self._call(
                     "keyword",
                     self._index.keyword_search,
                     request.query,
@@ -141,6 +143,8 @@ class HybridRetrievalService:
                     request.filters,
                     request.allowed_ids,
                 )
+                stage["raw_count"] = len(hits)
+                return hits
 
         with stage_timing("recall") as stage:
             results = await asyncio.gather(
@@ -255,6 +259,7 @@ class HybridRetrievalService:
         if self._reranker is not None and ranking:
             try:
                 with stage_timing("reranker") as stage:
+                    stage["input_count"] = len(ranking)
                     reranked = await self._call(
                         "reranker",
                         self._reranker.rerank,
@@ -283,7 +288,7 @@ class HybridRetrievalService:
                     scores = [(r.candidate_id, r.score) for r in reranked]
                     reranker_scores = _stage_scores(scores)
                     score_source = "reranker"
-                    stage.update(input_count=len(ranking), result_count=len(scores))
+                    stage["result_count"] = len(scores)
             except Exception as exc:
                 if not self._allow_partial:
                     raise SearchUnavailable("reranker failed") from exc

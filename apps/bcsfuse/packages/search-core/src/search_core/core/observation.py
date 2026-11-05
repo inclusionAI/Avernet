@@ -9,6 +9,7 @@ from queue import Empty, Full, Queue
 from threading import Lock
 from uuid import uuid4
 
+search_transport = ContextVar("search_transport", default="")
 _deadline = ContextVar("search_deadline", default=float("inf"))
 _request_id = ContextVar("search_request_id", default="")
 logger = logging.getLogger("search_core.events")
@@ -75,7 +76,7 @@ class EventSummaries:
         self._pending = Queue(maxsize=128)
         self._steps = Queue(maxsize=4096)
 
-    def record_steps(self, operation, outcome, elapsed_ms, stages, summary):
+    def record_steps(self, operation, outcome, elapsed_ms, stages, summary, results):
         if not logger.isEnabledFor(logging.INFO):
             return
         record = {
@@ -89,6 +90,26 @@ class EventSummaries:
             "result_cache": stages.get("result_cache_read", {}).get("cache", "skipped"),
             "stage_ms": {name: stage["elapsed_ms"] for name, stage in stages.items()},
         }
+        record["results"] = results
+        record["reasons"] = summary.get("reasons", ())
+        if "error_type" in summary:
+            record["error_type"] = summary["error_type"]
+        self.enqueue_detail(record)
+
+    def record_progress(self, stage, trace_id, **fields):
+        if logger.isEnabledFor(logging.INFO):
+            self.enqueue_detail(
+                {
+                    "event": "search_progress",
+                    "stage": stage,
+                    "trace_id": trace_id,
+                    "request_id": _request_id.get(),
+                    "timestamp": time.time(),
+                    **fields,
+                }
+            )
+
+    def enqueue_detail(self, record):
         try:
             self._steps.put_nowait(record)
         except Full:
@@ -173,7 +194,7 @@ class EventSummaries:
                 record = self._steps.get_nowait()
             except Empty:
                 break
-            logger.info(json.dumps(record, separators=(",", ":")))
+            logger.info(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
 
 
 events = EventSummaries()

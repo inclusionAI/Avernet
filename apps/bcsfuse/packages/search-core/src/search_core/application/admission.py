@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from search_core.api.errors import SearchOverloaded
 from search_core.application.emergency import EmergencyControl
-from search_core.core.observation import events
+from search_core.core.observation import events, search_transport
 
 
 class SearchAdmission:
@@ -27,6 +27,7 @@ class SearchAdmission:
             )
             raise SearchOverloaded("search capacity exceeded")
         self._active += 1
+        token = search_transport.set(transport)
         try:
             if snapshot is not None:
                 with self.emergency.bind(snapshot):
@@ -34,4 +35,5 @@ class SearchAdmission:
             else:
                 yield
         finally:
+            search_transport.reset(token)
             self._active -= 1
