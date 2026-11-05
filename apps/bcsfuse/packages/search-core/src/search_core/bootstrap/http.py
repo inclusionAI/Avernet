@@ -1,5 +1,7 @@
 """Compose the Agent application without requiring Worker/Profile/Fuse."""
 
+from collections.abc import Callable
+
 from fastapi import FastAPI
 from starlette.types import Lifespan
 
@@ -26,6 +28,7 @@ def create_search_app(
     timeout_seconds: float = 2.0,
     max_inflight_requests: int = DEFAULT_SEARCH.max_inflight_requests,
     emergency: EmergencyControl | None = None,
+    trace_id_provider: Callable[[], str] | None = None,
     request_model=SearchBody,
     result_mapper=None,
     response_model=ResultBody,
@@ -39,6 +42,7 @@ def create_search_app(
         filter_fields=filter_fields,
         request_timeout=timeout_seconds,
         emergency=emergency,
+        trace_id_provider=trace_id_provider,
     )
     app = FastAPI(title="Agent Search", lifespan=lifespan)
     admission = SearchAdmission(max_inflight_requests, emergency)

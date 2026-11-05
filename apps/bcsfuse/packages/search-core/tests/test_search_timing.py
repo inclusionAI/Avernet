@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 
 import pytest
 from search_core.api.errors import UnsupportedSearchOption
@@ -92,6 +93,24 @@ def test_success_has_stage_timings_and_no_query_or_card(timing_logs):
         assert stage["elapsed_ms"] >= 0
     assert "private" not in json.dumps(logs)
     assert "caller" not in json.dumps(logs)
+
+
+def test_trace_id_is_captured_before_background_log_flush(timing_logs):
+    active_trace = ContextVar("caller_trace", default="")
+    service = CatalogSearchApplication(
+        HybridRetrievalService(index=Index(), embedding=Embedding()),
+        trace_id_provider=active_trace.get,
+    )
+    previous = active_trace.set("upstream-trace")
+    try:
+        asyncio.run(
+            service.execute(
+                SearchCommand("q", 1, "search"), VerifiedIdentity("caller", None)
+            )
+        )
+    finally:
+        active_trace.reset(previous)
+    assert timing_logs()[-1]["sample"]["trace_id"] == "upstream-trace"
 
 
 def test_embedding_timeout_preserves_keyword_result_and_timing(timing_logs):
