@@ -1,6 +1,5 @@
 import type { BotCopyInput, BotDomain } from '@/services/botWorkshop';
-import { botWorkshopService } from '@/services/botWorkshop';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
