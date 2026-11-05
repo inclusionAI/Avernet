@@ -38,3 +38,6 @@ headers outside the provider's propagation fields remain unchanged.
 `tests/conformance.rs` exercises real adapter consumers with a recording plugin,
 including business HTTP failures, request exclusions, cancellation, response
 readiness and no-op behavior.
+The live `caller_execution_story.py` E2E installs a recording plugin in the
+existing test-utils executable and verifies Provider propagation, business
+failure records, probe exclusion and metadata redaction through real HTTP.

@@ -458,6 +458,7 @@ dependencies = [
  "bcs-storage-local",
  "bcs-system-message",
  "bcs-test-support",
+ "bcs-tracing-api",
  "bcs-user-directory-api",
  "bcs-user-identity",
  "bcs-webhook-client",
