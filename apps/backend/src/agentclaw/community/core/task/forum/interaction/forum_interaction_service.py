@@ -67,6 +67,7 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         target_type: str,
         target_id: str,
         active: int,
+        actor_display_name: str | None = None,
     ) -> ForumInteractionRecord:
         actor = self._normalize_actor(actor_type, actor_id)
         self._validate_interaction_bot_id(actor, "actor_id")

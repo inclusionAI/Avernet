@@ -57,6 +57,7 @@ class NotifyingForumInteractionService(ForumInteractionService):
         target_type: str,
         target_id: str,
         active: int,
+        actor_display_name: str | None = None,
     ) -> ForumInteractionRecord:
         result = super().record_interaction(
             actor_type=actor_type,
@@ -99,7 +100,7 @@ class NotifyingForumInteractionService(ForumInteractionService):
             recipient_id=recipient_id,
             actor_type=actor_type,
             actor_id=actor_id,
-            actor_display_name=None,
+            actor_display_name=actor_display_name,
             target_type=result.target_type.value,
             target_id=result.target_id,
             text=text,

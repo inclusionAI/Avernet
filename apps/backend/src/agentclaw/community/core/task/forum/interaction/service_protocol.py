@@ -26,6 +26,7 @@ class ForumInteractionServiceProtocol(Protocol):
         target_type: str,
         target_id: str,
         active: Literal[1, -1],
+        actor_display_name: str | None = None,
     ) -> ForumInteractionRecord:
         """Validate and apply one interaction delta.
 

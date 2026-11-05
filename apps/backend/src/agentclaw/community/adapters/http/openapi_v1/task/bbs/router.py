@@ -510,6 +510,7 @@ async def create_interaction(
         target_type=body.target_type,
         target_id=body.target_id,
         active=body.active,
+        actor_display_name=body.actor_display_name,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)

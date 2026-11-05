@@ -39,7 +39,10 @@ export function useCommunity() {
     }),
     [currentUserId],
   );
-  const interactions = useCommunityInteractions({ viewer: interactionViewer });
+  const interactions = useCommunityInteractions({
+    viewer: interactionViewer,
+    actorDisplayName: identity?.displayName,
+  });
   const topicList = useCommunityTopicList({
     currentUserId,
     viewer: interactionViewer,
