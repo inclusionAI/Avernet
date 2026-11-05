@@ -91,6 +91,49 @@ def _resolve_llm_api_key(secret_name: str, resolver: SecretResolver) -> str:
     return str(value)
 
 
+def _build_chat_transport(injector: Injector, config: AgentSwarmConfig):
+    """Build the configured chat transport, or ``None`` for the engine leg.
+
+    Kept as a module function rather than inline in the provider so the default
+    branch stays trivially auditable: an unconfigured deployment returns
+    ``None`` here and nothing else in this module allocates a transport.
+    """
+    if config.chat.transport != "baas_gateway":
+        return None
+
+    from agentclaw.community.core.gateway_principal import PrincipalSignerConfig
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.di.config import BaasConfig, SecretNamesConfig
+    from agentclaw.community.plugins.community.agentswarm.chat.baas_gateway import (
+        BaasGatewayChatTransport,
+    )
+    from agentclaw.community.utils.gateway_principal_config import (
+        resolve_signing_key,
+    )
+
+    chat_config = config.chat.baas_gateway
+    # Same secret name and conventions the HTTP boot's verifier uses, so the
+    # deployments that can mint are exactly the ones that can verify.
+    signing_key = resolve_signing_key(
+        injector.get(SecretResolver),
+        injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    )
+    signer = PrincipalSignerConfig(
+        signing_key=signing_key,
+        audience=chat_config.audience,
+        issuer=chat_config.issuer,
+        key_id=chat_config.key_id,
+    )
+    return BaasGatewayChatTransport(
+        bot_repo=injector.get(BotRepository),
+        base_url=injector.get(BaasConfig).api_base_url,
+        signer=signer,
+        resource_key_prefix=chat_config.resource_key_prefix,
+        app_name=chat_config.app_name,
+        default_timeout=chat_config.default_timeout_seconds,
+    )
+
+
 class AgentSwarmModule(Module):
 
     def configure(self, binder: Binder) -> None:
@@ -326,6 +369,9 @@ class AgentSwarmModule(Module):
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,
             chat_timeout_seconds=config.executor.bot_chat_timeout_seconds,
+            # ``None`` leaves this platform as its own engine transport — the
+            # pre-seam code path, and the default for an unconfigured pod.
+            chat_transport=_build_chat_transport(injector, config),
         )
 
     @provider

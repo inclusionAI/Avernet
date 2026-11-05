@@ -333,6 +333,74 @@ class AgentSwarmRetentionConfig:
 
 
 @dataclass(frozen=True)
+class AgentSwarmChatBaasConfig:
+    """The ``agentswarm.chat.baas_gateway`` block — platform chat channel.
+
+    Only read when ``agentswarm.chat.transport`` names the BaaS channel; the
+    engine channel needs none of it. ``resource_key_prefix`` is combined with
+    the platform tenant into the key the platform authorizes against
+    (``<prefix>_<tenant>``) — encoding the tenant into the key is what keeps
+    ``baas_resource_key``'s single-column unique constraint satisfiable while
+    the platform looks rows up by ``(resource_key, tenant)``.
+    """
+
+    resource_key_prefix: str = "agent_swarm_agent"
+    app_name: str = "agent_swarm"
+    issuer: str = "backend"
+    audience: str = "baas"
+    key_id: str = "bare"
+    default_timeout_seconds: float = 1800.0
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmChatBaasConfig":
+        d = cls()
+        block = block or {}
+        return cls(
+            resource_key_prefix=_as_str(
+                block, "resource_key_prefix", d.resource_key_prefix),
+            app_name=_as_str(block, "app_name", d.app_name),
+            issuer=_as_str(block, "issuer", d.issuer),
+            audience=_as_str(block, "audience", d.audience),
+            key_id=_as_str(block, "key_id", d.key_id),
+            default_timeout_seconds=_as_float(
+                block, "default_timeout_seconds",
+                d.default_timeout_seconds, minimum=0.0),
+        )
+
+
+@dataclass(frozen=True)
+class AgentSwarmChatConfig:
+    """The ``agentswarm.chat`` block — which chat transport the pod uses.
+
+    ``transport`` is ``engine_ws`` (default) or ``baas_gateway``. The default
+    is the pre-existing engine leg, so a profile that ships this block with no
+    value keeps today's behaviour and an unconfigured deployment cannot
+    silently switch channels.
+    """
+
+    transport: str = "engine_ws"
+    baas_gateway: AgentSwarmChatBaasConfig = field(
+        default_factory=AgentSwarmChatBaasConfig
+    )
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmChatConfig":
+        d = cls()
+        block = block or {}
+        transport = _as_str(block, "transport", d.transport).strip().lower()
+        if transport not in ("engine_ws", "baas_gateway"):
+            raise ValueError(
+                f"agentswarm.chat.transport must be 'engine_ws' or "
+                f"'baas_gateway', got {transport!r}"
+            )
+        return cls(
+            transport=transport,
+            baas_gateway=AgentSwarmChatBaasConfig.from_block(
+                block.get("baas_gateway")),
+        )
+
+
+@dataclass(frozen=True)
 class AgentSwarmConfig:
     llm: LlmConfig | None = None
     orchestration: AgentSwarmOrchestrationConfig = field(
@@ -361,6 +429,9 @@ class AgentSwarmConfig:
     )
     egress: AgentSwarmEgressConfig = field(
         default_factory=AgentSwarmEgressConfig
+    )
+    chat: AgentSwarmChatConfig = field(
+        default_factory=AgentSwarmChatConfig
     )
     artifact_store_root: str = "/tmp/agentswarm/artifacts"
     artifact_inline_threshold: int = 16384
@@ -396,6 +467,7 @@ class AgentSwarmConfig:
             retention=AgentSwarmRetentionConfig.from_block(
                 block.get("retention")),
             egress=AgentSwarmEgressConfig.from_block(block.get("egress")),
+            chat=AgentSwarmChatConfig.from_block(block.get("chat")),
             artifact_store_root=_as_path(
                 block, "artifact_store_root", cls().artifact_store_root),
             artifact_inline_threshold=_as_int(

@@ -106,7 +106,7 @@ class _HangingChatPlatform:
         return True
 
     def chat(self, bot_id, message, owner_id="", session_key=None,
-             cancel_event=None):
+             cancel_event=None, timeout_seconds=None, tenant=""):
         self.started.append(time.monotonic())
         self.session_keys.append(session_key)
         if cancel_event is None:
@@ -315,7 +315,7 @@ class _SessionModelPlatform:
         return True
 
     def chat(self, bot_id, message, owner_id="", session_key=None,
-             cancel_event=None):
+             cancel_event=None, timeout_seconds=None, tenant=""):
         self.session_keys.append(session_key)
         history = self.sessions.setdefault(session_key, [])
         history.append(message)

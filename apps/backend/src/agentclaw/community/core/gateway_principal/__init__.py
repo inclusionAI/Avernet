@@ -29,6 +29,9 @@ from agentclaw.community.core.gateway_principal.models import (
 from agentclaw.community.core.gateway_principal.service_principal import (
     mint_service_app_principal,
 )
+from agentclaw.community.core.gateway_principal.baas_service_principal import (
+    mint_baas_service_app_principal,
+)
 from agentclaw.community.core.gateway_principal.signer import (
     PrincipalSignerConfig,
     resign_principal_token,
@@ -64,6 +67,7 @@ __all__ = [
     "decode_principal_token",
     "is_weak_signing_key",
     "key_fingerprint",
+    "mint_baas_service_app_principal",
     "mint_service_app_principal",
     "resign_principal_token",
     "verify_principal_token",

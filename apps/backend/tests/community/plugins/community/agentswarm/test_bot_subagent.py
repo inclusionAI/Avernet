@@ -95,7 +95,7 @@ class FakePlatform:
         return self.statuses[0]
 
     def chat(self, bot_id, message, owner_id="", session_key=None,
-             cancel_event=None):
+             cancel_event=None, timeout_seconds=None, tenant=""):
         if self.fail_chat:
             raise RuntimeError("bot unreachable")
         self.chats.append((bot_id, message))
@@ -470,7 +470,7 @@ class TestChatOffloadsLongCalls:
 
         class _SlowChatPlatform(FakePlatform):
             def chat(self, bot_id, message, owner_id="", session_key=None,
-                     cancel_event=None):
+                     cancel_event=None, timeout_seconds=None, tenant=""):
                 _time.sleep(0.15)
                 return '{"result": "done"}'
 

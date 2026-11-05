@@ -185,6 +185,10 @@ class AvernetSubagent:
         chat_kwargs = dict(
             bot_id=self._bot_id, message=prompt,
             owner_id=self._run.owner_id,
+            # The tenant this leg acts under. Only a transport that selects
+            # platform credentials per tenant reads it; the engine transport
+            # ignores it, so passing it is safe on every channel.
+            tenant=self._run.tenant,
             cancel_event=cancel,
         )
         resolved_chat_timeout = self._resolved_chat_timeout()

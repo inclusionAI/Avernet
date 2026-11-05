@@ -94,7 +94,9 @@ class BotPlatform(Protocol):
 
     def chat(self, bot_id: BotId, message: str, owner_id: str = "",
              session_key: str | None = None,
-             cancel_event: threading.Event | None = None) -> str:
+             cancel_event: threading.Event | None = None,
+             timeout_seconds: float | None = None,
+             tenant: str = "") -> str:
         """Send one objective and return the bot's raw reply text; the
         caller owns parsing. Non-2xx-equivalent failures raise. The wait
         is finite: a hung engine transport surfaces as a raised error
@@ -119,5 +121,16 @@ class BotPlatform(Protocol):
         pool shutdown, run cancel) and a platform capable of honouring it
         unwinds its in-flight transport within its own receive bounds.
         A platform that does not support it ignores the event — its own
-        deadline still bounds the wait."""
+        deadline still bounds the wait.
+
+        ``timeout_seconds`` is the caller's wait limit for this leg. Absent,
+        the transport's deployment-configured default governs. The deadline is
+        timed by the transport, never delegated to the engine or the platform.
+
+        ``tenant`` names the deployment tenant this leg acts under. Only a
+        transport that selects platform credentials per tenant reads it — the
+        BaaS channel does, to choose the resource key row; the engine channel
+        ignores it and behaves identically whether it is supplied or blank.
+        Blank is allowed and falls back to the transport's configured default.
+        """
         ...

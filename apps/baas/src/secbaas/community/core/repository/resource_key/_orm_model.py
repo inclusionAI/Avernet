@@ -11,6 +11,11 @@ from secbaas.community.spi.database import Base
 
 from ._record import ResourceKeyBotMappingRecord, ResourceKeyRecord
 
+#: Mapping ``bot_id`` that authorizes the key for every bot (see
+#: ``exists_bot_mapping``). An explicit, operator-inserted row — never inferred
+#: from a missing or empty mapping set, which stays deny-by-default.
+WILDCARD_BOT_ID = "*"
+
 
 class ResourceKeyModel(Base):
     __tablename__ = "baas_resource_key"

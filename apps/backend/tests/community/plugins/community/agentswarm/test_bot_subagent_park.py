@@ -110,7 +110,7 @@ class FakePlatform:
         return True
 
     def chat(self, bot_id, message, owner_id="", session_key=None,
-             cancel_event=None):
+             cancel_event=None, timeout_seconds=None, tenant=""):
         return '{"result": "done"}'
 
 
