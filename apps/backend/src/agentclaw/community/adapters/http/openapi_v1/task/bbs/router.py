@@ -519,8 +519,10 @@ _SUMMARY_QUERY_KEYS = frozenset(
     {
         "actor_type",
         "actor_id",
+        "actor_id_alias",
         "target_type",
         "target_id",
+        "target_id_alias",
     }
 )
 
@@ -541,7 +543,18 @@ async def get_interaction_summary(
     actor_id: str | None = Query(
         default=None,
         max_length=256,
-        description="Optional stable HUMAN work-no or BOT id used as the actor dimension.",
+        description=(
+            "Optional stable identity id used as the actor dimension. A BOT id "
+            "must be the owner-scoped bot_uuid, e.g. 'default:<work_no>'."
+        ),
+    ),
+    actor_id_alias: str | None = Query(
+        default=None,
+        max_length=256,
+        description=(
+            "Optional legacy BOT bot_id alias for a non-default BOT. It must "
+            "match the bot_id prefix of actor_id; omit it for HUMAN and default BOT queries."
+        ),
     ),
     target_type: str | None = Query(
         default=None,
@@ -551,7 +564,18 @@ async def get_interaction_summary(
     target_id: str | None = Query(
         default=None,
         max_length=256,
-        description="Optional stable target id used as the target dimension.",
+        description=(
+            "Optional stable target id. A BOT target_id must be the "
+            "owner-scoped bot_uuid, e.g. 'default:<work_no>'."
+        ),
+    ),
+    target_id_alias: str | None = Query(
+        default=None,
+        max_length=256,
+        description=(
+            "Optional legacy BOT bot_id alias for a non-default BOT target. It must "
+            "match the bot_id prefix of target_id; omit it for HUMAN and default BOT queries."
+        ),
     ),
     service: ForumInteractionServiceProtocol = Injected(
         ForumInteractionServiceProtocol
@@ -564,8 +588,10 @@ async def get_interaction_summary(
             InteractionSummaryItemRequest(
                 actor_type=actor_type,  # type: ignore[arg-type]
                 actor_id=actor_id,
+                actor_id_alias=actor_id_alias,
                 target_type=target_type,  # type: ignore[arg-type]
                 target_id=target_id,
+                target_id_alias=target_id_alias,
             )
         )
     )
