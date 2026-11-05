@@ -50,6 +50,7 @@ class SearchCaches:
         self._lock = RLock()
         self._revision = self._mutations = 0
         self._caches = ()
+        self._logged_stats = {}
         self._metadata_cache = metadata_cache
 
     def configure(self, policy):
@@ -79,6 +80,7 @@ class SearchCaches:
             if self._metadata_cache is not None:
                 self._metadata_cache.retire()
             self._caches = caches
+            self._logged_stats.clear()
             self._metadata_cache = caches[2]
             self._revision += 1
         return caches[:3]
@@ -120,15 +122,17 @@ class SearchCaches:
     def log_stats(self):
         with self._lock:
             caches = self._caches
-        named = zip(
-            ("result", "query_embedding", "card_metadata", "default_candidates"), caches
-        )
-        for name, cache in named:
+        names = ("result", "query_embedding", "card_metadata", "default_candidates")
+        for name, cache in zip(names, caches):
             stats = cache.stats()
-            if stats["enabled"]:
-                logger.info(
-                    json.dumps({"event": "search_cache", "cache": name, **stats})
-                )
+            with self._lock:
+                if caches is not self._caches:
+                    return
+                if not stats["enabled"] or stats == self._logged_stats.get(name):
+                    continue
+                self._logged_stats[name] = stats
+            logger.info(json.dumps({"event": "search_cache", "cache": name, **stats}))
+
 
 
 class CachedRetrieval:

@@ -73,6 +73,26 @@ class EventSummaries:
         self._lock = Lock()
         self._buckets = {}
         self._pending = Queue(maxsize=128)
+        self._steps = Queue(maxsize=4096)
+
+    def record_steps(self, operation, outcome, elapsed_ms, stages, summary):
+        if not logger.isEnabledFor(logging.INFO):
+            return
+        record = {
+            "event": "search_steps",
+            "operation": operation,
+            "trace_id": summary.get("trace_id", ""),
+            "request_id": _request_id.get(),
+            "outcome": outcome,
+            "elapsed_ms": elapsed_ms,
+            "result_count": summary.get("result_count"),
+            "result_cache": stages.get("result_cache_read", {}).get("cache", "skipped"),
+            "stage_ms": {name: stage["elapsed_ms"] for name, stage in stages.items()},
+        }
+        try:
+            self._steps.put_nowait(record)
+        except Full:
+            self.record("search_steps_dropped", "logging", "queue_full")
 
     def record(self, event, stage, reason, **fields):
         now = time.monotonic()
@@ -147,6 +167,13 @@ class EventSummaries:
             except Empty:
                 break
             logger.log(level, line)
+
+        for _ in range(self._steps.qsize()):
+            try:
+                record = self._steps.get_nowait()
+            except Empty:
+                break
+            logger.info(json.dumps(record, separators=(",", ":")))
 
 
 events = EventSummaries()
