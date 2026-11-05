@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use bcs_bot_store::PersistentBotRepo;
@@ -159,6 +160,33 @@ async fn seed_bot(db: &dyn DbPlugin, bot_id: &str, bot_info: serde_json::Value) 
 
 fn plain_bot_info() -> serde_json::Value {
     json!({ "summary": "existing summary", "scopes": ["workspace"] })
+}
+
+#[tokio::test]
+async fn wrapped_object_sync_preserves_siblings_and_bad_roots_fail_closed() {
+    let (repo, db) = fixture().await;
+    let info = json!({"summary": "中\"\\", "future": {"keep": true}});
+    seed_bot(db.as_ref(), "wrapped", json!(info.to_string())).await;
+    assert_eq!(repo.get_caller_configuration("wrapped", "dev").await.unwrap().unwrap().snapshot, None);
+    assert!(matches!(repo.sync_caller_configuration("wrapped", "dev", snapshot(7, true)).await.unwrap(), Some(CallerConfigurationSync::Applied { .. })));
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid = 'wrapped' AND env = 'dev'")).await.unwrap();
+    let raw: String = bcs_db_api::db_get_column(&rows[0], "bot_info").unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(saved["summary"], info["summary"]);
+    assert_eq!(saved["future"], info["future"]);
+    assert_eq!(saved["caller"]["source_revision"], 7);
+    for (id, value) in [("deep", json!(json!(info.to_string()).to_string())), ("array", json!([])), ("scalar", json!(42))] {
+        seed_bot(db.as_ref(), id, value).await;
+        assert!(repo.get_caller_configuration(id, "dev").await.is_err());
+        assert!(repo.sync_caller_configuration(id, "dev", snapshot(1, true)).await.is_err());
+    }
+    let serialized_caller = serde_json::to_string(&snapshot(8, true)).unwrap();
+    for (id, root) in [("caller-string", json!({"caller": serialized_caller})), ("wrapped-caller-string", json!(json!({"caller": serde_json::to_string(&snapshot(8, true)).unwrap()}).to_string()))] {
+        seed_bot(db.as_ref(), id, root).await;
+        assert!(repo.get_caller_configuration(id, "dev").await.is_err());
+        assert!(repo.get_caller_configurations(&[id.to_string()], "dev").await.is_err());
+        assert!(repo.sync_caller_configuration(id, "dev", snapshot(9, true)).await.is_err());
+    }
 }
 
 #[tokio::test]
@@ -326,6 +354,33 @@ async fn broken_caller_data_is_an_error_never_disabled() {
 /// Fake plugin: reads yield a bot row without a caller object, while the
 /// conditional update affects zero rows (simulating a lost CAS race).
 struct ContendedDb;
+
+struct CountingDb { inner: Arc<dyn DbPlugin>, queries: AtomicUsize }
+#[async_trait]
+impl DbPlugin for CountingDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.queries.fetch_add(1, Ordering::SeqCst);
+        self.inner.query(statement).await
+    }
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> { self.inner.execute(statement).await }
+    async fn transaction(&self, steps: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> { self.inner.transaction(steps).await }
+    async fn health_check(&self) -> DbResult<DbHealth> { self.inner.health_check().await }
+}
+
+#[tokio::test]
+async fn cold_batch_is_chunked_and_mixed_invalid_data_fails() {
+    let db = sqlite_db().await;
+    let ids: Vec<String> = (0..501).map(|i| format!("batch-{i:03}")).collect();
+    for id in &ids { seed_bot(db.as_ref(), id, plain_bot_info()).await; }
+    let counted = Arc::new(CountingDb { inner: db.clone(), queries: AtomicUsize::new(0) });
+    let repo = PersistentBotRepo::with_sql_flavor(counted.clone(), DbSqlFlavor::Sqlite);
+    assert_eq!(repo.get_caller_configurations(&ids, "dev").await.unwrap().len(), 501);
+    assert_eq!(counted.queries.load(Ordering::SeqCst), 2);
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid=?", vec![Value::from(json!({"caller":null}).to_string()), Value::from(ids[500].clone())])).await.unwrap();
+    let cold = PersistentBotRepo::with_sql_flavor(counted.clone(), DbSqlFlavor::Sqlite);
+    assert!(cold.get_caller_configurations(&ids, "dev").await.is_err());
+    assert_eq!(counted.queries.load(Ordering::SeqCst), 4);
+}
 
 #[async_trait]
 impl DbPlugin for ContendedDb {

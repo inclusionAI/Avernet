@@ -24,6 +24,28 @@ fn record() -> A2aBotRecord {
 }
 
 #[tokio::test]
+async fn card_write_preserves_wrapped_metadata_and_rejects_bad_caller() {
+    let db = database().await;
+    let original = json!({"future": {"keep": true}, "caller": {"source_revision": 3, "caller_identity": {"enabled": true}}});
+    let wrapped = json!(original.to_string()).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid='bot' AND env='test'", vec![wrapped.into()])).await.unwrap();
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    let rows = db.query(DbStatement::new("SELECT bot_info FROM bcs_bots WHERE bot_uuid='bot' AND env='test'")).await.unwrap();
+    let raw = rows[0].get_string("bot_info").unwrap().unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(saved["future"], original["future"]);
+    assert_eq!(saved["caller"], original["caller"]);
+    let invalid = json!({"caller": null, "future": "keep"}).to_string();
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE bot_uuid='bot' AND env='test'", vec![invalid.clone().into()])).await.unwrap();
+    let mut changed = record(); changed.revision = 2; changed.agent_card["name"] = json!("Changed");
+    assert!(store.compare_and_set(&changed, 1).await.is_err());
+    let rows = db.query(DbStatement::new("SELECT bot_info,agent_card_revision FROM bcs_bots WHERE bot_uuid='bot' AND env='test'")).await.unwrap();
+    assert_eq!(rows[0].get_string("bot_info").unwrap().as_deref(), Some(invalid.as_str()));
+    assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(), Some(1));
+}
+
+#[tokio::test]
 async fn migration_preserves_legacy_rows_and_card_round_trip_is_lossless() {
     let db = database().await;
     let store = DbA2aBotStore::sqlite(db.clone(), "test".into());

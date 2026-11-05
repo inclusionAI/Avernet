@@ -22,6 +22,8 @@ impl PersistentBotRepo {
         &self,
         bot_id: String,
     ) -> Result<String, ConnectStreamError> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         // Decide the branch from the registry's authoritative current token
         // (memory → DB fallback via load_token) and existence (memory or DB),
         // before taking the write lock, so a DB-only bot after a BCS restart is
@@ -169,6 +171,8 @@ impl PersistentBotRepo {
     }
 
     pub(super) async fn register_streaming_connection_impl(&self, bot_id: String) -> Result<String, ()> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         info!(bot_id = %bot_id, "register_streaming_connection: registering new connection");
 
         let mut bots = self.bots.write().await;
@@ -233,6 +237,11 @@ impl PersistentBotRepo {
 
         // Find bot by token (memory -> database)
         let bot_id = self.find_bot_by_token(&existing_token).await.ok_or(())?;
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
+        if self.find_bot_by_token(&existing_token).await.as_deref() != Some(bot_id.as_str()) {
+            return Err(());
+        }
 
         let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
         info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: found bot by token");
@@ -365,6 +374,8 @@ impl PersistentBotRepo {
     }
 
     pub(super) async fn register_http_connection_impl(&self, bot_id: String, token: String) -> String {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         // Create a minimal bot entry if it doesn't exist
         {
             let mut bots = self.bots.write().await;

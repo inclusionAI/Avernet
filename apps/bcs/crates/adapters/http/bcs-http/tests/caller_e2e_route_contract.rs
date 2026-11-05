@@ -15,7 +15,7 @@ use axum::{
 };
 use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal};
 use bcs_message_store::MemoryMessageRepo;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as DbValue};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as DbValue};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_http::{
     router::build_router,
@@ -232,7 +232,7 @@ async fn caller_app(
 
     let message_repo = Arc::new(MemoryMessageRepo::new());
     let managed = Arc::new(ManagedMessageDelivery::new(message_repo.clone()));
-    let repo_port: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::new(db.clone()));
+    let repo_port: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite));
     let provider_store = Arc::new(MemoryProviderStore::default());
     let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
         repo_port,

@@ -31,7 +31,7 @@ impl PersistentBotRepo {
     /// means the target is missing out of scope; the inner `None` is a SQL
     /// NULL legacy column. With `provider`, the row must carry a canonical,
     /// enabled binding to exactly that Provider.
-    async fn read_caller_bot_info_raw(
+    pub(super) async fn read_caller_bot_info_raw(
         &self,
         bot_id: &str,
         env: &str,
@@ -71,9 +71,8 @@ impl PersistentBotRepo {
     /// `$.caller` plus a validity flag instead of the whole `bot_info`
     /// blob. A NULL `bot_info` (legal legacy column) reads as "never
     /// configured"; invalid JSON fails closed with the closed storage
-    /// error. Only realization drift vs the old full-parse: a
-    /// valid-but-non-object root (a shape no writer of this table
-    /// produces) reads as unconfigured instead of erroring.
+    /// error. A single legacy JSON string wrapper is accepted; all other
+    /// non-object roots fail closed.
     pub(crate) async fn read_caller_configuration_scoped(
         &self,
         bot_id: &str,
@@ -201,16 +200,7 @@ impl PersistentBotRepo {
         incoming: &CallerIdentitySnapshot,
         provider: Option<&str>,
     ) -> ServiceResult<Option<CallerConfigurationSync>> {
-        let mut root: serde_json::Value = match original {
-            Some(text) => serde_json::from_str(text)
-                .map_err(|_| ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string()))?,
-            None => serde_json::json!({}),
-        };
-        if !root.is_object() {
-            return Err(ServiceError::InternalError(
-                CALLER_CONFIG_STORAGE_ERROR.to_string(),
-            ));
-        }
+        let mut root = decode_bot_info(original)?;
         root.as_object_mut()
             .expect("checked object root")
             .insert(
@@ -297,20 +287,13 @@ pub(crate) fn caller_sync_decision(
 /// A missing `caller` sub-object is `Ok(None)` ("never configured"); a SQL
 /// NULL column is a legal legacy row; `caller: null`, a non-object root, or
 /// a malformed snapshot are explicit errors — never a fabricated disable.
-fn caller_snapshot_from_bot_info(
+pub(super) fn caller_snapshot_from_bot_info(
     raw: Option<&str>,
 ) -> ServiceResult<Option<CallerIdentitySnapshot>> {
     let Some(text) = raw else {
         return Ok(None);
     };
-    let root: serde_json::Value = serde_json::from_str(text).map_err(|_| {
-        ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
-    })?;
-    if !root.is_object() {
-        return Err(ServiceError::InternalError(
-            CALLER_CONFIG_STORAGE_ERROR.to_string(),
-        ));
-    }
+    let root = decode_bot_info(Some(text))?;
     match root.get("caller") {
         None => Ok(None),
         Some(serde_json::Value::Null) => Err(ServiceError::InternalError(
@@ -319,6 +302,37 @@ fn caller_snapshot_from_bot_info(
         Some(value) => serde_json::from_value::<CallerIdentitySnapshot>(value.clone())
             .map(Some)
             .map_err(|_| ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())),
+    }
+}
+
+pub(crate) fn decode_bot_info(raw: Option<&str>) -> ServiceResult<serde_json::Value> {
+    let fail = || ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string());
+    let Some(raw) = raw else { return Ok(serde_json::json!({})); };
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| fail())?;
+    let value = match value {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).map_err(|_| fail())?,
+        value => value,
+    };
+    if !value.is_object() { return Err(fail()); }
+    Ok(value)
+}
+
+/// Validate the entire caller field before another writer preserves it.
+pub(crate) fn validated_bot_info(raw: Option<&str>) -> ServiceResult<serde_json::Value> {
+    caller_snapshot_from_bot_info(raw)?;
+    decode_bot_info(raw)
+}
+
+pub(crate) fn bot_info_cas(flavor: DbSqlFlavor, raw: Option<&str>) -> (&'static str, Vec<Value>) {
+    match raw {
+        None => ("bot_info IS NULL", Vec::new()),
+        Some(raw) => (
+            match flavor {
+                DbSqlFlavor::Mysql => "CAST(bot_info AS BINARY) = CAST(? AS BINARY)",
+                DbSqlFlavor::Sqlite => "bot_info = ?",
+            },
+            vec![Value::from(raw.to_owned())],
+        ),
     }
 }
 
@@ -332,21 +346,29 @@ fn caller_snapshot_from_bot_info(
 /// from a genuinely missing path: SQLite spells that type lower-case,
 /// MySQL upper-case, so the parser compares case-insensitively.
 fn caller_config_projection(flavor: DbSqlFlavor) -> String {
+    let unquote = match flavor {
+        DbSqlFlavor::Mysql => "JSON_UNQUOTE(b.bot_info)",
+        DbSqlFlavor::Sqlite => "json_extract(b.bot_info, '$')",
+    };
+    let string_type = match flavor { DbSqlFlavor::Mysql => "string", DbSqlFlavor::Sqlite => "text" };
+    let normalized = format!("CASE WHEN b.bot_info IS NULL THEN '{{}}' \
+        WHEN COALESCE(JSON_VALID(b.bot_info), 0) != 1 THEN NULL \
+        WHEN LOWER(JSON_TYPE(b.bot_info)) = 'object' THEN b.bot_info \
+        WHEN LOWER(JSON_TYPE(b.bot_info)) = '{string_type}' THEN \
+          CASE WHEN JSON_VALID({unquote}) = 1 THEN \
+            CASE WHEN LOWER(JSON_TYPE({unquote})) = 'object' THEN {unquote} ELSE NULL END \
+          ELSE NULL END ELSE NULL END");
     let caller_type = match flavor {
-        DbSqlFlavor::Mysql => "JSON_TYPE(JSON_EXTRACT(b.bot_info, '$.caller'))",
-        DbSqlFlavor::Sqlite => "json_type(b.bot_info, '$.caller')",
+        DbSqlFlavor::Mysql => format!("JSON_TYPE(JSON_EXTRACT(({normalized}), '$.caller'))"),
+        DbSqlFlavor::Sqlite => format!("json_type(({normalized}), '$.caller')"),
     };
     // The type subselect is guarded the same way as the value: the json_*
     // helpers raise on malformed input, and one corrupt row must surface as
     // THIS row's closed storage error, never abort the whole query.
     format!(
-        "CASE WHEN b.bot_info IS NULL THEN NULL \
-         ELSE CASE WHEN COALESCE(JSON_VALID(b.bot_info), 0) = 1 \
-              THEN json_extract(b.bot_info, '$.caller') ELSE NULL END END AS caller_config, \
-         CASE WHEN b.bot_info IS NULL THEN 1 \
-              ELSE COALESCE(JSON_VALID(b.bot_info), 0) END AS bot_info_valid, \
-         CASE WHEN b.bot_info IS NULL OR COALESCE(JSON_VALID(b.bot_info), 0) != 1 THEN NULL \
-              ELSE {caller_type} END AS caller_type",
+        "CASE WHEN ({normalized}) IS NULL THEN NULL ELSE json_extract(({normalized}), '$.caller') END AS caller_config, \
+         CASE WHEN ({normalized}) IS NULL THEN 0 ELSE 1 END AS bot_info_valid, \
+         CASE WHEN ({normalized}) IS NULL THEN NULL ELSE {caller_type} END AS caller_type",
     )
 }
 
@@ -367,7 +389,7 @@ fn caller_configuration_from_projected_row(
     }
     if db_get_column_opt::<String>(row, "caller_type")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
-        .is_some_and(|kind| kind.eq_ignore_ascii_case("null"))
+        .is_some_and(|kind| !kind.eq_ignore_ascii_case("object"))
     {
         return Err(ServiceError::InternalError(
             CALLER_CONFIG_STORAGE_ERROR.to_string(),

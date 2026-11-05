@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::message_delivery::DeliveryFlowKind;
 use bcs_domain::{DeliveryType, NewMessage, SenderType};
@@ -140,7 +140,7 @@ fn admission(message_id: &str) -> AdmitMessageDeliveries {
 async fn deps() -> CallerAdmissionDeps {
     let db = sqlite_db().await;
     seed_bot(db.as_ref(), "bot-on", r#"{"summary":"s","caller":{"source_revision":1,"caller_identity":{"enabled":true}}}"#).await;
-    let repo: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::new(db));
+    let repo: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::with_sql_flavor(db, DbSqlFlavor::Sqlite));
     let provider_store = Arc::new(MemoryProviderStore::default());
     let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
         repo,

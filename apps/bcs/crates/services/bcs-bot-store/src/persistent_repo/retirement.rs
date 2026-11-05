@@ -37,6 +37,8 @@ impl PersistentBotRepo {
         bot_id: &str,
         mutation: &AuthorityMutation,
     ) -> ServiceResult<bool> {
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
         let env = bcs_config::resolve_env_str();
         ownership::validate_mutation(mutation)?;
         if bot_id.trim().is_empty() {

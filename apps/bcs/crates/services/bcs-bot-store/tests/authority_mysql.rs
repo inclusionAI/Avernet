@@ -30,7 +30,10 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_bot_store::PersistentBotRepo;
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue};
+use bcs_service_api::port::repo::{BotControlPlaneRepoPort, CallerConfigurationSync, CallerIdentitySnapshot};
+use serde_json::json;
 #[path = "../../../test-support/authority_mysql_chain.rs"]
 mod mysql_chain;
 
@@ -104,6 +107,8 @@ async fn provider_lifecycle_mysql_conformance() {
         run_scenario(scenario, &fixture).await;
     }
 
+    caller_configuration_mysql_contract(&database.plugin).await;
+
     assert_eq!(SCENARIOS.len(), 30, "lifecycle scenario inventory");
     report_mysql_gate_scenarios(
         "provider-lifecycle",
@@ -111,6 +116,54 @@ async fn provider_lifecycle_mysql_conformance() {
     );
 
     database.close().await;
+}
+
+async fn caller_configuration_mysql_contract(db: &std::sync::Arc<bcs_db_mysql::MysqlDbPlugin>) {
+    let env = "caller-mysql-contract";
+    let original = json!({"summary": "保留 \\\"quoted\\\"", "future": {"keep": true}});
+    let wrapped = serde_json::to_string(&original.to_string()).unwrap();
+    let bad = [("bad-array", "[]".to_string()),
+        ("bad-deep", serde_json::to_string(&wrapped).unwrap()),
+        ("bad-caller", json!({"caller": null}).to_string()),
+        ("bad-json", "{broken".to_string())];
+    for (id, raw) in [("wrapped", Some(wrapped.clone())), ("null", None),
+        ("object", Some(original.to_string()))].into_iter()
+        .chain(bad.iter().map(|(id, raw)| (*id, Some(raw.clone())))) {
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_bots (bot_uuid, name, env, bot_info) VALUES (?, ?, ?, ?)",
+            vec![id.into(), id.into(), env.into(), raw.map(DbValue::from).unwrap_or(DbValue::Null)],
+        )).await.unwrap();
+    }
+    let repo = PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Mysql);
+    let snapshot: CallerIdentitySnapshot = serde_json::from_value(json!({
+        "source_revision": 7, "caller_identity": {"enabled": true}
+    })).unwrap();
+    for id in ["wrapped", "null", "object"] {
+        assert!(repo.get_caller_configuration(id, env).await.unwrap().unwrap().snapshot.is_none());
+        assert!(matches!(repo.sync_caller_configuration(id, env, snapshot.clone()).await.unwrap(),
+            Some(CallerConfigurationSync::Applied { .. })));
+        assert_eq!(repo.get_caller_configuration(id, env).await.unwrap().unwrap().snapshot, Some(snapshot.clone()));
+        assert!(matches!(repo.sync_caller_configuration(id, env, snapshot.clone()).await.unwrap(),
+            Some(CallerConfigurationSync::Unchanged { .. })));
+    }
+    let rows = db.query(DbStatement::with_params(
+        "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+        vec!["wrapped".into(), env.into()],
+    )).await.unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&rows[0].get_string("bot_info").unwrap().unwrap()).unwrap();
+    assert_eq!(saved["summary"], original["summary"]);
+    assert_eq!(saved["future"], original["future"]);
+    assert_eq!(saved["caller"]["source_revision"], 7);
+    for (id, raw) in bad {
+        assert!(repo.get_caller_configuration(id, env).await.is_err());
+        assert!(repo.sync_caller_configuration(id, env, snapshot.clone()).await.is_err());
+        let rows = db.query(DbStatement::with_params(
+            "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+            vec![id.into(), env.into()],
+        )).await.unwrap();
+        assert_eq!(rows[0].get_string("bot_info").unwrap().unwrap(), raw);
+    }
+    println!("caller-mysql-contract: wrapped/null/object sync and malformed preservation passed");
 }
 
 async fn run_scenario(scenario: &str, fixture: &lifecycle::Fixture) {

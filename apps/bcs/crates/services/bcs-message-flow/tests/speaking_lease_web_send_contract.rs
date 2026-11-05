@@ -13,7 +13,7 @@ use bcs_bot::core::BotControlPlaneCore;
 use bcs_bot_store::provider::MemoryProviderStore;
 use bcs_bot_store::PersistentBotRepo;
 use bcs_config::resolve_env_str;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::speaking_lease::SessionSpeakingLease;
 use bcs_message_flow::caller_admission::CallerAdmissionDeps;
@@ -172,7 +172,7 @@ async fn harness_with_extra_bot(caller_enabled_bot: bool, leases_mounted: bool, 
 
     let repo = Arc::new(MemoryMessageRepo::new());
     let managed = Arc::new(ManagedMessageDelivery::new(repo.clone()));
-    let repo_port: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::new(db.clone()));
+    let repo_port: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite));
     let provider_store = Arc::new(MemoryProviderStore::default());
     let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
         repo_port,

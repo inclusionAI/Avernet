@@ -7,10 +7,11 @@
 use tracing::{info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
-use bcs_db_api::{DbRow, DbValue as Value, db_get_column, db_get_column_opt};
+use bcs_db_api::{DbRow, DbSqlFlavor, DbStatement, DbValue as Value, db_get_column, db_get_column_opt};
 use bcs_service_api::{BotCapabilities, ServiceError, ServiceResult};
 
 use super::PersistentBotRepo;
+use super::caller_config::{bot_info_cas, validated_bot_info};
 use crate::{BotInfo, bot_info_json_set};
 
 /// SQL parameter chunk bound for batched registry loads.
@@ -39,6 +40,7 @@ pub(super) struct CapabilitiesColumns {
 /// write uses the profile-only [`project_profile_columns`] sibling so a
 /// profile write can never touch the registry-owned identity fields.
 pub(super) fn project_capabilities_columns(
+    flavor: DbSqlFlavor,
     bot_uuid: &str,
     caps: &BotCapabilities,
     hidden: bool,
@@ -56,7 +58,7 @@ pub(super) fn project_capabilities_columns(
     };
     let bot_info_json = serde_json::to_string(&bot_info)
         .map_err(|e| ServiceError::InternalError(e.to_string()))?;
-    let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+    let (bot_info_assignment, bot_info_params) = bot_info_json_set(flavor, vec![
         ("$.summary", serde_json::to_value(&bot_info.summary)?),
         ("$.domains", serde_json::to_value(&bot_info.domains)?),
         ("$.skills", serde_json::to_value(&bot_info.skills)?),
@@ -107,10 +109,11 @@ pub(super) struct ProfileColumns {
 /// [`project_capabilities_columns`] where the registration/save paths need
 /// it, so the two mappings cannot drift on the shared profile keys.
 pub(super) fn project_profile_columns(
+    flavor: DbSqlFlavor,
     bot_uuid: &str,
     caps: &BotCapabilities,
 ) -> ServiceResult<ProfileColumns> {
-    let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+    let (bot_info_assignment, bot_info_params) = bot_info_json_set(flavor, vec![
         ("$.summary", serde_json::to_value(&caps.summary)?),
         ("$.domains", serde_json::to_value(&caps.domains)?),
         ("$.skills", serde_json::to_value(&caps.skills)?),
@@ -133,6 +136,13 @@ pub(super) fn project_profile_columns(
 }
 
 impl PersistentBotRepo {
+    async fn registry_bot_info_raw(&self, bot_uuid: &str, env: &str) -> ServiceResult<Option<Option<String>>> {
+        let rows = self.db_query("SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? LIMIT 1",
+            vec![Value::from(bot_uuid), Value::from(env)]).await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.first().map(|row| db_get_column_opt::<String>(row, "bot_info")
+            .map_err(|error| ServiceError::InternalError(error.to_string()))).transpose()
+    }
     /// Save bot capabilities to the configured database.
     /// First checks if the record exists, then uses UPDATE if it exists, otherwise INSERT.
     pub(super) async fn save_to_db(
@@ -142,6 +152,20 @@ impl PersistentBotRepo {
         session_token: Option<&str>,
         created_by_override: Option<&str>,
     ) -> ServiceResult<()> {
+        for attempt in 0..2 {
+            let result = self.save_to_db_once(bot_uuid, caps, session_token, created_by_override).await;
+            if attempt == 0 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Bot changed while updating metadata") { continue; }
+            if attempt == 1 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Bot changed while updating metadata") {
+                if let Some(raw) = self.registry_bot_info_raw(bot_uuid, &resolve_env()).await? {
+                    validated_bot_info(raw.as_deref())?;
+                }
+            }
+            return result;
+        }
+        unreachable!("bounded registry retry always returns")
+    }
+
+    async fn save_to_db_once(&self, bot_uuid: &str, caps: &BotCapabilities, session_token: Option<&str>, created_by_override: Option<&str>) -> ServiceResult<()> {
         let env = resolve_env();
 
         let (hidden, existing_created_by) = {
@@ -154,7 +178,7 @@ impl PersistentBotRepo {
             .map(|created_by| created_by.to_string())
             .or(existing_created_by);
 
-        let columns = project_capabilities_columns(bot_uuid, caps, hidden)?;
+        let columns = project_capabilities_columns(self.flavor, bot_uuid, caps, hidden)?;
 
         // Check if record exists
         let exists = self.exists_in_db(bot_uuid).await;
@@ -168,9 +192,13 @@ impl PersistentBotRepo {
             // attributes and forward-compatible keys remain authoritative.
             let bot_info_assignment = columns.bot_info_assignment;
             let bot_info_params = columns.bot_info_params;
+            let original = self.registry_bot_info_raw(bot_uuid, &env).await?
+                .ok_or_else(|| ServiceError::Conflict("Bot changed while updating metadata".into()))?;
+            validated_bot_info(original.as_deref())?;
+            let (cas, cas_params) = bot_info_cas(self.flavor, original.as_deref());
             if let Some(token) = session_token {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND {cas}"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -181,10 +209,11 @@ impl PersistentBotRepo {
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
                 ]);
-                self.db_execute_affected(&sql, params).await
+                params.extend(cas_params);
+                self.guarded_metadata_write(bot_uuid, &env, false, &original, DbStatement::with_params(sql, params)).await.map(u64::from)
             } else {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND {cas}"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -194,7 +223,8 @@ impl PersistentBotRepo {
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
                 ]);
-                self.db_execute_affected(&sql, params).await
+                params.extend(cas_params);
+                self.guarded_metadata_write(bot_uuid, &env, false, &original, DbStatement::with_params(sql, params)).await.map(u64::from)
             }
         } else {
             // INSERT new record — None maps to SQL NULL.
@@ -222,11 +252,15 @@ impl PersistentBotRepo {
                 Value::from(0_i64),
                 Value::from(env.as_str()),
                 Value::from(bcs_service_api::bot_provider::BotConnectionMode::Plugin.as_str()),
-            ]).await
-        }.map_err(|e| {
+            ]).await.map_err(|e| {
             warn!(request_id = %bcs_observability::CurrentRequestId, bot_uuid = %bot_uuid, error = %e, "save_to_db: failed");
             ServiceError::InternalError(e.to_string())
-        })?;
+            })
+        }?;
+
+        if exists && affected == 0 {
+            return Err(ServiceError::Conflict("Bot changed while updating metadata".into()));
+        }
 
         info!(bot_uuid = %bot_uuid, affected_rows = affected, exists = exists, "save_to_db: {} completed", if exists { "update" } else { "insert" });
 

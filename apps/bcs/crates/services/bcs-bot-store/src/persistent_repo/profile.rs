@@ -34,6 +34,7 @@ use bcs_service_api::{BotCapabilities, ServiceError, ServiceResult};
 use tracing::warn;
 
 use super::registry_storage::project_profile_columns;
+use super::caller_config::{bot_info_cas, validated_bot_info};
 use super::PersistentBotRepo;
 
 /// Maximum number of distinct ids one batched avatar read accepts.
@@ -51,7 +52,30 @@ impl PersistentBotRepo {
         bot_id: &str,
         update: ExistingProfileUpdate,
     ) -> ServiceResult<ProfileWrite> {
-        let columns = project_profile_columns(bot_id, &update.capabilities)?;
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
+        for attempt in 0..2 {
+            let result = self.update_profile_existing_once(bot_id, update.clone()).await;
+            if attempt == 0 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Bot changed while updating metadata") { continue; }
+            if attempt == 1 && matches!(&result, Err(ServiceError::Conflict(message)) if message == "Bot changed while updating metadata") {
+                match self.read_caller_bot_info_raw(bot_id, &resolve_env(), None).await? {
+                    Some(raw) => { validated_bot_info(raw.as_deref())?; }
+                    None => return Ok(ProfileWrite::Missing),
+                }
+            }
+            return result;
+        }
+        unreachable!("bounded profile retry always returns")
+    }
+
+    async fn update_profile_existing_once(&self, bot_id: &str, update: ExistingProfileUpdate) -> ServiceResult<ProfileWrite> {
+        let env = resolve_env();
+        let Some(original) = self.read_caller_bot_info_raw(bot_id, &env, None).await? else {
+            return Ok(ProfileWrite::Missing);
+        };
+        validated_bot_info(original.as_deref())?;
+        let (cas, cas_params) = bot_info_cas(self.flavor, original.as_deref());
+        let columns = project_profile_columns(self.flavor, bot_id, &update.capabilities)?;
         let mut sql = format!(
             "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, \
              visibility = ?",
@@ -65,17 +89,18 @@ impl PersistentBotRepo {
             sql.push_str(assignment);
             params.push(avatar_value(&update.avatar));
         }
-        sql.push_str(
-            ", updated_at = CURRENT_TIMESTAMP \
-             WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0",
-        );
+        sql.push_str(&format!(
+            ", updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 AND {cas}"
+        ));
         params.push(Value::from(bot_id));
-        params.push(Value::from(resolve_env()));
+        params.push(Value::from(env));
+        params.extend(cas_params);
 
         let write = self
             .confirm_and_write_existing(
                 bot_id,
                 Some(DbStatement::with_params(sql, params)),
+                Some(original),
             )
             .await?;
         if write == ProfileWrite::Updated {
@@ -105,7 +130,7 @@ impl PersistentBotRepo {
         // `Keep` never appears in a SET clause: it only confirms existence
         // and reports it, without writing the record.
         let Some(assignment) = avatar_assignment(&avatar) else {
-            return self.confirm_and_write_existing(bot_id, None).await;
+            return self.confirm_and_write_existing(bot_id, None, None).await;
         };
         let sql = format!(
             "UPDATE bcs_bots SET {assignment} \
@@ -119,6 +144,7 @@ impl PersistentBotRepo {
         self.confirm_and_write_existing(
             bot_id,
             Some(DbStatement::with_params(sql, params)),
+            None,
         )
         .await
     }
@@ -131,6 +157,7 @@ impl PersistentBotRepo {
         &self,
         bot_id: &str,
         statement: Option<DbStatement>,
+        expected: Option<Option<String>>,
     ) -> ServiceResult<ProfileWrite> {
         let env = resolve_env();
         let lock = match self.flavor {
@@ -139,7 +166,7 @@ impl PersistentBotRepo {
         };
         let confirm = DbTransactionStep::Query(DbStatement::with_params(
             format!(
-                "SELECT 1 AS live FROM bcs_bots \
+                "SELECT bot_info FROM bcs_bots \
                  WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0{lock}"
             ),
             vec![Value::from(bot_id), Value::from(env)],
@@ -168,6 +195,17 @@ impl PersistentBotRepo {
                 DbTransactionStepResult::Executed(_) => false,
             })
             .unwrap_or(false);
+        if let Some(expected) = expected {
+            if let Some(DbTransactionStepResult::Rows(rows)) = results.first() {
+                if let Some(row) = rows.first() {
+                    let actual = db_get_column_opt::<String>(row, "bot_info")
+                        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                    if actual != expected {
+                        return Err(ServiceError::Conflict("Bot changed while updating metadata".into()));
+                    }
+                }
+            }
+        }
         if confirmed_live {
             Ok(ProfileWrite::Updated)
         } else {

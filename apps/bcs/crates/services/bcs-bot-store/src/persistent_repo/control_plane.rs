@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use tracing::{debug, warn};
 
 use bcs_db_api::{
-    DbRow, DbValue as Value, db_get_column, db_get_column_opt,
+    DbRow, DbStatement, DbValue as Value, db_get_column, db_get_column_opt,
 };
 use bcs_service_api::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
@@ -605,6 +605,10 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
+        for attempt in 0..2 {
+        let patch = patch.clone();
         if patch.user_visibility.is_some()
             || patch.friend_ext.is_some()
             || patch.friend_check_in_strategy.is_some()
@@ -621,6 +625,16 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         if existing.is_none() {
             return Ok(None);
         }
+
+        let original = if patch.descriptor.is_some() {
+            let Some(raw) = self.read_caller_bot_info_raw(bot_id, env, None).await? else {
+                return Ok(None);
+            };
+            super::caller_config::validated_bot_info(raw.as_deref())?;
+            Some(raw)
+        } else {
+            None
+        };
 
         let mut assignments = Vec::new();
         let mut params = Vec::new();
@@ -692,7 +706,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 }
             }
             if !json_updates.is_empty() {
-                let (assignment, json_params) = bot_info_json_set(json_updates)?;
+                let (assignment, json_params) = bot_info_json_set(self.flavor, json_updates)?;
                 assignments.push(assignment);
                 params.extend(json_params);
             }
@@ -702,15 +716,34 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         assignments.push("updated_at = CURRENT_TIMESTAMP".to_string());
         params.push(Value::from(bot_id));
         params.push(Value::from(env));
+        let (guard, guard_params) = if let Some(raw) = &original {
+            let (cas, values) = super::caller_config::bot_info_cas(self.flavor, raw.as_deref());
+            (format!(" AND {cas}"), values)
+        } else {
+            (String::new(), Vec::new())
+        };
+        params.extend(guard_params);
         let sql = format!(
             "UPDATE bcs_bots SET {} WHERE bot_uuid = ? AND env = ? \
-             AND COALESCE(is_deleted, 0) = 0",
-            assignments.join(", ")
+             AND COALESCE(is_deleted, 0) = 0{guard}", assignments.join(", ")
         );
-        let affected = self
-            .db_execute_affected(&sql, params)
-            .await
-            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        let affected = if let Some(expected) = &original {
+            match self.guarded_metadata_write(bot_id, env, true, expected, DbStatement::with_params(sql, params)).await {
+                Ok(updated) => u64::from(updated),
+                Err(ServiceError::Conflict(message)) if attempt == 0 && message == "Bot changed while updating metadata" => continue,
+                Err(ServiceError::Conflict(message)) if message == "Bot changed while updating metadata" => {
+                    match self.read_caller_bot_info_raw(bot_id, env, None).await? {
+                        Some(raw) => { super::caller_config::validated_bot_info(raw.as_deref())?; }
+                        None => return Ok(None),
+                    }
+                    return Err(ServiceError::Conflict(message));
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            self.db_execute_affected(&sql, params).await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        };
         if affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
             return Ok(None);
         }
@@ -741,7 +774,9 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             }
         }
 
-        self.get_control_plane(bot_id, env).await
+        return self.get_control_plane(bot_id, env).await;
+        }
+        unreachable!("bounded control-plane retry always returns")
     }
 
     // ── Per-Bot caller configuration (spec §10.7.2/§15.96) ─────────────

@@ -34,6 +34,8 @@ impl BotRepoPort for PersistentBotRepo {
     async fn create_registration_if_absent(
         &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
     ) -> ServiceResult<bool> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         self.create_registration_once(bot_id, capabilities, created_by, token).await
     }
 
@@ -45,6 +47,8 @@ impl BotRepoPort for PersistentBotRepo {
         token: &str,
         initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
     ) -> ServiceResult<bool> {
+        let gate = self.metadata_gate(&bot_id).await;
+        let _guard = gate.lock().await;
         self.create_registration_owned(
             bot_id, capabilities, created_by, token, &initialization,
         )
@@ -90,6 +94,8 @@ impl BotRepoPort for PersistentBotRepo {
         bot_id: &str,
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "update_capabilities: replacing capabilities",);
         let session_token: Option<String> = {
             let bots = self.bots.read().await;
@@ -613,6 +619,8 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn soft_delete(&self, bot_id: &str) -> bool {
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
         // Soft-delete in the configured database
         let db_deleted = self.soft_delete_in_db(bot_id).await;
 
@@ -650,9 +658,8 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
-        // Sync binding channel index
-        self.sync_binding_channel_index(bot_id, caps).await;
-
+        let gate = self.metadata_gate(bot_id).await;
+        let _guard = gate.lock().await;
         // Get token from memory for DB insert
         let session_token: Option<String> = {
             let bots = self.bots.read().await;
@@ -662,6 +669,8 @@ impl BotRepoPort for PersistentBotRepo {
         // Save to the configured database
         self.save_to_db(bot_id, caps, session_token.as_deref(), None)
             .await?;
+
+        self.sync_binding_channel_index(bot_id, caps).await;
 
         // Update memory with the final merged capabilities produced by the
         // application layer.

@@ -4,12 +4,13 @@
 //! crate docs for the two-layer (process memory + DB) architecture.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(test)]
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
@@ -32,7 +33,7 @@ use super::{BotInfo, RegisteredBotInner};
 
 mod agent_registration;
 mod bot_repo_port;
-mod caller_config;
+pub(crate) mod caller_config;
 mod control_plane;
 mod profile;
 mod registration_create;
@@ -76,6 +77,8 @@ pub struct PersistentBotRepo {
 
     /// Card-renamed Bots read durable metadata; live connections stay in memory.
     registry_metadata_bypass: RwLock<std::collections::HashSet<(String, String)>>,
+    metadata_gates: Mutex<HashMap<String, Weak<Mutex<()>>>>,
+    metadata_gate_calls: AtomicUsize,
 
     // Layer 2: Database
     /// DB plugin for persistent storage.
@@ -114,6 +117,8 @@ impl PersistentBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             db,
             registry_metadata_bypass: RwLock::new(Default::default()),
+            metadata_gates: Mutex::new(HashMap::new()),
+            metadata_gate_calls: AtomicUsize::new(0),
             flavor,
             caller_config_cache: crate::caller_config_cache::CallerConfigCache::new(
                 crate::caller_config_cache::POSITIVE_TTL,
@@ -125,6 +130,21 @@ impl PersistentBotRepo {
 
     pub(crate) async fn invalidate_card_metadata(&self, env: &str, bot_id: &str) {
         self.registry_metadata_bypass.write().await.insert((env.into(), bot_id.into()));
+    }
+
+    /// Serialize durable metadata updates and cache publication per Bot,
+    /// without holding the registry lock across database work.
+    async fn metadata_gate(&self, bot_id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self.metadata_gates.lock().await;
+        if self.metadata_gate_calls.fetch_add(1, Ordering::Relaxed) % 256 == 0 {
+            gates.retain(|_, value| value.strong_count() > 0);
+        }
+        if let Some(gate) = gates.get(bot_id).and_then(Weak::upgrade) {
+            return gate;
+        }
+        let gate = Arc::new(Mutex::new(()));
+        gates.insert(bot_id.to_owned(), Arc::downgrade(&gate));
+        gate
     }
 
     async fn use_cached_metadata(&self, bot_id: &str) -> bool {
@@ -156,18 +176,31 @@ impl PersistentBotRepo {
         self.db.transaction(steps).await
     }
 
-    /// Read the `bot_info` JSON column for a given bot, parsed as a JSON object.
-    /// Returns `None` if the row is missing, the column is NULL, or JSON parsing fails.
-    async fn read_bot_info_json(&self, bot_uuid: &str) -> Option<serde_json::Value> {
-        let env = resolve_env();
-        let sql = "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
-        let rows = self
-            .db_query(sql, vec![Value::from(bot_uuid), Value::from(env.as_str())])
-            .await
-            .ok()?;
-        let row = rows.first()?;
-        let bot_info_str: String = db_get_column_opt(row, "bot_info").ok().flatten()?;
-        serde_json::from_str(&bot_info_str).ok()
+    /// Confirm the exact validated bytes under the same lock as the guarded
+    /// update, so a zero changed-row result is not confused with a lost CAS.
+    async fn guarded_metadata_write(
+        &self, bot_id: &str, env: &str, live_only: bool,
+        expected: &Option<String>, statement: DbStatement,
+    ) -> ServiceResult<bool> {
+        use bcs_db_api::{DbTransactionStep, DbTransactionStepResult};
+        let live = if live_only { " AND COALESCE(is_deleted, 0) = 0" } else { "" };
+        let lock = if matches!(self.flavor, DbSqlFlavor::Mysql) { " FOR UPDATE" } else { "" };
+        let query = DbStatement::with_params(
+            format!("SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ?{live}{lock}"),
+            vec![Value::from(bot_id), Value::from(env)],
+        );
+        let results = self.db_transaction(vec![DbTransactionStep::Query(query), DbTransactionStep::Execute(statement)])
+            .await.map_err(|_| ServiceError::InternalError("Bot metadata write failed".into()))?;
+        let Some(DbTransactionStepResult::Rows(rows)) = results.first() else {
+            return Err(ServiceError::InternalError("Bot metadata write failed".into()));
+        };
+        let Some(row) = rows.first() else { return Ok(false); };
+        let actual = db_get_column_opt::<String>(row, "bot_info")
+            .map_err(|_| ServiceError::InternalError("Bot metadata write failed".into()))?;
+        if &actual != expected {
+            return Err(ServiceError::Conflict("Bot changed while updating metadata".into()));
+        }
+        Ok(true)
     }
 
     /// Check if bot exists in the configured database.
