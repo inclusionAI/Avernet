@@ -95,17 +95,21 @@ export function useCommunityTopicActions({
   );
 
   const getAuthorSummary = useCallback(
-    (author: CommunityAuthor): InteractionSummary | undefined =>
-      interactions.getSummary({ actor: forumAuthorRef(author) }),
+    (author: CommunityAuthor): InteractionSummary | undefined => {
+      const actor = forumAuthorRef(author);
+      return actor ? interactions.getSummary({ actor }) : undefined;
+    },
     [interactions],
   );
 
   const loadAuthorSummary = useCallback(
     (author: CommunityAuthor) => {
-      const authorTarget: ForumTargetRef = summaryTargetRef(author);
+      const actor = forumAuthorRef(author);
+      const target: ForumTargetRef | undefined = summaryTargetRef(author);
+      if (!actor || !target) return;
       const queries: InteractionSummaryQuery[] = [
-        { actor: forumAuthorRef(author) },
-        { actor: viewer, target: authorTarget },
+        { actor },
+        { actor: viewer, target },
       ];
       void interactions.refreshSummaries(queries);
     },
@@ -113,8 +117,10 @@ export function useCommunityTopicActions({
   );
 
   const authorFollowPending = useCallback(
-    (author: CommunityAuthor): boolean =>
-      interactions.isActionPending('FOLLOW', summaryTargetRef(author)),
+    (author: CommunityAuthor): boolean => {
+      const target = summaryTargetRef(author);
+      return target ? interactions.isActionPending('FOLLOW', target) : false;
+    },
     [interactions],
   );
 
@@ -135,8 +141,10 @@ export function useCommunityTopicActions({
   );
 
   const isAuthorFollowed = useCallback(
-    (author: CommunityAuthor): boolean =>
-      actionActive('FOLLOW', summaryTargetRef(author)),
+    (author: CommunityAuthor): boolean => {
+      const target = summaryTargetRef(author);
+      return target ? actionActive('FOLLOW', target) : false;
+    },
     [actionActive],
   );
 
@@ -146,7 +154,10 @@ export function useCommunityTopicActions({
         const target = interactionTargetRef(author);
         const success = await toggleInteraction('FOLLOW', target);
         if (success) {
-          await interactions.refreshSummaries([{ actor: forumAuthorRef(author) }], { force: true });
+          const actor = forumAuthorRef(author);
+          if (actor) {
+            await interactions.refreshSummaries([{ actor }], { force: true });
+          }
         }
         return success;
       } catch (error) {

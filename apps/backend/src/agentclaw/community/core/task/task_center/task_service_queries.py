@@ -86,29 +86,37 @@ def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> 
             root.run_info.extend_props["assignee_owner_id"] = str(owner_user_id)
 
 
-def get_task_node_by_session(
+def get_task_nodes_by_session(
     self, session_id: str
-) -> TaskNodeSessionRef | None:
-    """Resolve a chat session to its task node while preserving task scoping.
+) -> list[TaskNodeSessionRef]:
+    """Resolve a chat session to every visible task node, newest first.
 
-    The run-info lookup is deliberately not tenant scoped. After it yields a
-    task handle, the env-scoped task repository must resolve the owner. A task
-    outside the current scope therefore behaves as no match and cannot expose
-    the run-info owner.
+    The run-info lookup is deliberately not tenant scoped. After each run row
+    yields a task handle, the env-scoped task repository must resolve the owner.
+    A task outside the current scope therefore behaves as no match and cannot
+    expose the run-info owner. Duplicate task rows are collapsed by task id.
     """
     if not session_id or self._run_info_repo is None or self._task_info_repo is None:
-        return None
-    run = self._run_info_repo.get_by_session_id(session_id)
-    if run is None:
-        return None
-    task = self._task_info_repo.get(run.task_id)
-    if task is None:
-        return None
-    return TaskNodeSessionRef(
-        task_id=run.task_id,
-        node_id=run.node_id,
-        owner_user_id=task.owner_user_id,
-    )
+        return []
+    runs = self._run_info_repo.list_by_session_id(session_id)
+    refs: list[TaskNodeSessionRef] = []
+    seen_task_ids: set[str] = set()
+    for run in runs:
+        if run.task_id in seen_task_ids:
+            continue
+        task = self._task_info_repo.get(run.task_id)
+        if task is None:
+            continue
+        seen_task_ids.add(run.task_id)
+        refs.append(
+            TaskNodeSessionRef(
+                task_id=run.task_id,
+                node_id=run.node_id,
+                owner_user_id=task.owner_user_id,
+                updated_at=run.gmt_modified or run.gmt_create,
+            )
+        )
+    return refs
 
 
 def get_task_context(self, task_id: str) -> TaskContext:

@@ -87,8 +87,8 @@ class _FakeProvisioner:
         )
         return self._result
 
-    async def cancel_pending(self, *, bot_id: str) -> None:
-        self.cancels.append(bot_id)
+    async def cancel_pending(self, *, bot_id: str, owner_user_id: str) -> None:
+        self.cancels.append(f"{bot_id}:{owner_user_id}")
 
 
 class _FakeGrantService:
@@ -204,9 +204,7 @@ async def test_upsert_grant_failure_does_not_start_provisioning():
         await upsert_bbs_browse_subscription(
             body=None,
             bot_id="bot-a",
-            request=_request(
-                "POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"
-            ),
+            request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
             response=Response(),
             owner_user_id="111111",
             principal=SimpleNamespace(user_id="caller-1"),
@@ -256,7 +254,7 @@ async def test_delete_openclaw_subscription_removes_cron():
             return _record(mode="openclaw")
 
         def delete_subscription(self, **kwargs):
-            assert kwargs == {"bot_id": "bot-a"}
+            assert kwargs == {"bot_id": "bot-a", "owner_user_id": "111111"}
             return True
 
     cron_manager = _FakeCronManager()
@@ -264,6 +262,7 @@ async def test_delete_openclaw_subscription_removes_cron():
     scheduler = _FakeScheduler()
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
@@ -299,6 +298,7 @@ async def test_delete_legacy_framework_subscription_unregisters_scheduler():
     scheduler = _FakeScheduler()
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
@@ -331,6 +331,7 @@ async def test_delete_missing_subscription_is_idempotent():
     scheduler = _FakeScheduler()
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,

@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 
@@ -77,27 +78,26 @@ beforeEach(() => {
   jest.clearAllMocks();
   useTaskConversationNavigationStore.getState().resetAll();
   useTaskSidePanelStore.getState().resetAll();
+  useTaskSessionAssociationStore.getState().reset();
   mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
-  mockListMyTasks.mockResolvedValue({ ok: true, data: [] });
+  mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
   window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
 });
 
-it('打开已存在的单 bot 会话时 by_session 命中即恢复任务副屏', async () => {
+it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务副屏', async () => {
   const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
   mockGetTaskBySession.mockResolvedValue({
     ok: true,
-    data: {
-      task_id: 'task-root',
-      owner_user_id: 'u1',
-      node_id: 'task-root',
-    },
+    data: [
+      { task_id: 'task-root', owner_user_id: 'u1', node_id: 'node-root', updated_at: null },
+    ],
   });
 
   renderHook(() => useChatHeaderPanels(options));
 
   await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
   expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
-  expect(mockListMyTasks).not.toHaveBeenCalled();
+  expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
   expect(openTab.mock.calls[0][0]).toMatchObject({
     id: 'task-task-root',
     type: 'taskPanel.TaskLoopView',
@@ -211,6 +211,37 @@ it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即�
   // autoCloseWhenEmpty 弹回等真实关态事件同样同步。
   act(() => result.current.onSidePaneIsOpenChange(false));
   expect(result.current.sidePaneOpen).toBe(false);
+});
+
+it('TaskPanel-only 会话在关闭后 Monitor 仍可点，并用 task tab 快照重开', () => {
+  const { options, openTab, closePanel } = makeOptions({ messages: makeMessages() });
+  useTaskSessionAssociationStore.getState().setActiveSession('sess-1');
+  useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-1', ['task-1']);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('task-1', {
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+    closable: true,
+    params: { taskId: 'task-1' },
+  });
+
+  const { result } = renderHook(() => useChatHeaderPanels(options));
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(1);
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+  });
+
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(2);
 });
 
 it('打开按消息标记幂等重建 tabs：BCS 天气卡（单引号 cardId/type/tab）原样重建 openTab 载荷', () => {

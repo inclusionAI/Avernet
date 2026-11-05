@@ -1,4 +1,4 @@
-"""内部面读侧镜像路由:GET /dashboard 与 /list。
+"""内部面读侧镜像路由:GET /dashboard、/list 与 /by_session。
 
 ``adapters/http/task/router.py``(/api/v1/collaboration/tasks)经 ``include_router``
 挂载;与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol``
@@ -30,10 +30,15 @@ from agentclaw.community.adapters.http.task.schemas import (
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
+from agentclaw.community.adapters.http.task.schemas_task_session import (
+    BySessionDTO,
+    by_session_refs_to_dto,
+)
 from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 
@@ -75,6 +80,25 @@ async def get_task_dashboard_internal(
         ),
         request,
     )
+
+
+@router.get("/by_session", response_model=Envelope[BySessionDTO])
+@envelope_errors
+async def get_task_by_session_internal(
+    session_id: Annotated[
+        str,
+        Query(description="The chat session id to resolve; misses are not found"),
+    ],
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[BySessionDTO]:
+    """Resolve a chat session to its relay task node (internal mirror)."""
+    del user
+    refs = service.get_task_nodes_by_session(session_id)
+    if not refs:
+        raise NotFound("task session not found")
+    return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
 def _validate_task_status_filter(status: str | None) -> None:

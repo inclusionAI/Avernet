@@ -58,7 +58,7 @@ from agentclaw.community.adapters.http.task.schemas import (
 )
 from agentclaw.community.adapters.http.task.schemas_task_session import (
     BySessionDTO,
-    by_session_ref_to_dto,
+    by_session_refs_to_dto,
 )
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.api.task.task_artifact_service import (
@@ -188,10 +188,10 @@ async def get_task_by_session(
 ) -> Envelope[BySessionDTO]:
     """Resolve a chat session to the relay task node executing in it."""
     del principal
-    ref = service.get_task_node_by_session(session_id)
-    if ref is None:
+    refs = service.get_task_nodes_by_session(session_id)
+    if not refs:
         raise NotFound("task session not found")
-    return envelope(by_session_ref_to_dto(ref), request)
+    return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
 @router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
