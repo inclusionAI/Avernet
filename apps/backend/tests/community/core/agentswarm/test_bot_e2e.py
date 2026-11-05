@@ -348,6 +348,10 @@ def _stand_in_for_provisioning(world) -> list[dict]:
                 "binding_id": bind_id,
             }
         )
+        # Creation applies a complete Manifest, including empty capability
+        # targets; the platform supplies a real scope for Default exclusions.
+        from tests.community.endpoints.manifest_device_seed import seed_empty_default_scope
+        seed_empty_default_scope(world, record["active_engine"])
         created.append(record)
         return record
 

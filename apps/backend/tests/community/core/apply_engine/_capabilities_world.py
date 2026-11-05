@@ -87,7 +87,7 @@ from ._fakes import FakeManifestContent, real_validator
 
 
 class CapabilityWorld:
-    def __init__(self, *, store=None, auth=None, http=None, runtime=None, device=False):
+    def __init__(self, *, store=None, auth=None, http=None, runtime=None, device=False, package=None):
         self.db = _Database(shared=True)
         self.bots = BotRepository(self.db)
         self.bots.insert(
@@ -171,7 +171,7 @@ class CapabilityWorld:
         self.sets = (DeviceSkillSetApply if device else PlatformSkillSetApply)(
             self.management
         )
-        package = _package()
+        package = _package() if package is None else package
         self.gateway = _PublicGateway(package, mcp_services=())
         self.materializer = SkillVersionMaterializer(
             versions=self.versions,
