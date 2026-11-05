@@ -1,3 +1,4 @@
+import { generateBotAvatar } from '@/domain/botAvatar';
 import * as botSessionController from '@/services/backendApi/bots/privateBotSessionController';
 import * as bbsTaskController from '@/services/backendApi/collaboration/bbsTaskController';
 import * as collaborationBotController from '@/services/backendApi/collaboration/collaborationBotController';
@@ -84,6 +85,7 @@ describe('CollaborationSquareApiAdapter', () => {
     await expect(new CollaborationSquareApiAdapter().listBots()).resolves.toEqual([
       {
         id: 'bot-1',
+        avatarUrl: generateBotAvatar('bot-1'),
         name: '公开助手',
         ownerName: 'Owner',
         description: '公开描述',
@@ -186,6 +188,7 @@ describe('CollaborationSquareApiAdapter', () => {
     expect(result).toEqual([
       {
         id: 'bot-smart-1',
+        avatarUrl: generateBotAvatar('bot-smart-1'),
         name: '会议助手',
         ownerName: 'Owner',
         description: '擅长会议纪要',
