@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import Callable
 
 from agentclaw.community.core.task.domain.identity import (
     resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
@@ -270,7 +269,6 @@ def _enrich_task_owner_display(
     if not records:
         return []
 
-    owner_lookup = self._resolve_entry_bot_owner
     normalized: list[tuple[TaskInfoRecord, str, str]] = []
     for record in records:
         bot_id, owner_id = resolve_entry_bot_identity(
