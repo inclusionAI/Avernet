@@ -150,6 +150,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
 
 logger = get_logger()
@@ -2516,6 +2517,7 @@ class BotService(BotServiceProtocol):
                 address = resolver.resolve(bot_id=bot_id, legacy_owner_id=user_id)
         except BotAddressNotFoundError as exc:
             raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
+        mark("bot.locator_resolved")
         return self.get_bot(bot_id=bot_id, user_id=address.current_owner_id)
 
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
@@ -2555,6 +2557,7 @@ class BotService(BotServiceProtocol):
 
         # Fetch template info if exists
         try:
+            mark("bot.template")
             template = self._template_service.get_template(bot_id)
             if template:
                 bot["template_config"] = template.get("ext")

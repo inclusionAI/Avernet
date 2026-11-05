@@ -22,7 +22,6 @@ public surface existed.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from injector import inject
@@ -62,6 +61,7 @@ from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark, timed_thread
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -132,6 +132,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         row is right here, so there is nothing to carry and nothing to re-read.
         """
         bot = self._bot_service.get_bot_by_address(bot_id, owner_id)
+        mark("bot.resolved")
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         require_bot_operator(
             self._collaborators,
@@ -157,7 +158,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         the result to :meth:`call` as ``facts`` so the bot is resolved once per
         request rather than once per gate plus once per forward.
         """
-        return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
+        return await timed_thread("bot", self.resolve_bot, bot_id, owner_id, caller_id)
 
     def _resolve_device(self, facts: BotFacts, stage: str, device_uuid: str | None = None) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
@@ -356,7 +357,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         rather than sniffing for a ``success`` key, because a body that happens
         to lack one is exactly the malformed case that must still fail.
         """
-        ctx = await asyncio.to_thread(
+        ctx = await timed_thread(
+            "device",
             self._resolve_bot_and_device, bot_id, owner_id, facts, stage, device_uuid
         )
         if device_uuid is not None and (
