@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/corp/plugins/prod/arca_io.py
+  s_770782c7fd8135::t_697cfa4f91a6d8 559-568
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5fa1b982fc5d7032142f1119416a50781c89dece",
+  "prompts": {},
+  "sessions": {
+    "s_770782c7fd8135": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-0e87-7360-ace8-cd1dab64ed4d",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/baas/singlebox-configs/application.yaml
+  s_2c37553adb8635::t_1fcfad584383b0 155-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b12af715c9ec89ce9eb4eff03cf61c1dc457e6ea",
+  "prompts": {},
+  "sessions": {
+    "s_2c37553adb8635": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a222-afa9-7091-8ca0-b04d15066578",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
