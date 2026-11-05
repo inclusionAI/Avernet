@@ -2,6 +2,7 @@
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
+import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
@@ -197,6 +198,9 @@ export function useBotSessionFilesFeature(
   const closeFileDrawer = useCallback(() => setDrawerOpen(false), []);
   const openUpload = useCallback(() => setUploadOpen(true), []);
 
+  // 资源管理面板 → Bot 完整资源目录：露出/置灰/跨空间切换由独立 Hook 承担。
+  const resourceJump = useBotResourceJump(bot, stage);
+
   const featureNode = (
     <BotSessionFileOverlays
       botId={botId}
@@ -213,6 +217,7 @@ export function useBotSessionFilesFeature(
       onOpenUpload={openUpload}
       onAddToSession={addReadyUploadsToSession}
       onReference={handleReference}
+      resourceJump={resourceJump}
     />
   );
 

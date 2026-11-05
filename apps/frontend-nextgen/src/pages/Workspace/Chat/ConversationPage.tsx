@@ -11,9 +11,12 @@ import { sortSpacesBySidebarOrder } from '@/domain/spaceContext';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { workspaceService } from '@/services/workspace/workspaceService';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { CodingBotConversationStage } from './CodingBotConversationStage';
 import { StandardConversationStageContainer } from './StandardConversationStageContainer';
@@ -171,6 +174,20 @@ export default function ConversationPage(): JSX.Element {
     }
     history.push(`/bot-workshop?keyword=${encodeURIComponent(bot.displayName)}`);
   }, []);
+  // 好友 Bot 快捷入口(2026-11-05 标题行常驻)与空态「公开 Bot」链接共用回调:跳发现页前把
+  // 协作身份切为用户身份——好友 Bot 分组仅承接用户身份申请的好友,身份不一致时申请的 Bot
+  // 不会进入对话单聊分组;用户身份未加载出时不强切,仍直接跳转。
+  const openPublicBots = useCallback(() => {
+    const { identities, activeIdentityId } = useWorkspaceStore.getState();
+    const userIdentity = identities.find((identity) => identity.kind === 'user');
+    if (userIdentity && activeIdentityId !== userIdentity.id) {
+      workspaceService.switchIdentity(userIdentity.id);
+      // 实际发生切换时 toast 告知(2026-11-05 验收微调):全局协作身份被切换是可感知副作用,
+      // 静默切换无感知,提示身份已变及好友 Bot 的承接身份。
+      toast.info('已切换至用户身份，Bot 好友将添加至该身份');
+    }
+    history.push('/collaboration-square/bots');
+  }, []);
   // 创建入口确认弹窗落地(2026-11-05 验收微调,同日二轮):带所选空间上下文跳 Bot 管理页,
   // ?create=cloud 让 Bot 管理页挂载时默认唤起云端创建(与 #2990「Bot 管理」菜单项同一空间落地模式)。
   const createBotInSpace = useCallback((spaceId: number) => {
@@ -194,9 +211,9 @@ export default function ConversationPage(): JSX.Element {
     sessions,
     others,
     onOpenSession: handleOpenSession,
-    // 好友 Bot 空态文案内「公开 Bot」链接:跳公开 Bot 发现页。
-    onOpenPublicBots: () => history.push('/collaboration-square/bots'),
-    // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
+    // 好友 Bot 快捷入口/空态「公开 Bot」链接共用:切用户身份后跳公开 Bot 发现页。
+    onOpenPublicBots: openPublicBots,
+    // 管理组空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
     // 创建入口(标题行常驻)空间菜单数据与落地回调(2026-11-05 验收微调)。
     createEntrySpaces,

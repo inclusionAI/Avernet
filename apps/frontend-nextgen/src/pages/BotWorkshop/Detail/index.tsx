@@ -24,7 +24,7 @@ import { moreTabs } from './detailTabs';
 import { useHostingTabs } from './useHostingTabs';
 import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
-  const { id, ownerId, requestedEditable, runtimeStage } = useBotEditorAddress();
+  const { id, ownerId, requestedEditable, runtimeStage, requestedTab } = useBotEditorAddress();
   const openDesktopFolder = useDesktopFolder(id);
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
@@ -64,6 +64,7 @@ const BotWorkshopDetailPage: React.FC = () => {
     false,
     additionalTabs,
     JSON.stringify([addressedOwnerId, runtimeStage, currentSpaceId]),
+    requestedTab,
   );
   const ExtensionPanel = panels.find((panel) => `extension:${panel.id}` === tab)?.Panel;
   const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
