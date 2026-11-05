@@ -65,7 +65,6 @@ async def benchmark_execute_task_internal(
     entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
         body.owner_bot_id,
         body.owner_user_id,
-        getattr(service, "_resolve_entry_bot_owner", None),
     )
     bot_identity = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
 

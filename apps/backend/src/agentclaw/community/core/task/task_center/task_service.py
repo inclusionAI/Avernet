@@ -67,7 +67,6 @@ from agentclaw.community.core.task.task_center.task_service_support import (
     STATIC_PLAN_TEMPLATES,
     build_submit_trajectory_event_kwargs,
     normalize_owner_bot_id,
-    resolve_entry_bot_owner,
 )
 
 from agentclaw.community.core.task.task_center.task_service_execution import (
@@ -263,7 +262,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             notify_messages_provider=self._notify_provider,
             bot_bindings=self._bot_bindings,
             task_context_service=self._task_context_service,
-            owner_lookup=self._resolve_entry_bot_owner,
         )
 
     def _resolve_static_plan_template_id(
@@ -413,10 +411,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
         return self._callback
 
-    def _resolve_entry_bot_owner(self, bot_id: str) -> str | None:
-        """Reverse-resolve a legacy bare product Bot id to its real owner."""
-        return resolve_entry_bot_owner(self._bot_service, bot_id)
-
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
         """提交执行任务并返回根节点标识。
 
@@ -458,9 +452,7 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                         ),
                     },
                 )
-        request = normalize_owner_bot_id(
-            request, owner_lookup=self._resolve_entry_bot_owner
-        )
+        request = normalize_owner_bot_id(request)
         requested_orchestration_mode = self._normalize_orchestration_mode(
             request.execution_config.get("orchestration_mode")
         )
