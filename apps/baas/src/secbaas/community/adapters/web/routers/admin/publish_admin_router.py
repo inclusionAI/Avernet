@@ -5,7 +5,7 @@ These endpoints bypass normal state machine transitions — use with caution.
 
 Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
-- POST /api/v1/admin/devices/{device_uuid}/status - Repair a device's status and/or
+- POST /api/v1/admin/devices/{device_uuid}/repair - Repair a device's status and/or
   provider binding directly, stamping the operator as `modifier`
 - POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
 - POST /api/v1/admin/bots/restore - Restore a bot record to live ACTIVE (bot_id or bot_uuid in request body)
@@ -164,14 +164,14 @@ def _to_update_status_response(
 
 
 @router.post(
-    "/devices/{device_uuid}/status",
+    "/devices/{device_uuid}/repair",
     response_model=ApiResponse[UpdateDeviceStatusResponse],
 )
 @inject
 async def update_device_status_endpoint(
     device_uuid: Annotated[
         str,
-        Path(description="Device UUID to update"),
+        Path(description="Device UUID to repair"),
     ],
     tenant: Annotated[str, Query(description="Tenant name")],
     request: UpdateDeviceStatusRequest,
