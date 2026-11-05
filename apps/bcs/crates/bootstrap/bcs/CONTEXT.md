@@ -169,6 +169,9 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
 ## Runtime ownership
 
 The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring.
+The SQLite schema bootstrap and versioned migration chain are owned by the
+`bcs-db-migrations` library (normal dependency); this crate re-exports that
+API as `bcs::migrations` and calls it during startup.
 Eventing workers initialize in orchestrator registration order and shut down in
 reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.

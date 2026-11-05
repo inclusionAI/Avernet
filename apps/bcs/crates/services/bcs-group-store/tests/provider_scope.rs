@@ -7,9 +7,7 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::{Group, GroupMutableFieldsPatch, Participant, ParticipantRole, ServiceError};
 use std::sync::Arc;
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 const ENV: &str = "scope-contract";
 async fn fixture() -> Arc<dyn DbPlugin> {
     let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());

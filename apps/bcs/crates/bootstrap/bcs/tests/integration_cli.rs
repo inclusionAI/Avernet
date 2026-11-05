@@ -8,6 +8,7 @@
 //! cargo test --package bcs --test integration_cli_test -- --test-threads=1
 //! ```
 
+#[path = "support/e2e_helpers.rs"]
 mod e2e_helpers;
 
 use e2e_helpers::{create_temp_dir, run_bcs_cli_no_token, ProcessManager};

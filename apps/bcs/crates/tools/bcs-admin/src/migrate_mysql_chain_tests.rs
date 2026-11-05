@@ -7,8 +7,7 @@ mod task_handle_contract;
 mod group_notify_contract;
 
 #[cfg(test)]
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-mod migration_chain_migrations;
+use bcs_db_migrations as migration_chain_migrations;
 
 #[path = "../../../services/bcs-bot-store/tests/support/a2a_mysql_cases.rs"]
 mod a2a_store_contract;
