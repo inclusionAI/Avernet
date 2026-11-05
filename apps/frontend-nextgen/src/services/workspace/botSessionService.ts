@@ -58,7 +58,7 @@ export interface ChatBotView {
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
-  /** 团队 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
+  /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
 }
 

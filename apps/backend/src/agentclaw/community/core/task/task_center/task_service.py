@@ -45,6 +45,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_runner.execution_adapters import (
@@ -783,6 +784,9 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
 
     def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
         return self._graph.get_node_context(task_id, node_id)
+
+    def get_task_node_by_session(self, session_id: str) -> TaskNodeSessionRef | None:
+        return task_service_queries.get_task_node_by_session(self, session_id)
 
     def get_task_dashboard(
         self,

@@ -44,7 +44,7 @@ export type { ComposerSelection, WorkflowSelection } from '@/services/tasks/task
 export interface UseTaskExecutionResult {
   submitting: boolean;
   error: string | null;
-  /** 当前 Bot/协作群 Driver Bot 是否已安装可用的 task-intent-recognition。 */
+  /** 当前 Bot/协作群 Driver Bot 是否已安装可用的 task-intake。 */
   dynamicTaskEnabled: boolean;
   dynamicTaskChecking: boolean;
   lastTaskId: string | null;

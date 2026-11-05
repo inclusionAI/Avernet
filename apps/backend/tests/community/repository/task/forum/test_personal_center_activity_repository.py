@@ -234,6 +234,97 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
     assert all_human.items[0].target_id == "user-b"
 
 
+def test_bot_actor_alias_aggregates_legacy_and_canonical_content(db):
+    content_repo = ForumRepository(db)
+    activity_repo = ForumPersonalCenterActivityRepository(db)
+    for author_id, request_id in (
+        ("bot-a", "req-bot-legacy-activity"),
+        ("bot-a:user-a", "req-bot-canonical-activity"),
+    ):
+        content_repo.create_topic(
+            author_type="BOT",
+            author_id=author_id,
+            client_request_id=request_id,
+            title=f"Topic {author_id}",
+            body="Body",
+        )
+
+    canonical_bot = ForumActorRef(
+        type=ForumActorType.BOT,
+        id="bot-a:user-a",
+        id_alias="bot-a",
+    )
+    page = _list(
+        activity_repo,
+        actors=(canonical_bot,),
+        activity_type=PersonalCenterActivityType.AUTHORED,
+    )
+
+    assert page.total == 2
+    assert {item.actor_id for item in page.items} == {"bot-a", "bot-a:user-a"}
+
+
+def test_bot_actor_alias_aggregates_legacy_and_canonical_replies(db):
+    content_repo = ForumRepository(db)
+    activity_repo = ForumPersonalCenterActivityRepository(db)
+    topic = content_repo.create_topic(
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="req-bot-alias-topic",
+        title="Reply identity topic",
+        body="Body",
+    ).topic
+    for index, author_id in enumerate(("bot-a", "bot-a:user-a")):
+        content_repo.create_reply(
+            topic_id=topic.topic_id,
+            author_type="BOT",
+            author_id=author_id,
+            client_request_id=f"req-bot-alias-reply-{index}",
+            body=f"Reply from {author_id}",
+        )
+
+    canonical_bot = ForumActorRef(
+        type=ForumActorType.BOT,
+        id="bot-a:user-a",
+        id_alias="bot-a",
+    )
+    page = _list(
+        activity_repo,
+        actors=(canonical_bot,),
+        activity_type=PersonalCenterActivityType.REPLIED,
+    )
+
+    assert page.total == 2
+    assert {item.actor_id for item in page.items} == {"bot-a", "bot-a:user-a"}
+
+
+def test_default_bot_actor_queries_only_owner_scoped_content(db):
+    content_repo = ForumRepository(db)
+    activity_repo = ForumPersonalCenterActivityRepository(db)
+    for author_id, request_id in (
+        ("default:user-a", "req-default-scoped-activity"),
+        ("default:user-b", "req-default-other-owner-activity"),
+        ("default", "req-default-ambiguous-activity"),
+    ):
+        content_repo.create_topic(
+            author_type="BOT",
+            author_id=author_id,
+            client_request_id=request_id,
+            title=f"Topic {author_id}",
+            body="Body",
+        )
+
+    default_bot = ForumActorRef(type=ForumActorType.BOT, id="default:user-a")
+    page = _list(
+        activity_repo,
+        actors=(default_bot,),
+        activity_type=PersonalCenterActivityType.AUTHORED,
+    )
+
+    assert page.total == 1
+    assert [item.actor_id for item in page.items] == ["default:user-a"]
+
+
 def test_topic_context_reuses_the_serving_hot_gate(db):
     content_repo = ForumRepository(db)
     activity_repo = ForumPersonalCenterActivityRepository(db)

@@ -79,7 +79,9 @@ export function ConversationSidebarSection(props: ConversationSidebarSectionProp
                   <span
                     role="img"
                     aria-label={infoHint}
-                    className="inline-flex shrink-0 cursor-help items-center text-content-icon"
+                    // cursor-pointer（2026-11-03 体验微调）：Info 说明图标 hover 出解释 Tooltip，
+                    // 原 cursor-help 的「？」指针让用户误读为疑问而非解释，改为手型表达「可交互」。
+                    className="inline-flex shrink-0 cursor-pointer items-center text-content-icon"
                   >
                     <Info className="h-3 w-3" aria-hidden="true" />
                   </span>
