@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import * as botsController from '@/services/backendApi/bots/botController';
+import { generateBotAvatar } from '@/domain/botAvatar';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import * as publicBotController from '@/services/backendApi/collaboration/publicBotController';
@@ -110,6 +111,7 @@ describe('collaborationCandidateService', () => {
           {
             id: 'b1:actor-1',
             name: 'Alpha',
+            avatarUrl: generateBotAvatar('b1'),
             online: true,
             status: 'online',
             botStatus: 'ACTIVE',
@@ -120,6 +122,7 @@ describe('collaborationCandidateService', () => {
           {
             id: 'b2:actor-1',
             name: 'Beta',
+            avatarUrl: generateBotAvatar('b2'),
             online: false,
             status: 'online',
             botStatus: 'INACTIVE',
@@ -267,6 +270,7 @@ describe('collaborationCandidateService', () => {
     expect(res.ok && res.data.items[0]).toMatchObject({
       id: 'b1:actor-1',
       name: 'Alpha',
+      avatarUrl: generateBotAvatar('b1'),
       online: false,
       status: 'hidden',
       detailsResolved: false,

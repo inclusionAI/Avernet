@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type { IdentityReachability, IdentityStatus } from '@/domain/collaboration';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import { listBotMetadata, type BotMetadataDto } from '@/services/backendApi/bots/botController';
@@ -68,7 +69,7 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
   return {
     id: dto.bot_id,
     name: dto.name ?? dto.bot_id,
-    avatarUrl: dto.avatar_url,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     summary: dto.descriptor?.summary,
     online: dto.status === 'online' && dto.reachability !== 'unreachable',
     status: dto.status === 'hidden' ? 'hidden' : 'online',
@@ -84,7 +85,7 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
   return {
     id,
     name: dto.bot_name || dto.bot_id,
-    avatarUrl: dto.avatar_url?.trim() || undefined,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: 'online',
     // 实例运行状态透传(2026-10-21):不再在视图层丢弃,FAILED/PENDING 供行级禁用与悬停提示感知。
@@ -110,6 +111,7 @@ function toUnavailableFriendBot(id: string, name?: string): CollaborationBotView
   return {
     id,
     name: name ?? id,
+    avatarUrl: resolveBotAvatarUrl(undefined, splitCompoundBotId(id).botId),
     online: false,
     status: 'hidden',
     reachability: 'reachable',
@@ -123,6 +125,7 @@ function toUnknownFriendBot(id: string): CollaborationBotView {
   return {
     id,
     name: id,
+    avatarUrl: resolveBotAvatarUrl(undefined, splitCompoundBotId(id).botId),
     online: false,
     status: 'hidden',
     reachability: 'reachable',
