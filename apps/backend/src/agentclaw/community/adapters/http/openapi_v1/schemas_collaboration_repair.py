@@ -13,9 +13,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Component = Literal["ownership", "profile", "managers", "caller_config"]
+Component = Literal["ownership", "profile", "managers"]
 ItemStatus = Literal[
-    "succeeded", "failed", "unknown", "skipped_dependency", "not_applicable"
+    "succeeded", "failed", "unknown", "skipped_dependency"
 ]
 ReportStatus = Literal["succeeded", "partial_failed", "failed"]
 
@@ -34,20 +34,20 @@ class CollaborationRepairItem(BaseModel):
 
 
 class CollaborationRepairReport(BaseModel):
-    """The four-item report; its status aggregates the item statuses."""
+    """The three-item report; its status aggregates the item statuses."""
 
     model_config = ConfigDict(extra="forbid")
 
     bot_id: str = Field(description="The repaired Bot's Backend id.")
     status: ReportStatus = Field(
-        description="Aggregate outcome derived from the four items."
+        description="Aggregate outcome derived from the three items."
     )
     items: list[CollaborationRepairItem] = Field(
-        min_length=4,
-        max_length=4,
+        min_length=3,
+        max_length=3,
         description=(
-            "Exactly four items in the fixed order: ownership, profile, "
-            "managers, caller_config."
+            "Exactly three items in the fixed order: ownership, profile, "
+            "managers."
         ),
     )
 

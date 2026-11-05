@@ -74,7 +74,6 @@ async def test_no_unexpected_calls_beyond_the_contract(repair_case):
     assert [c[0] for c in repair_case.metadata.method_calls] == [
         "exists",
         "update_profile",
-        "sync_caller",
     ]
     assert [c[0] for c in repair_case.ownership.method_calls] == ["replace_ownership"]
     assert [c[0] for c in repair_case.managers.method_calls] == [
@@ -90,5 +89,4 @@ def test_report_rejects_an_item_in_the_wrong_slot():
             RepairItem("profile", "succeeded"),
             RepairItem("ownership", "succeeded"),
             RepairItem("managers", "succeeded"),
-            RepairItem("caller_config", "succeeded"),
         )

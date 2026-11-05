@@ -5,7 +5,7 @@ public service constructor by ``factories.make_repair_case``. The suite pins
 the plan's behaviour contract:
 
 - fixed execution order (facts read → owner precondition → exists → ownership
-  read/write → profile → fresh managers read/write → optional caller), asserted
+  read/write → profile → fresh managers read/write), asserted
   from the actual call order, not final state;
 - exactly one bounded send per component and one exists probe;
 - Owner missing-noop, drift, deadline and delivery-classification mappings;
@@ -37,12 +37,10 @@ from agentclaw.community.kernel.bot_ownership_sync import (
     OwnershipFacts,
 )
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     MetadataDeliveryError,
     MetadataDeliveryErrorCode,
     RepairCommand,
     RepairFactsError,
-    RepairItem,
     RepairPreconditionError,
     RepairPreconditionErrorCode,
 )
@@ -90,7 +88,6 @@ def _assert_once_per_component(case) -> None:
     assert case.ownership.replace_ownership.await_count == 1
     assert case.metadata.update_profile.await_count == 1
     assert case.managers.replace_managers.await_count == 1
-    assert case.metadata.sync_caller.await_count == 1
     assert case.reader.read_facts.call_count == 1
     assert case.ownership_reader.read_facts.call_count == 1
     assert case.managers_reader.read_facts.call_count == 1
@@ -107,7 +104,6 @@ async def test_missing_target_sends_no_writes(repair_case):
     repair_case.ownership.replace_ownership.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.update_profile.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 # ── Happy path: order, one send per component, real projector behaviour ───
@@ -120,8 +116,7 @@ async def test_full_success_order_reads_fresh_and_sends_once_per_component(
     report = await repair_case.service.repair(repair_case.command)
 
     # Actual call order: the managers facts are (re)read only after the
-    # ownership write and the profile send; the caller only after the
-    # managers replace.
+    # ownership write and the profile send.
     assert _names(repair_case) == [
         "reader.read_facts",
         "metadata.exists",
@@ -130,7 +125,6 @@ async def test_full_success_order_reads_fresh_and_sends_once_per_component(
         "metadata.update_profile",
         "managers_reader.read_facts",
         "managers.replace_managers",
-        "metadata.sync_caller",
     ]
     _assert_once_per_component(repair_case)
 
@@ -157,25 +151,17 @@ async def test_full_success_order_reads_fresh_and_sends_once_per_component(
     assert manager_snapshot.owner_id == CURRENT_OWNER
     assert manager_snapshot.manager_user_ids == repair_case.expected_roster
 
-    # Caller: the established enabled config from the initial facts.
-    (caller,) = [
-        call.args[0] for call in repair_case.metadata.sync_caller.await_args_list
-    ]
-    assert caller is repair_case.facts.caller
-
     assert report.bot_id == repair_case.facts.profile.bot_id
     assert report.status == "succeeded"
     assert _items(report) == {
         "ownership": ("succeeded", None),
         "profile": ("succeeded", None),
         "managers": ("succeeded", None),
-        "caller_config": ("succeeded", None),
     }
     assert tuple(item.component for item in report.items) == (
         "ownership",
         "profile",
         "managers",
-        "caller_config",
     )
 
 
@@ -231,7 +217,6 @@ async def test_actor_drift_raises_owner_changed_before_any_outbound(repair_case)
     repair_case.ownership.replace_ownership.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.update_profile.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -288,7 +273,6 @@ async def test_exists_probe_backstop_expiry_is_a_precondition():
     case.ownership.replace_ownership.assert_not_awaited()
     case.metadata.update_profile.assert_not_awaited()
     case.managers.replace_managers.assert_not_awaited()
-    case.metadata.sync_caller.assert_not_awaited()
     never.set()
 
 
@@ -315,13 +299,11 @@ async def test_missing_bot_noop_is_reported_target_gone_not_success(repair_case)
         "ownership": ("failed", "collaboration_bot_not_found"),
         "profile": ("skipped_dependency", None),
         "managers": ("skipped_dependency", None),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "failed"
     repair_case.metadata.update_profile.assert_not_awaited()
     repair_case.managers_reader.read_facts.assert_not_called()
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -386,10 +368,8 @@ async def test_fresh_committed_owner_is_adopted_and_repair_continues():
         "ownership": ("succeeded", None),
         "profile": ("succeeded", None),
         "managers": ("succeeded", None),
-        "caller_config": ("succeeded", None),
     }
     assert report.status == "succeeded"
-    case.metadata.sync_caller.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -449,7 +429,7 @@ async def test_ownership_delivery_classification_flows_onto_the_item(
         ),
     ],
 )
-async def test_profile_failure_continues_to_managers_and_caller(
+async def test_profile_failure_continues_to_managers(
     repair_case, kind, code, status
 ):
     repair_case.metadata.update_profile.side_effect = MetadataDeliveryError(kind, code)
@@ -458,15 +438,13 @@ async def test_profile_failure_continues_to_managers_and_caller(
         "ownership": ("succeeded", None),
         "profile": (status, code),
         "managers": ("succeeded", None),
-        "caller_config": ("succeeded", None),
     }
     assert report.status == "partial_failed"
     assert repair_case.managers.replace_managers.await_count == 1
-    assert repair_case.metadata.sync_caller.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_profile_target_gone_stops_managers_and_caller(repair_case):
+async def test_profile_target_gone_stops_managers(repair_case):
     repair_case.metadata.update_profile.side_effect = MetadataDeliveryError(
         DeliveryFailure.REJECTED, MetadataDeliveryErrorCode.COLLABORATION_BOT_NOT_FOUND
     )
@@ -475,16 +453,14 @@ async def test_profile_target_gone_stops_managers_and_caller(repair_case):
         "ownership": ("succeeded", None),
         "profile": ("failed", "collaboration_bot_not_found"),
         "managers": ("skipped_dependency", None),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "partial_failed"
     repair_case.managers_reader.read_facts.assert_not_called()
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_profile_deadline_exhaustion_stops_managers_and_caller(repair_case):
+async def test_profile_deadline_exhaustion_stops_managers(repair_case):
     """The plan's profile continuation rule has two exceptions only."""
     repair_case.metadata.update_profile.side_effect = MetadataDeliveryError(
         DeliveryFailure.UNKNOWN, MetadataDeliveryErrorCode.DELIVERY_TIMEOUT
@@ -494,12 +470,10 @@ async def test_profile_deadline_exhaustion_stops_managers_and_caller(repair_case
         "ownership": ("succeeded", None),
         "profile": ("unknown", "delivery_timeout"),
         "managers": ("skipped_dependency", None),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "partial_failed"
     repair_case.managers_reader.read_facts.assert_not_called()
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -527,26 +501,14 @@ async def test_owner_drift_after_ownership_write_skips_stale_managers(repair_cas
     report = await repair_case.service.repair(repair_case.command)
 
     # Never write the stale roster: the drift is discovered at the managers
-    # step and carried there; the applicable caller follows as a plain
-    # dependency skip.
+    # step and carried there without changing the roster.
     assert _items(report) == {
         "ownership": ("succeeded", None),
         "profile": ("succeeded", None),
         "managers": ("skipped_dependency", "owner_drift"),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "partial_failed"
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_owner_drift_with_no_caller_keeps_not_applicable(repair_case):
-    drifted = SyncFacts(KEY, "b", "e", "owner-newer", (), bot_type="service")
-    repair_case.managers_reader.read_facts.return_value = drifted
-    repair_case.reader.read_facts.return_value = default_repair_facts(caller=None)
-    report = await repair_case.service.repair(repair_case.command)
-    assert _items(report)["caller_config"] == ("not_applicable", None)
 
 
 @pytest.mark.asyncio
@@ -571,7 +533,6 @@ async def test_managers_facts_error_reports_never_empty_roster(
     assert _items(report)["managers"] == ("failed", expected_code)
     assert report.status == "partial_failed"
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -585,7 +546,7 @@ async def test_managers_unclassified_reader_error_still_raises(repair_case):
 
 
 @pytest.mark.asyncio
-async def test_managers_delivery_failure_still_syncs_independent_caller(repair_case):
+async def test_managers_delivery_failure_is_reported(repair_case):
     repair_case.managers.replace_managers.side_effect = BcsManagersError(
         DeliveryFailure.REJECTED, "http_403"
     )
@@ -594,10 +555,8 @@ async def test_managers_delivery_failure_still_syncs_independent_caller(repair_c
         "ownership": ("succeeded", None),
         "profile": ("succeeded", None),
         "managers": ("failed", "http_403"),
-        "caller_config": ("succeeded", None),
     }
     assert report.status == "partial_failed"
-    assert repair_case.metadata.sync_caller.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -642,7 +601,6 @@ async def test_managers_identity_unresolved_mid_flight_reports_failure(repair_ca
     assert _items(report)["managers"] == (
         "failed", "collaboration_bot_identity_unresolved"
     )
-    repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
 
 
@@ -661,7 +619,6 @@ async def test_foreign_manager_facts_are_identity_not_benign_drift(repair_case):
     assert _items(report)["managers"] == (
         "failed", "collaboration_bot_identity_unresolved"
     )
-    repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
 
 
@@ -672,7 +629,6 @@ async def test_managers_reader_oversized_roster_reports_failure_never_empty(repa
     report = await repair_case.service.repair(repair_case.command)
     assert _items(report)["managers"] == ("failed", FactsCode.COLLABORATION_FACTS_READ_ERROR)
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -690,7 +646,6 @@ async def test_managers_projector_refusal_preserves_prior_writes(repair_case):
         report = await repair_case.service.repair(repair_case.command)
     assert _items(report)["managers"] == ("failed", FactsCode.COLLABORATION_FACTS_READ_ERROR)
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.ownership.replace_ownership.assert_awaited_once()
     repair_case.metadata.update_profile.assert_awaited_once()
 
@@ -727,55 +682,11 @@ async def test_initial_facts_key_mismatch_is_a_facts_error(repair_case):
     repair_case.metadata.exists.assert_not_awaited()
 
 
-# ── Caller item: applicability and disabled configs ─────────────────────
-
-
-@pytest.mark.asyncio
-async def test_no_established_caller_config_is_not_applicable(repair_case):
-    repair_case.reader.read_facts.return_value = default_repair_facts(caller=None)
-    report = await repair_case.service.repair(repair_case.command)
-    assert _items(report)["caller_config"] == ("not_applicable", None)
-    assert report.status == "succeeded"
-    repair_case.metadata.sync_caller.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_disabled_but_established_caller_config_still_syncs(repair_case):
-    disabled = CallerSnapshot(STABLE, enabled=False, source_revision=4)
-    repair_case.reader.read_facts.return_value = default_repair_facts(
-        caller=disabled
-    )
-    report = await repair_case.service.repair(repair_case.command)
-    assert repair_case.metadata.sync_caller.await_count == 1
-    (snap,) = [
-        call.args[0] for call in repair_case.metadata.sync_caller.await_args_list
-    ]
-    assert snap is disabled
-    assert _items(report)["caller_config"] == ("succeeded", None)
-    assert report.status == "succeeded"
-
-
-@pytest.mark.asyncio
-async def test_missing_noop_tail_with_no_caller_keeps_not_applicable(repair_case):
-    """Applicability is a fact, not a flow state — even in a stopped tail."""
-    repair_case.ownership.replace_ownership.return_value = OwnershipChange(
-        STABLE, None, None, False, "req-1"
-    )
-    repair_case.reader.read_facts.return_value = default_repair_facts(caller=None)
-    report = await repair_case.service.repair(repair_case.command)
-    assert _items(report) == {
-        "ownership": ("failed", "collaboration_bot_not_found"),
-        "profile": ("skipped_dependency", None),
-        "managers": ("skipped_dependency", None),
-        "caller_config": ("not_applicable", None),
-    }
-
-
 # ── Deadline semantics mid-execution ────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_deadline_between_profile_and_managers_fails_managers_skips_caller():
+async def test_deadline_between_profile_and_managers_fails_managers():
     """An item never sent is failed-with-timeout, never unknown."""
     case = make_repair_case()
 
@@ -790,11 +701,9 @@ async def test_deadline_between_profile_and_managers_fails_managers_skips_caller
         "ownership": ("succeeded", None),
         "profile": ("succeeded", None),
         "managers": ("failed", "delivery_timeout"),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "partial_failed"
     case.managers.replace_managers.assert_not_awaited()
-    case.metadata.sync_caller.assert_not_awaited()
     case.managers_reader.read_facts.assert_not_called()
 
 
@@ -812,7 +721,6 @@ async def test_deadline_before_ownership_send_fails_first_item():
         "ownership": ("failed", "delivery_timeout"),
         "profile": ("skipped_dependency", None),
         "managers": ("skipped_dependency", None),
-        "caller_config": ("skipped_dependency", None),
     }
     assert report.status == "failed"
     case.ownership.replace_ownership.assert_not_awaited()
@@ -854,7 +762,6 @@ async def test_cancellation_during_probe_sends_nothing(repair_case):
     repair_case.ownership.replace_ownership.assert_not_awaited()
     repair_case.metadata.update_profile.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
     never.set()
 
 
@@ -876,5 +783,4 @@ async def test_cancellation_during_in_flight_ownership_starts_no_new_send(
     repair_case.metadata.update_profile.assert_not_awaited()
     repair_case.managers_reader.read_facts.assert_not_called()
     repair_case.managers.replace_managers.assert_not_awaited()
-    repair_case.metadata.sync_caller.assert_not_awaited()
     never.set()

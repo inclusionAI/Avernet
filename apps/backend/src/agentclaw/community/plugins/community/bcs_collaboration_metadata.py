@@ -14,8 +14,7 @@ transport classification; the composition root injects its borrowed
 Exactly ONE bounded transport send happens per Plugin method call: no
 retry, no new URL or endpoint, no ``register_provider_bot`` (the up-link
 ``onboard`` is the only profile write, mirroring the daily metadata path
-in ``services/bot_service.py``), and the ``source_revision``
-is forwarded verbatim, never bumped.
+in ``services/bot_service.py``), without modifying caller configuration.
 
 Threading. Because each Plugin method issues exactly one send, the
 caller's ``timeout_seconds`` IS the remaining budget for that send and
@@ -47,14 +46,13 @@ public report carries only stable, sanitized reasons.
 | ``BcnBotMissingError`` (404) | ``exists`` → ``False`` — the only False path; on the write paths → ``MetadataDeliveryError(REJECTED, collaboration_bot_not_found)`` |
 | ``BcnUnavailableError`` (503) | ``MetadataDeliveryError(UNKNOWN, collaboration_sync_unavailable)`` |
 | ``BcnRequestError``, code ``timeout`` | ``MetadataDeliveryError(UNKNOWN, delivery_timeout)`` — the transport's kind is kept |
-| ``BcnRequestError``, code ``caller_conflict`` | ``MetadataDeliveryError(REJECTED, caller_conflict)`` — a stale/CAS conflict, never retried |
 | ``BcnRequestError``, kind ``REJECTED`` (other 4xx) | ``MetadataDeliveryError(REJECTED, collaboration_rejected)`` — the 4xx bucket |
 | ``BcnRequestError``, kind ``UNKNOWN`` (5xx / no response) | ``MetadataDeliveryError(UNKNOWN, collaboration_upstream_error)`` — the 5xx bucket |
 | ``BcnRequestError``, kind ``NOT_SENT`` | ``MetadataDeliveryError(NOT_SENT, collaboration_sync_unavailable)`` — defensive; the transport does not raise it today |
 | other ``BcnServiceError`` | ``MetadataDeliveryError(UNKNOWN, unknown)`` |
-| result body ``{"skipped": True}`` | ``RepairPreconditionError(collaboration_sync_unavailable)`` — an environment/credential gate is unavailability to start, never a fabricated absence (today only ``get_attributes``/``sync_bot_caller_config`` gate this way; the onboard branch is handled uniformly for the same transport family) |
+| result body ``{"skipped": True}`` | ``RepairPreconditionError(collaboration_sync_unavailable)`` — an environment/credential gate is unavailability to start, never a fabricated absence (today only ``get_attributes`` gates this way; the onboard branch is handled uniformly for the same transport family) |
 | 2xx onboard body with ``onboarded is False`` | ``MetadataDeliveryError(REJECTED, collaboration_bot_not_found)`` — the definitive per-domain rejection BCN reports without an exception |
-| 2xx body failing the documented success shape (non-dict, missing/non-bool ``onboarded``, non-string or mismatched ``bot_uuid``, unknown ``sync_status``, mismatched ``provider_bot_ref``) | ``MetadataDeliveryError(UNKNOWN, collaboration_response_malformed)`` |
+| 2xx body failing the documented success shape (non-dict, missing/non-bool ``onboarded``, non-string or mismatched ``bot_uuid``) | ``MetadataDeliveryError(UNKNOWN, collaboration_response_malformed)`` |
 
 ``exists`` failures surface as ``MetadataDeliveryError`` with
 precondition-shaped codes (``collaboration_sync_unavailable`` /
@@ -91,7 +89,6 @@ from agentclaw.community.core.bot_management.services.bcn_service import (
 )
 from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     MetadataDeliveryError,
     MetadataDeliveryErrorCode,
     ProfileSnapshot,
@@ -109,9 +106,6 @@ logger = get_logger()
 _SKIPPED_KEY = "skipped"
 _ONBOARDED_KEY = "onboarded"
 _BOT_UUID_KEY = "bot_uuid"
-_SYNC_STATUS_KEY = "sync_status"
-_PROVIDER_REF_KEY = "provider_bot_ref"
-_CONFIRMED_SYNC_STATUSES = frozenset({"applied", "unchanged"})
 
 # Delivery-level machine reason vocabulary: the kernel owns it
 # (``MetadataDeliveryErrorCode``); transport-shaped codes are bucketed so
@@ -119,7 +113,6 @@ _CONFIRMED_SYNC_STATUSES = frozenset({"applied", "unchanged"})
 _CODE_UNTYPED = MetadataDeliveryErrorCode.UNKNOWN
 _CODE_RESPONSE_MALFORMED = MetadataDeliveryErrorCode.COLLABORATION_RESPONSE_MALFORMED
 _CODE_TIMEOUT = MetadataDeliveryErrorCode.DELIVERY_TIMEOUT
-_CODE_CONFLICT = MetadataDeliveryErrorCode.CALLER_CONFLICT
 _CODE_REJECTED = MetadataDeliveryErrorCode.COLLABORATION_REJECTED
 _CODE_UPSTREAM = MetadataDeliveryErrorCode.COLLABORATION_UPSTREAM_ERROR
 _CODE_UNAVAILABLE = MetadataDeliveryErrorCode.COLLABORATION_SYNC_UNAVAILABLE
@@ -200,52 +193,11 @@ class BcnCollaborationMetadataAdapter(BcsCollaborationMetadataPlugin):
             )
         except BcnServiceError as exc:
             self._raise_delivery_failure("profile", snapshot.bcs_bot_id, exc)
+        # Blank summaries retain BCS Keep semantics. A valid acknowledgement
+        # confirms this operation; success does not imply a summary clear.
         self._confirm_onboard(snapshot.bcs_bot_id, result)
-        if not snapshot.summary.strip():
-            # BCS onboard treats empty/blank summaries as Keep, and its reply
-            # does not echo the stored summary. Name/avatar may have changed,
-            # but this acknowledgement cannot confirm the entire profile.
-            raise MetadataDeliveryError(
-                DeliveryFailure.UNKNOWN,
-                MetadataDeliveryErrorCode.COLLABORATION_SUMMARY_UNCONFIRMED,
-            )
         logger.info(
             "collaboration_metadata operation=profile bcs_bot_id=%s outcome=confirmed",
-            snapshot.bcs_bot_id,
-        )
-
-    async def sync_caller(
-        self,
-        snapshot: CallerSnapshot,
-        *,
-        timeout_seconds: float,
-    ) -> None:
-        """One CAS send of the saved caller config at the saved revision."""
-        # The stable composite address is the addressing unit. The legacy
-        # (teamclaw_bot_uuid, owner_workno) pair is re-derived from it by a
-        # mechanical split only because the transport validates
-        # provider_bot_ref against that prefix; with provider_bot_ref pinned
-        # verbatim (always, here) the pair never reaches the wire. The daily
-        # counterpart in di/modules/caller_identity_module.py instead sends
-        # the raw bot_id/owner pair; repair cannot, because Ownership
-        # handoff may have moved the current owner since the config was
-        # saved.
-        stable_teamclaw, _, stable_entity = snapshot.bcs_bot_id.partition(":")
-        try:
-            result = await asyncio.to_thread(
-                self._bcn_service.sync_bot_caller_config,
-                teamclaw_bot_uuid=stable_teamclaw,
-                owner_workno=stable_entity,
-                enabled=snapshot.enabled,
-                source_revision=snapshot.source_revision,
-                provider_bot_ref=snapshot.bcs_bot_id,
-                timeout_seconds=timeout_seconds,
-            )
-        except BcnServiceError as exc:
-            self._raise_delivery_failure("caller", snapshot.bcs_bot_id, exc)
-        self._confirm_caller_sync(snapshot.bcs_bot_id, result)
-        logger.info(
-            "collaboration_metadata operation=caller bcs_bot_id=%s outcome=confirmed",
             snapshot.bcs_bot_id,
         )
 
@@ -295,15 +247,6 @@ class BcnCollaborationMetadataAdapter(BcsCollaborationMetadataPlugin):
             # else means the confirmation describes a different bot.
             self._raise_malformed("profile", bcs_bot_id)
 
-    def _confirm_caller_sync(self, bcs_bot_id: str, result: object) -> None:
-        """Verify the caller sync was applied to this stable reference."""
-        body = self._require_mapping("caller", bcs_bot_id, result)
-        self._reject_skipped("caller", bcs_bot_id, body)
-        if body.get(_SYNC_STATUS_KEY) not in _CONFIRMED_SYNC_STATUSES:
-            self._raise_malformed("caller", bcs_bot_id)
-        if body.get(_PROVIDER_REF_KEY) != bcs_bot_id:
-            self._raise_malformed("caller", bcs_bot_id)
-
     @staticmethod
     def _raise_delivery_failure(
         operation: str,
@@ -323,9 +266,6 @@ class BcnCollaborationMetadataAdapter(BcsCollaborationMetadataPlugin):
                 # The send may have landed: keep the transport's UNKNOWN kind.
                 kind = exc.kind
                 code = _CODE_TIMEOUT
-            elif exc.code == "caller_conflict":
-                kind = exc.kind
-                code = _CODE_CONFLICT
             elif exc.kind is DeliveryFailure.REJECTED:
                 kind = DeliveryFailure.REJECTED
                 code = _CODE_REJECTED

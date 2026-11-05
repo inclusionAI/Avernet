@@ -1,4 +1,4 @@
-"""Read-only v1 collaboration repair facts for one Bot.
+"""Read-only v2 collaboration repair facts for one Bot.
 
 Never writes, never bumps ``caller_config_revision``, and never calls a
 business mutator. Missing/deleted Bots, scope mismatches, unresolvable
@@ -18,7 +18,7 @@ from agentclaw.community.kernel.collaboration_repair import RepairFacts
 
 @runtime_checkable
 class CollaborationRepairReadRepository(Protocol):
-    """Read current committed profile, owner and caller facts in one pass."""
+    """Read current committed profile and owner facts in one pass."""
 
     @abstractmethod
     def read_facts(self, key: SyncKey) -> RepairFacts:
