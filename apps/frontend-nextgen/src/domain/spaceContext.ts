@@ -64,3 +64,15 @@ export function sortSpacesByDisplayOrder<T extends Space>(spaces: T[]): T[] {
     return ta === 0 ? 0 : cmpTimeDesc(a, b);
   });
 }
+
+/**
+ * 侧栏空间切换顺序：个人空间置顶，团队空间按 gmtModified 倒序（与空间管理页一致）。
+ * 空间切换器(SpaceSwitcher)与对话菜单创建入口弹窗共用,保证两处空间菜单顺序一致
+ * (2026-11-05 验收问题「创建弹窗与左栏顺序不一致」的对齐)。
+ */
+export function sortSpacesBySidebarOrder<T extends Space>(spaces: T[]): T[] {
+  return [...spaces].sort((a, b) => {
+    if (a.spaceType !== b.spaceType) return a.spaceType === 'PERSONAL' ? -1 : 1;
+    return (b.gmtModified || '').localeCompare(a.gmtModified || '');
+  });
+}

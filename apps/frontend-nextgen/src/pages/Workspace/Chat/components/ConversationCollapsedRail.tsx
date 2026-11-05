@@ -20,7 +20,7 @@ const RAIL_SECTION_MAX_VISIBLE = 5;
 
 export interface ConversationCollapsedRailSection {
   id: ConversationBotSection;
-  /** 分组名（我的 Bot / 团队空间 Bot / 好友 Bot），仅用于 aria 与提示文案。 */
+  /** 分组名（我管理的 Bot / 我协作的 Bot / 好友 Bot），仅用于 aria 与提示文案。 */
   label: string;
   items: ConversationBotView[];
 }

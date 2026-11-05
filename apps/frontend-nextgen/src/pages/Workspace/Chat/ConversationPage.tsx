@@ -7,7 +7,9 @@ import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/Frie
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { sortSpacesBySidebarOrder } from '@/domain/spaceContext';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { history } from '@umijs/max';
@@ -60,6 +62,12 @@ export default function ConversationPage(): JSX.Element {
     managedBots: managedAndTeamBots,
     enabled: true,
   });
+  // 创建入口弹窗空间下拉数据(2026-11-05 验收微调,同日二轮):复用全局空间上下文并按
+  // 侧栏切换顺序排序(个人空间置顶+团队 gmtModified 倒序,与 SpaceSwitcher 共享同一函数,
+  // 验收问题「弹窗与左栏顺序不一致」的对齐);默认选中当前空间,确认后带空间上下文跳 Bot 管理页。
+  const spaces = useSpaceContext((state) => state.spaces);
+  const createEntrySpaces = useMemo(() => sortSpacesBySidebarOrder(spaces), [spaces]);
+  const createEntryCurrentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const hydrated = !directory.managedLoading && !directory.teamLoading && !directory.friendLoading;
   const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession } =
     useConversationSelection({
@@ -162,6 +170,12 @@ export default function ConversationPage(): JSX.Element {
     }
     history.push('/bot-workshop');
   }, []);
+  // 创建入口确认弹窗落地(2026-11-05 验收微调,同日二轮):带所选空间上下文跳 Bot 管理页,
+  // ?create=cloud 让 Bot 管理页挂载时默认唤起云端创建(与 #2990「Bot 管理」菜单项同一空间落地模式)。
+  const createBotInSpace = useCallback((spaceId: number) => {
+    useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
+    history.push('/bot-workshop?create=cloud');
+  }, []);
   // #2990 新增“当前会话回复中”状态保留。普通 Runtime 已拆到
   // StandardConversationStageContainer，通过状态回传供侧边栏会话行展示；Coding Bot
   // 子应用暂不透出同构状态，保持 null。
@@ -183,6 +197,10 @@ export default function ConversationPage(): JSX.Element {
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
+    // 创建入口(标题行常驻)空间菜单数据与落地回调(2026-11-05 验收微调)。
+    createEntrySpaces,
+    createEntryCurrentSpaceId,
+    onCreateBotInSpace: createBotInSpace,
     onOpenBotManagement: openBotManagement,
     replyingSessionId,
   };
