@@ -14,18 +14,12 @@ export interface BotStatusCellProps {
   onManagePublication?: (bot: BotDomain) => void;
 }
 
-/** 复制状态 → 中文标签(CONVERGED 不会出现:后端收敛后 copy_state 已为 null)。 */
-const COPY_STATUS_LABEL: Record<BotCopyStatus, string> = {
-  INITIAL: '复制初始化',
-  CREATED: '复制中',
-  AUTH_PENDING: '等待授权',
-  CONFIG_COPIED: '配置已复制',
-  FILE_SYNCED: '文件已同步',
-  BOT_STARTED: 'Bot 启动中',
-  CAPSET_SYNCED: '能力集同步中',
-  CONVERGED: '已复制完成',
-  FAILED: '复制失败',
-};
+/**
+ * 复制态文案:中间态一律「复制中」;终态只有成功(收敛后 copy_state 已为 null →
+ * 不显徽标)与「复制失败」。故非 null 的 copy_state 必为进行中或 FAILED,二分即可。
+ */
+const copyStatusLabel = (status: BotCopyStatus): string =>
+  status === 'FAILED' ? '复制失败' : '复制中';
 
 /**
  * 状态圆点配 dmore 稿（10/19 Bot管理首页）：8px 圆点 + 13px 文字，不再用彩色底 Badge。
@@ -65,7 +59,7 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({
       <span className="inline-flex items-center gap-1.5">
         <span aria-hidden className={`size-2 shrink-0 rounded-full ${failed ? 'bg-destructive' : 'bg-info'}`} />
         <span className="whitespace-nowrap text-[13px] text-muted-foreground">
-          {COPY_STATUS_LABEL[copyState.status]}
+          {copyStatusLabel(copyState.status)}
         </span>
       </span>
     );
