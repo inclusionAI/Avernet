@@ -10,6 +10,7 @@ from app.bootstrap.opensource import build_opensource_provider_registry
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "test")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "tc.sqlite3"))
@@ -235,13 +236,14 @@ def test_legacy_identity_is_resolved_for_fuse_without_md(runtime):
     )
 
 
-def test_stale_source_setting_cannot_attach_new_deployment_to_old_store(
+def test_explicit_card_backend_ignores_removed_index_source_setting(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "new.sqlite"))
     monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "new-qdrant"))
     monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "legacy")
+    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     registry = build_opensource_provider_registry("test")
 
     def old_storage():
