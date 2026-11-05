@@ -65,6 +65,6 @@
   <rect x="24" y="432" width="912" height="92" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="44" y="456" font-size="13" font-weight="bold" fill="#1c2420">Guarantee</text>
   <text x="44" y="478" font-size="11.5" fill="#1c2420">Every committed control event reaches every live subscriber at least once and in order (dedup by event_seq). Deltas are best effort; the final result is exact.</text>
-  <text x="44" y="498" font-size="11.5" fill="#1c2420">Rules: commit before publish · gap detection · republish on takeover · subscribe before snapshot · poll the log while the channel is down.</text>
+  <text x="44" y="498" font-size="11.5" fill="#1c2420">Rules: commit before publish · gap detection · republish on takeover · subscribe before snapshot · batched catch-up after a disconnect.</text>
   <text x="44" y="516" font-size="11" fill="#5c6a62">Use a sharded, non-durable pub/sub (Redis 7 SPUBLISH or NATS core) — never classic cluster PUBLISH, never a durable queue.</text>
 </svg>
