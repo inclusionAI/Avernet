@@ -38,6 +38,40 @@ def test_approved_callback_requires_original_puid_and_h3():
     assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "ALLOW"
 
 
+def test_offline_classification_requires_original_claim_and_version():
+    workflow = {"approval_target_ready": True, "callback_claim": {
+        "event": {"puid": "puid-a", "decision": "AGREE"},
+        "status": "processing", "claim_id": "claim-a",
+    }}
+    row = _record(phase="APPROVING", public_scope="legacy", approval_puid="puid-a",
+                  row_version=7, workflow_json=json.dumps(workflow))
+    repo = MagicMock()
+    repo.get.return_value = row
+    repo.update_current.return_value = True
+    guard = RiskApprovalGuard(repo, lambda _: True)
+
+    assert not guard.finish_device_offline("dev", "risk-a", "puid-a", "other", 7)
+    assert not guard.finish_device_offline("dev", "risk-a", "puid-a", "claim-a", 6)
+    repo.update_current.assert_not_called()
+    assert guard.finish_device_offline("dev", "risk-a", "puid-a", "claim-a", 7)
+    update = repo.update_current.call_args.kwargs
+    assert update["row_version"] == 7
+    assert update["changes"]["phase"] == "NEEDS_ATTENTION"
+    state = json.loads(update["changes"]["workflow_json"])
+    assert state["error"] == "CALLBACK_DEVICE_OFFLINE_REAPPLY"
+    assert state["callback_claim"]["status"] == "unknown"
+
+
+def test_offline_classification_never_rewrites_unknown_or_newer_claim():
+    repo = MagicMock()
+    repo.get.return_value = _record(phase="NEEDS_ATTENTION", public_scope="legacy",
+                                   approval_puid="puid-a", row_version=8,
+                                   workflow_json='{"error":"CALLBACK_OUTCOME_UNKNOWN"}')
+    guard = RiskApprovalGuard(repo, lambda _: True)
+    assert not guard.finish_device_offline("dev", "risk-a", "puid-a", "claim-a", 7)
+    repo.update_current.assert_not_called()
+
+
 def test_pending_callback_replayed_only_after_puid_association_and_h3():
     row = _record(phase="APPROVING", approval_puid="puid-a", workflow_json=json.dumps({
         "approval_intent": True, "approval_target_ready": True, "pending_approval": {"puid": "puid-a", "decision": "AGREE"}

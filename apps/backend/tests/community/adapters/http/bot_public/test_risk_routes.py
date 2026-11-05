@@ -423,6 +423,7 @@ async def test_openapi_refresh_keeps_event_loop_responsive(monkeypatch):
         "_view",
         lambda _: RiskRecordResponse(
             risk_check_id="r",
+            row_version=1,
             phase="CHECKING",
             target={"public_scope": "user", "visibility": "public"},
         ),
@@ -583,3 +584,13 @@ def test_resolved_bot_context_is_shared_by_gate_and_handler():
     result = client.post("/openapi/v1/collaboration/bots/default:entity/public/risk-checks?user_id=u1", json={"client_request_id":"once", "public_scope":"user", "visibility":"public"})
     assert result.status_code == 202
     assert bots.reads == 1
+
+
+def test_reapply_route_requires_current_owner_and_valid_version():
+    url = "/api/bots/default/public/risk-checks/old/reapply"
+    body = {"client_request_id": "retry", "expected_version": 2, "owner_id": "u1"}
+    manager, _, _ = client_for("manager")
+    assert manager.post(url, json=body).status_code == 404
+    owner, _, _ = client_for()
+    assert owner.post(url, json={**body, "expected_version": 0}).status_code == 422
+    assert owner.post(url, json=body).status_code == 404

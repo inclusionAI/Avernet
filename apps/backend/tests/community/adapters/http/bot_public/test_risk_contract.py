@@ -28,7 +28,7 @@ def test_new_public_scope_visibility_require_matching_departments():
 
 
 def test_response_never_leaks_input_or_summary():
-    response = RiskRecordResponse.model_validate({"risk_check_id": "r1", "phase": "CHECKING", "security_status": "REJECT", "detail_url": "https://example.com/report", "target": {"public_scope": "user", "visibility": "public", "view_depts": []}, "input_json": "secret", "input_hash": "digest", "summary": "private"}).model_dump()
+    response = RiskRecordResponse.model_validate({"risk_check_id": "r1", "row_version": 1, "phase": "CHECKING", "security_status": "REJECT", "detail_url": "https://example.com/report", "target": {"public_scope": "user", "visibility": "public", "view_depts": []}, "input_json": "secret", "input_hash": "digest", "summary": "private"}).model_dump()
     assert response["detail_url"] == "https://example.com/report"
     assert "input_json" not in response and "summary" not in response and "input_hash" not in response
 

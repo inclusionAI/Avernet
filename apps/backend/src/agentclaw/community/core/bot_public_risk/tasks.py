@@ -106,6 +106,18 @@ class RiskTasks:
                 raise RuntimeError("risk application disappeared during submission")
         return saved, created
 
+    def start_reapply(self, record: RiskCheck, *, expected_risk_id: str, expected_version: int) -> tuple[RiskCheck, bool]:
+        saved, created = self.repo.reapply_offline(
+            replace(record, next_action_at=self.clock() + timedelta(minutes=2)),
+            expected_risk_id=expected_risk_id, expected_version=expected_version,
+        )
+        if created:
+            self.submit(env=saved.env, risk_check_id=saved.risk_check_id)
+            saved = self.repo.get(env=saved.env, risk_check_id=saved.risk_check_id)
+            if saved is None:
+                raise RuntimeError("risk application disappeared during submission")
+        return saved, created
+
     def _update(self, row: RiskCheck, changes: dict) -> bool:
         workflow = json.loads(changes.get("workflow_json", row.workflow_json))
         if changes.get("security_status") == "REJECT":

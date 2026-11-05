@@ -29,6 +29,11 @@ class BotPublicRiskServiceProtocol(Protocol):
         self, *, bot: ResolvedBotContext, actor_id: str, record: RiskCheck
     ) -> tuple[str, RiskCheck]: ...
 
+    def reapply_offline(
+        self, *, bot: ResolvedBotContext, actor_id: str, risk_check_id: str,
+        expected_version: int, client_request_id: str,
+    ) -> tuple[RiskCheck, bool]: ...
+
 
 @runtime_checkable
 class BotPublicRiskQueryProtocol(Protocol):

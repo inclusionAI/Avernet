@@ -34,6 +34,11 @@ class LegacyRiskRequest(_Request):
         return value
 
 
+class LegacyOfflineReapplyRequest(_Request):
+    expected_version: int = Field(ge=1, description="Observed version of the offline risk application.")
+    owner_id: str | None = Field(default=None, min_length=1)
+
+
 class ViewDept(BaseModel):
     """Department included in an authorized publication target."""
 
@@ -82,6 +87,7 @@ class RiskRecordResponse(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
     risk_check_id: str = Field(description="Risk application identifier.")
+    row_version: int = Field(ge=1, description="Version used to guard a conditional reapplication.")
     phase: str = Field(description="Current application phase.")
     security_status: str | None = Field(
         default=None, description="Latest overall security status."
