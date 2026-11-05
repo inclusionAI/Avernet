@@ -233,3 +233,196 @@ def test_legacy_identity_is_resolved_for_fuse_without_md(runtime):
         source.scan_for_workers(["bot:owner:legacy"]).profiles[0].staff_id
         == "bot:owner"
     )
+
+
+def test_tc_index_source_cutover_keeps_old_queries_and_state_filters(
+    tmp_path, monkeypatch
+):
+    from search_core.providers.demo_embedding import DemoEmbedding
+
+    from app.domain.models.vector_point import VectorPoint
+    from app.domain.models.worker import Worker, WorkerIdentity, WorkerState
+    from app.domain.models.worker_profile_content import WorkerProfileContent
+    from app.infra.public.stores.sqlite_worker_profile_content_store import (
+        SQLiteWorkerProfileContentStore,
+    )
+    from app.infra.public.stores.sqlite_worker_registry_store import (
+        SQLiteWorkerRegistryStore,
+    )
+    from app.infra.public.stores.sqlite_worker_runtime_state_store import (
+        SQLiteWorkerRuntimeStateStore,
+    )
+    from app.infra.public.vectorstores.qdrant_sqlite_vector_store import (
+        QdrantSQLiteVectorStore,
+    )
+
+    old_db = str(tmp_path / "legacy.sqlite")
+    workers = SQLiteWorkerRegistryStore(old_db)
+    profiles = SQLiteWorkerProfileContentStore(old_db)
+    states = SQLiteWorkerRuntimeStateStore(old_db)
+    workers.create(
+        Worker(
+            id="legacy:owner",
+            type="bot",
+            identity=WorkerIdentity(
+                name="Legacy worker",
+                handle="legacy",
+                description="Old MySQL description",
+            ),
+            capabilities=[],
+            responsibilities=[],
+            state=WorkerState(
+                runtime_state="online", availability="public", trust_level="guarded"
+            ),
+        )
+    )
+    profiles.save(
+        WorkerProfileContent(worker_id="legacy:owner", profile_id="old", is_active=True)
+    )
+    from app.domain.models.worker_runtime_state import WorkerRuntimeState
+
+    states.set_runtime_state("legacy:owner", WorkerRuntimeState.ONLINE)
+    old_vectors = QdrantSQLiteVectorStore(
+        dimension=256, db_path=old_db, qdrant_path=str(tmp_path / "old-qdrant")
+    )
+    old_vectors.upsert(
+        [
+            VectorPoint(
+                id="legacy:owner:old:full",
+                vector=DemoEmbedding(256).embed("MySQL legacy source"),
+                payload={"worker_id": "legacy:owner", "content": "MySQL legacy source"},
+            )
+        ]
+    )
+    workers.create(
+        Worker(
+            id="aaa:hidden",
+            type="bot",
+            capabilities=[],
+            responsibilities=[],
+            identity=WorkerIdentity(name="Hidden", handle="hidden"),
+            state=WorkerState(
+                runtime_state="online", availability="private", trust_level="guarded"
+            ),
+        )
+    )
+    states.set_runtime_state("aaa:hidden", WorkerRuntimeState.ONLINE)
+    # More hidden fragments than the recall limit must not crowd out the visible Worker.
+    old_vectors.upsert(
+        [
+            VectorPoint(
+                id=f"aaa:hidden:old:{i}",
+                vector=DemoEmbedding(256).embed("MySQL"),
+                payload={"worker_id": "aaa:hidden", "content": "MySQL " * 20},
+            )
+            for i in range(65)
+        ]
+    )
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "cards.sqlite"))
+    monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "new-qdrant"))
+    monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "legacy")
+    registry = build_opensource_provider_registry("test")
+    registry.register(
+        "tc_legacy_storage_factory", lambda: (workers, profiles, states, old_vectors)
+    )
+    app = create_bcsfuse_app(
+        ApplicationContext(mode="test", startup_profile="opensource", registry=registry)
+    )
+    with TestClient(app, headers={"Authorization": "Bearer test-token"}) as client:
+        ready = client.get("/ready")
+        assert ready.status_code == 200, ready.text
+        assert ready.json()["index_source"] == "legacy"
+        legacy = client.post("/v1/search", json={"query": "MySQL"})
+        assert legacy.status_code == 200, legacy.text
+        assert legacy.json()["results"][0]["worker_id"] == "legacy:owner"
+        scoped = client.post(
+            "/api/v1/workers/profiles/search",
+            json={"query": "MySQL", "filters": {"worker_id": ["aaa:hidden"]}},
+        )
+        assert scoped.status_code == 200, scoped.text
+        assert scoped.json()["results"] == []
+        response = client.post(
+            "/v1/workers/legacy:owner/sync",
+            json={
+                "name": "Current worker",
+                "description": "PostgreSQL current source",
+                "runtime_state": "online",
+                "availability": "public",
+                "profile": {"activate": False},
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert (
+            registry.require("tc_catalog_repository")
+            .get("legacy:owner")
+            .card.source_card["description"]
+            == "PostgreSQL current source"
+        )
+        for path, body in (
+            ("offline", {}),
+            ("online", {}),
+            ("availability", {"availability": "private"}),
+            ("availability", {"availability": "public"}),
+        ):
+            assert (
+                client.put(f"/v1/workers/legacy:owner/{path}", json=body).status_code
+                == 200
+            )
+            result = client.post("/api/v1/search", json={"query": "MySQL"})
+            assert result.status_code == 200, result.text
+            assert bool(result.json()["results"]) == (
+                path == "online" or body.get("availability") == "public"
+            )
+        # Import/state changes do not overwrite the old persistence source.
+        assert (
+            old_vectors.get("legacy:owner:old:full").payload["content"]
+            == "MySQL legacy source"
+        )
+    monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "card")
+    next_registry = build_opensource_provider_registry("test")
+    next_registry.register(
+        "tc_legacy_storage_factory",
+        lambda: pytest.fail("card mode must not open old storage"),
+    )
+    next_app = create_bcsfuse_app(
+        ApplicationContext(
+            mode="test", startup_profile="opensource", registry=next_registry
+        )
+    )
+    with TestClient(next_app, headers={"Authorization": "Bearer test-token"}) as client:
+        assert client.get("/ready").json()["index_source"] == "card"
+        current = client.post("/api/v1/search", json={"query": "PostgreSQL"})
+        assert current.status_code == 200, current.text
+        assert current.json()["results"][0]["worker_id"] == "legacy:owner"
+        assert client.get("/v1/workers/legacy:owner/profiles/active").status_code == 200
+        recommendation = client.post("/v1/recommend", json={"question": "PostgreSQL"})
+        assert recommendation.status_code == 200, recommendation.text
+        assert (
+            recommendation.json()["recommendations"][0]["worker_id"] == "legacy:owner"
+        )
+        assert (
+            client.put(
+                "/v1/workers/legacy:owner/availability",
+                json={"availability": "private"},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post("/v1/search", json={"query": "PostgreSQL"}).json()["results"]
+            == []
+        )
+
+
+def test_invalid_tc_index_source_is_rejected_before_storage(monkeypatch):
+    monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "unexpected")
+    registry = build_opensource_provider_registry("test")
+    registry.register(
+        "tc_storage_factory", lambda: pytest.fail("must not open storage")
+    )
+    with pytest.raises(ValueError, match="legacy or card"):
+        create_bcsfuse_app(
+            ApplicationContext(
+                mode="test", startup_profile="opensource", registry=registry
+            )
+        )
