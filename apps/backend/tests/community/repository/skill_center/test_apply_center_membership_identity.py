@@ -6,6 +6,12 @@ import pytest
 
 from agentclaw.community.core.models.skill import Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.models.space_skill import SkillVersion
+from agentclaw.community.core.models.skill_installation_source import (
+    SkillInstallationSourceKind,
+)
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    skill_installations,
+)
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
@@ -212,15 +218,26 @@ def test_stale_raw_default_restore_uses_current_uuid_without_other_supply():
 
 @pytest.mark.parametrize("occupant", ["direct", "inactive-set", "removed-in-this-plan"])
 def test_stale_raw_default_restore_refuses_current_supply_and_keeps_exclusion(occupant):
-    _db, repo = seed(excluded=True, other=occupant != "direct")
+    db, repo = seed(excluded=True, other=occupant != "direct")
     if occupant == "direct":
-        repo.install_skill(
-            bot_id="bot",
-            owner_id="owner",
-            skill_id="1",
-            engine_type="openclaw",
-            default_engine_types=("openclaw",),
-        )
+        # Historical Direct supply exists before the platform Default acquires
+        # this stable UUID. Arrange that real fact through its table writer:
+        # the legacy ordinary API uses a different raw-ID exclusion guard.
+        with db.transactional_orm_session() as session:
+            assert skill_installations.install(
+                session,
+                bot_id="bot",
+                owner_id="owner",
+                env="dev",
+                skill_id=1,
+                source_kind=SkillInstallationSourceKind.DIRECT,
+            )
+            assert skill_installations.sources(
+                session,
+                bot_id="bot",
+                owner_id="owner",
+                env="dev",
+            ) == {1: (SkillInstallationSourceKind.DIRECT.value, None)}
     before = snapshot(repo)
     reason = (
         "RESOURCE_DIRECT_ACTIVE"
