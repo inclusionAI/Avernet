@@ -146,23 +146,28 @@ class RenderScreenService(RenderScreenServiceProtocol):
     ) -> int:
         """创建 CDN 配置，返回新记录 id。"""
         scope = self._resolve_scope(bot_id)
+        # 记录 scope 统一按 Bot 归属者落库:读侧 resource_locator 会把查询 owner
+        # 归一化成 Bot 的 entity_id,若按调用方(legacy 入口传的是登录人)落库,
+        # 协作者在他人 Bot 下写入的记录对归属者/协作者都稳定查空(副屏刷新后
+        # 报「组件库不存在」)。BCN 等无 bot 行的场景保持调用方兜底。
+        bot = self._bot_repo.get_by_id(bot_id)
+        record_owner_id = (
+            str(bot.get("owner_id") or "") if bot else ""
+        ) or owner_id or creator_id
         if scope == "bot":
             user_id = current_user_id or creator_id
             if not user_id or not self._bot_has_collaborative_access(bot_id, user_id):
                 raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
             existing = self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)
         else:
-            existing = self._repo.list_by_bot_id(bot_id=bot_id, owner_id=owner_id)
+            existing = self._repo.list_by_bot_id(
+                bot_id=bot_id, owner_id=record_owner_id or None
+            )
 
         if any(r.name == name for r in existing):
             raise ValueError(f"Duplicate name '{name}' for bot_id={bot_id}")
         if any(r.cdn_url == cdn_url for r in existing):
             raise ValueError(f"Duplicate cdn_url '{cdn_url}' for bot_id={bot_id}")
-
-        record_owner_id = owner_id or creator_id
-        if scope == "bot":
-            bot = self._require_bot(bot_id)
-            record_owner_id = str(bot.get("owner_id") or record_owner_id)
 
         record_id = self._repo.insert(
             bot_id=bot_id,

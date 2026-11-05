@@ -158,3 +158,41 @@ class RenderScreenRepository(
                 },
                 synchronize_session="fetch",
             )
+
+    def list_all_for_backfill(self) -> list[RenderScreenRecord]:
+        """启动订正专用:当前 env 全量未删除记录,不带 owner 过滤。
+
+        漂移行(记录 owner 与 Bot 归属者 entity 不一致)在 list_by_bot_id
+        的 resource_locator 归一化后对任何调用方都不可见,启动订正只能
+        全量读后逐行判定。
+        """
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Model)
+                .filter(
+                    self._Model.is_delete == 0,
+                    self._Model.env == get_current_env(),
+                )
+                .order_by(self._Model.id.asc())
+                .all()
+            )
+            return [_model_to_record(r) for r in rows]
+
+    def update_owner_by_id(self, *, record_id: int, owner_id: str) -> None:
+        """按主键归位记录的 owner scope(启动订正专用)。
+
+        与 update_by_id 同形:单条条件 UPDATE 保留 is_delete=0 / env 守卫,
+        防止并发软删的行被复活。
+        """
+        with self._db.orm_session() as db:
+            db.query(self._Model).filter(
+                self._Model.id == record_id,
+                self._Model.is_delete == 0,
+                self._Model.env == get_current_env(),
+            ).update(
+                {
+                    self._Model.owner_id: owner_id,
+                    self._Model.gmt_modified: func.now(),
+                },
+                synchronize_session=False,
+            )

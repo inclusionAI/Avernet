@@ -173,20 +173,59 @@ class TestAuthorizeRenderScreenBot:
 
 
 class TestCreateRenderScreen:
-    def test_create_returns_id(self, service, mock_repo):
+    def test_create_stamps_bot_owner_scope(self, service, mock_repo, mock_bot_repo):
+        """非共享 Bot 创建记录时统一落 Bot 行 owner_id(记录 canonical scope)。"""
+        mock_bot_repo.get_by_id.return_value = _bot(
+            active_engine="openclaw", template_type="normal",
+            owner_id="owner_001",
+        )
         mock_repo.list_by_bot_id.return_value = []
         mock_repo.insert.return_value = 42
         record_id = service.create_render_screen(
-            bot_id="bot_001", owner_id="user_001",
+            bot_id="bot_001", owner_id="owner_001",
             name="看板", cdn_url="https://cdn.example.com/v1/index.js",
-            creator_id="user_001",
+            creator_id="owner_001",
         )
         assert record_id == 42
-        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id="user_001")
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id="owner_001")
         mock_repo.insert.assert_called_once_with(
-            bot_id="bot_001", owner_id="user_001",
+            bot_id="bot_001", owner_id="owner_001",
             name="看板", cdn_url="https://cdn.example.com/v1/index.js",
-            creator_id="user_001",
+            creator_id="owner_001",
+        )
+
+    def test_create_by_collaborator_lands_in_owner_scope(
+        self, service, mock_repo, mock_bot_repo
+    ):
+        """协作者经 legacy 入口(调用方 owner=登录人)创建,记录必须落 Bot 归属者 scope。
+
+        否则读侧 resource_locator 归一化成归属者 entity_id 后稳定查空
+        (副屏刷新后报「组件库不存在」);creator_id 保留登录人做审计。
+        """
+        mock_bot_repo.get_by_id.return_value = _bot(
+            active_engine="openclaw", template_type="normal",
+            owner_id="272477",
+        )
+        mock_repo.list_by_bot_id.return_value = []
+        mock_repo.insert.return_value = 46
+
+        record_id = service.create_render_screen(
+            bot_id="bot_001", owner_id="435979",
+            name="rpp-prod", cdn_url="https://cdn.example.com/rpp.js",
+            creator_id="435979",
+        )
+
+        assert record_id == 46
+        # 重复名/URL 检测在目标(归属者)scope 内做,协作者自己的误写不入判。
+        mock_repo.list_by_bot_id.assert_called_once_with(
+            bot_id="bot_001", owner_id="272477"
+        )
+        mock_repo.insert.assert_called_once_with(
+            bot_id="bot_001",
+            owner_id="272477",
+            name="rpp-prod",
+            cdn_url="https://cdn.example.com/rpp.js",
+            creator_id="435979",
         )
 
     def test_create_duplicate_name_raises(self, service, mock_repo):
