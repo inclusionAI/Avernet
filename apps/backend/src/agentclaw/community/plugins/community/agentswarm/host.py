@@ -89,6 +89,10 @@ from agentclaw.community.plugins.community.agentswarm.host_chat import (
     chat_bridge_executor, set_chat_bridge_max_workers,
     shutdown_chat_bridge,
 )
+from agentclaw.community.plugins.community.agentswarm.chat.base import (
+    ChatTransport,
+    SessionMode,
+)
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
@@ -235,6 +239,7 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
         chat_timeout_seconds: float = _CHAT_TIMEOUT_SECONDS,
+        chat_transport: ChatTransport | None = None,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
@@ -245,7 +250,43 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         self._space_context = space_context
         self._baas_service = baas_service
         self._chat_timeout_seconds = chat_timeout_seconds
+        # ``None`` means this platform *is* the engine transport: ``chat``
+        # then runs the mixin's own leg, which is the exact pre-seam code
+        # path. A configured transport delegates instead. Nothing is
+        # allocated for the default case.
+        self._chat_transport = chat_transport
         set_chat_bridge_max_workers(max_platform_workers)
+
+    # ── chat ──────────────────────────────────────────────────────────────
+
+    def chat(self, bot_id: BotId, message: str, owner_id: str = "",
+             session_key: str | None = None,
+             cancel_event: threading.Event | None = None,
+             timeout_seconds: float | None = None,
+             tenant: str = "") -> str:
+        """One chat leg, on the configured transport.
+
+        With no transport injected this is the engine leg unchanged. With one
+        injected the leg is delegated, and the session semantics are always
+        ``FRESH``: the subagent never addresses a conversation by name, which is
+        what keeps a retried or respawned turn from inheriting an orphaned one.
+        """
+        if self._chat_transport is None:
+            return ChatLegMixin.chat(
+                self, bot_id, message, owner_id,
+                session_key=session_key,
+                cancel_event=cancel_event,
+                timeout_seconds=timeout_seconds,
+                tenant=tenant,
+            )
+        return self._chat_transport.chat(
+            bot_id, message, owner_id,
+            session_mode=SessionMode.FRESH,
+            session_key=session_key,
+            cancel_event=cancel_event,
+            timeout_seconds=timeout_seconds,
+            tenant=tenant,
+        )
 
 
     # ── create ────────────────────────────────────────────────────────────
