@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/task/task_node_run_info_repository.py
+  h_059e888e5e4e82 173
+apps/backend/src/agentclaw/community/core/repository/protocols/task/core.py
+  h_059e888e5e4e82 198
+apps/backend/tests/community/repository/task/test_task_node_run_info_repository.py
+  h_059e888e5e4e82 1-2,4-5,8,69-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0edc0ce70e907308d59acc13187b2813da7859a8",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
