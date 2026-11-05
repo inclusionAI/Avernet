@@ -18,9 +18,13 @@ import tempfile
 import threading
 import time
 import urllib.error
+from urllib.parse import urlencode
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+TRACE_QUERY_MARKER = 'redact-this-value'
 
 
 def free_port():
@@ -124,9 +128,12 @@ class Story:
 
     def run(self):
         self.request('POST', '/me/ensure-human')
+        trace_query = urlencode({
+            'trace_secret': TRACE_QUERY_MARKER,
+        })
         self.registration = self.request('POST', '/providers', {
             'name': 'Caller E2E', 'auth': {'mode': 'static_bearer'}, 'protocol_version': '2.0',
-            'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback?trace_secret=redact-this-value'})
+            'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback?{trace_query}'})
         bot = self.request('POST', '/providers/' + self.registration['provider_id'] + '/bots', {
             'name': 'Caller E2E Bot', 'owners': ['callere2eowner'], 'provider_bot_ref': 'caller-bot'},
             headers={'Authorization': 'Bearer ' + self.registration['provider_admin_token']})
@@ -195,7 +202,7 @@ def verify_network_traces(path, provider):
     assert all(record['trace_id'] == 'caller-network-e2e' for record in servers), 'incoming trace header lost'
     assert all(record['endpoint'] != '/health' for record in servers), 'health probe created a business trace'
     assert all('?' not in record['endpoint'] for record in records), 'query leaked into trace metadata'
-    assert 'redact-this-value' not in raw and 'test-token' not in raw, 'trace metadata contains credentials'
+    assert TRACE_QUERY_MARKER not in raw and 'test-token' not in raw, 'trace metadata contains credentials'
     assert any(record['outcome'] == 'Http(401)' for record in servers), 'business auth failure was not traced'
     assert any(record['outcome'] == 'Http(422)' for record in servers), 'business validation failure was not traced'
     indexed = {record['span_id']: record for record in clients}

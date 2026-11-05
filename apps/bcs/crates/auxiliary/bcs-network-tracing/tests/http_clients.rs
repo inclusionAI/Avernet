@@ -75,7 +75,12 @@ impl Server {
     }
 
     fn private_url(&self) -> String {
-        format!("{}/echo?secret=hidden#private", self.url).replacen("http://", "http://user:password@", 1)
+        let mut url = reqwest::Url::parse(&format!("{}/echo", self.url)).unwrap();
+        url.set_username("user").unwrap();
+        url.set_password(Some("password")).unwrap();
+        url.query_pairs_mut().append_pair("secret", "hidden");
+        url.set_fragment(Some("private"));
+        url.to_string()
     }
 }
 
