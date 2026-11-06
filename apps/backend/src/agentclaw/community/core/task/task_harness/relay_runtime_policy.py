@@ -1,13 +1,11 @@
 """Pure policy helpers for Relay runtime recovery.
 
-These helpers turn the authoritative Bot/Relay state graph into three recovery
+These helpers turn the authoritative Bot/Relay state graph into two recovery
 rules:
 
-1.  how many ``active`` observations without progress are allowed before a
-    same-session resume,
-2.  how long a silently successful runtime may remain unreported before a
-    recovery is scheduled, and
-3.  which task-loop step a same-session resume should anchor to.
+1.  how long a silently successful runtime may remain unreported after the
+    service first observes terminal success before a recovery is scheduled, and
+2.  which task-loop step a same-session resume should anchor to.
 
 The module deliberately contains pure helpers only.  Transport, probing, and the
 state-machine RecoveryLoop remain in their own modules.
@@ -19,18 +17,7 @@ from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode
 
-_RELAY_ACTIVE_NO_PROGRESS_CYCLES = (4, 6, 8)
 _RELAY_TERMINAL_SUCCESS_UNREPORTED_SECONDS = (360.0, 600.0, 900.0)
-
-
-def active_no_progress_cycle(attempts: int) -> int:
-    """Return the current ``active`` no-progress threshold in cycles."""
-    attempts = max(int(attempts), 0)
-    index = min(
-        attempts,
-        len(_RELAY_ACTIVE_NO_PROGRESS_CYCLES) - 1,
-    )
-    return _RELAY_ACTIVE_NO_PROGRESS_CYCLES[index]
 
 
 def terminal_success_unreported_seconds(attempts: int) -> float:

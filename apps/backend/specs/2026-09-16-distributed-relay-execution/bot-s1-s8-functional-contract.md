@@ -1483,17 +1483,13 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不做恢复；`active + 无进展` 按观察轮次递增介入。同一节点最多 2 次送达成功的 same-session resume：
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 与 `active + 无进展` 都不直接恢复。`active + 无进展` 仅累计观察指标，并等待引擎自身 timeout/终态；只有转换成 `terminal_failed` / `timeout` / `aborted`、`terminal_success` 但图谱未收到报告，或连续 `unknown/unresponsive` 时才进入 same-session recovery。同一节点最多 2 次送达成功的 same-session resume；预算耗尽后显式置 `HUNG`。
 
-- 第 1 轮观察期为 4 个巡检周期，连续无进展后发送 resume；
-- 第 2 轮观察期为 6 个巡检周期，视为上一轮 resume 后仍未推进；
-- 第 3 轮观察期为 8 个巡检周期，若仍无恢复信号则显式置 `HUNG`。
-
-`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒；`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
+`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒。该窗口从服务首次观察到 `terminal_success` 后开始计时；任何离开 `terminal_success` 的后续观察都会清空该计时基准，任务此前处于 active 等状态的时长不得消耗本窗口。`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
 
 每次成功送达的 resume 都会开启新的“恢复观察窗”：
 
-- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、观察时间起点；
+- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、`terminal_success_observed_at` 观察时间起点；
 - **不重置**：`relay_harness_resume_attempts`、`relay_token`、`task_id/node_id`、`run_mode`、`assignee`、会话/群身份。
 
 首个 post-resume probe 使用新的 cursor 基线，确保 resume 消息本身不会被误判为新的业务进展。
