@@ -1,0 +1,20 @@
+apps/bcs-internal/Cargo.lock
+  h_fa66fe7c023b4b 108,135,174,197
+apps/bcs-internal/Cargo.toml
+  h_fa66fe7c023b4b 124-125,128,132
+apps/bcs-internal/scripts/check-p0.sh
+  h_fa66fe7c023b4b 55
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 188-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6fd9d4058c22b069cf85e3b465ac5f7963e9153b",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
