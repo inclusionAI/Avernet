@@ -17,7 +17,6 @@ import {
   type ChatBotView,
 } from './botSessionService';
 import { collaborationCandidateService, type CollaborationBotView } from './collaborationCandidateService';
-import { conversationFavoriteService } from './conversationFavoriteService';
 import type { DomainResult } from './identityService';
 
 export interface ConversationDirectoryResult {
@@ -111,9 +110,7 @@ async function listCodingSessionsByOrigin(
   // 未扫到尾时只暴露“至少还有一页”的有界 total；真正到尾后再给精确过滤总数。
   const total = exhausted ? matching.length : Math.max(targetEnd + 1, matching.length + 1);
   const data = { items, total };
-  return scope === 'favorite' || !supportsBotSessionFavorites(bot.engine)
-    ? { ok: true, data }
-    : { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, data) };
+  return { ok: true, data };
 }
 
 export const conversationService = {
@@ -157,7 +154,7 @@ export const conversationService = {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
     const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
-    return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
+    return result;
   },
 
   /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
@@ -184,8 +181,6 @@ export const conversationService = {
       sessionKey,
       ...rangeArgs,
     );
-    return result.ok
-      ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
-      : result;
+    return result;
   },
 };

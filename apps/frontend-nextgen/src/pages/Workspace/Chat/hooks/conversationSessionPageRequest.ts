@@ -13,6 +13,7 @@ import { isManagedConversationSection } from '@/domain/conversation/types';
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
+import { hydrateConversationFavorites } from './conversationFavoriteHydration';
 import {
   filterRevisionOf,
   firstPageOf,
@@ -165,10 +166,25 @@ export function loadSessionPage(
       }
       return;
     }
+    const hydrateFavorites = () => {
+      if (scope !== 'all') return;
+      void hydrateConversationFavorites(view, userIdNow, result.data, origin, () => {
+        const current = useConversationStore.getState();
+        return ctx.generation.current === generation && ctx.userId.current === userIdNow &&
+          filterRevisionOf(botId, current) === revision &&
+          (isManagedConversationSection(sectionOf)
+            ? stillMineOrigin(botId, scope, origin)
+            : friendScopeOf(botId, current) === scope);
+      }, requestRange);
+    };
     if (!more) {
       writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total), origin);
+      hydrateFavorites();
       return;
     }
-    if (latest) writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page), origin);
+    if (latest) {
+      writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page), origin);
+      hydrateFavorites();
+    }
   });
 }
