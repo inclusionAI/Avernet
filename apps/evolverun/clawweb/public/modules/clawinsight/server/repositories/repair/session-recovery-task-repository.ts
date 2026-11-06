@@ -239,7 +239,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       }
       if (calls.length < 500) break;
     }
-    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery, task.timeline);
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {

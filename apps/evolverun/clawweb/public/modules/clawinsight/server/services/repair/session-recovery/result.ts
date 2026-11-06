@@ -1,7 +1,7 @@
 import { redactText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { DeliveryReceipt, RecoveryRequest, RecoveryResult } from "./contracts.js";
 import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
-import type { RecoveryInterventionStatus, RecoveryStoredTask } from "./task-contracts.js";
+import type { RecoveryInterventionStatus, RecoveryStoredTask, RecoveryTimelineEvent } from "./task-contracts.js";
 
 /** Latest audited message attempt; channel acceptance still needs session/trajectory confirmation. */
 export function recoveryMessagePending(task: Pick<RecoveryStoredTask, "delivery"> & Partial<Pick<RecoveryStoredTask, "timeline">>): boolean {
@@ -16,7 +16,12 @@ export function recoveryMessagePending(task: Pick<RecoveryStoredTask, "delivery"
 }
 
 /** Complete task audit, including prior executions. Acceptance alone does not confirm message presence. */
-export function recoveryInterventionStatus(calls: readonly AgentToolCall[], delivery?: RecoveryResult["delivery"]): RecoveryInterventionStatus {
+export function recoveryInterventionStatus(
+  calls: readonly AgentToolCall[], delivery?: RecoveryResult["delivery"], timeline: readonly RecoveryTimelineEvent[] = [],
+): RecoveryInterventionStatus {
+  // Only the durable accepted permission-handling receipt counts, not card dispatch or Plan approval.
+  if (timeline.some(event => event.kind === "owner_decision" && event.actor === "owner"
+    && typeof event.payload.owner_request_id === "string" && event.payload.owner_request_id.trim())) return "performed";
   const confirmedMessages = new Set(calls.filter(call => call.status === "succeeded" && !call.isWrite
     && ["session_read", "trajectory_read"].includes(call.toolName))
     .map(call => call.result as Record<string, unknown> | null)
