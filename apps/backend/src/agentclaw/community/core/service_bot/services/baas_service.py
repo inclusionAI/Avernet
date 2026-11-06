@@ -2025,109 +2025,132 @@ class BaasService:  # pragma: no cover
         if ws_conn_mode:
             params["ws_conn_mode"] = ws_conn_mode
 
-        try:
-            response = self._http.get(
-                f"/api/v1/bots/{bot_uuid}/ws-info",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
+        # Retry loop: NO_ACTIVE_DEVICES is a self-healing transient state
+        # (device still coming up after deploy/upgrade). The retry budget is
+        # kept tight — 3 attempts over ~6s — so the caller's response time
+        # stays within one human-noticeable pause.
+        max_attempts = 3
+        base_delay = 2.0  # seconds; doubles each attempt
 
-            response_data = response.json()
+        for attempt in range(max_attempts):
+            try:
+                response = self._http.get(
+                    f"/api/v1/bots/{bot_uuid}/ws-info",
+                    params=params,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
 
-            # 检查响应码
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+                response_data = response.json()
+
+                # 检查响应码
+                if response_data.get("code") != 0:
+                    raise BaasServiceError(
+                        f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+                    )
+
+                data = response_data.get("data", {})
+                result = BotWsConnectionInfoResponse(
+                    ws_url=data["ws_url"],
+                    token=data["token"],
+                    target=data["target"],
+                    expires_at=data["expires_at"],
+                    # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
+                    a2a_base_url=str(data.get("a2a_base_url") or ""),
+                    paas_device_id=bot_uuid,
+                    baas_base_url=self._baas_api_base,
+                    tenant=effective_tenant,
+                    bot_uuid=bot_uuid,
+                    engine_port=port,
                 )
 
-            data = response_data.get("data", {})
-            result = BotWsConnectionInfoResponse(
-                ws_url=data["ws_url"],
-                token=data["token"],
-                target=data["target"],
-                expires_at=data["expires_at"],
-                # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
-                a2a_base_url=str(data.get("a2a_base_url") or ""),
-                paas_device_id=bot_uuid,
-                baas_base_url=self._baas_api_base,
-                tenant=effective_tenant,
-                bot_uuid=bot_uuid,
-                engine_port=port,
-            )
-
-            logger.info(
-                f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"Got ws info: bot_uuid={bot_uuid}, target={result.target}"
-            )
-
-            return result
-
-        except httpx.HTTPStatusError as e:
-            # WARNING, not ERROR: every HTTP error here is re-raised as
-            # BaasServiceError and the callers (connection handler, device
-            # plugin, identity) all catch and degrade gracefully. The common
-            # cases — 404 BOT_NOT_FOUND (bot released/expired) and 503
-            # NO_ACTIVE_DEVICES (device still coming up) — are expected,
-            # self-healing business states, not faults; logging them as ERROR
-            # only floods the alarm/ticket pipeline. Whether a failure is truly
-            # alarm-worthy is the caller's call, made where the business context
-            # is known.
-            #
-            # The BaaS app only ever answers this endpoint with JSON
-            # (200/404/503/500); a 3xx status here is injected by the fronting
-            # gateway (Spanner) before the request reaches BaaS. Its ``Location``
-            # says where the request is being redirected (login/SSO host vs a
-            # moved route), and bot_uuid/tenant/device_affinity let us cluster
-            # intermittent redirects by bot/tenant/target device — the data
-            # needed to tell a partial-instance/routing fault apart from a
-            # blanket auth requirement.
-            if _is_no_active_devices_response(e.response):
                 logger.info(
-                    "[BaasService.get_ws_info_by_bot_uuid] no active device: "
-                    "status=%s bot_uuid=%s tenant=%s device_affinity=%s",
-                    e.response.status_code,
+                    f"[BaasService.get_ws_info_by_bot_uuid] "
+                    f"Got ws info: bot_uuid={bot_uuid}, target={result.target}"
+                )
+
+                return result
+
+            except httpx.HTTPStatusError as e:
+                # WARNING, not ERROR: every HTTP error here is re-raised as
+                # BaasServiceError and the callers (connection handler, device
+                # plugin, identity) all catch and degrade gracefully. The common
+                # cases — 404 BOT_NOT_FOUND (bot released/expired) and 503
+                # NO_ACTIVE_DEVICES (device still coming up) — are expected,
+                # self-healing business states, not faults; logging them as ERROR
+                # only floods the alarm/ticket pipeline. Whether a failure is truly
+                # alarm-worthy is the caller's call, made where the business context
+                # is known.
+                #
+                # The BaaS app only ever answers this endpoint with JSON
+                # (200/404/503/500); a 3xx status here is injected by the fronting
+                # gateway (Spanner) before the request reaches BaaS. Its ``Location``
+                # says where the request is being redirected (login/SSO host vs a
+                # moved route), and bot_uuid/tenant/device_affinity let us cluster
+                # intermittent redirects by bot/tenant/target device — the data
+                # needed to tell a partial-instance/routing fault apart from a
+                # blanket auth requirement.
+                if _is_no_active_devices_response(e.response):
+                    if attempt < max_attempts - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.info(
+                            "[BaasService.get_ws_info_by_bot_uuid] no active device, "
+                            "retrying: bot_uuid=%s tenant=%s device_affinity=%s "
+                            "attempt=%d/%d delay=%.1fs",
+                            bot_uuid,
+                            effective_tenant,
+                            device_affinity,
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        continue
+                    logger.info(
+                        "[BaasService.get_ws_info_by_bot_uuid] no active device: "
+                        "status=%s bot_uuid=%s tenant=%s device_affinity=%s",
+                        e.response.status_code,
+                        bot_uuid,
+                        effective_tenant,
+                        device_affinity,
+                    )
+                    raise BaasNoActiveDevicesError(
+                        status_code=e.response.status_code
+                    ) from e
+
+                location = e.response.headers.get("location")
+                logger.warning(
+                    f"[BaasService.get_ws_info_by_bot_uuid] "
+                    f"HTTP error: {e.response.status_code} - "
+                    f"bot_uuid={bot_uuid}, tenant={effective_tenant}, "
+                    f"device_affinity={device_affinity}, location={location!r} - "
+                    f"{e.response.text}"
+                )
+                if e.response.status_code >= 500:
+                    raise BaasTransientServiceError(
+                        f"BaaS API transient error: {e.response.status_code}"
+                    ) from e
+                raise BaasServiceError(
+                    f"BaaS API error: {e.response.status_code} - {e.response.text}"
+                )
+            except httpx.RequestError as e:
+                logger.warning(
+                    "[BaasService.get_ws_info_by_bot_uuid] transport failure: "
+                    "bot_uuid=%s tenant=%s device_affinity=%s error_type=%s",
                     bot_uuid,
                     effective_tenant,
                     device_affinity,
+                    type(e).__name__,
                 )
-                raise BaasNoActiveDevicesError(
-                    status_code=e.response.status_code
-                ) from e
-
-            location = e.response.headers.get("location")
-            logger.warning(
-                f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"HTTP error: {e.response.status_code} - "
-                f"bot_uuid={bot_uuid}, tenant={effective_tenant}, "
-                f"device_affinity={device_affinity}, location={location!r} - "
-                f"{e.response.text}"
-            )
-            if e.response.status_code >= 500:
                 raise BaasTransientServiceError(
-                    f"BaaS API transient error: {e.response.status_code}"
+                    f"BaaS transport failure: {type(e).__name__}"
                 ) from e
-            raise BaasServiceError(
-                f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
-        except httpx.RequestError as e:
-            logger.warning(
-                "[BaasService.get_ws_info_by_bot_uuid] transport failure: "
-                "bot_uuid=%s tenant=%s device_affinity=%s error_type=%s",
-                bot_uuid,
-                effective_tenant,
-                device_affinity,
-                type(e).__name__,
-            )
-            raise BaasTransientServiceError(
-                f"BaaS transport failure: {type(e).__name__}"
-            ) from e
-        except Exception as e:
-            logger.error(
-                f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"Failed to get ws info: {e}"
-            )
-            raise BaasServiceError(f"Failed to get ws info: {e}")
+            except Exception as e:
+                logger.error(
+                    f"[BaasService.get_ws_info_by_bot_uuid] "
+                    f"Failed to get ws info: {e}"
+                )
+                raise BaasServiceError(f"Failed to get ws info: {e}")
 
     def list_bots(
         self,
