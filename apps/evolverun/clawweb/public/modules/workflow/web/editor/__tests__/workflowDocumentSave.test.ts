@@ -4,10 +4,12 @@ import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { useEditorStore } from '../store'
 import { saveVerifiedWorkflowDocument, saveWorkflowCanvasDocument } from '../workflowDocumentSave'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn() }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), validateSnapshot: vi.fn() }))
 vi.mock('../../api/workflowDocument', async importOriginal => ({ ...(await importOriginal<typeof import('../../api/workflowDocument')>()), readWorkflowDocument: mocks.read }))
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: vi.fn(), api: { workflows: { get: mocks.read, getHistory: vi.fn(() => { throw new Error('History must not be read when saving') }) } } }))
-vi.mock('../packVersionSession', () => { throw new Error('DB saving must not load or lock Pack state') })
+// The source reader imports this validator, but DB-only saves must never invoke
+// it or access any Pack session functions (unmocked exports fail closed).
+vi.mock('../packVersionSession', () => ({ validateSnapshot: mocks.validateSnapshot }))
 const state = () => useEditorStore.getState()
 let workflowId = ''
 let workflowSequence = 0
@@ -20,13 +22,21 @@ const token = 'a'.repeat(64), savedToken = 'b'.repeat(64)
 const draft = (spec: WorkflowSpec = stored!, draftToken = token, packId: string | null = 'pack') => ({ workflowId, packId, specJson: JSON.stringify(spec), draftToken })
 const casCalls = () => vi.mocked(fetchJson).mock.calls.filter(([url]) => url === `/api/workflows/${workflowId}/editor-draft`)
 const bodyAt = async (index: number) => JSON.parse(await blobText(vi.mocked(fetchJson).mock.calls[index][1]!.body as Blob))
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  try {
+    expect(mocks.validateSnapshot).not.toHaveBeenCalled()
+    const isPackRequest = ([url]: [unknown, ...unknown[]]) => /\/(?:pack-version|unified-save)(?:\?|$)/.test(String(url))
+    expect(vi.mocked(fetch).mock.calls.filter(isPackRequest)).toEqual([])
+    expect(vi.mocked(fetchJson).mock.calls.filter(isPackRequest)).toEqual([])
+  } finally { vi.unstubAllGlobals() }
+})
 beforeEach(() => {
   sessionStorage.clear()
   workflowId = `document-save-fixture-${++workflowSequence}`
   // Exercise real Response handling while retaining the existing call spies.
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => new Response(JSON.stringify(await fetchJson(url, init)))))
   vi.resetAllMocks(); state().reset({ force: true })
+  mocks.validateSnapshot.mockImplementation(() => { throw new Error('DB saving must not inspect Pack snapshots') })
   stored = document(); state().loadSpec(stored); useEditorStore.setState({ _databasePackId: 'pack' })
   mocks.read.mockImplementation(async () => { if (stored === null) throw missing(); return structuredClone(stored) })
   vi.mocked(fetchJson).mockImplementation(async (url, init) => {
