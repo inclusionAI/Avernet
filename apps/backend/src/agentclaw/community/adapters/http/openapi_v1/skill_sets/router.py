@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -132,7 +133,8 @@ async def resources(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetResourceItem]]:
-    items = service.list_resources(
+    items = await run_in_threadpool(
+        service.list_resources,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
