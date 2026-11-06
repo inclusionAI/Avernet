@@ -398,3 +398,41 @@ fn callback_body_preserves_error_reason_and_partial_note() {
         crate::task_failure::callback_body(&cmd, true).contains("已返回部分内容")
     );
 }
+
+#[test]
+fn is_timeout_callback_requires_timeout_reason_on_aborted() {
+    let mut cmd = BotEventCommand {
+        bot_id: "bot-driver".into(),
+        run_id: "run".into(),
+        group_id: "group".into(),
+        bcs_session_id: Some("session".into()),
+        state: ChatEventState::Aborted,
+        event_type: "chat.event".into(),
+        event_payload: serde_json::json!({"reason": "not timeout"}),
+    };
+    assert!(!crate::task_failure::is_timeout_callback(&cmd));
+    cmd.event_payload["reason"] = serde_json::json!(crate::task_failure::TASK_TIMEOUT_REASON);
+    assert!(crate::task_failure::is_timeout_callback(&cmd));
+    cmd.state = ChatEventState::Error;
+    assert!(!crate::task_failure::is_timeout_callback(&cmd));
+}
+
+
+#[test]
+fn entry_intent_preserves_task_store_facts() {
+    let entry = crate::task_store::new_task_entry(
+        "task-1".to_string(),
+        "group".to_string(),
+        Some("session".to_string()),
+        "bot-driver".to_string(),
+        "bot-worker".to_string(),
+        Some("Worker".to_string()),
+        1,
+        bcs_service_api::ChatResponseMode::Full,
+    );
+    let intent = crate::task_failure::entry_intent(&entry);
+    assert_eq!(intent.task_id, "task-1");
+    assert_eq!(intent.manager, "bot-driver");
+    assert_eq!(intent.worker, "bot-worker");
+    assert_eq!(intent.worker_name, "Worker");
+}
