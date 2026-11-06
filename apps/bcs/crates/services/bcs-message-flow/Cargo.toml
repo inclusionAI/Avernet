@@ -40,6 +40,7 @@ bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 bcs-network-tracing = { workspace = true }

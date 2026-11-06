@@ -798,3 +798,5 @@ not Caller inheritance. There is no identity Plugin API or task wire change.
 Bounded replay and composition semantics are specified in
 `apps/bcs/docs/native-task-caller.md` and exercised through the real task and
 protected-delivery application seams.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.

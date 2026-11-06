@@ -11,9 +11,7 @@ use bcs_service_api::port::repo::{CommitGroupEventfulMutation, GroupEventfulMuta
 use bcs_service_api::{Group, GroupKind, GroupMutableFieldsPatch, GroupStrategy, Participant, ParticipantRole};
 use serde_json::{Value, json};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod migrations;
+use bcs_db_migrations as migrations;
 #[path = "../../../test-support/authority_mysql_chain.rs"]
 mod mysql_chain;
 

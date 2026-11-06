@@ -114,10 +114,12 @@ export interface InterventionInfo {
   canIntervene: boolean
   availableInterventions: InterventionAction[]
   interventionReady: boolean
+  interventionReadOnly?: boolean
+  sessionConfigured?: boolean
   originBotId: string | null
   originSessionKey: string | null
   originSessionId: string | null
-  hasCredentials: boolean
+  hasCredentials: boolean | null
 }
 
 export interface InterveneRequest {

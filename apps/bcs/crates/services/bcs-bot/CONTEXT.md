@@ -178,3 +178,5 @@ Provider identity, preserves a delegated owner and audits the actual Provider.
 Duplicates, tombstones and concurrent collisions fail without credential replay.
 The transaction is the existing composite; no migration or second partial Bot
 write is introduced. Admission adds bounded per-request reads, no registry scan.
+
+Custom AgentCard bindings use the deployment-installed bcs-a2a-binding-api registry for pure route selection. No transport or plugin implementation is imported by core.

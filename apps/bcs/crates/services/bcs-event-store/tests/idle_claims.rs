@@ -12,9 +12,7 @@ use bcs_service_api::port::repo::{ClaimEventDeliveries, ClaimFanoutTargets, Even
 use bcs_service_api::types::EventDeliveryStatus;
 use sha2::{Digest, Sha256};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 const NOW: u64 = 1_800_000_000_000;
 

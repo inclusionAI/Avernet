@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { createServer } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import { DingTalkNotificationSender } from "../dingtalk-sender.js";
@@ -21,4 +22,11 @@ it("reuses authenticated token delivery for an Owner native card and updates the
   expect(calls[2]).toMatchObject({ token: "fixture", body: { outTrackId: "owner-pre-task", cardData: { cardParamMap: { status: "核验中", config, confirm_status: "disabled" } } } });
   expect(calls[1].body).not.toHaveProperty("config");
   expect(calls[2].body).not.toHaveProperty("config");
+  await sender.sendCard({ recipientUserId: "123", outTrackId: "handoff-pre-task", templateId: "template",
+    cardParamMap: { instructions: "请回原会话补材料", confirm_visible: "false", confirm_status: "disabled", config } });
+  expect(calls).toHaveLength(4);
+  expect(calls[3]).toMatchObject({ token: "fixture", method: "POST", url: "/v1.0/card/instances/createAndDeliver",
+    body: { outTrackId: "handoff-pre-task", openSpaceId: "dtv1.card//IM_ROBOT.000123" } });
+  expect(calls[3].body).not.toHaveProperty("callbackType");
+  expect(calls[3].body).not.toHaveProperty("callbackRouteKey");
 });

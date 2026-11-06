@@ -7,13 +7,13 @@ function fail(status: number, message: string): never {
   throw new SessionRecoveryError(status, "recovery_owner_request_conflict", message);
 }
 
-/** Separate from the one environment Plan: permissions and essential materials only. */
+/** Permission handling is separate from the one environment Plan. */
 export function requestOwnerCooperation(state: RecoveryTaskState, input: RecoveryOwnerRequestInput, requestId: string, now: number): RecoveryTaskState {
   if (state.simulation || state.level === "debug" || state.status !== "running" || state.phase === "apply") fail(409, "当前不能等待 Owner 处理事项");
   if (state.ownerRequest?.status === "confirmed" && state.requiresFreshObservation) fail(409, "先核验 Owner 反馈后的最新原会话，再确认剩余缺项");
-  if (!input || !["permission", "materials"].includes(input.reason)
+  if (!input || input.reason !== "permission"
     || [input.summary, input.instructions].some(value => typeof value !== "string" || !value.trim() || value.length > 4000)
-    || containsSecret(JSON.stringify(input)) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) fail(422, "需要权限或必要补料原因、具体处理事项和现场证据");
+    || containsSecret(JSON.stringify(input)) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) fail(422, "仅权限申请支持反馈续接，需要具体处理事项和现场证据；补材料请普通转交并省略 owner_request");
   validateRecoveryEvidenceReferences(state, input.evidence_ids);
   if (!state.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
     && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) fail(422, "Owner 处理事项必须引用受控现场读取");

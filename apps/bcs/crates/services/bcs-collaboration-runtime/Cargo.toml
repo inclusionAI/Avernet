@@ -27,6 +27,7 @@ bcs-service-api = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-channel = { workspace = true }
 bcs-channel-api = { workspace = true }
 bcs-channel-store = { workspace = true }

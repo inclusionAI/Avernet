@@ -10,9 +10,11 @@ export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" 
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
+/** Owner-facing business handoff, separate from the full investigation report. */
+export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
-  reason: "permission" | "materials";
+  reason: "permission";
   summary: string;
   instructions: string;
   evidence_ids: string[];

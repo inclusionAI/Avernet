@@ -10,9 +10,7 @@
 //! counting DbPlugin wrapper whose write paths are forwarded, so seeding is
 //! never blocked and the core's page-to-query budget stays observable.
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 #[path = "../../bcs-bot-store/tests/support/bot_profile_fixture.rs"]
 #[allow(dead_code)]
 mod fixture;

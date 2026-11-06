@@ -48,7 +48,7 @@ check_r25_2_conformance_uses_harness() {
       echo "FAIL [R25.2]: $file does not call bcs_test_support::contract"
       missing=1
     fi
-  done < <(find crates -path '*/tests/conformance_*.rs' -type f | sort)
+  done < <(find crates -type f -path '*/tests/*' -name 'conformance_*.rs' | sort)
 
   if [[ $found -eq 0 ]]; then
     echo "FAIL [R25.2]: no conformance_*.rs entries found"
@@ -71,7 +71,7 @@ has_conformance_entry_for_impl() {
     if rg -q "\\b${type_name}\\b" "$file" && rg -q "\\b${harness}\\b" "$file"; then
       return 0
     fi
-  done < <(find crates -path '*/tests/conformance_*.rs' -type f | sort)
+  done < <(find crates -type f -path '*/tests/*' -name 'conformance_*.rs' | sort)
 
   return 1
 }

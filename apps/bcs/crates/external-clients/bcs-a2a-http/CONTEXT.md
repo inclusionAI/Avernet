@@ -205,3 +205,5 @@ must match JSON-RPC 2.0 and request ID; errors retain numeric codes and typed da
 not remote diagnostics. The shared bounded SSE decoder unwraps each RPC response
 before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
 binding fallback are introduced. Run persistence records json_rpc separately.
+
+Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.

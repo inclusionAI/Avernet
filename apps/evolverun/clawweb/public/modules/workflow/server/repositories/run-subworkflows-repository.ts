@@ -1,22 +1,26 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { RunViewScope } from "@avernet/clawweb-shared/server/services/run-view-permissions";
-import type { AuthorizedRunListQuery, AuthorizedRunList, RunListMetadata, RunIdentity, RunSubworkflowsStore, StoredRunSnapshot } from '../contracts/run-subworkflows.js';
+import type { AuthorizedRunListQuery, AuthorizedRunList, RunListMetadata, RunIdentity, RunSubworkflowsStore, StoredRunSnapshot, AssociationCandidate, AssociatedRunIdentity, FanoutOriginCandidate } from '../contracts/run-subworkflows.js';
 
 /** Deliberately separate from legacy repositories which swallow DB errors.
  * Only SELECTs, no credentials column and no engine calls. Read failures propagate. */
 export class RunSubworkflowsRepository implements RunSubworkflowsStore {
   constructor(private readonly db: IDatabase) {}
 
-  /** Compatibility with pre-analysis schemas, not a generic best-effort DB read.
-   * Only the optional projection column can be omitted; every other error propagates. */
+  /** Only the two optional projection columns may be omitted on old schemas;
+   * every other storage error propagates. */
   private async metadataQuery<T>(columns: readonly string[], suffix: string, params: unknown[]): Promise<T[]> {
-    try { return await this.db.query<T>(`SELECT ${columns.join(", ")} ${suffix}`, params); }
-    catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : '';
-      if (!/^unknown column 'evolution_analysis_status'(?: in 'field list')?$/.test(message)
-        && message !== 'no such column: evolution_analysis_status') throw error;
-      const legacyColumns = columns.filter(column => column !== 'evolution_analysis_status').join(', ');
-      return this.db.query<T>(`SELECT ${legacyColumns} ${suffix}`, params);
+    let projection = [...columns];
+    for (;;) {
+      try { return await this.db.query<T>(`SELECT ${projection.join(", ")} ${suffix}`, params); }
+      catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : '';
+        const missing = ['evolution_analysis_status', 'ordinary_run_marker'].find(column => projection.includes(column)
+          && (message === `no such column: ${column}` || message === `unknown column '${column}' in 'field list'`
+            || message === `unknown column '${column}'`));
+        if (!missing) throw error;
+        projection = projection.filter(column => column !== missing);
+      }
     }
   }
 
@@ -77,7 +81,7 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
         'input_json', 'result_json', 'params_json', 'node_count', 'succeeded_count', 'failed_count',
         'total_duration_ms', 'total_token_usage', 'started_at', 'completed_at', 'triggered_by', 'current_phase',
         'workflow_version', 'workflow_deploy_number', 'origin_session_key', 'origin_session_id', 'id', 'identity_key',
-        'user_id', 'plugin_version', 'engine', 'gmt_create', 'gmt_modified', 'evolution_analysis_status'
+        'user_id', 'plugin_version', 'engine', 'gmt_create', 'gmt_modified', 'evolution_analysis_status', 'ordinary_run_marker'
       ],
        `FROM flow_runs WHERE flow_id = ?`, [flowId]);
     return rows[0] ?? null;
@@ -93,4 +97,72 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
     }
     return rows;
   }
+  /** Correlate only explicit trusted-engine metadata. Never return stored state. */
+  async readFanoutOriginIdentities(candidates: FanoutOriginCandidate[]): Promise<RunIdentity[]> {
+    const result: RunIdentity[] = [];
+    for (let offset = 0; offset < candidates.length; offset += 200) {
+      const batch = candidates.slice(offset, offset + 200);
+      const rows = await this.db.query<RunIdentity & { state_json: string | null }>(
+        `SELECT flow_id, workflow_id, origin_bot_id, state_json FROM flow_runs WHERE flow_id IN (${batch.map(() => '?').join(',')})`,
+        batch.map(candidate => candidate.nativeFlowId));
+      for (const row of rows) {
+        const candidate = batch.find(value => value.nativeFlowId === row.flow_id);
+        if (!candidate || row.workflow_id !== candidate.workflowId || typeof row.state_json !== 'string') continue;
+        let origin: Record<string, unknown>;
+        try {
+          const state: unknown = JSON.parse(row.state_json);
+          if (!state || typeof state !== 'object' || Array.isArray(state)) continue;
+          const value = (state as Record<string, unknown>).fanoutOrigin;
+          if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+          origin = value as Record<string, unknown>;
+        } catch { continue; }
+        const keys = ['parentFlowId', 'parentNodeId', 'groupExecutionId', 'itemId', 'itemIndex',
+          'attemptNumber', 'childFlowId', 'workflowId'] as const;
+        if (keys.some(key => origin[key] !== candidate[key])
+          || typeof origin.requestDigest !== 'string' || !origin.requestDigest.trim()
+          || (Object.hasOwn(candidate, 'requestDigest') && origin.requestDigest !== candidate.requestDigest)) continue;
+        result.push({ flow_id: row.flow_id, workflow_id: row.workflow_id, origin_bot_id: row.origin_bot_id });
+      }
+    }
+    return result;
+  }
+
+  /** The request key is the item childFlowId only for a future host that adopts
+   * that convention. The present code does not start or register native runs. */
+  async readAssociatedIdentities(parent: StoredRunSnapshot, childWorkflowId: string, candidates: AssociationCandidate[]): Promise<AssociatedRunIdentity[]> {
+    const result: AssociatedRunIdentity[] = [];
+    const marker = parent.ordinary_run_marker;
+    for (let offset = 0; offset < candidates.length; offset += 200) {
+      const batch = candidates.slice(offset, offset + 200);
+      // Always execute the query for candidates, even if the parent marker is
+      // missing: missing schema or query failures are errors, not empty matches.
+      const rows = await this.db.query<{
+        request_key_hash: string; parent_flow_id: string; child_flow_id: string; child_workflow_id: string;
+        parent_run_marker: string | null; child_run_marker: string | null;
+        actual_parent_id: string; actual_parent_workflow: string; actual_parent_origin: string | null; actual_parent_marker: string | null;
+        flow_id: string; workflow_id: string; origin_bot_id: string | null; actual_child_marker: string | null;
+      }>(`SELECT a.request_key_hash, a.parent_flow_id, a.child_flow_id, a.child_workflow_id,
+          a.parent_run_marker, a.child_run_marker, p.flow_id AS actual_parent_id, p.workflow_id AS actual_parent_workflow,
+          p.origin_bot_id AS actual_parent_origin, p.ordinary_run_marker AS actual_parent_marker,
+          c.flow_id, c.workflow_id, c.origin_bot_id, c.ordinary_run_marker AS actual_child_marker
+        FROM ordinary_run_requests a JOIN flow_runs p ON p.flow_id = a.parent_flow_id
+        JOIN flow_runs c ON c.flow_id = a.child_flow_id
+        WHERE a.request_key_hash IN (${batch.map(() => '?').join(',')})`, batch.map(c => c.requestKeyHash));
+      for (const row of rows) {
+        const candidate = batch.find(c => c.requestKeyHash === row.request_key_hash && c.nativeFlowId === row.child_flow_id);
+        // Compare exact strings in JS too: SQL collations may be case-insensitive.
+        if (!candidate || !marker || !/^[0-9a-f]{64}$/.test(marker)
+          || !row.child_run_marker || !/^[0-9a-f]{64}$/.test(row.child_run_marker)
+          || row.parent_flow_id !== parent.flow_id || row.actual_parent_id !== parent.flow_id
+          || row.actual_parent_workflow !== parent.workflow_id || row.actual_parent_origin !== parent.origin_bot_id
+          || row.parent_run_marker !== marker || row.actual_parent_marker !== marker
+          || row.child_workflow_id !== childWorkflowId || row.workflow_id !== childWorkflowId
+          || row.flow_id !== candidate.nativeFlowId || row.child_run_marker !== row.actual_child_marker) continue;
+        result.push({ request_key_hash: row.request_key_hash, parent_run_marker: marker,
+          child_run_marker: row.child_run_marker, flow_id: row.flow_id, workflow_id: row.workflow_id, origin_bot_id: row.origin_bot_id });
+      }
+    }
+    return result;
+  }
+
 }

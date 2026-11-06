@@ -131,7 +131,11 @@ pub fn validate_management_card(card: &Value) -> Result<()> {
         .ok_or_else(|| invalid("agent_card.supportedInterfaces", "NONEMPTY_ARRAY_REQUIRED"))?;
     for (index, interface) in interfaces.iter().enumerate() {
         let prefix = format!("agent_card.supportedInterfaces[{index}]");
-        absolute_url(&interface["url"], &format!("{prefix}.url"), false)?;
+        // Standard bindings require URLs. Deployment-defined bindings validate
+        // their address fields at the outbound admission boundary.
+        if matches!(interface["protocolBinding"].as_str(), Some("HTTP+JSON" | "JSONRPC" | "GRPC")) {
+            absolute_url(&interface["url"], &format!("{prefix}.url"), false)?;
+        }
         text(
             &interface["protocolBinding"],
             &format!("{prefix}.protocolBinding"),

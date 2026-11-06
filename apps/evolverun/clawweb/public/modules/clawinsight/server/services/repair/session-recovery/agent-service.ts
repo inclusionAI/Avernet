@@ -18,6 +18,7 @@ import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnapshot, AgentPlanAction } from "../common/agent-tools/contracts.js";
 import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
+import { parseOwnerHandoffContent } from "./validation.js";
 import { RecoverySessionReader } from "./session-reader.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
@@ -281,7 +282,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -526,6 +527,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     // Compatibility for packages deployed before the generic handoff result.
     if (body.kind === "blocked" && body.reason === "mcp_permission_required") body = { ...body, kind: "owner_handoff", effect: "not_recovered" };
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
+    if (body.handoff !== undefined && body.kind !== "owner_handoff") fail(422, "handoff 交接说明仅用于 Owner 转交");
     if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
       await this.release(task, true);
@@ -553,17 +555,21 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "owner_handoff") {
+      if (typeof body.summary !== "string" || !body.summary.trim()) fail(422, "Owner 转交需要保留完整调查说明");
+      const handoff = body.handoff === undefined ? undefined : parseOwnerHandoffContent(body.handoff);
       if (body.owner_request !== undefined) {
+        if (body.effect === "recovered") fail(422, "原任务已恢复，请按正常效果流程回报；优化建议不属于 Owner 转交");
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
-        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission" | "materials", instructions: request.instructions as string,
-          summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+        if (handoff && request.instructions !== undefined && request.instructions !== handoff.instructions) fail(422, "Owner 处理事项有冲突，请统一使用 handoff.instructions");
+        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission", instructions: handoff?.instructions ?? request.instructions as string,
+          summary: handoff?.summary ?? body.summary as string, ...(handoff ? { reportSummary: body.summary as string } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
         return { ok: true };
       }
       const hasJudgment = body.delivery !== undefined || body.response !== undefined;
       if (hasJudgment) this.validateDeliveryResponse(task, body.delivery, body.response);
       await this.deps.business().finishForOwnerHandoff(task.taskId, task.version,
-        { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
+        { summary: body.summary as string, ...(handoff ? { handoff } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
           ...(hasJudgment ? { delivery: body.delivery as RecoveryJudgment["delivery"], response: body.response as RecoveryJudgment["response"] } : {}),
           effect: body.effect as Exclude<RecoveryJudgment["effect"], "not_intervened"> | undefined }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {

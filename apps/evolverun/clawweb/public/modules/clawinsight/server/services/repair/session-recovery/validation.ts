@@ -2,6 +2,7 @@ import { parseBotRuntimeIdentity } from "@avernet/clawweb-shared/server/services
 import { SessionRecoveryError } from "./errors.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import type { RecoveryRequest } from "./contracts.js";
+import type { RecoveryOwnerHandoffContent } from "./task-contracts.js";
 import { cronRunSessionId } from "./session-identity.js";
 
 function invalid(message: string): never { throw new SessionRecoveryError(422, "invalid_session_recovery", message); }
@@ -14,6 +15,15 @@ function text(value: unknown, field: string, max: number): string {
   if (containsSecret(value)) invalid(`${field} 不得包含凭据`);
   return value;
 }
+export function parseOwnerHandoffContent(raw: unknown): RecoveryOwnerHandoffContent {
+  const value = object(raw);
+  if (Object.keys(value).some(key => !["summary", "instructions"].includes(key))) invalid("Owner 交接说明只能包含 summary 和 instructions");
+  const summary = text(value.summary, "handoff.summary", 1024).trim();
+  const instructions = text(value.instructions, "handoff.instructions", 1024).trim();
+  if ([summary, instructions].some(item => Buffer.byteLength(item) > 1024)) invalid("Owner 交接说明的每项文本最多 1024 字节；简洁保留问题、完整处理事项和入口，调查经过留在原 summary 中");
+  return { summary, instructions };
+}
+
 export function parseRequest(raw: unknown): RecoveryRequest {
   const body = object(raw), target = object(body.target);
   for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "session_id", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);

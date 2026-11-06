@@ -37,11 +37,13 @@ pub fn select_card_with_bindings(
     raw: Value, extensions: &[&str], bearer_configured: bool, bindings: &[&str],
     allow_interface: impl Fn(&AgentInterface) -> bool,
 ) -> Result<SelectedCard, CardError> {
-    let mut card: AgentCard = serde_json::from_value(raw.clone()).map_err(|_| CardError::InvalidShape)?;
+    let projected = bcs_a2a_binding_api::registry().project(&raw).map_err(|_| CardError::InterfaceUnsupported)?;
+    if projected["supportedInterfaces"].as_array().is_some_and(Vec::is_empty) { return Err(CardError::InterfaceUnsupported); }
+    let mut card: AgentCard = serde_json::from_value(projected.clone()).map_err(|_| CardError::InvalidShape)?;
     // The pinned SDK strips http:// from gRPC interface URLs. BCS freezes the
     // declaration's exact endpoint identity, and mesh allowlisting compares that
     // identity, so use the original string after validating the complete shape.
-    let originals=raw.get("supportedInterfaces").and_then(Value::as_array).ok_or(CardError::InvalidShape)?;
+    let originals=projected.get("supportedInterfaces").and_then(Value::as_array).ok_or(CardError::InvalidShape)?;
     if originals.len()!=card.supported_interfaces.len() {return Err(CardError::InvalidShape);}
     for (interface,original) in card.supported_interfaces.iter_mut().zip(originals) {
         interface.url=original.get("url").and_then(Value::as_str).ok_or(CardError::InvalidShape)?.to_owned();

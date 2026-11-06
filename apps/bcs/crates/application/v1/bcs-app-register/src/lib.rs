@@ -149,6 +149,7 @@ impl RegisterServiceImpl {
                 .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
                 .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
             let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                visibility: Default::default(),
                 agent_card_url:url,
                 agent_card:fetched.raw,interface:fetched.interface,
                 registered_at_ms:now_ms,};

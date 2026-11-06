@@ -4,8 +4,7 @@ use bcs_db_api::DbPlugin;
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[tokio::test]
 async fn memory_organization_repo_contract() {
