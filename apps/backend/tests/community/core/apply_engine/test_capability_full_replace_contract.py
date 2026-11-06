@@ -81,6 +81,7 @@ from ._fakes import (
     OSS_BUCKET,
     EngineRig,
     build_skill_zip,
+    FakeMcpConfigService,
     manifest_compiler,
     real_validator,
     seeded_object_store,
@@ -135,9 +136,8 @@ class _Center:
         return {"has_permission": True, "access_level": "PUBLIC"}
 
 
-class _McpConfig:
-    def validate_bot_override(self, **_kwargs) -> dict:
-        return {"valid": True, "error": None}
+class _McpConfig(FakeMcpConfigService):
+    pass
 
 
 class _Runtime:

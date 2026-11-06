@@ -357,5 +357,24 @@ class FakeMcpAuth:
 
 
 class FakeMcpConfigService:
-    def validate_bot_override(self, **_kwargs) -> dict[str, Any]:
-        return {"valid": True, "error": None}
+    def validate_bot_override(self, *, server_code, **_kwargs) -> dict[str, Any]:
+        return {
+            "valid": True,
+            "error": None,
+            "mcp_data": {
+                "serverCode": server_code,
+                "runMode": "REMOTE",
+                "endpoints": [{
+                    "env": "PROD",
+                    "networkType": "INTERNET",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                    "url": "https://mcp.example/" + server_code,
+                }],
+            },
+        }
+
+    def get_bot_override(self, **_kwargs):
+        return None
+
+    def build_mcp_sync_payload(self, **_kwargs):
+        return None, {}, "PROD", "STREAMABLE_HTTP"

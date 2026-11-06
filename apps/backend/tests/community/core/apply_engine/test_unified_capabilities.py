@@ -36,7 +36,7 @@ from tests.community.core.skill_center._test_skill_set_management_service_suppor
     _skill_service,
     _Runtime,
 )
-from ._fakes import FakeManifestContent, FakeSharedSkills, real_validator
+from ._fakes import FakeManifestContent, FakeSharedSkills, FakeMcpConfigService, real_validator
 
 
 def rig():
@@ -72,7 +72,7 @@ def rig():
                 "access_level": "PUBLIC",
             }
         ),
-        SimpleNamespace(validate_bot_override=lambda **_: {"valid": True}),
+        FakeMcpConfigService(),
     )
     return service, sets, ctx, materialiser
 
