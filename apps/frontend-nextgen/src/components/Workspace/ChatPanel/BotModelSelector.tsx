@@ -74,8 +74,34 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
                         </TooltipTrigger>
                         <TooltipContent>{model.name}</TooltipContent>
                       </Tooltip>
+                      {model.badge ? (
+                        <Badge tone="primary" className="flex-none">
+                          {model.badge.label}
+                        </Badge>
+                      ) : null}
                     </span>
                     <span className="flex items-center gap-1.5">
+                      {model.badge?.link ? (
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          className="flex-none cursor-pointer text-xs font-medium text-primary hover:underline"
+                          onClick={(event) => {
+                            // 「查看介绍」只跳转：不触发选模型、不收起下拉。
+                            event.stopPropagation();
+                            event.preventDefault();
+                            if (model.badge?.link) window.open(model.badge.link, '_blank', 'noopener,noreferrer');
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter') return;
+                            event.stopPropagation();
+                            event.preventDefault();
+                            if (model.badge?.link) window.open(model.badge.link, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          查看介绍
+                        </span>
+                      ) : null}
                       {model.provider ? <Badge tone="neutral">{model.provider}</Badge> : null}
                       {selected ? <Check className="h-4 w-4 text-primary" /> : null}
                     </span>

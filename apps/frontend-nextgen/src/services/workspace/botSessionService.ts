@@ -1,5 +1,6 @@
 import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import type { BotModelBadge } from '@/capabilities';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
@@ -94,6 +95,8 @@ export interface BotModelView {
   modelId: string;
   name: string;
   provider: string;
+  /** 运营展示徽标（capability 注入，如「推荐」）；缺省不渲染。 */
+  badge?: BotModelBadge;
 }
 
 const COMPOUND_ID_RE = /^.+:.+$/;
