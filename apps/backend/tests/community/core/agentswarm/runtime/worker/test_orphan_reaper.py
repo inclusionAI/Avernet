@@ -290,8 +290,14 @@ class TestQueueOrphanReenqueue:
         assert _stuck_orphan_events(env, run) == []
 
     def test_fresh_run_inside_submit_grace_is_skipped(self, db):
+        # lease widened to 60s: the proof is "a run inside the grace window
+        # is skipped", but the 1s default makes _aged_run(0) a wall-clock
+        # race — under a loaded xdist fleet the setup-to-sweep gap can
+        # already exceed one lease and flip _fresh_run. _fresh_run is the
+        # reaper path's only lease consumer, so widening changes no other
+        # branching under _sweep_once.
         env = _build_env(db, [_finish_decision("x")], FakeFactory(),
-                         config=_reaper_config())
+                         config=_reaper_config(lease_seconds=60))
         run = _aged_run(0)   # inside the one-lease-window submit grace
         env.run_repo.create(run)   # no dispatch row yet — mid-submit shape
 
