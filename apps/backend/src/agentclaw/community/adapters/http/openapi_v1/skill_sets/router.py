@@ -90,7 +90,8 @@ async def list_skill_sets(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetItem]]:
-    items = service.list_sets(
+    items = await run_in_threadpool(  # allow-run-in-threadpool
+        service.list_sets,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -165,7 +166,8 @@ async def get_skill_set(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
-    item = service.get_set(
+    item = await run_in_threadpool(  # allow-run-in-threadpool
+        service.get_set,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -231,7 +233,8 @@ async def list_set_skills(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetSkillItem]]:
-    items = service.list_skills(
+    items = await run_in_threadpool(  # allow-run-in-threadpool
+        service.list_skills,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -340,7 +343,8 @@ async def list_set_mcps(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpItem]]:
-    items = service.list_mcps(
+    items = await run_in_threadpool(  # allow-run-in-threadpool
+        service.list_mcps,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -364,7 +368,8 @@ async def mcp_permissions(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpPermission]]:
-    items = service.list_mcp_permissions(
+    items = await run_in_threadpool(  # allow-run-in-threadpool
+        service.list_mcp_permissions,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
