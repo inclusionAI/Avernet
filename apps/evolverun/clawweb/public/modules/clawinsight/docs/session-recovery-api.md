@@ -280,7 +280,7 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 ### Owner 业务交接内容
 
-支持 `bootstrap.ownerHandoffProtocol=session-recovery-handoff/v1` 的服务，在 `kind=owner_handoff` 中接收独立 `handoff={"summary":"具体问题说明","instructions":"Owner处理事项"}`。两项都是非空、无凭据的 Markdown 文本，各最多 1024 个 UTF-8 字节；问题说明简洁呈现实际阻塞或非阻塞建议，处理事项保留全部必要缺项、权限对象和已核实入口。它们由同一次 Agent 判断提供，不增加独立模型调用，不包含通知呈现或互动控制信息。主 `summary` 继续保存完整调查、判断和依据。
+支持 `bootstrap.ownerHandoffProtocol=session-recovery-handoff/v1` 的服务，在 `kind=owner_handoff` 中接收独立 `handoff={"summary":"具体问题说明","instructions":"Owner处理事项"}`。两项都是非空、无凭据的 Markdown 文本，各最多 1024 个 UTF-8 字节；问题说明简洁呈现仍阻碍原任务的实际问题，处理事项保留全部必要缺项、权限对象和已核实入口。它们由同一次 Agent 判断提供，不增加独立模型调用，不包含通知呈现或互动控制信息。主 `summary` 继续保存完整调查、判断和依据。
 
 普通转交将 `handoff` 保存于终止事件并直接用于 Owner 通知；权限待办复用相同交接内容写入既有 `ownerRequest.summary/instructions`，完整报告保留在 waiting 事件。新协议中的 `owner_request` 仅标明 `{"reason":"permission"}`。旧结果仍可省略 `handoff`，权限待办仍接受原 `owner_request.instructions`；存在冲突的两份处理事项会被拒绝，避免发送含糊指引。新包只在收到协议声明时输出 `handoff`，先部署后端再更新自愈包。
 
@@ -288,16 +288,16 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 ### 普通转交 Owner 自行处理（省略 owner_request）
 
-Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
-`{"kind":"owner_handoff","phase":"当前阶段","delivery":"confirmed|unconfirmed","response":"acted|replied|none|unknown","effect":"recovered|not_recovered|unknown","summary":"原任务实际进展、剩余阻塞或优化建议、手册处理依据、具体对象及 Owner 指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
+Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢复方法无法安全解除且需要 Owner 处理，或满足明确的发送前观察到期条件时，回报
+`{"kind":"owner_handoff","phase":"当前阶段","delivery":"confirmed|unconfirmed","response":"acted|replied|none|unknown","effect":"not_recovered|unknown","summary":"原任务实际进展、剩余阻塞、现有恢复路径不可执行的现场依据及具体 Owner 事项（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
 此结果表示处置决定，不使用普通 `blocked` 的错误原因表达；控制面不识别具体故障类别。`assess`、`observe`、`plan`、`verify` 均可提交，不能在 `apply` 执行环境动作中途切换，Debug／仿真禁止真实转交。
 
 服务校验当前任务、执行归属、版本及已保存的现场读取证据，发送不带确认操作的 Owner 卡片并记录回执。必要补料属于普通转交，说明具体缺项及回原会话补充的方法。
 不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
-`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，干预情况仍由实际审计计算，通知不算干预。`delivery`／`response` 成对提交并保存，复用普通效果回报的校验：`confirmed` 必须有受控读取核实当前投递标识的证据，`acted`／`replied` 必须先确认本次触达；未发指引用 `unconfirmed`／`none`，关联证据不足用 `unknown`，不因转交自动推断触达或行动。旧包同时省略这两个字段时保留已有判断，无判断则为 `unconfirmed`／`unknown`；单字段、无效值或无触达证据的确认返回 422，不结束任务或发送通知。新包明确回报三种效果之一；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
-通知失败或禁用时同样结束，但页面不得显示“已通知”；已恢复时展示后续建议及实际通知状态，仍需人工处理时展示 Owner 处理指引。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，干预情况仍由实际审计计算，通知不算干预。`delivery`／`response` 成对提交并保存，复用普通效果回报的校验：`confirmed` 必须有受控读取核实当前投递标识的证据，`acted`／`replied` 必须先确认本次触达；未发指引用 `unconfirmed`／`none`，关联证据不足用 `unknown`，不因转交自动推断触达或行动。旧包同时省略这两个字段时保留已有判断，无判断则为 `unconfirmed`／`unknown`；单字段、无效值或无触达证据的确认返回 422，不结束任务或发送通知。新包明确回报 `not_recovered` 或 `unknown`；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复；已有恢复结论仍须走正常效果流程。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
+通知失败或禁用时同样结束，但页面不得显示“已通知”；展示尚未解除的阻塞、Owner 处理指引及真实通知状态。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
 
-原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。独立权限申请按下节等待反馈；环境修复所需动作及方案内配合仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+有现场依据、符合权限的纠正、有限重试或剩余步骤续接路径时必须先执行恢复，不能以优化建议、诊断标签或 Cron 本轮结束代替无法干预的证据。原任务已恢复时按正常效果流程完成，优化建议写入完成总结并随现有结果通知提供，不进入 `owner_handoff`，不等待修改或重跑验证。转交显式回报 `effect=recovered`、省略效果但沿用的已有判断为 `recovered`，或试图直接把已有恢复改成未知／未恢复，均返回 422，任务不结束、不通知、不改变已核实的效果；新的阻塞需先通过正常观察回报实际变化。独立权限申请按下节等待反馈；环境修复所需动作及方案内配合仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
 
 兼容与发布顺序：通用转交依赖支持 `owner_handoff` 的结果发送／接收后端和页面。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为通用转交并明确 `effect=not_recovered`，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。
 
@@ -370,3 +370,12 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 AIS 派发异常可能把完整响应正文放在异常消息中，因此派发日志只保留错误分类、执行关联和耗时；重试及最终技术失败日志不复制原因正文，具体已脱敏执行报告仍从原任务与 Step 查询。
 
 配置监控时使用多值多分组／分钟统计，关闭常用服务指标，将日志 `count` 求和为一个数值列 `failureCount`，按 1 分钟采集，以普通静态阈值 `failureCount >= 1` 告警，并完成订阅。生产与预发分别采集、分别告警；任务、执行和工具 ID 仅用于追查，不作为聚合维度。上线时需用实际部署日志调试时间戳解析和字段提取，不能仅凭本地测试认定监控采集已经生效。
+
+
+### 恢复优先与失败 Cron 续接
+
+Cron 本轮失败、超时、迭代耗尽或退出不代表原会话不能接收恢复消息。即时核实故障、已有业务结果及用户续聊后，存在明确恢复方法时，通过现有 `retry_message` 向冻结的原会话续接剩余步骤；不因 Cron 终态直接转交，不盲目重跑整个业务。运行中的 OpenClaw Cron 仍遵循原有发送前有界等待。
+
+`assess` 已有 accepted／unknown 初始消息时，普通 `owner_handoff` 返回 422，要求先提交 `assessment / decision=message` 进入观察，保留投递与截止时间。用户续聊、目标不可用和独立权限反馈续接仍按各自协议处理。
+
+方案调查中核实已恢复时，可以提交现有 observation 结果形状，`phase=plan`、`judgment.effect=recovered`。服务回到 `observe` 按普通效果条件完成；触达未确认时恢复最后一次消息的原始观察截止时间继续等待，不重发、不重新计时。`plan` 的其他效果仍不可跳过方案流程直接提交观察。无需新增状态、配置或数据字段；先部署校验后端，再更新自愈包，历史转交记录保持可读。

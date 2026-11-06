@@ -558,6 +558,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.summary !== "string" || !body.summary.trim()) fail(422, "Owner 转交需要保留完整调查说明");
       const handoff = body.handoff === undefined ? undefined : parseOwnerHandoffContent(body.handoff);
       if (body.owner_request !== undefined) {
+        if (body.effect === "recovered") fail(422, "原任务已恢复，请按正常效果流程回报；优化建议不属于 Owner 转交");
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
         if (handoff && request.instructions !== undefined && request.instructions !== handoff.instructions) fail(422, "Owner 处理事项有冲突，请统一使用 handoff.instructions");
