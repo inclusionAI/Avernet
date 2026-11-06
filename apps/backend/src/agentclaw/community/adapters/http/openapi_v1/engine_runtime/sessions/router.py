@@ -292,6 +292,7 @@ async def list_session_favorites(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List sessions the acting user has favorited on this bot runtime."""
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,

@@ -79,7 +79,7 @@ logger = get_logger()
 #: missing value, not as a field that happened not to be emitted.
 _ABSENT = "-"
 
-_LIST_PATH = re.compile(r"/openapi/v1/bots/[^/]+/(?:models|sessions(?:/[^/]+/messages)?)")
+_LIST_PATH = re.compile(r"/openapi/v1/bots/[^/]+/(?:models|connection|sessions(?:/favorites|/[^/]+/messages)?)")
 
 #: Substrings that mark a query parameter as carrying a secret, matched against
 #: the parameter *name*, case-insensitively. Kept in step with the gateway's own
