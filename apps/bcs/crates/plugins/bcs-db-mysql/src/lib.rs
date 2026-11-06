@@ -28,6 +28,15 @@ pub struct MysqlDbPlugin {
     db: String,
 }
 
+/// Returns true when the query returned fewer rows than expected_min_rows,
+/// signalling the transaction should stop after this step.
+fn query_checked_should_stop(row_count: usize, expected_min_rows: u64) -> DbResult<bool> {
+    let count = u64::try_from(row_count).map_err(|_| {
+        DbError::Conversion("query result count exceeds u64".into())
+    })?;
+    Ok(count < expected_min_rows)
+}
+
 impl MysqlDbPlugin {
     pub fn new(mysql: AsyncMysqlDbManager, db: impl Into<String>) -> Self {
         Self {
@@ -121,14 +130,11 @@ impl DbPlugin for MysqlDbPlugin {
                                     .into_iter()
                                     .map(row_to_db_row)
                                     .collect::<DbResult<Vec<_>>>()?;
-                                let count = u64::try_from(rows.len()).map_err(|_| DbError::Conversion(
-                                    "query result count exceeds u64".into(),
-                                ))?;
-                                if count < expected_min_rows {
-                                    results.push(DbTransactionStepResult::Rows(rows));
+                                let should_stop = query_checked_should_stop(rows.len(), expected_min_rows)?;
+                                results.push(DbTransactionStepResult::Rows(rows));
+                                if should_stop {
                                     break;
                                 }
-                                results.push(DbTransactionStepResult::Rows(rows));
                             }
                             PreparedTransactionStep::Execute(statement) => {
                                 let params =
@@ -467,6 +473,28 @@ mod tests {
             };
             assert_eq!(variant_name, expected_variant, "variant mismatch for {expected_variant}");
         }
+    }
+
+    #[test]
+    fn query_checked_should_stop_when_below_min_rows() {
+        assert!(query_checked_should_stop(0, 1).unwrap());
+        assert!(query_checked_should_stop(2, 5).unwrap());
+        assert!(!query_checked_should_stop(5, 5).unwrap());
+        assert!(!query_checked_should_stop(10, 5).unwrap());
+    }
+
+    #[test]
+    fn query_checked_should_stop_with_zero_min_rows_never_stops() {
+        assert!(!query_checked_should_stop(0, 0).unwrap());
+        assert!(!query_checked_should_stop(100, 0).unwrap());
+    }
+
+    #[test]
+    fn query_checked_should_stop_with_max_rows() {
+        // u64::MAX rows, expected_min_rows=u64::MAX → count == expected → no stop
+        assert!(!query_checked_should_stop(u64::MAX as usize, u64::MAX).unwrap());
+        // 0 rows, expected_min_rows=u64::MAX → count < expected → stop
+        assert!(query_checked_should_stop(0, u64::MAX).unwrap());
     }
 
 }
