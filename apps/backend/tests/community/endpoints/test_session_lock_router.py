@@ -13,7 +13,13 @@ endpoints to function.
 """
 from __future__ import annotations
 
+import logging
+from unittest.mock import Mock
+
+import pytest
+
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
@@ -468,3 +474,111 @@ def session_lock_info_locked_is_not_mine():
 )
 def session_lock_info_anonymous():
     """Get session lock info with anonymous user returns 400."""
+
+def _seed_deleted_bot_for_session_lock(world):
+    _seed_bot_for_session_lock(world)
+    assert world.get(BotRepository).soft_delete_by_owner("app_test", "u_owner")
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/session-lock/acquire",
+    scenario="bot_not_found",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_id": "app_test", "owner_id": "u_owner", "session_id": "sess_001"},
+    ),
+    seed=_seed_deleted_bot_for_session_lock,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404, "data": None},
+    ),
+)
+def session_lock_acquire_bot_not_found():
+    """A missing Bot is reported as a business not-found error."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/session-lock/release",
+    scenario="bot_not_found",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_id": "app_test", "owner_id": "u_owner", "session_id": "sess_001"},
+    ),
+    seed=_seed_deleted_bot_for_session_lock,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404, "data": None},
+    ),
+)
+def session_lock_release_bot_not_found():
+    """A missing Bot is reported as a business not-found error."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/session-lock/steal",
+    scenario="bot_not_found",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_id": "app_test", "owner_id": "u_owner", "session_id": "sess_001"},
+    ),
+    seed=_seed_deleted_bot_for_session_lock,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404, "data": None},
+    ),
+)
+def session_lock_steal_bot_not_found():
+    """A missing Bot is reported as a business not-found error."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bot/collaborator/session-lock/info",
+    scenario="bot_not_found",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        query_params={"bot_id": "app_test", "owner_id": "u_owner", "session_id": "sess_001"},
+    ),
+    seed=_seed_deleted_bot_for_session_lock,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404, "data": None},
+    ),
+)
+def session_lock_info_bot_not_found():
+    """A missing Bot is reported as a business not-found error."""
+
+
+async def _invoke_session_lock_route(action, service):
+    from types import SimpleNamespace
+    from importlib import import_module
+    module = import_module("agentclaw.community.adapters.http.bot_collaborator.session_lock_router")
+    from agentclaw.community.adapters.http.bot_collaborator.schemas import (
+        SessionLockRequest,
+        SessionReleaseLockRequest,
+    )
+
+    user = SimpleNamespace(staffId="u_owner")
+    values = {"bot_id": "app_test", "owner_id": "u_owner", "session_id": "sess_001"}
+    if action == "info":
+        return await module.get_session_lock_info(**values, user=user, service=service)
+    request_cls = SessionReleaseLockRequest if action == "release" else SessionLockRequest
+    handler = getattr(module, f"{action}_session_lock")
+    return await handler(request=request_cls(**values), user=user, service=service)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["acquire", "release", "steal", "info"])
+async def test_session_lock_unexpected_error_remains_server_error(action, caplog):
+    service = Mock()
+    method = "get_session_lock_info" if action == "info" else f"{action}_session_lock"
+    getattr(service, method).side_effect = RuntimeError("database unavailable")
+    with caplog.at_level(logging.ERROR):
+        result = await _invoke_session_lock_route(action, service)
+    assert result.success is False
+    assert result.error_code == 500
+    assert result.data is None
+    assert "database unavailable" in caplog.text
