@@ -123,21 +123,12 @@ describe('BrowserRouter real history workflow POP', () => {
   })
   it('commits Back and Forward without replacing either history entry', async () => {
     mocks.get.mockImplementation(async (id: string) => id === 'b' ? B : A)
-    const trace: unknown[] = []
-    const snap = (what: string) => trace.push({ what, time: Date.now(), idx: window.history.state?.idx, key: window.history.state?.key, url: window.location.search, spec: state().spec?.id, owner: isWorkflowPopOwned(), reads: mocks.get.mock.calls.map(call => call[0]) })
-    const capture = () => snap('capture pop')
-    window.addEventListener('popstate', capture, true)
-    const go = window.history.go.bind(window.history)
-    vi.spyOn(window.history, 'go').mockImplementation(delta => { snap(`go(${delta})`); return go(delta) })
     mountBrowser()
-    snap('mounted')
-    // Intermediate restore POPs are consumed by the workspace. A bubbling POP
-    // marks the replay that the router can actually commit, not just a transient
-    // history URL/store update while the browser traversal is still in flight.
+    // Intermediate restore POPs are consumed by the workspace. Observe the
+    // replayed POP that reaches the router, not a transient history position.
     const committedPops = vi.fn()
     window.addEventListener('popstate', committedPops)
     try {
-      snap('before back')
       act(() => window.history.back())
       await waitFor(() => expect(committedPops).toHaveBeenCalledTimes(1))
       expect(committedPops.mock.calls[0][0].state).toMatchObject({ idx: 0, key: 'target' })
@@ -146,7 +137,13 @@ describe('BrowserRouter real history workflow POP', () => {
       expect(isWorkflowPopOwned()).toBe(false)
       expect(window.history.state.idx).toBe(0)
       expect(screen.getByRole('button', { name: /切换工作流，当前：Target/ })).toBeInTheDocument()
-      snap('before forward')
+      // The editor starts its Pack load in an effect after the POP commits.
+      // Wait for that real request before starting the next independent POP:
+      // starting it during the next approval would invalidate its revision.
+      await waitFor(() => expect(mocks.fetchJson).toHaveBeenCalledWith(
+        '/api/workflows/b/pack-version?version=draft', expect.objectContaining({ signal: expect.anything() }),
+      ))
+      expect(sessionFor('b').state.versions.draft.loading).toBe(true)
       act(() => window.history.forward())
       await waitFor(() => expect(committedPops).toHaveBeenCalledTimes(2))
       expect(committedPops.mock.calls[1][0].state).toMatchObject({ idx: 1, key: 'source' })
@@ -155,10 +152,7 @@ describe('BrowserRouter real history workflow POP', () => {
       expect(isWorkflowPopOwned()).toBe(false)
       expect(window.history.state.idx).toBe(1)
       expect(screen.getByRole('button', { name: /切换工作流，当前：Original/ })).toBeInTheDocument()
-    } catch (error) {
-      snap('failure'); console.error('POP_TRACE', JSON.stringify(trace)); throw error
     } finally {
-      window.removeEventListener('popstate', capture, true)
       window.removeEventListener('popstate', committedPops)
     }
   })
