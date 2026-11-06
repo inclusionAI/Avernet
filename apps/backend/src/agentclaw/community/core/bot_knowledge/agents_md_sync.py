@@ -180,11 +180,22 @@ class BotKnowledgeAgentsMdSync:
                     exc_info=True,
                 )
 
-    async def _sync(self, *, scope: BotKnowledgeScope, actor_id: str) -> None:
+    def _load_inputs(
+        self, *, scope: BotKnowledgeScope, actor_id: str
+    ) -> tuple[dict, tuple[str, ...], dict[str, str]]:
+        """Read DB/catalog inputs in one worker, keeping sessions thread-local."""
         bot = self.repository.get_bot(scope)
         enabled = self.repository.list_enabled_current(scope)
         names = self._resolve_names(
             space_id=bot["space_id"], kb_ids=list(enabled), actor_id=actor_id
+        )
+        return bot, enabled, names
+
+    async def _sync(self, *, scope: BotKnowledgeScope, actor_id: str) -> None:
+        # Async BackgroundTasks run on the event loop, even after the response.
+        # Offload the complete blocking unit; to_thread copies request context.
+        bot, enabled, names = await asyncio.to_thread(
+            self._load_inputs, scope=scope, actor_id=actor_id
         )
         content = await self.identity.read_identity_file(
             bot["entity_type"],
