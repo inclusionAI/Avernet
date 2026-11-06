@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "real BCS state-machine cancel boundary probe with actual CPython BcnClient (no chat.abort delivered)",
+  "observed_at": "2026-11-02",
+  "bcs": "local standalone BCS 0.1.4-beta.3",
+  "api_flow": [
+    "POST /groups",
+    "GET /sessions/{sid}/state-machine-permission",
+    "POST /sessions/{sid}/state-machine-runs (single gate node)",
+    "POST /state-machine-runs/{run_id}/cancel",
+    "POST /channels/bindings (probe IM bridge)"
+  ],
+  "route": {
+    "method": "POST",
+    "path": "/state-machine-runs/{run_id}/cancel",
+    "handler": "routes::collaboration_runs::cancel_state_machine_run",
+    "response_http_status": 200
+  },
+  "permission": {
+    "session_id": "bcs_grp_0cbd6e4dbee84577a79a65da1a080f80:fa94e0bd",
+    "group_id": "bcs_grp_0cbd6e4dbee84577a79a65da1a080f80",
+    "caller_bot_id": "bot_43470f22",
+    "allowed": true,
+    "reason_code": "allowed",
+    "message": "the caller may start a one-shot state-machine run in this session",
+    "policy_version": "session_state_machine_v1",
+    "group_strategy": "chat",
+    "group_owner_bot_id": "bot_43470f22"
+  },
+  "group_id": "bcs_grp_0cbd6e4dbee84577a79a65da1a080f80",
+  "session_id": "bcs_grp_0cbd6e4dbee84577a79a65da1a080f80:fa94e0bd",
+  "run_id": "sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b",
+  "cancel_http_status": 200,
+  "cancel_run_status": "aborted",
+  "cancel_run_error": "controlled abort test",
+  "node_status_at_cancel": "running",
+  "actual_cpython_player": {
+    "seat": 1,
+    "bot_uuid": "bot_5d8e2188",
+    "brain": "GateBrain (actual BcnClient)",
+    "received_v3_chat_send": [
+      {
+        "type": "req",
+        "id": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+        "method": "chat.send",
+        "node_id": "gate",
+        "session_id": "bcs_grp_0cbd6e4dbee84577a79a65da1a080f80:fa94e0bd"
+      }
+    ],
+    "sent_v3_chat_final": [
+      {
+        "type": "event",
+        "event": "chat",
+        "runId": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+        "state": "final",
+        "seq": 1,
+        "content": "我投2号"
+      }
+    ]
+  },
+  "client_events_before_release": [
+    {
+      "at": "2026-11-02 01:40:08.171",
+      "event": "task_received",
+      "run_id": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+      "kind": "vote",
+      "node_id": "gate",
+      "chars": null
+    }
+  ],
+  "client_events_after_release": [
+    {
+      "at": "2026-11-02 01:40:08.171",
+      "event": "task_received",
+      "run_id": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+      "kind": "vote",
+      "node_id": "gate",
+      "chars": null
+    },
+    {
+      "at": "2026-11-02 01:40:11.181",
+      "event": "final_sent",
+      "run_id": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+      "kind": null,
+      "node_id": null,
+      "chars": 4
+    },
+    {
+      "at": "2026-11-02 01:40:11.181",
+      "event": "task_completed",
+      "run_id": "smnode-sm-a2ee6e1c-eb0f-4f44-bc54-1db8022f9b0b-gate-0",
+      "kind": "vote",
+      "node_id": null,
+      "chars": 4
+    }
+  ],
+  "bcs_run_after_release": {
+    "status": "aborted",
+    "nodes": [
+      {
+        "node_id": "gate",
+        "status": "running"
+      }
+    ]
+  },
+  "im_bridge_probe": {
+    "endpoint": "POST /channels/bindings",
+    "http_status": 400,
+    "error": "channel bridge is disabled"
+  },
+  "direct_a2a_probe": {
+    "endpoint": "POST /bot/chat-async + POST /chat/runs/{run_id}/cancel",
+    "result": "cancel returned state=cancelled; no chat.abort observed"
+  },
+  "group_session_probe": {
+    "endpoint": "POST /sessions/{sid}/chat + POST /chat/runs/{id}/cancel",
+    "result": "404 bot_not_found; delivery cancel returned []"
+  },
+  "conclusion": "状态机 cancel 只标记 run aborted，未向 WS Bot 下发 chat.abort；IM channel bridge 在本机部署被禁用。可用 Bot API 路径不能触发真实 chat.abort。",
+  "late_result_observation": "取消后 WS client 仍收到 task_received，约 3 秒后发送 final_sent/task_completed；BCS run 保持 aborted，node 仍 running。",
+  "limitations": [
+    "这是取消路径边界证据，不是一次成功的 chat.abort。",
+    "未修改 BCS/主持人，未使用真实三局。"
+  ],
+  "redaction": {
+    "omitted": [
+      "token",
+      "本机路径",
+      "真实对局数据"
+    ],
+    "retained": [
+      "测试 group/session/run ID",
+      "权限响应",
+      "节点状态",
+      "取消响应",
+      "实际 BcnClient V3 请求/终态"
+    ]
+  }
+}

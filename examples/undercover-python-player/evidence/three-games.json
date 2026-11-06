@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "three-game public acceptance evidence",
+  "generated_at": "2026-11-02",
+  "source": {
+    "run_date": "2026-11-01",
+    "group_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763",
+    "player_log": "local player JSONL (not committed)",
+    "referee_states": "local referee FINISHED state files (not committed)",
+    "note": "Sanitized export from the actual local mixed-table run; not a mock or unit-test fixture."
+  },
+  "player": {
+    "display_name": "玩家稳健老陈",
+    "bot_uuid": "bot_9e1372b5"
+  },
+  "summary": {
+    "games": 3,
+    "finished_games": 3,
+    "player_speeches": 4,
+    "player_votes": 4,
+    "player_violations": 0,
+    "other_player_violations": 4,
+    "model_source_counts": {
+      "llm": 8
+    },
+    "auxiliary_rule_tasks": 1,
+    "all_player_tasks_model_generated": true
+  },
+  "redaction": {
+    "omitted": [
+      "API keys, bearer tokens and bot session tokens",
+      "all player secret words",
+      "other players identities/words and raw structured vote payloads",
+      "raw referee state files and full chat transcripts"
+    ],
+    "retained": [
+      "full group and session IDs",
+      "round numbers",
+      "Lao Chen speech and vote text",
+      "validity per speech/vote",
+      "model source and degraded flag",
+      "violation statistics",
+      "derived per-task duration"
+    ],
+    "note": "All three games are FINISHED and revealed; only public-at-end Lao Chen role is included."
+  },
+  "games": [
+    {
+      "session_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763:cf21c17e",
+      "group_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763",
+      "finished": true,
+      "revealed_at": "2026-11-01 21:17:58",
+      "player": {
+        "display_name": "玩家稳健老陈",
+        "state_display_name": "稳健老陈",
+        "bot_uuid": "bot_9e1372b5",
+        "seat": 1,
+        "role": "civilian",
+        "role_note": "role is public after final reveal",
+        "eliminated_round": null
+      },
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 1
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "speech": {
+            "text": "出门前常会摸一下口袋。",
+            "chars": 11,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 2354,
+            "duration_source": "derived_from_jsonl_timestamps"
+          },
+          "vote": {
+            "text": "我投3号",
+            "chars": 4,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 1497,
+            "duration_source": "derived_from_jsonl_timestamps",
+            "target": 3
+          }
+        }
+      ],
+      "auxiliary_tasks": [
+        {
+          "kind": "vote_start",
+          "node_id": "vote_start",
+          "source": "rules",
+          "degraded": true,
+          "chars": 23,
+          "duration_ms": 1,
+          "counted_as_player_vote": false
+        }
+      ],
+      "violations": {
+        "player_speech": 0,
+        "player_vote": 0,
+        "other_players": [
+          {
+            "round": 1,
+            "seat": 4,
+            "actor_kind": "human",
+            "kind": "vote",
+            "violation": "超过 10 字",
+            "target": 3,
+            "note": "structured JSON vote length counted against 10-char limit; vote itself was still accepted"
+          }
+        ]
+      },
+      "player_task_count": 2,
+      "player_task_sources": {
+        "llm": 2
+      },
+      "game": 1
+    },
+    {
+      "session_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763:11491aca",
+      "group_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763",
+      "finished": true,
+      "revealed_at": "2026-11-01 21:37:32",
+      "player": {
+        "display_name": "玩家稳健老陈",
+        "state_display_name": "稳健老陈",
+        "bot_uuid": "bot_9e1372b5",
+        "seat": 4,
+        "role": "undercover",
+        "role_note": "role is public after final reveal",
+        "eliminated_round": 1
+      },
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 1
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "speech": {
+            "text": "站得久，周围一直闹哄哄的",
+            "chars": 12,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 4459,
+            "duration_source": "derived_from_jsonl_timestamps"
+          },
+          "vote": {
+            "text": "我投3号",
+            "chars": 4,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 3548,
+            "duration_source": "derived_from_jsonl_timestamps",
+            "target": 3
+          }
+        }
+      ],
+      "auxiliary_tasks": [],
+      "violations": {
+        "player_speech": 0,
+        "player_vote": 0,
+        "other_players": [
+          {
+            "round": 1,
+            "seat": 3,
+            "actor_kind": "human",
+            "kind": "vote",
+            "violation": "超过 10 字",
+            "target": 4,
+            "note": "structured JSON vote length counted against 10-char limit; vote itself was still accepted"
+          }
+        ]
+      },
+      "player_task_count": 2,
+      "player_task_sources": {
+        "llm": 2
+      },
+      "game": 2
+    },
+    {
+      "session_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763:eaf8480f",
+      "group_id": "bcs_grp_93c843085d6d4c0ab2fae3765e112763",
+      "finished": true,
+      "revealed_at": "2026-11-01 21:41:46",
+      "player": {
+        "display_name": "玩家稳健老陈",
+        "state_display_name": "稳健老陈",
+        "bot_uuid": "bot_9e1372b5",
+        "seat": 6,
+        "role": "civilian",
+        "role_note": "role is public after final reveal",
+        "eliminated_round": null
+      },
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 2
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "speech": {
+            "text": "用久了边角会有些磨白",
+            "chars": 10,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 8990,
+            "duration_source": "derived_from_jsonl_timestamps"
+          },
+          "vote": {
+            "text": "我投2号",
+            "chars": 4,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 1846,
+            "duration_source": "derived_from_jsonl_timestamps",
+            "target": 2
+          }
+        },
+        {
+          "round": 2,
+          "speech": {
+            "text": "翻开是一页页，合上就能放一边",
+            "chars": 14,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 3569,
+            "duration_source": "derived_from_jsonl_timestamps"
+          },
+          "vote": {
+            "text": "我投5号",
+            "chars": 4,
+            "violation": null,
+            "valid": true,
+            "model_source": "llm",
+            "degraded": false,
+            "duration_ms": 3732,
+            "duration_source": "derived_from_jsonl_timestamps",
+            "target": 5
+          }
+        }
+      ],
+      "auxiliary_tasks": [],
+      "violations": {
+        "player_speech": 0,
+        "player_vote": 0,
+        "other_players": [
+          {
+            "round": 1,
+            "seat": 5,
+            "actor_kind": "human",
+            "kind": "vote",
+            "violation": "超过 10 字",
+            "target": 2,
+            "note": "structured JSON vote length counted against 10-char limit; vote itself was still accepted"
+          },
+          {
+            "round": 2,
+            "seat": 5,
+            "actor_kind": "human",
+            "kind": "vote",
+            "violation": "超过 10 字",
+            "target": 6,
+            "note": "structured JSON vote length counted against 10-char limit; vote itself was still accepted"
+          }
+        ]
+      },
+      "player_task_count": 4,
+      "player_task_sources": {
+        "llm": 4
+      },
+      "game": 3
+    }
+  ]
+}
