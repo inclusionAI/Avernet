@@ -62,6 +62,18 @@ const makePanelRef = () => {
   return { openTab, ref: { current: handle } as React.RefObject<PanelHandle | null> };
 };
 
+it('历史未就绪时不请求任务，历史就绪后保留原恢复流程', async () => {
+  const panel = makePanelRef();
+  const { rerender } = renderHook(({ ready }) => useSessionTaskPanelBootstrap({
+    sessionId: 'sess-1', userId: 'u1', panelRef: panel.ref, enabled: ready,
+  }), { initialProps: { ready: false } });
+  expect(mockGetTaskBySession).not.toHaveBeenCalled();
+  expect(mockListMyTasks).not.toHaveBeenCalled();
+  rerender({ ready: true });
+  await waitFor(() => expect(mockGetTaskBySession).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(mockListMyTasks).toHaveBeenCalledTimes(1));
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
