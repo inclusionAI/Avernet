@@ -1,0 +1,20 @@
+apps/bcs-internal/crates/external-clients/bcs-layotto/tests/support/zdas_mysql.rs
+  h_9547b72f8f06cd 17,140-143,227-230,236-240,245-248,252
+apps/bcs-internal/crates/plugins/bcs-db-zdas/CONTEXT.md
+  h_9547b72f8f06cd 37-43,75-77
+apps/bcs-internal/crates/plugins/bcs-db-zdas/src/lib.rs
+  h_9547b72f8f06cd 30-31,363-368,421-422,426-427,432-463
+apps/bcs-internal/crates/plugins/bcs-db-zdas/tests/transaction_stop.rs
+  h_9547b72f8f06cd 184-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a6a5a9de3d84c08bb7e0b0109364ecc459d94041",
+  "prompts": {},
+  "humans": {
+    "h_9547b72f8f06cd": {
+      "author": "ray <ray@U-PCF66F1V-2003.local>"
+    }
+  }
+}

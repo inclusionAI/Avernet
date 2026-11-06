@@ -1,0 +1,25 @@
+apps/frontend-nextgen/test/services/lab/botConfigService.test.ts
+  s_d7925f1e35e34c::t_43610049908613 59,62-63,67,70-71
+  s_d7925f1e35e34c::t_92da72c4b69b94 4
+apps/frontend-nextgen/test/services/lab/botConfigController.test.ts
+  s_d7925f1e35e34c::t_c350a4e28d1a54 61-67
+apps/frontend-nextgen/test/services/lab/botConfigApiGateway.test.ts
+  s_d7925f1e35e34c::t_43d436a04130bf 68
+  s_d7925f1e35e34c::t_6fbcb3002b229a 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "115cb0afa1dc9a42ad50fb62b3f003f871d783a0",
+  "prompts": {},
+  "sessions": {
+    "s_d7925f1e35e34c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0b782b87-d249-4536-9dfb-a5423eb12db4",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

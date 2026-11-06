@@ -1,0 +1,28 @@
+apps/bcs-internal/bcn-configs/a2a-sofarpc.toml
+  h_9547b72f8f06cd 1-8
+apps/bcs-internal/configs/a2a-sofarpc.toml
+  h_9547b72f8f06cd 1-8
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_9547b72f8f06cd 39,47-48,58-70,80-101
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/README.md
+  h_9547b72f8f06cd 22,32,42-45,48-52
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/lib.rs
+  h_9547b72f8f06cd 16,63,73-75,78-81
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/config_install.rs
+  h_9547b72f8f06cd 15-16
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  h_9547b72f8f06cd 36,76,82,87,95,122,126-135
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/triple_wire.rs
+  h_9547b72f8f06cd 4,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04c5cb9863cdecaa8643d70652c74990530bdebb",
+  "prompts": {},
+  "humans": {
+    "h_9547b72f8f06cd": {
+      "author": "ray <ray@U-PCF66F1V-2003.local>"
+    }
+  }
+}

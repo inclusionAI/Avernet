@@ -1,0 +1,20 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  h_b601d8706f5d44 147-148,161,230
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  h_b601d8706f5d44 52,188-196,198-205,273-275,469-470,473-475
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  h_b601d8706f5d44 113-162
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  h_b601d8706f5d44 14-15,28-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd4a8670d8b35c703ddf609ed419b63f14f2c594",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
