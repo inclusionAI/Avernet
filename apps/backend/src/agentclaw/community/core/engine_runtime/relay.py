@@ -29,7 +29,7 @@ from injector import inject
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceContext,
@@ -90,7 +90,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     @inject
     def __init__(
         self,
-        bot_service: BotService,
+        bot_service: RuntimeBotLookup,
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
         publish_repo: BotPublishRepositoryProtocol,
@@ -109,7 +109,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     def resolve_bot(self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts:
         """Return the few bot facts handlers need, or raise.
 
-        ``BotService.get_bot_by_address`` resolves a unique Bot from the legacy
+        ``RuntimeBotLookup.get_bot_by_address`` resolves a unique Bot from the legacy
         locator, matching its permanent entity or current Owner within repository
         tenant/environment scope. Missing or ambiguous matches fail closed.
         ``require_bot_operator`` then checks the authenticated ``caller_id``
@@ -119,11 +119,9 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         ``owner_id`` retains its compatibility parameter name and may contain an
         entity locator. All downstream ownership checks use the resolved row.
 
-        Returns :class:`BotFacts`, **not** the raw record. ``get_bot`` attaches
-        ``device_binding`` — ``device_id``, ``device_provider``, ``device_props``
-        — and this is a public-surface entry point whose entire purpose is to
-        stop publishing device topology. A narrow value object makes leaking it
-        impossible rather than merely discouraged.
+        Returns :class:`BotFacts`, **not** the raw record. The lookup deliberately
+        skips management-page binding/template enrichment. The narrow value
+        object also prevents other stored fields from reaching public handlers.
 
         The adjudication's ``bot_pk`` comes from the row read just above, not
         from :class:`BotFacts`. ``ac_bot_collaborator`` is keyed on
@@ -148,8 +146,8 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     ) -> BotFacts:
         """:meth:`resolve_bot`, run in a worker thread.
 
-        ``resolve_bot`` is synchronous and not cheap: ``BotService.get_bot_by_address``
-        resolves the address and enriches the Bot with binding/template data, and the operator adjudication may add a collaborator query.
+        ``resolve_bot`` still performs synchronous scoped repository reads,
+        and the operator adjudication may add a collaborator query.
         Running that inline parks the event loop for the length of one slow
         database round trip and stalls every unrelated request on the worker —
         the same reason :meth:`call` already offloads device resolution.
@@ -335,8 +333,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
 
         Bot and device resolution share one **worker thread** hop. Both legs are
         synchronous and neither belongs on the event loop:
-        ``BotService.get_bot_by_address`` resolves the scoped address and fetches
-        device-binding and template data, and the device leg's provider call is blocking
+        ``RuntimeBotLookup`` resolves the scoped address with repository reads,
+        and the device leg's provider call is blocking
         network I/O — a BaaS-backed bot resolves through
         ``BaasService.get_ws_info``, a sync ``httpx`` call with a 30-second
         timeout — so running either inline would park the event loop for the
