@@ -179,7 +179,14 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.ENGINE_CONFIG, SourceKind.GIT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
-    (Category.ENGINE_CONFIG, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
+    # The whole category is closed (no materialiser), so its ``bot`` cell
+    # carries the category's own reason — the same way ``mcp``'s ``bot`` cell
+    # carries ``_MCP_HAS_NO_SOURCE``. The capabilities resolver intersects the
+    # category verdict first and would otherwise publish a cell whose message
+    # disagreed with the ``unsupported_category`` violation the document earns.
+    (Category.ENGINE_CONFIG, SourceKind.BOT): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
 }
 
 
