@@ -20,6 +20,7 @@ from caller_delegation_chain_story import DelegationChainStory
 
 class ProtectedResultLegStory(DelegationChainStory):
     def setup(self) -> None:
+        self.manager_caller_revisions = 0
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
         self.provider = self.post("/providers", {
@@ -52,13 +53,29 @@ class ProtectedResultLegStory(DelegationChainStory):
                          {"visibility": "public"}, method="PUT")
         self.enable_group_queue_policy()
 
-    def enable_manager_caller(self) -> None:
+    def apply_manager_caller(self, revision: int, enabled: bool) -> None:
         path = (f"/providers/{segment(self.provider['provider_id'])}/bots/"
                 f"{segment(self.manager['provider_bot_ref'])}/caller")
-        applied = self.request(path, {"snapshot": {"source_revision": 1,
-            "caller_identity": {"enabled": True}}}, method="PATCH",
+        applied = self.request(path, {"snapshot": {"source_revision": revision,
+            "caller_identity": {"enabled": enabled}}}, method="PATCH",
             headers={"Authorization": "Bearer " + self.provider["provider_admin_token"]})
         assert applied["sync_status"] == "applied", applied
+
+    def enable_manager_caller(self) -> None:
+        # Revision 1 is the first enablement; turn 2 disables at revision 2
+        # and re-enables at revision 3 (caller_delegation handles the rest
+        # of the chain shape below).
+        revision = 1 if self.manager_caller_revisions == 0 else 3
+        self.manager_caller_revisions += 1
+        self.apply_manager_caller(revision, True)
+
+    def disable_manager_caller(self) -> None:
+        # Dropping the Caller snapshot lets the next Manager turn open the
+        # supported ordinary run shape again (the delegation under a Caller
+        # parent needs a parent execution token the scripted mock never
+        # round-trips); re-enabling below restores the §15.4 shape before
+        # the Worker settles.
+        self.apply_manager_caller(2, False)
 
     def manager_headers(self):
         return {"X-BCN-Provider-Id": self.provider["provider_id"],
@@ -247,7 +264,7 @@ class ProtectedResultLegStory(DelegationChainStory):
             token = body["extensions"]["caller_execution_token"]
             assert token.get("token") and token["token"] not in json.dumps(body["message"]), \
                 "Proof leaked into model input"
-            assert (body.get("channel") or {}).get("actor_id") == self.worker["bot_uuid"], \
+            assert (body.get("from") or {}).get("actor_id") == self.worker["bot_uuid"], \
                 "the trusted sender is the Worker, never the protected subject"
             ensures = [item for item in results[:results.index(result_ride)]
                        if item["body"].get("method") == "caller.container.ensure"
@@ -261,7 +278,11 @@ class ProtectedResultLegStory(DelegationChainStory):
 
             # ---- Turn 2: a second delegated leg answers with an ERROR
             # callback; the failure-text result rides the SAME protected
-            # transport (§15.4 keeps its own material, not a bare notice). ----
+            # transport (§15.4 keeps its own material, not a bare notice).
+            # The Manager's Caller snapshot is dropped first so the second
+            # human turn opens the supported ordinary delegation shape;
+            # caller re-enablement below then protects the failure leg. ----
+            self.disable_manager_caller()
             self.post("/control/provider/clear", mock=True)
             socket_client.send({"type": "req", "id": "pr-speak2", "method": "chat.send",
                                 "params": {"group_id": self.group_id,
@@ -279,15 +300,15 @@ class ProtectedResultLegStory(DelegationChainStory):
                         and (body2.get("to_bot") or {}).get("provider_bot_ref")
                         == self.manager["provider_bot_ref"]
                         and "delegate the fragile leg" in json.dumps(body2))
-            second_ride = self.wait("manager rides again after caller enablement",
-                                    lambda: self.requests(),
-                                    lambda items: any(is_second_root_ride(item) for item in items))
-            # A caller-enabled Manager now refuses ordinary content: the
-            # second human turn must itself ride the protected wire.
+            second_ride = self.wait("manager rides again while ordinary",
+                                     lambda: self.requests(),
+                                     lambda items: any(is_second_root_ride(item) for item in items))
             second_root = next(item for item in second_ride if is_second_root_ride(item))
-            assert (second_root["body"].get("extensions") or {}).get("caller_context"), \
-                "the second Manager ride must be protected after enablement"
+            assert not (second_root["body"].get("extensions") or {}).get("caller_context"), \
+                "the second Manager ride must be ordinary after caller disablement"
             parent2_run_id = second_root["body"]["id"]
+            self.enable_manager_caller()
+            print("  Manager Caller configuration re-applied for the fragile leg", flush=True)
             self.assign_tool_leg(parent2_run_id, "worker leg that will fail")
             failing_ride = self.delegated_worker_ride("worker leg that will fail")
             self.post("/control/provider/clear", mock=True)
@@ -296,6 +317,10 @@ class ProtectedResultLegStory(DelegationChainStory):
                 "group_id": self.group_id, "bcs_session_id": self.session_id,
                 "message": {"text": "the delegated leg exploded"},
             }, headers=self.worker_headers())
+            # Settle the parent turn first: the session serializes its lane,
+            # so the failure result rides only after turn 2's run frees it.
+            self.reply_chat_final(parent2_run_id, "manager acknowledged the failed leg",
+                                  self.manager_headers())
             def is_failure_ride(item):
                 body3 = item["body"]
                 return (body3.get("method") == "chat.send"
@@ -308,10 +333,8 @@ class ProtectedResultLegStory(DelegationChainStory):
                                  lambda items: any(is_failure_ride(item) for item in items))
             failure_ride = next(item for item in failures if is_failure_ride(item))
             assert "情况" in json.dumps(failure_ride["body"]["message"], ensure_ascii=False)
-            assert (failure_ride["body"].get("channel") or {}).get("actor_id") == self.worker["bot_uuid"]
+            assert (failure_ride["body"].get("from") or {}).get("actor_id") == self.worker["bot_uuid"]
             print("  protected failure text reached the late-enabled Manager", flush=True)
-            self.reply_chat_final(parent2_run_id, "manager acknowledged the failed leg",
-                                  self.manager_headers())
 
             socket_client.send({"type": "req", "id": "pr-release", "method": "lease.release",
                                 "params": {"groupId": self.group_id,
