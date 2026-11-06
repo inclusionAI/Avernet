@@ -216,3 +216,54 @@ it.each([true, false])("waits for delayed TE AIVision evidence after recovery: i
   expect(runtime.request).not.toHaveBeenCalled();
   expect(runtime.executeShell).not.toHaveBeenCalled();
 });
+
+it("counts durable Owner feedback once while keeping recovery unknown and preserving it across later requests", async () => {
+  let task = await create();
+  const read = await inspect(task);
+  notifier.notifyOwnerRequest = vi.fn().mockResolvedValue(true);
+  vi.spyOn(agent, "start").mockResolvedValue();
+  const ask = async () => {
+    task = await current(task.taskId);
+    await service.requestOwner(task.taskId, task.version, { reason: "permission", summary: "原资料访问权限不足", instructions: "请申请原资料读取权限",
+      evidence_ids: [read.evidenceId], executionId: task.execution!.executionId });
+    task = await current(task.taskId);
+    return task.ownerRequest!.requestId;
+  };
+  const first = await ask();
+  await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.kind === "notification"
+    && event.payload.channel === "owner_card" && event.payload.state === "sent")).toBe(true));
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "none", pending_results: [] });
+  await expect(service.confirmOwner(task.taskId, first, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  await expect(service.confirmOwner(task.taskId, "stale-request", actor)).rejects.toMatchObject({ status: 409 });
+  const save = vi.spyOn(tasks, "update").mockRejectedValueOnce(new Error("storage unavailable"));
+  await expect(service.confirmOwner(task.taskId, first, actor)).rejects.toThrow("storage unavailable"); save.mockRestore();
+  expect(await current(task.taskId)).toMatchObject({ interventionStatus: "none", ownerRequest: { status: "pending" } });
+
+  await service.confirmOwner(task.taskId, first, actor, "已处理权限");
+  await service.confirmOwner(task.taskId, first, actor, "重复回执");
+  tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
+  expect(await current(task.taskId)).toMatchObject({ status: "running", interventionStatus: "performed", judgment: null, pending_results: [] });
+  expect((await current(task.taskId)).timeline.filter(event => event.kind === "owner_decision")).toHaveLength(1);
+  await inspect(await current(task.taskId), "after-owner-feedback");
+  const second = await ask();
+  expect(second).not.toBe(first);
+  await expect(service.confirmOwner(task.taskId, first, actor)).rejects.toMatchObject({ status: 409 });
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "performed", ownerRequest: { requestId: second, status: "pending" } });
+  await service.confirmOwner(task.taskId, second, actor, "已处理剩余权限");
+  await service.executionFailure(task.taskId, "回执已保存，后续执行未完成核验");
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ effect: "unknown", intervention_status: "performed" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("does not count environment-plan approval as a confirmed permission-handling receipt", async () => {
+  let task = await create();
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要获批环境动作", evidence_ids: [read.evidenceId] });
+  await agent.report(await current(task.taskId), { kind: "plan", phase: "plan", plan });
+  task = await current(task.taskId);
+  vi.spyOn(agent, "start").mockResolvedValue();
+  await service.decide(task.taskId, task.plan!.digest!, true, actor);
+  expect((await current(task.taskId)).timeline.some(event => event.kind === "owner_decision")).toBe(true);
+  expect((await current(task.taskId)).interventionStatus).toBe("none");
+});
