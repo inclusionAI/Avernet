@@ -309,6 +309,7 @@ describe('useSessionTaskPanelBootstrap', () => {
     const sessionId = 'agent:main:session:sess-1:user:440718';
     const ownerTask = taskRecord('task-owner', '2026-10-27 11:30:00', sessionId);
     const viewerTask = taskRecord('task-viewer', '2026-10-27 10:30:00', 'sess-other');
+    mockGetTaskBySession.mockResolvedValue({ ok: true, data: [] });
     mockListMyTasks.mockResolvedValue({ code: 0, data: [viewerTask, ownerTask] });
 
     renderHook(() =>

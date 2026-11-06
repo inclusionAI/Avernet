@@ -64,7 +64,6 @@ from agentclaw.community.adapters.http.task.schemas_task_session import (
     BySessionDTO,
     by_session_refs_to_dto,
 )
-from agentclaw.community.core.errors import NotFound
 from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
 )
@@ -188,17 +187,20 @@ async def get_task_dashboard(
 async def get_task_by_session(
     session_id: Annotated[
         str,
-        Query(description="The chat session id to resolve; misses are not found"),
+        Query(description="The chat session id to resolve; sessions without visible tasks return an empty list"),
     ],
     request: Request,
     principal: PrincipalDep,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[BySessionDTO]:
-    """Resolve a chat session to the relay task node executing in it."""
+    """Resolve a chat session to its ordered relay task nodes.
+
+    A session with no visible task is a normal lookup miss, not an HTTP error;
+    it returns the empty list envelope so clients and access logs do not treat
+    ordinary session emptiness as a failed dependency.
+    """
     del principal
     refs = await run_in_threadpool(service.get_task_nodes_by_session, session_id)
-    if not refs:
-        raise NotFound("task session not found")
     return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
