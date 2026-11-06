@@ -14,10 +14,11 @@ const blobText = (body: Blob) => new Promise<string>(resolve => { const r = new 
 let counter = 0
 let row: { workflowId: string; packId: null; specJson: string; draftToken: string }
 let submitted: any, snapshot: any, post: ReturnType<typeof vi.fn>
+let responseCommit: string
 let scenario: 'ok' | 'partial' | 'stale-commit' | 'stale-token' | 'stale-yaml' | 'missing-file' | 'denied' | 'rejected' | 'offline' | 'concurrent' | 'default-host' | 'cap-invalid' | 'cap-down'
 const encode = (s: string) => btoa(unescape(encodeURIComponent(s)))
 beforeEach(() => {
-  scenario = 'ok'; submitted = undefined
+  scenario = 'ok'; submitted = undefined; responseCommit = commit
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   useEditorStore.getState().reset({ force: true })
   vi.mocked(api.workflows.get).mockImplementation(async () => JSON.parse(row.specJson) as never)
@@ -46,12 +47,12 @@ beforeEach(() => {
     if (scenario === 'concurrent') useEditorStore.getState().updateSpecField('title', 'Later edit')
     row = { ...row, specJson: submitted.specJson, draftToken: scenario === 'stale-token' ? token : newToken }
     const yaml = stringify(JSON.parse(submitted.specJson), { sortMapEntries: true, lineWidth: 0 })
-    snapshot = { ...snapshot, baseCommit: scenario === 'stale-commit' ? old : commit, draftHead: scenario === 'stale-commit' ? old : commit,
+    snapshot = { ...snapshot, baseCommit: scenario === 'stale-commit' ? old : responseCommit, draftHead: scenario === 'stale-commit' ? old : responseCommit,
       versionFiles: snapshot.versionFiles.map((f: any) => f.path.endsWith('.yaml') && f.path !== 'workflow.pack.yaml'
         ? { ...f, contentBase64: encode(scenario === 'stale-yaml' ? 'id: wrong\n' : yaml) }
         : f.path === 'scripts/a.sh' && submitted.changes.length ? { ...f, contentBase64: encode('new') } : f).filter((f: any) => scenario !== 'missing-file' || f.path !== 'scripts/a.sh') }
     return { status: 200, json: async () => ({ requestId: submitted.requestId, outcome: 'confirmed', reconciliationRequired: false,
-      evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'e'.repeat(64), commit, draftToken: newToken } }) }
+      evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'e'.repeat(64), commit: responseCommit, draftToken: newToken } }) }
   })
   vi.stubGlobal('fetch', post)
 })
@@ -83,7 +84,7 @@ it.each([false, true])('submits one candidate and verifies the complete saved sn
   expect(useEditorStore.getState().isDirty).toBe(false)
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
 })
-it.each(['partial', 'stale-commit', 'stale-token', 'stale-yaml', 'missing-file', 'denied', 'offline', 'concurrent'] as const)('retains and locks drafts after %s', async kind => {
+it.each(['partial', 'stale-commit', 'stale-token', 'stale-yaml', 'missing-file', 'denied', 'offline'] as const)('retains and locks drafts after %s', async kind => {
   scenario = kind
   const ctx = await setup(true)
   await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('统一保存') })
@@ -93,6 +94,34 @@ it.each(['partial', 'stale-commit', 'stale-token', 'stale-yaml', 'missing-file',
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('unknown')
   await expect(ctx.hook.result.current.save()).rejects.toThrow()
   expect(post.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1)
+})
+
+it('preserves a later canvas edit after verifying the submitted snapshot', async () => {
+  scenario = 'concurrent'
+  const ctx = await setup(true)
+  await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toEqual({ mode: 'unified', dbSaved: true, gitSaved: true, commit }) })
+  expect(JSON.parse(submitted.specJson).title).toBe('Edited')
+  expect(JSON.parse(row.specJson).title).toBe('Edited')
+  expect(ctx.session.state.versions.draft.snapshot?.baseCommit).toBe(commit)
+  expect(ctx.session.state.versions.draft.snapshot?.draftHead).toBe(commit)
+  expect(ctx.session.state.versions.draft.files.find(f => f.path === 'scripts/a.sh')?.contentBase64).toBe(encode('new'))
+  expect(useEditorStore.getState().spec?.title).toBe('Later edit')
+  expect(useEditorStore.getState()._savedSpec?.title).toBe('Edited')
+  expect(useEditorStore.getState().isDirty).toBe(true)
+  expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
+  expect(post.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1)
+  scenario = 'ok'
+  const secondCommit = 'c'.repeat(40)
+  responseCommit = secondCommit
+  await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toMatchObject({ commit: secondCommit }) })
+  expect(submitted.sourceCommit).toBe(commit)
+  expect(submitted.expectedSavedHead).toBe(commit)
+  expect(ctx.session.state.versions.draft.snapshot?.baseCommit).toBe(secondCommit)
+  expect(ctx.session.state.versions.draft.snapshot?.draftHead).toBe(secondCommit)
+  expect(JSON.parse(submitted.specJson).title).toBe('Later edit')
+  expect(JSON.parse(row.specJson).title).toBe('Later edit')
+  expect(useEditorStore.getState().isDirty).toBe(false)
+  expect(post.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2)
 })
 
 it('does not trust even a correlated pre-write rejection without origin-bound proof', async () => {
@@ -114,28 +143,33 @@ it('does not advertise unified capability based on legacy pack-version canWrite'
   await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toMatchObject({ commit }) })
 })
 
-it('does not dispatch or lock when the user declines the unavailable-capability warning', async () => {
+it('does not prompt, dispatch or lock when an existing draft lacks unified capability, and can retry when restored', async () => {
   scenario = 'default-host'
   const ctx = await setup(true)
   vi.mocked(window.confirm).mockReturnValueOnce(false)
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('未发送写入') })
-  expect(post.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0)
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('数据库和 Git 均未写入') })
+  expect(window.confirm).not.toHaveBeenCalled()
+  expect(post.mock.calls.map(([, init]) => init.method)).toEqual(['GET'])
+  expect(useEditorStore.getState().isDirty).toBe(true)
   expect(ctx.session.state.postSaveVerificationError).toBeFalsy()
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
   scenario = 'ok'
   await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toMatchObject({ commit }) })
 })
 
-it('default deny-only host offers explicit DB-only CAS without touching YAML or file drafts', async () => {
+it('default deny-only host refuses DB-only CAS and preserves the database, YAML and file drafts', async () => {
   scenario = 'default-host'
   const ctx = await setup(true)
   const before = structuredClone(ctx.session.state.versions.draft)
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toMatchObject({ stages: { db: 'confirmed', git: 'not-started' } }) })
-  expect(vi.mocked(window.confirm)).toHaveBeenCalledWith(expect.stringContaining('未获得文件写入权限'))
+  const beforeRow = structuredClone(row)
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('数据库和 Git 均未写入') })
+  expect(window.confirm).not.toHaveBeenCalled()
   expect(post.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
-    [`/api/workflows/${ctx.id}/unified-save`, 'GET'], [`/api/workflows/${ctx.id}/editor-draft`, 'PUT'],
+    [`/api/workflows/${ctx.id}/unified-save`, 'GET'],
   ])
-  expect(JSON.parse(row.specJson).title).toBe('Edited')
+  expect(row).toEqual(beforeRow)
+  expect(useEditorStore.getState().spec?.title).toBe('Edited')
+  expect(useEditorStore.getState().isDirty).toBe(true)
   expect(ctx.session.state.versions.draft).toEqual(before)
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
 })

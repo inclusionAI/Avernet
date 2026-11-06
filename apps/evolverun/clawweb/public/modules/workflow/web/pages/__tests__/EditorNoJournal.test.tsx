@@ -75,11 +75,13 @@ it('deploys the saved files and DB draft even when Git YAML differs', async () =
   expect(mocks.casGet.mock.invocationCallOrder[0]).toBeLessThan(mocks.deploy.mock.invocationCallOrder[0])
   expect(await screen.findByText(/部署成功/)).toBeInTheDocument()
 })
-function realConflictTransport(gate?: Promise<void>) {
+function realConflictTransport(gate?: Promise<void>, editorGuard = true) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
   const wrapper = ({ children }: PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  const hook = renderHook(useRealDeploy, { wrapper })
+  // Match Editor: its guarded transport preserves the bound request identity.
+  const hook = renderHook(() => useRealDeploy({ editorGuard }), { wrapper })
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async (_url, init) => {
+    expect(_url).toBe(editorGuard ? '/api/auto-heal/editor-deploy/snapshot-v2' : '/api/auto-heal/deploy')
     const input = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init!.body as Blob) })
     if (gate) await gate
     return new Response(JSON.stringify({ code: 'DEPLOY_TREE_CONFLICT', requestId: JSON.parse(input).requestId }), { status: 409 })
@@ -412,7 +414,7 @@ it('blocks AutoHeal after Editor loses its acknowledgement and the panel remount
 it('unlocks an AutoHeal tree conflict and permits a retry after repair', async () => {
   const { id } = await setup(); cleanup(); openPanel(id)
   const deployButton = await diagnoseAndSave()
-  const transport = realConflictTransport()
+  const transport = realConflictTransport(undefined, false)
   mocks.deploy.mockImplementationOnce(transport.deploy).mockImplementationOnce(async input => ({
     ok: true, deployed: true, workflowId: id, packId: 'pack', deployNumber: 1, version: 1, tagName: 'v1', snapshotProtocol: input.snapshotProtocol, candidateCommit: input.candidateCommit, expectedActiveCommit: input.expectedActiveCommit,
   }))

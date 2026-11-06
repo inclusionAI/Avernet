@@ -341,7 +341,7 @@ describe.each(["save", "deploy", "editor-deploy"] as const)("AutoHeal /%s Git se
   }
 
   if (endpoint !== "save") {
-    if (endpoint === "editor-deploy") it("returns a tree conflict without exposing shared repository paths to an execute-only user", async () => {
+    if (endpoint === "editor-deploy") it("rejects an execute-only editor deployment without exposing shared repository paths", async () => {
       await deps.botPermRepo!.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id, can_view: 0, can_execute: 1, can_edit: 0 });
       const seed = path.join(root, "seed");
       mkdirSync(path.join(seed, "other-pack"));
@@ -350,7 +350,7 @@ describe.each(["save", "deploy", "editor-deploy"] as const)("AutoHeal /%s Git se
       runGit(seed, ["push", remote, `HEAD:refs/heads/wf/${spec.id}`]);
       const previous = remoteGit("rev-parse", `refs/heads/wf/${spec.id}`);
       const response = await post(createAutoHealRouter(deps), endpoint, await requestBody());
-      expect(response).toMatchObject({ status: 409, body: { code: "DEPLOY_TREE_CONFLICT" } });
+      expect(response).toMatchObject({ status: 403, body: { code: "FORBIDDEN" } });
       expect(JSON.stringify(response.body)).not.toContain("other-pack");
       expect(response.body).not.toHaveProperty("paths");
       expect(remoteGit("rev-parse", `refs/heads/wf/${spec.id}`)).toBe(previous);

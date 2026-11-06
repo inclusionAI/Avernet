@@ -67,14 +67,34 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Editor and Pack candidate isolation', () => {
   it('saves file edits through the shared Pack path without legacy DB or Git writes', async () => {
+    let saved = snapshot('draft')
+    const originalFetchJson = mocks.fetchJson.getMockImplementation()!
+    mocks.fetchJson.mockImplementation((url: string, init?: RequestInit) => url.includes('version=draft') ? Promise.resolve(saved) : originalFetchJson(url, init))
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/unified-save') && init?.method === 'GET') return new Response(JSON.stringify({ protocol: 'workflow-unified-save-v1' }))
+      if (String(url).endsWith('/unified-save') && init?.method === 'POST') {
+        const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob) })
+        const input = JSON.parse(text)
+        expect(input.expectedDraftToken).toBe('a'.repeat(64))
+        expect(input.changes).toEqual([expect.objectContaining({ path: 'scripts/test', contentBase64: btoa('new yaml') })])
+        const files = saved.versionFiles.map(f => f.path === 'flows/main.yaml'
+          ? { ...f, contentBase64: btoa(stringify(JSON.parse(input.specJson), { sortMapEntries: true, lineWidth: 0 })) }
+          : f.path === 'scripts/test' ? { ...f, contentBase64: btoa('new yaml') } : f)
+        saved = { ...saved, baseCommit: B, draftHead: B, versionFiles: files }
+        return new Response(JSON.stringify({ requestId: input.requestId, outcome: 'confirmed', reconciliationRequired: false,
+          evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'e'.repeat(64), commit: B, draftToken: 'a'.repeat(64) } }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
     mount(); await openFile()
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'new yaml' } })
     fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }))
     await screen.findByText(new RegExp(`已保存到草稿 commit ${B}`))
     expect(mocks.casGet).toHaveBeenCalledWith(`/api/workflows/${mocks.id}/editor-draft`, expect.objectContaining({ method: 'GET' }))
-    const gitWrite = mocks.fetchJson.mock.calls.findIndex(([, init]) => init?.method === 'PUT')
-    expect(gitWrite).toBeGreaterThanOrEqual(0)
-    expect(mocks.casGet.mock.invocationCallOrder[0]).toBeLessThan(mocks.fetchJson.mock.invocationCallOrder[gitWrite])
+    const unifiedWrite = vi.mocked(fetch).mock.calls.findIndex(([, init]) => init?.method === 'POST')
+    expect(unifiedWrite).toBeGreaterThanOrEqual(0)
+    expect(mocks.casGet.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[unifiedWrite])
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0)
     fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(screen.queryByText(/工作流保存已阻止/)).not.toBeInTheDocument()
     expect(mocks.saveDb).not.toHaveBeenCalled(); expect(mocks.gitSave).not.toHaveBeenCalled(); expect(useEditorStore.getState().isDirty).toBe(false)
@@ -102,9 +122,19 @@ describe('Editor and Pack candidate isolation', () => {
     expect(screen.getByText(/读取期间编辑内容或数据库草稿已变化/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
   })
   it('does not deploy after an unsuccessful Pack save and retains the file', async () => {
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/unified-save') && init?.method === 'GET') return new Response(JSON.stringify({ protocol: 'workflow-unified-save-v1' }))
+      if (String(url).endsWith('/unified-save') && init?.method === 'POST') {
+        const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob) })
+        return new Response(JSON.stringify({ requestId: JSON.parse(text).requestId, outcome: 'rejected', reconciliationRequired: false,
+          evidence: { db: 'not_started', git: 'not_started' } }), { status: 409 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
     mount(); await openFile(); fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'unsaved' } })
-    mocks.fetchJson.mockRejectedValueOnce({ status: 409, body: '{"code":"VERSION_CONFLICT"}' }); fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }))
-    expect((await screen.findAllByRole('alert')).some(alert => alert.textContent?.includes('保存冲突'))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }))
+    await waitFor(() => expect(sessionFor(mocks.id).state.postSaveVerificationError).toContain('统一保存结果为 rejected'))
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
     fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); fireEvent.click(screen.getByRole('button', { name: '部署' }))
     expect(mocks.deploy).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
     fireEvent.click(screen.getByRole('button', { name: 'scripts/test' })); expect(screen.getByLabelText('文件内容')).toHaveValue('unsaved')

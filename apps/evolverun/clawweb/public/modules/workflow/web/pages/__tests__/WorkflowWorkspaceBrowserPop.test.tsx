@@ -258,7 +258,7 @@ describe('BrowserRouter real history workflow POP', () => {
   })
 
   it('preserves a null DB baseline when committing an active-only browser POP target', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     mountBrowser(); act(() => window.history.back())

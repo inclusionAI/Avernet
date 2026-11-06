@@ -44,14 +44,31 @@ function fixture(doc: WorkflowSpec, storage: 'projection' | 'wrapper' | 'json') 
   }
   const versionFiles = [
     { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [doc.id] })), mode: '100644' },
-    { path: `workflows/${doc.id}.yaml`, contentBase64: btoa(yaml), mode: '100644' },
+    // Unified save requires Git to match the complete CAS document, including content.
+    { path: `workflows/${doc.id}.yaml`, contentBase64: btoa(stringify(storage === 'projection' ? stored : doc)), mode: '100644' },
     { path: 'script', contentBase64: btoa('original script'), mode: '100755' },
   ]
-  const snapshot = { workflowId: doc.id, packId: 'pack', baseRef: `origin/saved/${doc.id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles }
+  let snapshot = { workflowId: doc.id, packId: 'pack', baseRef: `origin/saved/${doc.id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles }
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input === `/api/workflows/${doc.id}`) return route('/:workflowId')
     if (input === `/api/workflows/${doc.id}/export`) return route('/:workflowId/export')
     if (input === `/api/workflows/${doc.id}/pack-version?version=draft` && !init?.method) return new Response(JSON.stringify(snapshot))
+    if (input === `/api/workflows/${doc.id}/unified-save`) {
+      if (init?.method === 'GET') return new Response(JSON.stringify({ protocol: 'workflow-unified-save-v1' }))
+      if (init?.method === 'POST') {
+        const body = JSON.parse(await readBlob(init.body as Blob))
+        expect(body.expectedDraftToken).toBe(editorDraftToken(row))
+        expect(body.sourceVersion).toBe('draft'); expect(body.sourceCommit).toBe(A); expect(body.expectedSavedHead).toBe(A)
+        expect(body.changes).toEqual([])
+        row.spec_json = body.specJson
+        const commit = 'b'.repeat(40)
+        snapshot = { ...snapshot, baseCommit: commit, draftHead: commit, versionFiles: snapshot.versionFiles.map(file =>
+          file.path === `workflows/${doc.id}.yaml`
+            ? { ...file, contentBase64: btoa(stringify(JSON.parse(body.specJson), { sortMapEntries: true, lineWidth: 0 })) } : file) }
+        return new Response(JSON.stringify({ requestId: body.requestId, outcome: 'confirmed', reconciliationRequired: false,
+          evidence: { db: 'confirmed', git: 'confirmed', commit, draftToken: editorDraftToken(row), inputHash: 'e'.repeat(64) } }))
+      }
+    }
     if (input === `/api/workflows/${doc.id}/editor-draft`) {
       if (init?.method === 'GET') return new Response(JSON.stringify({ workflowId: doc.id, packId: row.pack_id, specJson: row.spec_json, draftToken: editorDraftToken(row) }))
       if (init?.method === 'PUT') {
@@ -98,29 +115,50 @@ it.each(['projection', 'wrapper', 'json'] as const)('uses the raw CAS %s documen
   expect(fetchMock.mock.calls.filter(([url]) => url.includes('/pack-version')).map(([url]) => url))
     .toEqual([`/api/workflows/${doc.id}/pack-version?version=draft`])
   // The hook's initial source read is the first CAS GET. The save must make
-  // a second GET before the PUT to acquire a token for that same row.
+  // a second GET before the unified POST to acquire a token for that same row.
   const casCalls = () => fetchMock.mock.calls.filter(([url]) => url.endsWith('/editor-draft'))
   expect(casCalls().map(([, init]) => init?.method)).toEqual(['GET'])
   act(() => useEditorStore.getState().updateSpecField('title', 'Edited title'))
   await act(async () => { await canvas.current.save() })
-  const writes = fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/editor-draft') && init?.method === 'PUT')
+  const writes = fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/unified-save') && init?.method === 'POST')
   expect(writes).toHaveLength(1)
   expect(writes[0][1]!.headers).toMatchObject({ 'X-Pack-Version-CSRF': '1' })
   // Finishing the verified write advances the guard epoch. The still-mounted
-  // source hook therefore fetches a new query key after PUT; it must not use
+  // source hook therefore fetches a new query key after POST; it must not use
   // the pre-write cache as the next session's confirmed baseline.
   await waitFor(() => expect(result.current.data?.title).toBe('Edited title'))
-  expect(casCalls().map(([, init]) => init?.method)).toEqual(['GET', 'GET', 'PUT', 'GET'])
+  expect(casCalls().map(([, init]) => init?.method)).toEqual(['GET', 'GET', 'GET', 'GET'])
+  expect(fetchMock.mock.calls.filter(([url]) => url.includes('/pack-version'))).toHaveLength(2)
   expect(result.current.databaseSpec?.title).toBe('Edited title')
   expect(originalDraftPackId(result.current.databaseSpec!)).toBe('pack')
   const body = JSON.parse(await readBlob(writes[0][1]!.body as Blob))
-  const submitted = body.spec
+  const submitted = JSON.parse(body.specJson)
   expect(submitted).toMatchObject({ version: '2.7.0', title: 'Edited title', facade: doc.facade, custom: doc.custom })
   if (storage === 'projection') expect(submitted.content).toBe(stringify(doc))
   else expect(submitted).not.toHaveProperty('content')
   expect(submitted).not.toHaveProperty('updatedAt')
   expect(body.expectedDraftToken).toBe(initialToken)
   expect(useEditorStore.getState()._savedSpec).toEqual(submitted)
+})
+
+it('rejects unified save when Git lacks the raw projection content', async () => {
+  const doc = document(), { fetchMock, snapshot } = fixture(doc, 'projection')
+  const original = fetchMock.getMockImplementation()!
+  fetchMock.mockImplementation((url, init) => url.endsWith('/pack-version?version=draft')
+    ? Promise.resolve(new Response(JSON.stringify({ ...snapshot, versionFiles: snapshot.versionFiles.map(file =>
+      file.path === `workflows/${doc.id}.yaml` ? { ...file, contentBase64: btoa(stringify(doc)) } : file) })))
+    : original(url, init))
+  client()
+  const { result } = renderHook(() => useEditorWorkflowDocument(doc.id), { wrapper })
+  await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  const loaded = result.current.data!
+  act(() => { expect(commitWorkflowTransition(beginWorkflowTransition()!, loaded, doc.id, false, result.current.databaseSpec!)).toBe(true) })
+  const { result: canvas } = renderHook(() => usePackCanvasSession(doc.id, loaded))
+  await waitFor(() => expect(canvas.current.snapshot).toBeTruthy())
+  act(() => useEditorStore.getState().updateSpecField('title', 'Edited title'))
+  await act(async () => { await expect(canvas.current.save()).rejects.toThrow('Git 工作流 YAML 与数据库基线不一致') })
+  expect(fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/unified-save') && init?.method === 'POST')).toHaveLength(0)
+  expect(useEditorStore.getState().isDirty).toBe(true)
 })
 
 it.each(['numeric', 'missing', 'null'] as const)('rejects saving a legacy wrapper when export normalizes %s version and other fields', async version => {

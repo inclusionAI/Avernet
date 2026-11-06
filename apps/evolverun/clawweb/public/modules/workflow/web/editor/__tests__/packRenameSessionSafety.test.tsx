@@ -65,6 +65,8 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
   publish(session, { ...session.state, version: 'draft' })
   let databasePackId = 'pack'
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === `/api/workflows/${id}/unified-save` && init?.method === 'GET') return json({ protocol: 'workflow-unified-save-v1' })
+    if (url === `/api/workflows/${id}/unified-save` && init?.method === 'POST' && originRejected) return json({ code: 'ORIGIN_NOT_ALLOWED' }, 403)
     if (url === `/api/workflows/${id}`) return json(ui.db)
     if (url === `/api/workflows/${id}/editor-draft` && init?.method === 'GET') return json({ workflowId: id, packId: databasePackId, specJson: JSON.stringify(ui.db), draftToken: 'a'.repeat(64) })
     if (url.startsWith(`/api/workflows/${id}/history?`)) return json({ workflowId: id, history: [], active: null })
@@ -237,7 +239,13 @@ it('blocks standalone Pack saves after rename rejection even when both versions 
 
 it('does not give a non-rename origin rejection a session-level lock', async () => {
   const ctx = setup({ rename: false })
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('版本文件保存请求被来源校验拒绝') })
+  const candidate = structuredClone(ctx.session.state.versions.draft.files)
+  await act(async () => { expect(await savePackVersion(ctx.session, ctx.id, 'draft')).toBeNull() })
+  expect(ctx.fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([[`/api/workflows/${ctx.id}/pack-version`, 'PUT']])
+  expect(ctx.session.state.versions.draft.error).toContain('版本文件保存请求被来源校验拒绝')
+  expect(ctx.session.state.versions.draft.files).toEqual(candidate)
+  expect(dirty(ctx.session.state.versions.draft)).toBe(true)
+  expect(ctx.session.state.uncertainRename).toBeNull()
   expect(ctx.session.state.reconciliation).toBeNull()
   expect(ctx.session.state.versions.draft.blocked).toBe(false)
   await reloadBoth(ctx)
@@ -247,11 +255,25 @@ it('does not give a non-rename origin rejection a session-level lock', async () 
   expect(sessionFor(ctx.id)).not.toBe(ctx.session)
 })
 
+it('quarantines a non-rename unified save after an origin rejection without origin-bound proof', async () => {
+  const ctx = setup({ rename: false })
+  const candidate = structuredClone(ctx.session.state.versions.draft.files)
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('统一保存未能完整确认') })
+  expect(ctx.session.state.uncertainRename).toBeNull()
+  expect(ctx.session.state.postSaveVerificationError).toContain('勿重复提交')
+  expect(ctx.session.state.versions.draft.files).toEqual(candidate)
+  expect(dirty(ctx.session.state.versions.draft)).toBe(true)
+  expect(ctx.fetchMock.mock.calls.filter(([url, init]) => url === `/api/workflows/${ctx.id}/unified-save` && init?.method === 'POST')).toHaveLength(1)
+  const requests = ctx.fetchMock.mock.calls.length
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('不要重试') })
+  expect(ctx.fetchMock).toHaveBeenCalledTimes(requests)
+})
+
 it('blocks a new rename before any write without creating a historical guard', async () => {
   const ctx = setup({ originRejected: false })
   const candidate = structuredClone(ctx.session.state.versions.draft.files)
   await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('暂不支持') })
-  expect(ctx.fetchMock).not.toHaveBeenCalled()
+  expect(ctx.fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([[`/api/workflows/${ctx.id}/unified-save`, 'GET']])
   expect(ctx.databasePackId()).toBe('pack')
   expect(ctx.session.state.uncertainRename).toBeNull()
   expect(ctx.session.state.versions.draft.files).toEqual(candidate)

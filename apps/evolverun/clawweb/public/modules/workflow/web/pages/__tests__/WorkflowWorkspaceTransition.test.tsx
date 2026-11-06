@@ -170,7 +170,7 @@ describe('real workspace and embedded editor transitions', () => {
   })
 
   it('commits an active-only target with a null DB baseline rather than inventing a draft', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     mount(); chooseB()

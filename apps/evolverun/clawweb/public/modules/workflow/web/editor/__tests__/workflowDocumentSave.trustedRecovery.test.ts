@@ -23,12 +23,12 @@ const blobText = (blob: Blob) => new Promise<string>((resolve, reject) => {
 })
 let draft: typeof authored | null, currentActive: Record<string, unknown>, currentSnapshot: Record<string, unknown>
 let onHistory: (() => void) | undefined, onSnapshot: (() => void) | undefined, beforePost: (() => void) | undefined
-let sent: Record<string, unknown>[]
+let sent: Record<string, unknown>[], gitToken: string, gitYaml: string
 const state = () => useEditorStore.getState()
 beforeEach(() => {
   const guard = (globalThis as typeof globalThis & { [key: symbol]: { entries: Map<string, unknown> } | undefined })[Symbol.for('avernet.editor.workflow-write-guard.v1')]
   guard?.entries.delete(id); sessionStorage.clear(); state().reset({ force: true })
-  draft = null; currentActive = { ...active }; currentSnapshot = { ...snapshot }; sent = []
+  draft = null; currentActive = { ...active }; currentSnapshot = { ...snapshot }; sent = []; gitToken = token; gitYaml = yaml
   onHistory = undefined; onSnapshot = undefined; beforePost = undefined
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -36,6 +36,14 @@ beforeEach(() => {
     if (url === `/api/workflows/${id}/editor-draft`) return json({ workflowId: id, packId, specJson: JSON.stringify(draft), draftToken: 'a'.repeat(64) })
     if (url.includes('/history?')) { onHistory?.(); return json({ workflowId: id, history: [], active: currentActive }) }
     if (url.endsWith('/by-deploy/3')) { onSnapshot?.(); return json(currentSnapshot) }
+    if (url === `/api/workflows/${id}/pack-version?version=current`) return json({
+      workflowId: id, packId, baseRef: `origin/wf/${id}`, baseCommit: 'b'.repeat(40), draftHead: null,
+      activeHistory: { protocol: 'active-history-v1', activeToken: gitToken },
+      versionFiles: [
+        { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: packId, workflows: [id] })), mode: '100644' },
+        { path: `workflows/${id}.yaml`, contentBase64: btoa(gitYaml), mode: '100644' },
+      ],
+    })
     if (url === '/api/auto-heal/editor-save-first-draft') {
       const request = JSON.parse(await blobText(init!.body as Blob)) as Record<string, unknown>
       sent.push(request); beforePost?.()
@@ -62,12 +70,19 @@ describe('trusted history recovery to first draft', () => {
     const reader = await open()
     expect(structuredClone(state()._activeBaseline)).toMatchObject({ specJson: archive, activeToken: token })
     expect(await saveWorkflowCanvasDocument(id)).toEqual({ dbSaved: true, commit: null })
-    expect(reader).toHaveBeenCalledTimes(1)
+    expect(reader).not.toHaveBeenCalled() // content resolution requires Git evidence, not the optional ambiguity reader
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(`/api/workflows/${id}/pack-version?version=current`, expect.anything())
     expect(sent).toEqual([{ workflowId: id, packId, expectedDraftAbsent: true, expectedActiveDeployNumber: 3,
       expectedActiveToken: token, spec: { ...authored, title: 'Edited' } }])
     expect(draft).toEqual({ ...authored, title: 'Edited' })
     expect(state()._databaseSpec).toEqual(draft)
     expect(state().isDirty).toBe(false)
+  })
+  it.each(['token', 'content'] as const)('rejects Git history with mismatched %s without writing', async mismatch => {
+    if (mismatch === 'token') gitToken = 'f'.repeat(64)
+    else gitYaml = stringify({ ...authored, title: 'Other Git document' })
+    await expect(readEditorWorkflowSource(id)).rejects.toThrow('未替换草稿')
+    expect(sent).toHaveLength(0); expect(draft).toBeNull(); expect(state().spec).toBeNull()
   })
   it.each(['active', 'snapshot', 'pack', 'token'] as const)('does not POST when original %s changes', async kind => {
     await open()

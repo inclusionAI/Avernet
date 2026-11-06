@@ -7,6 +7,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { stringify } from 'yaml';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
+import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
@@ -37,7 +38,7 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
   const deploy = (candidateCommit?: string, requestId = deployId) => {
     const history = new WorkflowDeployHistoryRepository(db);
     const service = new AutoHealDeployService(db, new WorkflowSpecRepository(db, history), history,
-      { hasEditPermission: async () => true, hasExecutePermission: async () => true } as never, config(), author);
+      new BotWorkflowPermissionRepository(db), config(), author);
     return service.deploy({ workflowId: 'flow', actorId: 'editor', candidateCommit, requestId, autoRun: false });
   };
   beforeEach(() => {
@@ -57,6 +58,8 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY,bot_id TEXT,bot_owner_id TEXT,workflow_id TEXT,env TEXT,can_view INTEGER,can_execute INTEGER,can_edit INTEGER,gmt_create INTEGER,gmt_modified INTEGER);
       CREATE TABLE facade_bindings (command TEXT PRIMARY KEY,workflow_id TEXT,pack_id TEXT,remark TEXT,gmt_create INTEGER,gmt_modified INTEGER);`);
     raw.prepare('INSERT INTO workflow_specs(workflow_id,pack_id,spec_json,title,owner_id) VALUES (?,?,?,?,?)').run('flow','pack',JSON.stringify(spec),spec.title,'editor');
+    raw.prepare('INSERT INTO bot_workflow_permissions(bot_id,bot_owner_id,workflow_id,env,can_view,can_execute,can_edit) VALUES (NULL,?,?,?,?,?,?)')
+      .run('editor', 'flow', 'test', 1, 1, 1);
     db = new SqliteDatabase(raw);
   });
   afterEach(async () => { vi.restoreAllMocks(); if (db) await db.close(); if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
@@ -64,7 +67,7 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
   const saveWorkflow = (actor = 'editor') => {
     const history = new WorkflowDeployHistoryRepository(db);
     return new AutoHealSaveService(db, new WorkflowSpecRepository(db, history), history,
-      { hasEditPermission: async (_workflow: string, user: string) => user === 'editor' } as never, config(), author)
+      new BotWorkflowPermissionRepository(db), config(), author)
       .save({ workflowId: 'flow', actorId: actor, spec: edited, requestId: saveId });
   };
   const remoteGit = (...args: string[]) => git(root, '--git-dir', remote, ...args);

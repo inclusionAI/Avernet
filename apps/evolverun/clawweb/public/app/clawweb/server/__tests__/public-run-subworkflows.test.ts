@@ -38,7 +38,7 @@ it('wires durable fanout reads and owner-preserving parent/child guards in the a
     config: { concurrency: 2, successPolicy: 'all_done', finishMode: 'wait_all', resultPolicy: 'collect_all' },
     children: ['visible-child', 'private-child'].map((childFlowId, itemIndex) => ({
       parentFlowId: 'parent', parentNodeId: 'group', groupExecutionId: 'execution', itemIndex, itemId: childFlowId,
-      attemptNumber: 1, childFlowId, status: 'running', result: null, error: null,
+      attemptNumber: 1, childFlowId, nativeFlowId: childFlowId, status: 'running', result: null, error: null,
     })) };
   raw.exec(`INSERT INTO flow_runs (flow_id, workflow_id, origin_bot_id, status, started_at) VALUES
     ('parent','parent-workflow','bot:reader','running',1),
@@ -46,6 +46,12 @@ it('wires durable fanout reads and owner-preserving parent/child guards in the a
     ('private-child','child-workflow','bot:other','running',3);
     INSERT INTO bot_workflow_permissions (bot_id,bot_owner_id,workflow_id,env,can_view,can_execute,can_edit) VALUES
     (NULL,'reader','parent-workflow','dev',1,0,0),('bot','reader','child-workflow','dev',1,0,0);`);
+  for (const child of group.children) {
+    const fanoutOrigin = { parentFlowId: 'parent', parentNodeId: 'group', groupExecutionId: 'execution',
+      itemIndex: child.itemIndex, itemId: child.itemId, attemptNumber: 1, childFlowId: child.childFlowId,
+      workflowId: 'child-workflow', requestDigest: 'fixture-digest' };
+    raw.prepare('UPDATE flow_runs SET state_json=? WHERE flow_id=?').run(JSON.stringify({ fanoutOrigin }), child.childFlowId);
+  }
   raw.prepare('UPDATE flow_runs SET state_json=?, result_json=? WHERE flow_id=?')
     .run(JSON.stringify({ subworkflowFanouts: { group } }), 'private-child-output', 'parent');
   vi.stubEnv('PORT', '0');

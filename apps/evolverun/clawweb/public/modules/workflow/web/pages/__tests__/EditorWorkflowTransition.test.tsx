@@ -196,7 +196,7 @@ describe('embedded editor controlled target', () => {
     expect(window.confirm).toHaveBeenCalledTimes(1)
   })
   it('passes the active fallback and its absent DB draft through a controlled switch', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
