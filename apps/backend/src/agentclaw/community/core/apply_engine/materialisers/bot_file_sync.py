@@ -95,6 +95,7 @@ class BotFileSyncMaterialiser(Materialiser):
             entity_id=ctx.entity_id,
             env=ctx.env,
             engine_type=ctx.engine_type,
+            entity_type=ctx.bot.get("entity_type") or "staff",
         )
         results: list[EntryResult] = []
         for planned in plan.entries:
