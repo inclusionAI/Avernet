@@ -18,6 +18,9 @@ htmlcov/
 
 # Node.js
 node_modules/
+# A prewarmed `node_modules` is linked, and the directory-only rule above does
+# not match a symlink. See docs/agents/review-env-prewarm.md.
+node_modules
 .npm/
 .tshy/
 .tshy-build/
