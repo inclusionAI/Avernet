@@ -53,6 +53,7 @@ function InfoCell({
 }
 
 export interface MyTaskRoutineDrawerProps {
+  botType?: string;
   selectedRoutine: ScheduledRoutineRecord | null;
   selectedRoutineKey: string | null;
   onCloseRoutine: () => void;
@@ -63,6 +64,7 @@ export interface MyTaskRoutineDrawerProps {
 }
 
 export function MyTaskRoutineDrawer({
+  botType,
   selectedRoutine,
   selectedRoutineKey,
   onCloseRoutine,
@@ -170,7 +172,7 @@ export function MyTaskRoutineDrawer({
                             {item.errorMessage}
                           </p>
                         ) : null}
-                        {item.conversation && <div className="mt-3 flex justify-end"><RoutineRunConversation run={item.conversation} /></div>}
+                        {item.conversation && <div className="mt-3 flex justify-end"><RoutineRunConversation run={item.conversation} botType={botType} /></div>}
                       </div>
                     ))
                   ) : (
