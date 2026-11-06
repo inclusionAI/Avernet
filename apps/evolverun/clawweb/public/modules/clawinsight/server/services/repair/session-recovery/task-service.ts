@@ -201,7 +201,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (existing && JSON.stringify(existing) !== JSON.stringify(item)) this.fail(409, "同一证据标识的内容不能改变");
         if (!existing) stored.push(item);
       }
-      return { ...value, ...observeRecovery({ ...value, evidence: stored }, judgment, this.now()),
+      let observing = { ...value, evidence: stored };
+      if (value.phase === "plan" && judgment.effect === "recovered") {
+        // Planning can discover recovery; keep the last message's original observation deadline.
+        const message = value.timeline.findLast(event => event.kind === "operation"
+          && typeof (event.payload.result as Record<string, unknown>)?.initial_message === "boolean");
+        const finishedAt = message ? (message.payload.result as Record<string, unknown>).finished_at_ms : value.delivery?.delivery.finished_at_ms;
+        observing = { ...observing, phase: "observe", observationDeadlineAt: value.observationDeadlineAt
+          ?? (typeof finishedAt === "number" ? finishedAt + this.deps.observationMs : null) };
+      }
+      return { ...value, ...observeRecovery(observing, judgment, this.now()),
         timeline: [...value.timeline, this.event("observation", "agent", judgment.summary, { judgment, evidence })] };
     }, finalSummary);
     if (["completed", "failed", "waiting_effect"].includes(task.status)) await this.deps.agent.release(task);
@@ -247,6 +256,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const requestId = randomUUID();
     await this.mutate(taskId, version, value => {
       if (value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "旧执行不能提交 Owner 处理事项");
+      if (value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，请按正常效果流程回报；优化建议写入完成总结，不再请求 Owner 处理");
       const { executionId: _execution, reportSummary, ...request } = input;
       return { ...value, ...requestOwnerCooperation(value, request, requestId, this.now()),
         timeline: [...value.timeline, this.event("waiting", "agent", reportSummary ?? request.summary, { owner_request_id: requestId, phase: value.phase })] };
@@ -373,6 +383,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
         || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "Owner 转交需要已核实原因、Owner 处理指引及现场证据");
       if (input.effect !== undefined && !["recovered", "not_recovered", "unknown"].includes(input.effect)) this.fail(422, "Owner 转交效果仅接受 recovered / not_recovered / unknown，按原任务实际执行证据判断");
+      const effect = input.effect ?? value.judgment?.effect ?? "unknown";
+      if (effect === "recovered" || value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，不能以 owner_handoff 结束；assess 回报 decision=observe，plan 回报 observation，其他阶段按正常效果流程回报，优化建议写入完成总结");
+      if (value.phase === "assess" && value.delivery && value.delivery.delivery.status !== "failed") this.fail(422, "已有初始消息投递记录，不能转交结束并跳过效果回收；请回报 assessment、decision=message 进入 observe，不重复发送");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
         && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
@@ -380,7 +393,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
         judgment: { delivery: input.delivery ?? value.judgment?.delivery ?? "unconfirmed", response: input.response ?? value.judgment?.response ?? "unknown",
-          effect: input.effect ?? value.judgment?.effect ?? "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
+          effect, summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase, ...(handoff ? { handoff } : {}) })] };
     }, finalSummary);
