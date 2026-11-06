@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import type { BotChatSessionView, BotModelView, ChatBotView } from '@/services/workspace/botSessionService';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { botModelContextKey, loadCachedBotModels } from '@/services/workspace/botModelCache';
@@ -10,6 +11,15 @@ export interface UseBotModelsResult {
   isLoadingModels: boolean;
   loadModels: () => void;
   selectModel: (modelId: string) => Promise<boolean>;
+}
+
+/** 合并 capability 注入的模型徽标；getModelBadge 默认 null（无徽标时保持原列表项引用）。 */
+function withModelBadges(models: BotModelView[]): BotModelView[] {
+  return models.map((model) => {
+    const badgeResult = getCapabilities().getModelBadge(model);
+    const badge = badgeResult.status === 'available' ? badgeResult.value : null;
+    return badge ? { ...model, badge } : model;
+  });
 }
 
 /**
@@ -46,7 +56,7 @@ export function useBotModels(
     loadCachedBotModels(bot, activeIdentityId).then((res) => {
       if (cancelled) return;
       if (!res.ok) toast.error(res.error.friendlyMessage);
-      setState({ key, models: res.ok ? res.data : [], loading: false });
+      setState({ key, models: res.ok ? withModelBadges(res.data) : [], loading: false });
     }).catch((error: unknown) => {
       if (cancelled) return;
       toast.error(error instanceof Error ? error.message : '模型列表加载失败');

@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { extendCapabilities } from '@/capabilities';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
 import { clearBotModelCache } from '@/services/workspace/botModelCache';
@@ -34,10 +35,44 @@ const session: BotChatSessionView = {
 
 beforeEach(() => {
   clearBotModelCache();
+  // 恢复默认形态（Open Core 无徽标数据），避免用例间 capability 注入残留。
+  extendCapabilities({
+    getModelBadge: () => ({ status: 'available', value: null }),
+  });
   mockedListModels.mockReset().mockResolvedValue({
     ok: true,
     data: [{ modelId: 'model-1', name: 'Model 1', provider: 'provider' }],
   });
+});
+
+it('capability 注入的模型徽标随模型列表合并', async () => {
+  extendCapabilities({
+    getModelBadge: () => ({
+      status: 'available',
+      value: { label: '推荐', link: 'https://example.com/venus' },
+    }),
+  });
+  const { result } = renderHook(() =>
+    useBotModels(managedBot, { ...session, botId: managedBot.botId }, 'human_900003', jest.fn()),
+  );
+
+  await waitFor(() => expect(result.current.isLoadingModels).toBe(false));
+  expect(result.current.models[0]).toMatchObject({
+    modelId: 'model-1',
+    badge: { label: '推荐', link: 'https://example.com/venus' },
+  });
+});
+
+it('capability 返回 unsupported 时模型列表保持无徽标（防御分支）', async () => {
+  extendCapabilities({
+    getModelBadge: () => ({ status: 'unsupported', value: null, reason: '测试注入' }),
+  });
+  const { result } = renderHook(() =>
+    useBotModels(managedBot, { ...session, botId: managedBot.botId }, 'human_900003', jest.fn()),
+  );
+
+  await waitFor(() => expect(result.current.isLoadingModels).toBe(false));
+  expect(result.current.models[0]).not.toHaveProperty('badge');
 });
 
 it('托管 Bot 会话保持拉取模型列表', async () => {
