@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from types import SimpleNamespace
 
@@ -25,6 +26,13 @@ from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+
+@pytest.mark.parametrize("service_type", [TaskServiceProtocol, TaskService])
+@pytest.mark.parametrize("method_name", ["get_task_dashboard", "list_tasks"])
+def test_same_named_task_read_targets_remain_synchronous(service_type, method_name):
+    """Pin the sync targets explicitly exempted from the name-based async guard."""
+    assert not inspect.iscoroutinefunction(getattr(service_type, method_name))
 
 
 def _app(service, artifact_service=None):

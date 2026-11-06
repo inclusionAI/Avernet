@@ -71,11 +71,13 @@ async def get_task_dashboard_internal(
     任务/节点不存在 → TaskNotFoundError/NodeNotFoundError → 404。"""
     del user
     if include_action_log:
-        graph = await run_in_threadpool(
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
             service.get_task_dashboard, task_id, node_id, include_action_log=True
         )
     else:
-        graph = await run_in_threadpool(service.get_task_dashboard, task_id, node_id)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id
+        )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
     artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
@@ -156,7 +158,9 @@ async def list_tasks_internal(
             detail="page and page_size must be both provided or both omitted",
         )
     if page_size is None:
-        items = await run_in_threadpool(service.list_tasks, status, owner_user_id=user_id)
+        items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.list_tasks, status, owner_user_id=user_id
+        )
         return envelope([task_info_record_to_dto(item) for item in items], request)
     items, total = await run_in_threadpool(
         service.list_tasks_page,
