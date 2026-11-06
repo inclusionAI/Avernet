@@ -61,6 +61,8 @@ export interface UseChatHeaderPanelsOptions {
   fileDrawerOpen: boolean;
   /** 是否启用任务副屏及其进入会话自动恢复逻辑。 */
   sidePaneEnabled?: boolean;
+  /** 普通单聊先完成历史读取，再恢复任务副屏，避免首屏并发全量任务查询。 */
+  historyReady?: boolean;
 }
 
 export interface UseChatHeaderPanelsResult {
@@ -131,6 +133,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
 
   const sidePaneEnabled = options.sidePaneEnabled !== false;
   useSessionTaskPanelBootstrap({
+    enabled: options.historyReady !== false,
     sessionId: sidePaneEnabled ? sessionId : null,
     userId: sidePaneEnabled ? options.userId : null,
     panelRef,

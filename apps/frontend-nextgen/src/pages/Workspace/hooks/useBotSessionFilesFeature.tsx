@@ -59,7 +59,7 @@ export function useBotSessionFilesFeature(
     ...(stage ? ([stage] as const) : []),
   );
   const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
-  const skillsState = useBotSkills(bot, userId);
+  const skillsState = useBotSkills(bot, userId, false);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
   const senderRef = useRef<SenderRef | null>(null);
@@ -148,31 +148,32 @@ export function useBotSessionFilesFeature(
     [files, handleReference],
   );
 
-  const skillItems = useMemo<CommandItem[]>(
-    () =>
-      skillsState.skills.map((s) => ({
+  const onSearchSkills = useCallback(async (query: string): Promise<CommandItem[]> => {
+    const skills = await skillsState.loadSkills();
+    const keyword = query.trim().toLowerCase();
+    return skills.filter((skill) => skill.name.toLowerCase().includes(keyword)).map((s) => ({
         id: `__skill__${s.skillId}`,
         name: s.name,
         description: s.description || (s.active ? '已激活' : '未激活'),
         icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
         data: { skill_id: s.skillId },
-      })),
-    [skillsState.skills],
-  );
+      }));
+  }, [skillsState.loadSkills]);
 
   // /skill /file /clear 命令项装配抽取到 botSessionCommandItems.tsx（纯配置，行为不变）。
   const commandItems = useMemo<CommandItem[]>(
     () =>
       buildBotSessionCommandItems({
         canUseSkills,
-        skillItems,
+        skillItems: [],
+        onSearchSkills,
         onSearchFiles,
         skillsLoading: skillsState.isLoading,
         filesLoading: files.isLoadingList,
         onClear,
         onSelectSkill: handleSelectSkill,
       }),
-    [canUseSkills, skillItems, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [canUseSkills, onSearchSkills, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
   );
 
   const command = useMemo<CommandConfig>(

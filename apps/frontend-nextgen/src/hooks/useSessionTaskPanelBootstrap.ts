@@ -127,15 +127,17 @@ export function useSessionTaskPanelBootstrap({
   sessionId,
   userId,
   panelRef,
+  enabled = true,
 }: {
   sessionId: string | null;
   userId: string | null;
   panelRef: PanelRef;
+  enabled?: boolean;
 }): void {
   const bootstrapKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !userId) return undefined;
+    if (!enabled || !sessionId || !userId) return undefined;
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
     const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
     if (!sessionOwnerUserId) return undefined;
@@ -215,8 +217,9 @@ export function useSessionTaskPanelBootstrap({
 
     return () => {
       cancelled = true;
+      if (bootstrapKeyRef.current === bootstrapKey) bootstrapKeyRef.current = null;
     };
-  }, [panelRef, sessionId, userId]);
+  }, [enabled, panelRef, sessionId, userId]);
 }
 
 export default useSessionTaskPanelBootstrap;
