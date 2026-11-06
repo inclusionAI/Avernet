@@ -33,7 +33,9 @@ type FakeRunnerParams = {
 export type FakeController = {
   runner: (params: FakeRunnerParams, handlers?: ClaudePromptHandlers) => RunningClaudePrompt;
   /** All running prompts created by this controller, in creation order. */
-  runs: Array<{ params: FakeRunnerParams; handlers?: ClaudePromptHandlers; aborted: boolean }>;
+  runs: Array<{ params: FakeRunnerParams; handlers?: ClaudePromptHandlers; aborted: boolean;}>;
+  /** Emit text delta events for a specific run after it has started. */
+  emitLateText: (runIndex: number, text: string) => void;
   events: EventEmitter;
 };
 
@@ -42,8 +44,18 @@ export type FakeController = {
  * append more steps at runtime via the returned `enqueue` on each run.
  */
 export function createFakeRunner(script: FakeStep[], opts?: { abortSdkSessionId?: string }): FakeController {
-  const controller: FakeController = { runner: null as unknown as FakeController['runner'], runs: [], events: new EventEmitter() };
+  const controller: FakeController = {
+    runner: null as unknown as FakeController['runner'],
+    runs: [],
+    events: new EventEmitter(),
+    emitLateText: (runIndex, text) => {
+      const run = controller.runs[runIndex];
+      if (!run) throw new Error(`Unknown fake run: ${runIndex}`);
 
+      // Deliberately simulate a callback arriving after abort.
+      run.handlers?.onTextDelta?.(text, text);
+    },
+  };
   controller.runner = (params, handlers) => {
     const run = { params, handlers, aborted: false };
     controller.runs.push(run);

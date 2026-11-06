@@ -212,6 +212,30 @@ export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
 hybrid_configure_mode
 [[ "${HYBRID_START_ORDER[*]}" == "${HYBRID_CLAUDE_START_ORDER[*]}" ]]
 
+test_hybrid_rejects_invalid_replacement_target() (
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="missing-bot"
+    if hybrid_validate_profiles; then
+        echo 'missing replacement target unexpectedly accepted' >&2
+        exit 1
+    fi
+
+    local duplicate_profile="$TMP/openclaw-duplicate"
+    cp -R "$BOTS_PROFILE_DIR" "$duplicate_profile"
+    jq '.bots += [(.bots[] | select(.source == "platform-data"))]' \
+        "$duplicate_profile/bots.json" > "$duplicate_profile/bots.json.tmp"
+    mv "$duplicate_profile/bots.json.tmp" "$duplicate_profile/bots.json"
+    export BOTS_PROFILE_DIR="$duplicate_profile"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    if hybrid_validate_profiles; then
+        echo 'duplicate replacement target unexpectedly accepted' >&2
+        exit 1
+    fi
+)
+
+test_hybrid_rejects_invalid_replacement_target
+
 unset BOTS_EXCLUDED_PROFILE_SOURCE
 if hybrid_validate_profiles; then
     echo 'Claude profile without an excluded OpenClaw source unexpectedly accepted' >&2
@@ -656,6 +680,34 @@ test_hybrid_claude_runtime_choice() (
 )
 
 test_hybrid_claude_runtime_choice
+
+test_hybrid_model_config_isolated_from_project_env() (
+    local project_env="$TMP/project.env"
+    local singlebox_env="$TMP/singlebox.env"
+    cat > "$project_env" <<'ENV'
+ANTHROPIC_MODEL=claude-sonnet-4-5
+ENV
+    cat > "$singlebox_env" <<'ENV'
+ANTHROPIC_MODEL=deepseek/deepseek-v4.1-flash
+ENV
+
+    unset ANTHROPIC_MODEL
+    load_repo_env_file "$project_env"
+    [ "$ANTHROPIC_MODEL" = "claude-sonnet-4-5" ]
+    load_repo_env_file "$singlebox_env"
+    [ "$ANTHROPIC_MODEL" = "deepseek/deepseek-v4.1-flash" ]
+
+    export HYBRID_CLAUDE_CONFIG_MODE="env-local"
+    export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+    export ANTHROPIC_BASE_URL="https://anthropic-mock.example.test"
+    export ANTHROPIC_AUTH_TOKEN="test-only-token"
+    claude_profile_entries >/dev/null
+    IFS=$'\x1f' read -r _ _ _ _ _ _ model _ _ < <(claude_profile_entries)
+    [ "$model" = "deepseek/deepseek-v4.1-flash" ]
+    [ "$ANTHROPIC_MODEL" != "claude-sonnet-4-5" ]
+)
+
+test_hybrid_model_config_isolated_from_project_env
 
 test_hybrid_anthropic_defaults_and_base_url_edit() (
     log_warn() { :; }

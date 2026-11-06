@@ -8,7 +8,7 @@ BCS_BAAS_PROVIDER_LOG="${LOG_DIR}/bcs_baas_provider.merchant_hybrid.log"
 BCS_BAAS_PROVIDER_PID_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.pid"
 BCS_BAAS_PROVIDER_STATE_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.state.json"
 BCS_BAAS_PROVIDER_TOKEN_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.tokens.json"
-BCS_BAAS_PROVIDER_BRIDGE="${SCRIPT_DIR}/bcs_baas_provider_bridge.mjs"
+BCS_BAAS_PROVIDER_BRIDGE="${SCRIPT_DIR}/apps/bcs/bcs_baas_provider_bridge.mjs"
 
 bcs_baas_provider_enabled() {
     claude_bots_enabled

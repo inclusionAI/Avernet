@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "谁是卧底 Claude Code 玩家 Profile",
+  "entity_id": "mock-user",
+  "entity_type": "staff",
+  "bots": [
+    {
+      "source": "player-luoji",
+      "profile": "undercover-player-luoji",
+      "name": "玩家逻辑控林工",
+      "summary": "Claude Code 驱动的属性推理型谁是卧底玩家，遵守发言、投票和协作节点输出规则。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,deductive-play",
+      "skills": "one-line-word-description,attribute-framing,deductive-voting,speech-reading",
+      "runtime": {
+        "type": "claude_code",
+        "relay_port": 18900,
+        "claude_config_dir": "~/.claude-undercover-luoji",
+        "workspace": "~/.teamclaw/claude-workspaces/undercover-luoji",
+        "permission_mode": "bypassPermissions",
+        "system_prompt_md": "player-luoji/CLAUDE.md"
+      }
+    }
+  ]
+}
