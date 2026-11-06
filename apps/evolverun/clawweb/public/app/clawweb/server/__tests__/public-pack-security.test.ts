@@ -23,9 +23,6 @@ vi.mock('@avernet/clawinsight', async () => {
   const { Router } = await import('express');
   return { createInsightRuntime: () => ({ service: {} }), createInsightManagementRuntime: () => ({ router: Router() }), createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router() };
 });
-// Exercise the current route source, not a potentially stale workspace dist build.
-vi.mock('@avernet/workflow/server/routes/auto-heal', () => import('../../../../modules/workflow/server/routes/auto-heal.js'));
-vi.mock('@avernet/workflow/server/routes/workflow-unified-save', () => import('../../../../modules/workflow/server/routes/workflow-unified-save.js'));
 vi.mock('../repair-ais-execution.js', () => ({ resolveRepairAisConfiguration: async () => null }));
 import { createClawWebBootstrap } from '../public-bootstrap.js';
 let lifecycle: ClawWebLifecycle | void;

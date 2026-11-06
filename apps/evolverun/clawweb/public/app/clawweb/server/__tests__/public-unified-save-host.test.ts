@@ -10,10 +10,10 @@ import { spawnSync } from 'node:child_process';
 import { type Server } from 'node:http';
 import { SqliteDatabase, runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
-import { EditorDraftCasService } from '../../../../modules/workflow/server/services/editor-draft-cas-service.js';
-import { createLocalRemote, runGit } from '../../../../modules/workflow/server/services/__tests__/clawflows-git-client-fixture.js';
-import { projectWorkflowSnapshotYaml } from '../../../../modules/workflow/server/services/workflow-snapshot-projection.js';
-import type { WorkflowPackWriteAuthorization } from '../../../../modules/workflow/server/services/workflow-unified-save-service.js';
+import { EditorDraftCasService } from '@avernet/workflow/server/services/editor-draft-cas-service';
+import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
+import { projectWorkflowSnapshotYaml } from '@avernet/workflow/server/services/workflow-snapshot-projection';
+import type { WorkflowPackWriteAuthorization } from '@avernet/workflow/server/services/workflow-unified-save-service';
 import type { ClawWebLifecycle } from '../bootstrap.js';
 const state = vi.hoisted(() => ({ db: null as IDatabase | null }));
 vi.mock('@avernet/clawweb-shared/server/db', async original => ({
@@ -28,11 +28,6 @@ vi.mock('@avernet/clawinsight', async () => {
   const { Router } = await import('express');
   return { createInsightRuntime: () => ({ service: {} }), createInsightManagementRuntime: () => ({ router: Router() }), createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router() };
 });
-// Exercise the current route source, not a potentially stale workspace dist build.
-vi.mock('@avernet/workflow/server/routes/auto-heal', () => import('../../../../modules/workflow/server/routes/auto-heal.js'));
-vi.mock('@avernet/workflow/server/routes/workflow-unified-save', () => import('../../../../modules/workflow/server/routes/workflow-unified-save.js'));
-vi.mock('@avernet/workflow/server/services/workflow-unified-save-service', () => import('../../../../modules/workflow/server/services/workflow-unified-save-service.js'));
-vi.mock('@avernet/workflow/server/services/editor-draft-cas-service', () => import('../../../../modules/workflow/server/services/editor-draft-cas-service.js'));
 vi.mock('../repair-ais-execution.js', () => ({ resolveRepairAisConfiguration: async () => null }));
 import { createClawWebBootstrap } from '../public-bootstrap.js';
 let lifecycle: ClawWebLifecycle | void;
