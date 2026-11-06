@@ -1,8 +1,13 @@
 """AGENTS.md projection: fence discipline, idempotence, degradation."""
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+import threading
 
 import pytest
+from starlette.background import BackgroundTasks
+from starlette.responses import Response
 
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
     KNOWLEDGE_SECTION_END_MARKER,
@@ -344,12 +349,132 @@ def test_resolve_names_continues_after_failed_batch(knowledge):
 
 @pytest.mark.asyncio
 async def test_sync_concurrent_calls_produce_one_section(knowledge):
+    class YieldingIdentity(FakeIdentity):
+        async def read_identity_file(self, *args, **kwargs):
+            content = await super().read_identity_file(*args, **kwargs)
+            await asyncio.sleep(0)
+            return content
+
     _, repo, service, scope = knowledge
     enable(service, scope)
-    identity = FakeIdentity({"AGENTS.md": "# 手写\n"})
+    identity = YieldingIdentity({"AGENTS.md": "# 手写\n"})
     sync = make_sync(repo, FakeDetailsCatalog(names={"kb": "Name"}), identity)
     await asyncio.gather(
         sync.sync(scope=scope, actor_id="owner"),
         sync.sync(scope=scope, actor_id="owner"),
     )
     assert identity.files["AGENTS.md"].count(KNOWLEDGE_SECTION_START_MARKER) == 1
+    assert identity.writes == ["AGENTS.md"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kb_count", [1, 20, 21, 100])
+async def test_background_sync_offloads_preparation_and_keeps_loop_responsive(
+    knowledge, monkeypatch, kb_count
+):
+    """Exercise the real callback/repository, not an offloaded test wrapper."""
+    db, repo, service, scope = knowledge
+    ids = [f"kb{i:03}" for i in range(kb_count)]
+    service.catalog.authorized.update(ids)
+    for kb_id in ids:
+        enable(service, scope, kb_id=kb_id)
+
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    request_id = ContextVar("projection_request_id", default=None)
+    sync_calls = []
+    session_calls = []
+    identity_calls = []
+    response_sent = threading.Event()
+    heartbeat = threading.Event()
+    lookup_progress = []
+
+    def record_sync_call(operation):
+        assert response_sent.is_set()
+        sync_calls.append((operation, threading.get_ident(), request_id.get()))
+
+    original_get_bot = repo.get_bot
+    original_list_enabled = repo.list_enabled_current
+    original_session = db.orm_session
+
+    def get_bot(*args, **kwargs):
+        record_sync_call("get_bot")
+        return original_get_bot(*args, **kwargs)
+
+    def list_enabled(*args, **kwargs):
+        record_sync_call("list_enabled")
+        return original_list_enabled(*args, **kwargs)
+
+    @contextmanager
+    def session():
+        session_calls.append(("open", threading.get_ident()))
+        with original_session() as value:
+            yield value
+        session_calls.append(("close", threading.get_ident()))
+
+    monkeypatch.setattr(repo, "get_bot", get_bot)
+    monkeypatch.setattr(repo, "list_enabled_current", list_enabled)
+    monkeypatch.setattr(db, "orm_session", session)
+
+    class BlockingCatalog(FakeDetailsCatalog):
+        def details(self, **kwargs):
+            record_sync_call("details")
+            if not self.calls:
+                # Only the loop can release this synchronous lookup. The timeout
+                # prevents a deadlock on the old implementation; no latency
+                # threshold is used to judge the successful implementation.
+                loop.call_soon_threadsafe(heartbeat.set)
+                lookup_progress.append(heartbeat.wait(timeout=5))
+            return super().details(**kwargs)
+
+    class RecordingIdentity(FakeIdentity):
+        async def read_identity_file(self, *args, **kwargs):
+            identity_calls.append(("read", threading.get_ident(), request_id.get()))
+            return await super().read_identity_file(*args, **kwargs)
+
+        async def write_identity_file(self, *args, **kwargs):
+            identity_calls.append(("write", threading.get_ident(), request_id.get()))
+            return await super().write_identity_file(*args, **kwargs)
+
+    catalog = BlockingCatalog(names={kb_id: f"Name {kb_id}" for kb_id in ids})
+    identity = RecordingIdentity({"AGENTS.md": "# Hand-written\n"})
+    sync = make_sync(repo, catalog, identity)
+    background = BackgroundTasks()
+    background.add_task(sync.sync, scope=scope, actor_id="owner")
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            response_sent.set()
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    context_binding = request_id.set("projection-request")
+    try:
+        await Response("accepted", background=background)(
+            {"type": "http"}, receive, send
+        )
+    finally:
+        request_id.reset(context_binding)
+
+    assert response_sent.is_set()
+    assert lookup_progress == [True], "the loop stalled during synchronous lookup"
+    assert [call[0] for call in sync_calls] == [
+        "get_bot", "list_enabled", *(["details"] * ((kb_count + 19) // 20))
+    ]
+    worker_threads = {call[1] for call in sync_calls}
+    assert len(worker_threads) == 1
+    assert loop_thread not in worker_threads
+    assert all(call[2] == "projection-request" for call in sync_calls)
+    assert session_calls == [
+        (operation, sync_calls[0][1])
+        for operation in ("open", "close", "open", "close")
+    ]
+    assert identity_calls == [
+        (operation, loop_thread, "projection-request") for operation in ("read", "write")
+    ]
+    assert catalog.calls == [ids[offset:offset + 20] for offset in range(0, kb_count, 20)]
+    content = identity.files["AGENTS.md"]
+    assert content.startswith("# Hand-written\n\n")
+    assert all(f"- `{kb_id}` — Name {kb_id}" in content for kb_id in ids)
+    assert content.count(KNOWLEDGE_SECTION_START_MARKER) == 1
