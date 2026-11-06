@@ -3,6 +3,7 @@ use super::*;
 
 impl A2aChat {
     pub(super) async fn chat_with_queue_mode(&self, cmd: A2aChatCommand, selected_queue_mode: Option<bool>) -> ServiceResult<A2aChatOutcome> {
+        validate_message(&cmd.message)?;
         let client_kind = direct_chat_client_kind(cmd.client.as_deref());
         let from_bot_id = bot_caller_id(&cmd.caller)?;
         bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
@@ -307,4 +308,15 @@ impl A2aChat {
         })
     }
 
+}
+
+/// Text-only direct chat cannot produce an executable request from empty input.
+pub(super) fn validate_message(message: &str) -> ServiceResult<()> {
+    if message.is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: "message must not be empty".to_string(),
+            request_id: None,
+        });
+    }
+    Ok(())
 }

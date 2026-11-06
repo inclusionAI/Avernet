@@ -102,6 +102,8 @@ pub struct ChatRunCancelCommand {
 
 #[async_trait]
 pub trait A2aChatService: Send + Sync {
+    /// Reject a zero-length message with InvalidOperation before admission side
+    /// effects. Nonempty messages, including whitespace, are not normalized.
     async fn chat(&self, cmd: A2aChatCommand) -> ServiceResult<A2aChatOutcome>;
     async fn get_run(&self, caller: CallerContext, run_id: &str) -> ServiceResult<A2aRunStatus>;
     async fn wait_run(
@@ -123,6 +125,9 @@ pub trait A2aChatService: Send + Sync {
 
 #[async_trait]
 pub trait A2aChatRunService: Send + Sync {
+    /// Reject a zero-length message with InvalidOperation before registering a
+    /// response channel/context, creating a session/Run, queueing or delivery.
+    /// This text-only use case has no attachment-only request form.
     async fn start_async_chat(
         &self,
         cmd: AsyncA2aChatCommand,

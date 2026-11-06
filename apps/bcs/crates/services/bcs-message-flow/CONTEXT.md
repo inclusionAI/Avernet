@@ -36,6 +36,17 @@ these strings both as Send sources and bound Inject context. Fully managed
 replays reuse durable deliveries; mixed replays fail as ambiguous because legacy
 recipients have no durable delivery ledger. Runtime retry policy is unchanged.
 
+## Direct chat empty-input admission (v1)
+
+A2aChat implements the text-only direct-chat application contract. Both
+A2aChatRunService::start_async_chat and A2aChatService::chat reject an empty
+message with ServiceError::InvalidOperation before any response-channel/context,
+session, Run, queue or downlink side effect, in both legacy and managed modes.
+Only zero length is rejected; nonempty bytes (including whitespace) are preserved.
+The guard adds no DB reads/writes or configuration. Existing Runs are not replayed
+or changed. Generic message blocks and attachment-capable entry points are not
+part of this rule.
+
 ## Provides
 
 The shared human-mention notify helper owns the per-Group external-notify
