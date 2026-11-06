@@ -728,7 +728,7 @@ class BotCandidate:
     score: float | None = None
 ```
 
-`TaskService.search_bots(*, query: str, task_id: str, node_id: str) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
+`TaskService.search_bots(*, query: str, task_id: str, node_id: str, viewer_actor_type: Literal["bot", "human"] | None = None, viewer_actor_id: str | None = None) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
 
 目标 Service 方法为 `TaskService.report(TaskReportCommand) -> TaskReportResult`。当前实现链路仍为 `RelayTaskEventDTO -> report_task_event(散列参数及 payload dict) -> dict`，需要在 Service、HTTP adapter 和测试中一起迁移，不能只修改 Bot 文档。
 
@@ -1245,6 +1245,16 @@ def plan_next_node(
 `None` 只表示 `task_gaps=[]`；有缺口但无法规划必须走错误通道，不能误判为完成。此处 `TaskNode` 尚未落图，`node_id/status/node_run_graph` 为合法临时空态。S5.2 仅允许初始化一个下一棒节点；该节点是唯一剩余节点，必须通过 `next_spec.goal.acceptances` 完整承载每一个 `task_gap`，不得把缺口留给未规划的后续节点。
 
 ### 9.3 S5.3：搜索候选
+
+2026-11-06 已审查的兼容扩展：`POST /search` 可选传入成对的
+`viewer_actor_type`（`bot` / `human`）与非空字符串 `viewer_actor_id`。
+两个字段均省略或均为 null 时完全保留现有 public-only 搜索；只传一个、空 ID
+或非法类型返回 422。显式 viewer 复用产品侧对应的 BCSFuse/BCS 可见性规则，
+不是认证凭据，不覆盖节点执行者；执行代次校验不变。任务候选仍执行运行就绪
+过滤，最多返回 5 个，不能把可发现等同于可派发授权。Backend 保留旧四字段请求兼容；task-loop Skill 固定传入当前执行 Bot 的
+`viewer_actor_type="bot"` 与明确 Runtime 身份 `viewer_actor_id`，不开放 Human
+视角，身份不明不得回退到无 viewer 搜索。
+
 
 输入参数：
 

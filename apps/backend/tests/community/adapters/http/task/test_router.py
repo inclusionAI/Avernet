@@ -1168,3 +1168,112 @@ def test_task_artifact_content_error_maps_to_4xx():
     assert response is not None, "TaskArtifactContentError 必须在信封映射表中"
     assert response.status_code == 422
     assert b"artifact" in response.body or response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "viewer_type,viewer_id", [("bot", "bot:owner"), ("human", "146836")]
+)
+def test_relay_search_forwards_explicit_viewer_after_generation_check(
+    task_client, monkeypatch, viewer_type, viewer_id
+):
+    client, svc = task_client
+    svc.set_execution_config(
+        {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+    )
+    svc.set_node_status("t1", "t1", Status.RUNNING)
+    calls = []
+
+    async def search_bots(**kwargs):
+        calls.append(kwargs)
+        return [
+            BotCandidate(
+                bot_id="candidate:owner",
+                name="Candidate",
+                description="match",
+                score=0.9,
+            )
+        ]
+
+    monkeypatch.setattr(svc, "search_bots", search_bots)
+    body = {
+        "query": "q",
+        "task_id": "t1",
+        "node_id": "t1",
+        "relay_token": "run-1",
+        "viewer_actor_type": viewer_type,
+        "viewer_actor_id": viewer_id,
+    }
+    stale = client.post(
+        "/api/v1/collaboration/tasks/search", json={**body, "relay_token": "stale"}
+    )
+    assert stale.status_code == 409
+    assert not calls
+    response = client.post("/api/v1/collaboration/tasks/search", json=body)
+    assert response.status_code == 200, response.text
+    assert calls == [
+        {
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "t1",
+            "viewer_actor_type": viewer_type,
+            "viewer_actor_id": viewer_id,
+        }
+    ]
+    assert response.json()["data"] == {
+        "candidates": [
+            {
+                "bot_id": "candidate:owner",
+                "name": "Candidate",
+                "description": "match",
+                "score": 0.9,
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "viewer",
+    [
+        {"viewer_actor_type": "bot"},
+        {"viewer_actor_id": "bot:owner"},
+        {"viewer_actor_type": "admin", "viewer_actor_id": "bot:owner"},
+        {"viewer_actor_type": "human", "viewer_actor_id": " "},
+    ],
+)
+def test_relay_search_invalid_viewer_never_calls_service(task_client, viewer):
+    client, svc = task_client
+    before = len(svc.callback.calls)
+    response = client.post(
+        "/api/v1/collaboration/tasks/search",
+        json={
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "t1",
+            "relay_token": "run-1",
+            **viewer,
+        },
+    )
+    assert response.status_code == 422
+    assert "run-1" not in response.text
+    assert len(svc.callback.calls) == before
+
+
+def test_relay_search_null_viewer_keeps_legacy_service_call(task_client):
+    client, svc = task_client
+    svc.set_execution_config(
+        {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+    )
+    svc.set_node_status("t1", "t1", Status.RUNNING)
+    response = client.post(
+        "/api/v1/collaboration/tasks/search",
+        json={
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "t1",
+            "relay_token": "run-1",
+            "viewer_actor_type": None,
+            "viewer_actor_id": None,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert svc.callback.calls[-1] == ("search_bots", ("q", "t1", "t1"))

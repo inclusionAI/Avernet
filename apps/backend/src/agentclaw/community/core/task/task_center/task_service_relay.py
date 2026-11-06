@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from agentclaw.community.core.task.domain.search_viewer import SearchViewerType, normalize_search_viewer
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     BotCandidate,
@@ -136,12 +137,15 @@ class TaskServiceRelayMixin:
 
     async def search_bots(
         self, *, query: str, task_id: str, node_id: str,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]:
         """Project the catalog result to the stable Relay BotCandidate model."""
         if not query.strip() or not task_id or not node_id:
             raise TaskStateError("relay search requires query, task_id and node_id")
+        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         try:
-            raw = await self._relay_adapter.search.search_catalog(query)
+            raw = await self._relay_adapter.search.search_catalog(query, **viewer)
         except Exception as exc:
             self._graph.append_action_event(
                 task_id,

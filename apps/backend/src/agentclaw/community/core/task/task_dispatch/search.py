@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.search_viewer import SearchViewerType, normalize_search_viewer
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     search_candidates,
 )
@@ -20,7 +21,8 @@ class TaskSearch:
 
     It deliberately does not accept task/node/holder identifiers and does not
     decide HIT_SINGLE/HIT_MULTI_BOTS/MISS.  Those decisions belong to the
-    centralized dispatcher or the Relay Skill.
+    centralized dispatcher or the Relay Skill. An explicit viewer scopes catalog
+    retrieval only; it never becomes the task owner or node executor.
     """
 
     def __init__(self, discover: Any, *, user_id: str = "") -> None:
@@ -35,11 +37,15 @@ class TaskSearch:
     def backend_name(self) -> str:
         return type(self._discover).__name__ if self._discover is not None else "None"
 
-    async def search(self, query: str) -> Any:
+    async def search(
+        self, query: str, *, viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
+    ) -> Any:
+        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         normalized = str(query or "").strip()
         if not normalized:
             raise ValueError("search query is required")
-        if self._discover is None:
+        if self._discover is None and not viewer:
             # Keep the existing search result shape for callers that already
             # project .candidates/.tokens/.failed_keywords.
             return await search_candidates(None, normalized, user_id=self._user_id)
@@ -47,6 +53,7 @@ class TaskSearch:
             self._discover,
             normalized,
             user_id=self._user_id,
+            **viewer,
         )
 
     @staticmethod
@@ -61,8 +68,12 @@ class TaskSearch:
             candidate["recommend"] = item["recommend"]
         return candidate
 
-    async def search_catalog(self, query: str) -> dict[str, Any]:
+    async def search_catalog(
+        self, query: str, *, viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return the public query-only candidate catalog with diagnostics."""
+        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         started_at = time.monotonic()
         normalized = str(query or "").strip()
         if not normalized:
@@ -75,14 +86,14 @@ class TaskSearch:
             len(normalized),
             {"runtime_state": ["online"]},
         )
-        if not self.available:
+        if not self.available and not viewer:
             logger.warning(
                 "search_empty reason=discover_unavailable discover=%s elapsed_ms=%.1f",
                 self.backend_name,
                 (time.monotonic() - started_at) * 1000,
             )
             return self._response([], result=None)
-        result = await self.search(normalized)
+        result = await self.search(normalized, **viewer)
         candidates = [
             self._project_candidate(item)
             for item in result.candidates
