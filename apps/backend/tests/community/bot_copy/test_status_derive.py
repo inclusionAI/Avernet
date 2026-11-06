@@ -47,9 +47,12 @@ def test_created_when_pre_container_apply_running():
     assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status=None) == BotCopyStatus.CREATED
 
 
-def test_file_synced_when_pre_container_terminal_and_provisioning():
+def test_created_when_pre_terminal_and_device_not_yet_active():
+    # pre done, device not yet ACTIVE (on_container not started) → CREATED.
+    # File sync is an on_container signal, so a pre-only terminal state is
+    # never FILE_SYNCED (no on_container progress to report yet).
     recs = [_apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value)]
-    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="PENDING") == BotCopyStatus.FILE_SYNCED
+    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="PENDING") == BotCopyStatus.CREATED
 
 
 def test_bot_started_when_pre_terminal_and_device_active():

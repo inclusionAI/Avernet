@@ -609,6 +609,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
+  - agentclaw.community.kernel.build_ignore  # normalize_build_ignore_path governs a copy's excludes — literal relative paths, not a gitignore
   - agentclaw.community.log
   - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant

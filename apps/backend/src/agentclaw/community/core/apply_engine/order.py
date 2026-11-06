@@ -80,7 +80,7 @@ class ApplyStep:
 
     #: Which construct this step applies.
     construct: ApplyConstruct
-    #: The sort key, 0-6, unique across the table. Shared by every family: the
+    #: The sort key, 0-7, unique across the table. Shared by every family: the
     #: order is the table's, only the phase is family-specific.
     position: int
 
@@ -103,10 +103,11 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     ApplyStep(Section.SCRIPT, 0),
     ApplyStep(Category.IDENTITY, 1),
     ApplyStep(Category.RESOURCES, 2),
-    ApplyStep(Category.SKILLS, 3),
-    ApplyStep(Category.MCP, 4),
-    ApplyStep(Category.ENGINE_CONFIG, 5),
-    ApplyStep(Category.CLI_TOOLS, 6),
+    ApplyStep(Section.BOT_FILE_SYNC, 3),
+    ApplyStep(Category.SKILLS, 4),
+    ApplyStep(Category.MCP, 5),
+    ApplyStep(Category.ENGINE_CONFIG, 6),
+    ApplyStep(Category.CLI_TOOLS, 7),
 )
 
 __all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]

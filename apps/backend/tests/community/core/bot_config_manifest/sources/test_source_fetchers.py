@@ -66,8 +66,13 @@ def pipeline(collaborators) -> DeclaredSourceResolver:
 def test_every_declarable_protocol_has_a_fetcher():
     """The rule this whole feature is built around, at the fetch layer: the
     surface must not accept what it cannot apply. A protocol the parser
-    admits with nothing to serve it is exactly that, one layer down."""
-    assert set(FETCHER_TYPES) == set(DECLARABLE_PROTOCOLS)
+    admits with nothing to serve it is exactly that, one layer down.
+
+    ``bot`` is the one exception: it converges through the bot-file-sync
+    materialiser (a per-engine workspace sync), not the fetch→store→write
+    chain, so it is declarable and served without a row in ``FETCHER_TYPES``.
+    """
+    assert set(FETCHER_TYPES) == set(DECLARABLE_PROTOCOLS) - {SourceKind.BOT}
 
 
 def test_content_is_a_kind_but_never_a_fetcher():
@@ -79,6 +84,15 @@ def test_content_is_a_kind_but_never_a_fetcher():
     assert SourceKind.CONTENT not in DECLARABLE_PROTOCOLS
 
 
+def test_bot_is_declarable_but_served_by_a_sync_materialiser_not_a_fetcher():
+    """``bot`` is bot copy's file-sync protocol: declarable (a source names a
+    ``bot_id``), but it has no fetcher — a per-engine ``BotFileSyncPort`` invoked
+    by the ``BOT_FILE_SYNC`` materialiser serves it. The fetcher table's guard
+    exempts it the same way it exempts inline ``content``."""
+    assert SourceKind.BOT in DECLARABLE_PROTOCOLS
+    assert SourceKind.BOT not in FETCHER_TYPES
+
+
 def test_a_protocol_with_no_fetcher_is_refused_at_import():
     """Re-runs the module's own guard against a table with a hole.
 
@@ -87,10 +101,15 @@ def test_a_protocol_with_no_fetcher_is_refused_at_import():
     that expression is ever weakened, this fails; if the guard is deleted,
     ``test_every_declarable_protocol_has_a_fetcher`` still catches the hole
     it existed to prevent.
+
+    ``content`` and ``bot`` are exempt — the first is inline, the second is
+    served by a sync materialiser — so neither is "unserved" by a hole in the
+    fetcher table.
     """
     holed = {SourceKind.GIT: GitSourceFetcher}
-    unserved = (set(SourceKind) - {SourceKind.CONTENT}) - set(holed)
+    unserved = (set(SourceKind) - {SourceKind.CONTENT, SourceKind.BOT}) - set(holed)
     assert unserved == {SourceKind.OSS}
+
 
 
 @pytest.mark.parametrize(

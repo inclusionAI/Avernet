@@ -153,19 +153,47 @@ def _generate_operation_id() -> str:
     return f"copy_{date_part}_{random_part}"
 
 
-def _build_manifest_document(script_body: str) -> str:
-    """Serialize source's script into a manifest config document (v1: script only).
+#: The literal ``path`` the copy serializer writes on the file-sync resources
+#: entry. It is a constant, not resolved from the source or dst bot: a
+#: per-engine sync strategy builds the real source/target workspace paths at
+#: sync time, and the manifest's job is to declare *that a workspace sync
+#: happens* and *which source bot to read from*, not where the bytes live on
+#: any host. The trailing slash marks it a directory tree.
+_FILE_SYNC_PATH = "workspace/"
 
-    The document is what ``manifest_seam.persist`` stores under the dst bot's key
-    and what ManifestCompiler compiles. ``identity`` / ``resources`` / ``skills``
-    / ``mcp`` are deferred (sync + 能力集 stages); when they land this function
-    emits the extra sections.
+
+def _build_manifest_document(
+    *,
+    script_body: str,
+    source_bot_id: str,
+    excludes: tuple[str, ...] = (),
+) -> str:
+    """Serialize source's config into a manifest config document.
+
+    The document is what ``manifest_seam.persist`` stores under the dst bot's
+    key and what ManifestCompiler compiles. v1 carried ``script`` only; this
+    adds the file-sync section: a top-level ``sources.from_bot`` declaring
+    ``protocol: bot`` + the source bot's id, and one ``resources`` entry that
+    uses it with the literal ``workspace/`` path. ``excludes`` is the same
+    list the caller sent under ``request_detail`` — written into the manifest
+    entry so the compiler and a future sync materialiser read one source of
+    truth rather than reaching back across modules for the operation ledger.
+    ``identity`` / ``skills`` / ``mcp`` are still deferred (能力集 stage).
     """
-    return yaml.safe_dump(
-        {"schema_version": 1, "script": {"body": script_body}},
-        sort_keys=False,
-        allow_unicode=True,
-    )
+    resources_entry: dict[str, Any] = {"path": _FILE_SYNC_PATH, "from": "from_bot"}
+    if excludes:
+        resources_entry["excludes"] = list(excludes)
+    document: dict[str, Any] = {
+        "schema_version": 1,
+        "script": {"body": script_body},
+        "sources": {
+            "from_bot": {"protocol": "bot", "bot_id": source_bot_id},
+        },
+        "manifest": {
+            "resources": [resources_entry],
+        },
+    }
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
 def submit_copy(
@@ -228,7 +256,16 @@ def submit_copy(
     script_body = bot_script_service.get_body(
         entity_id=source_entity_id, bot_id=source["bot_id"]
     )
-    manifest_document = _build_manifest_document(script_body)
+    # ``excludes`` rides both the operation ledger (``request_detail``, so retry
+    # and audit see the caller's intent) and this manifest document (so the
+    # compiler reads one source of truth rather than reaching across modules
+    # for the ledger row). They are the same value under two roles.
+    request_excludes = tuple((body.request_detail or {}).get("excludes") or ())
+    manifest_document = _build_manifest_document(
+        script_body=script_body,
+        source_bot_id=source["bot_id"],
+        excludes=request_excludes,
+    )
 
     # Validate the document before anything is spent (manifest-creation's rule:
     # an invalid doc never reaches Passport). Raises ManifestValidationError.

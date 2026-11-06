@@ -72,6 +72,9 @@ from agentclaw.community.core.apply_engine.identity_files import (
 )
 from agentclaw.community.core.apply_engine.redeliver import TeclawRedeliver
 from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
+from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_noop import (
+    NoopBotFileSyncPort,
+)
 from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.apply_engine.resource_files import (
@@ -193,6 +196,9 @@ class ApplyEngineModule(Module):
                 resource_rows=lambda bot_id: resource_services.create(bot_id=bot_id),
                 cli_tool_service=cli_tool_service_factory("arca"),
                 shared_skills=injector.get(SharedSkillPort),
+                # Noop until a real ARCA NAS rsync implementation lands; the
+                # BOT_FILE_SYNC materialiser is otherwise wired end to end.
+                file_sync=NoopBotFileSyncPort(),
             )
 
         return device_ports
@@ -254,6 +260,10 @@ class ApplyEngineModule(Module):
                 # family whatever the switch says.
                 cli_tool_service=cli_tool_service_factory("teclaw"),
                 shared_skills=injector.get(SharedSkillPort),
+                # Platform-managed teclaw composes the artifact at provision,
+                # never a workspace sync — copy is openclaw-only, so this port
+                # refuses rather than pretending to sync.
+                file_sync=NoopBotFileSyncPort(),
             )
 
         return platform_ports
