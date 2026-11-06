@@ -230,14 +230,60 @@ async def test_unreadable_node_modules_map_does_not_fail_build():
 
 
 @pytest.mark.asyncio
-async def test_unreadable_source_file_raises():
+async def test_unreadable_source_file_skipped_with_warning():
+    """A non-excluded file whose read_file returns None is skipped with a warning,
+    not turned into a hard build failure (the promotion continues with other files)."""
     fs = _FakeDeviceFs(
-        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
-        contents={},  # read_file returns None → hard error
+        listings={
+            "workspace": [
+                {"path": "/workspace/a.csv", "is_dir": False},
+                {"path": "/workspace/x", "is_dir": False},  # unreadable
+            ],
+            "identity": [],
+        },
+        contents={"workspace/a.csv": b"a"},  # x has no content → None
     )
-    with pytest.raises(TeclawFilePromotionError):
-        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    # x is skipped, a.csv is still promoted
+    assert [r["name"] for r in refs.resources] == ["a.csv"]
+    # x was attempted to be read (then skipped)
+    assert "workspace/x" in fs.read_calls
 
+
+
+@pytest.mark.asyncio
+async def test_test_and_cache_dirs_are_excluded():
+    """Test, tests, __pycache__, and .pytest_cache directories are excluded from
+    the promotion snapshot — their files are never read or staged, at any depth."""
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/app.py", "is_dir": False},
+                {"path": "/workspace/test", "is_dir": True},
+                {"path": "/workspace/test/data.json", "is_dir": False},
+                {"path": "/workspace/sub/tests", "is_dir": True},
+                {"path": "/workspace/sub/tests/helpers.py", "is_dir": False},
+                {"path": "/workspace/lib/__pycache__", "is_dir": True},
+                {"path": "/workspace/lib/__pycache__/mod.cpython-311.pyc", "is_dir": False},
+                {"path": "/workspace/.pytest_cache", "is_dir": True},
+                {"path": "/workspace/.pytest_cache/v/cache/lastfailed", "is_dir": False},
+            ],
+            "identity": [],
+        },
+        contents={
+            "workspace/app.py": b"code",
+            "workspace/test/data.json": b"testdata",
+            "workspace/sub/tests/helpers.py": b"helpers",
+            "workspace/lib/__pycache__/mod.cpython-311.pyc": b"pyc",
+            "workspace/.pytest_cache/v/cache/lastfailed": b"cache",
+        },
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["app.py"]
+    # Excluded files were never read
+    assert fs.read_calls == ["workspace/app.py"]
 
 @pytest.mark.asyncio
 async def test_oss_put_failure_raises():

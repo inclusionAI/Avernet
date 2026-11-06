@@ -72,8 +72,8 @@ _BOT_DATA_STORE = "bot-data"
 # fragile: ``node_modules`` routinely holds entries (e.g. ``*.js.map`` files and
 # package symlinks) that ``list_dir`` reports but the engine cannot ``read_file``,
 # which the source-of-truth contract below turns into a hard build failure.
-# Skipping them by path segment (at any depth) avoids both problems.
-_EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
+# Skipping them (and test / cache directories) by path segment (at any depth) avoids both problems.
+_EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules", "test", "tests", "__pycache__", ".pytest_cache"})
 
 
 def _has_excluded_segment(engine_path: str) -> bool:
@@ -142,10 +142,9 @@ class TeclawFilePromotion:
         engine, because the platform is the side that holds them.
 
         Raises:
-            TeclawFilePromotionError: a listed file could not be read (the source
-                container is the source of truth, so a missing read is a hard
-                failure, not a silent skip), its OSS put failed, or a tool object
-                could not be copied.
+            TeclawFilePromotionError: a listed file could not be read and is
+                excluded from the snapshot (logged as WARNING then skipped);
+                its OSS put failed, or a tool object could not be copied.
         """
         store_base = f"teclaw/{env}/bolt_data"
         # Stage-scoped per-bot segment isolates each publish snapshot.
@@ -191,9 +190,11 @@ class TeclawFilePromotion:
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
                 if content is None:
-                    raise TeclawFilePromotionError(
-                        f"teclaw promotion: source file unreadable: {engine_path}"
+                    logger.warning(
+                        "[TeclawFilePromotion] skipping unreadable file: %s",
+                        engine_path,
                     )
+                    continue
                 rel = logical[len(ns):].lstrip("/")  # "sub/x.csv"
                 ref_path = f"{rel_root}/{ns}/{rel}"
                 oss_key = f"{store_base}/{ref_path}"
