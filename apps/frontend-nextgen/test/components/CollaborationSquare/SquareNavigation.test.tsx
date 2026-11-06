@@ -8,9 +8,10 @@ jest.mock('@umijs/max', () => ({
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => <a href={to} {...props}>{children}</a>,
 }));
 
-test('发现导航保留公开Bot/群并提供专家市场', () => {
+test('发现导航保留公开 Bot/群并提供专家', () => {
   const { rerender } = render(<SquareNavigation active="bot" />);
-  const bot = screen.getByRole('link', { name: '公开Bot' });
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['公开 Bot', '专家 Bot', '公开协作群']);
+  const bot = screen.getByRole('link', { name: '公开 Bot' });
   const group = screen.getByRole('link', { name: '公开协作群' });
   // dmore Frame 1：选中 pill 为 6px 圆角 + 主色软底；非选中无底色。
   expect(bot).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary', 'h-8', 'px-3', 'text-[13px]');
@@ -26,12 +27,12 @@ test('发现导航保留公开Bot/群并提供专家市场', () => {
   expect(bot).not.toHaveAttribute('aria-current');
 });
 
-test('专家市场使用独立可访问路由与选中状态', () => {
+test('专家使用独立可访问路由与选中状态', () => {
   render(<SquareNavigation active="expert" />);
-  const expert = screen.getByRole('link', { name: '专家市场' });
+  const expert = screen.getByRole('link', { name: '专家 Bot' });
   expect(expert).toHaveAttribute('href', '/collaboration-square/experts');
   expect(expert).toHaveAttribute('aria-current', 'page');
-  expect(screen.getByRole('link', { name: '公开Bot' })).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('link', { name: '公开 Bot' })).not.toHaveAttribute('aria-current');
 });
 
 test('页头右侧 actions 槽位仅在透传时渲染工具区', () => {
