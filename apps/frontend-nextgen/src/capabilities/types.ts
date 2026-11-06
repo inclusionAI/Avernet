@@ -473,6 +473,20 @@ export interface ConversationInstanceScopeCapability {
   getSessionRange(bot: ConversationInstanceScopeBot): ConversationSessionRequestRange | null;
 }
 
+/** 会话模型选择器的模型徽标（运营展示增强，如「推荐」）。 */
+export interface BotModelBadge {
+  /** 徽标文案，如「推荐」。 */
+  label: string;
+  /** 徽标跳转链接（新窗口打开）；缺省时徽标纯展示、不可点击。 */
+  link?: string;
+}
+
+/** getModelBadge 入参：模型列表项基础字段。 */
+export interface BotModelBadgeContext {
+  modelId: string;
+  provider: string;
+}
+
 export interface AppCapabilities {
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
@@ -527,6 +541,12 @@ export interface AppCapabilities {
   getAppCodingYuqueTokenGuideVideoUrl: () => CapabilityResult<string | null>;
   /** CodeFuse 模型目录接口地址；Open Core 无内部目录时返回 null。 */
   getCodefuseModelsUrl: () => CapabilityResult<string | null>;
+  /**
+   * 会话模型选择器的模型徽标（运营展示增强，如「推荐」+ 对比页跳转）。
+   * Open Core 默认 null（模型列表不渲染徽标）；internal overlay 注入内源运营配置。
+   * 返回 null = 该模型无徽标。同步签名，不发请求。
+   */
+  getModelBadge: (model: BotModelBadgeContext) => CapabilityResult<BotModelBadge | null>;
   getAgentCodingInternalResources: () => CapabilityResult<AgentCodingInternalResources>;
   /**
    * 登录策略（见 `LoginStrategy`）：Open Core 默认 `oauth-provider`；internal overlay `ace-gateway`。
