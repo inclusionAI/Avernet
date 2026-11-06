@@ -12,7 +12,7 @@ import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMem
 import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle, PanelTab } from '@tc-chat/core';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 type PanelRef = React.RefObject<PanelHandle | null>;
 /**
@@ -132,26 +132,17 @@ export function useSessionTaskPanelBootstrap({
   panelRef: PanelRef;
   enabled?: boolean;
 }): void {
-  const bootstrapKeyRef = useRef<string | null>(null);
-
+  // effect 依赖已限定会话边界；不要额外缓存执行标记，否则已取消的恢复会阻挡
+  // selectedSession 短暂为空后重入同一会话（以及 StrictMode 的 effect 重放）。
   useEffect(() => {
     if (!enabled || !sessionId || !userId) return undefined;
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
     const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
     if (!sessionOwnerUserId) return undefined;
-    const bootstrapKey = `${sessionOwnerUserId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
-    if (bootstrapKeyRef.current === bootstrapKey) return undefined;
-    bootstrapKeyRef.current = bootstrapKey;
     let cancelled = false;
 
-    const openTaskPanel = async (
-      taskId: string,
-      records: TaskListItem[] | null,
-      waitForPanel: boolean,
-    ): Promise<void> => {
-      const panel = waitForPanel
-        ? panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled))
-        : panelRef.current;
+    const openTaskPanel = async (taskId: string, records: TaskListItem[] | null): Promise<void> => {
+      const panel = panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled));
       if (cancelled || !panel) return;
       const record = records?.find((item) => item.task_id === taskId) ?? null;
       useTaskSidePanelStore.getState().setActiveTask(taskId);
@@ -195,7 +186,7 @@ export function useSessionTaskPanelBootstrap({
           associationStore.setActiveSessionTaskIds(sessionId, [requestedTaskId]);
           const requestedResult = await listMyTasks({ user_id: sessionOwnerUserId });
           if (cancelled) return;
-          await openTaskPanel(requestedTaskId, taskRecords(requestedResult), false);
+          await openTaskPanel(requestedTaskId, taskRecords(requestedResult));
           return;
         }
 
@@ -205,7 +196,7 @@ export function useSessionTaskPanelBootstrap({
           const latestResult = await listMyTasks({ user_id: sessionOwnerUserId });
           if (cancelled) return;
           const latestRef = sessionTaskRefs[0];
-          await openTaskPanel(latestRef.task_id, taskRecords(latestResult), true);
+          await openTaskPanel(latestRef.task_id, taskRecords(latestResult));
           return;
         }
 
@@ -217,7 +208,7 @@ export function useSessionTaskPanelBootstrap({
         const latestRecord = records ? findLatestTaskForSession(records, sessionId) : null;
         if (!latestRecord) return;
         associationStore.setActiveSessionTaskIds(sessionId, [latestRecord.task_id]);
-        await openTaskPanel(latestRecord.task_id, records, false);
+        await openTaskPanel(latestRecord.task_id, records);
       } catch {
         // by_session 失败不算会话错误；恢复是增强体验，不能阻断会话打开。
         if (!cancelled) {

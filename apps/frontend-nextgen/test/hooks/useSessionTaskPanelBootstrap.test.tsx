@@ -12,6 +12,7 @@ import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 
 const mockGetTaskBySession = jest.fn();
 const mockListMyTasks = jest.fn();
@@ -362,6 +363,105 @@ describe('useSessionTaskPanelBootstrap', () => {
     await act(async () => Promise.resolve());
     expect(mockListMyTasks).toHaveBeenCalledTimes(1);
     expect(openTab).toHaveBeenCalledTimes(1);
+  });
+
+  it('群列表重拉使会话短暂为空后，重新进入同一 session 仍恢复任务', async () => {
+    const { ref, openTab } = makePanelRef();
+    let resolveFirst: (value: unknown) => void = () => undefined;
+    mockGetTaskBySession
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue({ ok: true, data: [sessionRef('task-new')] });
+
+    const { rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef: ref }),
+      { initialProps: { sessionId: 'sess-1' as string | null } },
+    );
+    expect(mockGetTaskBySession).toHaveBeenCalledTimes(1);
+
+    rerender({ sessionId: null });
+    // 旧请求即使返回也不能打开已离开的会话。
+    await act(async () => { resolveFirst({ ok: true, data: [sessionRef('task-old')] }); });
+    expect(openTab).not.toHaveBeenCalled();
+
+    rerender({ sessionId: 'sess-1' });
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(mockGetTaskBySession).toHaveBeenCalledTimes(2);
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-new' });
+  });
+
+  it('StrictMode 取消首次 effect 后仍能恢复当前会话的任务', async () => {
+    const { ref, openTab } = makePanelRef();
+    mockGetTaskBySession.mockResolvedValue({ ok: true, data: [sessionRef('task-new')] });
+
+    renderHook(
+      () => useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
+      { wrapper: StrictMode },
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-new' });
+  });
+
+  it.each(['任务列表兜底', '显式任务入口'])('%s 命中先于群面板挂载时仍等待 handle 恢复任务', async (source) => {
+    jest.useFakeTimers();
+    try {
+      const { ref: readyRef, openTab } = makePanelRef();
+      const panelRef = { current: null as PanelHandle | null };
+      mockListMyTasks.mockResolvedValue({
+        code: 0,
+        data: [taskRecord('task-new', '2026-10-27 11:30:00')],
+      });
+      if (source === '显式任务入口') {
+        useTaskSidePanelStore.getState().markTaskPanelOpenIntent('task-new');
+      }
+
+      renderHook(() =>
+        useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef }),
+      );
+      await act(async () => Promise.resolve());
+      expect(openTab).not.toHaveBeenCalled();
+
+      panelRef.current = readyRef.current;
+      await act(async () => jest.advanceTimersByTimeAsync(100));
+      expect(openTab).toHaveBeenCalledTimes(1);
+      expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-new' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each(['关联任务', '任务列表兜底', '显式任务入口'])('%s 等待面板期间离开页面后不会打开旧任务', async (source) => {
+    jest.useFakeTimers();
+    try {
+      const { ref: readyRef, openTab } = makePanelRef();
+      const panelRef = { current: null as PanelHandle | null };
+      if (source === '关联任务') {
+        mockGetTaskBySession.mockResolvedValue({ ok: true, data: [sessionRef('task-old')] });
+      }
+      mockListMyTasks.mockResolvedValue({
+        code: 0,
+        data: [taskRecord('task-old', '2026-10-27 11:30:00')],
+      });
+      if (source === '显式任务入口') {
+        useTaskSidePanelStore.getState().markTaskPanelOpenIntent('task-old');
+      }
+      const { unmount } = renderHook(() =>
+        useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef }),
+      );
+      await act(async () => Promise.resolve());
+      expect(jest.getTimerCount()).toBe(1);
+
+      unmount();
+      panelRef.current = readyRef.current;
+      await act(async () => jest.advanceTimersByTimeAsync(100));
+
+      expect(openTab).not.toHaveBeenCalled();
+      expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('没有命中当前会话的任务时不打开副屏', async () => {
