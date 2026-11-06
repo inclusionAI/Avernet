@@ -265,7 +265,11 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title, device_uuid=device_uuid)
+    item = await reconcile_created_session(
+        relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id,
+        user_id=user_id, stage=stage, device_uuid=device_uuid,
+        created_item=result.data, requested_title=body.title,
+    )
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
