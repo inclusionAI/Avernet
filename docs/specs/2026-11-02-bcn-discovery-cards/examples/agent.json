@@ -1,0 +1,42 @@
+{
+  "name": "SQL 分析师",
+  "description": "分析 SQL 并形成诊断结论。",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "url": "https://agents.example.com/a2a/bot-analyst-001",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+        "description": "来源平台标识",
+        "required": false,
+        "params": {
+          "agentId": "third-party-agent-analyst-001",
+          "party": "third_party"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "sql.analyze",
+      "name": "SQL 分析师",
+      "description": "分析 SQL 并形成诊断结论。",
+      "tags": [
+        "database"
+      ]
+    }
+  ]
+}
