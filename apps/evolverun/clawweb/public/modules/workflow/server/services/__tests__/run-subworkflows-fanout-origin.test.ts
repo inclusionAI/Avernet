@@ -7,6 +7,7 @@ import { RunSubworkflowsRepository } from '../../repositories/run-subworkflows-r
 import { RunSubworkflowsService } from '../run-subworkflows-service.js';
 
 const actor = { actorId: 'reader', isAdmin: false };
+const opaquePayload = 'opaque-secret-value';
 const identity = { parentFlowId: 'parent', parentNodeId: 'group', groupExecutionId: 'generation',
   itemId: 'item', itemIndex: 0, attemptNumber: 1, childFlowId: 'logical', workflowId: 'child-wf', requestDigest: 'digest' };
 let raw: Database.Database; let db: SqliteDatabase; let service: RunSubworkflowsService;
@@ -56,18 +57,18 @@ describe('trusted-engine fanoutOrigin correlation with SQLite', () => {
   it('projects useful child execution state while omitting opaque payloads and association data', async () => {
     scopes.set('parent-wf', 'deny');
     writeChild({ workflowId: 'child-wf', workflowVersion: 2, businessStatus: 'PROCESSING', currentPhase: 'P1',
-      executionMode: 'private', activeNodes: ['work', 'agent:secret-session', { token: 'active-secret' }],
+      executionMode: 'private', activeNodes: ['work', 'agent:secret-session', { token: opaquePayload }],
       nodeStates: { work: { status: 'running', phase: 'P1', executor: 'agent', attempts: 2, manualRetries: 1,
         startedAt: 100, updatedAt: 120, completedAt: null, result: { secret: 'result-secret' }, error: 'error-secret',
         childSessionKey: 'session-secret', callbackToken: 'callback-secret', waitPrompt: 'prompt-secret',
-        bcsApproval: { token: 'approval-secret' }, params: { token: 'node-param-secret' },
+        bcsApproval: { token: opaquePayload }, params: { token: opaquePayload },
         subworkflowFanouts: { nested: { childFlowId: 'nested-association-secret' } } },
-        invalid: { status: { token: 'invalid-secret' }, startedAt: 'timestamp-secret' },
+        invalid: { status: { token: opaquePayload }, startedAt: 'timestamp-secret' },
         'agent:session-secret': { status: 'running' } },
       fanoutOrigin: identity, originCredentials: 'credential-secret', originSessionKey: 'session-secret',
-      params: { token: 'param-secret' }, workflowData: { token: 'workflow-data-secret' },
+      params: { token: opaquePayload }, workflowData: { token: opaquePayload },
       actionOutputs: { work: 'output-secret' }, subworkflowMeta: { parentFlowId: 'parent-secret' },
-      workflowSnapshot: { token: 'snapshot-secret' }, fanoutRuntimeContext: { sessionKey: 'context-secret' } });
+      workflowSnapshot: { token: opaquePayload }, fanoutRuntimeContext: { sessionKey: 'context-secret' } });
     const inspection = await service.inspectRun(actor, 'native');
     expect(JSON.parse(inspection.run.state_json!)).toEqual({ workflowId: 'child-wf', workflowVersion: 2,
       businessStatus: 'PROCESSING', currentPhase: 'P1', executionMode: 'private', activeNodes: ['work'],
