@@ -41,6 +41,9 @@ from agentclaw.community.core.bot_management.render_screen.errors import (
 from agentclaw.community.core.bot_management.render_screen.models import (
     RenderScreenRecord,
 )
+from agentclaw.community.core.bot_management.errors import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -90,7 +93,7 @@ def _record(**overrides) -> RenderScreenRecord:
 @pytest.mark.asyncio
 async def test_list_is_readable_without_editor_permission():
     bots = Mock()
-    bots.get_bot.return_value = _bot()
+    bots.get_bot_by_address.return_value = _bot()
     service = Mock()
     service.list_render_screens.return_value = [_record()]
 
@@ -113,7 +116,9 @@ async def test_list_is_readable_without_editor_permission():
         "created_at": "2026-08-19T10:00:00",
         "updated_at": "2026-08-19T10:00:00",
     }
-    bots.get_bot.assert_called_once_with("bot-1", "owner-1")
+    # The read resolves through the unified address entry so a handovered Bot
+    # stays addressable by entity_id / pre-handover owner like the mutations.
+    bots.get_bot_by_address.assert_called_once_with("bot-1", "owner-1")
     service.list_render_screens.assert_called_once_with(
         bot_id="bot-1", owner_id="owner-1", current_user_id="viewer-1"
     )
@@ -197,15 +202,21 @@ async def test_the_read_refuses_a_bot_that_is_not_the_owners():
     ``GET`` is the one operation here whose row is ``NoCheck`` — the seam
     adjudicates nothing, because share and group viewers hold no Editor
     relation. That leaves ``resolve_readable_bot`` as the sole proof the
-    addressed Bot exists under the named owner. Both absence shapes are driven:
-    the service raising, and the service answering with nothing.
+    addressed Bot exists under the named owner. Absence is driven through the
+    unified address entry: the service raising, the service answering with
+    nothing, and an ambiguous legacy locator all refuse alike — resolution
+    failure grants no read.
     """
-    for absent in (BotNotFoundError("no such bot"), None):
+    for absent in (
+        BotNotFoundError("no such bot"),
+        BotLookupAmbiguousError("ambiguous locator"),
+        None,
+    ):
         bots = Mock()
         if isinstance(absent, Exception):
-            bots.get_bot.side_effect = absent
+            bots.get_bot_by_address.side_effect = absent
         else:
-            bots.get_bot.return_value = absent
+            bots.get_bot_by_address.return_value = absent
         service = Mock()
 
         response = await list_render_screens(
