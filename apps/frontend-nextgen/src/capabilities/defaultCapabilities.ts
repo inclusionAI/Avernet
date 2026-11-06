@@ -17,6 +17,7 @@ import type {
   CapabilityResult,
   CodingBotConversationHost,
   ConversationInstanceScopeCapability,
+  GuideAssistantSpec,
   HumanIdentity,
   InviteCodeGatePolicy,
   LegacyVersionSwitchSpec,
@@ -152,6 +153,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 无雨燕配置数据源 → 版本发布说明不支持（菜单不渲染该项）。
   getReleaseNotesCapability: (): CapabilityResult<ReleaseNotesCapability | null> => ({
+    status: 'available',
+    value: null,
+  }),
+  // 产品引导（新版助手）：内源专属功能，Open Core 无此能力（入口不渲染、浮层不挂载）。
+  getGuideAssistant: (): CapabilityResult<GuideAssistantSpec | null> => ({
     status: 'available',
     value: null,
   }),
