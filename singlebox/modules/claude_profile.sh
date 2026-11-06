@@ -65,8 +65,11 @@ for field in required - {"runtime"}:
     value = bot.get(field)
     if not isinstance(value, str) or not value.strip() or any(ch in value for ch in "\t\r\n"):
         raise SystemExit(f"{field} must be a non-empty single-line string")
-if bot["source"] != "platform-data" or bot["profile"] != "platform-data-analyst":
-    raise SystemExit("Claude profile must define platform-data analyst")
+
+for field in ("source", "profile"):
+    value = bot[field]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value):
+        raise SystemExit(f"{field} is invalid")
 
 runtime = bot["runtime"]
 required_runtime = {"type", "relay_port", "claude_config_dir", "workspace", "permission_mode", "system_prompt_md"}
@@ -92,14 +95,23 @@ try:
     prompt_path.relative_to(root)
 except ValueError:
     raise SystemExit("runtime.system_prompt_md escapes the Claude profile")
-if prompt_path.name != "CLAUDE.md" or prompt_path.parent.name != "platform-data" or not prompt_path.is_file():
-    raise SystemExit("runtime.system_prompt_md must be platform-data/CLAUDE.md")
-for filename in ("CLAUDE.md", "WORKFLOW.md", "KNOWLEDGE.md", "RULES.md", "OUTPUT.md", "MEMORY.md"):
-    if not (prompt_path.parent / filename).is_file():
-        raise SystemExit(f"Claude profile file missing: platform-data/{filename}")
+if prompt_path.name != "CLAUDE.md" or not prompt_path.is_file():
+    raise SystemExit("runtime.system_prompt_md must point to an existing CLAUDE.md")
+
+prompt_dir = prompt_path.parent
+for filename in (
+    "CLAUDE.md",
+    "WORKFLOW.md",
+    "KNOWLEDGE.md",
+    "RULES.md",
+    "OUTPUT.md",
+    "MEMORY.md",
+):
+    if not (prompt_dir / filename).is_file():
+        raise SystemExit(f"Claude profile file missing: {prompt_dir / filename}")
 PY
     then
-        log_error "Invalid --claude-profile-dir (expected one platform-data Claude Code profile)"
+        log_error "Invalid --claude-profile-dir (expected one Claude Code bot profile)"
         return 1
     fi
 }

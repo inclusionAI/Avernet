@@ -263,6 +263,9 @@ export function startChatRun(
   const preSubscribeBuffer: OrchestratorEvent[] = [];
 
   const emit = (event: OrchestratorEvent) => {
+    // A cancelled run must not emit late SDK/CLI events.
+    if (aborted) return;
+
     if (!listener) {
       preSubscribeBuffer.push(event);
       return;
@@ -380,7 +383,7 @@ export function startChatRun(
     subscribe(l) {
       if (listener) throw new Error('RunningOrchestration.subscribe may only be called once');
       listener = l;
-      while (preSubscribeBuffer.length > 0) {
+      while (!aborted && preSubscribeBuffer.length > 0) {
         const event = preSubscribeBuffer.shift()!;
         try {
           l(event);
@@ -390,7 +393,9 @@ export function startChatRun(
       }
     },
     abort() {
+      if (aborted) return;
       aborted = true;
+      preSubscribeBuffer.length = 0;
       running.abort();
     },
     completed,

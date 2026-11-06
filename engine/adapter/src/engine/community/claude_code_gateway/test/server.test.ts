@@ -131,6 +131,107 @@ describe('Gateway server (E2E)', () => {
     }
   });
 
+  it('suppresses late events from aborted run A while run B completes', async () => {
+    const script = [
+      { kind: 'lifecycle' as const, phase: 'start' as const },
+      { kind: 'textDelta' as const, text: 'partial' },
+      ...Array.from({ length: 200 }, () => ({
+        kind: 'textDelta' as const,
+        text: '.',
+      })),
+      { kind: 'done' as const, stopReason: 'end_turn' },
+    ];
+
+    const { server, store, storePath, controller } = await bootServer(script);
+
+    try {
+      const client = await connectedClient(server.port);
+      const sessionKey = 'sess-late-abort';
+
+      // A: start a real Gateway run.
+      const sendA = await client.request('chat.send', {
+        sessionKey,
+        message: 'run A',
+        cwd: process.cwd(),
+      });
+      assert.equal(sendA.ok, true);
+
+      const runA = (sendA.payload as { runId: string }).runId;
+
+      await client.waitForEvent(e =>
+        e.event === 'chat' &&
+        (e.payload as { runId?: string; state?: string }).runId === runA &&
+        (e.payload as { state?: string }).state === 'delta'
+      );
+
+      // Cancel A.
+      const abortA = await client.request('chat.abort', { runId: runA });
+      assert.equal(abortA.ok, true);
+      assert.equal((abortA.payload as { aborted: boolean }).aborted, true);
+      assert.equal(controller.runs[0].aborted, true);
+
+      await client.waitForEvent(e =>
+        e.event === 'chat' &&
+        (e.payload as { runId?: string; state?: string }).runId === runA &&
+        (e.payload as { state?: string }).state === 'aborted'
+      );
+
+      // Force a callback after cancellation.
+      const checkpoint = client.events.length;
+      controller.emitLateText(0, 'A-late');
+
+      // Let asynchronous event forwarding settle.
+      await sleep(30);
+
+      const leakedA = client.events.slice(checkpoint).filter(e => {
+        if (e.event !== 'chat') return false;
+        const p = e.payload as {
+          runId?: string;
+          state?: string;
+          delta?: string;
+          message?: { content?: Array<{ text?: string }> };
+        };
+        return p.runId === runA &&
+          (p.state === 'delta' || p.state === 'final' || p.state === 'error') &&
+          (
+            p.delta?.includes('A-late') ||
+            p.message?.content?.some(c => c.text?.includes('A-late'))
+          );
+      });
+
+      assert.equal(leakedA.length, 0, 'A-late must not reach the client');
+
+      // B: start a new run in the same session.
+      const sendB = await client.request('chat.send', {
+        sessionKey,
+        message: 'run B',
+        cwd: process.cwd(),
+      });
+      assert.equal(sendB.ok, true);
+
+      const runB = (sendB.payload as { runId: string }).runId;
+      assert.notEqual(runB, runA);
+
+      await client.waitForEvent(e =>
+        e.event === 'chat' &&
+        (e.payload as { runId?: string; state?: string }).runId === runB &&
+        (e.payload as { state?: string }).state === 'final'
+      );
+
+      await store.flush();
+      const binding = store.getByGatewaySessionKey(sessionKey);
+      assert(binding);
+
+      const historyText = JSON.stringify(binding.history ?? []);
+      assert(!historyText.includes('A-late'), 'A-late must not pollute history');
+
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
+
   it('detaches session on disconnect and starts orphan grace (run survives briefly)', async () => {
     const script = [
       { kind: 'lifecycle' as const, phase: 'start' as const },
