@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import errno
+import http.client
 import hashlib
 import io
 import json
@@ -13,6 +15,8 @@ import re
 import shutil
 import stat
 import tempfile
+import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -152,10 +156,10 @@ def _step_url(args: argparse.Namespace, suffix: str) -> str:
 
 
 def _http(method: str, url: str, *, body: bytes | None = None, headers: dict[str, str] | None = None,
-          max_bytes: int = MAX_HTTP_BYTES) -> bytes:
+          max_bytes: int = MAX_HTTP_BYTES, timeout: float = 300) -> bytes:
     request = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=300) as response:
+    with opener.open(request, timeout=timeout) as response:
         payload = response.read(max_bytes + 1)
     if len(payload) > max_bytes:
         raise RuntimeFailure("HTTP response exceeds safety limit")
@@ -185,26 +189,66 @@ def _report(
         value["error"] = error
     if progress is not None:
         value["progress"] = progress
+    # Freeze one delivery identity and payload; retrying must never execute the
+    # business again. Keep the evidence in the existing task log archive tree.
+    report_id = str(uuid.uuid4())
+    body = _json(value).encode("utf-8")
+    evidence = _run_dir(args) / f"report-{report_id}.json"
+    record: dict[str, Any] = {"reportId": report_id, "payload": value,
+                              "delivery": "unconfirmed", "attempts": []}
+    _atomic_json(evidence, record)
+    deadline = time.monotonic() + 120
     args._report_attempted = True
-    try:
-        raw = _http(
-            "POST",
-            _step_url(args, "report"),
-            body=_json(value).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-    except urllib.error.HTTPError as exc:
-        # These responses reject the payload before accepting the report. Only
-        # this definite rejection permits a subsequent failure report; timeout,
-        # 5xx and state conflicts remain uncertain and must not be overwritten.
-        if exc.code in (400, 422):
-            args._report_attempted = False
-        detail = exc.read(4096).decode("utf-8", errors="replace")
-        raise RuntimeFailure(f"ClawWeb report rejected (HTTP {exc.code}): {detail}") from exc
-    response = json.loads(raw or b"{}")
-    if not isinstance(response, dict) or response.get("ok") is not True:
-        raise RuntimeFailure("ClawWeb did not acknowledge the Stage report")
-    return response
+    for attempt in range(1, 6):
+        retryable = False
+        try:
+            raw = _http(
+                "POST", _step_url(args, "report"), body=body,
+                headers={"Content-Type": "application/json", "X-ClawEvolve-Report-Id": report_id},
+                timeout=min(20, max(0.1, deadline - time.monotonic())),
+            )
+            response = json.loads(raw or b"{}")
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise RuntimeFailure("ClawWeb did not acknowledge the Stage report")
+            record["attempts"].append({"attempt": attempt, "acknowledged": True})
+            record["delivery"] = "acknowledged"
+            _atomic_json(evidence, record)
+            return response
+        except urllib.error.HTTPError as exc:
+            # Only definite protocol rejection permits the caller to report a
+            # business failure. An uncertain accepted report is never replaced.
+            if exc.code in (400, 422):
+                args._report_attempted = False
+            retryable = exc.code in (502, 503, 504)
+            try:
+                detail = exc.read(4096).decode("utf-8", errors="replace")
+            except (OSError, http.client.HTTPException):
+                detail = "error response body unavailable"
+            finally:
+                exc.close()
+            failure = f"HTTP {exc.code}: {detail}"
+            record["attempts"].append({"attempt": attempt, "httpStatus": exc.code})
+        except (OSError, urllib.error.URLError, http.client.HTTPException) as exc:
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            retryable = isinstance(reason, (TimeoutError, ConnectionError,
+                                            http.client.RemoteDisconnected, http.client.IncompleteRead)) or (
+                isinstance(reason, OSError) and reason.errno in
+                {errno.ECONNRESET, errno.ECONNABORTED, errno.ECONNREFUSED, errno.ETIMEDOUT, errno.EPIPE})
+            failure = f"{type(exc).__name__}: {exc}"
+            record["attempts"].append({"attempt": attempt, "errorType": type(exc).__name__})
+        except (ValueError, RuntimeFailure) as exc:
+            failure = str(exc)
+            record["attempts"].append({"attempt": attempt, "errorType": type(exc).__name__})
+        _atomic_json(evidence, record)
+        print(f"[clawevolve-report] report={report_id} attempt={attempt}/5 "
+              f"outcome={record['attempts'][-1]} retryable={retryable}", flush=True)
+        delay = 2 ** (attempt - 1)
+        if not retryable or attempt == 5 or time.monotonic() + delay >= deadline:
+            raise RuntimeFailure(
+                f"ClawWeb report not acknowledged after {attempt} attempt(s): {failure}; evidence={evidence}"
+            )
+        time.sleep(delay)
+    raise AssertionError("unreachable report retry state")
 
 
 def _run_dir(args: argparse.Namespace) -> Path:
