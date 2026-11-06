@@ -89,7 +89,8 @@ SQLite 新文件权限为 `0600`。原始 CSV、补充 JSONL、归档和本地�
 | `bot_uuid` | 完整 `agent_id`，不拆冒号、不重造 ID |
 | `env` | 仓储环境及 `source_card.environment` |
 | `actor_kind` | `type`，保留 `bot / human` |
-| `visibility` | `availability`，保留 `private / protected / public` |
+| `visibility` | `labels.visibility` 与旧兼容字段 `availability`，保留 `private / protected / public` |
+| `user_visibility` | 有原值时写入 `labels.user_visibility`；缺失时保留已有标签，不从 online/offline 推导 |
 | `bot_info.name` | `name`；未提供该键时使用 CSV `name` |
 | `bot_info.summary` | `description`，缺失 / null 保留为 null |
 | `bot_info.skills` | 独立 `name / description` 对象列表，不拼入 description、不推导 expert |
@@ -105,6 +106,23 @@ SQLite 新文件权限为 `0600`。原始 CSV、补充 JSONL、归档和本地�
 已有 Card 的 `runtime_state / trust_level / lifecycle_state / profile_id` 在没有补充值时保持原值。
 新 Card 默认 `guarded / active / default`。`profile_id` 只是单一历史兼容标识，不创建多 Profile 或激活关系。
 新运行状态取 CSV `status`，不能据此推断部署系统当前在线状态。
+
+## V2 标签与旧接口兼容
+
+部署支持标签的版本前，在 TC 原数据源的 `bcsfuse_agent_cards` 增加 `labels JSON NULL`；
+不切换到 zbcsfuse 数据源，Doc 表继续使用已有的 `filters` 列。
+
+- legacy 模式的旧接口仍只更新旧表；V2 标签始终只影响新 Card/Doc。
+- card 模式的旧 sync/availability 将明确提交的 `availability` 与 `labels.visibility`
+  在同一次 Card 写入中保存。稀疏 sync、不涉及可见性的更新保留已有标签。
+- V2 修改 `labels.visibility` 后，旧单查、批查、候选过滤和 Fuse 的 Worker 读取使用同一可见性。
+  原生 Card 无需补入 `availability` 字段；已导入的 Worker Card 若含此字段，则一并更新。
+  同次请求明确提交两个冲突值时返回 400，不写入。
+- `user_visibility` 独立保留原始三态。旧 online/offline 仅更新旧运行状态，既不生成也不覆盖
+  用户标签；V2 标签更新也不把用户可见性当作连接在线状态。V1 原在线过滤保持，V2 仅按显式条件筛选。
+- TC 构建器版本升级为 `tc-description-v2`，使已有 Doc 的兼容可见性过滤也能正确重建。
+  部署后新 TC 索引代次由现有同步链路生成，验收前等待新 Card/Doc 索引就绪；无须重新导入 Card。
+  legacy 旧索引以及 zbcsfuse 的索引和构建规则不变。
 
 ## 可选权威资料 JSONL
 

@@ -603,3 +603,121 @@ def test_private_v2_card_is_discoverable_without_changing_v1_defaults(service):
                 assert [item["id"] for item in response.json()["items"]] == expected
         response = client.post("/v1/search", json={"query": "private:one"})
         assert response.status_code == 200 and not response.json()["results"]
+
+
+@pytest.mark.parametrize("mode", ["legacy", "card"])
+def test_old_visibility_updates_follow_storage_switch_and_preserve_user_label(
+    service, mode
+):
+    start, _ = service
+    with start(mode) as (client, _registry):
+        key = "visibility:owner"
+        old_sync(client, key, "invoice lookup")
+        new_card(client, key, name=key, description="invoice lookup")
+        path = f"/api/v2/agent-cards/{key}"
+        client.put(
+            path, json={"labels": {"user_visibility": ["protected"]}}
+        ).raise_for_status()
+        for operation in ("availability", "sync"):
+            if operation == "availability":
+                response = client.put(
+                    f"/v1/workers/{key}/availability", json={"availability": "private"}
+                )
+            else:
+                response = client.post(
+                    f"/v1/workers/{key}/sync",
+                    json={"name": key, "availability": "protected", "profile": {}},
+                )
+            assert response.status_code == 200, response.text
+            expected = (
+                "public"
+                if mode == "legacy"
+                else ("private" if operation == "availability" else "protected")
+            )
+            labels = client.get(path).json()["labels"]
+            assert labels == {
+                "visibility": [expected],
+                "user_visibility": ["protected"],
+            }
+        before = client.get(path).json()["labels"]
+        for state in ("offline", "online"):
+            client.put(f"/v1/workers/{key}/{state}").raise_for_status()
+            assert client.get(path).json()["labels"] == before
+        client.post(
+            f"/v1/workers/{key}/sync", json={"name": "Renamed", "profile": {}}
+        ).raise_for_status()
+        assert client.get(path).json()["labels"] == before
+        # Missing user visibility is preserved as unknown for old-only imports.
+        old_sync(client, "unlabeled:owner", "invoice lookup")
+        if mode == "card":
+            assert client.get("/api/v2/agent-cards/unlabeled:owner").json()[
+                "labels"
+            ] == {"visibility": ["public"]}
+
+
+def test_v2_visibility_updates_old_reads_filters_and_fuse_without_changing_native_card(
+    service,
+):
+    start, _ = service
+    with start("card") as (client, registry):
+        key = "native:visibility"
+        path = f"/api/v2/agent-cards/{key}"
+        card = {"name": "Invoice assistant", "description": "invoice lookup"}
+        new_card(client, key, **card)
+        client.put(f"/v1/workers/{key}/online").raise_for_status()
+        # Only the old online operation adds a compatibility runtime state.
+        stored = client.get(path).json()["card"]
+        assert stored == {**card, "runtime_state": "online"}
+        for value, visible in (
+            ("public", True),
+            ("private", False),
+            ("protected", True),
+        ):
+            response = client.put(path, json={"labels": {"visibility": [value]}})
+            assert response.status_code == 202, response.text
+            registry.require("tc_card_search").updates.run_once()
+            assert client.get(path).json()["card"] == stored
+            assert client.get(f"/v1/workers/{key}").json()["availability"] == value
+            batch = client.post("/v1/workers/batch", json={"worker_ids": [key]}).json()
+            assert batch["data"][key]["availability"] == value
+            worker = registry.require("worker_registry_store").get_by_id(key)
+            assert worker.state.availability.value == value
+            old = client.post("/v1/search", json={"query": key})
+            assert old.status_code == 200, old.text
+            assert bool(old.json()["results"]) is visible
+            for route in ("search", "recommend"):
+                new = client.post(
+                    f"/api/v2/{route}",
+                    json={"query": key, "filters": {"labels.visibility": [value]}},
+                )
+                assert new.status_code == 200, new.text
+                assert [item["id"] for item in new.json()["items"]] == [key]
+
+
+def test_v2_rejects_conflicting_visibility_and_keeps_legacy_card_fields_consistent(
+    service,
+):
+    start, _ = service
+    with start("card") as (client, registry):
+        key = "imported:visibility"
+        old_sync(client, key, "invoice lookup")
+        path = f"/api/v2/agent-cards/{key}"
+        before = client.get(path).json()
+        response = client.put(
+            path,
+            json={
+                "card": {"availability": "private"},
+                "labels": {"visibility": ["public"]},
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert client.get(path).json() == before
+        response = client.put(path, json={"labels": {"visibility": ["private"]}})
+        assert response.status_code == 202, response.text
+        assert client.get(path).json()["card"]["availability"] == "private"
+        response = client.put(path, json={"card": {"availability": "protected"}})
+        assert response.status_code == 202, response.text
+        registry.require("tc_card_search").updates.run_once()
+        saved = client.get(path).json()
+        assert saved["labels"] == {"visibility": ["protected"]}
+        assert saved["card"]["availability"] == "protected"

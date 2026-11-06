@@ -26,8 +26,15 @@ FILTER_FIELDS = frozenset(
 )
 
 
+def worker_availability(card):
+    # V2 Cards need no legacy state fields. Explicit labels also override old
+    # Worker snapshots when projecting the legacy read/filter contract.
+    values = card.labels.get("visibility")
+    return values[0] if values else card.source_card.get("availability", "private")
+
+
 class TcDocumentConverter:
-    version = "tc-description-v1"
+    version = "tc-description-v2"
 
     def convert(self, card):
         data = business_card(card)
@@ -46,7 +53,11 @@ class TcDocumentConverter:
             "lifecycle_state": "active",
         }
         for key in FILTER_FIELDS:
-            value = data.get(key, worker_defaults.get(key))
+            value = (
+                worker_availability(card)
+                if key == "availability"
+                else data.get(key, worker_defaults.get(key))
+            )
             values = [value] if isinstance(value, str) else value
             if values:
                 labels[key] = tuple(values)
@@ -151,7 +162,13 @@ class TcCatalog:
         fields = sync_changes(current, payload)
         self.validate({**data, **fields})
         row = self.repository.upsert(
-            worker_id, fields, resource_type="agent", search_config={}
+            worker_id,
+            fields,
+            resource_type="agent",
+            search_config={},
+            labels={"visibility": [fields["availability"]]}
+            if "availability" in fields
+            else None,
         )
         return row, current is None
 
@@ -160,7 +177,13 @@ class TcCatalog:
         data = {**current.card.source_card, **fields}
         self.validate(data)
         return self.repository.upsert(
-            worker_id, fields, resource_type="agent", search_config={}
+            worker_id,
+            fields,
+            resource_type="agent",
+            search_config={},
+            labels={"visibility": [fields["availability"]]}
+            if "availability" in fields
+            else None,
         )
 
     @staticmethod
@@ -243,7 +266,7 @@ class TcCatalog:
             domains=data.get("domains", []),
             capabilities=[],
             state={
-                "availability": data.get("availability", "private"),
+                "availability": worker_availability(row.card),
                 "runtime_state": data.get("runtime_state", "offline"),
                 "trust_level": data.get("trust_level", "guarded"),
             },
