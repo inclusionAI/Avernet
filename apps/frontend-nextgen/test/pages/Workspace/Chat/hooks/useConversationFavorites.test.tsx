@@ -9,7 +9,7 @@ import { act, renderHook } from '@testing-library/react';
 import { toast } from 'sonner';
 
 jest.mock('@/services/workspace/conversationFavoriteService', () => ({
-  conversationFavoriteService: { toggle: jest.fn() },
+  conversationFavoriteService: { toggle: jest.fn(), invalidate: jest.fn() },
 }));
 jest.mock('sonner', () => ({ toast: { error: jest.fn() } }));
 const toggle = conversationFavoriteService.toggle as jest.Mock;
