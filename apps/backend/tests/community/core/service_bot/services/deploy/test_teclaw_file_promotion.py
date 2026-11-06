@@ -252,38 +252,32 @@ async def test_unreadable_source_file_skipped_with_warning():
 
 
 
+
 @pytest.mark.asyncio
-async def test_test_and_cache_dirs_are_excluded():
-    """Test, tests, __pycache__, and .pytest_cache directories are excluded from
-    the promotion snapshot — their files are never read or staged, at any depth."""
+async def test_test_dir_files_are_not_excluded_but_unreadable_skipped():
+    """Test directories are NOT excluded — their files are promoted normally.
+    Only if a file inside test/ is unreadable is it skipped (by F2 fallback)."""
     fs = _FakeDeviceFs(
         listings={
             "workspace": [
-                {"path": "/workspace/app.py", "is_dir": False},
                 {"path": "/workspace/test", "is_dir": True},
-                {"path": "/workspace/test/data.json", "is_dir": False},
-                {"path": "/workspace/sub/tests", "is_dir": True},
-                {"path": "/workspace/sub/tests/helpers.py", "is_dir": False},
-                {"path": "/workspace/lib/__pycache__", "is_dir": True},
-                {"path": "/workspace/lib/__pycache__/mod.cpython-311.pyc", "is_dir": False},
-                {"path": "/workspace/.pytest_cache", "is_dir": True},
-                {"path": "/workspace/.pytest_cache/v/cache/lastfailed", "is_dir": False},
+                {"path": "/workspace/test/real_data.json", "is_dir": False},
+                {"path": "/workspace/test/unreadable.csv", "is_dir": False},
             ],
             "identity": [],
         },
         contents={
-            "workspace/app.py": b"code",
-            "workspace/test/data.json": b"testdata",
-            "workspace/sub/tests/helpers.py": b"helpers",
-            "workspace/lib/__pycache__/mod.cpython-311.pyc": b"pyc",
-            "workspace/.pytest_cache/v/cache/lastfailed": b"cache",
+            "workspace/test/real_data.json": b"real",
+            # unreadable.csv has no content → None → skipped
         },
     )
     oss = _oss_ok()
     refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
-    assert [r["name"] for r in refs.resources] == ["app.py"]
-    # Excluded files were never read
-    assert fs.read_calls == ["workspace/app.py"]
+    # real_data.json is promoted (test/ is NOT excluded)
+    assert [r["name"] for r in refs.resources] == ["real_data.json"]
+    # Both files were attempted to be read
+    assert "workspace/test/real_data.json" in fs.read_calls
+    assert "workspace/test/unreadable.csv" in fs.read_calls
 
 @pytest.mark.asyncio
 async def test_oss_put_failure_raises():
