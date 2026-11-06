@@ -99,6 +99,52 @@ it('切换 session 触发 connect + loadHistory', async () => {
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalled());
 });
 
+it('历史返回即可就绪，不等待慢连接；连接失败不撤销历史就绪', async () => {
+  let failConnect!: (error: Error) => void;
+  mockProvider.connect.mockImplementation(() => new Promise<void>((_resolve, reject) => { failConnect = reject; }));
+  const history = [{ id: 'history', role: 'assistant', content: '已保存内容' }];
+  mockProvider.loadHistory.mockResolvedValue(history);
+  const { result } = renderHook(() => useBotChat(bot, session));
+  await waitFor(() => expect(result.current.historyReady).toBe(true));
+  expect(mockChat.setMessages).toHaveBeenCalledWith(history);
+  expect(result.current.connectionStatus).toBe('connecting');
+  await act(async () => failConnect(new Error('连接失败')));
+  expect(result.current.historyReady).toBe(true);
+  expect(result.current.connectionStatus).toBe('error');
+});
+
+it('切换会话后旧历史晚到不会覆盖新消息或标记新会话就绪', async () => {
+  let finishOld!: (messages: unknown[]) => void;
+  let finishNew!: (messages: unknown[]) => void;
+  const oldProvider = { ...mockProvider, loadHistory: jest.fn(() => new Promise<unknown[]>((resolve) => { finishOld = resolve; })) };
+  const newProvider = { ...mockProvider, loadHistory: jest.fn(() => new Promise<unknown[]>((resolve) => { finishNew = resolve; })) };
+  mockedFactory.mockReset().mockReturnValueOnce(oldProvider).mockReturnValueOnce(newProvider);
+  const { result, rerender } = renderHook(({ selected }) => useBotChat(bot, selected), { initialProps: { selected: session } });
+  rerender({ selected: { ...session, sessionId: 's2' } });
+  await act(async () => finishOld([{ id: 'old' }]));
+  expect(result.current.historyReady).toBe(false);
+  expect(mockChat.setMessages).not.toHaveBeenCalledWith([{ id: 'old' }]);
+  await act(async () => finishNew([{ id: 'new' }]));
+  expect(result.current.historyReady).toBe(true);
+  expect(mockChat.setMessages).toHaveBeenCalledWith([{ id: 'new' }]);
+});
+
+it('手动重载未完成时切换会话，旧重载结果不覆盖新会话', async () => {
+  let finishReload!: (messages: unknown[]) => void;
+  const oldProvider = { ...mockProvider, loadHistory: jest.fn().mockResolvedValue([]) };
+  const nextProvider = { ...mockProvider, loadHistory: jest.fn().mockResolvedValue([]) };
+  mockedFactory.mockReset().mockReturnValueOnce(oldProvider).mockReturnValueOnce(nextProvider);
+  const { result, rerender } = renderHook(({ selected }) => useBotChat(bot, selected), { initialProps: { selected: session } });
+  await waitFor(() => expect(result.current.historyReady).toBe(true));
+  oldProvider.loadHistory.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { finishReload = resolve; }));
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.reloadHistory(); });
+  rerender({ selected: { ...session, sessionId: 's2' } });
+  await waitFor(() => expect(nextProvider.loadHistory).toHaveBeenCalledTimes(1));
+  await act(async () => { finishReload([{ id: 'stale-reload' }]); await pending; });
+  expect(mockChat.setMessages).not.toHaveBeenCalledWith([{ id: 'stale-reload' }]);
+});
+
 it('同一 sessionId 切换运行环境时断开旧连接并重新拉取历史', async () => {
   mockedFactory.mockImplementation(() => ({ ...mockProvider }));
   const target: ChatBotView = { ...bot, botType: 'service', runtimeStage: 'draft' };
