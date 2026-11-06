@@ -22,7 +22,12 @@ class BotRunQueueChunkRepository(Protocol):
         content: str | None = None,
         metadata: str | None = None,
     ) -> None:
-        """插入一条 chunk 记录。(run_id, seq) 联合唯一，重复写 INSERT IGNORE。"""
+        """Insert a chunk; duplicate (run_id, seq) writes keep the first row unchanged.
+
+        Native conflict-ignore retains existing rows without updating them. Other
+        write failures propagate; MySQL nonduplicate or incomplete warnings fail
+        before commit.
+        """
         ...
 
     def get_chunks_after(
