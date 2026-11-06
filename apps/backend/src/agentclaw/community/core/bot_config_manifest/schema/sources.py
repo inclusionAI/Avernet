@@ -62,6 +62,12 @@ _KEY_OWNER: dict[str, tuple[SourceKind, str]] = {
     "subpath": (SourceKind.GIT, "selects inside the tree a repository delivers"),
     "bucket": (SourceKind.OSS, "names a bucket in an object store"),
     "key": (SourceKind.OSS, "names an object inside that bucket"),
+    # ``bot_id`` is the whole of a bot source's addressing: which source bot's
+    # workspace the sync reads from. The entry's own ``path`` (a literal the
+    # copy serializer writes) selects within it at sync time, so there is no
+    # ``subpath`` on the source — and no ``auth``/``mode``/``ref``, because a
+    # bot source is not a fetch.
+    "bot_id": (SourceKind.BOT, "names the source bot whose workspace is synced"),
 }
 
 #: How each protocol says where its content is — quoted back to a caller who
@@ -71,12 +77,13 @@ _ADDRESSING: dict[SourceKind, str] = {
     SourceKind.OSS: (
         "an oss source addresses its object with 'bucket' and 'key'"
     ),
+    SourceKind.BOT: "a bot source names its source bot with 'bot_id'",
 }
 
 _KEYS_BY_PROTOCOL: dict[SourceKind, frozenset[str]] = {
     protocol: _COMMON_KEYS
     | frozenset(k for k, (owner, _) in _KEY_OWNER.items() if owner is protocol)
-    for protocol in (SourceKind.GIT, SourceKind.OSS)
+    for protocol in (SourceKind.GIT, SourceKind.OSS, SourceKind.BOT)
 }
 
 #: What each protocol cannot do without. Everything else is optional or
@@ -91,18 +98,27 @@ _REQUIRED_BY_PROTOCOL: dict[SourceKind, tuple[str, ...]] = {
     # apply. The fetcher re-asks it as a belt, for documents that reached
     # storage before this rule existed.
     SourceKind.OSS: ("bucket", "auth"),
+    # A bot source names exactly one source bot; without it the sync has
+    # nothing to read. ``bot_id`` is the protocol's only addressing field.
+    SourceKind.BOT: ("bot_id",),
 }
 
 #: The field each protocol says *where* with. Writing the other protocol's is
 #: one mistake, and the refusal for it already names the replacement — so the
 #: "you are missing X" complaint is suppressed rather than added to it.
-_ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket"})
+_ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket", "bot_id"})
 
 #: The protocols a source may declare. ``content`` is a
 #: :class:`~agentclaw.community.core.apply_engine.support_matrix.SourceKind`
 #: but never a *source*: inline text is written on the entry and there is
-#: nothing to declare.
-DECLARABLE_PROTOCOLS: tuple[SourceKind, ...] = (SourceKind.GIT, SourceKind.OSS)
+#: nothing to declare. ``bot`` is a source — it names a source bot by
+#: ``bot_id`` — even though, unlike git/oss, it converges through a sync step
+#: rather than fetching bytes into the content store.
+DECLARABLE_PROTOCOLS: tuple[SourceKind, ...] = (
+    SourceKind.GIT,
+    SourceKind.OSS,
+    SourceKind.BOT,
+)
 
 _PROTOCOL_LIST = " or ".join(f"'protocol: {p.value}'" for p in DECLARABLE_PROTOCOLS)
 
@@ -170,6 +186,10 @@ class SourceDecl:
     #: Both entries read one checkout of one commit: the composition changes
     #: which path is read out of the tree, never which tree is fetched.
     subpath: str | None = None
+    #: bot only — the source bot whose workspace the sync reads from. The
+    #: entry's own ``path`` (a literal the copy serializer writes) selects
+    #: within it at sync time, so there is no ``subpath`` on a bot source.
+    bot_id: str | None = None
     #: The **name** of a stored credential. Never a value — the manifest has no
     #: vocabulary for one, at any depth.
     auth: str | None = None
@@ -178,6 +198,10 @@ class SourceDecl:
     @property
     def is_git(self) -> bool:
         return self.protocol is SourceKind.GIT
+
+    @property
+    def is_bot(self) -> bool:
+        return self.protocol is SourceKind.BOT
 
 
 @dataclass(frozen=True)
@@ -332,6 +356,11 @@ def parse_source(
         add(".subpath", "invalid_path", "subpath must be a non-empty string")
         subpath = None
 
+    bot_id = None if "bot_id" in misplaced else raw.get("bot_id")
+    if bot_id is not None and (not isinstance(bot_id, str) or not bot_id):
+        add(".bot_id", "invalid_bot_id", "'bot_id' must name a source bot")
+        bot_id = None
+
     auth = raw.get("auth")
     if auth is not None and (not isinstance(auth, str) or not auth):
         add(".auth", "invalid_auth", "'auth' must name a stored credential")
@@ -359,6 +388,7 @@ def parse_source(
             key=key_prefix,
             ref=ref,
             subpath=subpath,
+            bot_id=bot_id,
             auth=auth,
             mode=SourceMode(mode),
         ),

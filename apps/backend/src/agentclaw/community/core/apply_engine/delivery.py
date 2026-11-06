@@ -77,6 +77,7 @@ from typing import (
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
+from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.ports.identity_file_port import (
@@ -201,6 +202,12 @@ class MaterialiserPorts:
     mcp_config_service: MCPConfigServiceProtocol
     #: Finds the shared Center / repository skill a desired skill names, for the skills materialiser.
     shared_skills: SharedSkillPort
+    #: Bot copy's file-sync port: the ``BOT_FILE_SYNC`` materialiser forwards
+    #: here, never touching the content store. One field cross-family: both
+    #: deliveries bind it (a noop on platform-managed teclaw, a real sync on
+    #: ARCA), the way ``cli_tool_service`` is one field with family-specific
+    #: backing. Test rigs pass ``None`` when they exercise no bot copy.
+    file_sync: BotFileSyncPort | None
 
     def as_kwargs(self) -> dict[str, Any]:
         """The same fields as a plain dict, ready to splat into
@@ -221,6 +228,7 @@ class MaterialiserPorts:
             "cli_tool_service": self.cli_tool_service,
             "mcp_config_service": self.mcp_config_service,
             "shared_skills": self.shared_skills,
+            "file_sync": self.file_sync,
         }
 
 
@@ -367,6 +375,9 @@ _ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
     Section.SCRIPT: ApplyPhase.PRE_CONTAINER,
     Category.IDENTITY: ApplyPhase.ON_CONTAINER,
     Category.RESOURCES: ApplyPhase.ON_CONTAINER,
+    # File sync runs after the device is up — it syncs another bot's workspace
+    # onto this one, which only makes sense once the target container is alive.
+    Section.BOT_FILE_SYNC: ApplyPhase.ON_CONTAINER,
     Category.SKILLS: ApplyPhase.ON_CONTAINER,
     Category.MCP: ApplyPhase.ON_CONTAINER,
     Category.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,

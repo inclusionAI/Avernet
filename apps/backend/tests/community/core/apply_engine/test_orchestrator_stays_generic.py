@@ -144,15 +144,18 @@ def test_script_is_alone_in_the_phase_that_needs_no_container():
 
 
 def test_phase_b_keeps_the_declared_category_order():
-    """``identity → resources → skills → mcp``, per work-items §5."""
+    """``identity → resources → bot_file_sync → skills → mcp``, the on-container
+    walk order. ``bot_file_sync`` sits right after ``resources``: a workspace
+    sync moves the same roots the resources materialiser owns, so it runs next."""
     on_container = [
         step.construct
         for step in sorted(order.APPLY_ORDER, key=lambda s: s.position)
         if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.ON_CONTAINER
     ]
-    assert on_container[:4] == [
+    assert on_container[:5] == [
         Category.IDENTITY,
         Category.RESOURCES,
+        Section.BOT_FILE_SYNC,
         Category.SKILLS,
         Category.MCP,
     ]
