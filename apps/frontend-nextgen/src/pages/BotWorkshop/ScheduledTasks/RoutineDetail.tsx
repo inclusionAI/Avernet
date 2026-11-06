@@ -158,7 +158,7 @@ export function RoutineDetail({
                   <div className="break-all">Caller：{run.operator_id || '未报告'}</div>
                 </dl>
                 <div className="mt-4 flex justify-end">
-                  <RoutineRunConversation run={run} />
+                  <RoutineRunConversation run={run} botType={context.bot_type} />
                 </div>
               </article>
             ))}
