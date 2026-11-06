@@ -272,25 +272,6 @@ def test_create_session_other_engine_keeps_existing_response(client, relay, engi
     assert resp.json()["data"]["model"] == ENGINE_SESSION["model"]
 
 
-@pytest.mark.parametrize("ext_info", [
-    None, [], {}, {"openclaw_creation": []},
-    {"openclaw_creation": {}},
-    {"openclaw_creation": {"session_id": 123, "model": "p/m"}},
-    {"openclaw_creation": {"session_id": " ", "model": "p/m"}},
-    {"openclaw_creation": {"session_id": SESSION_ID}},
-    {"openclaw_creation": {"session_id": SESSION_ID, "model": 123}},
-    {"openclaw_creation": {"session_id": SESSION_ID, "model": " "}},
-])
-def test_create_rejects_missing_metadata_without_readback_or_retry(client, relay, ext_info):
-    relay.results = [EngineResult(data={**ENGINE_SESSION, "ext_info": ext_info})]
-
-    response = client.post(_base(), json={"title": "T"})
-
-    assert response.status_code == 502, response.json()
-    assert len(relay.calls) == 1
-    assert relay.calls[0]["method"] == "POST"
-
-
 @pytest.mark.parametrize("title", [None, "", "Named_with_underscores"])
 def test_create_preserves_title_and_creation_times_without_list(client, relay, title):
     relay.results = [EngineResult(data={

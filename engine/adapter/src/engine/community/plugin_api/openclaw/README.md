@@ -58,6 +58,12 @@ store path, transcript ID, or raw gateway payload is exposed.
 
 The Backend OpenAPI create route consumes this metadata to return the canonical
 session ID and effective model directly, without list/history readback or sleeps.
-Deploy the updated Adapter with this Backend; older Adapters have no fallback.
+For older Adapters without this metadata (or an incomplete metadata response),
+Backend keeps the legacy best-effort list reconciliation: at most three reads,
+with delays of 0, 0.5, and 1.5 seconds, on the same Bot, stage, and device instance.
+It preserves the creation timestamps and requested title when merging a match.
+If reconciliation fails or finds no match, the original successful creation
+response is returned; creation is never retried. Incomplete metadata is logged
+without exposing response contents. Updated Adapters always take the fast path.
 Other engines and the friend-caller path are unchanged. The local plugin supplies
 the same contract using its stored session key and local model.
