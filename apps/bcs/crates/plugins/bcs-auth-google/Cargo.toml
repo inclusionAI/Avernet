@@ -11,10 +11,8 @@ version = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 bcs-auth-api = { workspace = true }
-bcs-jwt = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tracing = { workspace = true }
 urlencoding = { workspace = true }
 

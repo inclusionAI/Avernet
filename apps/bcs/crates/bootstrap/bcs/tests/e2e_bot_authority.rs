@@ -70,6 +70,7 @@
 //!     -- --test-threads=1 --nocapture
 //! ```
 
+#[path = "support/e2e_helpers.rs"]
 mod e2e_helpers;
 
 use std::time::Duration;

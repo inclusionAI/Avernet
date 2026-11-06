@@ -10,9 +10,7 @@ use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{Participant, ParticipantRole};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 async fn membership_contract(repo: &dyn SessionRepoPort) {
     let ids = vec!["unknown".into(), "human_alice".into(), "owned".into()];
