@@ -1,0 +1,20 @@
+apps/backend/tests/community/endpoints/test_openapi_create_with_manifest.py
+  s_620fb772f449f4::t_b41bddf08f01d2 27,556-557,984-989,991,1020,1026-1029
+  s_620fb772f449f4::t_49c22494798073 536-541,549-551,990,1030
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b7402ca005f496d85b6b737a95782e93a6713c63",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
