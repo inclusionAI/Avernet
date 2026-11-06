@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -780,9 +781,11 @@ async def get_task_internal(
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
-    graph = service.get_task_dashboard(task_id)
+    graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+        service.get_task_dashboard, task_id
+    )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
-    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
