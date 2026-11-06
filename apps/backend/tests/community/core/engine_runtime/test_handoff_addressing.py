@@ -8,8 +8,8 @@ import pytest
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
-    BotService,
 )
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
 from agentclaw.community.core.engine_runtime.stage import resolve_stage_device_context
 from tests.community.core.engine_runtime.test_connection import _Devices, _svc
 from tests.community.core.engine_runtime.test_relay import (
@@ -65,12 +65,8 @@ class BotRows:
 
 def make_runtime():
     rows = BotRows()
-    # Use the real compatibility resolver and strict enrichment methods. Only
-    # the persistence/template/provider boundaries are replaced in this suite.
-    bots = BotService.__new__(BotService)
-    bots._repository = rows
-    bots._template_service = Mock()
-    bots._template_service.get_template.return_value = None
+    # Use the production lightweight lookup and real compatibility resolver.
+    bots = RuntimeBotLookup(rows)
     resolver, transport, collaborators = _Resolver(), _Transport(), _Collaborators()
     publishes = _PublishRepo(
         {PK: [_PublishRecord({"binding": {"online": 930, "verify": 920}})]}
