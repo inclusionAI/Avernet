@@ -75,15 +75,34 @@ async fn dispatch(flow: &BcsMessageFlow, mut cmd: TaskDispatchCommand, native: b
             if let Some(sid) = manager_session_id.as_deref() {
                 if let Ok(Some(session)) = sessions.get(sid).await {
                     for participant in &session.participants {
-                        if flow.registry.get(&participant.bot_uuid).await.is_none() {
-                            if let Err(e) = sessions.remove_participant(sid, &participant.bot_uuid).await {
+                        // Only clean up bot participants whose registration
+                        // is definitively absent. Human participants carry
+                        // user IDs in bot_uuid — they are never in the bot
+                        // registry — and transient read failures must not
+                        // be mistaken for a deleted bot.
+                        if !participant.is_bot() {
+                            continue;
+                        }
+                        match flow.registry.try_get(&participant.bot_uuid).await {
+                            Ok(None) => {
+                                if let Err(e) = sessions.remove_participant(sid, &participant.bot_uuid).await {
+                                    tracing::warn!(
+                                        bot_uuid = %participant.bot_uuid,
+                                        session_id = %sid,
+                                        error = %e,
+                                        "failed to remove orphan participant from session"
+                                    );
+                                }
+                            }
+                            Err(e) => {
                                 tracing::warn!(
                                     bot_uuid = %participant.bot_uuid,
                                     session_id = %sid,
                                     error = %e,
-                                    "failed to remove orphan participant from session"
+                                    "skipping orphan cleanup: registry read failed"
                                 );
                             }
+                            _ => {}
                         }
                     }
                 }
