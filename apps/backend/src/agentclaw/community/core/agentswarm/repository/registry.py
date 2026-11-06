@@ -34,6 +34,9 @@ from agentclaw.community.core.agentswarm.repository.run_dispatch.model import (
 from agentclaw.community.core.agentswarm.repository.audit.model import (
     AcAgentSwarmAuditModel,
 )
+from agentclaw.community.core.agentswarm.repository.identity.model import (
+    AcAgentSwarmIdentityModel,
+)
 
 ALL_MODELS = (
     AcAgentSwarmRunModel,
@@ -45,4 +48,5 @@ ALL_MODELS = (
     AcAgentSwarmGuardEventModel,
     AcAgentSwarmRunDispatchModel,
     AcAgentSwarmAuditModel,
+    AcAgentSwarmIdentityModel,
 )

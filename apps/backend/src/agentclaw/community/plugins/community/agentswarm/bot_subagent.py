@@ -33,9 +33,6 @@ from agentclaw.community.core.agentswarm.domain.models import (
     SubagentResult, TaskEnvelope, NonRetryableProvisioningError, spawn_digest,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
-from agentclaw.community.plugin_api.agentswarm.subagent import (
-    ParkedAwaitingAuthorization,
-)
 from agentclaw.community.log import get_logger
 
 logger = get_logger("agentswarm")
@@ -259,33 +256,12 @@ class AvernetSubagent:
             )
             if state == BotState.READY.value:
                 return state
-            if state == BotState.AWAITING_AUTHORIZATION.value:
-                # The human gate: reset the provisioning-delay marker so
-                # the post-gate boot simulation fires once per gate cycle.
-                self._prov_delay_fired = False
-                # The human gate: the passport application is
-                # pending inside its window and only a human can move it, so
-                # burning the poll budget against this deadline is guaranteed
-                # waste. Park now — the pool rechecks this same continuation
-                # cheaply and parks time never touches the setup clock. The
-                # window's own deadline (in the status answer's authorization
-                # descriptor when the platform serves one) is the park's bound.
-                parked = "bot {} parked awaiting human authorization".format(
-                    bot_id)
-                authorization = getattr(state, "authorization", None)
-                if authorization is not None:
-                    deadline = str(getattr(authorization, "deadline", "") or "")
-                    if deadline:
-                        parked += f" (window deadline {deadline})"
-                raise ParkedAwaitingAuthorization(parked, bot_id=bot_id)
             if state in _AUTHORIZATION_TERMINAL:
-                # The authorization answered with its own terminal verdict:
-                # a retry would re-open a fresh gate the same human just
-                # declined (or let yet another window lapse), so classify
-                # non-retryable and let the pool stop the attempt loop.
-                # The identity + verdict ride the marker so the pool can
-                # record the terminal state on the agent row
-                # without parsing this message.
+                # A worker never waits for a human: the run's identity is applied
+                # synchronously by the first persona, so no authorization gate
+                # exists to park at (design D1). These states remain reachable only
+                # from a platform that answered with an authorization verdict, and
+                # are classified non-retryable exactly as before.
                 raise NonRetryableProvisioningError(
                     f"bot {bot_id} creation failed: {state}",
                     bot_id=bot_id, bot_state=state,)

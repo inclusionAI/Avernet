@@ -12,7 +12,13 @@ from agentclaw.community.plugins.community.agentswarm.host import (
     AvernetBotPlatform,
 )
 from agentclaw.community.plugins.community.agentswarm.bot_subagent import (
-    AvernetSubagent, ParkedAwaitingAuthorization,
+    AvernetSubagent,
+)
+# The park marker lives in the seam's vocabulary, not the adapter's: the adapter no
+# longer raises it (a swarm worker never waits for a human), but the shared pool
+# still catches it for platforms that can.
+from agentclaw.community.plugin_api.agentswarm.subagent import (
+    ParkedAwaitingAuthorization,
 )
 
 
@@ -27,109 +33,6 @@ def _mk_platform(**overrides):
     for k, v in overrides.items():
         setattr(platform, k, v)
     return platform
-
-
-class TestFindJobPreCheck:
-    """Cross-slice resume: when the manifest seam already has a creation
-    job for this identity, create_bot returns the bot_id immediately,
-    skipping the redundant submit + passport apply."""
-
-    def test_existing_job_returns_immediately(self):
-        from agentclaw.community.plugins.community.agentswarm.host import (
-            AvernetBotPlatform,
-        )
-        from agentclaw.community.core.agentswarm.domain.models import (
-            BotCreateSpec, IdempotencyKey,
-        )
-        platform = AvernetBotPlatform.__new__(AvernetBotPlatform)
-        platform._manifest_seam = MagicMock()
-        platform._manifest_seam.find_job.return_value = {"bot_id": "x"}
-        platform._space_context = MagicMock()
-        result = platform.create_bot(
-            spec=BotCreateSpec(name="t", description="d"),
-            idempotency_key=IdempotencyKey("r:a:1"),
-            owner_id="49912",
-        )
-        assert result == "agent_swarm_" + result.replace("agent_swarm_", "")
-        platform._manifest_seam.find_job.assert_called_once()
-
-
-class TestPassportReApplyGuard:
-    """When the submit raises PassportError but the passport's live
-    status is ISSUED, the handler starts the creation job directly."""
-
-    def test_issued_passport_starts_job(self):
-        from agentclaw.community.plugins.community.agentswarm.host import (
-            AvernetBotPlatform,
-        )
-        from agentclaw.community.plugin_api.agentswarm.bot import BotCreateSpec
-        from agentclaw.community.plugin_api.passport import PassportError
-        from agentclaw.community.core.agentswarm.domain.models import (
-            IdempotencyKey,
-        )
-        platform = AvernetBotPlatform.__new__(AvernetBotPlatform)
-        platform._manifest_seam = MagicMock()
-        platform._manifest_seam.find_job.return_value = None
-        platform._passport = MagicMock()
-        platform._passport.query_auth_status.return_value = {
-            "status": "ISSUED", "token": "tok",
-        }
-        platform._space_context = MagicMock()
-        platform._bot_service = MagicMock()
-        platform._bot_repo = MagicMock()
-        platform._skill_set_factory = MagicMock()
-
-        from agentclaw.community.core.bot_management.create_flow import (
-            submit_bot_creation_with_manifest,
-        )
-        with patch(
-            "agentclaw.community.core.bot_management.create_flow."
-            "submit_bot_creation_with_manifest",
-            side_effect=PassportError("empty corner"),
-        ):
-            result = platform.create_bot(
-                spec=BotCreateSpec(name="t", description="d"),
-                idempotency_key=IdempotencyKey("r:a:1"),
-                owner_id="49912",
-            )
-        assert result.startswith("agent_swarm_")
-        platform._manifest_seam.start_job.assert_called_once()
-        kwargs = platform._manifest_seam.start_job.call_args[1]
-        assert kwargs["iframe_url"] is None
-        assert kwargs["redirect_url"] is None
-
-    def test_unissued_passport_reraises(self):
-        from agentclaw.community.plugins.community.agentswarm.host import (
-            AvernetBotPlatform,
-        )
-        from agentclaw.community.core.agentswarm.domain.models import (
-            IdempotencyKey,
-        )
-        from agentclaw.community.plugin_api.passport import PassportError
-        platform = AvernetBotPlatform.__new__(AvernetBotPlatform)
-        platform._manifest_seam = MagicMock()
-        platform._manifest_seam.find_job.return_value = None
-        platform._passport = MagicMock()
-        platform._passport.query_auth_status.return_value = {"status": "REJECTED"}
-        platform._space_context = MagicMock()
-        platform._bot_service = MagicMock()
-        platform._bot_repo = MagicMock()
-        platform._skill_set_factory = MagicMock()
-
-        from agentclaw.community.plugins.community.agentswarm.host import (
-            BotCreateSpec,
-        )
-        with patch(
-            "agentclaw.community.core.bot_management.create_flow."
-            "submit_bot_creation_with_manifest",
-            side_effect=PassportError("empty corner"),
-        ):
-            with pytest.raises(PassportError):
-                platform.create_bot(
-                    spec=BotCreateSpec(name="t", description="d"),
-                    idempotency_key=IdempotencyKey("r:a:1"),
-                    owner_id="49912",
-                )
 
 
 class TestEngineConnectRetry:

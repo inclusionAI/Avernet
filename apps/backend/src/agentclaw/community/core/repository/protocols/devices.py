@@ -9,7 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Any, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.repository.record import (
@@ -231,6 +231,21 @@ class DeviceBindingRepository(Protocol):
         caller 实例由 ``apply_reason=caller_instance:{bot_id}`` 标识，且
         binding 的 ``entity_id`` 始终是服务 Bot owner；``applied_by`` 才是
         caller。这里只返回 BaaS staff binding，并按 ``device_id`` 去重。
+        """
+        ...
+
+    @abstractmethod
+    def find_worker_binding(
+        self,
+        *,
+        owner_id: str,
+        applied_by: str,
+        env: str,
+    ) -> Optional[DeviceBindingRecord]:
+        """一个 AgentSwarm worker 实例的 live binding，按 worker 自己（``applied_by``）定位。
+
+        调用方手里只有 ``create_bot`` 返回的 worker id，因此查找以它为键，而不是
+        反推 run 的 bot id。``apply_reason`` 只用于限定在 worker 家族内。
         """
         ...
 

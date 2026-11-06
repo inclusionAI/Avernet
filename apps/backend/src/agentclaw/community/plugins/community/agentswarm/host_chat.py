@@ -26,6 +26,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agentclaw.community.core.agentswarm.domain.models import BotId
 
+
+def _current_env() -> str:
+    """The deployment env a binding is scoped to, read where it is needed."""
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    return get_current_env()
+
 # Upper bound on one engine chat round trip. It follows the swarm's own
 # per-attempt task budget (``orchestration.per_attempt_timeout``, 1800s
 # after the durable-persona raise; setup 900 + chat 1800 = 2700 still fits
@@ -189,6 +196,34 @@ class ChatLegMixin:
         per-run options resolve against."""
         return self._chat_timeout_seconds
 
+    def _worker_device_id(self, *, bot_id: BotId, owner: str) -> str:
+        """The device behind a worker, from its binding row.
+
+        A swarm worker is addressed by its ``ac_entity_device_binding``: the row
+        carries ``device_id`` (the platform device ws-info resolves) and the
+        ``applied_by`` that says which persona's instance it is. That is the same
+        family the caller-instance path writes — one bot record, N device
+        bindings — so a worker resolves without a bot record of its own.
+
+        Answers ``""`` when no binding matches, which lets the caller fall back to
+        a bot row that owns its own device.
+        """
+        finder = getattr(self._bot_service, "resolve_worker_device_id", None)
+        if finder is not None:
+            device = finder(bot_id=str(bot_id), owner_id=owner)
+            if device:
+                return str(device).strip()
+
+        find = getattr(self._device_binding_repo, "find_worker_binding", None)
+        if find is None:
+            return ""
+        binding = find(
+            owner_id=owner, applied_by=str(bot_id), env=_current_env()
+        )
+        if binding is None:
+            return ""
+        return str(getattr(binding, "device_id", "") or "").strip()
+
     def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:
         """Resolve the bot's chat endpoint via BaaS ws-info.
 
@@ -196,11 +231,20 @@ class ChatLegMixin:
         knows (bot-uuid-minted targets close the WS 1008 in proxypass_ws),
         so the connection pair always comes from the canonical
         ``/api/v1/bots/{uuid}/ws-info`` resolution — never minted here.
+
+        **A worker has no bot row of its own.** A swarm run owns one bot record
+        and each persona is a device under it, addressed by its
+        ``ac_entity_device_binding`` row — the same shape the caller-instance path
+        provisions at production scale. So the device is resolved from the
+        binding first, and the bot row's own ``device_id`` is the fallback for
+        any surface that still owns one.
         """
-        bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
-        if bot is None:
-            raise RuntimeError(f"bot {bot_id} not found for chat")
-        bot_uuid = (bot.get("device_id") or "").strip()
+        bot_uuid = self._worker_device_id(bot_id=bot_id, owner=owner)
+        if not bot_uuid:
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
+            if bot is None:
+                raise RuntimeError(f"bot {bot_id} not found for chat")
+            bot_uuid = (bot.get("device_id") or "").strip()
         if not bot_uuid:
             raise RuntimeError(
                 f"bot {bot_id} has no runtime binding to chat through"

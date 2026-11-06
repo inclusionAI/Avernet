@@ -26,7 +26,13 @@ class TestBotPlatformConformance:
 
     def test_method_set_is_exactly_the_seam(self):
         public = {m for m in vars(BotPlatform) if not m.startswith("_")}
-        assert public == {"create_bot", "bot_status", "delete_bot", "chat"}
+        # ``end_run`` is part of the seam because a platform whose bots share one
+        # identity must release it at the run's terminal point, not with any one
+        # bot's teardown. It is the slot that made run-scoped identity destruction
+        # reachable at all.
+        assert public == {
+            "create_bot", "bot_status", "delete_bot", "chat", "end_run"
+        }
 
     def test_create_bot_takes_structured_spec_keyword_only(self):
         sig = _sig("create_bot")

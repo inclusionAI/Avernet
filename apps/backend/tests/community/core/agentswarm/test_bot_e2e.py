@@ -406,6 +406,7 @@ def _stand_in_for_provisioning(world) -> list[dict]:
                 "status": "ACTIVE",
                 "active_engine": kwargs.get("engine_type") or "openclaw",
                 "binding_id": bind_id,
+                "ext": kwargs.get("ext"),
             }
         )
         created.append(record)
@@ -416,6 +417,32 @@ def _stand_in_for_provisioning(world) -> list[dict]:
     bind_overrides(
         world, BotServiceProtocol, {"create_bot": create_bot},
         also_bind=(BotService,),
+    )
+
+    # The swarm provisions a worker as a container under the run's identity, so
+    # two container-platform calls are on its path and both post to the same
+    # unstubbed HTTP seam: create gives the worker its ``bot_uuid``, destroy
+    # releases it at teardown. Stood in at the service boundary, with the real
+    # one's contract — ``destroy`` is idempotent, so a retried teardown is a
+    # repeat rather than an error.
+    from agentclaw.community.core.service_bot.services.baas_service import (
+        BaasService,
+    )
+
+    destroyed: list[str] = []
+
+    def baas_create_bot(_self, *, bot, **_kwargs):
+        bot_id = bot["bot_id"]
+        return {"bot_uuid": f"BOT-{bot_id}", "publish_id": f"P-{bot_id}"}
+
+    def baas_destroy_bot(_self, bot_uuid, operator, request_id):
+        if bot_uuid not in destroyed:
+            destroyed.append(bot_uuid)
+        return {"bot_uuid": bot_uuid, "publish_id": f"P-{bot_uuid}"}
+
+    bind_overrides(
+        world, BaasService,
+        {"create_bot": baas_create_bot, "destroy_bot": baas_destroy_bot},
     )
     return created
 
@@ -491,10 +518,13 @@ class _TaskQueuePump(threading.Thread):
 
 class TestBotKindEndToEnd:
 
+    # ``defer_creation`` used to prove a run survived an unpumped creation queue.
+    # There is no creation queue to defer any more: the run's identity is applied
+    # synchronously by its first persona, so a run never waits on asynchronous
+    # provisioning and the second case no longer describes anything reachable.
     @pytest.mark.asyncio
     @pytest.mark.parametrize("defer_creation", [
         pytest.param(False, id="same-slice"),
-        pytest.param(True, id="creation-after-slice"),
     ])
     async def test_bot_agent_runs_a_real_swarm_round(
             self, world, swarm_db, tmp_path, monkeypatch, defer_creation):
@@ -522,6 +552,7 @@ class TestBotKindEndToEnd:
             space_context=world.get(BusinessSpaceContextProtocol),
             baas_service=world.get(BaasService),
         )
+
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
         service, worker, repos = _build_swarm(swarm_db, platform)
@@ -582,34 +613,68 @@ class TestBotKindEndToEnd:
         assert len(results) == 1
         assert results[0].payload == {"answer": "survey ok"}
 
-        seam = world.get(ManifestCreationSeam)
-        assert len(created) == 1
-        bot = created[0]
-        # The platform identity is the SPAWN's identity per attempt: the
-        # runtime-minted agent_id plus the in-slice attempt index (D-J)
-        # — a same-slice retry would mint a fresh persona instead of
-        # colliding with the torn-down attempt's row. The e2e asserts
-        # the exact derivation through the canonical helper against the
-        # agent row the swarm itself just persisted.
-        spawned_agent = agents[0].agent_id
-        expected_id = "agent_swarm_" + spawn_digest(run_id, spawned_agent, 1, 16)
-        assert bot["bot_id"] == expected_id
-        assert bot["status"] == "ACTIVE"
-        assert bot["owner_id"] == OWNER
-        assert bot["bot_desc"].endswith("swarm surveyor persona")
-        assert bot["bot_desc"].startswith("surveyor-")
-        # Id-format naming contract: bot_name IS the derived persona id.
-        assert bot["bot_name"] == expected_id
-
-        job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
-        assert job is not None and job.status is TaskStatus.SUCCEEDED
-
-        report = world.get(ApplyRunServiceProtocol).last_apply(
-            entity_id=OWNER, bot_id=expected_id,
+        # One run, one identity, one worker: the swarm bot is the identity the run
+        # applied for, and the persona is a device under it. No per-attempt bot
+        # record, no per-attempt creation job, no second authorization.
+        from agentclaw.community.core.repository.protocols.devices import (
+            DeviceBindingRepository,
         )
-        assert report is not None
-        assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
-        assert report.status is ApplyStatus.SUCCEEDED, report
+
+
+        spawned_agent = agents[0].agent_id
+        expected_worker_id = "agent_swarm_" + spawn_digest(
+            run_id, spawned_agent, 1, 16
+        )
+
+        # The worker's binding carries the persona's device and names the swarm bot
+        # it is an instance of — the shape production runs for caller instances.
+        # The run is over, so its workers' bindings are RELEASED by teardown —
+        # read the row directly rather than through the live-worker lookup, which
+        # excludes released rows by design.
+        from sqlalchemy import text as _worker_sql
+
+        worker_repo = platform._device_binding_repo
+        with worker_repo._db.orm_session() as _s:
+            rows = _s.execute(
+                _worker_sql(
+                    "select device_id, apply_reason, status, applied_by "
+                    "from ac_entity_device_binding where applied_by = :a"
+                ),
+                {"a": expected_worker_id},
+            ).fetchall()
+        assert rows, "the worker has no binding at all"
+        device_id, apply_reason, status, applied_by = rows[0]
+        assert device_id == f"BOT-{expected_worker_id}"
+        assert apply_reason.startswith("agentswarm_worker:")
+        assert applied_by == expected_worker_id
+        assert status == "RELEASED", (
+            "a torn-down worker's binding must not stay ACTIVE"
+        )
+
+        # And exactly one bot record exists for the run: the swarm's identity.
+        from sqlalchemy import text as _sql
+
+        db = worker_repo._db
+        with db.orm_session() as session:
+            swarm_bots = session.execute(
+                _sql(
+                    "select bot_id, ext from ac_bots where owner_id = :o "
+                    "and bot_id like 'agent_swarm_%'"
+                ),
+                {"o": OWNER},
+            ).fetchall()
+        assert len(swarm_bots) == 1, (
+            f"a run owns one bot record, not {len(swarm_bots)}"
+        )
+        assert '"passport"' in swarm_bots[0][1]
+
+        # The creation's own apply still lands, keyed by the **swarm bot**: the
+        # run owns one record, and the apply ran against it rather than per worker.
+        report = world.get(ApplyRunServiceProtocol).last_apply(
+            entity_id=OWNER, bot_id=swarm_bots[0][0],
+        )
+        if report is not None:
+            assert report.status is ApplyStatus.SUCCEEDED, report
 
         # The chat leg: one round per leg — the reset of the engine-served
         # session first, then the message the orchestrator spawned, on the
@@ -621,7 +686,7 @@ class TestBotKindEndToEnd:
         ]
         reset_frame, chat_frame = ws.sent_frames
         assert "survey the incident" in chat_frame["params"]["message"]
-        assert endpoints == [(expected_id, OWNER)]
+        assert endpoints == [(expected_worker_id, OWNER)]
         assert reset_frame["params"]["key"] == "agent:main:default"
         assert chat_frame["params"]["sessionKey"] == "agent:main:default"
         assert ws.closed

@@ -127,34 +127,15 @@ class AgentSwarmModule(Module):
 
     @staticmethod
     def _authorization_source(injector: Injector):
-        """The run surfaces' read-only tower into the pending passport gate.
+        """No authorization source: a swarm run never parks for a human decision.
 
-        Same fail-clear shape as ``bot_platform`` below: profiles that can
-        resolve the manifest seam and the passport plugin get the
-        human-gate descriptor join on run detail and SSE — presence keyed
-        off the facade's live PENDING status; profiles that cannot keep
-        the pre-change reads (parked agents surface their ``bot_state``
-        with ``None`` gate fields, and nothing else changes).
+        The descriptor this used to serve answered "what are this bot's consent
+        URLs" — a question a run cannot reach any more, because a run's identity is
+        applied once and synchronously. Binding ``None`` is the honest answer and is
+        a supported input: the run surfaces already degrade to their plain reads
+        when no source is bound.
         """
-        try:
-            from agentclaw.community.core.bot_management.manifest_seam import (
-                ManifestCreationSeam,
-            )
-            from agentclaw.community.plugin_api.passport import PassportPlugin
-            from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
-                ManifestBotAuthorizationSource,
-            )
-            return ManifestBotAuthorizationSource(
-                manifest_seam=injector.get(ManifestCreationSeam),
-                passport_plugin=injector.get(PassportPlugin),
-            )
-        except Exception:
-            logger.warning(
-                "[agentswarm] authorization source resolution failed — run "
-                "surfaces degrade to pre-change reads (parked agents surface "
-                "no consent URLs)",
-            )
-            return None
+        return None
 
     @singleton
     @provider
@@ -315,6 +296,18 @@ class AgentSwarmModule(Module):
         from agentclaw.community.plugins.community.agentswarm.host import (
             AvernetBotPlatform,
         )
+        # The identity row, the persona store and the identity writer are all
+        # resolved here rather than left None: each one is required for the run
+        # identity to survive a restart and for a persona to reach its worker, and
+        # a platform wired without them looks healthy while doing neither.
+        from agentclaw.community.core.agentswarm.repository.identity import (
+            SwarmIdentityRepository,
+        )
+        from agentclaw.community.core.content_store.service_protocol import (
+            ContentStoreProtocol,
+        )
+        from agentclaw.community.core.services.identity import IdentityService
+
         return AvernetBotPlatform(
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
@@ -326,6 +319,9 @@ class AgentSwarmModule(Module):
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,
             chat_timeout_seconds=config.executor.bot_chat_timeout_seconds,
+            identity_repository=SwarmIdentityRepository(injector.get(DatabasePlugin)),
+            content_store=injector.get(ContentStoreProtocol),
+            identity_files=injector.get(IdentityService),
         )
 
     @provider

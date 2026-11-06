@@ -92,6 +92,21 @@ class BotPlatform(Protocol):
         """Best-effort removal of the transient bot."""
         ...
 
+    def end_run(self, *, run_id: str, owner_id: str) -> bool:
+        """Destroy whatever identity the run held for its bots, once it is over.
+
+        Separate from ``delete_bot`` on purpose. A platform whose bots share one
+        identity must not destroy it while a sibling is still running, so it is
+        released at the **run's** terminal point rather than with any one bot.
+        A platform whose bots each hold their own identity answers ``False``: there
+        is nothing run-scoped to release, and per-bot teardown already did it.
+
+        Best-effort by contract — a run's terminal write must never be blocked by
+        cleanup — and idempotent, so a retried or concurrent reconciliation is
+        safe. Returns whether this call released something.
+        """
+        ...
+
     def chat(self, bot_id: BotId, message: str, owner_id: str = "",
              session_key: str | None = None,
              cancel_event: threading.Event | None = None) -> str:

@@ -115,12 +115,45 @@ class DefaultSubagentFactory:
         if self._attempt_repo is not None:
             destroyed += self._sweep_ledger_bots(run)
         destroyed += self._sweep_legacy_belt(run, agents)
+        # The run's **identity** goes last, once its workers are gone: workers
+        # borrow it, so destroying it first would break every sibling still
+        # running. This is the end of the run — a normal end, a cancellation, a
+        # stuck reclaim and a forced failure all pass through here — which is why
+        # the identity's lifetime is tied to the run's terminal write rather than
+        # to any one persona's teardown.
+        self._destroy_run_identity(run)
         if destroyed:
             logger.info(
                 "[agentswarm][factory] destroyed %d stranded bot(s) for run=%s: %s",
                 len(destroyed), run.run_id, destroyed,
             )
         return destroyed
+
+    def _destroy_run_identity(self, run: Run) -> None:
+        """Destroy the run's single AgentPass, if the platform exposes one.
+
+        Best-effort and idempotent: the platform decides from its own stored row
+        whether there is an identity left to destroy, so a retried or concurrent
+        reconciliation cannot destroy twice. A platform without the method (a test
+        double, or a profile with no identity plane) is a no-op rather than an
+        error — reconciliation must never block a run's terminal write.
+        """
+        end_run = getattr(self._platform, "end_run", None)
+        if end_run is None:
+            return
+        try:
+            destroyed = end_run(run_id=str(run.run_id), owner_id=run.owner_id)
+        except Exception:  # noqa: BLE001 - reconciliation never blocks terminal
+            logger.exception(
+                "[agentswarm][factory] run identity destroy failed for run=%s",
+                run.run_id,
+            )
+            return
+        if destroyed:
+            logger.info(
+                "[agentswarm][factory] destroyed the run's identity for run=%s",
+                run.run_id,
+            )
 
     def _sweep_ledger_bots(self, run: Run) -> list[str]:
         destroyed: list[str] = []

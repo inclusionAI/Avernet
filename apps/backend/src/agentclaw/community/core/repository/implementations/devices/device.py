@@ -98,6 +98,16 @@ from agentclaw.community.core.repository.implementations.devices.guarded_lifecyc
 logger = get_logger()
 
 
+#: The ``apply_reason`` a swarm worker's device binding carries, keyed by the bot the
+#: instance belongs to. Same shape as the caller-instance family — one bot record, N
+#: device bindings, resolved by ``(entity_id, apply_reason, applied_by)`` — but its
+#: own namespace, so a worker is never mistaken for a human caller.
+#:
+#: The literal is owned here (this layer is what reads it) and the swarm re-exports
+#: it, because ``core`` must not import a plugin: the dependency runs the other way.
+WORKER_INSTANCE_APPLY_REASON_PREFIX = "agentswarm_worker:"
+
+
 class _DeviceBindingStatus:
     """Device binding status enum values (copied from prod twin)."""
 
@@ -381,6 +391,41 @@ class DeviceRepository(
                 seen_device_ids.add(record.device_id)
                 bindings.append(record)
             return bindings
+
+    def find_worker_binding(
+        self,
+        *,
+        owner_id: str,
+        applied_by: str,
+        env: str,
+    ) -> Optional[DeviceBindingRecord]:
+        """The live binding carrying one worker instance.
+
+        A swarm run owns one bot record and each persona is a device under it, so
+        the binding is addressed by **the worker itself** — ``applied_by`` — and not
+        by the run's bot: a caller that only holds the id ``create_bot`` returned has
+        the worker and nothing else, and an id that has to be inverted back into a
+        run would be a guess. ``owner_id`` keeps the lookup inside the owner's rows
+        and the reason prefix keeps it inside the worker family.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.env == env,
+                    EntityDeviceBinding.entity_id == owner_id,
+                    EntityDeviceBinding.entity_type == "staff",
+                    EntityDeviceBinding.device_provider == "baas",
+                    EntityDeviceBinding.apply_reason.like(
+                        f"{WORKER_INSTANCE_APPLY_REASON_PREFIX}%"
+                    ),
+                    EntityDeviceBinding.applied_by == applied_by,
+                    EntityDeviceBinding.status != _DeviceBindingStatus.RELEASED,
+                )
+                .order_by(EntityDeviceBinding.id.desc())
+                .first()
+            )
+            return _to_record(row) if row is not None else None
 
     def count_non_released_bindings(
         self,

@@ -337,3 +337,38 @@ class TestConfiguredOrchestration:
         )
         assert evaluator._wall_clock_seconds == 1800.0
         assert evaluator._no_progress_threshold == 6
+
+
+class TestPlatformIsWiredForIdentityAndPersonas:
+    """The platform must be *built* with the three collaborators a run needs.
+
+    A platform wired with them as ``None`` looks healthy — it constructs, it
+    provisions — while silently losing the run's durable identity and never
+    delivering a persona. This asserts the wiring, not the behaviour, because the
+    failure mode is absence.
+    """
+
+    def test_the_identity_repository_is_bound(self, test_injector):
+        from agentclaw.community.plugins.community.agentswarm.host import (
+            AvernetBotPlatform,
+        )
+
+        test_injector.binder.bind(AgentSwarmConfig, to=AgentSwarmConfig())
+        platform = test_injector.get(BotPlatform)
+
+        assert isinstance(platform, AvernetBotPlatform)
+        assert platform._run_registry is not None
+        assert platform._run_registry._repository is not None, (
+            "a run's identity would never be written, so a restart re-applies"
+        )
+
+    def test_the_persona_store_and_writer_are_bound(self, test_injector):
+        test_injector.binder.bind(AgentSwarmConfig, to=AgentSwarmConfig())
+        platform = test_injector.get(BotPlatform)
+
+        assert platform._content_store is not None, (
+            "persona content could not be stored"
+        )
+        assert platform._identity_files is not None, (
+            "persona content could not be delivered to a worker"
+        )
