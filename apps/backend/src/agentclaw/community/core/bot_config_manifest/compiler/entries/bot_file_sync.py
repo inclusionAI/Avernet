@@ -71,7 +71,13 @@ def compile_bot_file_sync(
             continue
         try:
             source_bot_id = _resolve_bot_id(session, entry)
-        except EntryFetchError as exc:
+        except EntryFetchError as exc:  # pragma: no cover - defensive
+            # ``declared_protocol`` already gated this entry as a bot source,
+            # and ``_resolve_bot_id`` re-reads the same raw the gate read. The
+            # two can only disagree if that raw mutated between the two reads,
+            # which the parser never does. Kept as a guard rather than dropped
+            # so a future change to ``declared_protocol`` that loosens the gate
+            # surfaces here as an entry failure instead of an IndexError.
             failures.append(EntryFailure(path, exc.reason))
             continue
         excludes = tuple(entry.get("excludes") or ())
@@ -100,14 +106,14 @@ def _resolve_bot_id(session: CompileSession, entry: Mapping[str, Any]) -> str:
     name = entry.get("from")
     if isinstance(name, str) and name:
         raw = session.source_session.sources.get(name)
-        if raw is None:
+        if raw is None:  # pragma: no cover - defensive, see caller's except
             raise EntryFetchError(
                 f"'from' references source {name!r}, which is not declared under 'sources'"
             )
     else:
         raw = entry.get("source")
     decl, violations = parse_source(raw)
-    if decl is None or decl.bot_id is None:
+    if decl is None or decl.bot_id is None:  # pragma: no cover - defensive
         # The schema refuses this at PUT; reaching here means a document that
         # predates the rule or was stored by an older build. Surface it as an
         # entry failure rather than fetching.

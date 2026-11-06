@@ -66,3 +66,57 @@ def test_a_mixed_list_lands_only_the_bot_source_in_this_declaration() -> None:
     assert entry.source_bot_id == "s"
     assert entry.path == "workspace/"
 
+
+def test_a_non_mapping_entry_is_reported_as_a_failure_skipped() -> None:
+    # A malformed entry never reaches DesiredBotFileSync; the compiler carries
+    # the misuse as an EntryFailure rather than fetching from it.
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    declared = compile_bot_file_sync(session, ["not-a-mapping"])
+    assert declared is not None
+    assert declared.entries == ()
+    (failure,) = declared.failures
+    assert "a resources entry must be a mapping" in failure.reason
+
+
+def test_a_bot_source_entry_without_a_path_is_reported() -> None:
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    declared = compile_bot_file_sync(session, [{"from": "from_bot"}])
+    assert declared is not None
+    assert declared.entries == ()
+    (failure,) = declared.failures
+    assert "a resources entry must declare a 'path'" in failure.reason
+
+
+def test_a_bot_source_entry_whose_path_refuses_locally_is_reported() -> None:
+    # ``resource_path_refusal`` rejects an absolute/escape path; the compiler
+    # surfaces the refusal as an entry failure on that path.
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    declared = compile_bot_file_sync(session, [{"path": "/abs/path", "from": "from_bot"}])
+    assert declared is not None
+    assert declared.entries == ()
+    assert declared.failures and declared.failures[0].identity == "/abs/path"
+
+
+def test_a_bot_source_entry_referencing_an_undeclared_name_is_skipped_not_failed() -> None:
+    # ``from: absent`` is not under ``sources:``, so ``declared_protocol`` reads
+    # it as ``None`` and the entry is skipped whole — the undeclared-name
+    # refusal belongs to the resources validator / schema, not this compiler,
+    # which only reclassifies entries it can already see are bot-sourced.
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    assert compile_bot_file_sync(
+        session, [{"path": "workspace/", "from": "absent_source"}]
+    ) is None
+
+
+def test_an_inline_bot_source_carries_its_bot_id_straight_through() -> None:
+    # An inline ``source: {protocol: bot, bot_id: …}`` parses the same way as a
+    # named one; the compiler reads the bot_id off the parsed decl.
+    session, _, _ = rig()
+    declared = compile_bot_file_sync(
+        session,
+        [{"path": "workspace/", "source": {"protocol": "bot", "bot_id": "inline_1"}}],
+    )
+    assert declared is not None
+    (entry,) = declared.entries
+    assert entry.source_bot_id == "inline_1"
+
