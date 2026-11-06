@@ -1,0 +1,38 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-deploy-router-host.test.ts
+  h_5f06d4d8b4bdd5 16,29
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-deploy-transport.test.ts
+  h_5f06d4d8b4bdd5 53-57,62
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-draft-host.test.ts
+  h_5f06d4d8b4bdd5 111-113
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-host.test.ts
+  h_5f06d4d8b4bdd5 51-59
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-router-host.test.ts
+  h_5f06d4d8b4bdd5 14,25,35-41,50
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-origin-bootstrap.test.ts
+  h_5f06d4d8b4bdd5 52-54
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-pre-cors-mount.test.ts
+  h_5f06d4d8b4bdd5 1-70
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-origin.test.ts
+  h_5f06d4d8b4bdd5 50-52
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-logging.test.ts
+  h_5f06d4d8b4bdd5 74-78
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-security.test.ts
+  h_5f06d4d8b4bdd5 32-33,37
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/unified-save-host.test.ts
+  h_5f06d4d8b4bdd5 181-183
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 91,471
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  h_5f06d4d8b4bdd5 4,59-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5cebafe4d5788fae567a68e6576a191b5a2503bd",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
