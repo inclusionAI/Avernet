@@ -169,6 +169,28 @@ describe('useSessionTaskPanelBootstrap', () => {
     ]);
   });
 
+  it('前一个会话残留的焦点任务不会阻止新会话自动恢复', async () => {
+    const { ref, openTab } = makePanelRef();
+
+    useTaskSessionAssociationStore.getState().setActiveSession('sess-old');
+    useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-old', ['task-old']);
+    useTaskSidePanelStore.getState().setActiveTask('task-old');
+
+    mockGetTaskBySession.mockResolvedValue({
+      ok: true,
+      data: [sessionRef('task-new')],
+    });
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-new', userId: 'u1', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-new' });
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-new');
+  });
+
   it('任务列表失败但 by_session 命中时仍恢复最新 task', async () => {
     const { ref, openTab } = makePanelRef();
     mockGetTaskBySession.mockResolvedValue({

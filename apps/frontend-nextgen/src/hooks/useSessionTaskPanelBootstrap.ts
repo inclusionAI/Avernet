@@ -167,6 +167,19 @@ export function useSessionTaskPanelBootstrap({
     void (async () => {
       try {
         const associationStore = useTaskSessionAssociationStore.getState();
+        // 残留焦点任务只在前一会话中有效。若 clean-up 被任务导航保活或 provider
+        // 重建时序拦住，bootstrap 也要按旧会话关联清掉它，避免挡住新会话恢复。
+        const staleActiveTaskId = useTaskSidePanelStore.getState().activeTaskId;
+        const previousSessionId = associationStore.activeSessionId;
+        if (
+          staleActiveTaskId &&
+          previousSessionId &&
+          previousSessionId !== sessionId &&
+          associationStore.activeSessionTaskIds.includes(staleActiveTaskId)
+        ) {
+          useTaskSidePanelStore.getState().clearActiveTask(staleActiveTaskId);
+        }
+
         associationStore.setActiveSession(sessionId);
 
         const sessionTask = await getTaskBySession(sessionId);

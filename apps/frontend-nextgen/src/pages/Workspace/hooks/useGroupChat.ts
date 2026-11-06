@@ -112,7 +112,7 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
   const interactions = useGroupChatInteractions(provider);
 
   // 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一管理。
-  useGroupChatPanelCleanup(provider, sessionId, panelRef);
+  useGroupChatPanelCleanup(sessionId, panelRef);
 
   // 历史装载同步（分页状态 + loader 串行流程，拆至 useGroupChatHistorySync 控制体积）。
   const { hasMoreHistory, isLoadingMoreHistory, setHasMoreHistory, setIsLoadingMoreHistory } = useGroupChatHistorySync({
