@@ -36,6 +36,7 @@ function formatDateTime(value?: string | null): string {
 }
 
 export interface MyTaskRoutineHistoryDrawerProps {
+  botType?: string;
   selectedRoutineHistoryId: string | null;
   onCloseRoutineHistory: () => void;
   historyRuns: ScheduledRoutineRunRecord[];
@@ -45,6 +46,7 @@ export interface MyTaskRoutineHistoryDrawerProps {
 }
 
 export function MyTaskRoutineHistoryDrawer({
+  botType,
   selectedRoutineHistoryId,
   onCloseRoutineHistory,
   historyRuns,
@@ -121,7 +123,7 @@ export function MyTaskRoutineHistoryDrawer({
                       </Td>
                       <Td>
                         <div className="flex justify-end gap-2">
-                          {item.conversation && <RoutineRunConversation run={item.conversation} />}
+                          {item.conversation && <RoutineRunConversation run={item.conversation} botType={botType} />}
                           <Button
                             variant="secondary"
                             size="sm"

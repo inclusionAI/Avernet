@@ -82,3 +82,34 @@ test('renders historical input and output as Markdown with lists, code and table
   expect(within(dialog).getByRole('table')).toHaveTextContent('不可用');
   expect(within(dialog).getByRole('link', { name: '来源' })).toHaveAttribute('href', 'https://example.com');
 });
+
+
+test.each(['personal', 'desktop'])('hides missing target fields for a %s Bot', (botType) => {
+  render(<RoutineRunConversation botType={botType} run={{ id: 'run', routineId: 'job', status: 'ok', output: '**完成**' }} />);
+  open();
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('执行记录：run');
+  expect(dialog).toHaveTextContent('状态：执行完成');
+  expect(dialog).not.toHaveTextContent('环境：');
+  expect(dialog).not.toHaveTextContent('运行实例：');
+  expect(dialog).not.toHaveTextContent('Caller：');
+  expect(within(dialog).getByRole('heading', { name: '执行会话详情' })).toHaveClass('text-lg', 'font-semibold', 'text-foreground');
+});
+
+test('keeps reported target fields for a personal Bot and hides only missing fields', () => {
+  render(<RoutineRunConversation botType="personal" run={{ ...base, operator_id: '  ' }} />);
+  open();
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('环境：生产态');
+  expect(dialog).toHaveTextContent('运行实例：instance-a');
+  expect(dialog).not.toHaveTextContent('Caller：');
+});
+
+test.each(['service', undefined])('preserves missing target diagnostics when Bot type is %s', (botType) => {
+  render(<RoutineRunConversation botType={botType} run={{ id: 'run', routineId: 'job', status: 'ok' }} />);
+  open();
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('环境：未报告');
+  expect(dialog).toHaveTextContent('运行实例：未报告');
+  expect(dialog).toHaveTextContent('Caller：未报告');
+});
