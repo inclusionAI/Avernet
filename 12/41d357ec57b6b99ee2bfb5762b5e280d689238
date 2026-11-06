@@ -1,0 +1,14 @@
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal/result_leg_identity_tests.rs
+  h_7ecb107b24dd7d 401-438
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1241d357ec57b6b99ee2bfb5762b5e280d689238",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
