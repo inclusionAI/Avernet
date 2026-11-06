@@ -31,7 +31,10 @@ def run_selection(db, observer, phase):
         publication.ext = json.dumps({"publish": {"online": 301}})
     return observer.project_online_selection(
         publication_id=101,
-        observed={"workflow_id": 301, "rollback_token": None},
+        observed={
+            "workflow_id": 301,
+            "rollback_token": None,
+        },
     )
 
 

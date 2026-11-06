@@ -354,7 +354,9 @@ async def test_http_logs_business_fields_trace_and_session_keys_without_credenti
         "Authorization": sentinel,
         "Cookie": sentinel,
         "secret": sentinel,
-        "credentials": {"password": sentinel},
+        "credentials": {
+            "password": sentinel,
+        },
         "sessionKey": "business-session-a",
         "session_key": "business-session-b",
     }
