@@ -127,6 +127,17 @@ export interface ReleaseNotesCapability {
 }
 
 /**
+ * 产品引导（新版助手）能力插槽。Open Core 返回 null（常驻入口不渲染、浮层不挂载，零行为）；
+ * internal overlay 提供实现：
+ * - Entry：侧栏底部常驻入口按钮（AppSidebar 渲染；静默关闭欢迎弹层时短暂高亮）
+ * - Overlay：全局浮层聚合（欢迎弹层 / 助手面板 / 分步引导，AppShell 挂载）
+ */
+export interface GuideAssistantSpec {
+  Entry: ComponentType;
+  Overlay: ComponentType;
+}
+
+/**
  * 员工目录搜索结果（Open Core 领域模型，已剥离 Antbu 原始字段，通过 DTO-leak 门禁）。
  * 由 getUserSearchCapability 在内部 overlay 经 antbuservice 搜索后映射得到。
  * Open Core 默认 null（无员工目录数据源）。userId=工号(staffNo)，作为 addSpaceMember
@@ -518,6 +529,7 @@ export interface AppCapabilities {
    * internal overlay 经 src/internal/help 提供 yuyan 配置实现。
    */
   getReleaseNotesCapability: () => CapabilityResult<ReleaseNotesCapability | null>;
+  getGuideAssistant: () => CapabilityResult<GuideAssistantSpec | null>;
   /**
    * 员工目录搜索能力（花名/工号/邮箱）。Open Core 默认 null（不支持，添加成员弹窗降级为手填工号）；
    * internal overlay 经 src/extensions/internal.ts 注入 antbuservice 实现。
