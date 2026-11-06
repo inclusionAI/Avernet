@@ -1,0 +1,31 @@
+apps/bcs/crates/services/bcs-message-flow/tests/caller_observe_fanout_wiring_contract.rs
+  s_fbddaf353af73f::t_d1380e5f6ebde8 254,262,606-608
+apps/bcs/crates/services/bcs-message-flow/tests/support/caller_observe_reply_case.rs
+  s_80fc7b98894eba::t_49addc05e71600 223,232,243-251,274-276,300-302,307-310,324
+apps/bcs/crates/services/bcs-message-flow/tests/support/caller_observe_tracing.rs
+  s_80fc7b98894eba::t_0cb83ea3efacb9 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4d1f83413be7401a2730bd79381386d335e48d96",
+  "prompts": {},
+  "sessions": {
+    "s_80fc7b98894eba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc3-42ae-75f0-bcd6-2937bf8e6290",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_fbddaf353af73f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aa86-b4c2-7c80-80f2-5a4e43aab9f7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
