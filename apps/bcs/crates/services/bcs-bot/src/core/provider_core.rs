@@ -175,13 +175,8 @@ impl ProviderCore {
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         let provider_bot_ref = identity.provider_bot_ref;
         let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
-        let owner = owners.first().map(|owner| owner.trim()).unwrap_or_default();
-        if owners.len() != 1 || owner.is_empty() {
-            return Err(ServiceError::InvalidOperation {
-                message: "owners must contain exactly one non-empty staff_no".to_string(),
-                request_id: None,
-            });
-        }
+        let (owner, _) = bcs_service_api::types::bot_authority::normalize_provider_owners(&owners)?;
+        let owner = owner.as_str();
         if let Some(url) = webhook_url.as_deref() {
             if matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
                 return Err(ServiceError::InvalidOperation {

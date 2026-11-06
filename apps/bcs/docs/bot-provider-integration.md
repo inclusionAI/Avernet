@@ -132,6 +132,27 @@ With the Provider Admin Bearer token, register a Bot using
 }
 ```
 
+`owners` is an ordered initialization snapshot, not a multi-owner role or a
+manager synchronization API. The first entry becomes the sole owner and
+`created_by`; remaining distinct entries become managers. For example,
+`["alice", "bob", "carol"]` initializes owner Alice and managers Bob/Carol.
+Supply 1–101 raw user IDs (at most 100 initial managers); entries are trimmed,
+validated and deduplicated without changing the first owner. Blank IDs,
+`human_`-prefixed actor IDs, control characters and IDs over 128 UTF-8 bytes
+are rejected before Bot creation. The owner is excluded from managers.
+
+Provider Admin Bearer authorizes this initial identity declaration. Manager
+Human actors are created when absent, but tombstoned/non-Human identities fail
+closed. Owner/version, manager actors/edges and the Provider-attributed
+initialization audit commit atomically. Ordinary registration retains its existing
+Bot/binding-before-authority boundary: failures return errors and may leave a
+version-0 Bot whose authority can be completed through existing replay-capable
+registration paths. Strict duplicate-conflict paths (including AgentPass subbots
+and A2A) retain their existing duplicate policy. An already initialized
+Bot never has managers synchronized or a transferred owner reset by registration;
+Gateway/Plugin replay preserves subsequent grants and revocations. Existing
+initialized Bots are not backfilled. Use the existing management APIs for changes.
+
 Without either `agent_card_url` or `agent_card`, gateway registration fails with HTTP 400 before Bot
 creation if neither webhook address is configured. Plugin/WebSocket Bots reject an explicit webhook URL. URLs use the
 existing outbound URL validation policy. Registration replay preserves the saved
@@ -437,12 +458,12 @@ differences:
 
 `POST /providers/{provider_id}/bots` accepts exactly one of `agent_card_url` or
 a complete `agent_card` JSON object, with the same Provider Admin Bearer.
-Supply exactly one owner and a stable provider_bot_ref. The A2A name defaults
+Supply an `owners` initialization snapshot as described above and a stable provider_bot_ref. The A2A name defaults
 to Card.name; an explicit name is a local alias. Summary defaults to the Card
 description when omitted. Legacy non-A2A requests still require their name.
 
 Both sources share declaration/egress validation and atomic Bot, binding,
-ownership, profile, audit and full Card creation. No webhook is needed; plugin
+ownership, initial manager actors/edges, profile, audit and full Card creation. No webhook is needed; plugin
 mode and mixed webhook/source inputs are rejected. Duplicate Provider/ref
 returns 409 without replaying credentials. Updates use expected_revision.
 Only URL-backed Cards refresh automatically; inline Cards require explicit

@@ -647,11 +647,11 @@ async fn agentpass_provider_bot_registration_omits_runtime_token() {
 }
 
 #[tokio::test]
-async fn provider_bot_registration_requires_exactly_one_owner() {
+async fn provider_bot_registration_requires_valid_owner_and_manager_ids() {
     let ctx = test_context();
     let provider = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
 
-    for owners in [vec![], vec!["11111111".to_string(), "12345678".to_string()]] {
+    for owners in [vec![], vec!["11111111".to_string(), " ".to_string()]] {
         let err = ctx
             .core
             .register_provider_bot_with_bot_uuid(

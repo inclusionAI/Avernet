@@ -189,7 +189,8 @@ async fn human_and_provider_atomic_entrypoints_reject_the_wrong_principal() {
     let v=validated();
     let card=A2aBotRecord {bot_uuid:bot.bot_uuid.clone(),provider_id:bot.provider_id.clone(),provider_bot_ref:bot.provider_bot_ref.clone(),
         agent_card_url:Some("https://example.org/card.json".into()),agent_card:v.raw,revision:1,};
-    let initialization=|actor| OwnershipInitialization {owner_user_id:"delegated-owner".into(),
+    let initialization=|actor| OwnershipInitialization {initial_manager_user_ids: Vec::new(),
+                owner_user_id:"delegated-owner".into(),
         mutation:AuthorityMutation {mutation_id:"test-principal-boundary".into(),actor}};
     let provider=initialization(AuthorityActor::Provider {provider_id:"provider-a".into()});
     assert!(chain.provider_repo.create_a2a_provider_bot_with_ownership(bot.clone(),Default::default(),
@@ -365,4 +366,23 @@ async fn renamed_card_invalidates_warm_metadata_before_partial_provider_patch() 
     assert_eq!(chain.bot_repo.get_including_deleted(&id).await.unwrap().capabilities.name.as_deref(),Some("Renamed Agent"));
     assert!(fetcher.providers.update_provider_bot("provider-a","test-admin","remote",Some("Unauthorized rename".into()),
         None,None,None,None,None).await.is_err());
+}
+
+#[tokio::test]
+async fn provider_a2a_initial_managers_share_atomic_registration() {
+    use bcs_service_api::types::bot_authority::BotAccessRelation;
+    let (chain,service,_,_)=fixture().await;
+    let mut c=command();c.owners=vec![" delegated-owner ".into(),"bob".into(),"bob".into(),"delegated-owner".into()];
+    let result=service.register_provider_bot(c,"https://example.org/card.json".into(),1000).await.unwrap();
+    assert_delegated_owner(&chain,&result.bot_uuid).await;
+    assert_eq!(chain.authority_store.role("human_bob",&result.bot_uuid).await.unwrap(),Some(BotAccessRelation::Manager));
+}
+
+#[tokio::test]
+async fn provider_a2a_manager_failure_rolls_back_bot_card_binding_owner_and_humans() {
+    let (chain,service,_,_)=fixture().await;
+    chain.db.execute(DbStatement::new("CREATE TRIGGER reject_manager BEFORE INSERT ON edge_grants WHEN NEW.grant_kind='manager' BEGIN SELECT RAISE(ABORT, 'manager failure'); END")).await.unwrap();
+    let mut c=command();c.owners.push("bob".into());
+    assert!(service.register_provider_bot(c,"https://example.org/card.json".into(),1000).await.is_err());
+    assert_empty(&chain).await;
 }

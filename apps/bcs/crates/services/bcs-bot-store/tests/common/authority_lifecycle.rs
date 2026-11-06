@@ -331,6 +331,7 @@ fn mutation(owner: &str) -> OwnershipInitialization {
     let sequence =
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     OwnershipInitialization {
+        initial_manager_user_ids: Vec::new(),
         owner_user_id: owner.to_string(),
         mutation: AuthorityMutation {
             mutation_id: format!("mutation-{owner}-{sequence}"),

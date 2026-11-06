@@ -60,6 +60,7 @@ fn initialization_invalid(detail: String) -> ServiceError {
 pub(crate) fn verified_initialization(
     initialization: &OwnershipInitialization,
 ) -> ServiceResult<(String, String)> {
+    bcs_service_api::types::bot_authority::validate_initial_managers(initialization)?;
     let owner = verified_owner(initialization)?;
     match &initialization.mutation.actor {
         AuthorityActor::Human { user_id } => {
@@ -204,9 +205,8 @@ pub(crate) fn ownership_authorization_steps(
     steps_base: usize,
 ) -> ServiceResult<OwnershipSteps> {
     let (owner, owner_actor) = verified_initialization(initialization)?;
-    let actor_id = owner_actor.clone();
     build_ownership_steps(flavor, env, bot_id, initialization, human_session_token,
-        steps_base, (owner, owner_actor, "human", actor_id))
+        steps_base, (owner, owner_actor))
 }
 
 /// Separate Provider-admin admission; the Human-token operation stays strict.
@@ -215,6 +215,7 @@ pub(crate) fn provider_ownership_authorization_steps(
     flavor: DbSqlFlavor, env: &str, bot_id: &str, provider_id: &str,
     initialization: &OwnershipInitialization, human_session_token: &str, steps_base: usize,
 ) -> ServiceResult<OwnershipSteps> {
+    crate::ownership_managers::validate_provider_initialization(initialization)?;
     let owner = verified_owner(initialization)?.to_string();
     if provider_id.trim().is_empty() || !matches!(&initialization.mutation.actor,
         AuthorityActor::Provider {provider_id:actor} if actor == provider_id) {
@@ -223,14 +224,14 @@ pub(crate) fn provider_ownership_authorization_steps(
     validate_mutation(&initialization.mutation)?;
     let owner_actor = owner_actor_id(&owner);
     build_ownership_steps(flavor, env, bot_id, initialization, human_session_token,
-        steps_base, (owner, owner_actor, "provider", format!("provider_{provider_id}")))
+        steps_base, (owner, owner_actor))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build_ownership_steps(
     flavor: DbSqlFlavor, env: &str, bot_id: &str, initialization: &OwnershipInitialization,
     human_session_token: &str, steps_base: usize,
-    (owner, owner_actor, actor_kind, actor_id): (String, String, &str, String),
+    (owner, owner_actor): (String, String),
 ) -> ServiceResult<OwnershipSteps> {
     let mut steps: Vec<DbTransactionStep> = Vec::new();
     // (absolute-ish step index, result column) pairs the
@@ -343,14 +344,9 @@ fn build_ownership_steps(
     // (env, mutation, sequence) would violate the audit key
     // and fail the transaction deterministically.
     steps.push(DbTransactionStep::ExecuteChecked {
-        statement: lifecycle::initialize_audit_statement(
-            env,
-            bot_id,
-            &initialization.mutation.mutation_id,
-            actor_kind,
-            &actor_id,
-            &owner_actor,
-            1,
+        statement: crate::ownership_managers::audit_statement(
+            env, bot_id, &initialization.mutation, &owner_actor,
+            &initialization.initial_manager_user_ids,
         ),
         expected_affected_rows: 1,
     });
@@ -367,6 +363,9 @@ fn build_ownership_steps(
         guard_indexes
             .push((steps.len() - 1, "sequence"));
     }
+
+    crate::ownership_managers::append_steps(&mut steps, flavor, env, bot_id,
+        &initialization.initial_manager_user_ids, steps_base);
 
     // Final guard-consumption statement binding every guard
     // row: a failed guard has no row to bind and the whole

@@ -324,6 +324,14 @@ impl BotRegistryCoreService for BotCore {
         self.repo.initialize_ownership(bot_id, owner_user_id, mutation).await
     }
 
+    async fn initialize_provider_authority(
+        &self, bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
+        self.repo.initialize_provider_authority(bot_id, initialization).await
+    }
+
+
     async fn ownership_governance_state(
         &self,
         bot_id: &str,
