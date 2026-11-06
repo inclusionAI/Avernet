@@ -64,6 +64,8 @@ from agentclaw.community.adapters.http.task.callback_routes import (
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.task.read_auth import task_read_actor
+from agentclaw.community.core.gateway_principal import VerifiedCaller
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
@@ -804,7 +806,7 @@ def reject_public_only_task_id(task_id: str) -> None:
 async def get_task_internal(
     task_id: str,
     request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser | VerifiedCaller = Depends(task_read_actor),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:

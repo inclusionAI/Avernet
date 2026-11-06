@@ -19,6 +19,8 @@ from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.task.read_auth import task_read_actor
+from agentclaw.community.core.gateway_principal import VerifiedCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -53,7 +55,7 @@ router = APIRouter(tags=["task"])
 async def get_task_dashboard_internal(
     task_id: Annotated[str, Query(description="任务ID(创建时签发,bots 列表返回的 task_id)")],
     request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser | VerifiedCaller = Depends(task_read_actor),
     node_id: Annotated[
         str | None, Query(description="子节点ID;指定则只返回该节点的子树投影,缺省返回整图")
     ] = None,
@@ -129,7 +131,7 @@ def _validate_task_status_filter(status: str | None) -> None:
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser | VerifiedCaller = Depends(task_read_actor),
     user_id: str = Query(..., description="按归属 user_id 过滤任务记录"),
     status: Annotated[
         str | None,

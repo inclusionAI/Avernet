@@ -1,6 +1,8 @@
 """内部面镜像:GET /api/v1/collaboration/tasks/dashboard 与 /list(/openapi/v1 同逻辑,改其一须同步)。"""
 from __future__ import annotations
 
+from agentclaw.community.adapters.http.task.read_auth import task_read_actor
+
 from datetime import datetime
 
 from fastapi import FastAPI
@@ -173,7 +175,7 @@ def _client(task_service, artifact_repo) -> TestClient:
     injector = Injector([_StubModule(task_service, artifact_repo)])
     app = FastAPI()
     app.include_router(task_internal_router)
-    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+    app.dependency_overrides[task_read_actor] = app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id="id-1", staffId="owner-1", operatorName="owner"
     )
     attach_injector(app, injector)
