@@ -188,6 +188,29 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             )
             resp.raise_for_status()
             return True
+        except httpx.HTTPStatusError as e:
+            # Idempotent contract: a device-level 404 means the directory is
+            # already gone, which the ``DeviceFileSystem.delete_tree`` docstring
+            # explicitly allows counting as success — and which
+            # ``LocalDeviceFileSystem._baas_delete_tree`` already maps to True.
+            # A transparent-proxy 404 (``BOT_NOT_FOUND`` / ``NO_DEVICES_FOUND``)
+            # means the bot/device is unreachable, not absent, so it fails
+            # closed (False); every other status is a real error and must not
+            # read as deleted. This is the same verified-404 split
+            # ``read_file``/``list_dir`` already apply on this transport.
+            if e.response.status_code == 404 and not _is_proxy_routing_failure(
+                e.response
+            ):
+                logger.debug(
+                    "[%s.delete_tree] already absent: %s",
+                    type(self).__name__, dir_path,
+                )
+                return True
+            logger.error(
+                "[%s.delete_tree] HTTP %d: %s",
+                type(self).__name__, e.response.status_code, dir_path,
+            )
+            return False
         except Exception as e:
             logger.error("[%s.delete_tree] error: %s", type(self).__name__, e)
             return False
@@ -206,6 +229,29 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             )
             resp.raise_for_status()
             return True
+        except httpx.HTTPStatusError as e:
+            # Idempotent contract (``DeviceFileSystem.delete_file``): True when the
+            # file was deleted *or is already absent*. A device-level 404 from
+            # ``/api/file/remove`` is the device saying "no such path" (already
+            # gone), so a repeated delete is success — matching
+            # ``LocalDeviceFileSystem._baas_delete_tree``'s 404 → True and the
+            # verified-404 split ``read_file``/``list_dir`` already use here. A
+            # transparent-proxy 404 (``BOT_NOT_FOUND`` / ``NO_DEVICES_FOUND``) is
+            # unavailability, not absence, so it fails closed (False); every other
+            # status (401, 5xx, …) stays an error and must never read as deleted.
+            if e.response.status_code == 404 and not _is_proxy_routing_failure(
+                e.response
+            ):
+                logger.debug(
+                    "[%s.delete_file] already absent: %s",
+                    type(self).__name__, file_path,
+                )
+                return True
+            logger.error(
+                "[%s.delete_file] HTTP %d: %s",
+                type(self).__name__, e.response.status_code, file_path,
+            )
+            return False
         except Exception as e:
             logger.error("[%s.delete_file] error: %s", type(self).__name__, e)
             return False

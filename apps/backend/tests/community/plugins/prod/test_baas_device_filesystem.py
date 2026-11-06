@@ -406,3 +406,117 @@ async def test_exists_raises_on_401():
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     with pytest.raises(httpx.HTTPStatusError):
         await fs.exists("/foo")
+
+
+# ── delete idempotency: device-level 404 == already absent (True) ────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_file_returns_true_on_device_404():
+    """A device 404 is "file already gone" — the idempotent-delete contract's True.
+
+    ``DeviceFileSystem.delete_file`` documents "True if deleted or already
+    absent"; a 404 that is *not* a transparent-proxy routing failure is the
+    device's own "no such path" answer, so a repeated delete must succeed rather
+    than surface as an ERROR / False (which the file router turns into 404).
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=404,
+        json={"detail": "No such file or directory"},
+        request=httpx.Request("POST", "http://fake/api/file/remove"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.delete_file("/already/gone.txt") is True
+    transport.post.assert_called_once_with("/api/file/remove", json={"target_path": "/already/gone.txt"})
+
+
+@pytest.mark.asyncio
+async def test_delete_file_returns_true_on_plain_404():
+    """A non-JSON 404 body is still the device answering — idempotent True."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=404, content=b"not found",
+        request=httpx.Request("POST", "http://fake/api/file/remove"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.delete_file("/already/gone.txt") is True
+
+
+@pytest.mark.asyncio
+async def test_delete_file_returns_false_on_proxy_routing_404():
+    """A proxy 404 means the bot/device is gone — unavailability, fail closed."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"):
+        err_resp = httpx.Response(
+            status_code=404,
+            json={"detail": {"error": marker, "message": "gone", "bot_uuid": "b1"}},
+            request=httpx.Request("POST", "http://fake/api/file/remove"),
+        )
+        transport = _make_transport(response=err_resp)
+        fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+        assert await fs.delete_file("/foo") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", (401, 500, 502, 503))
+async def test_delete_file_returns_false_on_non_404_http_error(status_code: int):
+    """Auth / server failures are real errors — never read as already-deleted."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=status_code, content=b"boom",
+        request=httpx.Request("POST", "http://fake/api/file/remove"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.delete_file("/foo") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_returns_true_on_device_404():
+    """A device 404 on rmtree means the directory is already gone (idempotent).
+
+    Mirrors ``LocalDeviceFileSystem._baas_delete_tree``'s explicit "404 → True"
+    contract and the ``DeviceFileSystem.delete_tree`` docstring's allowance for
+    unambiguous-absence success.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=404,
+        json={"detail": "No such file or directory"},
+        request=httpx.Request("POST", "http://fake/api/file/rmtree"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.delete_tree("/already/gone") is True
+    transport.post.assert_called_once_with("/api/file/rmtree", json={"target_path": "/already/gone"})
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_returns_false_on_proxy_routing_404():
+    """An ambiguous proxy 404 fails closed — never reported as deleted."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"):
+        err_resp = httpx.Response(
+            status_code=404,
+            json={"detail": {"error": marker, "message": "gone"}},
+            request=httpx.Request("POST", "http://fake/api/file/rmtree"),
+        )
+        transport = _make_transport(response=err_resp)
+        fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+        assert await fs.delete_tree("/dir") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", (401, 500, 502, 503))
+async def test_delete_tree_returns_false_on_non_404_http_error(status_code: int):
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=status_code, content=b"boom",
+        request=httpx.Request("POST", "http://fake/api/file/rmtree"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.delete_tree("/dir") is False
