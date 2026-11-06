@@ -17,7 +17,7 @@ function frozenSession() {
   const candidate = { ...original, contentBase64: 'ZnJvemVu' }
   const snapshot: Snapshot = { workflowId, packId: 'pack', canWrite: true, baseRef: `origin/wf/${workflowId}`, baseCommit: SOURCE, draftHead: null, versionFiles: [original] }
   updateVersion(session, 'current', { snapshot, files: [candidate], error: SAVE_ERROR, blocked: true, notice: '本地候选已保留。' })
-  publish(session, { ...session.state, reconciliation: {
+  publish(session, { ...session.state, version: 'current', reconciliation: {
     attempt: { requestId: REQUEST_ID, expectedPackId: 'pack', snapshot, files: [candidate], input: { requestId: REQUEST_ID, sourceVersion: 'current', sourceCommit: SOURCE, expectedSavedHead: null, changes: [{ ...candidate, operation: 'replace' }] } },
     token: {}, version: 'current', reason: 'no-response', identity: null,
     attemptedFiles: [candidate], sourceCommit: SOURCE, expectedSavedHead: null,

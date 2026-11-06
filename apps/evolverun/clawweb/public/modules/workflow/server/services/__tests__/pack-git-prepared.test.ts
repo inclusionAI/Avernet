@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +10,9 @@ import path from 'node:path';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
 import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
 import { cloneClawflows } from '../clawflows-git-client.js';
+import { createAutoHealConfigTestDb } from '../../config/__tests__/auto-heal-git-fixtures.js';
+import { createPackVersionRouter } from '../../routes/pack-version.js';
+import { savePackVersionToRemote } from '../pack-version-remote.js';
 import {
   withPreparedPackCandidate, pushPreparedPackCandidate, resumePreparedPackCandidate, PackCandidateOutcomeUnknownError, PackCandidateConflictError,
   type SavePackCandidateInput, type PreparedPackCandidate,
@@ -145,22 +150,58 @@ describe('prepared save primitives with a real bare remote', () => {
     expect(ref('refs/heads/wf/flow')).toBe(next);
   });
 
-  it('saves S, deploys release R with the same tree, then edits current R over observed saved S', async () => {
+  it('rejects current R over saved S after deployment even when their trees match, but allows editing S', async () => {
     const saved = await save(); const dir = await clone();
     const release = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
     await pushPreparedDeployment(dir, release);
     expect(release.releaseCommit).not.toBe(saved.commit);
     expect(ref(`${release.releaseCommit}^{tree}`)).toBe(ref(`${saved.commit}^{tree}`));
-    const edited = await withPreparedPackCandidate({ ...input(), sourceCommit: release.releaseCommit,
-      expectedSavedHead: saved.commit, changes: [{ path: 'workflows/flow.yaml', operation: 'replace',
-        contentBase64: b64('id: flow\ntitle: Current edited after deploy\n'), mode: '100644' }] }, async (p, push) => {
-      expect(p.sourceCommit).toBe(release.releaseCommit); expect(p.expectedSavedHead).toBe(saved.commit);
-      await push(); return p;
-    });
+    const changes: SavePackCandidateInput['changes'] = [{ path: 'workflows/flow.yaml', operation: 'replace',
+      contentBase64: b64('id: flow\ntitle: Edited after deploy\n'), mode: '100644' }];
+    await expect(withPreparedPackCandidate({ ...input(), sourceCommit: release.releaseCommit,
+      expectedSavedHead: saved.commit, changes }, async (_p, push) => push())).rejects.toBeInstanceOf(PackCandidateConflictError);
+    expect(ref('refs/heads/saved/flow')).toBe(saved.commit);
+    expect(remoteGit('show', `${saved.commit}:workflows/flow.yaml`)).toBe(content.trim());
+    const edited = await withPreparedPackCandidate({ ...input(), sourceVersion: 'draft', sourceCommit: saved.commit,
+      expectedSavedHead: saved.commit, changes }, async (p, push) => { await push(); return p; });
     expect(ref('refs/heads/saved/flow')).toBe(edited.commit);
     expect(ref('refs/heads/wf/flow')).toBe(release.releaseCommit);
     expect(ref('refs/tags/deploy/flow/#1')).toBe(release.tagObject);
-    expect(remoteGit('show', '-s', '--format=%P', edited.commit)).toBe(release.releaseCommit);
+    expect(remoteGit('show', '-s', '--format=%P', edited.commit)).toBe(saved.commit);
+    expect(remoteGit('show', `${edited.commit}:workflows/flow.yaml`)).toBe('id: flow\ntitle: Edited after deploy');
+    expect(execFileSync('git', ['--git-dir', remote, 'show', `${edited.commit}:asset.bin`])).toEqual(binary);
+  });
+
+  it('returns VERSION_CONFLICT through the real save service and HTTP route without replacing saved', async () => {
+    const saved = await save();
+    const db = createAutoHealConfigTestDb();
+    await db.exec('CREATE TABLE workflow_deploy_history (workflow_id TEXT, version INTEGER)');
+    const app = express(); app.use(express.json()); app.use(createPackVersionRouter({
+      resolvePrincipal: async () => ({ actorId: 'trusted' }),
+      botPermRepo: { hasEditPermission: async () => true },
+      workflowSpecRepo: { findByWorkflowId: async () => ({ workflow_id: 'flow', pack_id: 'pack' }) },
+      readSnapshot: async () => { throw new Error('Unexpected read'); },
+      saveCandidate: candidate => savePackVersionToRemote({ ...candidate, db, gitConfig: input().config, gitAuthor: author }),
+    }));
+    const server = app.listen(0, '127.0.0.1');
+    try {
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing local address');
+      const response = await fetch(`http://127.0.0.1:${address.port}/flow/pack-version`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sourceVersion: 'current', sourceCommit: current, expectedSavedHead: saved.commit,
+          requestId: 'conflict-request-01', changes: [{ path: 'asset.bin', operation: 'replace', contentBase64: b64('changed'), mode: '100644' }] }),
+      });
+      expect(response.status).toBe(409);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ error: 'Workflow operation could not be completed', code: 'VERSION_CONFLICT', requestId: 'conflict-request-01' });
+      expect(ref('refs/heads/saved/flow')).toBe(saved.commit);
+      expect(execFileSync('git', ['--git-dir', remote, 'show', `${saved.commit}:asset.bin`])).toEqual(binary);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await db.close();
+    }
   });
 
   it('recovers the exact unpublished commit from JSON plus a self-contained bundle', async () => {

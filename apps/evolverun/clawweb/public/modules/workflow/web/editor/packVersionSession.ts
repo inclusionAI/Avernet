@@ -5,10 +5,10 @@ import type { PackVersionFile } from '../components/PackVersionEditor'
 export type Version = 'current' | 'draft'
 export type Snapshot = { workflowId: string; packId: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[] }
 export type Change = { path: string; operation: 'delete' } | ({ operation: 'create' | 'replace' } & PackVersionFile)
-type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; blocked: boolean; notice: string | null }
+type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; readFailure?: string; blocked: boolean; notice: string | null }
 export type SaveInput = { sourceVersion: Version; sourceCommit: string; expectedSavedHead: string | null; changes: Change[]; requestId?: string }
 export type SaveResult = { branch: string; commit: string; requestId: string; version: number; packId: string }
-export type SaveAttempt = { requestId: string; expectedPackId: string; snapshot: Snapshot; input: SaveInput; files: PackVersionFile[]; onSaved?: (result: SaveResult) => void }
+export type SaveAttempt = { requestId: string; expectedPackId: string; snapshot: Snapshot; input: SaveInput; files: PackVersionFile[]; onSaved?: (result: SaveResult) => void; verifySaved?: (result: SaveResult) => Promise<void> }
 type Reconciliation = {
   attempt: SaveAttempt
   token: object
@@ -28,10 +28,14 @@ export type CreateInput = { workflowId: string; packId: string; spec: WorkflowSp
 export type CreateAttempt = { input: CreateInput; pending: boolean; phase: 'unknown' | 'failed' | 'conflict' | 'saved' | 'completed'; result?: SaveResult; error: string | null }
 // null means no unfinished Pack identity write is known in this page session.
 // A message survives snapshot reloads; clean Git files do not reconcile DB identity.
-type State = { uncertainRename: string | null; creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
-export type Session = { state: State; listeners: Set<() => void>; requests: Partial<Record<Version, AbortController>>; saveRequest?: object; deployRequest?: object; createRequest?: object; canvasDirty?: boolean; canvasInitialized?: boolean; reconciliationRequest?: { controller: AbortController; timeout: ReturnType<typeof setTimeout> } }
+type State = { uncertainRename: string | null; postSaveVerificationError?: string | null; creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
+export type Session = { state: State; listeners: Set<() => void>; requests: Partial<Record<Version, AbortController>>; saveRequest?: object; deployRequest?: object; createRequest?: object; canvasDirty?: boolean; reconciliationRequest?: { controller: AbortController; timeout: ReturnType<typeof setTimeout> } }
 
 const sessions = new Map<string, Session>()
+/** Observation only: never create a session or affect its release lifecycle. */
+export function hasPostSaveVerificationError(id: string): boolean {
+  return !!sessions.get(id)?.state.postSaveVerificationError
+}
 let unloadGuardInstalled = false
 let revision = 0
 const observers = new Set<() => void>()
@@ -40,7 +44,7 @@ export const packVersionsRevision = () => revision
 function notify() { revision++; observers.forEach(listener => listener()) }
 export function hasPackVersionEditRisk(id: string | null): boolean {
   const session = id ? sessions.get(id) : undefined
-  return !!session && (session.state.uncertainRename !== null || session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
+  return !!session && (session.state.uncertainRename !== null || !!session.state.postSaveVerificationError || session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
 }
 export function hasPackVersionRisk(id: string | null): boolean {
   const state = id ? sessions.get(id)?.state : undefined
@@ -155,7 +159,7 @@ export function sessionFor(id: string): Session {
   }
   let session = sessions.get(id)
   if (!session) {
-    session = { state: { uncertainRename: null, version: 'current', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
+    session = { state: { uncertainRename: null, version: 'draft', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
     sessions.set(id, session)
   }
   return session
@@ -215,7 +219,7 @@ function readError(error: unknown): string {
   return '无法读取完整版本文件，服务响应可能不兼容，请稍后重试。'
 }
 export function load(session: Session, id: string, version: Version) {
-  if (session.state.saving || session.state.uploading || session.state.reconciliation?.version === version) return
+  if (session.state.saving || session.state.uploading || session.state.postSaveVerificationError || session.state.reconciliation?.version === version) return
   session.requests[version]?.abort()
   const controller = new AbortController()
   session.requests[version] = controller
@@ -224,9 +228,12 @@ export function load(session: Session, id: string, version: Version) {
     .then(value => {
       if (controller.signal.aborted) return
       const snapshot = validateSnapshot(value, id, version)
-      updateVersion(session, version, { snapshot, files: snapshot.versionFiles.map(file => ({ ...file })), loading: false, error: null, blocked: false, notice: null })
+      updateVersion(session, version, { snapshot, files: snapshot.versionFiles.map(file => ({ ...file })), loading: false, error: null, readFailure: undefined, blocked: false, notice: null })
     }).catch(error => {
-      if (!controller.signal.aborted) updateVersion(session, version, { loading: false, error: readError(error) })
+      if (!controller.signal.aborted) {
+        const message = readError(error)
+        updateVersion(session, version, { loading: false, error: message, readFailure: message })
+      }
     }).finally(() => { if (session.requests[version] === controller) delete session.requests[version] })
 }
 

@@ -50,7 +50,7 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
   const id = `rename-session-${++sequence}`
   const spec: WorkflowSpec = { id, title: 'Workflow', version: '1', nodes: [] }
   ui.db = spec
-  useEditorStore.getState().reset({ force: true }); useEditorStore.getState().loadSpec(spec)
+  useEditorStore.getState().reset({ force: true }); useEditorStore.getState().loadSpec(spec); useEditorStore.setState({ _databasePackId: 'pack' })
   const file = (path: string, text: string) => ({ path, contentBase64: btoa(text), mode: '100644' as const })
   const files = [file('workflow.pack.yaml', stringify({ id: 'pack', workflows: [id] })),
     file(`workflows/${id}.yaml`, stringify(spec)), file('scripts/run.sh', 'original')]
@@ -66,6 +66,7 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
   let databasePackId = 'pack'
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === `/api/workflows/${id}`) return json(ui.db)
+    if (url === `/api/workflows/${id}/editor-draft` && init?.method === 'GET') return json({ workflowId: id, packId: databasePackId, specJson: JSON.stringify(ui.db), draftToken: 'a'.repeat(64) })
     if (url.startsWith(`/api/workflows/${id}/history?`)) return json({ workflowId: id, history: [], active: null })
     if (url === '/api/auto-heal/save') {
       if (failDb) throw new TypeError('DB response lost')
@@ -85,13 +86,25 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
   })
   vi.stubGlobal('fetch', fetchMock)
   const hook = renderHook(() => usePackCanvasSession(id, spec))
-  return { id, spec, session, hook, fetchMock, databasePackId: () => databasePackId }
+  return { id, spec, session, hook, fetchMock, databasePackId: () => databasePackId, setDatabasePackId: (value: string) => { databasePackId = value } }
 }
 
-async function rejectRename(ctx: ReturnType<typeof setup>) {
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('不能自动重试') })
+/** Rehydrate the exact session-level guard produced by the former rename path.
+ * This intentionally does not claim that the now-disabled path can create it. */
+function seedHistoricalRename(ctx: ReturnType<typeof setup>, failDb = false) {
+  const dbState = failDb ? '已发送，结果未知' : '已确认 Pack ID renamed，文档已核对'
+  const gitState = failDb ? 'Git 保存未发起' : 'Git 保存已发起，结果未确认；请核对 saved 分支和完整候选'
+  const message = `Pack 重命名 pack → renamed 未完整完成：数据库${dbState}；${gitState}。请先人工核对数据库和 Git，不能自动重试。本页会话已锁定；刷新会丢失本地草稿和此锁定状态。`
+  const files = structuredClone(ctx.session.state.versions.draft.files)
+  ctx.setDatabasePackId(failDb ? 'pack' : 'renamed')
+  act(() => {
+    publish(ctx.session, { ...ctx.session.state, uncertainRename: message })
+    for (const version of ['current', 'draft'] as const) updateVersion(ctx.session, version, { blocked: true, error: message })
+  })
+  expect(ctx.session.state.versions.draft.files).toEqual(files)
   expect(ctx.session.state.saving).toBe(false)
   expect(ctx.session.state.reconciliation).toBeNull()
+  expect(ctx.fetchMock).not.toHaveBeenCalled()
 }
 
 async function reloadBoth(ctx: ReturnType<typeof setup>) {
@@ -108,7 +121,7 @@ async function reloadBoth(ctx: ReturnType<typeof setup>) {
 // successful snapshot reload legitimately clears without settling the rename.
 it.each([false, true])('retains rename risk after real reload of both versions (DB response lost: %s)', async failDb => {
   const ctx = setup({ failDb })
-  await rejectRename(ctx)
+  seedHistoricalRename(ctx, failDb)
   if (!failDb) expect(ctx.databasePackId()).toBe('renamed')
   const message = ctx.hook.result.current.error
   expect(message).toContain('Pack 重命名')
@@ -125,7 +138,7 @@ it.each([false, true])('retains rename risk after real reload of both versions (
 // component unmount/remount, including the hook's queued releaseCleanSession.
 it('retains a clean-file rename session through release, unmount and remount', async () => {
   const ctx = setup()
-  await rejectRename(ctx); await reloadBoth(ctx)
+  seedHistoricalRename(ctx); await reloadBoth(ctx)
   expect(ctx.session.canvasDirty).toBe(false)
   await act(async () => { ctx.hook.unmount(); await Promise.resolve() })
   expect(ctx.session.listeners.size).toBe(0)
@@ -141,7 +154,7 @@ it('retains a clean-file rename session through release, unmount and remount', a
 
 it('blocks real Editor deployment before confirmation after rename rejection, reload and remount', async () => {
   const ctx = setup()
-  await rejectRename(ctx); await reloadBoth(ctx)
+  seedHistoricalRename(ctx); await reloadBoth(ctx)
   await act(async () => { ctx.hook.unmount(); await Promise.resolve() })
   render(<Editor embedded initialWorkflowId={ctx.id} />)
   await act(async () => { await Promise.resolve() })
@@ -156,7 +169,7 @@ it('blocks real Editor deployment before confirmation after rename rejection, re
 
 it('shows an independent snapshot read failure without hiding the persistent rename warning', async () => {
   const ctx = setup()
-  await rejectRename(ctx); await reloadBoth(ctx)
+  seedHistoricalRename(ctx); await reloadBoth(ctx)
   await act(async () => { ctx.hook.unmount(); await Promise.resolve() })
   render(<Editor embedded initialWorkflowId={ctx.id} />)
   fireEvent.click(screen.getByRole('tab', { name: '脚本文件', exact: true }))
@@ -171,22 +184,42 @@ it('shows an independent snapshot read failure without hiding the persistent ren
   expect(hasPackVersionEditRisk(ctx.id)).toBe(true)
 })
 
-it('keeps the save button disabled for fresh edits after a locked rename is reloaded', async () => {
+it('refuses shared save without sending a write after a locked rename is reloaded', async () => {
   const ctx = setup()
-  await rejectRename(ctx); await reloadBoth(ctx)
+  seedHistoricalRename(ctx); await reloadBoth(ctx)
   await act(async () => { ctx.hook.unmount(); await Promise.resolve() })
   render(<Editor embedded initialWorkflowId={ctx.id} />)
   fireEvent.click(screen.getByRole('tab', { name: '脚本文件', exact: true }))
   fireEvent.click(await screen.findByRole('button', { name: 'scripts/run.sh', exact: true }))
   fireEvent.change(screen.getByRole('textbox', { name: '文件内容' }), { target: { value: 'new candidate after reload' } })
   expect(dirty(ctx.session.state.versions.draft)).toBe(true)
-  expect(screen.getByRole('button', { name: '保存到草稿', exact: true })).toBeDisabled()
+  expect(screen.queryByRole('button', { name: '保存到草稿', exact: true })).not.toBeInTheDocument()
+  const requests = ctx.fetchMock.mock.calls.length
+  const files = structuredClone(ctx.session.state.versions.draft.files)
+  const guard = ctx.session.state.uncertainRename
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存', exact: true })); await Promise.resolve() })
+  expect(ctx.fetchMock).toHaveBeenCalledTimes(requests)
+  expect(ctx.session.state.versions.draft.files).toEqual(files)
+  expect(ctx.session.state.uncertainRename).toBe(guard)
+  expect(screen.getByRole('alert')).toHaveTextContent('Pack 重命名')
   expect(screen.getByRole('button', { name: '重新读取', exact: true })).toBeEnabled()
+})
+
+it('keeps the historical guard when a version is unblocked and the selection changes', async () => {
+  const ctx = setup(); seedHistoricalRename(ctx, true)
+  const message = ctx.session.state.uncertainRename
+  act(() => { updateVersion(ctx.session, 'current', { blocked: false }); publish(ctx.session, { ...ctx.session.state, version: 'current' }) })
+  expect(ctx.session.state.versions.current.blocked).toBe(false)
+  expect(ctx.hook.result.current.error).toBe(message)
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('不能自动重试') })
+  expect(ctx.fetchMock).not.toHaveBeenCalled()
+  expect(ctx.session.state.uncertainRename).toBe(message)
+  expect(hasPackVersionRisk(ctx.id)).toBe(true)
 })
 
 it('blocks standalone Pack saves after rename rejection even when both versions reload clean', async () => {
   const ctx = setup()
-  await rejectRename(ctx); await reloadBoth(ctx)
+  seedHistoricalRename(ctx); await reloadBoth(ctx)
   const requests = ctx.fetchMock.mock.calls.length
   const state = ctx.session.state
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -214,13 +247,41 @@ it('does not give a non-rename origin rejection a session-level lock', async () 
   expect(sessionFor(ctx.id)).not.toBe(ctx.session)
 })
 
-it('does not retain a rename guard after both DB and Git confirm success', async () => {
+it('blocks a new rename before any write without creating a historical guard', async () => {
   const ctx = setup({ originRejected: false })
-  await act(async () => { expect(await ctx.hook.result.current.save()).toEqual({ dbSaved: true, commit: B }) })
-  expect(ctx.databasePackId()).toBe('renamed')
-  expect(ctx.session.state.versions.draft.snapshot?.packId).toBe('renamed')
-  expect(hasPackVersionEditRisk(ctx.id)).toBe(false)
-  expect(hasPackVersionRisk(ctx.id)).toBe(false)
-  await act(async () => { ctx.hook.unmount(); await Promise.resolve() })
-  expect(sessionFor(ctx.id)).not.toBe(ctx.session)
+  const candidate = structuredClone(ctx.session.state.versions.draft.files)
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('暂不支持') })
+  expect(ctx.fetchMock).not.toHaveBeenCalled()
+  expect(ctx.databasePackId()).toBe('pack')
+  expect(ctx.session.state.uncertainRename).toBeNull()
+  expect(ctx.session.state.versions.draft.files).toEqual(candidate)
+  expect(dirty(ctx.session.state.versions.draft)).toBe(true)
+})
+
+it('isolates a historical rename guard from a different workflow save', async () => {
+  const ctx = setup(); seedHistoricalRename(ctx); await reloadBoth(ctx)
+  const otherId = `${ctx.id}-other`, other = sessionFor(otherId)
+  const otherSpec = { ...ctx.spec, id: otherId }
+  const files = [
+    { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'other-pack', workflows: [otherId] })), mode: '100644' as const },
+    { path: `workflows/${otherId}.yaml`, contentBase64: btoa(stringify(otherSpec)), mode: '100644' as const },
+    { path: 'scripts/run.sh', contentBase64: btoa('original'), mode: '100644' as const },
+  ]
+  const otherSnapshot: Snapshot = { workflowId: otherId, packId: 'other-pack', baseRef: `origin/saved/${otherId}`,
+    baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
+  const candidate = files.map(file => file.path === 'scripts/run.sh' ? { ...file, contentBase64: btoa('other edit') } : file)
+  updateVersion(other, 'draft', { snapshot: otherSnapshot, files: candidate })
+  const original = ctx.fetchMock.getMockImplementation()!
+  ctx.fetchMock.mockImplementation(async (url, init) => {
+    if (url === `/api/workflows/${otherId}/pack-version` && init?.method === 'PUT') {
+      const input = await readBody(init)
+      return json({ branch: `saved/${otherId}`, commit: B, requestId: input.requestId, version: 2, packId: 'other-pack' })
+    }
+    return original(url, init)
+  })
+  expect(other.state.uncertainRename).toBeNull()
+  await act(async () => { expect(await savePackVersion(other, otherId, 'draft', candidate)).toMatchObject({ commit: B, packId: 'other-pack' }) })
+  expect(ctx.fetchMock.mock.calls.filter(([url, init]) => url === `/api/workflows/${otherId}/pack-version` && init?.method === 'PUT')).toHaveLength(1)
+  expect(ctx.session.state.uncertainRename).toContain('不能自动重试')
+  expect(hasPackVersionRisk(ctx.id)).toBe(true); expect(hasPackVersionRisk(otherId)).toBe(false)
 })

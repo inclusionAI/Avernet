@@ -525,6 +525,10 @@ export interface WorkflowSpec {
 
 /** One row of workflow_deploy_history (list payload, no spec_json). */
 export interface DeployHistoryItem {
+  /** DB pack identity is included only on the separately returned active record. */
+  packId?: string
+  /** Opaque baseline token included only on the separately returned active record. */
+  activeToken?: string
   deployNumber: number
   version: number
   tagName: string | null

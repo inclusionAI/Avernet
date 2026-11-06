@@ -1,10 +1,13 @@
 /** ClawWeb's private save/publish journal. Formal deployment history contains releases only. */
 import { createHash } from 'node:crypto';
+import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from 'yaml';
 import { parse as parseYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { PackOperationRepository, type PackOperation } from '../repositories/pack-operation-repository.js';
-import { normalizeWorkflowSpec, validateWorkflowSemantics } from '../workflow.js';
+import { projectWorkflowSnapshotYaml, WORKFLOW_SNAPSHOT_MAX_BYTES, WORKFLOW_SNAPSHOT_MAX_NODES } from './workflow-snapshot-projection.js';
 import { validateSpec } from '../validators/workflow-validator.js';
+import { assertLosslessNumber } from './lossless-json-validation.js';
+import { normalizeWorkflowSpec, validateWorkflowSemantics } from '../workflow.js';
 import { resumePreparedPackCandidate, type PreparedPackCandidate } from './pack-candidate-save.js';
 import { resumePreparedDeployment, type PreparedDeployment } from './auto-heal-deploy-git.js';
 import type { ClawFlowsGitConfig } from './clawflows-git-client.js';
@@ -32,14 +35,137 @@ export type OperationPayload = {
   preserveDraft: boolean;
   facadeCommands?: string[];
 };
-export function candidateProjection(workflowId: string, content: string, manifestContent: string) {
-  let raw: unknown;
-  try { raw = parseYaml(content); } catch { throw new PackOperationError(400, 'INVALID_WORKFLOW'); }
-  const validation = validateSpec(raw);
-  if (!validation.valid || !validation.normalizedSpec) throw new PackOperationError(400, 'INVALID_WORKFLOW');
-  const spec = normalizeWorkflowSpec(validation.normalizedSpec);
-  try { validateWorkflowSemantics(spec); } catch { throw new PackOperationError(400, 'INVALID_WORKFLOW'); }
-  if (spec.id !== workflowId) throw new PackOperationError(400, 'WORKFLOW_ID_MISMATCH');
+/** Preserve the existing Editor deployment allowance for top-level null
+ * dependencies, without changing the authored YAML or other strict checks. */
+function strictValidationYaml(content: string): string {
+  const doc = parseDocument(content, { uniqueKeys: false, prettyErrors: false });
+  if (doc.errors.length || doc.warnings.length || !isMap(doc.contents)) throw new Error('Invalid workflow');
+  const nodes = doc.contents.get('nodes', true);
+  if (!isSeq(nodes)) return content;
+  const ranges: Array<[number, number]> = [];
+  for (const node of nodes.items) {
+    if (!isMap(node)) continue;
+    const dependency = node.get('dependsOn', true);
+    if (isScalar(dependency) && dependency.value === null && dependency.range) ranges.push([dependency.range[0], dependency.range[1]]);
+  }
+  let result = content;
+  for (const [start, end] of ranges.reverse()) result = result.slice(0, start) + (start === end ? ' [] ' : '[]') + result.slice(end);
+  return result;
+}
+
+/** Bound the expanded JSON document before serialization, without applying the
+ * snapshot projector's unrelated 1 MiB encoded-JSON limit. */
+function checkLegacyDocument(document: unknown): void {
+  const ancestors = new Set<object>();
+  let bytes = 0, values = 0;
+  const add = (part: string) => { bytes += Buffer.byteLength(part); if (bytes > 8 * 1024 * 1024) throw new Error('Expanded workflow too large'); };
+  const string = (value: string) => {
+    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value)) throw new Error('Invalid string');
+    add(JSON.stringify(value));
+  };
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 100 || ++values > 100_000) throw new Error('Expanded workflow too complex');
+    if (typeof value === 'string') { string(value); return; }
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error('Invalid number');
+      add(JSON.stringify(value)); return;
+    }
+    if (value === null || typeof value === 'boolean') { add(JSON.stringify(value)); return; }
+    if (typeof value !== 'object' || ancestors.has(value)) throw new Error('Invalid or cyclic workflow');
+    const proto = Object.getPrototypeOf(value);
+    if (Array.isArray(value) ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) throw new Error('Invalid object');
+    ancestors.add(value);
+    try {
+      if (Array.isArray(value)) {
+        add('[');
+        for (const [index, item] of value.entries()) { if (index) add(','); walk(item, depth + 1); }
+        add(']');
+      } else {
+        add('{');
+        for (const [index, key] of Object.keys(value).entries()) {
+          if (index) add(','); string(key); add(':'); walk((value as Record<string, unknown>)[key], depth + 1);
+        }
+        add('}');
+      }
+    } finally { ancestors.delete(value); }
+  };
+  walk(document, 0);
+}
+
+/** Legacy documents may contain aliases and fields ignored by the old
+ * normalizer. Bound expansion and validate every original numeric lexeme
+ * before producing a JSON-compatible history projection. */
+export function legacyWorkflowDocument(workflowId: string, content: string): Record<string, unknown> {
+  if (Buffer.byteLength(content) > WORKFLOW_SNAPSHOT_MAX_BYTES) throw new Error('Workflow too large');
+  const doc = parseDocument(content, { prettyErrors: false });
+  if (doc.errors.length || doc.warnings.length || !isMap(doc.contents)) throw new Error('Invalid workflow');
+  let aliasCount = 0;
+  visit(doc, (_key, node) => { if (isAlias(node) && ++aliasCount > 100) throw new Error('Too many aliases'); });
+  visit(doc, (_key, node) => {
+    if (node && typeof node === 'object' && 'tag' in node && node.tag) {
+      const tag = node.tag;
+      const supported = isScalar(node) && (
+        (tag === 'tag:yaml.org,2002:str' && typeof node.value === 'string')
+        || ((tag === 'tag:yaml.org,2002:int' || tag === 'tag:yaml.org,2002:float') && typeof node.value === 'number')
+        || (tag === 'tag:yaml.org,2002:bool' && typeof node.value === 'boolean')
+        || (tag === 'tag:yaml.org,2002:null' && node.value === null)
+      ) || (tag === 'tag:yaml.org,2002:map' && isMap(node)) || (tag === 'tag:yaml.org,2002:seq' && isSeq(node));
+      if (!supported) throw new Error('Unsupported YAML tag');
+    }
+    if (isScalar(node) && typeof node.value === 'number') {
+      if (!node.source) throw new Error('Invalid numeric scalar');
+      assertLosslessNumber(node.source, node.value);
+    }
+    if (isMap(node)) {
+      const keys = new Set<string>();
+      for (const pair of node.items) {
+        const key = isAlias(pair.key) ? pair.key.resolve(doc) : pair.key;
+        if (!isScalar(key) || !['string', 'number', 'boolean'].includes(typeof key.value)) throw new Error('Invalid YAML key');
+        const name = String(key.value);
+        if (keys.has(name)) throw new Error('Duplicate YAML key after conversion');
+        keys.add(name);
+      }
+    }
+  });
+  const raw: unknown = doc.toJS({ maxAliasCount: 100 });
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid workflow');
+  const spec = raw as Record<string, unknown>;
+  if (!Array.isArray(spec.nodes) || spec.nodes.length > WORKFLOW_SNAPSHOT_MAX_NODES) throw new Error('Invalid workflow nodes');
+  // Check cycles, expansion size and strings without imposing Editor rules.
+  checkLegacyDocument(spec);
+  const validation = validateSpec(spec);
+  if (!validation.valid || !validation.normalizedSpec) throw new Error('Invalid workflow');
+  const normalized = normalizeWorkflowSpec(validation.normalizedSpec);
+  validateWorkflowSemantics(normalized);
+  if (normalized.id !== workflowId) throw new PackOperationError(400, 'WORKFLOW_ID_MISMATCH');
+  return spec;
+}
+
+export function candidateProjection(workflowId: string, content: string, manifestContent: string, mode: 'strict' | 'legacy-autoheal' = 'strict') {
+  let spec: Record<string, unknown>;
+  try {
+    if (Buffer.byteLength(content) > WORKFLOW_SNAPSHOT_MAX_BYTES
+      || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(content)) throw new Error('Invalid workflow text');
+    if (mode === 'legacy-autoheal') {
+      spec = legacyWorkflowDocument(workflowId, content);
+    } else {
+      const identity = parseYaml(content) as { id?: unknown };
+      if (identity && typeof identity === 'object' && !Array.isArray(identity)
+        && typeof identity.id === 'string' && identity.id !== workflowId) {
+        throw new PackOperationError(400, 'WORKFLOW_ID_MISMATCH');
+      }
+      projectWorkflowSnapshotYaml(workflowId, strictValidationYaml(content));
+      const validation = validateSpec(identity);
+      if (!validation.valid || !validation.normalizedSpec) throw new Error('Invalid workflow');
+      const normalized = normalizeWorkflowSpec(validation.normalizedSpec);
+      validateWorkflowSemantics(normalized);
+      if (normalized.id !== workflowId) throw new PackOperationError(400, 'WORKFLOW_ID_MISMATCH');
+      spec = identity as Record<string, unknown>;
+    }
+  } catch (error) {
+    if (error instanceof PackOperationError) throw error;
+    throw new PackOperationError(400, 'INVALID_WORKFLOW');
+  }
   const manifest = parseYaml(manifestContent) as { facades?: Array<{ command: string; aliases?: string[]; defaultWorkflow: string }> };
   let facadeCommands: string[] | undefined;
   if (manifest.facades !== undefined) {
@@ -53,7 +179,11 @@ export function candidateProjection(workflowId: string, content: string, manifes
     }
     if (new Set(facadeCommands).size !== facadeCommands.length) throw new PackOperationError(400, 'INVALID_MANIFEST');
   }
-  return { specJson: JSON.stringify({ ...spec, content }), title: spec.title || workflowId, facadeCommands };
+  // Keep the legacy history contract: content archives the exact deployed
+  // YAML. Any authored field of the same name remains inside those YAML bytes;
+  // the top-level projection is history metadata, not the editable document.
+  const historySpec = { ...spec, content };
+  return { specJson: JSON.stringify(historySpec), title: typeof spec.title === 'string' && spec.title.trim() ? spec.title.trim() : workflowId, facadeCommands };
 }
 async function syncFacades(tx: IDatabase, op: PackOperation, payload: OperationPayload) {
   if (payload.facadeCommands === undefined) return;

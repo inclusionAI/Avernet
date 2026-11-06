@@ -4,7 +4,7 @@ import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-ro
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), fetchJson: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
 vi.mock('../../api/hooks', () => ({
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
@@ -12,7 +12,7 @@ vi.mock('../../api/hooks', () => ({
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'user', isAdmin: false }) }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: mocks.fetchJson }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
@@ -53,7 +53,18 @@ function unchanged(session: number) {
 }
 beforeEach(() => {
   useEditorStore.setState(useEditorStore.getInitialState(), true); state().loadSpec(A)
-  vi.clearAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  vi.resetAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  // Navigation reads the validated CAS row after workflows.get. Pack-loading
+  // requests remain pending, as they are not part of these navigation stories.
+  mocks.fetchJson.mockImplementation((url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (match && init?.method === 'GET') {
+      const id = decodeURIComponent(match[1])
+      const spec = id === 'a' ? A : B
+      return Promise.resolve({ workflowId: id, packId: null, specJson: JSON.stringify(spec), draftToken: 'a'.repeat(64) })
+    }
+    return new Promise(() => {})
+  })
   mocks.history.mockReturnValue(new Promise(() => {}))
   mocks.refetch.mockResolvedValue({ data: mocks.rows })
   vi.spyOn(window, 'confirm').mockReturnValue(true)

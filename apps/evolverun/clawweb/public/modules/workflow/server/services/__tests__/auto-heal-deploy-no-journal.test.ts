@@ -1,15 +1,20 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import express from 'express';
 import { parse, stringify } from 'yaml';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
+import { createWorkflowsRouter } from '../../routes/workflows.js';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import { AutoHealDeployService } from '../auto-heal-deploy-service.js';
+import { editorDraftToken } from '../editor-draft-token.js';
+import { assertLosslessJson } from '../lossless-json-validation.js';
 import * as deployment from '../auto-heal-deploy-git.js';
 import { runGit } from './clawflows-git-client-fixture.js';
 const git = (cwd: string, ...args: string[]) => runGit(cwd, args);
@@ -22,6 +27,20 @@ describe('deployment without a Pack operation table', () => {
   let root: string, remote: string, work: string, saved: string, raw: Database.Database, db: SqliteDatabase;
   let service: AutoHealDeployService;
   const remoteGit = (...args: string[]) => git(root, '--git-dir', remote, ...args);
+  const readHistory = async (deployNumber: number) => {
+    const app = express();
+    app.use('/api/workflows', createWorkflowsRouter(null, null, new BotWorkflowPermissionRepository(db), null, new WorkflowDeployHistoryRepository(db)));
+    const server = app.listen(0, '127.0.0.1');
+    try {
+      await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing history listener');
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/workflows/flow/history/by-deploy/${deployNumber}`,
+        { headers: { 'X-Staff-Id': 'user' } });
+      expect(response.status).toBe(200);
+      return await response.json() as { specJson: string };
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  };
   beforeEach(async () => {
     raw = new Database(':memory:');
     raw.exec(`CREATE TABLE workflow_specs (id INTEGER PRIMARY KEY, workflow_id TEXT UNIQUE, pack_id TEXT, spec_json TEXT, title TEXT, version INTEGER, owner_id TEXT, gmt_create INTEGER, gmt_modified INTEGER);
@@ -57,6 +76,123 @@ describe('deployment without a Pack operation table', () => {
     expect(JSON.parse(row.spec_json).content).toContain('Database YAML'); expect(row.is_active).toBe(1);
     expect(raw.prepare('SELECT version FROM workflow_specs').get()).toEqual({ version: 1 });
   });
+  it('deploys legacy null dependencies without changing the archived YAML or authored fields', async () => {
+    const draft = { ...spec, content: { owner: 'user' }, custom: { dependsOn: null },
+      nodes: [{ ...spec.nodes[0], dependsOn: null }, spec.nodes[1]] };
+    const draftJson = JSON.stringify(draft);
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(draftJson);
+    const result = await service.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
+    expect(result).toMatchObject({ ok: true, deployed: true });
+    const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8' });
+    expect(gitYaml).toBe(stringify(draft));
+    const history = JSON.parse((await readHistory(result.deployNumber)).specJson);
+    expect(history.content).toBe(gitYaml);
+    expect(parse(history.content)).toEqual(draft);
+    expect(history.nodes[0].dependsOn).toBeNull();
+    expect(history.custom).toEqual(draft.custom);
+    expect((raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string }).spec_json).toBe(draftJson);
+  });
+  it('rejects an unsafe number alongside legacy null before publishing', async () => {
+    const yaml = 'id: flow\nnodes:\n  - id: start\n    executor: { type: start }\n    dependsOn: null\nlarge: 9007199254740993\n';
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: yaml }));
+    const before = remoteGit('show-ref');
+    await expect(service.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false }))
+      .rejects.toMatchObject({ code: 'INVALID_WORKFLOW' });
+    expect(remoteGit('show-ref')).toBe(before);
+    expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+  });
+  const deployDraft = async (editor: boolean) => {
+    const input = { workflowId: 'flow', actorId: 'user', autoRun: false };
+    if (!editor) return service.deploy(input);
+    // These document-validation cases need to pass the real non-v2 Editor
+    // edit and candidate-policy gates. The default legacy fixture remains
+    // execute-only so legacy AutoHeal coverage is unchanged.
+    const permissions = new BotWorkflowPermissionRepository(db);
+    await permissions.upsert({ bot_id: null, bot_owner_id: 'user', workflow_id: 'flow', can_view: 1, can_execute: 1, can_edit: 1 });
+    const history = new WorkflowDeployHistoryRepository(db), specs = new WorkflowSpecRepository(db, history);
+    const row = await specs.findByWorkflowId('flow');
+    if (!row) throw new Error('Missing draft');
+    const editorService = new AutoHealDeployService(db, specs, history, permissions,
+      { remoteUrl: remote, username: author.name, email: author.email, token: '' }, author, undefined, async () => true);
+    return editorService.editorDeploy({ ...input, expectedDraftToken: editorDraftToken(row) });
+  };
+  it.each([false, true])('rejects lossy raw JSON and duplicate keys before any publication (editor=%s)', async editor => {
+    const base = JSON.stringify(spec).slice(0, -1);
+    for (const extra of [
+      ',"custom":0.10000000000000001}', ',"custom":9007199254740993}',
+      ',"custom":1e-400}', ',"custom":-0}', ',"custom":1e400}',
+      ',"custom":{"key":1,"key":2}}', ',"custom":{"key":1,"\\u006bey":2}}',
+      ',"id":"flow"}',
+    ]) {
+      const text = base + extra;
+      raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(text);
+      const refs = remoteGit('show-ref');
+      await expect(deployDraft(editor)).rejects.toMatchObject({ status: 400, code: 'INVALID_WORKFLOW' });
+      expect(remoteGit('show-ref')).toBe(refs);
+      expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+      expect((raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string }).spec_json).toBe(text);
+    }
+  });
+  it.each([false, true])('deploys lossless JSON numbers and null dependencies (editor=%s)', async editor => {
+    const text = JSON.stringify({ ...spec, nodes: [{ ...spec.nodes[0], dependsOn: null }, spec.nodes[1]],
+      custom: { fraction: 0.1, integer: 9007199254740991, exponent: 1.25e-8, zero: 0,
+        quoted: '0.10000000000000001 \"key\":1, \"key\":2', left: { key: 1 }, right: { key: 2 } } })
+      .replace('1.25e-8', '1.2500e-8');
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(text);
+    const result = await deployDraft(editor);
+    const yaml = remoteGit('show', `${result.commit}:workflows/flow.yaml`);
+    expect(parse(yaml)).toEqual(JSON.parse(text));
+    expect(remoteGit('rev-parse', `refs/tags/${result.tagName}^{commit}`)).toBe(result.commit);
+    expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 1 });
+  });
+  it.each([false, true])('deploys a content-only legacy wrapper with null dependencies (editor=%s)', async editor => {
+    const legacyYaml = stringify({ ...spec, nodes: [{ ...spec.nodes[0], dependsOn: null }, spec.nodes[1]] });
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: legacyYaml }));
+    const result = await deployDraft(editor);
+    expect(remoteGit('show', `${result.commit}:workflows/flow.yaml`)).toBe(legacyYaml.trimEnd());
+    expect((raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get())).toEqual({ n: 1 });
+  });
+  it('rejects oversized and over-populated drafts before changing Git or history', async () => {
+    const refs = remoteGit('show-ref');
+    const base = JSON.stringify(spec).slice(0, -1);
+    const drafts = [
+      `${base},"padding":"${'a'.repeat(8 * 1024 * 1024)}"}`,
+      `${base},"items":[${'null,'.repeat(1024 * 1024)}null]}`,
+    ];
+    for (const [index, text] of drafts.entries()) {
+      raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(text);
+      await expect(deployDraft(index === 1)).rejects.toMatchObject({ status: 400, code: 'INVALID_WORKFLOW' });
+      expect(remoteGit('show-ref')).toBe(refs);
+      expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+    }
+  }, 30_000);
+  it('deploys a 1 MiB legacy YAML wrapper encoded with JSON unicode escapes', async () => {
+    const prefix = `${stringify(spec)}#`;
+    const padding = 1024 * 1024 - Buffer.byteLength(prefix);
+    const escapedPrefix = Array.from(prefix, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
+    const text = `{"content":"${escapedPrefix}${'\\u0061'.repeat(padding)}"}`;
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(text);
+    const result = await deployDraft(false);
+    expect(result).toMatchObject({ ok: true, deployed: true });
+    expect(remoteGit('rev-parse', `refs/tags/${result.tagName}^{commit}`)).toBe(result.commit);
+    expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 1 });
+  }, 30_000);
+  it('denies non-v2 Editor deployment without edit permission or an approving host policy', async () => {
+    const history = new WorkflowDeployHistoryRepository(db), specs = new WorkflowSpecRepository(db, history);
+    const row = await specs.findByWorkflowId('flow'); if (!row) throw new Error('Missing draft');
+    const input = { workflowId: 'flow', actorId: 'user', autoRun: false, expectedDraftToken: editorDraftToken(row) };
+    const before = remoteGit('show-ref');
+    await expect(service.editorDeploy(input)).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    const permissions = new BotWorkflowPermissionRepository(db);
+    await permissions.upsert({ bot_id: null, bot_owner_id: 'user', workflow_id: 'flow', can_view: 1, can_execute: 1, can_edit: 1 });
+    await expect(service.editorDeploy(input)).rejects.toMatchObject({ status: 403, code: 'SNAPSHOT_DEPLOY_FORBIDDEN' });
+    const policy = vi.fn(async () => false);
+    const denied = new AutoHealDeployService(db, specs, history, permissions,
+      { remoteUrl: remote, username: author.name, email: author.email, token: '' }, author, undefined, policy);
+    await expect(denied.editorDeploy(input)).rejects.toMatchObject({ status: 403, code: 'SNAPSHOT_DEPLOY_FORBIDDEN' });
+    expect(policy).toHaveBeenCalledOnce(); expect(remoteGit('show-ref')).toBe(before);
+    expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+  });
   it('rejects unauthorized actors and stale candidates before publishing', async () => {
     await expect(service.deploy({ workflowId: 'flow', actorId: 'other' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(service.deploy({ workflowId: 'flow', actorId: 'user', candidateCommit: 'f'.repeat(40) })).rejects.toMatchObject({ code: 'CANDIDATE_NOT_SAVED' });
@@ -88,17 +224,38 @@ describe('deployment without a Pack operation table', () => {
     const result = await service.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
     expect(parse(remoteGit('show', `${result.commit}:workflows/flow.yaml`)).title).toBe('Structured draft');
   });
-  it('preserves a user-authored content field in the deployed YAML and history', async () => {
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ ...spec, content: 'user payload' }));
+  it.each([
+    ['plain string', 'user payload'],
+    ['YAML-like string', stringify(spec)],
+    ['empty string', ''],
+    ['object', { nested: ['kept', 0, null] }],
+    ['null', null],
+    ['false', false],
+  ])('preserves authored content (%s) through real deploy and history reads', async (_label, content) => {
+    const draft = { ...spec, content };
+    const draftJson = JSON.stringify(draft);
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(draftJson);
     const result = await service.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
-    expect(parse(remoteGit('show', `${result.commit}:workflows/flow.yaml`)).content).toBe('user payload');
-    const history = raw.prepare('SELECT spec_json FROM workflow_deploy_history WHERE is_active = 1').get() as { spec_json: string };
-    expect(parse(JSON.parse(history.spec_json).content).content).toBe('user payload');
+    const yaml = stringify(draft);
+    expect(remoteGit('rev-parse', `refs/tags/${result.tagName}^{commit}`)).toBe(result.commit);
+    const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8' });
+    expect(gitYaml).toBe(yaml);
+    expect(parse(remoteGit('show', `${result.commit}:workflows/flow.yaml`))).toEqual(draft);
+    const history = await readHistory(result.deployNumber);
+    const archived = JSON.parse(history.specJson);
+    expect(archived.content).toBe(gitYaml);
+    expect(parse(archived.content)).toEqual(draft);
+    expect((raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string }).spec_json).toBe(draftJson);
   });
-  it('preserves even a user-authored content field matching the remaining workflow YAML', async () => {
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ ...spec, content: stringify(spec) }));
+  it('keeps legacy no-content history readable and retains the no-content deployment projection', async () => {
+    const legacy = JSON.stringify(spec);
+    raw.prepare(`INSERT INTO workflow_deploy_history (pack_id, workflow_id, deploy_number, version, action, spec_json, is_active)
+      VALUES ('pack', 'flow', 1, 1, 'deploy', ?, 0)`).run(legacy);
     const result = await service.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
-    expect(parse(remoteGit('show', `${result.commit}:workflows/flow.yaml`)).content).toBe(stringify(spec));
+    expect(JSON.parse((await readHistory(1)).specJson)).toEqual(spec);
+    const deployed = JSON.parse((await readHistory(result.deployNumber)).specJson);
+    expect(parse(deployed.content)).toEqual({ ...spec, title: 'Database YAML' });
+    expect(deployed.id).toBe('flow');
   });
   it('rejects a legacy null Pack identity that does not match the workflow ID before publishing', async () => {
     raw.prepare('UPDATE workflow_specs SET pack_id = NULL').run();
@@ -226,4 +383,31 @@ describe('deployment without a Pack operation table', () => {
     await expect(service.deploy({ workflowId: 'flow', actorId: 'user' })).rejects.toMatchObject({ code: 'DEPLOY_OUTCOME_UNKNOWN' });
     expect(raw.prepare('SELECT COUNT(*) n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
   });
+});
+
+// These parser regressions do not need the SQLite/Git fixture above.
+describe('lossless raw JSON resource bounds', () => {
+  it('handles long almost-zero tails in linear time and preserves decimal correctness', () => {
+    const zeros = '0'.repeat(140_000);
+    const start = performance.now();
+    expect(() => assertLosslessJson(`{"n":0.1${zeros}1}`)).toThrow();
+    expect(() => assertLosslessJson(`{"n":0.1${zeros}}`)).not.toThrow();
+    expect(performance.now() - start).toBeLessThan(3500);
+  }, 30_000);
+
+  it('allows a 1 MiB YAML string even when each byte is JSON-unicode-escaped', () => {
+    const json = `{"content":"${'\\u0061'.repeat(1024 * 1024)}"}`;
+    expect(() => assertLosslessJson(json)).not.toThrow();
+  }, 30_000);
+
+  it('bounds raw JSON bytes and the number of values', () => {
+    const maxBytes = 8 * 1024 * 1024;
+    expect(() => assertLosslessJson(`${' '.repeat(maxBytes - 2)}{}`)).not.toThrow();
+    expect(() => assertLosslessJson(`${' '.repeat(maxBytes - 1)}{}`)).toThrow();
+    expect(() => assertLosslessJson(`\"${'é'.repeat(maxBytes / 2)}\"`)).toThrow();
+    const maxValues = 1024 * 1024;
+    const body = 'null,'.repeat(maxValues - 2);
+    expect(() => assertLosslessJson(`[${body}null]`)).not.toThrow();
+    expect(() => assertLosslessJson(`[${body}null,null]`)).toThrow();
+  }, 30_000);
 });

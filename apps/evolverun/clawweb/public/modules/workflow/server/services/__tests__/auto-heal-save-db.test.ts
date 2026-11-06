@@ -127,7 +127,7 @@ describe('AutoHeal database-only save contract', () => {
       raw.prepare('INSERT INTO workflow_specs (id, workflow_id, spec_json, gmt_create, gmt_modified) VALUES (99, ?, ?, 0, 0)').run('flow', 'replacement');
       return allowed;
     });
-    await expect(service().save(input())).rejects.toThrow('Workflow update failed');
+    await expect(service().save(input())).rejects.toMatchObject({ status: 409, code: 'DRAFT_CONFLICT' });
     expect(raw.prepare('SELECT id, spec_json FROM workflow_specs').get()).toEqual({ id: 99, spec_json: 'replacement' });
   });
   it('preserves a user-authored content field without fabricating a projection', async () => {

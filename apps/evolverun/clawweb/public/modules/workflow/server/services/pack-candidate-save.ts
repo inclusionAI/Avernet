@@ -35,7 +35,7 @@ export type PreparedPackCandidate = PreparedPackMetadata & Readonly<{
   bundleBase64: string;
 }>;
 export class PackCandidateConflictError extends Error {
-  constructor() { super('Workflow version or saved head changed'); this.name = 'PackCandidateConflictError'; }
+  constructor(message = 'Workflow version or saved head changed') { super(message); this.name = 'PackCandidateConflictError'; }
 }
 
 export class PackWorkflowContentChangedError extends Error {
@@ -56,6 +56,12 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 const maxBlob = 1024 * 1024;
 const maxPackBytes = 8 * 1024 * 1024;
 const maxPackFiles = 500;
+function rejectCurrentOverDifferentSaved(sourceVersion: 'current' | 'draft' | 'initial',
+  sourceCommit: string | null, expectedSavedHead: string | null): void {
+  if (sourceVersion === 'current' && expectedSavedHead !== null && expectedSavedHead !== sourceCommit) {
+    throw new PackCandidateConflictError('Cannot save from current: saved contains a different version; edit saved instead');
+  }
+}
 function idValid(id: unknown): id is string {
   return typeof id === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(id)
     && !id.includes('..') && !id.endsWith('.') && !id.endsWith('.lock');
@@ -82,20 +88,113 @@ function isCandidate(file: string): boolean {
     || (parts.length === 3 && parts[0] === 'packs'));
 }
 
+/** Prototype-only ASCII alias guard. Every protected path and its ancestors must
+ * have one spelling in the entire Git tree. This is not a complete model of
+ * Unicode or every destination filesystem; the host still owns that check. */
+function rejectProtectedTreeAliases(entries: Map<string, Entry>, root: string, manifest: Record<string, unknown>): void {
+  if (!Array.isArray(manifest.workflows) || manifest.workflows.length > 500) throw new Error('Invalid pack manifest workflows');
+  const paths = [`${root}workflow.pack.yaml`];
+  const ids = new Set<string>();
+  for (const item of manifest.workflows) {
+    const id = itemId(item);
+    if (!idValid(id) || ids.has(id.toLowerCase())) throw new Error('Aliased workflow identity');
+    ids.add(id.toLowerCase());
+    paths.push(root + workflowFile(item));
+  }
+  const protectedNames = new Map<string, string>();
+  const protectedFiles = new Set<string>();
+  for (const file of paths) {
+    const parts = file.split('/');
+    if (parts.some(part => !/^[A-Za-z0-9_.-]+$/.test(part) || part === '.' || part === '..' || part.endsWith('.'))) {
+      throw new Error('Non-portable protected path');
+    }
+    let prefix = '';
+    for (const [index, part] of parts.entries()) {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const key = prefix.toLowerCase();
+      const prior = protectedNames.get(key);
+      if ((prior !== undefined && prior !== prefix) || protectedFiles.has(key)
+        || (index === parts.length - 1 && prior !== undefined)) throw new Error('Aliased protected paths');
+      protectedNames.set(key, prefix);
+      if (index === parts.length - 1) protectedFiles.add(key);
+    }
+  }
+  for (const name of entries.keys()) {
+    // Non-ASCII and other filesystem equivalences need authoritative host checks.
+    if (!/^[\x00-\x7f]+$/.test(name)) continue;
+    let prefix = '';
+    for (const part of name.split('/')) {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const key = prefix.toLowerCase();
+      const expected = protectedNames.get(key);
+      if ((expected !== undefined && expected !== prefix)
+        || (protectedFiles.has(key) && prefix !== name)) throw new Error('Aliased protected tree path');
+    }
+  }
+}
+
 /** All fields other than changes must be obtained/validated server-side, not from the request.
  * The caller grants the existing workflow editor authority over the entire selected Pack,
  * including files shared with other workflows. No separate Pack ACL or credential is used.
  * Only saved is compare-and-swapped atomically. Current is checked before construction;
  * it can advance before the saved push, which is not a two-ref transaction. A current
- * save may replace an explicitly confirmed different saved head. The saved lease
- * prevents overwriting any draft created after that confirmation.
+ * save cannot replace a different saved head, even if it was observed. The saved
+ * lease prevents overwriting a draft created after the initial check.
  * A successful push is not atomic with any database update or publication. */
 export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput,
   callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>): Promise<T> {
+  return preparePackCandidate(input, callback);
+}
+
+/** Server-only entry point: workflowYaml must be the authorized, canonical workflow
+ * projection, not an untrusted file-API field. This explicit authority takes
+ * precedence over preserveWorkflowContent; the old entry point is unchanged. The caller owns authorization,
+ * DB persistence and journaling before push; this function only constructs Git. */
+export async function withPreparedPackCandidateWithWorkflow<T>(input: SavePackCandidateInput, workflowYaml: string,
+  callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>): Promise<T> {
+  if (typeof workflowYaml !== 'string' || Buffer.byteLength(workflowYaml) > maxBlob
+    || Buffer.from(workflowYaml).toString('utf8') !== workflowYaml) throw new Error('Invalid workflow content');
+  const workflowYamlSnapshot = workflowYaml;
+  return preparePackCandidate(input, callback, workflowYamlSnapshot);
+}
+
+/** Isolated unified-save prototype guard; legacy candidate and AutoHeal callers
+ * retain their existing rules. The trusted host must still authorize writes and
+ * address Unicode/filesystem aliases, concurrency and crash recovery. */
+export async function withPreparedPackCandidateForUnifiedSave<T>(input: SavePackCandidateInput, workflowYaml: string,
+  callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>): Promise<T> {
+  if (typeof workflowYaml !== 'string' || Buffer.byteLength(workflowYaml) > maxBlob
+    || Buffer.from(workflowYaml).toString('utf8') !== workflowYaml) throw new Error('Invalid workflow content');
+  return preparePackCandidate(input, callback, workflowYaml, true);
+}
+
+async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
+  callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>,
+  workflowYamlSnapshot?: string, protectTreeAliases = false): Promise<T> {
+  // Capture every value used by construction and transport before the first
+  // asynchronous boundary. In particular cloneClawflows reads config again
+  // after awaits, so copying just the outer input is not sufficient.
+  const { workflowId, sourceVersion, sourceCommit, expectedSavedHead, preserveWorkflowContent,
+    config: callerConfig, changes: callerChanges } = callerInput;
+  if (!Array.isArray(callerChanges) || callerChanges.length > 500) throw new Error('Invalid candidate save input');
+  const config = callerConfig && typeof callerConfig === 'object' ? {
+    remoteUrl: callerConfig.remoteUrl,
+    username: callerConfig.username,
+    email: callerConfig.email,
+    token: callerConfig.token,
+  } : callerConfig;
+  const input: SavePackCandidateInput = { workflowId, sourceVersion, sourceCommit, expectedSavedHead,
+    preserveWorkflowContent, config, changes: callerChanges.map(change => {
+      if (!change || typeof change !== 'object') return change as PackCandidateChange;
+      const { path, operation, contentBase64, mode } = change as {
+        path: string; operation: string; contentBase64?: string; mode?: '100644' | '100755';
+      };
+      return { path, operation, contentBase64, mode } as PackCandidateChange;
+    }) };
   if (!idValid(input.workflowId) || !oidPattern.test(input.sourceCommit)
     || (input.expectedSavedHead !== null && !oidPattern.test(input.expectedSavedHead))
-    || !['current', 'draft'].includes(input.sourceVersion) || !Array.isArray(input.changes)
-    || input.changes.length > 500) throw new Error('Invalid candidate save input');
+    || !['current', 'draft'].includes(input.sourceVersion)) throw new Error('Invalid candidate save input');
+  rejectCurrentOverDifferentSaved(input.sourceVersion, input.sourceCommit, input.expectedSavedHead);
   const seen = new Set<string>();
   let total = 0;
   const changes = input.changes.map(change => {
@@ -140,24 +239,28 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
       }
       const resolved = await text(['rev-parse', '--verify', `${input.sourceCommit}^{commit}`]);
       if (resolved !== input.sourceCommit) throw new Error('Invalid source commit');
-      const tree = await git(['ls-tree', '-r', '-t', '-l', '-z', '--full-tree', input.sourceCommit]);
-      if (tree.length && tree.at(-1) !== 0) throw new Error('Invalid Git tree');
-      const entries = new Map<string, Entry>();
-      let count = 0;
-      for (const raw of tree.toString('binary').split('\0')) {
-        if (!raw) continue;
-        if (++count > 50000) throw new Error('Git tree limit exceeded');
-        const data = Buffer.from(raw, 'binary');
-        const tab = data.indexOf(9);
-        const header = data.subarray(0, tab).toString('ascii').match(/^(\d{6}) (blob|tree|commit) ([a-f0-9]{40}|[a-f0-9]{64}) +(-|\d+)$/);
-        if (tab < 0 || !header) throw new Error('Invalid Git tree');
-        let name: string;
-        try { name = decoder.decode(data.subarray(tab + 1)); } catch { throw new Error('Invalid Git path'); }
-        if (!safePath(name) || entries.has(name)) throw new Error('Invalid Git path');
-        const size = header[4] === '-' ? null : Number(header[4]);
-        if (header[2] === 'blob' ? size === null || !Number.isSafeInteger(size) : size !== null) throw new Error('Invalid Git tree size');
-        entries.set(name, { mode: header[1], type: header[2], oid: header[3], size });
-      }
+      const readTreeEntries = async (ref: string): Promise<Map<string, Entry>> => {
+        const tree = await git(['ls-tree', '-r', '-t', '-l', '-z', '--full-tree', ref]);
+        if (tree.length && tree.at(-1) !== 0) throw new Error('Invalid Git tree');
+        const entries = new Map<string, Entry>();
+        let count = 0;
+        for (const raw of tree.toString('binary').split('\0')) {
+          if (!raw) continue;
+          if (++count > 50000) throw new Error('Git tree limit exceeded');
+          const data = Buffer.from(raw, 'binary');
+          const tab = data.indexOf(9);
+          const header = data.subarray(0, tab).toString('ascii').match(/^(\d{6}) (blob|tree|commit) ([a-f0-9]{40}|[a-f0-9]{64}) +(-|\d+)$/);
+          if (tab < 0 || !header) throw new Error('Invalid Git tree');
+          let name: string;
+          try { name = decoder.decode(data.subarray(tab + 1)); } catch { throw new Error('Invalid Git path'); }
+          if (!safePath(name) || entries.has(name)) throw new Error('Invalid Git path');
+          const size = header[4] === '-' ? null : Number(header[4]);
+          if (header[2] === 'blob' ? size === null || !Number.isSafeInteger(size) : size !== null) throw new Error('Invalid Git tree size');
+          entries.set(name, { mode: header[1], type: header[2], oid: header[3], size });
+        }
+        return entries;
+      };
+      const entries = await readTreeEntries(input.sourceCommit);
       const yamlObject = async (entry: Entry | undefined): Promise<Record<string, unknown>> => {
         if (!entry || entry.type !== 'blob' || !['100644', '100755'].includes(entry.mode)) throw new Error('Invalid manifest or workflow mode');
         const size = await text(['cat-file', '-s', entry.oid]);
@@ -198,6 +301,8 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
       rejectMixedRootLayout();
       const sourcePack = await locate();
       let pack: { root: string; id: string } = sourcePack;
+      if (protectTreeAliases) rejectProtectedTreeAliases(entries, sourcePack.root,
+        await yamlObject(entries.get(`${sourcePack.root}workflow.pack.yaml`)));
       const rejectOverlappingPacks = () => {
         for (const name of entries.keys()) {
           if (name !== 'workflow.pack.yaml' && !name.endsWith('/workflow.pack.yaml')) continue;
@@ -241,7 +346,34 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
         await git(['update-index', '--add', '--cacheinfo', change.mode, oid, full]);
         entries.set(full, { mode: change.mode, type: 'blob', oid, size: change.bytes!.length });
       }
-      if (input.preserveWorkflowContent) {
+      if (workflowYamlSnapshot !== undefined) {
+        // Resolve the final manifest after ordinary file changes. The selected
+        // workflow has exactly one authority: the separate trusted argument.
+        const manifest = await yamlObject(entries.get(`${pack.root}workflow.pack.yaml`));
+        if (!Array.isArray(manifest.workflows)) throw new Error('Invalid pack manifest workflows');
+        const matches = manifest.workflows.filter(item => itemId(item) === input.workflowId);
+        if (matches.length !== 1) throw new Error('Pack manifest identity conflict');
+        const selected = workflowFile(matches[0]);
+        if (selected === 'workflow.pack.yaml' || seen.has(selected)) throw new Error('Conflicting selected workflow change');
+        const full = pack.root + selected;
+        const existing = entries.get(full);
+        if (existing && (existing.type !== 'blob' || !['100644', '100755'].includes(existing.mode))) throw new Error('Unsafe target');
+        // Compare Pack-relative paths before any Pack rename. A different
+        // existing file is never implicitly replaced by the workflow projection.
+        if (existing && selected !== sourcePack.workflow) throw new Error('Workflow target already exists');
+        for (const [name, entry] of entries) {
+          if ((full.startsWith(`${name}/`) && entry.type !== 'tree') || name.startsWith(`${full}/`)) throw new Error('Unsafe target');
+        }
+        const bytes = Buffer.from(workflowYamlSnapshot, 'utf8');
+        const file = path.join(dir, '.git', `candidate-blob-${index++}`);
+        await writeFile(file, bytes, { mode: 0o600, flag: 'wx' });
+        const oid = await text(['hash-object', '-w', '--no-filters', '--', file]);
+        if (!oidPattern.test(oid)) throw new Error('Invalid blob id');
+        const mode = existing?.mode ?? sourcePack.entry.mode;
+        await git(['update-index', '--add', '--cacheinfo', mode, oid, full]);
+        entries.set(full, { mode, type: 'blob', oid, size: bytes.length });
+      }
+      if (input.preserveWorkflowContent && workflowYamlSnapshot === undefined) {
         // Check the old path as well as the path selected by the new manifest.
         // Otherwise a manifest move could leave a modified old YAML in Git, or
         // point to a different pre-existing blob without mentioning it in changes.
@@ -333,6 +465,7 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
         if (spec.id !== id) throw new Error('Workflow identity mismatch');
       }
       const treeId = await text(['write-tree']);
+      if (protectTreeAliases) rejectProtectedTreeAliases(await readTreeEntries(treeId), pack.root, manifest);
       const commit = await text(['commit-tree', treeId, '-p', input.sourceCommit, '-m', `Save workflow ${input.workflowId}`]);
       if (!oidPattern.test(commit)) throw new Error('Invalid candidate commit');
       const metadata = await readPreparedPackMetadata(dir, input.workflowId, commit);
@@ -391,6 +524,7 @@ function validatePreparedCandidate(prepared: PreparedPackCandidate) {
 export async function pushPreparedPackCandidate(repoDir: string, input: PreparedPackCandidate): Promise<SavePackCandidateResult> {
   const prepared = Object.freeze({ ...input });
   validatePreparedCandidate(prepared);
+  rejectCurrentOverDifferentSaved(prepared.sourceVersion, prepared.sourceCommit, prepared.expectedSavedHead);
   const { text } = preparedGitRunner(repoDir);
   if (await text(['rev-parse', '--verify', `${prepared.commit}^{commit}`]) !== prepared.commit
     || await text(['show', '-s', '--format=%P', prepared.commit]) !== (prepared.sourceCommit ?? '')) throw new Error('Invalid prepared candidate commit');
@@ -431,6 +565,7 @@ export async function resumePreparedPackCandidate(input: PreparedPackCandidate, 
         return { branch: prepared.branch, commit: prepared.commit };
       }
       if (head !== prepared.expectedSavedHead) throw new PackCandidateConflictError();
+      rejectCurrentOverDifferentSaved(prepared.sourceVersion, prepared.sourceCommit, prepared.expectedSavedHead);
       await restorePreparedGitBundle(dir, prepared.bundleBase64);
       attempted = true;
       return await pushPreparedPackCandidate(dir, prepared);
