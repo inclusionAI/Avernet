@@ -215,13 +215,14 @@ def create_router():
                 missing.append(key)
                 continue
             source = row.card.source_card
+            worker = catalog.worker(row).model_dump(mode="json")
             data[key] = {
                 "name": source["name"],
                 "runtime_state": source.get("runtime_state"),
-                "availability": source.get("availability"),
+                "availability": worker["state"]["availability"],
                 "profile_tags": {"trust_level": source.get("trust_level", "guarded")},
             }
-            workers.append(catalog.worker(row).model_dump(mode="json"))
+            workers.append(worker)
         return {
             "success": True,
             "data": data,
