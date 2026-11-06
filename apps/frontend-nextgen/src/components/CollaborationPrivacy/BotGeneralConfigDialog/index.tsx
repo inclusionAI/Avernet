@@ -22,9 +22,12 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+// BotDomain 类型改经 Domain 真源供给（collab-form Task 17 源切片类型完备）：services/botWorkshop
+// barrel 属 BotWorkshop 裁剪面（其 types.ts 本就是 Domain 层的兼容出口），保留的协作权限组件
+// 不得 type-only 依赖它——运行时守卫擦除此类边，源切片则会因缺失文件而 typecheck 失败。
+import type { BotDomain } from '@/domain/botWorkshop';
 import { useBotPublishApproval } from '@/hooks/useBotPublishApproval';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
-import type { BotDomain } from '@/services/botWorkshop';
 import { history } from '@umijs/max';
 import { Copy, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';

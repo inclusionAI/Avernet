@@ -1,17 +1,11 @@
 import { Button, Segmented, Spin, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import { SERVICE_BOT_STAGE_OPTIONS } from '@/domain/collaboration/serviceBotRouting';
+import type { ServiceBotRoutingControlProps } from '@/extensions/contracts/groupRouting';
 import { Info } from 'lucide-react';
-import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
 
-export function ServiceBotRoutingControl({
-  actorId,
-  botName,
-  routing,
-}: {
-  actorId: string;
-  botName: string;
-  routing: ReturnType<typeof useServiceBotRouting>;
-}) {
+// props 契约（含 routing 模型）已上移至 src/extensions/contracts/groupRouting.ts
+// （collab-form Task 17 源切片类型完备）：本实现不再 type-only 依赖 useServiceBotRouting hooks 文件。
+export function ServiceBotRoutingControl({ actorId, botName, routing }: ServiceBotRoutingControlProps) {
   const state = routing.states[actorId];
   if (state?.status === 'non_service') return null;
   if (!state || state.status === 'loading') {

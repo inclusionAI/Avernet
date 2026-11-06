@@ -20,7 +20,7 @@ import {
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import type {
   SessionMessageSearchQuery,
-  SessionMessageSearchResult,
+  UseSessionHistorySearchModel,
 } from '@/services/workspace/conversationSearchService';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
@@ -83,15 +83,8 @@ export interface UseChatHeaderPanelsResult {
   locateMessage: (messageId: string) => void;
 }
 
-export interface UseSessionHistorySearchModel {
-  query: SessionMessageSearchQuery;
-  setKeyword: (keyword: string) => void;
-  setSender: (sender: SessionMessageSearchQuery['sender']) => void;
-  setTodayOnly: (todayOnly: boolean) => void;
-  /** 本地降级态指示：面板据此明示「仅已载入消息」。 */
-  source: 'local';
-  results: SessionMessageSearchResult[];
-}
+// UseSessionHistorySearchModel 已上移至 domain/conversation/search.ts 并经
+// conversationSearchService re-export（collab-form Task 17 源切片类型完备）。
 
 /** 历史消息面板的搜索/筛选/结果模型（本地源即时过滤）。 */
 function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: number): UseSessionHistorySearchModel {

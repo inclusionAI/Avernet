@@ -1,8 +1,8 @@
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { Button } from '@/components/ui/Button';
 import { useExpertDetails } from '@/hooks/useExpertDetails';
 import { initSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import MarkdownIt from 'markdown-it';
 import { useEffect, useState } from 'react';
 

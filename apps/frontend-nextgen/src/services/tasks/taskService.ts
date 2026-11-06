@@ -105,4 +105,6 @@ export async function resolveWorkflowCommand(
   }
 }
 
+// WorkflowListItem 权威定义已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17
+// 源切片类型完备）；本层仅为兼容出口：workflowController（BackendApi 面）→ taskService（Service 面）。
 export type { WorkflowListItem };

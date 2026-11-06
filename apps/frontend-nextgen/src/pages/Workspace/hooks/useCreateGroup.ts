@@ -1,6 +1,6 @@
 import type { GroupView } from '@/domain/collaboration';
 import type { HumanMentionNotifyMode, MessageViewScope } from '@/domain/collaboration/types';
-import { resolveUserId } from '@/services/workspace/botSessionService';
+import { resolveUserId } from '@/services/workspace/resolveUserId';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { groupService } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';

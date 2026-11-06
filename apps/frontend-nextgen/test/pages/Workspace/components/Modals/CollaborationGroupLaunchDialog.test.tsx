@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import '../../../../helpers/registerOpenGroupServiceBotRoutingSlots';
 import CollaborationGroupLaunchDialog from '@/pages/Workspace/components/Modals/CollaborationGroupLaunchDialog';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { BotBasicInfoDialog } from '@/components/BotWorkshop/BotBasicInfoDialog';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { expect, jest, test } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

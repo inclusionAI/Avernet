@@ -1,4 +1,4 @@
-import { botEditorService } from '@/services/botWorkshop/botEditorService';
+import { botPublishApprovalService } from '@/services/bots/botPublishApprovalService';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -13,7 +13,7 @@ export function useBotPublishApproval(botId: string, ownerId: string | undefined
     setLoading(true);
     setError(undefined);
     try {
-      setRequired(await botEditorService.loadApproval(botId, ownerId));
+      setRequired(await botPublishApprovalService.loadApproval(botId, ownerId));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '发布审批配置加载失败');
     } finally {
@@ -30,7 +30,7 @@ export function useBotPublishApproval(botId: string, ownerId: string | undefined
       if (!enabled || updating) return;
       setUpdating(true);
       try {
-        await botEditorService.saveApproval(botId, next, ownerId);
+        await botPublishApprovalService.saveApproval(botId, next, ownerId);
         setRequired(next);
         setError(undefined);
         toast.success('发布审批配置已更新');

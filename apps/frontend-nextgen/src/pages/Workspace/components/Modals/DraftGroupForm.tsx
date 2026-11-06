@@ -4,7 +4,6 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useAllAvailableBots } from '../../hooks/useAllAvailableBots';
 import { useGroupCollaborationPicker } from '../../hooks/useGroupCollaborationPicker';
 import { useParticipantBinding } from '../../hooks/useParticipantBinding';
-import { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
 import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CreateGroupFooter } from './CreateGroupFooter';
@@ -12,6 +11,7 @@ import { CreateGroupHumanNotifyMode, useCreateGroupHumanNotifyMode } from './Cre
 import { GroupConfigFields } from './GroupConfigFields';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
 import { formatAutoGroupName } from './groupNaming';
+import { useResolvedServiceBotRouting } from './serviceBotRoutingSlots';
 
 export interface DraftGroupValues {
   name: string;
@@ -55,7 +55,7 @@ export function DraftGroupForm({
   }, [initialYaml, binding.handleValidate, binding.reset, picker.setTab]);
   const boundIds = Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean)));
   const memberIds = Array.from(new Set([originator?.id, ...boundIds].filter((id): id is string => Boolean(id))));
-  const routing = useServiceBotRouting(memberIds, true);
+  const routing = useResolvedServiceBotRouting(memberIds, true);
   const botName = (id: string) => allBots.find((bot) => bot.id === id)?.name ?? id;
   const boundOptions = memberIds.map((id) => allBots.find((bot) => bot.id === id) ?? { id, name: botName(id) });
   const activeBot = binding.participantBindings[binding.activeParticipantKey];

@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 槽位真实装配必须先于 GroupChatPane 模块求值（组件在模块作用域解析槽位）：import 按声明序求值。
+import '../../../../helpers/registerOpenGroupTaskSlots';
 import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
 import { GroupChatPane, type GroupChatPaneProps } from '@/pages/Workspace/components/GroupChatPane';
 import type { PanelHandle } from '@tc-chat/core';

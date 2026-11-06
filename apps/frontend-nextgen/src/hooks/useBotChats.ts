@@ -6,7 +6,9 @@ import {
   formatFriendlyDateTime,
   fuzzyQueryWindowDays,
 } from '@/services/botWorkshop/botChatService';
-import { identityService, isTestUserIdentity, resolveUserId } from '@/services/workspace';
+import { identityService } from '@/services/workspace/identityService';
+import { isTestUserIdentity } from '@/services/workspace/testUser';
+import { resolveUserId } from '@/services/workspace/resolveUserId';
 import { useBotChatStore } from '@/stores/botChatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useLocation } from '@umijs/max';

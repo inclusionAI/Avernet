@@ -9,6 +9,10 @@ FROM node:22-bookworm-slim AS build
 # --build-arg A2A_CLIENT_DEFAULT=true；缺省 false=主线 off 语义。
 ARG A2A_CLIENT_DEFAULT=false
 ENV A2A_CLIENT_DEFAULT=${A2A_CLIENT_DEFAULT}
+# 装配形态（spec 2026-11-03-collab-form）：open（默认）/ collab（协作群极简站）。
+# 构建协作群极简站镜像：docker build --build-arg FRONTEND_FORM=collab -f apps/frontend-nextgen/Dockerfile .
+ARG FRONTEND_FORM=open
+ENV FRONTEND_FORM=${FRONTEND_FORM}
 WORKDIR /repo
 COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
 COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./apps/frontend-nextgen/

@@ -35,6 +35,11 @@ import {
   type PublicationResult,
 } from './collaborationPrivacyGateway';
 import {
+  applyExternalBotDtoToDomain,
+  stripExternalAgentViewScopeDeps,
+  submitExternalPublication,
+} from './externalBotPublication';
+import {
   buildFriendApprovalAttributesPatch,
   mapFriendApprovalAttributesToDomain,
   readFriendApprovalAttributes,
@@ -46,7 +51,6 @@ import {
   readDepartmentScopeReferences,
   type DepartmentScopeReference,
 } from './mappers';
-import { applyExternalBotDtoToDomain, stripExternalAgentViewScopeDeps, submitExternalPublication } from './externalBotPublication';
 
 export interface CollaborationPrivacyRuntimeDependencies {
   apiAdapter: CollaborationPrivacyApiAdapter;
@@ -59,6 +63,8 @@ export interface CollaborationPrivacyRuntimeDependencies {
   };
   getWorkerConfig: typeof fetchWorkerConfig;
   updateWorkerConfig: typeof saveWorkerConfig;
+  /** 显式注入的旧 adapter 保持原目录语义；生产装配始终提供运行时能力 getter。 */
+  getOrganizationDirectoryEnabled?: () => boolean;
   getUserProfilePresentation?: () => UserProfilePresentation;
   getHumanIdentity?: () => HumanIdentity | null;
 }
@@ -267,6 +273,7 @@ function applyResolvedDepartmentEntries(
 async function hydrateDepartmentScopes(
   dtos: CollaborationBotDto[],
   listDepartments: typeof listOrgDepts,
+  directoryEnabled: boolean,
   signal?: AbortSignal,
 ): Promise<CollaborationBot[]> {
   const referencesByBot = new Map(dtos.map((dto) => [dto.bot_id, readBotDepartmentReferences(dto)]));
@@ -286,7 +293,7 @@ async function hydrateDepartmentScopes(
   );
 
   await Promise.all(
-    departmentNos.map(async (departmentNo) => {
+    (directoryEnabled ? departmentNos : []).map(async (departmentNo) => {
       try {
         const departments = assertDepartmentResponse(await listDepartments({ keyword: departmentNo }, signal));
         const exact = departments.find((department) => department.dept_no === departmentNo);
@@ -375,6 +382,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
     taskGrant: { grantTaskClaim, revokeTaskClaim },
     getWorkerConfig: fetchWorkerConfig,
     updateWorkerConfig: saveWorkerConfig,
+    getOrganizationDirectoryEnabled: () => getCapabilities().getOrganizationDirectoryEnabled().value,
     getUserProfilePresentation: () => getCapabilities().getUserProfilePresentation().value,
     getHumanIdentity: () => getCapabilities().getHumanIdentity().value,
   },
@@ -384,19 +392,24 @@ export function createCollaborationPrivacyRuntimeAdapter(
   let activeRawUserId: string | undefined;
   let latestLoadId = 0;
   let managedBotSnapshots = new Map<string, CollaborationBotDto>();
+  const organizationDirectoryEnabled = () => dependencies.getOrganizationDirectoryEnabled?.() ?? true;
+  const hydrateBotScopes = (dtos: CollaborationBotDto[], signal?: AbortSignal) =>
+    // 即使不接目录也保留 DTO 自带的名称路径；仅跳过远端解引用。
+    hydrateDepartmentScopes(dtos, dependencies.listOrgDepts, organizationDirectoryEnabled(), signal);
 
   return {
     async loadOverview(userId, signal, loadScope = { target: 'allBots' }) {
       const loadId = ++latestLoadId;
       const rawUserId = userId.trim();
       const userProfilePresentation = resolveUserProfilePresentation(dependencies);
-      const currentUser = userProfilePresentation.preferAuthenticatedUserProfile
-        ? buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.())
-        : mapOrgUserToIdentity(
-            normalizeOrgUser(
-              assertOrgUserResponse(await dependencies.getOrgUser(normalizeEmployeeNumber(rawUserId), signal)),
-            ),
-          );
+      const currentUser =
+        !organizationDirectoryEnabled() || userProfilePresentation.preferAuthenticatedUserProfile
+          ? buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.())
+          : mapOrgUserToIdentity(
+              normalizeOrgUser(
+                assertOrgUserResponse(await dependencies.getOrgUser(normalizeEmployeeNumber(rawUserId), signal)),
+              ),
+            );
       // 用户身份入口只渲染身份卡：不请求 Bot 列表，部门回显与 BCSFuse config 的 N+1 自然归零。
       if (loadScope.target === 'currentUser') {
         const userScopedOverview: CollaborationPrivacyOverview = { currentUser, organizationOptions: [], bots: [] };
@@ -422,11 +435,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
       // 部门回显和画像公开配置是两条独立链路；并行启动，避免部门搜索慢/失败时看不到 BCSFuse 请求。
       const baseBots = hydratableBots.map(mapBotDtoToDomain);
       const [botsWithDepartments, botsWithProfile] = await Promise.all([
-        hydrateDepartmentScopes(
-          isExternalLoad ? hydratableBots.map(stripExternalAgentViewScopeDeps) : hydratableBots,
-          dependencies.listOrgDepts,
-          signal,
-        ),
+        hydrateBotScopes(isExternalLoad ? hydratableBots.map(stripExternalAgentViewScopeDeps) : hydratableBots, signal),
         // 外部 Bot 不提供画像公开能力，不查询 BCSFuse Worker 配置。
         isExternalLoad ? baseBots : hydrateProfilePublic(baseBots, dependencies.getWorkerConfig, signal),
       ]);
@@ -461,9 +470,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
       const previousDto = managedBotSnapshots.get(botId);
       const dtoWithPreservedEngine =
         dto.engine?.trim() || !previousDto?.engine ? dto : { ...dto, engine: previousDto.engine };
-      const [refreshedBot] = await hydrateDepartmentScopes(
+      const [refreshedBot] = await hydrateBotScopes(
         [isExternalBot ? stripExternalAgentViewScopeDeps(dtoWithPreservedEngine) : dtoWithPreservedEngine],
-        dependencies.listOrgDepts,
         signal,
       );
       if (!refreshedBot) throw new Error('Bot 详情接口未返回可配置的 Bot');
@@ -478,7 +486,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
 
     async syncDepartment(userId, signal) {
       const userProfilePresentation = resolveUserProfilePresentation(dependencies);
-      if (!userProfilePresentation.showDepartment) {
+      if (!organizationDirectoryEnabled() || !userProfilePresentation.showDepartment) {
         return buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.());
       }
       const userResponse = await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal);
@@ -486,6 +494,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
     },
 
     async searchDepartments(keyword, signal) {
+      if (!organizationDirectoryEnabled()) return [];
       return assertDepartmentResponse(await dependencies.listOrgDepts({ keyword }, signal)).map(mapOrgDeptToEntry);
     },
 

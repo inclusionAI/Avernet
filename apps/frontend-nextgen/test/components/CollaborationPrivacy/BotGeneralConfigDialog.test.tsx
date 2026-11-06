@@ -2,8 +2,8 @@
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import type { CollaborationBot, CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
 import * as identityModule from '@/hooks/useHumanIdentity';
-import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { botPublishApprovalService } from '@/services/bots/botPublishApprovalService';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import '@testing-library/jest-dom';
@@ -75,8 +75,8 @@ beforeEach(() => {
     status: 'ready',
     identity: { userId: '900004', displayName: '真实用户', online: true },
   });
-  jest.spyOn(botEditorService, 'loadApproval').mockResolvedValue(false);
-  jest.spyOn(botEditorService, 'saveApproval').mockResolvedValue({ data: { should_approval: false } } as never);
+  jest.spyOn(botPublishApprovalService, 'loadApproval').mockResolvedValue(false);
+  jest.spyOn(botPublishApprovalService, 'saveApproval').mockResolvedValue({ data: { should_approval: false } } as never);
 });
 
 afterEach(() => {
@@ -205,7 +205,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
   it('internal × 团队空间 Bot：发布审批读取真实配置并可持久化切换（AC-06/07）', async () => {
     mockCapabilities.mockReturnValue(internalCapabilities);
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
-    jest.mocked(botEditorService.loadApproval).mockResolvedValue(true);
+    jest.mocked(botPublishApprovalService.loadApproval).mockResolvedValue(true);
 
     render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
 
@@ -217,7 +217,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
 
     const approvalSwitch = await screen.findByRole('switch', { name: '关闭共同编辑者发布需 Owner 审批' });
     fireEvent.click(approvalSwitch);
-    await waitFor(() => expect(botEditorService.saveApproval).toHaveBeenCalledWith('bot-1', false, undefined));
+    await waitFor(() => expect(botPublishApprovalService.saveApproval).toHaveBeenCalledWith('bot-1', false, undefined));
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
   });
 
@@ -295,6 +295,6 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
-    expect(botEditorService.loadApproval).toHaveBeenCalledTimes(2);
+    expect(botPublishApprovalService.loadApproval).toHaveBeenCalledTimes(2);
   });
 });

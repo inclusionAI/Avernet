@@ -9,7 +9,7 @@
  */
 
 import { copyBot as copyBotApi, retryCopyBot as retryCopyBotApi } from '@/services/backendApi/bots/botController';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
 import type { BotCopyInput } from '@/services/botWorkshop';
 

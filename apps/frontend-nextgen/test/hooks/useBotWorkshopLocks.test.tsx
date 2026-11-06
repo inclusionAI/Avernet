@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { useBotWorkshopLocks } from '@/hooks/useBotWorkshopLocks';
 import { botEditLockService } from '@/services/botWorkshop/botEditLockService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { act, renderHook } from '@testing-library/react';
 import { history } from '@umijs/max';
 

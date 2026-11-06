@@ -1,9 +1,9 @@
 export * from './botChatService';
 export * from './botContainerService';
-export * from './botMapper';
+export * from '@/services/bots/botMapper';
 export * from './botPolicy';
 export * from './botWorkshopService';
-export * from './externalBotService';
+export * from '@/services/externalBots/externalBotService';
 export * from './types';
 
 // Re-exported so hooks can branch on a 404 from the detail poll without crossing the

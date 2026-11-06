@@ -83,3 +83,26 @@ its platform archives/installer pass release gates; then update all pinned links
 Closing the registration guide reloads the external Bot list and reachability.
 OpenClaw setup separates Bot type selection from terminal installation versus
 sending onboarding instructions to the Bot.
+
+## General configuration service capabilities
+
+BCN-only `collab` does not use the organization directory or the engine asset
+catalog. These dependencies are controlled independently of login identity and
+user-profile presentation:
+
+| Capability | Open Core | collab | Full internal overlay |
+| --- | --- | --- | --- |
+| `getOrganizationDirectoryEnabled` | false | false | true |
+| `getCollaborationBotEngineLabelEnabled` | true | false | true |
+
+When the directory is unavailable, general configuration resolves the current
+user from the authenticated identity and makes no organization user, department
+hydration, synchronization, or department search requests. Department names
+already included in Bot DTOs remain in the domain model. Organization-restricted
+visibility and historical organization-scope viewer actions are hidden; existing
+restricted configurations can be replaced by either supported visibility value.
+Friend approval retains the existing two-option collab policy. Disabling engine
+enrichment skips `/openapi/v1/bots` in both general configuration and shell identity
+initialization, without discarding an engine/provider already
+included in the collaboration Bot response. Capabilities are read at request
+time, after extension registration, including when refreshing configuration.

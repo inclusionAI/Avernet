@@ -1,6 +1,8 @@
 // @asset-migrated: teamclaw 自研资产
-/** Task artifact 站内预览抽屉；仅依赖 TaskPanel 与既有 Service，避免反向依赖 Workspace 页面。 */
+/** Task artifact 站内预览抽屉；仅依赖 TaskPanel、既有 Service 与 shared HTML 工具（净化已外移 src/shared/html），避免反向依赖 Workspace 页面。 */
 import { formatFileSize, getFileExt } from '@/services/workspace/sessionFileUtils';
+import { SafeHtml } from '@/shared/html/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import MarkdownIt from 'markdown-it';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -12,8 +14,6 @@ import {
   useTaskArtifactPreview,
 } from '../hooks/useTaskArtifactPreview';
 import { Close } from '../icons';
-import { SafeHtml } from '../SafeHtml';
-import { sanitizeMarkdownHtml } from '../sanitizeHtml';
 import { C } from '../tokens';
 import { formatArtifactUpdatedAt } from '../artifactTime';
 import type { TaskArtifactView } from '../types';

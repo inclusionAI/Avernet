@@ -5,6 +5,30 @@ by itself does not change the running UI. Select `FRONTEND_VARIANT=nextgen`
 for **every** setup/start/stop/status invocation, or persist it in the checkout's
 untracked `singlebox/.env.local`. Do not copy secrets between worktrees.
 
+## Full public product (`FRONTEND_FORM=open`) and the collab assembly
+
+`apps/frontend-nextgen` keeps the complete public source and its default Open
+routes. The 2026-11-03 collab-form work adds a build-time `FRONTEND_FORM` switch
+inside nextgen (`open` by default; `collab` selects a collaboration-only page
+assembly from the same source). Singlebox regression therefore pins the full
+product explicitly:
+
+```bash
+FRONTEND_VARIANT=nextgen FRONTEND_FORM=open bash singlebox/singlebox.sh start all
+```
+
+The collab assembly builds from the same public source via `npm run
+build:collab` / `npm run dev:collab` for local checks; it is not a Singlebox
+frontend entry. The independent internal collaboration site is a separate
+OCB-nextgen artifact (`apps/frontend-nextgen/specs/2026-11-03-collab-form/export-plan.md`,
+Tasks 17–20): its exporter writes a new output directory and never replaces
+`apps/frontend-nextgen`, prunes this source tree, or involves legacy
+`apps/frontend`. It never becomes the public Singlebox source directory —
+Singlebox keeps serving the complete public product above. The full-source
+startup evidence from export-plan Task 20 is recorded in the
+"Full-source validation record (2026-11-04)" below; the earlier
+"Local validation record (2026-09-10)" was the pre-collab-form evidence.
+
 ## FRONTEND_VARIANT=teamclaw: the external internal-UI checkout
 
 `apps/frontend-nextgen` is the exported open-core subset of the TeamClaw UI —
@@ -228,3 +252,89 @@ bash singlebox/verity/test_singlebox_default_mode.sh
   the local Gateway/backend stack was not running. Authenticated bot/chat
   workflows and full Singlebox coverage were **not** verified. No mock auth
   or synthetic backend responses were introduced for the browser check.
+
+## Full-source validation record (export-plan Task 20, 2026-11-04)
+
+Recorded at Avernet commit `53d9ea5f57` (collab-form public surface
+complete). Everything below was exercised from this checkout on 2026-11-04;
+no mock auth, no synthetic backend responses, and no skipped launcher
+readiness contract were involved.
+
+### Verity gates
+
+- `bash singlebox/verity/test_singlebox_frontend_variant.sh` — PASS, all
+  7 scenarios (variant resolution incl. `nextgen → apps/frontend-nextgen` +
+  `dev:local` + root id `root`; upstream defaults/overrides; teamclaw
+  mapping/auto-update; dev-login banner; frontend-pull refusal semantics;
+  locked-arm install policy).
+- `bash singlebox/verity/test_singlebox_variant_gate.sh` — PASS (status
+  probes stay usable under broken variants; starts fail fast before any
+  service work; bcs_frontend refuses non-legacy variants; gateway_stop keeps
+  the owned-process contract; frontend-pull routes as a command).
+
+### Actual frontend source and commands
+
+- Source path: `$ROOT/apps/frontend-nextgen` (the complete public nextgen
+  tree at HEAD), launcher command `npm run dev:local`,
+  `FRONTEND_ROOT_ID=root`, workbench `http://127.0.0.1:8000/`.
+- Startup: `FRONTEND_VARIANT=nextgen FRONTEND_FORM=open bash
+  singlebox/singlebox.sh start all` → **rc=0**, full standalone stack
+  ready (baas, backend, bcsfuse, BCS on 21000, 5 OpenClaw bots, demo bot,
+  Gateway on 8889, nextgen frontend on 8000). Readiness is the launcher's
+  own HTTP contract: `<div id="root">` + a 10.7 MB `/umi.js`, no bundling
+  placeholder. Gateway `/health` → 200.
+
+### Live HTTP-level smoke (full stack up)
+
+- Login: `http://127.0.0.1:8889/_dev/login?next=8000` arms the signed
+  `staff_id` cookie (the Gateway `dev_cookie` strategy resolved it for every
+  forwarded route). `/openapi/v1/auth/user` and `/openapi/v1/auth/url`
+  answer the documented local contract `OAuth is not configured`
+  (HTTP 404, `auth_not_configured`) — Singlebox wires no OAuth provider, so
+  the provider step is the missing piece, not the caller.
+- Collaboration flow, through the frontend origin
+  (`127.0.0.1:8000/openapi/...` → Gateway → BCS) with the dev principal:
+  group list → `20000 OK` (initially empty); **group create** (chat
+  strategy, driver `bot_13a68ef8` CEO + participant `human_001`) → `20100
+  Created`, `bcs_grp_10dbeb93d89b40069e1e84a8f020cae4`, listing shows
+  `total: 1`; external-bot `bots/mine` → 200 with the 5 onboarded
+  `bot_*` profiles plus `human_001`, all `online`.
+- Non-collaboration Open surface: `/bot-workshop` and
+  `/workspace/collaboration` → 200; the dev bundle contains the open-form
+  route markers (e.g. `bot-workshop` × 8); BBS task list
+  (`/openapi/v1/collaboration/tasks/bbs/list`, a route the collab form
+  cuts) → `200000 OK`. Absent optional remote services were not confused
+  with bundle failures.
+- The legacy `bcs_frontend` composite was not used for any of this.
+
+### What this record does not cover
+
+- Browser-rendered interactions (sidebar contents, dialogs, WebSocket
+  push, side panels) had no browser session in this run; readiness and the
+  flows above are HTTP-level. They remain part of the collab-form live
+  acceptance and recorded network trace (spec acceptance criteria 2–5, 8).
+- This machine has no Docker CLI: the exported-tree image build/startup and
+  the private-deployment smoke stay UNVERIFIED here and are owned by the
+  private deployment environment (OCB
+  `apps/frontend-nextgen/deploy/collab/README.md`).
+- All services started for this record were stopped with `stop all`;
+  no listener or orphan process was left behind.
+
+### Legacy-omission disposable check
+
+A disposable `git worktree add --detach` copy at `53d9ea5f57` with **only**
+`apps/frontend` deleted (the real legacy directory was untouched):
+
+- `FRONTEND_VARIANT=nextgen` startup through the same launcher: deps
+  install, `dev:local`, readiness contract — FRONTEND READY on port 8001,
+  `/` root element, `/umi.js` 200, `/bot-workshop` 200, collab/open route
+  markers present in the bundle.
+- `FRONTEND_VARIANT=legacy` startup fails loudly at its own prerequisites
+  (rc=1, `apps/frontend/scripts/ci_test.sh: No such file or directory`
+  → `[ERROR] Prerequisites not met for frontend`) — no silent fallback.
+- Both verity scripts above pass in full inside the copy (7/7 and PASS):
+  nextgen selection, upstreams, readiness and lifecycle contracts have no
+  runtime dependency on the legacy directory; `singlebox`'s only
+  `apps/frontend` references are the legacy/default variant mapping, the
+  warn-and-degrade lifecycle fallback, and the legacy-only bcs_frontend
+  composite. The worktree was removed afterwards.

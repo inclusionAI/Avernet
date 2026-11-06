@@ -1,5 +1,5 @@
-import type { BotDomain } from '@/services/botWorkshop';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import type { BotDomain } from '@/domain/botWorkshop';
+import { mapBotDto } from '@/services/bots/botMapper';
 import {
   buildDraftOrPrestableServiceCodingBotChatHref,
   canEnterBotDetail,

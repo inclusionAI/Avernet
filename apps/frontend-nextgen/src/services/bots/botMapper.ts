@@ -1,8 +1,8 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import type { BotCopyStateSummary, BotCopyStatus, BotDomain, BotRuntimeDomain } from '@/domain/botWorkshop';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
-import { getBcnCapability, getServiceBotCapability } from './agentCodingTemplateService';
+import { getBcnCapability, getServiceBotCapability } from './botCapability';
 import { resolveBotLifecycle } from './botLifecycleResolver';
-import type { BotCopyStateSummary, BotCopyStatus, BotDomain, BotRuntimeDomain } from './types';
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'hermes', 'teclaw']);
 const INTERNAL_ENGINES = new Set(['claude_code', 'aicoding', 'claudeCode', 'applicationCoding']);

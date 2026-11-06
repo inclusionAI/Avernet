@@ -10,7 +10,7 @@
 // identityService 已做模块级单飞，此处无需重复去重。
 
 import { getCapabilities } from '@/capabilities';
-import { resolveUserId } from '@/services/workspace/botSessionService';
+import { resolveUserId } from '@/services/workspace/resolveUserId';
 import { identityService } from '@/services/workspace/identityService';
 import { applyIdentityLoadResult } from '@/services/workspace/identityStore';
 

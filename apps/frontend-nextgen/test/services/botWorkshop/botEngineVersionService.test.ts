@@ -3,7 +3,7 @@ import * as botController from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import * as botContainerService from '@/services/botWorkshop/botContainerService';
 import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersionService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botController');

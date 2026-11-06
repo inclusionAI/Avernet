@@ -1,7 +1,7 @@
 // @sdd: IdentityView → Identity 映射（从 useWorkspace 抽出,降低 Hook 体积 + 语义归类至映射层）。
 import type { IdentityView } from '@/domain/collaboration';
 import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
-import type { ChatBotView } from '@/services/workspace';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 import type { ConversationTarget, Identity } from '@/services/workspace/workspaceModel';
 
 export function mapIdentityViewToIdentity(view: IdentityView): Identity {

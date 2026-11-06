@@ -2,10 +2,8 @@ import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot'
 import '@/components/Workspace/ChatPanel/ChatPanel.css';
 import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
-import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
-import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
@@ -24,6 +22,7 @@ import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { SpeakingLeaseStrip } from './SpeakingLeaseControl';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
+import { GroupTaskLinkedSession, useResolvedGroupTaskExecution } from './paneTaskSlots';
 import { useGroupChatPaneActions } from './useGroupChatPaneActions';
 export { resolveSender } from './messageHelpers';
 export function GroupChatPane(props: GroupChatPaneProps) {
@@ -110,7 +109,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     [activeIdentity?.id, activeIdentity?.kind, session?.participants],
   );
 
-  const taskExecution = useGroupTaskExecution({
+  const taskExecution = useResolvedGroupTaskExecution({
     group,
     session,
     activeIdentity,
@@ -163,8 +162,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
-        {linkedSession ? (
-          <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
+        {linkedSession && GroupTaskLinkedSession ? (
+          <GroupTaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
         ) : (
           <>
         <GroupHeader

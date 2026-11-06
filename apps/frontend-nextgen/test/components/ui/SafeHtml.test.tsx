@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { SafeHtml } from '@/shared/html/SafeHtml';
 import { describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { render, screen } from '@testing-library/react';

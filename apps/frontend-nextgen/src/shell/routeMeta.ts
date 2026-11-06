@@ -147,6 +147,14 @@ export const routeMetaList: RouteMeta[] = [
     navKey: 'bot-workshop',
     openCore: true,
   },
+  // collab 形态一级页（Open 形态路由表不含该路径，meta 在 Open 下惰性无害）。
+  {
+    path: '/external-bots',
+    title: '外部 Bot',
+    section: 'bot',
+    navKey: 'external-bots',
+    openCore: true,
+  },
   {
     path: '/bot-workshop/detail',
     title: 'Bot 详情',

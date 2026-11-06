@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 槽位真实装配必须先于 CreateGroupModal 模块求值（modal 在模块作用域经 serviceBotRoutingSlots 解析选路槽位）：import 按声明序求值。
+import '../../../../helpers/registerOpenGroupServiceBotRoutingSlots';
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';

@@ -1,13 +1,15 @@
 import { FileIcon } from 'lucide-react';
 
+import { AttachmentMenu } from '@/components/Workspace/AttachmentMenu';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
-import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
 import type { SessionView } from '@/domain/collaboration';
-import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
+import { getExtensionSlots } from '@/extensions/slots';
+// 编排结果改由槽位契约供给（collab-form Task 17 源切片类型完备）：useTaskExecution 属任务栈
+// 裁剪面，collab 源切片裁掉后本保留文件不得 type-only 依赖它。
+import type { UseTaskExecutionResult } from '@/extensions/contracts/groupTasks';
 import { useGroupChatImageUpload } from '@/pages/Workspace/hooks/useGroupChatImageUpload';
 import { buildQuotePrompt, type MessageQuote } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useSessionFileUpload } from '@/pages/Workspace/hooks/useSessionFileUpload';
-import { buildTaskInstructions } from '@/services/tasks/taskMapper';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import { cn } from '@/utils/cn';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
@@ -17,6 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { GroupImagePreview } from './GroupImagePreview';
 import { expandMentionIds } from './mentionHelpers';
 import { UploadFilesModal } from './UploadFilesModal';
+
+// 任务菜单/任务指令构造经槽位解析（collab 形态为 null：菜单与任务发送分支整体消失）。
+const CapabilitiesMenu = getExtensionSlots().groupTasks?.ComposerCapabilitiesMenu;
+const buildInstructions = getExtensionSlots().groupTasks?.buildTaskInstructions;
 
 interface GroupChatComposerProps {
   session: SessionView | null;
@@ -130,8 +136,9 @@ export function GroupChatComposer({
       if ((!hasText && !hasImages) || images.isProcessing || images.isUploading) return;
       const quotedContent = quote ? `${buildQuotePrompt(quote.senderName, quote.text)}\n\n${content}` : content;
       // 任务胶囊选中态：逐胶囊构造任务指令消息发到群聊，由 bot/skill 解析触发（每胶囊各发起一个任务）。
-      if (execution && execution.selections.length > 0) {
-        for (const instruction of buildTaskInstructions(quotedContent, execution.selections)) {
+      // 槽位为 null（collab 形态）时 buildInstructions 缺失，任务发送分支整体跳过、降级为普通消息。
+      if (execution && execution.selections.length > 0 && buildInstructions) {
+        for (const instruction of buildInstructions(quotedContent, execution.selections)) {
           onSend(instruction, [], undefined);
         }
         execution.clearSelection();
@@ -205,8 +212,10 @@ export function GroupChatComposer({
         toolbar={{
           left: (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {execution ? (
-                <ComposerCapabilitiesMenu
+              {/* 任务栈经槽位装配：Open 注册真实能力菜单；collab（槽位 null）与无任务执行装配时
+                  降级到任务无关附件菜单，＋ 附件入口（上传文件/添加图片）保持可用。 */}
+              {execution && CapabilitiesMenu ? (
+                <CapabilitiesMenu
                   execution={execution}
                   onUpload={() => setUploadFilesOpen(true)}
                   onAddImage={triggerImagePicker}
@@ -217,7 +226,15 @@ export function GroupChatComposer({
                   onDynamicSelected={execution.selectDynamic}
                   onRemoveSelection={execution.removeSelection}
                 />
-              ) : null}
+              ) : (
+                // 断连时本降级菜单整体灰化，对齐 sender 断连灰卡语义；Open 能力菜单按其自身契约
+                // 仅受 !session 约束（触发器保持可开）。
+                <AttachmentMenu
+                  onUpload={() => setUploadFilesOpen(true)}
+                  onAddImage={triggerImagePicker}
+                  disabled={!session || connectionStatus !== 'connected'}
+                />
+              )}
             </span>
           ),
           right: undefined,

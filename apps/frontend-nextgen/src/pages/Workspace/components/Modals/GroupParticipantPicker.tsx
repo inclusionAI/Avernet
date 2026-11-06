@@ -1,10 +1,12 @@
 import { Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import type { ServiceBotRoutingModel } from '@/extensions/contracts/groupRouting';
 import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { cn } from '@/utils/cn';
 import { Search } from 'lucide-react';
 import { useMemo } from 'react';
 import type { CandidateFilterMode, UseGroupCollaborationPickerResult } from '../../hooks/useGroupCollaborationPicker';
-import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
+// routing 的类型经槽位契约供给（collab-form Task 17 源切片类型完备）：useServiceBotRouting
+// hooks 文件属 pages 裁剪面，保留链不得 type-only 依赖它（运行时守卫擦除此类边，源切片则会漏文件）。
 import { ParticipantRow } from './ParticipantRow';
 import { SelectedParticipantChip } from './SelectedParticipantChip';
 
@@ -23,7 +25,7 @@ export interface GroupParticipantPickerProps {
   listViewportClassName?: string;
   /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
   fillAvailableHeight?: boolean;
-  routing?: ReturnType<typeof useServiceBotRouting>;
+  routing?: ServiceBotRoutingModel;
   /** 其他协作角色已绑定的 Bot：保留路由配置入口，不改变当前角色的选择。 */
   additionalRoutingOptions?: Array<{ id: string; name: string; avatarUrl?: string }>;
 }
