@@ -34,10 +34,11 @@ Scope rules:
 | [0013](0013-async-repository-dal.md) | Async SQLAlchemy repository pattern | accepted | all | repository-per-aggregate quartet; pluggable engines (sqlite/mariadb vs enterprise ZDAS) |
 | [0014](0014-background-job-model.md) | Background job model | accepted | all | `AppScheduler` with scheduled task classes; per-bot concurrency; TTL renewal and sweeper jobs |
 | [0015](0015-one-way-assembly-from-bootstrap.md) | One-way assembly from bootstrap | accepted | all | bootstrap wires all components; reverse `get_container`/service-location outside bootstrap is forbidden (arch-test ratchet) |
+| [0016](0016-chat-transport-state-ownership.md) | Chat transport state ownership | accepted | all | injected operation contract; transports own connections, facade owns sessions; narrow callbacks |
 
 ## Writing the next ADR
 
-1. Next number: **0016**. Create `NNNN-kebab-title.md` here, following the
+1. Next number: **0017**. Create `NNNN-kebab-title.md` here, following the
    scope rules above.
 2. Required sections, in order: `# ADR-NNNN: <Title>`, `## Status`,
    `## Date`, `## Applies to`, `## Context`, `## Decision`,

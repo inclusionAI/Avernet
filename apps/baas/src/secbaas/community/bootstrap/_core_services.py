@@ -95,6 +95,8 @@ from secbaas.community.core.service.template_manage import DefaultDeviceTemplate
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
+from ._chat_transport import build_chat_transport
+
 
 def _real_bot_service_plugin(
     base_url: str = "",
@@ -298,6 +300,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     chat_client_pool = providers.Singleton(
         AsyncChatClientPool,
+        transport_factory=providers.Object(build_chat_transport),
         max_size=config.chat_client_pool.max_size,
         max_conns_per_sandbox=config.chat_client_pool.max_conns_per_sandbox,
         max_concurrent_per_conn=config.chat_client_pool.max_concurrent_per_conn,
