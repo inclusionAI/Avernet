@@ -171,6 +171,28 @@ class TestAuthorizeRenderScreenBot:
 
         assert scope == "owner"
 
+    def test_handed_over_creator_denied(self, service, mock_bot_repo):
+        """转出未获授回的源身份:创建入口默认收回写权(规范场景4)。"""
+        mock_bot_repo.get_by_id.return_value = _bot(
+            bot_type="service", entity_id="435979", owner_id="200001",
+        )
+
+        with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):
+            service.authorize_render_screen_bot(bot_id="bot_001", user_id="435979")
+
+    def test_handed_over_creator_readded_as_collaborator_allowed(
+        self, service, mock_bot_repo, mock_collaborator_repo
+    ):
+        """新归属者将源身份加回协作者表 = 明确授回,创建入口放行。"""
+        mock_bot_repo.get_by_id.return_value = _bot(
+            bot_type="service", entity_id="435979", owner_id="200001",
+        )
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+
+        scope = service.authorize_render_screen_bot(bot_id="bot_001", user_id="435979")
+
+        assert scope == "owner"
+
 
 class TestCreateRenderScreen:
     def test_create_stamps_bot_owner_scope(self, service, mock_repo, mock_bot_repo):
@@ -244,6 +266,33 @@ class TestCreateRenderScreen:
                 creator_id="435979",
             )
         mock_repo.insert.assert_not_called()
+
+    def test_create_by_readded_creator_lands_in_new_owner_scope(
+        self, service, mock_repo, mock_bot_repo, mock_collaborator_repo
+    ):
+        """转出源身份被加回协作者表后可建,记录落「当前归属者」scope。"""
+        mock_bot_repo.get_by_id.return_value = _bot(
+            active_engine="openclaw", template_type="normal",
+            bot_type="service", entity_id="435979", owner_id="200001",
+        )
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+        mock_repo.list_by_bot_id.return_value = []
+        mock_repo.insert.return_value = 47
+
+        record_id = service.create_render_screen(
+            bot_id="bot_001", owner_id="435979",
+            name="rpp-prod", cdn_url="https://cdn.example.com/rpp.js",
+            creator_id="435979", current_user_id="435979",
+        )
+
+        assert record_id == 47
+        mock_repo.insert.assert_called_once_with(
+            bot_id="bot_001",
+            owner_id="200001",
+            name="rpp-prod",
+            cdn_url="https://cdn.example.com/rpp.js",
+            creator_id="435979",
+        )
 
     def test_create_duplicate_name_raises(self, service, mock_repo, mock_bot_repo):
         # 归属校验会先于 duplicate 检测执行,故以归属者身份构造。
@@ -402,7 +451,7 @@ class TestAuthorizeRenderScreenRecord:
         record = service.authorize_render_screen_record(record_id=1, user_id="owner_001")
         assert record.id == 1
 
-    def test_authorize_record_denies_service_member_instance(
+    def test_authorize_record_denies_handed_over_creator(
         self, service, mock_repo, mock_bot_repo, mock_collaborator_repo
     ):
         """服务 Bot 成员实例(entity 归本人、归属者另有其人)不放行,与创建侧对称。"""
@@ -413,6 +462,19 @@ class TestAuthorizeRenderScreenRecord:
 
         with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):
             service.authorize_render_screen_record(record_id=1, user_id="435979")
+
+    def test_authorize_record_readded_creator_as_collaborator_allowed(
+        self, service, mock_repo, mock_bot_repo, mock_collaborator_repo
+    ):
+        """新归属者把转出的源身份加回协作者表后,改删按协作者口径放行。"""
+        mock_repo.get_by_id.return_value = _record(id=1, owner_id="200001")
+        mock_bot_repo.get_by_id.return_value = _bot(
+            bot_type="service", entity_id="435979", owner_id="200001",
+        )
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+
+        record = service.authorize_render_screen_record(record_id=1, user_id="435979")
+        assert record.id == 1
 
     def test_authorize_record_shared_bot_allows_collaborator(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
         mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
