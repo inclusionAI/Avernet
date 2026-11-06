@@ -183,9 +183,14 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
         model: str | None = None,
         token: str | None = None,
     ) -> dict:
-        session = {"id": key, "key": key, "label": label, "model": model}
+        resolved_model = model or "local/local-model"
+        session = {"id": key, "key": key, "label": label, "model": resolved_model}
         self._sessions[key] = session
-        return session
+        return {
+            **session,
+            "canonical_session_id": key,
+            "resolved_model": resolved_model,
+        }
 
     async def session_delete(self, key: str, token: str | None = None) -> bool:
         self._history.pop(key, None)

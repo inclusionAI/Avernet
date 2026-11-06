@@ -343,7 +343,7 @@ class _SessionPortMixin:
         model: str | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Call `sessions.patch` to create a session; return the params dict used.
+        """Return legacy patch params plus the acknowledged canonical id/model.
 
         Relocated from `engines/openclaw/session.py:create` up to the gateway
         call.  The adapter synthesises the Session DTO from the returned dict.
@@ -365,8 +365,30 @@ class _SessionPortMixin:
             log.error("[session_create] sessions.patch failed: %s", error_msg)
             raise RuntimeError(f"Failed to create session: {error_msg}")
 
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise RuntimeError("sessions.patch returned no creation result")
+        canonical_id = payload.get("key")
+        if not isinstance(canonical_id, str) or not canonical_id.strip():
+            raise RuntimeError("sessions.patch returned no canonical session key")
+        resolved = payload.get("resolved")
+        if not isinstance(resolved, dict):
+            raise RuntimeError("sessions.patch returned no resolved model")
+        resolved_model = resolved.get("model")
+        provider = resolved.get("modelProvider")
+        if (
+            not isinstance(resolved_model, str) or not resolved_model.strip()
+            or not isinstance(provider, str) or not provider.strip()
+        ):
+            raise RuntimeError("sessions.patch returned an invalid resolved model")
+        # Match list model IDs without providers.available or chat.history RPCs.
+        model_id = resolved_model if "/" in resolved_model else f"{provider}/{resolved_model}"
         log.info("[session_create] created session: %s", key)
-        return patch_params
+        return {
+            **patch_params,
+            "canonical_session_id": canonical_id,
+            "resolved_model": model_id,
+        }
 
     async def session_delete(
         self,

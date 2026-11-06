@@ -115,7 +115,13 @@ def test_create_session_uses_stable_address_and_authenticated_actor(
 ):
     handoff_runtime.transport._result = {
         "success": True,
-        "data": {"id": "session-one", "title": "handoff"},
+        "data": {
+            "id": "session-one", "title": "handoff",
+            "ext_info": {"openclaw_creation": {
+                "session_id": f"agent:main:session:one:user:{OWNER}",
+                "model": "provider/model",
+            }},
+        },
     }
     response = handoff_client().post(
         f"/openapi/v1/bots/{BOT}/sessions",
