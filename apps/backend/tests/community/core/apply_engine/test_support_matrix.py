@@ -95,6 +95,9 @@ def test_the_matrix_is_the_contract_the_spec_publishes():
         (Category.RESOURCES, SourceKind.CONTENT),
         (Category.RESOURCES, SourceKind.OSS),
         (Category.RESOURCES, SourceKind.GIT),
+        # The bot-to-bot workspace sync this change opens: only resources move
+        # a workspace tree wholesale, so this is the one open bot cell.
+        (Category.RESOURCES, SourceKind.BOT),
         (Category.SKILLS, SourceKind.OSS),
         (Category.SKILLS, SourceKind.GIT),
         (Category.CLI_TOOLS, SourceKind.OSS),
