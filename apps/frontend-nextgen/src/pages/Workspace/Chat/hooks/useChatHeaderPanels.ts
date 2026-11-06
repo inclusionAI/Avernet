@@ -211,7 +211,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       session && options.botId ? options.favoritePending(options.botId, options.section, session.sessionId) : false;
     return {
       favorite,
-      disabled: !session || !options.botId || pending,
+      disabled: !session || session.favorite === undefined || !options.botId || pending,
       onToggle: () => {
         if (!session || !options.botId) return;
         void options.toggleFavorite(options.botId, options.section, session.sessionId);

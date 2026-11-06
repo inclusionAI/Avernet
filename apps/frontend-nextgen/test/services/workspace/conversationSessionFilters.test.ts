@@ -48,7 +48,7 @@ const sessionsEnvelope = (items: unknown[], total = items.length) => ({
   request_id: 'sessions',
 });
 
-/** 普通会话 hydrate 收藏元数据时也会访问收藏分页,统一给空成功应答。 */
+/** 收藏筛选分页的默认空成功应答。 */
 beforeEach(() => {
   jest.clearAllMocks();
   mocked.listFavoriteSessions.mockResolvedValue(sessionsEnvelope([]));
@@ -100,7 +100,7 @@ describe('botSessionService.listSessionsPage with session key', () => {
 });
 
 describe('conversationService.listManagedSessions with session key', () => {
-  it('passes the raw session_key through for scope=all and still hydrates favorites', async () => {
+  it('passes the raw session_key through for scope=all without waiting for favorites', async () => {
     mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
 
     const result = await conversationService.listManagedSessions(managedBot, 'human_900003', 'all', 2, 20, 'agent:main:x');
@@ -109,8 +109,8 @@ describe('conversationService.listManagedSessions with session key', () => {
       'bot-a',
       expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20, session_key: 'agent:main:x' }),
     );
-    // 普通列表继续补全收藏状态。
-    expect(mocked.listFavoriteSessions).toHaveBeenCalled();
+    // 收藏改由列表展示后后台补全，Service 不阻塞普通会话读取。
+    expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({ sessionId: 'session-1', botId: 'bot-a:2088', title: '历史会话' });
@@ -150,11 +150,7 @@ describe('conversationService.listFriendBotSessions with scope and session key',
         session_key: 'agent:main:f',
       }),
     );
-    // 好友普通列表继续 hydrate 收藏元数据,收藏分页也走好友身份。
-    expect(mocked.listFavoriteSessions).toHaveBeenCalledWith(
-      'bot-b',
-      expect.objectContaining({ user_id: '900003', owner_id: '327325', f_user_id: '900003' }),
-    );
+    expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({ sessionId: 'session-1', botId: 'bot-b:327325' });

@@ -238,7 +238,7 @@ describe('conversationService.listManagedSessions', () => {
       'bot-a',
       expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20 }),
     );
-    expect(mocked.listFavoriteSessions).toHaveBeenCalled();
+    expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({
