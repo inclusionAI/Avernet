@@ -20,6 +20,7 @@ interface BotManagementMenuProps {
   lockedByOther: boolean;
   onAction: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onManagePublication?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
   /** 以下两项与任务实例原为行内图标按钮，按 dmore 稿 087 收口进「三个点」气泡。 */
   onHealthCheck?: (bot: BotDomain) => void;
   healthCheckAvailability?: BotActionAvailability;
@@ -46,6 +47,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     lockedByOther,
     onAction,
     onManagePublication,
+    onOpenEvaluation,
     onHealthCheck,
     healthCheckAvailability,
     onOpenTaskInstances,
@@ -253,6 +255,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             onClose={() => setOpen(false)}
             onConfirm={setConfirmAction}
             onManagePublication={onManagePublication}
+            onOpenEvaluation={onOpenEvaluation}
           />
         </PopoverContent>
       </Popover>

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, ClipboardCheck } from 'lucide-react';
 import {
   canRestartFailedServiceBot,
   failedServiceDeleteReason,
@@ -16,6 +16,7 @@ interface BotManagementRuntimeItemsProps {
   onClose: () => void;
   onConfirm: (action: BotCardManagementAction) => void;
   onManagePublication?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
 }
 
 export function BotManagementRuntimeItems({
@@ -24,6 +25,7 @@ export function BotManagementRuntimeItems({
   onClose,
   onConfirm,
   onManagePublication,
+  onOpenEvaluation,
 }: BotManagementRuntimeItemsProps) {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
@@ -83,6 +85,20 @@ export function BotManagementRuntimeItems({
               ) : (
                 <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>
               )}
+            </Button>
+          ) : null}
+          {isServiceBot && onOpenEvaluation ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={<ClipboardCheck className="size-4" />}
+              onClick={() => {
+                onClose();
+                onOpenEvaluation(bot);
+              }}
+            >
+              发起评测
             </Button>
           ) : null}
           {restartUnsupported || !isServiceBot || restartDeclared ? (

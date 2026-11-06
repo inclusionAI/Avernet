@@ -37,6 +37,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onChangeSpace,
     onAuthorize,
     onManagePublication,
+    onOpenEvaluation,
     onAction,
     onClaimLock,
     onReleaseLock,
@@ -187,6 +188,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
+                onOpenEvaluation={onOpenEvaluation}
                 onHealthCheck={onHealthCheck}
                 healthCheckAvailability={getHealthCheckAvailability?.(bot)}
                 onOpenTaskInstances={onOpenTaskInstances}
@@ -223,6 +225,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onChangeSpace,
       onAuthorize,
       onManagePublication,
+      onOpenEvaluation,
       onAction,
       onClaimLock,
       onReleaseLock,

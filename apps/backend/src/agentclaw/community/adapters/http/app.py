@@ -162,6 +162,7 @@ from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
+from agentclaw.community.adapters.http.service_bot.router_eval import router as service_bot_eval_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
@@ -958,6 +959,7 @@ app.include_router(bot_dormant_internal_router)
 mount_space_routers(app)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
+app.include_router(service_bot_eval_router)
 app.include_router(service_bot_file_count_router)
 app.include_router(bot_collaborator_router)
 app.include_router(skill_scan.router)

@@ -13,17 +13,21 @@ import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublic
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
+import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
+import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import React, { useState } from 'react';
+import { history } from '@umijs/max';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
+  const [evalGateModalBot, setEvalGateModalBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
   const [containerBot, setContainerBot] = useState<BotDomain>();
@@ -45,6 +49,32 @@ const BotWorkshopPage: React.FC = () => {
     Tracert.click(Points.botWorkshop.openDetail, { bot_id: bot.id });
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
     else setBasicInfoBot(bot);
+  };
+  const openEvaluation = (bot: BotDomain) => {
+    const version = bot.publicationVersion ?? bot.liveVersion ?? 'latest';
+    history.push(
+      `/bot-workshop/evaluation/${encodeURIComponent(bot.id)}/versions/${encodeURIComponent(String(version))}` +
+        (bot.ownerId ? `?owner_id=${encodeURIComponent(bot.ownerId)}` : ''),
+    );
+  };
+  const handleManagePublication = async (bot: BotDomain) => {
+    if (bot.lifecycle !== 'draft') {
+      setPublicationBot(bot);
+      return;
+    }
+    try {
+      const version = String(bot.publicationVersion ?? bot.liveVersion ?? '');
+      if (!version) throw new Error('评测版本不存在，无法推进发布');
+      const gate = await serviceBotEvalService.precheck(bot.id, version, bot.ownerId);
+      if (gate.allowed) {
+        setPublicationBot(bot);
+        return;
+      }
+      setEvalGateModalBot(bot);
+    } catch (error) {
+      if (error instanceof Error && error.message === '评测版本不存在，无法推进发布') setEvalGateModalBot(bot);
+      else setEvalGateModalBot(bot);
+    }
   };
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
@@ -145,7 +175,8 @@ const BotWorkshopPage: React.FC = () => {
                         getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
-                      onManagePublication={setPublicationBot}
+                      onManagePublication={(bot) => void handleManagePublication(bot)}
+                      onOpenEvaluation={openEvaluation}
                       onAction={workshop.runAction}
                       onCopy={workshop.openCopy}
                       getCopyAvailability={workshop.getCopyAvailability}
@@ -211,6 +242,35 @@ const BotWorkshopPage: React.FC = () => {
           onEditorRequestPolicyChange={workshop.updateEditorRequestPolicy}
           onRequestAccess={workshop.requestAccess}
         />
+        <Modal
+          open={Boolean(evalGateModalBot)}
+          onOpenChange={(open) => {
+            if (!open) setEvalGateModalBot(undefined);
+          }}
+        >
+          <ModalContent size="sm" showClose={false}>
+            <ModalHeader>
+              <ModalTitle>无法推进发布</ModalTitle>
+              <ModalDescription>评测未通过，无法推进发布</ModalDescription>
+            </ModalHeader>
+            <p className="m-0 text-sm leading-6 text-muted-foreground">
+              请完成评测数据上报认证，或重新发起评测后再推进发布。
+            </p>
+            <ModalFooter>
+              <Button variant="secondary" onClick={() => setEvalGateModalBot(undefined)}>
+                稍后处理
+              </Button>
+              <Button
+                onClick={() => {
+                  if (evalGateModalBot) openEvaluation(evalGateModalBot);
+                  setEvalGateModalBot(undefined);
+                }}
+              >
+                去评测认证
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
         <ServicePublicationDrawer
           bot={publicationBot}
           onClose={() => {
