@@ -147,7 +147,7 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.queryByRole('heading', { name: '公开 Bot' })).not.toBeInTheDocument();
     expect(screen.queryByText(/可按 Bot 名称或 Owner 用户名称搜索公开 Bot/)).not.toBeInTheDocument();
     expect(resourceRegion).toContainElement(screen.getByText('bot panel'));
-    const botNav = screen.getByRole('link', { name: '公开Bot' });
+    const botNav = screen.getByRole('link', { name: '公开 Bot' });
     expect(botNav).toHaveClass('bg-primary/10', 'text-primary');
     expect(resourceRegion).toHaveClass('space-y-4');
     // dmore：页头下 16px 起内容，左右 20px 边距，内容列宽 1200。
@@ -172,9 +172,9 @@ describe('SquarePageShell three-way dispatch', () => {
   test('两个资源导航始终以命名导航链接呈现（社区已迁至实验室一级导航）', () => {
     render(<SquarePageShell resource="bot" />);
     const navigation = screen.getByRole('navigation');
-    expect(screen.getByRole('link', { name: '公开Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
     expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
-    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开Bot' }));
+    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开 Bot' }));
   });
 
   test('Bot 工作身份下两 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
@@ -185,7 +185,7 @@ describe('SquarePageShell three-way dispatch', () => {
 
     render(<SquarePageShell resource="bot" />);
 
-    expect(screen.getByRole('link', { name: '公开Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '公开协作群' })).toBeInTheDocument();
   });
 
