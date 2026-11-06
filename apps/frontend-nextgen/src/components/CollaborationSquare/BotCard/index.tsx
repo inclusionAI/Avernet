@@ -141,6 +141,7 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
               <IconButton
                 label={primaryLabel}
                 loading={busy}
+                data-guide-target="discover-add-friend-button"
                 icon={
                   canStartConversation ? (
                     <MessageCircleMore aria-hidden className="h-4.5 w-4.5" />

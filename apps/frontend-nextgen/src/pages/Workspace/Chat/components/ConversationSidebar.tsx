@@ -176,6 +176,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
             />
             <SidebarSection
               title={friendTitle}
+              guideTarget="chat-friend-group"
               loading={directory.friendLoading && friendBots.length === 0}
               error={directory.friendError}
               onRetry={directory.retryFriend}

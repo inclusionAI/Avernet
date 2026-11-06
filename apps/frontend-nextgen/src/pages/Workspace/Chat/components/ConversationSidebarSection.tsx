@@ -12,6 +12,8 @@ import { ConversationBotRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationSidebarSectionProps {
   title: string;
+  /** 产品引导打标语义标识（可选；好友分组消费方传 chat-friend-group，配置规范 §4）。纯静态标记零逻辑。 */
+  guideTarget?: string;
   loading: boolean;
   error: string | null;
   onRetry(): void;
@@ -34,7 +36,7 @@ export interface ConversationSidebarSectionProps {
 }
 
 export function ConversationSidebarSection(props: ConversationSidebarSectionProps) {
-  const { title, loading, error, onRetry, items } = props;
+  const { title, loading, error, onRetry, items, guideTarget } = props;
   const { emptyTitle, emptyHint, isSearching, renderItem, collapsible, infoHint, headerAction } = props;
   const { collapsed, onToggleCollapsed } = props;
   const bodyHidden = collapsible === true && collapsed;
@@ -88,7 +90,7 @@ export function ConversationSidebarSection(props: ConversationSidebarSectionProp
     </p>
   );
   return (
-    <div className="pb-1 pt-0.5" role="group" aria-label={title}>
+    <div className="pb-1 pt-0.5" role="group" aria-label={title} data-guide-target={guideTarget}>
       {/* 分组标题行（dmore DOM 实测：h=32、与列表统一 36px 节奏）：12px 常规字重 #868686；
           x 与列表内容左缘对齐；标题行不再渲染「+」添加入口（2026-10-14 体验修复）。
           可收起分组标题即切换按钮（2026-10-10 需求：我的/好友 Bot 列表支持展开收起，

@@ -49,7 +49,11 @@ export function ConversationInteractiveStage(props: {
     : null;
   const composerSession = presentation.composerExtensions ? model.selectedSession : null;
   return (
-    <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+    <div
+      className="relative isolate flex min-h-0 min-w-0 flex-1"
+      data-workspace-conversation="true"
+      data-guide-target="chat-input"
+    >
       <ConversationComposerHost
         bot={composerBot}
         session={composerSession}
