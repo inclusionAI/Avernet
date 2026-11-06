@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/corp/plugins/prod/runtime_list_timing.py
+  s_620fb772f449f4::t_ba91ffa5e3ba36 1-18
+apps/backend/tests/corp/plugins/prod/test_zdas_db.py
+  s_620fb772f449f4::t_3ba8cbc096d270 29-43
+apps/backend/src/agentclaw/corp/plugins/prod/database.py
+  s_620fb772f449f4::t_ba91ffa5e3ba36 25,495,497,506,509,512,518
+apps/backend/src/agentclaw/corp/plugins/prod/device_adapter_transport.py
+  s_620fb772f449f4::t_f5782eae2e8bc5 31
+  s_620fb772f449f4::t_ba91ffa5e3ba36 477-478,493,495
+  s_620fb772f449f4::t_eeeb297c0c1b2a 567-568,578,580
+apps/backend/tests/corp/plugins/prod/test_device_adapter_transport.py
+  s_620fb772f449f4::t_3ba8cbc096d270 60-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd0ab685024e4037cbc9b97c45db71717b5032ad",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
