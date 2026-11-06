@@ -38,7 +38,6 @@ from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 
@@ -87,17 +86,18 @@ async def get_task_dashboard_internal(
 async def get_task_by_session_internal(
     session_id: Annotated[
         str,
-        Query(description="The chat session id to resolve; misses are not found"),
+        Query(description="The chat session id to resolve; sessions without visible tasks return an empty list"),
     ],
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[BySessionDTO]:
-    """Resolve a chat session to its relay task node (internal mirror)."""
+    """Resolve a chat session to its relay task nodes (internal mirror).
+
+    Empty result semantics deliberately match the public ``by_session`` route.
+    """
     del user
     refs = service.get_task_nodes_by_session(session_id)
-    if not refs:
-        raise NotFound("task session not found")
     return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 

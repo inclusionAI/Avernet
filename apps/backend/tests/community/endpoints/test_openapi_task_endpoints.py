@@ -198,7 +198,7 @@ def by_session_unauthenticated():
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/by_session",
-    scenario="session_not_found",
+    scenario="empty_session",
     seed=lambda w: (
         _boot_verifier(w),
         bind_overrides(
@@ -211,9 +211,19 @@ def by_session_unauthenticated():
         headers=_headers(),
         query_params={"session_id": "missing-task-session"},
     ),
-    expect=ExpectError(status=404),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "missing-task-session",
+                "items": [],
+                "total": 0,
+            },
+        },
+    ),
 )
-def by_session_not_found():
+def by_session_empty():
     pass
 
 
