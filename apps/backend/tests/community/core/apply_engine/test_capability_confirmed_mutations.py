@@ -8,11 +8,66 @@ from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
     DesiredCapabilities,
     DesiredMcpServer,
+    DesiredSkillSet,
     McpOverride,
 )
 from agentclaw.community.core.models.mcp import BotMCPConfig
 from ._capabilities_world import CapabilityWorld
 from .test_unified_capabilities import apply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["audit", "recovery"])
+@pytest.mark.parametrize("operation", ["create", "remove", "noop", "precommit"])
+async def test_set_only_failure_preserves_actual_commit_receipt(
+    failure, operation, monkeypatch
+):
+    world = CapabilityWorld(device=failure == "recovery")
+    target = DesiredCapabilities(
+        skill_sets=Declaration((DesiredSkillSet("expert", True, (), ()),))
+    )
+    materialiser = world.materialiser
+    if operation == "noop":
+        resolved = await materialiser.resolve(world.ctx, (target,))
+        stale_plan = await materialiser.plan(world.ctx, resolved.intents)
+
+        class ConcurrentNoop:
+            async def resolve(self, ctx, entries):
+                return await world.materialiser.resolve(ctx, entries)
+
+            async def plan(self, ctx, intents):
+                return stale_plan
+
+            async def write(self, ctx, plan):
+                return await world.materialiser.write(ctx, plan)
+
+        materialiser = ConcurrentNoop()
+    if operation in {"remove", "noop"}:
+        seeded = await apply(world.ctx, world.materialiser, target)
+        assert seeded.status.value == "SUCCEEDED"
+    if operation == "remove":
+        target = DesiredCapabilities(skill_sets=Declaration(()))
+
+    def fail(**_kwargs):
+        raise RuntimeError("injected persistence failure")
+
+    if failure == "audit":
+        monkeypatch.setattr(world.management, "_audit", fail)
+    else:
+        async def pending(**_kwargs):
+            raise RuntimeError("runtime unavailable")
+
+        monkeypatch.setattr(world.runtime, "apply_plan", pending)
+        monkeypatch.setattr(world.management._flow._recovery, "ensure", fail)
+    if operation == "precommit":
+        monkeypatch.setattr(world.repo, "replace_apply_skill_sets", fail)
+    result = await apply(world.ctx, materialiser, target)
+    committed = operation in {"create", "remove"}
+    assert result.status.value == ("PARTIAL" if committed else "FAILED")
+    assert result.categories[0].confirmed_partial is committed
+    assert {group.name for group in world.snapshot().sets} == (
+        {"expert"} if operation in {"create", "noop"} else set()
+    )
 
 
 @pytest.mark.asyncio

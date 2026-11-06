@@ -150,6 +150,9 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
 实际清理在所有控制面步骤成功后再次只读检查原始引用、安装及归属，并沿原删除守卫。
 批量事务的 `default_changed` / `default_removed` 是实际 SQL 操作及 Default 安装修复
 的私有确认摘要，不能用计划或事务外前后读取差值代替；异常仍沿原保守失败合同。
+批量 Set 命令与 Direct 命令一样捕获 Repository 提交回执：实际发生变更后，
+审计或 Runtime 恢复记录等后置步骤失败时抛出 `ApplyDesiredStateCommittedError`，
+使 Apply 报告已确认的部分写入；无变更或提交前失败不得使用该标记。
 
 ## 4. Local、Repo、Center 的内容身份
 

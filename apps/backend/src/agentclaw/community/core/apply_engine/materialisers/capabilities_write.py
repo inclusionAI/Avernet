@@ -53,6 +53,10 @@ def _claim_outcome(result):
     raise ValueError("Apply claim did not confirm its outcome")
 
 
+def _combined_outcome(*outcomes):
+    return max(outcomes, key=lambda value: ("unchanged", "created", "updated").index(value))
+
+
 async def write_capabilities(owner, ctx, plan):
     resolved = plan.resolved
     snapshot = resolved.snapshot
@@ -129,6 +133,10 @@ async def write_capabilities(owner, ctx, plan):
             )
             confirmed = confirmed or result.changed
             removals.update("skill_sets/" + n for n in result.removed)
+            member_uploads = {
+                group.name: tuple(uploaded[s.key] for s in group.skills if s.key in uploaded)
+                for group in resolved.sets
+            }
             for outcome, names in (
                 ("created", result.created),
                 ("updated", result.updated),
@@ -139,7 +147,7 @@ async def write_capabilities(owner, ctx, plan):
                     results[identity] = EntryResult(
                         Category.CAPABILITIES,
                         identity,
-                        EntryOutcome(outcome),
+                        _combined_outcome(EntryOutcome(outcome), *member_uploads[name]),
                         note=_projection_note(
                             {"runtime_projection": result.runtime_projection}
                         ),
@@ -170,10 +178,7 @@ async def write_capabilities(owner, ctx, plan):
             outcome = _claim_outcome(result)
             upload_outcome = uploaded.get(skill.key)
             if upload_outcome is not None:
-                outcome = max(
-                    (outcome, upload_outcome),
-                    key=lambda value: ("unchanged", "created", "updated").index(value),
-                )
+                outcome = _combined_outcome(outcome, upload_outcome)
             results[identity] = EntryResult(
                 Category.CAPABILITIES, identity, outcome, note=note
             )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.skill_center.errors import (
+    ApplyDesiredStateCommittedError,
     SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -94,28 +95,42 @@ class SkillSetApplyService:
                 server_code=code,
                 detail=detail,
             )
-        result = await self._mutate(
-            bot=bot,
-            bot_id=scope.bot_id,
-            actor_id=actor_id,
-            action="skill_sets_apply_replace",
-            runtime_required=project,
-            skip_projection_when_unchanged=True,
-            scope_from_result=lambda mutation: ProjectionScope(
-                skills=True,
-                mcp=bool(mutation.mcp_codes),
-                claimed_mcp=mutation.mcp_codes,
-                released_mcp=mutation.mcp_codes,
-            ),
-            mutation=lambda: self._repository.replace_apply_skill_sets(
+        mutation_result = None
+
+        def mutation():
+            nonlocal mutation_result
+            mutation_result = self._repository.replace_apply_skill_sets(
                 scope=scope,
                 sets=sets,
                 remove_names=remove_names,
                 default_change=default_change,
                 platform_default_codes=platform_default_codes,
                 mcp_catalog_entries=mcp_catalog_entries,
-            ),
-        )
+            )
+            return mutation_result
+
+        try:
+            result = await self._mutate(
+                bot=bot,
+                bot_id=scope.bot_id,
+                actor_id=actor_id,
+                action="skill_sets_apply_replace",
+                runtime_required=project,
+                skip_projection_when_unchanged=True,
+                scope_from_result=lambda mutation: ProjectionScope(
+                    skills=True,
+                    mcp=bool(mutation.mcp_codes),
+                    claimed_mcp=mutation.mcp_codes,
+                    released_mcp=mutation.mcp_codes,
+                ),
+                mutation=mutation,
+            )
+        except Exception:
+            if mutation_result is not None and mutation_result.changed:
+                raise ApplyDesiredStateCommittedError(
+                    "Manifest desired state committed before follow-up failure"
+                ) from None
+            raise
         return SkillSetApplyResult(
             result["created"],
             result["updated"],

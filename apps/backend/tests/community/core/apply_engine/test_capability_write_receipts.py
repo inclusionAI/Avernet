@@ -7,6 +7,9 @@ from agentclaw.community.core.apply_engine.desired_state import (
     DesiredCapabilities,
     DesiredMcpServer,
     DesiredSkill,
+    DesiredSkillSet,
+    ContentRef,
+    LocalSkillPackage,
     RepoSkillPath,
 )
 from agentclaw.community.core.models.mcp import BotMCPConfig
@@ -119,3 +122,33 @@ async def test_direct_claim_of_a_dependency_keeps_its_effective_outcome_unchange
     actual = await apply(world.ctx, world.materialiser, target)
     assert _outcomes(actual.categories[0]) == [("mcp/mcp.one", "unchanged")]
     assert world.snapshot().installed_mcp_codes == frozenset({"mcp.one"})
+
+
+@pytest.mark.asyncio
+async def test_set_reports_local_package_replacement_with_unchanged_membership():
+    import hashlib
+    from agentclaw.community.core.content_store import canonical_tree_bytes
+
+    world = CapabilityWorld()
+    member = local_skill(world, "local-one")
+    target = DesiredCapabilities(
+        skill_sets=Declaration((DesiredSkillSet("expert", True, (member,), ()),))
+    )
+    first = await apply(world.ctx, world.materialiser, target)
+    assert _outcomes(first.categories[0]) == [("skill_sets/expert", "created")]
+    before = world.snapshot()
+    original_package = world.uploads.packages["local-one"]
+    tree = canonical_tree_bytes([
+        ("SKILL.md", b"---\nname: local-one\ndescription: Skill package\n---\nBody v2")
+    ])
+    digest = "sha256:" + hashlib.sha256(tree).hexdigest()
+    world.content.blobs[digest] = tree
+    replacement = DesiredSkill("local-one", LocalSkillPackage(ContentRef(digest)))
+    target = DesiredCapabilities(
+        skill_sets=Declaration((DesiredSkillSet("expert", True, (replacement,), ()),))
+    )
+    result = await apply(world.ctx, world.materialiser, target)
+    assert _outcomes(result.categories[0]) == [("skill_sets/expert", "updated")]
+    assert world.uploads.packages["local-one"] != original_package
+    assert world.snapshot().sets == before.sets
+    assert world.snapshot().installed_skill_ids == frozenset(before.sets[0].skill_ids)
