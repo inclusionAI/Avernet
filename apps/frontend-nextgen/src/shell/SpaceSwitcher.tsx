@@ -163,7 +163,7 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
     return (
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
-          <span className="inline-flex">
+          <span className="inline-flex" data-guide-target="space-switch">
             {collapsed ? (
               <IconButton label={`切换空间（当前：${displayText}）`} icon={<Users className="h-4 w-4" />} />
             ) : (
