@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from agentclaw.community.adapters.http.task.read_auth import task_read_actor
+
 import json
 
 from fastapi import FastAPI
@@ -124,13 +126,13 @@ def _client() -> tuple[TestClient, _StubArtifactRepo]:
     service = injector.get(TaskArtifactApiServiceProtocol)
     app = FastAPI()
     app.include_router(task_internal_router)
-    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+    app.dependency_overrides[task_read_actor] = app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id="id-1",
         staffId="owner-1",
         operatorName="owner",
     )
     # POST 双凭证分支(spec §14)换用 actor 依赖——沿用同一登录用户身份打桩,
-    # 绕开轻量 injector 里未绑定的 AuthPlugin;GET 列表口仍走 get_current_user。
+    # 绕开轻量 injector 里未绑定的 AuthPlugin;GET 列表口的 task_read_actor 沿用相同测试用户。
     app.dependency_overrides[resolve_artifact_write_actor] = lambda: ArtifactWriteActor(
         relay_token=None,
         user=AuthenticatedUser(id="id-1", staffId="owner-1", operatorName="owner"),
