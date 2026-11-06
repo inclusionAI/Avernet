@@ -87,6 +87,8 @@ fn text_with_timeout(task: &TaskIntent, cancelled: bool, timed_out: bool, reason
 
 #[cfg(test)]
 mod tests {
+    use bcs_domain::message_delivery::PersistedMessageDelivery;
+
     #[test]
     fn historical_intent_without_new_fields_uses_task_reference_and_unknown_reason() {
         let task = serde_json::from_value(serde_json::json!({"leg":"dispatch", "task_id":"old-task", "manager":"m",
@@ -95,6 +97,138 @@ mod tests {
         assert!(text.contains("派发引用：old-task"));
         assert!(text.contains("原因未提供") && text.contains("已返回部分内容"));
         assert!(!text.contains("用户中断"));
+    }
+
+    fn failure_row(status: bcs_domain::message_delivery::MessageDeliveryStatus,
+        may_have_been_sent: bool,
+        mut row: PersistedMessageDelivery,
+    ) -> (PersistedMessageDelivery, bcs_domain::message_delivery::MessageDeliveryState) {
+        row.env = "local".into();
+        row.state.kind = bcs_domain::DeliveryType::Send;
+        row.state.status = status;
+        row.state.state_version = 1;
+        row.state.may_have_been_sent = may_have_been_sent;
+        let state = row.state.clone();
+        (row, state)
+    }
+
+    #[test]
+    fn failure_reason_reports_cancelled_and_failed_reasons() {
+        let row = PersistedMessageDelivery {
+            delivery_id: "d".into(),
+            env: "local".into(),
+            source_message_id: "m".into(),
+            target_bot_id: "bot".into(),
+            session_id: "group".into(),
+            group_id: "group".into(),
+            source_session_seq: 0,
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Task,
+            state: bcs_domain::message_delivery::MessageDeliveryState {
+                kind: bcs_domain::DeliveryType::Send,
+                status: bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+                state_version: 1,
+                may_have_been_sent: true,
+            },
+            wait_reason: None,
+            available_at_ms: 0,
+            expire_at_ms: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            run_id: None,
+            idempotency_key: None,
+            attempt_no: 0,
+            request_id: None,
+            send_started_at_ms: None,
+            submitted_at_ms: None,
+            accepted_at_ms: None,
+            run_deadline_at_ms: None,
+            terminal_at_ms: None,
+            bound_to_delivery_id: None,
+            cancel_requested_at_ms: None,
+            cancel_requested_by: None,
+            cancel_reason: None,
+            abort_request_id: None,
+            abort_started_at_ms: None,
+            cancel_deadline_at_ms: None,
+            last_error_code: None,
+            semantic_projection_json: serde_json::Value::Null,
+            transport_context_json: None,
+            context_selection_json: None,
+        };
+
+        let (cancelled_row, cancelled_state) = failure_row(
+            bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled,
+            false,
+            row.clone(),
+        );
+        let cancelled = super::failure_reason(&cancelled_row, cancelled_state, None, None).unwrap();
+        assert_eq!(cancelled.0, true);
+        assert_eq!(cancelled.1, "任务在开始执行前已取消。");
+
+        let (failed_row, failed_state) = failure_row(
+            bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+            false,
+            cancelled_row,
+        );
+        let failed = super::failure_reason(&failed_row, failed_state, None, None).unwrap();
+        assert_eq!(failed.0, false);
+        assert_eq!(failed.1, "任务未能发送给 Worker，尚未开始执行。");
+    }
+
+    #[test]
+    fn failure_reason_prefers_resolution_and_transport_reasons() {
+        let mut row = PersistedMessageDelivery {
+            delivery_id: "d".into(),
+            env: "local".into(),
+            source_message_id: "m".into(),
+            target_bot_id: "bot".into(),
+            session_id: "group".into(),
+            group_id: "group".into(),
+            source_session_seq: 0,
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Task,
+            state: bcs_domain::message_delivery::MessageDeliveryState {
+                kind: bcs_domain::DeliveryType::Send,
+                status: bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+                state_version: 1,
+                may_have_been_sent: true,
+            },
+            wait_reason: None,
+            available_at_ms: 0,
+            expire_at_ms: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            run_id: None,
+            idempotency_key: None,
+            attempt_no: 0,
+            request_id: None,
+            send_started_at_ms: None,
+            submitted_at_ms: None,
+            accepted_at_ms: None,
+            run_deadline_at_ms: None,
+            terminal_at_ms: None,
+            bound_to_delivery_id: None,
+            cancel_requested_at_ms: None,
+            cancel_requested_by: None,
+            cancel_reason: None,
+            abort_request_id: None,
+            abort_started_at_ms: None,
+            cancel_deadline_at_ms: None,
+            last_error_code: None,
+            semantic_projection_json: serde_json::Value::Null,
+            transport_context_json: None,
+            context_selection_json: None,
+        };
+        row.state.status = bcs_domain::message_delivery::MessageDeliveryStatus::Failed;
+        row.state.may_have_been_sent = true;
+        row.transport_context_json = Some(serde_json::json!({"cancel_reason":"transport reason"}));
+
+        let reason = super::failure_reason(
+            &row, row.state.clone(), Some("human"), Some(&serde_json::json!({"reason":"resolution reason"})),
+        ).unwrap().1;
+        assert_eq!(reason, "resolution reason");
+
+        let reason = super::failure_reason(&row, row.state.clone(), None, None).unwrap().1;
+        assert_eq!(reason, "transport reason");
     }
 }
 
