@@ -223,6 +223,36 @@ describe('useSessionTaskPanelBootstrap', () => {
     }
   });
 
+  it('深链冷启动时 PanelHandle 晚于 2 秒仍可自动拉起副屏', async () => {
+    jest.useFakeTimers();
+    try {
+      const { ref: readyRef, openTab } = makePanelRef();
+      const nullRef: React.RefObject<PanelHandle | null> = { current: null };
+      mockGetTaskBySession.mockResolvedValue({
+        ok: true,
+        data: [sessionRef('task-relay')],
+      });
+
+      renderHook(() =>
+        useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: nullRef }),
+      );
+      await act(async () => Promise.resolve());
+      await act(async () => jest.advanceTimersByTimeAsync(2000));
+      expect(openTab).not.toHaveBeenCalled();
+
+      (nullRef as { current: PanelHandle | null }).current = readyRef.current;
+      await act(async () => jest.advanceTimersByTimeAsync(100));
+
+      expect(openTab).toHaveBeenCalledTimes(1);
+      expect(openTab.mock.calls[0][0]).toMatchObject({
+        id: 'task-task-relay',
+        type: 'taskPanel.TaskLoopView',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('任务列表进入对话时优先打开用户点击的任务，而不是会话最新任务', async () => {
     const { ref, openTab } = makePanelRef();
     useTaskSidePanelStore.getState().setActiveTask('task-current');
