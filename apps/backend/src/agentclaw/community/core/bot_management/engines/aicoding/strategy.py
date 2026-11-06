@@ -878,7 +878,50 @@ class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableResta
                 "[aicoding.restart] begin restart resync: bot_id=%s, engine_type=%s, entity_id=%s, entity_type=%s",
                 ctx.bot_id, effective_engine, effective_entity_id, effective_entity_type,
             )
-            if skill_set_factory is not None:
+            if runtime_reconciler is not None:
+                try:
+                    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+                        ProjectionScope,
+                    )
+
+                    logger.info(
+                        "[aicoding.restart] starting runtime reconciler full projection: "
+                        "bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
+                    # The restart is not a narrow mutation: a fresh runtime may
+                    # hold nothing, so project the complete desired state. The
+                    # reconciler owns both the Skill and MCP/CLI write paths.
+                    # This intentionally replaces the legacy SkillSet
+                    # ``project_skills`` fallback below. Calling the legacy
+                    # path after the reconciler would duplicate one restart
+                    # projection and can trip a bindpath target conflict.
+                    async def _do_projection() -> None:
+                        await runtime_reconciler.project(
+                            bot_id=ctx.bot_id,
+                            owner_id=effective_entity_id,
+                            scope=ProjectionScope.everything(),
+                        )
+
+                    asyncio.run(_do_projection())
+                    logger.info(
+                        "[aicoding.restart] runtime reconciler full projection succeeded: "
+                        "bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
+                except Exception as runtime_error:
+                    refresh_succeeded = False
+                    logger.error(
+                        "[aicoding.restart] runtime reconciler full projection failed: "
+                        "bot_id=%s, engine_type=%s, error=%s; continue without clearing restart marker",
+                        ctx.bot_id, effective_engine, runtime_error,
+                        exc_info=True,
+                    )
+            elif skill_set_factory is not None:
+                # Keep the historical best-effort symlink refresh for callers
+                # which do not yet provide the modern runtime authority. It is
+                # intentionally not a fallback after the reconciler: mixing
+                # the two entries would re-apply the same Skill state twice.
                 try:
                     skill_set_service = skill_set_factory.create(
                         user_id=effective_entity_id,
@@ -888,64 +931,13 @@ class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableResta
                         engine_type=effective_engine,
                     )
                     logger.info(
-                        "[aicoding.restart] skill set service created for restart resync: bot_id=%s, engine_type=%s",
-                        ctx.bot_id, effective_engine,
-                    )
-                except Exception as skill_error:
-                    refresh_succeeded = False
-                    logger.error(
-                        "[aicoding.restart] skill set service create error: "
-                        "bot_id=%s, engine_type=%s, error=%s; continue with remaining restart resync steps",
-                        ctx.bot_id, effective_engine, skill_error,
-                        exc_info=True,
-                    )
-
-            if runtime_reconciler is not None:
-                try:
-                    from agentclaw.community.core.skill_center.runtime_projection_contract import (
-                        ProjectionScope,
-                    )
-
-                    async def _do_mcp_projection() -> None:
-                        await runtime_reconciler.project_mcp_and_cli(
-                            bot_id=ctx.bot_id,
-                            owner_id=effective_entity_id,
-                            scope=ProjectionScope(mcp=True),
-                        )
-
-                    asyncio.run(_do_mcp_projection())
-                    logger.info(
-                        "[aicoding.restart] MCP projection resync succeeded: "
+                        "[aicoding.restart] skill set service created for restart resync: "
                         "bot_id=%s, engine_type=%s",
                         ctx.bot_id, effective_engine,
                     )
-                except Exception as mcp_error:
-                    refresh_succeeded = False
-                    logger.error(
-                        "[aicoding.restart] MCP projection resync failed: "
-                        "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
-                        ctx.bot_id, effective_engine, mcp_error,
-                        exc_info=True,
-                    )
-            else:
-                refresh_succeeded = False
-                logger.error(
-                    "[aicoding.restart] MCP projection resync skipped: "
-                    "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
-                    ctx.bot_id, effective_engine,
-                    "runtime reconciler unavailable",
-                )
-
-            if skill_set_service is not None:
-                try:
-                    logger.info(
-                        "[aicoding.restart] start skill symlink resync after MCP stage: bot_id=%s, engine_type=%s",
-                        ctx.bot_id, effective_engine,
-                    )
-                    # ``project_skills`` is async so that both halves of the
+                    # ``project_skills`` is async so both halves of the
                     # capability boundary are awaited the same way; this is a
-                    # worker thread with no running loop, so it bridges the
-                    # same way ``_do_mcp_projection`` above does.
+                    # worker thread with no running loop, so bridge it here.
                     skill_synced = bool(asyncio.run(skill_set_service.project_skills()))
                     if skill_synced:
                         logger.info(
@@ -953,8 +945,7 @@ class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableResta
                             "bot_id=%s, engine_type=%s",
                             ctx.bot_id, effective_engine,
                         )
-
-                    if not skill_synced:
+                    else:
                         refresh_succeeded = False
                         logger.error(
                             "[aicoding.restart] skill symlink sync failed: "
@@ -969,6 +960,14 @@ class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableResta
                         ctx.bot_id, effective_engine, skill_error,
                         exc_info=True,
                     )
+            else:
+                refresh_succeeded = False
+                logger.error(
+                    "[aicoding.restart] runtime reconciliation and skill sync unavailable: "
+                    "bot_id=%s, engine_type=%s, error=%s",
+                    ctx.bot_id, effective_engine,
+                    "both runtime reconciler and skill set factory unavailable",
+                )
 
             if refresh_succeeded and should_resync and template_service is not None:
                 try:
