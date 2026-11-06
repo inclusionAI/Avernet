@@ -13,6 +13,7 @@ import type {
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,
+  BotModelBadge,
   CapabilityResult,
   CodingBotConversationHost,
   ConversationInstanceScopeCapability,
@@ -174,6 +175,8 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 无内源运营配置：模型列表不渲染徽标。
+  getModelBadge: (): CapabilityResult<BotModelBadge | null> => ({ status: 'available', value: null }),
   getAgentCodingInternalResources: (): CapabilityResult<AgentCodingInternalResources> => ({
     status: 'available',
     value: {
