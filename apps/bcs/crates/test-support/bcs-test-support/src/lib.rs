@@ -543,8 +543,11 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
     }]).await.expect("matched CAS commits");
 
     // QueryChecked: enough rows → commit all steps.
+    // Use DELETE+INSERT (not ON CONFLICT / ON DUPLICATE KEY) to stay in the
+    // shared SQLite/MySQL subset required by this contract.
+    plugin.execute(DbStatement::new("DELETE FROM contract_items WHERE id = 'qc-enough'")).await.ok();
     plugin.execute(DbStatement::new(
-        "INSERT INTO contract_items (id, name, active) VALUES ('qc-enough', 'qc', 1) ON CONFLICT(id) DO UPDATE SET active=1",
+        "INSERT INTO contract_items (id, name, active) VALUES ('qc-enough', 'qc', 1)",
     )).await.expect("qc-enough seed");
     let qc_ok = plugin.transaction(vec![
         DbTransactionStep::Execute(DbStatement::new(
