@@ -15,10 +15,17 @@ export type StoredRunSnapshot = RunListMetadata & { state_json: string | null; o
 /** Internal proof; markers are only used to pin authorization/cursors and are never returned as API data. */
 export type AssociatedRunIdentity = RunIdentity & { request_key_hash: string; parent_run_marker: string; child_run_marker: string };
 export type AssociationCandidate = { requestKeyHash: string; nativeFlowId: string };
+/** Trusted-engine metadata correlation only; no provenance or incarnation guarantee. */
+export type FanoutOriginCandidate = {
+  nativeFlowId: string; parentFlowId: string; parentNodeId: string; groupExecutionId: string;
+  itemId: string; itemIndex: number; attemptNumber: number; childFlowId: string; workflowId: string;
+  requestDigest?: unknown;
+};
 export interface RunSubworkflowsStore {
   listRuns(query: AuthorizedRunListQuery, scopes: Map<string, RunViewScope> | null): Promise<AuthorizedRunList>;
   readRun(flowId: string): Promise<StoredRunSnapshot | null>;
   readIdentities(flowIds: string[]): Promise<RunIdentity[]>;
+  readFanoutOriginIdentities(candidates: FanoutOriginCandidate[]): Promise<RunIdentity[]>;
   readAssociatedIdentities(parent: StoredRunSnapshot, childWorkflowId: string, candidates: AssociationCandidate[]): Promise<AssociatedRunIdentity[]>;
 }
 export type AuthorizedRunListQuery = {
@@ -47,11 +54,13 @@ export type FanoutPage = {
 };
 export type FanoutQuery = { groupExecutionId: string; limit?: number; cursor?: string };
 export type RunReadInspection = {
-  run: StoredRunSnapshot; managed: boolean; restricted: boolean;
+  run: StoredRunSnapshot; managed: boolean; restricted: boolean; sensitiveChild?: boolean; sessionConfigured?: boolean;
   groups: { nodeId: string; groupExecutionId: string }[];
 };
 /** Read-only Service API. No engine lifecycle/command dependency is permitted. */
 export interface RunSubworkflowsReader {
+  /** Internal classifier for the temporary public write guard, independent of caller identity. */
+  isFanoutOriginChild(flowId: string): Promise<boolean | null>;
   listRuns(actor: RunReader, query: AuthorizedRunListQuery): Promise<AuthorizedRunList>;
   workflowStats(actor: RunReader): Promise<{ stats: AuthorizedWorkflowStats[]; visibleWorkflowIds: string[] | null }>;
   readGroup(actor: RunReader, flowId: string, nodeId: string, query: FanoutQuery): Promise<FanoutPage>;

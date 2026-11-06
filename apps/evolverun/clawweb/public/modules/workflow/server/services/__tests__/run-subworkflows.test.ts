@@ -144,6 +144,65 @@ describe('fanout HTTP reads against durable SQLite state', () => {
     const body = await response.json();
     expect(body.children.map((child: { childFlowId: string }) => child.childFlowId)).toEqual(['child-0', 'child-2']);
   });
+  it('serves matched ClawMind children through HTTP without bypassing child owner or exposing origin state', async () => {
+    for (const child of group.children) {
+      const origin = { parentFlowId: 'parent', parentNodeId: 'group', groupExecutionId: 'generation-1',
+        itemId: child.itemId, itemIndex: child.itemIndex, attemptNumber: child.attemptNumber,
+        childFlowId: child.childFlowId, workflowId: 'child-workflow', requestDigest: 'private-digest' };
+      raw.prepare('UPDATE flow_runs SET state_json=?, credentials_json=?, params_json=?, input_json=?, result_json=?, origin_session_key=?, origin_session_id=? WHERE flow_id=?')
+        .run(JSON.stringify({ fanoutOrigin: origin, privateValue: 'child-state-secret', businessStatus: 'RUNNING', currentPhase: 'P1', activeNodes: ['work'], nodeStates: { work: { status: 'running', result: 'node-secret' } } }),
+          'credential-secret', 'params-secret', 'input-secret', 'result-secret', 'session-key-secret', 'session-id-secret', child.childFlowId);
+    }
+    persist();
+    const response = await read(endpoint); expect(response.status).toBe(200);
+    const page = await response.json();
+    expect(page).toMatchObject({ countScope: 'visible', groupTotal: null, visibleTotal: 2,
+      children: [{ childFlowId: 'child-0' }, { childFlowId: 'child-2' }] });
+    expect(JSON.stringify(page)).not.toMatch(/child-1|item-1|private-digest|child-state-secret|credential-secret|fanoutOrigin/);
+    raw.prepare('UPDATE node_executions SET input_json=?, output_json=?, error_text=?, system_context_json=?, progress_message=? WHERE flow_id=?')
+      .run('node-input-secret', 'node-output-secret', 'node-error-secret', 'node-context-secret', 'node-progress-secret', 'child-0');
+    raw.prepare('UPDATE flow_runs SET status=? WHERE flow_id=?').run('failed', 'child-0');
+    raw.prepare('INSERT INTO flow_events (flow_id,event_type,time,data_json,error_text) VALUES (?,?,?,?,?)')
+      .run('child-0', 'node.error', 8, 'event-data-secret', 'event-error-secret');
+    const storedSession = raw.prepare('SELECT origin_session_key,origin_session_id FROM flow_runs WHERE flow_id=?').get('child-0');
+    scopes.set('parent-workflow', 'deny'); // Child access must not depend on permission to its parent.
+    const child = await read('/child-0'); expect(child.status).toBe(200);
+    const body = await child.json(); expect(JSON.parse(body.run.state_json)).toEqual({ businessStatus: 'RUNNING', currentPhase: 'P1', activeNodes: ['work'], nodeStates: { work: { status: 'running' } } });
+    expect(JSON.stringify(body)).not.toMatch(/private-digest|child-state-secret|credential-secret|params-secret|input-secret|result-secret|session-key-secret|session-id-secret|fanoutOrigin|node-secret/);
+    expect(body.nodes).toMatchObject([{ node_id: 'launch', status: 'succeeded' }]);
+    expect(JSON.stringify(body.nodes)).not.toMatch(/node-input-secret|node-output-secret|node-error-secret|node-context-secret|node-progress-secret/);
+    for (const suffix of ['/child-0/nodes', '/child-0/nodes?full=true']) {
+      const nodesResponse = await read(suffix); expect(nodesResponse.status).toBe(200);
+      expect(JSON.stringify(await nodesResponse.json())).not.toMatch(/node-input-secret|node-output-secret|node-error-secret|node-context-secret|node-progress-secret/);
+    }
+    expect((await (await read('/child-0/events')).json())).toEqual([]);
+    expect((await read('/child-0/steps')).status).toBe(403);
+    expect((await read('/child-0/replay')).status).toBe(403);
+    const interventionResponse = await read('/child-0/interventions'); expect(interventionResponse.status).toBe(200);
+    const intervention = await interventionResponse.json();
+    expect(intervention).toMatchObject({ canIntervene: false, availableInterventions: [], interventionReady: false,
+      interventionReadOnly: true, sessionConfigured: true, originSessionKey: null, originSessionId: null, hasCredentials: null });
+    expect(body.availableInterventions).toEqual([]);
+    expect(JSON.stringify(intervention)).not.toMatch(/session-key-secret|session-id-secret/);
+    expect(raw.prepare('SELECT origin_session_key,origin_session_id FROM flow_runs WHERE flow_id=?').get('child-0')).toEqual(storedSession);
+    raw.prepare('UPDATE flow_runs SET origin_session_key=NULL, origin_session_id=NULL WHERE flow_id=?').run('child-2');
+    expect(await (await read('/child-2/interventions')).json()).toMatchObject({ interventionReadOnly: true,
+      sessionConfigured: false, interventionReady: false, originSessionKey: null });
+    expect((await read('/child-1')).status).toBe(403);
+    expect((await read('/child-1/events')).status).toBe(403);
+    expect((await read('/child-1/interventions')).status).toBe(403);
+  });
+  it('preserves ordinary run nodes, events, and intervention session fields', async () => {
+    raw.prepare('UPDATE flow_runs SET state_json=?, status=?, origin_session_key=?, origin_session_id=? WHERE flow_id=?')
+      .run('{}', 'failed', 'ordinary-session-key', 'ordinary-session-id', 'child-0');
+    raw.prepare('UPDATE node_executions SET output_json=? WHERE flow_id=?').run('ordinary-output', 'child-0');
+    raw.prepare('INSERT INTO flow_events (flow_id,event_type,time,data_json) VALUES (?,?,?,?)')
+      .run('child-0', 'ordinary-event', 9, 'ordinary-event-data');
+    expect((await (await read('/child-0')).json()).nodes[0].output_json).toBe('ordinary-output');
+    expect(await (await read('/child-0/events')).json()).toMatchObject([{ data_json: 'ordinary-event-data' }]);
+    expect(await (await read('/child-0/interventions')).json()).toMatchObject({ interventionReady: true,
+      originSessionKey: 'ordinary-session-key', originSessionId: 'ordinary-session-id', canIntervene: true });
+  });
   it('does not expose flat native IDs without trusted group and item provenance', async () => {
     Object.assign(group.children[0], { nativeFlowId: 'native-0', sessionKey: undefined, stateDirRef: undefined });
     Object.assign(group.children[1], { nativeFlowId: 'native-1', sessionKey: undefined, stateDirRef: undefined });

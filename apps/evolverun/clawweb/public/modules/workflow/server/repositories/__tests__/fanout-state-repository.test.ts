@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FanoutStateRepository } from '../fanout-state-repository.js';
 import { FlowRunRepository } from '../flow-run-repository.js';
 import { childInput, fixture, group } from './fanout-state-fixture.js';
@@ -98,6 +99,192 @@ it.each([
   { cleanupPendingChildIds: [15] }, { revision: -1 }, { revision: 1 }, { result: {} },
 ])('validates v1 snapshots before storage: %j', async invalid => {
   await expect(save({ ...group(), ...invalid })).rejects.toMatchObject({ statusCode: 400 });
+});
+
+it('allows a durable dispatch claim to advance without changing launch identity', async () => {
+  const g = group(); g.children[0].status = 'queued'; await save(g);
+  const claimed = structuredClone(g); claimed.revision = 1; claimed.children[0].status = 'dispatch_pending';
+  claimed.children[0].dispatchClaimToken = 'claim-token'; claimed.cleanupPendingChildIds = [claimed.children[0].childFlowId];
+  await save(claimed, 0);
+  expect(stored().subworkflowFanouts.fanout.children[0].dispatchClaimToken).toBe('claim-token');
+});
+
+describe('one-shot dispatch claims', () => {
+  const queued = (nodeId?: string) => { const g = group(nodeId); g.children[0].status = 'queued'; return g; };
+  const claimed = (g = queued(), token: unknown = 'claim-token', index = 0) => {
+    const next = structuredClone(g); next.revision++; next.children[index].status = 'dispatch_pending';
+    next.children[index].dispatchClaimToken = token; next.cleanupPendingChildIds = next.children
+      .filter((child: any) => !['queued', 'succeeded', 'failed', 'cancelled', 'timed_out', 'rejected'].includes(child.status))
+      .map((child: any) => child.childFlowId); return next;
+  };
+  const twoChildren = () => { const g = queued();
+    g.children.push({ ...structuredClone(g.children[0]), itemId: 'two', itemIndex: 1, childFlowId: 'child-two' });
+    return g;
+  };
+
+  it.each([[undefined], [null], [''], ['  '], [0], [false], [{}], [[]], [['token']]])('rejects malformed token %j', async token => {
+    await save(queued());
+    const invalid = claimed(); invalid.children[0].dispatchClaimToken = token;
+    await expect(save(invalid, 0)).rejects.toMatchObject({ statusCode: 400 });
+    expect(stored().subworkflowFanouts.fanout.revision).toBe(0);
+  });
+
+  it('reads and updates legacy children without a token, but rejects a preclaimed group creation', async () => {
+    await expect(save({ ...claimed(), revision: 0 })).rejects.toMatchObject({ statusCode: 409 });
+    await save(queued());
+    const legacy = (await repo.getGroup('parent', 'fanout')).group as Record<string, any>;
+    expect(legacy.children[0]).not.toHaveProperty('dispatchClaimToken');
+    await save({ ...legacy, revision: 1 }, 0);
+  });
+
+  it.each(['dispatch_pending', 'dispatch_unknown', 'running', 'cancel_requested', 'succeeded'])('refuses to claim child status %s', async status => {
+    const g = queued(); g.children[0].status = status; await save(g);
+    await expect(save(claimed(g), 0)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('refuses to claim an associated child or non-running group', async () => {
+    const g = queued(); g.children[0].nativeFlowId = 'native'; await save(g);
+    await expect(save(claimed(g), 0)).rejects.toMatchObject({ statusCode: 409 });
+    const stopping = queued('stopping'); stopping.status = 'cancelling';
+    stopping.cancelRequestedAt = stopping.createdAt; stopping.cancelDeadlineAt = stopping.deadlineAt;
+    await save(stopping);
+    await expect(save(claimed(stopping), 0)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it.each(['paused', 'pending', 'waiting', 'cancelled', 'succeeded'])('refuses a claim when parent is %s', async status => {
+    await save(queued()); f.raw.prepare('UPDATE flow_runs SET status = ? WHERE flow_id = ?').run(status, 'parent');
+    await expect(save(claimed(), 0)).rejects.toMatchObject({ statusCode: 409 });
+    expect(stored().subworkflowFanouts.fanout.revision).toBe(0);
+  });
+
+  it('rejects an already expired claim without blocking an ordinary stop', async () => {
+    const g = queued(); g.deadlineAt = new Date(Date.now() - 1000).toISOString(); await save(g);
+    await expect(save(claimed(g), 0)).rejects.toMatchObject({ statusCode: 409 });
+    await save({ ...g, revision: 1, status: 'cancelling', cancelRequestedAt: g.createdAt, cancelDeadlineAt: g.deadlineAt }, 0);
+  });
+
+  it.each(['other-child', 'second-claim', 'own-status', 'group-status', 'group-field'])('rejects simultaneous %s during first claim', async change => {
+    const g = twoChildren(); await save(g);
+    const next = claimed(g);
+    if (change === 'other-child') next.children[1].status = 'running';
+    if (change === 'second-claim') next.children[1].dispatchClaimToken = 'another';
+    if (change === 'own-status') next.children[0].status = 'running';
+    if (change === 'group-status') { next.status = 'cancelling'; next.cancelRequestedAt = g.createdAt; next.cancelDeadlineAt = g.deadlineAt; }
+    if (change === 'group-field') next.cleanupPendingChildIds = [];
+    await expect(save(next, 0)).rejects.toMatchObject({ statusCode: 409 });
+    expect(stored().subworkflowFanouts.fanout).toEqual(g);
+  });
+
+  it('keeps an existing claim immutable while allowing normal progress and other child claims', async () => {
+    const g = twoChildren(); await save(g);
+    const first = claimed(g); await save(first, 0);
+    for (const replacement of [undefined, 'different']) {
+      const next = structuredClone(first); next.revision = 2;
+      if (replacement === undefined) delete next.children[0].dispatchClaimToken;
+      else next.children[0].dispatchClaimToken = replacement;
+      await expect(save(next, 1)).rejects.toMatchObject({ statusCode: 409 });
+    }
+    const second = claimed(first, 'claim-two', 1);
+    await save(second, 1);
+    const progress = structuredClone(second); progress.revision = 3; progress.children[0].status = 'running';
+    progress.children[0].nativeFlowId = 'native-one'; await save(progress, 2);
+    expect((await repo.getGroup('parent', 'fanout')).group).toEqual(progress);
+  });
+
+  it('has one CAS winner and permits read-back after an unacknowledged write, not a duplicate commit', async () => {
+    await save(queued());
+    const candidates = await Promise.allSettled([save(claimed(queued(), 'first'), 0), save(claimed(queued(), 'second'), 0)]);
+    expect(candidates.filter(candidate => candidate.status === 'fulfilled')).toHaveLength(1);
+    expect(candidates.find(candidate => candidate.status === 'rejected')).toMatchObject({ reason: { statusCode: 409 } });
+    const persisted = (await repo.getGroup('parent', 'fanout')).group as Record<string, any>;
+    expect(['first', 'second']).toContain(persisted.children[0].dispatchClaimToken);
+    await expect(save(persisted, 0)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await repo.getGroup('parent', 'fanout')).group).toEqual(persisted);
+  });
+
+  it('propagates a lost acknowledgement and exposes the committed claim for reconciliation', async () => {
+    await save(queued());
+    const unreliable = new Proxy(f.db as IDatabase, { get(target, key) {
+      if (key === 'transaction') return async (fn: (db: IDatabase) => Promise<unknown>) => {
+        await target.transaction(fn); throw new Error('claim response lost');
+      };
+      const member = Reflect.get(target, key); return typeof member === 'function' ? member.bind(target) : member;
+    } });
+    const candidate = claimed();
+    await expect(new FanoutStateRepository(unreliable).saveGroup('parent', 'fanout', { group: candidate, expectedRevision: 0 }))
+      .rejects.toThrow('claim response lost');
+    expect((await repo.getGroup('parent', 'fanout')).group).toEqual(candidate);
+    await expect(save(candidate, 0)).rejects.toMatchObject({ statusCode: 409 });
+    await expect(save(claimed(queued(), 'other-token'), 0)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('does not bootstrap unrelated parent mirror fields as part of a claim', async () => {
+    await save(queued());
+    await save(claimed(), 0, { currentPhase: 'untrusted' });
+    expect(stored().currentPhase).toBeUndefined();
+    expect(stored().subworkflowFanouts.fanout.children[0].dispatchClaimToken).toBe('claim-token');
+  });
+
+  it('preserves claims during a concurrent mirror update and a later stop', async () => {
+    await save(queued());
+    const first = claimed();
+    await Promise.all([save(first, 0), new FlowRunRepository(f.db).updateStateJson('parent', JSON.stringify({ currentPhase: 'next' }))]);
+    expect(stored().currentPhase).toBe('next');
+    expect(stored().subworkflowFanouts.fanout).toEqual(first);
+    const stopping = { ...structuredClone(first), revision: 2, status: 'cancelling',
+      cancelRequestedAt: first.createdAt, cancelDeadlineAt: first.deadlineAt };
+    await save(stopping, 1);
+    expect((await repo.getGroup('parent', 'fanout')).group).toEqual(stopping);
+  });
+
+  it.each(['mysql', 'zdas'])('generates byte-exact CAS and database-clock fences for %s', async dbType => {
+    await save(queued());
+    let statement = ''; let values: unknown[] = []; let locked = false; let inTransaction = false;
+    const captured = new Proxy(f.db as IDatabase, { get(target, key) {
+      if (key === 'dbType') return dbType;
+      if (key === 'query') return (sql: string, params: unknown[]) => target.query(sql.replace(/ FOR UPDATE$/, ''), params);
+      if (key === 'transaction') return async (fn: (db: IDatabase) => Promise<unknown>) => { inTransaction = true; return fn(captured); };
+      if (key === 'exec') return async (sql: string, params: unknown[]) => {
+        if (sql.startsWith('UPDATE flow_runs SET flow_id = flow_id')) { locked = inTransaction; return { affectedRows: 1 }; }
+        statement = sql; values = params; throw new Error('captured SQL');
+      };
+      const member = Reflect.get(target, key); return typeof member === 'function' ? member.bind(target) : member;
+    } });
+    await expect(new FanoutStateRepository(captured).saveGroup('parent', 'fanout', { group: claimed(), expectedRevision: 0 }))
+      .rejects.toThrow('captured SQL');
+    expect(locked).toBe(true);
+    expect(statement).toContain('BINARY state_json = BINARY ?');
+    expect(statement).toContain('AND status = ?');
+    expect(statement).toContain('UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000');
+    expect(values.slice(-2)).toEqual(['running', Date.parse(queued().deadlineAt)]);
+  });
+
+  it.each(['status', 'deadline'])('fences claim when %s changes before the SQL write', async mode => {
+    const g = queued(); if (mode === 'deadline') g.deadlineAt = new Date(Date.now() + 500).toISOString();
+    await save(g);
+    let resume!: () => void; let entered!: () => void; let intercepted = false;
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const release = new Promise<void>(resolve => { resume = resolve; });
+    const wrap = (connection: IDatabase): IDatabase => new Proxy(connection, { get(target, key) {
+      if (key === 'transaction') return (fn: (db: IDatabase) => Promise<unknown>) => target.transaction(tx => fn(wrap(tx)));
+      if (key === 'exec') return async (sql: string, params: unknown[]) => {
+        if (!intercepted && sql.startsWith('UPDATE flow_runs SET state_json')) {
+          intercepted = true; entered(); await release;
+        }
+        return target.exec(sql, params);
+      };
+      const member = Reflect.get(target, key); return typeof member === 'function' ? member.bind(target) : member;
+    } });
+    const pending = new FanoutStateRepository(wrap(f.db)).saveGroup('parent', 'fanout', { group: claimed(g), expectedRevision: 0 });
+    const rejected = expect(pending).rejects.toMatchObject({ statusCode: 409 });
+    try {
+      await reached;
+      if (mode === 'status') f.raw.prepare('UPDATE flow_runs SET status = ? WHERE flow_id = ?').run('paused', 'parent');
+      else await new Promise(resolve => setTimeout(resolve, Math.max(1, Date.parse(g.deadlineAt) - Date.now() + 30)));
+    } finally { resume(); }
+    await rejected;
+    expect(stored().subworkflowFanouts.fanout).toEqual(g);
+  });
 });
 
 it('rejects changes to frozen child specs and child launch identity', async () => {

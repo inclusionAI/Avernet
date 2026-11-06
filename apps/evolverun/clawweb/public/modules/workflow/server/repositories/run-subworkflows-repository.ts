@@ -1,6 +1,6 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { RunViewScope } from "@avernet/clawweb-shared/server/services/run-view-permissions";
-import type { AuthorizedRunListQuery, AuthorizedRunList, RunListMetadata, RunIdentity, RunSubworkflowsStore, StoredRunSnapshot, AssociationCandidate, AssociatedRunIdentity } from '../contracts/run-subworkflows.js';
+import type { AuthorizedRunListQuery, AuthorizedRunList, RunListMetadata, RunIdentity, RunSubworkflowsStore, StoredRunSnapshot, AssociationCandidate, AssociatedRunIdentity, FanoutOriginCandidate } from '../contracts/run-subworkflows.js';
 
 /** Deliberately separate from legacy repositories which swallow DB errors.
  * Only SELECTs, no credentials column and no engine calls. Read failures propagate. */
@@ -97,6 +97,36 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
     }
     return rows;
   }
+  /** Correlate only explicit trusted-engine metadata. Never return stored state. */
+  async readFanoutOriginIdentities(candidates: FanoutOriginCandidate[]): Promise<RunIdentity[]> {
+    const result: RunIdentity[] = [];
+    for (let offset = 0; offset < candidates.length; offset += 200) {
+      const batch = candidates.slice(offset, offset + 200);
+      const rows = await this.db.query<RunIdentity & { state_json: string | null }>(
+        `SELECT flow_id, workflow_id, origin_bot_id, state_json FROM flow_runs WHERE flow_id IN (${batch.map(() => '?').join(',')})`,
+        batch.map(candidate => candidate.nativeFlowId));
+      for (const row of rows) {
+        const candidate = batch.find(value => value.nativeFlowId === row.flow_id);
+        if (!candidate || row.workflow_id !== candidate.workflowId || typeof row.state_json !== 'string') continue;
+        let origin: Record<string, unknown>;
+        try {
+          const state: unknown = JSON.parse(row.state_json);
+          if (!state || typeof state !== 'object' || Array.isArray(state)) continue;
+          const value = (state as Record<string, unknown>).fanoutOrigin;
+          if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+          origin = value as Record<string, unknown>;
+        } catch { continue; }
+        const keys = ['parentFlowId', 'parentNodeId', 'groupExecutionId', 'itemId', 'itemIndex',
+          'attemptNumber', 'childFlowId', 'workflowId'] as const;
+        if (keys.some(key => origin[key] !== candidate[key])
+          || typeof origin.requestDigest !== 'string' || !origin.requestDigest.trim()
+          || (Object.hasOwn(candidate, 'requestDigest') && origin.requestDigest !== candidate.requestDigest)) continue;
+        result.push({ flow_id: row.flow_id, workflow_id: row.workflow_id, origin_bot_id: row.origin_bot_id });
+      }
+    }
+    return result;
+  }
+
   /** The request key is the item childFlowId only for a future host that adopts
    * that convention. The present code does not start or register native runs. */
   async readAssociatedIdentities(parent: StoredRunSnapshot, childWorkflowId: string, candidates: AssociationCandidate[]): Promise<AssociatedRunIdentity[]> {

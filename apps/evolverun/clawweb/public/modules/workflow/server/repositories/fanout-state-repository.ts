@@ -187,6 +187,7 @@ function validateGroup(value: unknown, parentFlowId: string, nodeId: string): as
     valid(text(child.itemId) && child.itemIndex === index && child.attemptNumber === 1 && text(child.childFlowId)
       && (child.sessionKey === undefined || text(child.sessionKey)) && (child.stateDirRef === undefined || text(child.stateDirRef))
       && (child.nativeFlowId === undefined || child.nativeFlowId === null || text(child.nativeFlowId))
+      && (!Object.hasOwn(child, 'dispatchClaimToken') || text(child.dispatchClaimToken))
       && integer(child.depth, 1), 'Invalid v1 child attempt');
     valid(!childIds.has(child.childFlowId) && !itemIds.has(child.itemId), 'Duplicate child identity');
     childIds.add(child.childFlowId); itemIds.add(child.itemId);
@@ -229,7 +230,7 @@ function storedGroup(state: ObjectValue, parentFlowId: string, nodeId: string): 
 function frozenGroup(g: Group): unknown {
   return { parentFlowId: g.parentFlowId, groupNodeId: g.groupNodeId, groupExecutionId: g.groupExecutionId,
     createdAt: g.createdAt, deadlineAt: g.deadlineAt, config: g.config, childWorkflow: g.childWorkflow, childPublishedVersion: g.childPublishedVersion, childRelease: g.childRelease, childResolved: g.childResolved, inputDigest: g.inputDigest,
-    children: g.children.map(({ status: _status, result: _result, error: _error, nativeFlowId: _nativeFlowId, ...identity }) => identity) };
+    children: g.children.map(({ status: _status, result: _result, error: _error, nativeFlowId: _nativeFlowId, dispatchClaimToken: _dispatchClaimToken, ...identity }) => identity) };
 }
 /** Compare request-key hashes exactly as the ordinary association store does.
  * Already persisted conflicts may advance unchanged (including cancellation),
@@ -270,6 +271,12 @@ function assertNoNewKeyConflicts(state: ObjectValue, nodeId: string, current: Gr
 }
 function mergeMirror(current: ObjectValue, incoming: ObjectValue): ObjectValue {
   const { subworkflowFanouts: _untrustedGroups, ...rest } = incoming;
+  if (Object.hasOwn(current, 'fanoutOrigin')) {
+    conflict(!Object.hasOwn(incoming, 'fanoutOrigin') || equal(current.fanoutOrigin, incoming.fanoutOrigin),
+      'Fanout origin is immutable');
+    // Ordinary fanout children retain their registered origin even when the engine omits it in a mirror.
+    rest.fanoutOrigin = current.fanoutOrigin;
+  }
   return Object.hasOwn(current, 'subworkflowFanouts') ? { ...rest, subworkflowFanouts: groupsOf(current) } : rest;
 }
 
@@ -314,13 +321,14 @@ export class FanoutStateRepository {
     const sql = this.db.dbType === 'mysql' || this.db.dbType === 'zdas' ? 'BINARY state_json = BINARY ?' : 'state_json = ?';
     return { sql, params: [raw] };
   }
-  private async read(flowId: string, db = this.db): Promise<RunRow | null> {
+  private async read(flowId: string, db = this.db, current = false): Promise<RunRow | null> {
     this.available();
-    const rows = await db.query<RunRow>('SELECT flow_id, workflow_id, status, origin_session_key, state_json FROM flow_runs WHERE flow_id = ?', [flowId]);
+    const lock = current && (db.dbType === 'mysql' || db.dbType === 'zdas') ? ' FOR UPDATE' : '';
+    const rows = await db.query<RunRow>(`SELECT flow_id, workflow_id, status, origin_session_key, state_json FROM flow_runs WHERE flow_id = ?${lock}`, [flowId]);
     return rows[0] ?? null;
   }
-  private async require(flowId: string, db = this.db): Promise<RunRow> {
-    const row = await this.read(flowId, db);
+  private async require(flowId: string, db = this.db, current = false): Promise<RunRow> {
+    const row = await this.read(flowId, db, current);
     if (!row) throw new FanoutStorageError(404, 'Flow run not found');
     return row;
   }
@@ -338,23 +346,66 @@ export class FanoutStateRepository {
     valid(!['__proto__', 'constructor', 'prototype'].includes(nodeId), 'Invalid node id');
     valid(input.expectedRevision === null || integer(input.expectedRevision), 'Invalid expectedRevision');
     valid(input.parentState === undefined || object(input.parentState), 'Invalid parentState');
+    if (Array.isArray(input.group.children)) {
+      for (const child of input.group.children) {
+        valid(!object(child) || !Object.hasOwn(child, 'dispatchClaimToken') || text(child.dispatchClaimToken), 'Invalid dispatch claim token');
+      }
+    }
     const next = cleanGroup(input.group);
     validateGroup(next, parentFlowId, nodeId);
     valid(next.revision === (input.expectedRevision === null ? 0 : input.expectedRevision + 1), 'revision must advance by exactly one');
+    // Serialize claims with managed creation and first start on the parent row.
+    // On MySQL, locking before the deadline statement also avoids using its
+    // statement-start timestamp from before a row-lock wait.
+    const lockBeforeWrite = next.status === 'succeeded'
+      || next.children.some(child => Object.hasOwn(child, 'dispatchClaimToken'));
     const persist = async (db: IDatabase) => {
-      if (next.status === 'succeeded') await db.exec('UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?', [parentFlowId]);
+      if (lockBeforeWrite) await db.exec('UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?', [parentFlowId]);
       for (let attempt = 0; attempt < maxCasAttempts; attempt++) {
-        const row = await this.require(parentFlowId, db);
+        // A locking read sees current data even inside a caller's existing
+        // MySQL repeatable-read transaction with an older snapshot.
+        const lockingRead = lockBeforeWrite && (db.dbType === 'mysql' || db.dbType === 'zdas');
+        const row = await this.require(parentFlowId, db, lockBeforeWrite);
         const state = parseState(row.state_json);
         const current = storedGroup(state, parentFlowId, nodeId);
         conflict(current ? current.revision === input.expectedRevision : input.expectedRevision === null, 'Group revision conflict');
+        let newClaimIndex = -1;
+        if (!current) conflict(next.children.every(child => !Object.hasOwn(child, 'dispatchClaimToken')), 'New groups cannot contain dispatch claims');
         if (current) {
           conflict(current.groupExecutionId === next.groupExecutionId && equal(frozenGroup(current), frozenGroup(next)), 'Group launch identity conflict');
           conflict(!terminal.has(current.status), 'Group is terminal');
           current.children.forEach((child, index) => {
-            if (text(child.nativeFlowId)) conflict(child.nativeFlowId === next.children[index].nativeFlowId, 'Native child identity is immutable');
-            if (terminal.has(child.status)) conflict(equal(child, next.children[index]), 'Terminal child snapshot is immutable');
+            const incoming = next.children[index];
+            if (!terminal.has(child.status) && child.status !== 'queued') {
+              conflict(incoming.status !== 'queued', 'Dispatched child cannot return to queued');
+            }
+            if (text(child.nativeFlowId)) conflict(child.nativeFlowId === incoming.nativeFlowId, 'Native child identity is immutable');
+            if (terminal.has(child.status)) conflict(equal(child, incoming), 'Terminal child snapshot is immutable');
+            if (Object.hasOwn(child, 'dispatchClaimToken')) {
+              conflict(child.dispatchClaimToken === incoming.dispatchClaimToken, 'Dispatch claim is immutable');
+            } else if (Object.hasOwn(incoming, 'dispatchClaimToken')) {
+              conflict(newClaimIndex === -1 && current.status === 'running' && child.status === 'queued'
+                && (child.nativeFlowId === undefined || child.nativeFlowId === null), 'Child is not eligible for a dispatch claim');
+              newClaimIndex = index;
+            }
           });
+          if (newClaimIndex !== -1) {
+            // Admission is one atomic transition. Recompute the cleanup list as
+            // the collector does, without changing any other child or group data.
+            const children = current.children.map((child, index) => index === newClaimIndex
+              ? { ...child, status: 'dispatch_pending', dispatchClaimToken: next.children[index].dispatchClaimToken } : child);
+            const cleanupPendingChildIds = children.filter(child => child.status !== 'queued' && !terminal.has(child.status))
+              .map(child => child.childFlowId);
+            conflict(row.status === 'running' && equal(next, { ...current, revision: next.revision, children, cleanupPendingChildIds }),
+              'Dispatch claim must be isolated and parent must be running');
+            // Any row with this id could represent an existing managed child;
+            // fail closed even for foreign or malformed rows. Parent is locked
+            // first, matching managed creation/checkpoint lock ordering.
+            const childRows = await db.query<{ flow_id: string }>(
+              `SELECT flow_id FROM flow_runs WHERE flow_id = ?${lockingRead ? ' FOR UPDATE' : ''}`,
+              [current.children[newClaimIndex].childFlowId]);
+            conflict(childRows.length === 0, 'Child already exists; dispatch claim is not authorized');
+          }
           if (current.status === 'cancelling') conflict(next.status !== 'running' && next.status !== 'succeeded', 'Cancellation cannot be reversed');
           if (current.cancelRequestedAt !== null) conflict(equal(current.cancelRequestedAt, next.cancelRequestedAt)
             && equal(current.cancelDeadlineAt, next.cancelDeadlineAt), 'Cancellation deadline is immutable');
@@ -362,17 +413,17 @@ export class FanoutStateRepository {
         assertNoNewKeyConflicts(state, nodeId, current, next);
         conflict(!['running', 'succeeded'].includes(next.status) || parentActive.has(row.status), 'Parent is cancelled or terminal');
         const mirrorEmpty = Object.keys(state).every(key => key === 'subworkflowFanouts');
-        const base = mirrorEmpty && input.parentState ? clean(input.parentState) : state;
+        const base = newClaimIndex === -1 && mirrorEmpty && input.parentState ? clean(input.parentState) : state;
         const merged = { ...base, subworkflowFanouts: { ...groupsOf(state), [nodeId]: next } };
         const guard = this.stateGuard(row.state_json);
-        const deadline = this.deadlineGuard(next.status === 'succeeded' ? next.deadlineAt : undefined);
+        const deadline = this.deadlineGuard(next.status === 'succeeded' || newClaimIndex !== -1 ? next.deadlineAt : undefined);
         const result = await db.exec(`UPDATE flow_runs SET state_json = ? WHERE flow_id = ? AND ${guard.sql} AND status = ?${deadline.sql}`,
           [JSON.stringify(merged), parentFlowId, ...guard.params, row.status, ...deadline.params]);
         if (result.affectedRows > 0) return { group: next, parentStatus: row.status };
       }
       throw new FanoutStorageError(409, 'Concurrent parent state update or expired deadline');
     };
-    return next.status === 'succeeded' ? this.db.transaction(persist) : persist(this.db);
+    return lockBeforeWrite ? this.db.transaction(persist) : persist(this.db);
   }
 
   /** Legacy mirror writes cannot author, delete, or rewind authoritative groups. */
@@ -442,7 +493,7 @@ export class FanoutStateRepository {
     return this.db.transaction(async tx => {
       await tx.exec('UPDATE workflow_specs SET workflow_id = workflow_id WHERE workflow_id = ?', [input.workflowId]);
       await tx.exec('UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?', [parentFlowId]);
-      const parent = await this.require(parentFlowId, tx);
+      const parent = await this.require(parentFlowId, tx, true);
       const g = storedGroup(parseState(parent.state_json), parentFlowId, input.parentNodeId);
       conflict(g && g.groupExecutionId === input.groupExecutionId, 'No matching durable group');
       const child = g.children.find(c => c.childFlowId === childFlowId);
@@ -458,12 +509,15 @@ export class FanoutStateRepository {
         workflowTitle: input.workflowTitle ?? null, originBotId: input.originBotId ?? null, userId: input.userId ?? null,
       };
       this.validateChildState(initial, identity);
-      const existing = await this.read(childFlowId, tx);
+      const existing = await this.read(childFlowId, tx, true);
       if (existing) {
         const run = this.childRecord(existing, parentFlowId);
         conflict(equal(run.stateJson._fanoutIdentity, identity), 'Child ID already has a different launch identity');
         return { created: false, run };
       }
+      // A dispatch claim belongs to the ordinary launcher, never this legacy
+      // managed-child creation path. Existing children remain readable above.
+      conflict(!Object.hasOwn(child, 'dispatchClaimToken'), 'Claimed child cannot use managed creation');
       conflict(parentActive.has(parent.status) && g.status === 'running'
         && ['dispatch_pending', 'dispatch_unknown', 'running'].includes(child.status), 'Child creation is no longer authorized');
       await this.admitChild(tx, input.workflowId);
@@ -505,7 +559,7 @@ export class FanoutStateRepository {
       await tx.exec('UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?', [parentFlowId]);
       await tx.exec('UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?', [childFlowId]);
       for (let attempt = 0; attempt < maxCasAttempts; attempt++) {
-        const row = await this.require(childFlowId, tx);
+        const row = await this.require(childFlowId, tx, true);
         const current = this.childRecord(row, parentFlowId);
         conflict(current.revision === input.expectedRevision, 'Child revision conflict');
         conflict(!terminal.has(row.status), 'Child is terminal');
@@ -515,11 +569,12 @@ export class FanoutStateRepository {
         conflict(current.stateJson._fanoutStarted !== true || incoming._fanoutStarted !== false, 'Child started claim cannot be reversed');
         let deadline = this.deadlineGuard();
         if (current.stateJson._fanoutStarted === false && incoming._fanoutStarted === true) {
-          const parent = await this.require(parentFlowId, tx);
+          const parent = await this.require(parentFlowId, tx, true);
           const group = storedGroup(parseState(parent.state_json), parentFlowId, String(identity.parentNodeId));
           const child = group?.children.find(c => c.childFlowId === childFlowId);
           conflict(parentActive.has(parent.status) && group?.status === 'running'
             && group.groupExecutionId === identity.groupExecutionId && child
+            && !Object.hasOwn(child, 'dispatchClaimToken')
             && ['dispatch_pending', 'dispatch_unknown', 'running'].includes(child.status), 'Child execution is no longer authorized');
           deadline = this.deadlineGuard(group.deadlineAt);
         }

@@ -49,6 +49,21 @@ async function fixture() {
 }
 const lookup = { type: 'ordinary-run-request.lookup.v1', ordinary_request_key: 'key_A' };
 describe('ordinary run request association', () => {
+  it('rejects initial fanout child claims on the nested ordinary run before any association or insert', async () => {
+    const f = await fixture();
+    for (const token of ['claim-secret', '', null, false, { forged: true }]) {
+      const state_json = JSON.stringify({ subworkflowFanouts: { first: { children: [{}] }, second: { children: [{ dispatchClaimToken: token }] } } });
+      const response = await f.post('/request-association/register', { ...start, state_json });
+      expect(response.status).toBe(400);
+      expect(JSON.stringify(response.data)).not.toContain('claim-secret');
+    }
+    expect(f.raw.prepare('SELECT count(*) AS n FROM ordinary_run_requests').get()).toEqual({ n: 0 });
+    expect(f.raw.prepare("SELECT count(*) AS n FROM flow_runs WHERE flow_id='child'").get()).toEqual({ n: 0 });
+    const state_json = JSON.stringify({ subworkflowFanouts: { first: { children: [{ item: { dispatchClaimToken: 'business' } }] } },
+      workflowData: { dispatchClaimToken: 'business' } });
+    expect((await f.post('/request-association/register', { ...start, state_json })).status).toBe(201);
+    expect(f.raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id='child'").get()).toEqual({ state_json });
+  });
   it('atomically registers and returns the original run for exact retries and authenticated lookup, never params', async () => {
     const f = await fixture();
     expect(await f.post('/request-association/register', start)).toMatchObject({ status: 201, data: { success: true, data: { created: true, parent_flow_id: 'parent', flow_id: 'child', workflow_id: 'child-wf' } } });

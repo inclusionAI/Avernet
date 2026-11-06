@@ -227,3 +227,29 @@ DDL-denied installations
 must provision the migration 151 schema before enabling a trusted host. Do not
 interpret an arbitrary 404 from an older server as proof that no run exists if
 the caller cannot establish which protocol version is deployed.
+
+## Experimental one-shot dispatch reservation
+
+The fanout group CAS also accepts an experimental one-shot claim for an ordinary
+launcher that cannot idempotently create a native run. One update changes one
+previously `queued` item to `dispatch_pending`, adds a nonblank
+`dispatchClaimToken`, and updates the cleanup projection. The request must not
+change other item or group fields. The update is conditional on the parent still
+being `running` and the group deadline not having expired at the database write.
+Once present, the claim cannot be removed or replaced. A nonterminal item cannot
+move back to `queued` after dispatch begins. The legacy managed-child creation
+path rejects new creation and first execution for a claimed item, while retaining
+read-only reuse and normal progress of an already started matching managed child.
+An existing child with the legacy child ID prevents a new claim. A claim is an
+admission record, not proof that a native run was created or that a child finished.
+
+The older `queued` to `dispatch_pending` transition without a claim remains
+supported for existing idempotent runtimes. An already pending item without a
+claim cannot be retroactively claimed: it may already have launched. A caller
+that loses a claim response or crashes after a successful claim must not infer
+that no native run exists and must not blindly retry the non-idempotent launch.
+Ordinary run creation rejects initial child `dispatchClaimToken` fields; this
+alone does not establish that a supplied group or item has trusted provenance.
+The item-level attribution and production authentication limitations above
+continue to apply. Real MySQL/ZDAS lock/deadline behavior requires validation on
+the target database before production use.

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { RunViewScope } from '@avernet/clawweb-shared/server/services/run-view-permissions';
 import { FanoutReadError, type AuthorizedRunListQuery, type AuthorizedWorkflowStats, type FanoutCounts, type FanoutPage, type FanoutQuery, type RunIdentity,
   type RunReader, type RunReadInspection, type RunSubviewPermissions, type RunSubworkflowsReader,
-  type RunSubworkflowsStore } from '../contracts/run-subworkflows.js';
+  type RunSubworkflowsStore, type FanoutOriginCandidate } from '../contracts/run-subworkflows.js';
 import { readFanoutMap, readFanoutState, type FanoutStateView } from './fanout-state-reader.js';
 
 export function canReadRun(scope: RunViewScope, run: RunIdentity): boolean {
@@ -29,6 +29,35 @@ function readGroups(map: Record<string, unknown>, parentFlowId: string): FanoutS
     seen.add(key);
   }
   return groups;
+}
+// Project only execution metadata, never opaque engine state or node payloads.
+// Status and node/phase identifiers are labels, not a general string channel.
+const safeLabel = (value: unknown): value is string => typeof value === 'string'
+  && /^[\p{L}\p{N}_. -]{1,128}$/u.test(value) && !['__proto__', 'constructor', 'prototype'].includes(value);
+const nodeStatuses = new Set(['pending', 'running', 'postActionsRunning', 'waiting', 'succeeded', 'failed', 'rejected', 'blocked', 'skipped']);
+function projectChildState(state: Record<string, unknown>, workflowId: string): string {
+  const safe: Record<string, unknown> = {};
+  if (state.workflowId === workflowId) safe.workflowId = workflowId;
+  if (Number.isSafeInteger(state.workflowVersion) && (state.workflowVersion as number) >= -1) safe.workflowVersion = state.workflowVersion;
+  if (safeLabel(state.businessStatus)) safe.businessStatus = state.businessStatus;
+  if (safeLabel(state.currentPhase)) safe.currentPhase = state.currentPhase;
+  if (typeof state.executionMode === 'string' && ['private', 'dingtalk-group', 'bcs-group'].includes(state.executionMode)) safe.executionMode = state.executionMode;
+  if (Array.isArray(state.activeNodes)) safe.activeNodes = state.activeNodes.filter(safeLabel);
+  if (state.nodeStates && typeof state.nodeStates === 'object' && !Array.isArray(state.nodeStates)) {
+    const nodes: Record<string, unknown> = Object.create(null);
+    for (const [id, value] of Object.entries(state.nodeStates)) {
+      if (!safeLabel(id) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const node = value as Record<string, unknown>; const projected: Record<string, unknown> = {};
+      if (typeof node.status === 'string' && nodeStatuses.has(node.status)) projected.status = node.status;
+      for (const key of ['phase', 'executor'] as const) if (safeLabel(node[key])) projected[key] = node[key];
+      for (const key of ['attempts', 'manualRetries', 'startedAt', 'updatedAt', 'completedAt'] as const) {
+        if (typeof node[key] === 'number' && Number.isSafeInteger(node[key]) && (node[key] as number) >= 0) projected[key] = node[key];
+      }
+      nodes[id] = projected;
+    }
+    safe.nodeStates = nodes;
+  }
+  return JSON.stringify(safe);
 }
 const activeStatuses = new Set(['dispatch_pending', 'dispatch_unknown', 'running', 'waiting', 'cancel_requested']);
 
@@ -78,22 +107,30 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
     return { run, scope, parentScope };
   }
 
-  private async visibility(group: FanoutStateView, scope: (id: string) => Promise<RunViewScope>, parentScope: RunViewScope) {
+  private async visibility(group: FanoutStateView, storedGroup: unknown, scope: (id: string) => Promise<RunViewScope>, parentScope: RunViewScope) {
     const current = group.children.map(item => ({ item, attempt: item.attempts.find(a => a.attemptNumber === item.activeAttemptNumber)! }));
     const childScope = await scope(group.childWorkflowId);
     const legacyIds = current.flatMap(({ attempt }) => attempt.associationKey === null && attempt.nativeFlowId !== null
       ? [attempt.nativeFlowId] : []);
-    // Flat children are not observable without authoritative group provenance;
-    // do not query association storage when its result cannot change that.
     const legacy = legacyIds.length ? await this.store.readIdentities(legacyIds) : [];
     const identities = new Map(legacy.map(row => [row.flow_id, row]));
+    // The reader already validated the shape. Preserve a digest on the parent
+    // if one exists, but never infer one from inputs or a different digest field.
+    const storedChildren = new Map((storedGroup as { children: Record<string, unknown>[] }).children
+      .map(value => [value.itemId, value]));
+    const candidates: FanoutOriginCandidate[] = current.flatMap(({ item, attempt }) => {
+      if (attempt.associationKey === null || attempt.nativeFlowId === null) return [];
+      const stored = storedChildren.get(item.itemId)!;
+      return [{ nativeFlowId: attempt.nativeFlowId, parentFlowId: group.parentFlowId,
+        parentNodeId: group.groupNodeId, groupExecutionId: group.groupExecutionId, itemId: item.itemId,
+        itemIndex: item.itemIndex, attemptNumber: attempt.attemptNumber, childFlowId: attempt.associationKey,
+        workflowId: group.childWorkflowId, ...(Object.hasOwn(stored, 'requestDigest') ? { requestDigest: stored.requestDigest } : {}) }];
+    });
+    const matched = candidates.length ? await this.store.readFanoutOriginIdentities(candidates) : [];
+    const origins = new Map(matched.map(row => [row.flow_id, row]));
     const visible = current.flatMap(({ item, attempt }) => {
       if (attempt.nativeFlowId === null) return [];
-      // Ordinary associations prove only parent + request key, not the group,
-      // node or item. Legacy flat checkpoints can be forged by ordinary POST.
-      // Neither is enough authority to reveal a flat child; only the already
-      // approved attempts-format legacy path remains observable.
-      const child = attempt.associationKey === null ? identities.get(attempt.nativeFlowId) : undefined;
+      const child = attempt.associationKey === null ? identities.get(attempt.nativeFlowId) : origins.get(attempt.nativeFlowId);
       return child && child.workflow_id === group.childWorkflowId && canReadRun(childScope, child)
         ? [{ item, attempt, child }] : [];
     });
@@ -101,14 +138,34 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
       authorization: [parentScope, childScope, visible.map(({ child }) => child)] };
   }
 
+  async isFanoutOriginChild(flowId: string): Promise<boolean | null> {
+    const run = await this.store.readRun(flowId);
+    if (!run) return null;
+    if (run.state_json === null || run.state_json === '') return false;
+    if (typeof run.state_json !== 'string') throw new Error('Run state unavailable');
+    const state: unknown = JSON.parse(run.state_json);
+    return state !== null && typeof state === 'object' && Object.hasOwn(state, 'fanoutOrigin');
+  }
+
   async inspectRun(actor: RunReader, flowId: string): Promise<RunReadInspection> {
     const { run, scope, parentScope } = await this.authorizedRun(actor, flowId);
-    const groups = readGroups(readFanoutMap(run), flowId);
+    const map = readFanoutMap(run);
+    const groups = readGroups(map, flowId);
     let restricted = false;
-    for (const group of groups) if (!(await this.visibility(group, scope, parentScope)).full) restricted = true;
+    for (const group of groups) if (!(await this.visibility(group, map[group.groupNodeId], scope, parentScope)).full) restricted = true;
     // The incarnation marker is internal proof, not part of run detail APIs.
     const { ordinary_run_marker: _marker, ...publicRun } = run;
-    return { run: publicRun, managed: groups.length > 0, restricted,
+    // A child can be readable without its parent; expose only safe execution metadata.
+    const state = run.state_json ? JSON.parse(run.state_json) as Record<string, unknown> : null;
+    const sensitiveChild = !!state && Object.hasOwn(state, 'fanoutOrigin');
+    const sessionConfigured = sensitiveChild ? !!run.origin_bot_id && !!run.origin_session_key : undefined;
+    if (sensitiveChild) restricted = true;
+    if (sensitiveChild && state) {
+      publicRun.state_json = projectChildState(state, run.workflow_id);
+      publicRun.params_json = null; publicRun.input_json = null; publicRun.result_json = null;
+      publicRun.origin_session_key = null; publicRun.origin_session_id = null;
+    }
+    return { run: publicRun, managed: groups.length > 0, restricted, sensitiveChild, sessionConfigured,
       groups: groups.map(group => ({ nodeId: group.groupNodeId, groupExecutionId: group.groupExecutionId })) };
   }
 
@@ -122,7 +179,7 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
     if (!Object.hasOwn(map, nodeId)) throw new FanoutReadError('not_found', 'No persisted fanout for this node');
     const group = readGroups(map, flowId).find(value => value.groupNodeId === nodeId)!;
     if (group.groupExecutionId !== query.groupExecutionId) throw new FanoutReadError('identity_conflict', 'Group execution changed; refresh the parent run');
-    const { visible, full, authorization } = await this.visibility(group, scope, parentScope);
+    const { visible, full, authorization } = await this.visibility(group, map[group.groupNodeId], scope, parentScope);
     const snapshotId = hash([actor, group.groupExecutionId, group.revision, group.parentFlowId, group.groupNodeId, authorization, visible]);
     let offset = 0;
     if (query.cursor !== undefined) {

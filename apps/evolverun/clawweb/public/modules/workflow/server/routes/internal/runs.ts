@@ -13,6 +13,19 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
 
+// Only the durable fanout child slot is reserved. Items, params, and other
+// workflow state are user data and may legitimately use the same field name.
+function hasInitialDispatchClaim(state: Record<string, unknown>): boolean {
+  const groups = state.subworkflowFanouts;
+  if (!groups || typeof groups !== "object" || Array.isArray(groups)) return false;
+  return Object.values(groups).some(group => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+    const children = (group as Record<string, unknown>).children;
+    return Array.isArray(children) && children.some(child => child !== null && typeof child === "object"
+      && !Array.isArray(child) && Object.hasOwn(child, "dispatchClaimToken"));
+  });
+}
+
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
   input: { flowId: string; status: string },
@@ -159,6 +172,10 @@ export function createInternalRunsRouter(
         try {
           const state = JSON.parse(state_json);
           if (state === null || typeof state !== "object" || Array.isArray(state)) throw new Error("not an object");
+          if (hasInitialDispatchClaim(state)) {
+            res.status(400).json({ success: false, error: "Bad Request", message: "Initial fanout children cannot contain dispatch claims" });
+            return;
+          }
         } catch {
           res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
           return;
