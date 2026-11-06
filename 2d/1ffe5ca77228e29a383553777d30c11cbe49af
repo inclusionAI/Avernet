@@ -1,0 +1,29 @@
+apps/bcs/scripts/e2e-test/caller_identity_story.sh
+  s_aaa6c69208f9c5::t_a77489fde61ac9 71-83
+apps/bcs/scripts/e2e-test/protected_result_leg_story.py
+  s_aaa6c69208f9c5::t_3b30890af5d2e8 197-205
+  s_aaa6c69208f9c5::t_8681bc85420ca6 276-281,284
+  s_aaa6c69208f9c5::t_89e4992ba4eee6 195-196
+  s_aaa6c69208f9c5::t_5fa7c97fe7fb36 2-175,182-183,186-194,219-275,282-283,291-349
+  s_aaa6c69208f9c5::t_c12972778a564a 206-218
+  s_aaa6c69208f9c5::t_8e8305c7f00143 285-290
+  s_aaa6c69208f9c5::t_2809cd221cdc0e 176-181,184-185
+  s_aaa6c69208f9c5::t_d77a025ba6be02 1
+  s_aaa6c69208f9c5::t_79a30096d66015 350-352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d1ffe5ca77228e29a383553777d30c11cbe49af",
+  "prompts": {},
+  "sessions": {
+    "s_aaa6c69208f9c5": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7dae3fc0-26c6-4513-a555-0cf337957ea8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
