@@ -1,0 +1,29 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/skill/handbook.md
+  s_2877c6b8504772::t_9888b276a69a4f 29
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_2877c6b8504772::t_9888b276a69a4f 10,16,18,20,22,24-36,40,42,46,48-63,65,68-97,101,107,111-112,120,124-125,134-136,144-145,152-154,160,164-176,178,180,182,186-187,194-198,200,206,208,210,212,214,216,218,220,222,224,226,228,230,232,234,236,240,242,244,246,248,250,252,254,256,258,260,262-269,271,281-282,285,290
+  s_2877c6b8504772::t_ea706f452f2ce9 44,67
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  s_2877c6b8504772::t_9888b276a69a4f 17,25
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  s_2877c6b8504772::t_9888b276a69a4f 11
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_2877c6b8504772::t_ea706f452f2ce9 144
+  s_2877c6b8504772::t_9888b276a69a4f 50,140,147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a7849399d1753fff68d3234e7f4711b4e643dc2",
+  "prompts": {},
+  "sessions": {
+    "s_2877c6b8504772": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af78-2006-7511-9a74-9700a3444273",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
