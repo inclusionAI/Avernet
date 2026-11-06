@@ -1,46 +1,12 @@
-import re
-import sqlite3
-
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, text
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import DatabaseError
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
-from secbaas.community.logger import get_logger
 
 from ._orm_model import BotRunQueueChunkModel
 from ._record import BotRunQueueChunkRecord
-
-log = get_logger("orm")
-
-
-def _is_run_seq_duplicate(error: IntegrityError) -> bool:
-    """Fail closed: only the chunk table's run/sequence unique key is ignorable."""
-    original = error.orig
-    sqlite_code = getattr(original, "sqlite_errorcode", None)
-    if sqlite_code is not None:
-        return (
-            sqlite_code == sqlite3.SQLITE_CONSTRAINT_UNIQUE
-            and str(original)
-            == "UNIQUE constraint failed: baas_bot_run_queue_chunk.run_id, "
-            "baas_bot_run_queue_chunk.seq"
-        )
-    code = getattr(original, "errno", None)
-    if code is None and original.args:
-        code = original.args[0]
-    message = getattr(original, "msg", None)
-    if message is None and len(original.args) > 1:
-        message = original.args[1]
-    if not isinstance(message, str):
-        return False
-    return (
-        isinstance(code, int)
-        and code == 1062
-        and re.search(
-            r"for key ['`](?:baas_bot_run_queue_chunk\.)?(?:uk_run_seq|uq_run_seq)['`]$",
-            message,
-        )
-        is not None
-    )
 
 
 class OrmBotRunQueueChunkRepository(OrmConnectionMixin):
@@ -59,22 +25,49 @@ class OrmBotRunQueueChunkRepository(OrmConnectionMixin):
         content: str | None = None,
         metadata: str | None = None,
     ) -> None:
-        row = BotRunQueueChunkModel(
+        table = BotRunQueueChunkModel.__table__
+        values = dict(
             run_id=run_id,
             seq=seq,
             chunk_type=chunk_type,
             content=content,
-            metadata_=metadata,
+            metadata=metadata,
         )
-        try:
-            self._session.add(row)
-            self._session.flush()
-        except IntegrityError as error:
-            if not _is_run_seq_duplicate(error):
-                raise
-            # with_orm_session owns a fresh session for this single insert.
-            # Clear the failed transaction without updating the first writer.
-            self._session.rollback()
+        dialect = self._session.bind.dialect.name
+        if dialect == "sqlite":
+            statement = (
+                sqlite_insert(table)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=["run_id", "seq"])
+            )
+        elif dialect in ("mysql", "mariadb"):
+            statement = mysql_insert(table).values(**values).prefix_with("IGNORE")
+        else:
+            raise ValueError(f"Unsupported database dialect: {dialect}")
+        self._session.execute(statement)
+        if dialect in ("mysql", "mariadb"):
+            # IGNORE also downgrades invalid data to warnings. Diagnostic SHOW
+            # statements preserve the list; SELECT @@warning_count would clear it.
+            count = self._session.execute(text("SHOW COUNT(*) WARNINGS")).scalar_one()
+            if type(count) is not int or count < 0:
+                raise DatabaseError(
+                    None, None, RuntimeError("Invalid chunk insert warnings count")
+                )
+            if count:
+                warnings = self._session.execute(text("SHOW WARNINGS")).all()
+                # max_error_count can suppress/truncate the stored diagnostics.
+                # Fail closed rather than commit coerced data as a valid chunk.
+                rejected = [(row[1], row[2]) for row in warnings if row[1] != 1062]
+                if len(warnings) != count or rejected:
+                    raise DatabaseError(
+                        None,
+                        None,
+                        RuntimeError(
+                            "Nonduplicate or incomplete chunk insert warnings: "
+                            f"reported={count}, stored={len(warnings)}, "
+                            f"rejected={rejected!r}"
+                        ),
+                    )
 
     @with_orm_session
     def get_chunks_after(

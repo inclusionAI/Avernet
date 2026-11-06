@@ -4,19 +4,16 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Barrier
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
-from mysql.connector.errors import IntegrityError as MysqlIntegrityError
 from sqlalchemy import (
     CheckConstraint,
     Integer,
     MetaData,
-    UniqueConstraint,
     create_engine,
     select,
 )
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from secbaas.community.core.repository.bot_run_queue_chunk import (
@@ -132,76 +129,11 @@ def test_other_real_constraints_propagate(storage, field, value, existing):
         repo.insert_chunk(run_id="target", seq=1, chunk_type="delta", content="first")
     kwargs = dict(run_id="target", seq=1, chunk_type="delta", content="new")
     kwargs[field] = value
-    with pytest.raises(IntegrityError):
+    before = snapshot(engine, table)
+    if existing and field == "content":
+        # Native target-conflict no-op can precede another unique check.
         repo.insert_chunk(**kwargs)
-
-
-def fake_repository(error, *, commit_error=None, rollback_error=None):
-    session = MagicMock()
-    session.flush.side_effect = error
-    session.rollback.side_effect = rollback_error
-
-    @contextmanager
-    def orm_session():
-        yield session
-        if commit_error:
-            raise commit_error
-
-    return OrmBotRunQueueChunkRepository(
-        SimpleNamespace(orm_session=orm_session)
-    ), session
-
-
-@pytest.mark.parametrize(
-    "key", ["uk_run_seq", "uq_run_seq", "baas_bot_run_queue_chunk.uk_run_seq"]
-)
-@pytest.mark.parametrize("driver", ["connector", "args"])
-def test_mysql_target_duplicate_rolls_back(key, driver):
-    message = f"Duplicate entry 'opaque-value' for key '{key}'"
-    orig = (
-        MysqlIntegrityError(msg=message, errno=1062)
-        if driver == "connector"
-        else Exception(1062, message)
-    )
-    error = IntegrityError("insert", {}, orig)
-    repo, session = fake_repository(error)
-    assert repo.insert_chunk(run_id="r", seq=1, chunk_type="delta") is None
-    session.rollback.assert_called_once_with()
-
-
-@pytest.mark.parametrize(
-    "code,message",
-    [
-        (1062, "Duplicate entry 'x' for key 'other_unique'"),
-        (1048, "Column cannot be null for key 'uk_run_seq'"),
-        (1062, "unsupported format uk_run_seq"),
-        (1062, "Duplicate entry 'uk_run_seq' for key 'other_unique'"),
-        (1062, "Duplicate entry 'x' for key 'uk_run_seq_extra'"),
-        ("1062", "Duplicate entry 'x' for key 'uk_run_seq'"),
-    ],
-)
-def test_unrecognized_or_other_mysql_errors_propagate(code, message):
-    error = IntegrityError("insert", {}, Exception(code, message))
-    repo, session = fake_repository(error)
-    with pytest.raises(IntegrityError) as raised:
-        repo.insert_chunk(run_id="r", seq=1, chunk_type="delta")
-    assert raised.value is error
-    session.rollback.assert_not_called()
-
-
-@pytest.mark.parametrize("phase", ["execute", "commit", "rollback"])
-def test_connection_commit_and_rollback_failures_propagate(phase):
-    failure = OperationalError("operation", {}, RuntimeError("unavailable"))
-    duplicate = IntegrityError(
-        "insert",
-        {},
-        MysqlIntegrityError(msg="Duplicate entry 'x' for key 'uk_run_seq'", errno=1062),
-    )
-    repo, _ = fake_repository(
-        failure if phase == "execute" else duplicate if phase == "rollback" else None,
-        commit_error=failure if phase == "commit" else None,
-        rollback_error=failure if phase == "rollback" else None,
-    )
-    with pytest.raises(OperationalError) as raised:
-        repo.insert_chunk(run_id="r", seq=1, chunk_type="delta")
-    assert raised.value is failure
+    else:
+        with pytest.raises(IntegrityError):
+            repo.insert_chunk(**kwargs)
+    assert snapshot(engine, table) == before

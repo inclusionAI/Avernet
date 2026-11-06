@@ -24,7 +24,9 @@ class BotRunQueueChunkRepository(Protocol):
     ) -> None:
         """Insert a chunk; duplicate (run_id, seq) writes keep the first row unchanged.
 
-        Other persistence failures propagate; this is not a general INSERT IGNORE.
+        Native conflict-ignore retains existing rows without updating them. Other
+        write failures propagate; MySQL nonduplicate or incomplete warnings fail
+        before commit.
         """
         ...
 
