@@ -32,7 +32,8 @@ impl WorkerProfileCoreService for FuseCardWorkerProfileService {
             tracing::warn!(reasons = ?response.reasons, "BCSFuse Card search degraded");
         }
         let recommendations: Vec<_> = response.items.into_iter()
-            .filter(|item| item.score >= command.min_score)
+            // Rank-fusion scores have a different scale from reranker relevance.
+            .filter(|item| item.score_source != "reranker" || item.score >= command.min_score)
             .map(|item| WorkerRecommendation {
                 worker_id: item.id,
                 score: item.score,

@@ -126,7 +126,7 @@ impl BcsServer {
 
         let (fusion, fuse_client) = create_fusion_service(&config);
         register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
-            bot_registry.clone(), sessions.clone(), leader_election.clone(), &config);
+            control_plane_repo.clone(), sessions.clone(), &config);
 
         // F.1/F.2 dual-write wiring: relation_svc MUST be constructed BEFORE
         // friend_svc so it can be injected via `with_relation(...)`.

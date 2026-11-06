@@ -5,7 +5,11 @@ use tokio::net::TcpListener;
 
 async fn endpoint(status: &str, body: Value) -> (FuseClient, tokio::task::JoinHandle<(String, Value)>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = FuseClient::for_test_with_url(format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+    let mut config = bcs_fuse_client::BcsFuseConfig {
+        url: format!("http://{}/", listener.local_addr().unwrap()), ..Default::default()
+    };
+    config.set_resolved_authorization("test".into());
+    let client = FuseClient::new(&config).unwrap();
     let status = status.to_string();
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
@@ -18,6 +22,8 @@ async fn endpoint(status: &str, body: Value) -> (FuseClient, tokio::task::JoinHa
             if let Some(end) = bytes.windows(4).position(|v| v == b"\r\n\r\n") { break end + 4; }
         };
         let headers = String::from_utf8(bytes[..end].to_vec()).unwrap();
+        assert!(headers.lines().any(|line| line.eq_ignore_ascii_case("authorization: Bearer test")),
+            "Card requests must preserve configured authorization headers");
         let size: usize = headers.lines().find_map(|line| {
             let (key, value) = line.split_once(':')?;
             key.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
@@ -41,12 +47,13 @@ async fn card_write_uses_v2_path_and_fuse_envelope() {
     let (client, task) = endpoint("202 Accepted", json!({"saved":true,"card_version":7})).await;
     let response = client.put_card("group:billing", &CardWriteRequest {
         resource_type: CardResourceType::Group,
+        labels: [("visibility".into(), vec!["public".into()])].into(),
         card: json!({"name":"Billing","skills":[]}),
     }).await.unwrap();
     assert_eq!(response.card_version, 7);
     let (line, body) = task.await.unwrap();
     assert_eq!(line, "PUT /api/v2/agent-cards/group:billing HTTP/1.1");
-    assert_eq!(body, json!({"resource_type":"group","card":{"name":"Billing","skills":[]}}));
+    assert_eq!(body, json!({"resource_type":"group","labels":{"visibility":["public"]},"card":{"name":"Billing","skills":[]}}));
 }
 
 #[tokio::test]

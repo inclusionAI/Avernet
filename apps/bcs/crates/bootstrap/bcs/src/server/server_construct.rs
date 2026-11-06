@@ -526,7 +526,7 @@ impl BcsServer {
             &config,
             card_changes.clone(),
             invite_token_secret.clone(),
-            control_plane_repo,
+            control_plane_repo.clone(),
             &provider_repos,
             bot_registry.clone(),
             sessions.clone(),
@@ -671,7 +671,7 @@ impl BcsServer {
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
-            bot_registry.clone(), sessions.clone(), leader_election.clone(), &config);
+            control_plane_repo, sessions.clone(), &config);
         register_eventing_lifecycles(
             &lifecycle,
             eventing_runtime.lifecycle.as_ref(),

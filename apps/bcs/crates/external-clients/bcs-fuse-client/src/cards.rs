@@ -11,6 +11,7 @@ use crate::{FuseClient, FuseClientError};
 #[derive(Debug, Clone, Serialize)]
 pub struct CardWriteRequest {
     pub resource_type: CardResourceType,
+    pub labels: BTreeMap<String, Vec<String>>,
     pub card: Value,
 }
 

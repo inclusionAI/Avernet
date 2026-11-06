@@ -2,7 +2,11 @@
 
 ## Provides
 
-- Fuse v2 Card search adaptation and master-bound Agent/Group catalog publication, with a coalesced identity queue and startup backfill.
+- Fuse v2 Card search adaptation and event-triggered Agent/Group publication,
+  with a coalesced identity queue and bounded retries. Agent Cards carry both
+  committed visibility labels, including private values; public normal Groups
+  carry the bot visibility label. Bootstrap supplies the control-plane repo and
+  environment for current-state reads. No startup or master-acquisition scan.
 
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.
 - BCSFuse-backed `FusionCoreService` implementation using the transport-only external client.
