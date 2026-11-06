@@ -110,6 +110,41 @@ def test_submit_copy_oss_noop_persists_manifest_and_hands_off():
     assert "state_ref" not in start_kwargs["spec"]
 
 
+def test_submit_copy_carries_caller_excludes_into_the_manifest_entry():
+    # The caller's excludes ride both the ledger (request_detail) and the
+    # manifest resources entry, so the compiler and the sync read one source of
+    # truth. An empty document omits them entirely — the empty branch.
+    mocks = _mocks()
+    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, _passport, _ = mocks
+    bot_repo.get_by_id.return_value = _source_bot()
+
+    body, _ = _call(
+        {"request_detail": {"excludes": ["secrets/", "large/tmp"]}},
+        {},
+        mocks=mocks,
+    )
+    assert body.type == "success"
+    document = manifest_seam.persist.call_args.kwargs["document"]
+    assert "excludes:" in document
+    assert "secrets/" in document
+    assert "large/tmp" in document
+    # The ledger row keeps the caller's intent too.
+    inserted = bot_copy_repo.insert.call_args.args[0]
+    assert inserted.request_detail == {"excludes": ["secrets/", "large/tmp"]}
+
+
+def test_submit_copy_an_empty_excludes_list_is_omitted_from_the_manifest():
+    # No excludes → the entry carries no 'excludes' key at all (the falsy branch
+    # of the serializer), so the compiler never sees an empty list.
+    mocks = _mocks()
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _ = mocks
+    bot_repo.get_by_id.return_value = _source_bot()
+
+    _call({"request_detail": {"excludes": []}}, {}, mocks=mocks)
+    document = manifest_seam.persist.call_args.kwargs["document"]
+    assert "excludes" not in document
+
+
 def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
     mocks = _mocks()
     bot_repo, _, _, _, passport, _ = mocks
