@@ -49,7 +49,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _session_file_resource,
     _window,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import convert_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
@@ -264,7 +264,9 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title, device_uuid=device_uuid)
+    item = convert_created_session(
+        engine_type=facts.active_engine, created_item=result.data, requested_title=body.title,
+    )
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 

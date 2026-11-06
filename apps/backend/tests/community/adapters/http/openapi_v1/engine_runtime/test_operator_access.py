@@ -85,6 +85,9 @@ _UNIVERSAL = {
     "sessionKey": "k",
     "mode": "approve",
     "id": SESSION_ID,
+    "ext_info": {"openclaw_creation": {
+        "session_id": f"agent:main:{SESSION_ID}", "model": "provider/model",
+    }},
 }
 
 

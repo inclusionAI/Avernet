@@ -42,3 +42,22 @@ The existing pre/prod grammar, singlebox workspace-root handling, and direct-pat
 passthrough are unchanged. This compatibility mapping does not mount storage,
 copy files, select a Skills layout, or make old Engine images understand the new
 address form; simulator Bots must load an image containing the change.
+
+### Session creation result
+
+`session_create` performs one `sessions.patch` RPC. It keeps the legacy request
+parameters and adds `canonical_session_id` from the acknowledged `key`, plus
+`resolved_model` from `resolved.modelProvider` / `resolved.model`. Both are
+required; an incomplete acknowledgement is an upstream error, not a reason to
+list sessions or retry creation.
+
+The core adapter exposes these two values as
+`ext_info.openclaw_creation.{session_id,model}` on `POST /api/sessions`. Existing
+`id`, `title`, `model`, and timestamp fields retain their legacy meanings. No
+store path, transcript ID, or raw gateway payload is exposed.
+
+The Backend OpenAPI create route consumes this metadata to return the canonical
+session ID and effective model directly, without list/history readback or sleeps.
+Deploy the updated Adapter with this Backend; older Adapters have no fallback.
+Other engines and the friend-caller path are unchanged. The local plugin supplies
+the same contract using its stored session key and local model.
