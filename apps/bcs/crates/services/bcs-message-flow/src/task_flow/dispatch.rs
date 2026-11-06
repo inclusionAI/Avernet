@@ -73,13 +73,19 @@ async fn dispatch(flow: &BcsMessageFlow, mut cmd: TaskDispatchCommand, native: b
         );
         if let Some(sessions) = flow.session_management.as_ref() {
             if let Some(sid) = manager_session_id.as_deref() {
-                if let Err(e) = sessions.remove_participant(sid, &cmd.target_bot_id).await {
-                    tracing::warn!(
-                        target_bot_id = %cmd.target_bot_id,
-                        session_id = %sid,
-                        error = %e,
-                        "failed to remove orphan participant from session"
-                    );
+                if let Ok(Some(session)) = sessions.get(sid).await {
+                    for participant in &session.participants {
+                        if flow.registry.get(&participant.bot_uuid).await.is_none() {
+                            if let Err(e) = sessions.remove_participant(sid, &participant.bot_uuid).await {
+                                tracing::warn!(
+                                    bot_uuid = %participant.bot_uuid,
+                                    session_id = %sid,
+                                    error = %e,
+                                    "failed to remove orphan participant from session"
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

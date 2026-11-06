@@ -1366,6 +1366,17 @@ async fn session_chat_maps_session_not_found_to_not_found() {
 }
 
 #[tokio::test]
+async fn session_chat_maps_bot_not_found_to_not_found() {
+    let (status, json) = post_session_chat_with_flow_error(ServiceError::BotNotFound(
+        "orphan-bot".to_string(),
+    ))
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(json["error"], "bot not found: orphan-bot");
+}
+
+#[tokio::test]
 async fn session_chat_keeps_internal_error_as_server_error() {
     let (status, json) = post_session_chat_with_flow_error(ServiceError::InternalError(
         "database unavailable".to_string(),

@@ -112,7 +112,7 @@ impl QueuedGroupProjection {
         if command.session_id.as_deref().is_none_or(|s| s.is_empty()) {
             return Err(invalid("queue admission requires a canonical session"));
         }
-        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await?.is_http_provider();
+        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await.map(|dt| dt.is_http_provider()).unwrap_or(false);
         // WS does not consume Provider-only headers. Preserve only explicitly
         // approved routing metadata for a later Bot relay, never credentials.
         let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|
