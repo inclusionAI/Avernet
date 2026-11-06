@@ -16,7 +16,12 @@ export function useGroupChatPanelCleanup(
   const lastSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      // 群列表重拉会短暂清空选中会话；重入同一 session 也必须先清理旧焦点，
+      // 否则 bootstrap 会将残留 activeTask 误判为已展示，无从恢复面板。
+      lastSessionIdRef.current = null;
+      return;
+    }
     if (lastSessionIdRef.current === sessionId) return;
     lastSessionIdRef.current = sessionId;
     releaseTaskPanelNavigationForOtherSession(sessionId);
