@@ -1,0 +1,16 @@
+apps/bcs-internal/bcn-configs/bcs-config-gray.toml
+  h_45bbed694cc8b0 10
+apps/bcs-internal/configs/bcs-config.toml
+  h_45bbed694cc8b0 136-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e4f2a378247b7043a301a984f48c9f40d93faed3",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
