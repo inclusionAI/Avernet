@@ -31,22 +31,24 @@ The v2 adapter uses the Fuse search-core response
 into BCS's existing discovery/actor response types, including the legacy
 `context.recommend_response.recommendations` shape. The frontend and BCS API
 paths/response fields are unchanged. Fuse owns relevance ordering; BCS retains
-its score threshold and local visibility/relationship checks.
+its local visibility/relationship checks. `recommend_min_score` applies to
+`score_source=reranker`; RRF ranking scores use a different scale and are kept.
 
 The agreed Card URL prefix is `/api/v2/agent-cards`. Deploy this mode with a
-Fuse catalog application exposing that prefix and `/api/v2/search`. The
-search-core branch originally mounted Card writes under `/api/v1/agent-cards`;
-the BCS adapter targets the agreed v2 prefix. Card-only deployments use BCS's
+Fuse catalog application supporting the labels/filter contract below and
+`/api/v2/search`. Group publication requires the generic Agent/Group Card
+application; the TC-specific Card entry point currently accepts Agents only.
+Card-only deployments use BCS's
 local context fusion service, since their API has no legacy Group-fusion route.
 
 ## Published data
 
 - Agent: BCS bot ID, display name, summary, skills and domain tags. The Card
   description combines the summary and domains so the default Fuse converter
-  indexes domain-only Agents too. `public`
-  and `protected` Agents remain discoverable, as in existing BCS search.
-  `private` Agents and Human actors are removed from the catalog. BCS still
-  enforces the original collaboration permission checks on search results.
+  indexes domain-only Agents too. All three bot visibility values and all three
+  user visibility values are synchronized. Human actors and deleted Agents are
+  removed. BCS still enforces collaboration permission checks on search results,
+  including allowing a private Agent that is already a friend.
 - Group: BCS group ID, label and context, with `resource_type=group`.
   Only normal Groups with `record_status=active` and `visibility=public` are
   published. DM and private Groups are removed. Publishing does not change
@@ -57,29 +59,108 @@ local context fusion service, since their API has no legacy Group-fusion route.
   fields. Runtime credentials, local context files and chat history are not
   part of the discovery projection.
 
+### Labels contract
+
+Agent writes carry both current, committed control-plane visibility values:
+
+```json
+{
+  "resource_type": "agent",
+  "labels": {"visibility": ["private"], "user_visibility": ["protected"]},
+  "card": {"name": "Billing", "description": "Invoices", "skills": []}
+}
+```
+
+`labels` is a map of string keys to string arrays, suitable for additional
+static classification tags without adding a top-level field for each category.
+BCS owns and sends only these keys:
+
+| Resource | Label | Values |
+| --- | --- | --- |
+| Agent | `visibility` | One of `public`, `protected`, `private` |
+| Agent | `user_visibility` | One of `public`, `protected`, `private` |
+| Group | `visibility` | `public` on every published Group |
+
+The Card body has no duplicate visibility field. Groups have no
+`user_visibility` label. `group_kind`, `record_status` and conversation status
+determine publication eligibility locally; they are not labels. A Group's
+`label` is its display name, not a classification label.
+
+For `user_visibility`, `private` hides the Bot from user discovery, `public`
+allows discovery and friendship applications, and `protected` still allows
+discovery but restricts friendship applications to the configured organization
+scope. `friend_ext.view_scope_user_friend_deps` and the bot-side organization
+scope remain BCS friendship policy; they are not sent to Fuse. Pending approval
+metadata likewise does not override committed visibility values. No department
+field is required in Card registration, including for `protected`.
+
+The agreed Fuse label update semantics preserve omitted keys, replace the
+array of a supplied key, and remove an ordinary label when supplied as `[]`.
+Required visibility labels cannot be removed. BCS sends the full current value
+of both Agent visibility labels on every write, without clearing unrelated labels.
+
+## Search parameters and defaults
+
+BCS calls v1 `POST /api/v1/recommend` with `question`, `topK` and `min_score`,
+without explicit filter parameters. Fuse v1 defaults restrict results to
+`availability` in `public`/`protected` and `runtime_state=online`. V1 registers
+private Agents too, but these defaults exclude them from semantic retrieval.
+V1 `availability` corresponds to bot `visibility`; the user publication flow
+maps to online/offline and does not retain the public/protected distinction.
+
+The agreed v2 defaults apply to `/api/v2/search` and `/api/v2/recommend`:
+
+| Parameter | When omitted | BCS search request |
+| --- | --- | --- |
+| `query` | Required, nonblank | Search text |
+| `limit` | `5` | Requested candidate count, at least `1` |
+| `filters` | `{}` | `{"resource_type":["agent"]}` |
+| `filters.resource_type` | All resource types | Agents only |
+| `filters["labels.visibility"]` | All visibility values, including private | Omitted |
+| `filters["labels.user_visibility"]` | All visibility values | Omitted |
+| Other label filters | Unrestricted on omitted keys | Omitted |
+
+Within one filter key, values are ORed; different keys are ANDed. An explicit
+empty array matches nothing. Omitting a key does not impose a public-only
+default. Label filters use `labels.<key>` (for example, `labels.department`);
+`resource_type` remains a separate filter key. These HTTP APIs currently serve BCN; external Spring/Sofa RPC entry
+points apply their own discovery policy, without a caller visibility option.
+
+BCS currently uses `/api/v2/search`. It retains self/friend/collaboration checks
+on the returned candidates, without refilling after filtering. The legacy
+`context.recommend_response` remains populated before these local checks;
+no additional filtering is applied to that context in this change.
+
 ## Publication lifecycle
 
 Successful core writes enqueue the resource identity after the storage commit.
 The selected v2 lifecycle reads current BCS state immediately before each
-publication. It coalesces repeated changes, serializes HTTP writes, retries
-failures with a delay up to 30 seconds, and re-reads state on every retry.
-Changing a resource to private or deleting it sends DELETE, rather than a
-business `status` field. Fuse's accepted response confirms saving; indexing
+publication. It coalesces repeated changes and serializes HTTP writes. Registration,
+profile/capability changes, bot visibility changes, user-visibility-only patches,
+deletion and Group mutations all use these existing change events. Agent
+visibility changes send PUT; a Group becoming private or being deleted sends
+DELETE. Fuse's accepted response confirms saving; indexing
 and search visibility are asynchronous.
 
-The worker runs on the existing BCS master. Startup/master acquisition backfills
-existing discoverable Bots and Groups in pages of 100; each drain processes at
-most 100 identities with one HTTP request in flight. SQL Bot page reads use the
-existing page/count queries, Group page reads use the existing participant JOIN;
-each publication adds one current-state lookup (Bot cache hit or DB read,
-Group cache hit or DB read) and one lease check. No database lock spans the HTTP request.
+Like v1, the instance handling the change publishes asynchronously, without
+master election or startup/master-acquisition scans. Each change gets at most
+10 attempts, using `sync_retry_base_ms` exponential backoff capped at 8 seconds.
+Exhaustion is logged; a subsequent change starts a new attempt budget. Every
+attempt re-reads current state, so a retry after deletion sends DELETE instead
+of replaying a stale PUT. Read failures are retried rather than treated as deletion.
 
-Pending changes are held in process memory. Startup backfill republishes
-existing discoverable resources; it does not reconstruct a failed deletion
-after the BCS record is removed and the process exits. Such deletions need to
-be retried operationally against the same Card ID. Switching an existing
-deployment between independent catalogs likewise requires reconciling the
-destination catalog before routing discovery traffic to it.
+Each drain takes at most 100 identities and permits one HTTP request in flight.
+Each Agent attempt reads one control-plane row by bot ID and environment
+(`LIMIT 1`), including both visibility fields. Each Group attempt uses its
+existing current-state lookup (cache hit or DB read). There are no page/count
+queries or lease checks, and no database lock spans an HTTP request. A failing
+Agent change therefore costs at most 10 single-row reads and 10 HTTP attempts;
+newly committed changes may legitimately start another budget.
+
+Pending identities are held in process memory. Failed or interrupted changes
+can be republished operationally using the same Card ID. Switching an existing
+deployment between independent catalogs requires an explicit initial migration
+and reconciliation before routing discovery traffic to the destination.
 
 ## Validation
 

@@ -317,6 +317,7 @@ impl BotRegistryCoreService for BotCore {
                 "Bot registration identity already exists".into(),
             ));
         }
+        self.catalog_changed(&bot_id);
         Ok(CommittedBotRegistration {
             bot_name: self
                 .repo
@@ -363,7 +364,9 @@ impl BotRegistryCoreService for BotCore {
         // The ordinary `retire` is its own command — never
         // chained into a Provider retirement (spec §7.1).
         // The real mutation actor is the audit initiator.
-        self.repo.retire_with_authority(bot_id, mutation).await
+        let retired = self.repo.retire_with_authority(bot_id, mutation).await?;
+        if retired { self.catalog_changed(bot_id); }
+        Ok(retired)
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {

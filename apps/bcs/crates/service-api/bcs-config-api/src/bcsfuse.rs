@@ -45,8 +45,8 @@ pub struct BcsFuseConfig {
     pub sync_timeout_ms: u64,
 
     /// Base backoff between catalog sync retries, in milliseconds.
-    /// V1 worker retries are bounded; v2 Card retries continue while running,
-    /// with a minimum one-second delay and exponential backoff up to 30 seconds.
+    /// Both versions attempt each change at most 10 times, with exponential
+    /// backoff capped at eight seconds. A later change starts a new attempt budget.
     #[serde(default = "default_sync_retry_base")]
     pub sync_retry_base_ms: u64,
 

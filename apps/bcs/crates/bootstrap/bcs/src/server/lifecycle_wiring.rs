@@ -128,9 +128,8 @@ pub(super) fn register_late_lifecycles(
     lifecycle: &Arc<Mutex<LifecycleOrchestrator>>,
     fuse_client: Option<&Arc<FuseClient>>,
     card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
-    bots: Arc<dyn BotRegistryCoreService>,
+    bots: Arc<dyn BotControlPlaneRepoPort>,
     groups: Arc<dyn GroupCoreService>,
-    leader: Arc<dyn LeaderElectionPort>,
     config: &BcsConfig,
 ) {
     if let Some(client) = fuse_client {
@@ -143,7 +142,7 @@ pub(super) fn register_late_lifecycles(
         guard.register("fuse_client", adapter as Arc<dyn ServiceLifecycle>);
         if let Some(queue) = card_changes {
             guard.register("fuse_card_sync", Arc::new(bcs_fusion::FuseCardSyncLifecycle::new(
-                queue, client.clone(), bots, groups, leader, config.bcsfuse.sync_retry_base_ms,
+                queue, client.clone(), bots, groups, crate::env::resolve_env(), config.bcsfuse.sync_retry_base_ms,
             )));
         }
     }

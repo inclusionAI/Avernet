@@ -543,7 +543,8 @@ pub(super) fn build_openapi_v1_state(
         registry.clone(), relation.clone(), relation_env.clone(),
         config.openapi_v1.registration_self_service_provider_ids.clone(),
         outbound_url_guard_from_config(config),
-    ).with_a2a_anonymous(config.a2a_allow_anonymous));
+    ).with_a2a_anonymous(config.a2a_allow_anonymous)
+        .with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_repos.provider_repo.clone(),
