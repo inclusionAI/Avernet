@@ -96,7 +96,7 @@ it.each(['/ticket-center', '/work/my-task', '/bot-workshop'])(
     renderSidebar({ activePath, collapsed: true });
     expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
     expect(screen.getByTestId('account-badge-collapsed')).toHaveTextContent('真实用户');
-    expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bot 管理' })).toBeInTheDocument();
   },
 );
 
@@ -107,18 +107,18 @@ it('产品侧栏只展示协作 / Bot 双分组（不随路由整体换组）', 
   expect(view.queryByRole('region', { name: '老功能' })).not.toBeInTheDocument();
 });
 
-it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」', () => {
+it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot 管理」', () => {
   const view = renderSidebar();
   const collab = view.getByRole('region', { name: '协作' });
   const bot = view.getByRole('region', { name: '管理' });
   expect(view.getByRole('button', { name: /对话/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /协作群/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /发现/ })).toBeInTheDocument();
-  expect(view.getByRole('button', { name: /Bot管理/ })).toBeInTheDocument();
+  expect(view.getByRole('button', { name: /Bot 管理/ })).toBeInTheDocument();
   expect(collab.textContent).toContain('对话');
   expect(collab.textContent).toContain('协作群');
   expect(collab.textContent).toContain('发现');
-  expect(bot.textContent).toContain('Bot管理');
+  expect(bot.textContent).toContain('Bot 管理');
 });
 
 it('任务列表、协作权限与管理后台入口均不占产品导航位', () => {
@@ -134,7 +134,7 @@ it('折叠态：不展示身份切换入口，账号行仍可见，任务列表�
   expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
   expect(screen.getByTestId('account-badge-collapsed')).toBeInTheDocument();
   expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Bot 管理' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /任务列表/ })).not.toBeInTheDocument();
 });
 
@@ -185,7 +185,7 @@ it('折叠态：工具簇图标以 sm 规格 + muted 色阶与导航项区分，
   for (const btn of [search, expand]) {
     expect(btn).toHaveClass('h-7', 'w-7', 'text-muted-foreground');
   }
-  const nav = view.getByRole('button', { name: 'Bot管理' });
+  const nav = view.getByRole('button', { name: 'Bot 管理' });
   expect(nav).not.toHaveClass('h-7');
   expect(nav).not.toHaveClass('text-muted-foreground');
 });
@@ -203,7 +203,7 @@ it('internal overlay：空间切换器以 compact 形态挂在 Bot 分组标题�
   expect(view.getByTestId('space-switcher-compact')).toBeInTheDocument();
   expect(view.queryByTestId('space-switcher')).not.toBeInTheDocument();
   // compact 切换器位于 Bot 分组标题行内（先于组内导航项出现）
-  expect(bot.textContent?.indexOf('选择空间')).toBeLessThan(bot.textContent?.indexOf('Bot管理') ?? -1);
+  expect(bot.textContent?.indexOf('选择空间')).toBeLessThan(bot.textContent?.indexOf('Bot 管理') ?? -1);
 });
 
 it('notificationBell=false 形态：通知中心入口不渲染', () => {
