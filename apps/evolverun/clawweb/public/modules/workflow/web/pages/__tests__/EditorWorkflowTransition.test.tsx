@@ -4,12 +4,19 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), history: vi.fn(), snapshot: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), documents: new Map<string, unknown>(), history: vi.fn(), snapshot: vi.fn() }))
 vi.mock('../../api/hooks', () => ({
   useEditorWorkflowDocument: (id: string) => ({ data: id ? { id, title: id === 'a' ? 'Original' : 'Target', version: '1', nodes: [] } : undefined, isLoading: false }),
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => {
+  const value = await mocks.get(id); mocks.documents.set(id, value); return value
+}, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: (url: string) => {
+  const match = url.match(/^\/api\/workflows\/([^/]+)\/editor-draft$/)
+  if (!match) return new Promise(() => {})
+  const id = decodeURIComponent(match[1])
+  return Promise.resolve({ workflowId: id, packId: 'pack', specJson: JSON.stringify(mocks.documents.get(id)), draftToken: 'a'.repeat(64) })
+} }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/WorkflowPackSidebar', () => ({ default: ({ selectedWorkflowId, onSelectWorkflow }: { selectedWorkflowId: string; onSelectWorkflow: (id: string) => void }) => <><span data-testid="selection">{selectedWorkflowId}</span><button onClick={() => onSelectWorkflow('b')}>选择 B</button><button onClick={() => onSelectWorkflow('c')}>选择 C</button></> }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
@@ -39,7 +46,7 @@ function makeDraft() {
 beforeEach(() => {
   useEditorStore.setState(useEditorStore.getInitialState(), true)
   state().loadSpec(A)
-  vi.clearAllMocks()
+  vi.clearAllMocks(); mocks.documents.clear()
   mocks.history.mockReturnValue(new Promise(() => {}))
   vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
@@ -189,7 +196,7 @@ describe('embedded editor controlled target', () => {
     expect(window.confirm).toHaveBeenCalledTimes(1)
   })
   it('passes the active fallback and its absent DB draft through a controlled switch', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)

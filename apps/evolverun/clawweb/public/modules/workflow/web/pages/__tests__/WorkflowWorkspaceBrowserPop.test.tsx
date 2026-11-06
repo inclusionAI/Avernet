@@ -4,7 +4,7 @@ import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-ro
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), fetchJson: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
 vi.mock('../../api/hooks', () => ({
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
@@ -12,7 +12,7 @@ vi.mock('../../api/hooks', () => ({
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'user', isAdmin: false }) }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: mocks.fetchJson }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
@@ -53,7 +53,18 @@ function unchanged(session: number) {
 }
 beforeEach(() => {
   useEditorStore.setState(useEditorStore.getInitialState(), true); state().loadSpec(A)
-  vi.clearAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  vi.resetAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  // Navigation reads the validated CAS row after workflows.get. Pack-loading
+  // requests remain pending, as they are not part of these navigation stories.
+  mocks.fetchJson.mockImplementation((url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (match && init?.method === 'GET') {
+      const id = decodeURIComponent(match[1])
+      const spec = id === 'a' ? A : B
+      return Promise.resolve({ workflowId: id, packId: null, specJson: JSON.stringify(spec), draftToken: 'a'.repeat(64) })
+    }
+    return new Promise(() => {})
+  })
   mocks.history.mockReturnValue(new Promise(() => {}))
   mocks.refetch.mockResolvedValue({ data: mocks.rows })
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -113,16 +124,37 @@ describe('BrowserRouter real history workflow POP', () => {
   it('commits Back and Forward without replacing either history entry', async () => {
     mocks.get.mockImplementation(async (id: string) => id === 'b' ? B : A)
     mountBrowser()
-    act(() => window.history.back())
-    await waitFor(() => expect(state().spec?.id).toBe('b'))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=b'))
-    expect(window.history.state.idx).toBe(0)
-    expect(screen.getByRole('button', { name: /切换工作流，当前：Target/ })).toBeInTheDocument()
-    act(() => window.history.forward())
-    await waitFor(() => expect(state().spec?.id).toBe('a'))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=a'))
-    expect(window.history.state.idx).toBe(1)
-    expect(screen.getByRole('button', { name: /切换工作流，当前：Original/ })).toBeInTheDocument()
+    // Intermediate restore POPs are consumed by the workspace. Observe the
+    // replayed POP that reaches the router, not a transient history position.
+    const committedPops = vi.fn()
+    window.addEventListener('popstate', committedPops)
+    try {
+      act(() => window.history.back())
+      await waitFor(() => expect(committedPops).toHaveBeenCalledTimes(1))
+      expect(committedPops.mock.calls[0][0].state).toMatchObject({ idx: 0, key: 'target' })
+      await waitFor(() => expect(state().spec?.id).toBe('b'))
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=b'))
+      expect(isWorkflowPopOwned()).toBe(false)
+      expect(window.history.state.idx).toBe(0)
+      expect(screen.getByRole('button', { name: /切换工作流，当前：Target/ })).toBeInTheDocument()
+      // The editor starts its Pack load in an effect after the POP commits.
+      // Wait for that real request before starting the next independent POP:
+      // starting it during the next approval would invalidate its revision.
+      await waitFor(() => expect(mocks.fetchJson).toHaveBeenCalledWith(
+        '/api/workflows/b/pack-version?version=draft', expect.objectContaining({ signal: expect.anything() }),
+      ))
+      expect(sessionFor('b').state.versions.draft.loading).toBe(true)
+      act(() => window.history.forward())
+      await waitFor(() => expect(committedPops).toHaveBeenCalledTimes(2))
+      expect(committedPops.mock.calls[1][0].state).toMatchObject({ idx: 1, key: 'source' })
+      await waitFor(() => expect(state().spec?.id).toBe('a'))
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=a'))
+      expect(isWorkflowPopOwned()).toBe(false)
+      expect(window.history.state.idx).toBe(1)
+      expect(screen.getByRole('button', { name: /切换工作流，当前：Original/ })).toBeInTheDocument()
+    } finally {
+      window.removeEventListener('popstate', committedPops)
+    }
   })
 
 
@@ -247,7 +279,7 @@ describe('BrowserRouter real history workflow POP', () => {
   })
 
   it('preserves a null DB baseline when committing an active-only browser POP target', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     mountBrowser(); act(() => window.history.back())

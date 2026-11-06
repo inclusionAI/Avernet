@@ -24,7 +24,15 @@ vi.mock('../../api/hooks', () => ({
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
   useEvolveLessons: queryHooks.lessons,
 }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } }, fetchJson: vi.fn() }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({
+  api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } },
+  fetchJson: async (url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (!match || init?.method !== 'GET') throw new Error(`Unexpected request: ${url}`)
+    const id = decodeURIComponent(match[1])
+    return { workflowId: id, packId: null, specJson: JSON.stringify({ id, title: id, version: '1', nodes: [] }), draftToken: 'a'.repeat(64) }
+  },
+}))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'admin-1', isAdmin: true }) }))
 vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () => <div>运行概览内容</div> }))
 vi.mock('../../components/workflow-workspace/EditorTab', () => ({ default: () => <div>编辑器内容</div> }))

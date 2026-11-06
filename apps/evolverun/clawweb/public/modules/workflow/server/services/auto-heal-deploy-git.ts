@@ -1,4 +1,4 @@
-/** Exact candidate promotion. The caller owns authorization, saved provenance and durable registration. */
+/** Exact candidate promotion. The caller owns authorization, candidate selection and outcome handling. */
 import { parse as parseYaml } from 'yaml';
 import { randomUUID } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
@@ -38,7 +38,7 @@ export class DeploymentOutcomeUnknownError extends Error {
 }
 
 /** Reads the explicit immutable commit even when saved was advanced/deleted.
- * A matching commit is not evidence of a previous save; the main service checks its journal. */
+ * A matching commit is not evidence of a previous save; the caller must verify its own preconditions. */
 export async function inspectDeployCandidate(repoDir: string, workflowId: string, packId: string, candidateCommit: string) {
   if (!validPackGitId(packId)) throw new Error('Invalid deploy candidate');
   const metadata = await readPreparedPackMetadata(repoDir, workflowId, candidateCommit);
@@ -64,7 +64,8 @@ function validatePrepared(prepared: PreparedDeployment) {
 const result = (prepared: PreparedDeployment): DeployResult => ({ branch: prepared.branch, tagName: prepared.tagName,
   commit: prepared.releaseCommit, deployNumber: prepared.deployNumber });
 
-/** Creates local objects only. Persist the returned JSON before calling pushPreparedDeployment.
+/** Creates local objects only. The returned bundle can contain confidential Git history.
+ * A caller without durable operation state must not treat it as a crash recovery receipt.
  * A unique release commit ensures every distinct deployment changes wf, including redeploys.
  * Its tree is exactly S; neither merging nor re-reading saved is permitted. */
 export async function prepareDeployCandidate(repoDir: string, workflowId: string, candidateCommit: string,
@@ -121,7 +122,9 @@ export async function pushPreparedDeployment(repoDir: string, input: PreparedDep
   return result(prepared);
 }
 
-/** Resume the same durable request. Never allocates a new deploy number/commit/tag.
+/** Legacy recovery helper for callers that already possess a trusted durable request.
+ * The new no-journal flow must not call this after an uncertain push.
+ * Never allocates a new deploy number/commit/tag.
  * Exact desired pair => success without push; expected wf + absent tag => retry
  * these same objects; any mixed/concurrent state => conflict without overwriting. */
 export async function resumePreparedDeployment(input: PreparedDeployment, config: ClawFlowsGitConfig): Promise<DeployResult> {
@@ -150,7 +153,7 @@ export async function resumePreparedDeployment(input: PreparedDeployment, config
 }
 
 /** @deprecated Non-journaled compatibility wrapper. Not crash-safe across DB writes;
- * production callers must use prepare + persist + push. */
+ * callers must handle partial or unknown outcomes without blindly retrying. */
 export async function pushDeployCandidate(repoDir: string, workflowId: string, candidateCommit: string,
   previousCommit: string, deployNumber: number, version: number, author: GitAuthor): Promise<DeployResult> {
   return pushPreparedDeployment(repoDir,

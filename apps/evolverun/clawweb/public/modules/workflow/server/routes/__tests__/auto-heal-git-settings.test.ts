@@ -4,6 +4,7 @@ import type { Request, Response, Router } from "express";
 import { stringify as stringifyYaml } from "yaml";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -42,10 +43,15 @@ function post(router: Router, endpoint: string, body: unknown): Promise<{ status
   });
 }
 
-describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint => {
+describe.each(["save", "deploy", "editor-deploy"] as const)("AutoHeal /%s Git settings", endpoint => {
   let db: IDatabase, repo: AppConfigRepository, deps: AutoHealRouteDependencies;
   let root: string, remote: string, candidate: string;
-  const requestBody = () => ({ workflowId: spec.id, spec: { ...spec, title: "DB draft" }, packId: "pack-1", autoRun: true, candidateCommit: candidate });
+  const requestBody = async () => {
+    const row = (await deps.workflowSpecRepo.findByWorkflowId(spec.id))!;
+    const expectedDraftToken = createHash('sha256').update(JSON.stringify(['editor-draft-current-value-v1', row.id, row.workflow_id, row.pack_id, row.spec_json,
+      row.version, row.title, row.owner_id, row.gmt_create, row.gmt_modified])).digest('hex');
+    return { workflowId: spec.id, spec: { ...spec, title: "DB draft" }, packId: "pack-1", autoRun: true, candidateCommit: candidate, expectedDraftToken };
+  };
   const remoteGit = (...args: string[]) => runGit(root, ["--git-dir", remote, ...args]);
   const noJournal = async () => expect(await db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'clawweb_pack_operations'")).toEqual([]);
   const configQueries = (query: MockInstance<IDatabase["query"]>) => query.mock.calls.filter(([sql]) => sql.includes("cm_app_config"));
@@ -80,7 +86,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     const botPermRepo = new BotWorkflowPermissionRepository(db);
     await workflowSpecRepo.upsert(spec.id, "pack-1", JSON.stringify(spec), "operator");
     await botPermRepo.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id, can_view: 1, can_execute: 1, can_edit: 1 });
-    deps = { resolvePrincipal: async () => ({ actorId: "operator" }), db, workflowSpecRepo, deployHistoryRepo, botPermRepo, gitConfig: { ...fallbackGitConfig },
+    deps = { resolvePrincipal: async () => ({ actorId: "operator" }), authorizeSnapshotDeploy: async () => true, db, workflowSpecRepo, deployHistoryRepo, botPermRepo, gitConfig: { ...fallbackGitConfig },
       gitAuthor: { ...fallbackAuthor }, triggerRun: vi.fn().mockResolvedValue("run-1") };
     root = mkdtempSync(path.join(tmpdir(), "auto-heal-settings-"));
     remote = path.join(root, "remote.git"); const seed = path.join(root, "seed");
@@ -101,6 +107,54 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   });
   afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true }); });
 
+  it("provides no-store absence proof only to an authorized actor", async () => {
+    if (endpoint !== "editor-deploy") return;
+    const getState = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
+      let status = 200, cache = "";
+      const req = { method: "GET", url: `/editor-deploy/snapshot-v2/state?workflowId=${spec.id}`, query: { workflowId: spec.id }, headers: {} } as Request;
+      const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
+        status(code: number) { status = code; return this; },
+        json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
+      router(req, res, (error?: unknown) => reject(error ?? new Error("No response")));
+    });
+    expect(await getState(createAutoHealRouter(deps))).toEqual({ status: 200, cache: "no-store", body: {
+      protocol: "editor-deployment-state-v1", workflowId: spec.id, packId: "pack-1", canDeploy: true, savedCommit: candidate, activeCommit: null } });
+    expect((await getState(createAutoHealRouter({ ...deps, resolvePrincipal: async () => null }))).status).toBe(401);
+    expect((await getState(createAutoHealRouter({ ...deps, botPermRepo: null }))).status).toBe(403);
+    expect(await getState(createAutoHealRouter({ ...deps, authorizeSnapshotDeploy: undefined }))).toMatchObject({ status: 200, body: { savedCommit: candidate } });
+  });
+
+  it("reports authenticated unified-save availability only for an explicit host resolver", async () => {
+    if (endpoint !== "editor-deploy") return;
+    const get = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
+      let status = 200, cache = "";
+      const req = { method: "GET", url: "/capabilities", headers: {} } as Request;
+      const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
+        status(code: number) { status = code; return this; },
+        json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
+      router(req, res, (error?: unknown) => reject(error ?? new Error("No capability response")));
+    });
+    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: false }, cache: "no-store" });
+    deps.resolveUnifiedSave = async () => null;
+    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: "v1" }, cache: "no-store" });
+    deps.resolvePrincipal = async () => null;
+    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 401, body: { code: "AUTHENTICATION_REQUIRED" }, cache: "no-store" });
+  });
+
+  it("requires the snapshot protocol on its separate Editor endpoint", async () => {
+    if (endpoint !== "editor-deploy") return;
+    const router = createAutoHealRouter(deps);
+    const body = { ...await requestBody(), autoRun: false };
+    expect((await post(router, "editor-deploy/snapshot-v2", body)).status).toBe(400);
+    expect((await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "future" })).status).toBe(400);
+    expect((await post(router, "editor-deploy", { ...body, snapshotProtocol: "saved-tree-v2" })).status).toBe(400);
+    remoteGit("update-ref", `refs/heads/wf/${spec.id}`, candidate);
+    const response = await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "saved-tree-v2", expectedActiveCommit: candidate, confirmedFileDiff: true });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ snapshotProtocol: "saved-tree-v2", candidateCommit: candidate });
+    expect(remoteGit("rev-parse", `${response.body.commit}^{tree}`)).toBe(remoteGit("rev-parse", `${candidate}^{tree}`));
+  });
+
   it("resolves configured Git only for create-only save", async () => {
     if (endpoint !== "save") return;
     await repo.create({ config_key: "git", config_yaml: stringifyYaml({ remoteUrl: remote }) });
@@ -116,7 +170,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
 
   it("rejects unverified header identities when no trusted principal is supplied", async () => {
     deps.resolvePrincipal = undefined;
-    const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody(), createOnly: true, workflowId: "new-workflow" });
+    const response = await post(createAutoHealRouter(deps), endpoint, { ...await requestBody(), createOnly: true, workflowId: "new-workflow" });
     expect(response.status).toBe(401);
     expect(writes()).toHaveLength(0);
     expect(await db.query("SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?", ["new-workflow"])).toEqual([]);
@@ -125,7 +179,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   it("never treats a process exit status as an HTTP informational status", async () => {
     if (endpoint === "save") vi.spyOn(AutoHealSaveService.prototype, "save").mockRejectedValueOnce(Object.assign(new Error("database failed"), { status: 128 }));
     else vi.mocked(gitClient.cloneClawflows).mockRejectedValueOnce(Object.assign(new Error("git failed"), { status: 128 }));
-    expect((await post(createAutoHealRouter(deps), endpoint, requestBody())).status).toBe(500);
+    expect((await post(createAutoHealRouter(deps), endpoint, await requestBody())).status).toBe(500);
   });
 
   it("reloads DB URL, credentials, and author between two requests on the same router", async () => {
@@ -135,14 +189,14 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     }) });
     const query = vi.spyOn(db, "query"), router = createAutoHealRouter(deps);
     expect(query).not.toHaveBeenCalled();
-    expect(await post(router, endpoint, requestBody())).toMatchObject({ status: 200, body: { ok: true } });
+    expect(await post(router, endpoint, await requestBody())).toMatchObject({ status: 200, body: { ok: true } });
     expect(configQueries(query)).toHaveLength(endpoint === "save" ? 0 : 1);
     await repo.update("git", { config_yaml: stringifyYaml({
       remoteUrl: "https://git.example.com/second.git", username: "second-user", email: "second@example.invalid",
       token: " second-token ", authorName: "Second Author", authorEmail: "second@example.invalid",
     }) });
     query.mockClear();
-    expect(await post(router, endpoint, requestBody())).toMatchObject({ status: 200, body: { ok: true } });
+    expect(await post(router, endpoint, await requestBody())).toMatchObject({ status: 200, body: { ok: true } });
     expect(configQueries(query)).toHaveLength(endpoint === "save" ? 0 : 1);
     expect(deps.gitConfig).toEqual(fallbackGitConfig); expect(deps.gitAuthor).toEqual(fallbackAuthor);
     expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled();
@@ -170,10 +224,10 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   it("uses fallbacks after the DB row is disabled on the same router", async () => {
     await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "https://git.example.com/database.git"' });
     const router = createAutoHealRouter(deps);
-    expect((await post(router, endpoint, requestBody())).status).toBe(200);
+    expect((await post(router, endpoint, await requestBody())).status).toBe(200);
     await repo.update("git", { enabled: 0 });
-    expect((await post(router, endpoint, requestBody())).status).toBe(200);
-    if (endpoint === "deploy") { expect(writes()[1]).toEqual(fallbackGitConfig); expect(authors()[1]).toEqual(fallbackAuthor); }
+    expect((await post(router, endpoint, await requestBody())).status).toBe(200);
+    if (endpoint !== "save") { expect(writes()[1]).toEqual(fallbackGitConfig); expect(authors()[1]).toEqual(fallbackAuthor); }
     else { expect(writes()).toEqual([]); expect(authors()).toEqual([]); }
   });
 
@@ -182,7 +236,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     if (state === "whitespace") await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "  "' });
     const save = vi.spyOn(AutoHealSaveService.prototype, "save"), deploy = vi.spyOn(AutoHealDeployService.prototype, "deploy");
     const write = vi.spyOn(db, "exec"), transaction = vi.spyOn(db, "transaction");
-    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    const result = await post(createAutoHealRouter(deps), endpoint, await requestBody());
     if (endpoint === "save") {
       expect(result).toMatchObject({ status: 200, body: { ok: true, saved: true } }); expect(save).toHaveBeenCalledOnce();
       expect(JSON.parse((await deps.workflowSpecRepo.findByWorkflowId(spec.id))!.spec_json).title).toBe("DB draft");
@@ -202,9 +256,9 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   it("recovers from missing remote settings on the next request without rebuilding the router", async () => {
     deps.gitConfig.remoteUrl = "";
     const router = createAutoHealRouter(deps);
-    expect((await post(router, endpoint, requestBody())).status).toBe(endpoint === "save" ? 200 : 503);
+    expect((await post(router, endpoint, await requestBody())).status).toBe(endpoint === "save" ? 200 : 503);
     await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "https://git.example.com/configured.git"' });
-    expect((await post(router, endpoint, requestBody())).status).toBe(200);
+    expect((await post(router, endpoint, await requestBody())).status).toBe(200);
     expect(writes()).toEqual(endpoint === "save" ? [] : [{ ...fallbackGitConfig, remoteUrl: "https://git.example.com/configured.git" }]);
   });
 
@@ -212,7 +266,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     const query = db.query.bind(db);
     vi.spyOn(db, "query").mockImplementation((sql, params) => sql.includes("cm_app_config") ? Promise.reject(new Error("database unavailable")) : query(sql, params));
     const save = vi.spyOn(AutoHealSaveService.prototype, "save"), deploy = vi.spyOn(AutoHealDeployService.prototype, "deploy");
-    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    const result = await post(createAutoHealRouter(deps), endpoint, await requestBody());
     if (endpoint === "save") { expect(result.status).toBe(200); expect(save).toHaveBeenCalledOnce(); }
     else { expect(result).toMatchObject({ status: 500, body: { code: "DEPLOYMENT_FAILED" } }); expect(save).not.toHaveBeenCalled(); }
     expect(deploy).not.toHaveBeenCalled(); expect(JSON.stringify(result.body)).not.toContain("database unavailable");
@@ -220,9 +274,10 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   });
 
   it("handles database query failure without leaking details or writing", async () => {
+    const body = await requestBody();
     vi.spyOn(db, "query").mockRejectedValue(new Error("database unavailable"));
     const transaction = vi.spyOn(db, "transaction"), write = vi.spyOn(db, "exec");
-    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    const result = await post(createAutoHealRouter(deps), endpoint, body);
     expect(result).toMatchObject({ status: 500, body: { code: endpoint === "save" ? "SAVE_FAILED" : "DEPLOYMENT_FAILED" } });
     expect(JSON.stringify(result.body)).not.toContain("database unavailable");
     expect(transaction).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled();
@@ -240,7 +295,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   it("checks permissions before preparing or pushing a private operation", async () => {
     await deps.botPermRepo!.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id,
       can_view: 1, can_execute: 0, can_edit: 0 });
-    expect((await post(createAutoHealRouter(deps), endpoint, requestBody())).status).toBe(403);
+    expect((await post(createAutoHealRouter(deps), endpoint, await requestBody())).status).toBe(403);
     expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled(); expect(gitClient.cloneClawflows).not.toHaveBeenCalled();
     await noJournal();
     expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
@@ -265,7 +320,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     });
     it("reports a DB write failure without publishing or changing the draft", async () => {
       vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("database unavailable"));
-      const response = await post(createAutoHealRouter(deps), endpoint, requestBody());
+      const response = await post(createAutoHealRouter(deps), endpoint, await requestBody());
       expect(response).toMatchObject({ status: 500, body: { code: "SAVE_FAILED" } });
       expect(JSON.stringify(response.body)).not.toContain("database unavailable");
       expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
@@ -275,7 +330,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   } else {
     it("returns explicit unknown after a failed Git publication without a journal or run", async () => {
       vi.mocked(deployGit.pushPreparedDeployment).mockRejectedValueOnce(new Error("git failed"));
-      const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody(), requestId: "git-failed-request" });
+      const response = await post(createAutoHealRouter(deps), endpoint, { ...await requestBody(), requestId: "git-failed-request" });
       expect(response).toMatchObject({ status: 503, body: { code: "DEPLOY_OUTCOME_UNKNOWN", requestId: "git-failed-request", branch: `wf/${spec.id}`, tagName: `deploy/${spec.id}/#1` } });
       expect(response.body.commit).toMatch(/^[a-f0-9]{40,64}$/);
       expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]); await noJournal();
@@ -285,10 +340,28 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     });
   }
 
-  if (endpoint === "deploy") {
+  if (endpoint !== "save") {
+    if (endpoint === "editor-deploy") it("rejects an execute-only editor deployment without exposing shared repository paths", async () => {
+      await deps.botPermRepo!.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id, can_view: 0, can_execute: 1, can_edit: 0 });
+      const seed = path.join(root, "seed");
+      mkdirSync(path.join(seed, "other-pack"));
+      writeFileSync(path.join(seed, "other-pack", "private-asset.txt"), "private");
+      runGit(seed, ["add", "."]); runGit(seed, ["commit", "-m", "other pack asset"]);
+      runGit(seed, ["push", remote, `HEAD:refs/heads/wf/${spec.id}`]);
+      const previous = remoteGit("rev-parse", `refs/heads/wf/${spec.id}`);
+      const response = await post(createAutoHealRouter(deps), endpoint, await requestBody());
+      expect(response).toMatchObject({ status: 403, body: { code: "FORBIDDEN" } });
+      expect(JSON.stringify(response.body)).not.toContain("other-pack");
+      expect(response.body).not.toHaveProperty("paths");
+      expect(remoteGit("rev-parse", `refs/heads/wf/${spec.id}`)).toBe(previous);
+      expect(remoteGit("tag", "-l")).toBe("");
+      expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
+    });
+
     it.each([true, false])("publishes explicit and legacy deployment requests (explicit=%s)", async explicit => {
       await deps.workflowSpecRepo.upsert(spec.id, "pack-1", JSON.stringify({ ...spec, title: "DB draft" }), "operator");
-      const body = explicit ? { workflowId: spec.id, candidateCommit: candidate, packId: "pack-1", autoRun: true } : { workflowId: spec.id };
+      const editorPrecondition = endpoint === "editor-deploy" ? { expectedDraftToken: (await requestBody()).expectedDraftToken } : {};
+      const body = explicit ? { workflowId: spec.id, candidateCommit: candidate, packId: "pack-1", autoRun: true, ...editorPrecondition } : { workflowId: spec.id, ...editorPrecondition };
       const result = await post(createAutoHealRouter(deps), endpoint, body);
       expect(result).toMatchObject({ status: 200, body: { ok: true, deployed: true, candidateCommit: candidate } });
       expect(deployGit.prepareDeployCandidate).toHaveBeenCalledWith(expect.any(String), spec.id, expect.stringMatching(/^[a-f0-9]{40,64}$/), "", 1, 1, fallbackAuthor);
@@ -304,7 +377,8 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     });
 
     it("rejects an unproven 64-character candidate without pushing or creating public history", async () => {
-      expect(await post(createAutoHealRouter(deps), endpoint, { workflowId: spec.id, candidateCommit: "b".repeat(64) }))
+      expect(await post(createAutoHealRouter(deps), endpoint, { workflowId: spec.id, candidateCommit: "b".repeat(64),
+        ...(endpoint === "editor-deploy" ? { expectedDraftToken: (await requestBody()).expectedDraftToken } : {}) }))
         .toMatchObject({ status: 409, body: { code: "CANDIDATE_NOT_SAVED" } });
       expect(deployGit.prepareDeployCandidate).not.toHaveBeenCalled(); expect(deployGit.pushPreparedDeployment).not.toHaveBeenCalled();
       expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]); expect(deps.triggerRun).not.toHaveBeenCalled();

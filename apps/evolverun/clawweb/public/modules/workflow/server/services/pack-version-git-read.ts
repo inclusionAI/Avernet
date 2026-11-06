@@ -16,24 +16,35 @@ export async function preparePackVersionRepo(repoDir: string, config: ClawFlowsG
   await initClawflowsReadRepo(repoDir, config);
 }
 
-/** Fetch only the two workflow tips, without tags or lazy blobs. */
-export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGitConfig, workflowId: string): Promise<() => Promise<void>> {
+/** Fetch workflow tips and, for active recovery only, the bound deployment tag. */
+export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGitConfig, workflowId: string, activeTag?: string, allowMissingActiveBranch = false, allowDifferentActiveBranch = false): Promise<(() => Promise<void>) & { activeCommit?: string }> {
   validateWorkflowId(workflowId);
+  if (activeTag !== undefined && (!activeTag.startsWith(`deploy/${workflowId}/#`) || !/^[1-9][0-9]*$/.test(activeTag.slice(`deploy/${workflowId}/#`.length)))) throw new Error('Invalid active tag');
   const refs = [`refs/heads/wf/${workflowId}`, `refs/heads/saved/${workflowId}`];
+  const tagRef = activeTag ? `refs/tags/${activeTag}` : undefined;
+  const requestedRefs = tagRef ? [...refs, tagRef, `${tagRef}^{}`] : refs;
   const env = packVersionGitEnvironment();
   const git = async (args: string[]) => (await executeGit(args, { cwd: repoDir, env, timeout: 120_000, maxBuffer: 16 * 1024 })).toString('utf8').trim();
   const discover = async (): Promise<Map<string, string>> => {
-    const output = await git(['ls-remote', '--refs', '--', 'origin', ...refs]);
+    const output = await git(['ls-remote', ...(tagRef ? [] : ['--refs']), '--', 'origin', ...requestedRefs]);
     const found = new Map<string, string>();
     if (output) for (const line of output.split('\n')) {
       const match = /^(?:([0-9a-f]{40})|([0-9a-f]{64}))\t([^\s]+)$/.exec(line);
-      if (!match || !refs.includes(match[3]) || found.has(match[3])) throw new Error('Invalid remote refs');
+      if (!match || !requestedRefs.includes(match[3]) || found.has(match[3])) throw new Error('Invalid remote refs');
       found.set(match[3], match[1] || match[2]);
     }
     return found;
   };
   const observed = await discover();
-  const changed = (after: Map<string, string>) => refs.some(ref => observed.get(ref) !== after.get(ref));
+  const changed = (after: Map<string, string>) => requestedRefs.some(ref => observed.get(ref) !== after.get(ref));
+  // Compare the fetched tag object and commit with both remote observations.
+  // A differing wf is allowed only for rollback; the caller checks its Pack tree.
+  const activeCommit = tagRef ? observed.get(`${tagRef}^{}`) ?? observed.get(tagRef) : undefined;
+  const wfCommit = observed.get(refs[0]);
+  if (tagRef && !wfCommit && !allowMissingActiveBranch) throw new Error('Workflow snapshot not found');
+  if (tagRef && (!observed.get(tagRef) || !activeCommit || (wfCommit && activeCommit !== wfCommit && !allowDifferentActiveBranch))) {
+    throw Object.assign(new Error('Active deployment ref mismatch'), { code: 'PACK_REFS_CHANGED' });
+  }
   const refConflict = () => Object.assign(new Error('Workflow refs changed during read'), { code: 'PACK_REFS_CHANGED' });
   // ls-remote is hash-format agnostic, while fetch requires a matching local
   // object database. Recreate only this newly initialized temporary repo.
@@ -44,6 +55,7 @@ export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGit
     await initClawflowsReadRepo(repoDir, config, 'sha256');
   }
   const refspecs = refs.filter(ref => observed.has(ref)).map(ref => `+${ref}:refs/remotes/origin/${ref.slice('refs/heads/'.length)}`);
+  if (tagRef) refspecs.push(`+${tagRef}:refs/pack-version/active`);
   if (refspecs.length) {
     try { await git(['fetch', '--quiet', '--no-tags', '--depth=1', '--', 'origin', ...refspecs]); }
     catch (error) {
@@ -53,13 +65,15 @@ export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGit
       if (changed(await discover())) throw refConflict();
       throw error;
     }
+    if (tagRef && (await git(['rev-parse', '--verify', 'refs/pack-version/active']) !== observed.get(tagRef)
+      || await git(['rev-parse', '--verify', 'refs/pack-version/active^{commit}']) !== activeCommit)) throw refConflict();
     for (const ref of refs.filter(value => observed.has(value))) {
       const actual = await git(['rev-parse', '--verify', `refs/remotes/origin/${ref.slice('refs/heads/'.length)}^{commit}`]);
       if (actual !== observed.get(ref)) throw refConflict();
     }
   }
-  return async () => {
+  return Object.assign(async () => {
     const after = await discover();
     if (changed(after)) throw refConflict();
-  };
+  }, { activeCommit });
 }

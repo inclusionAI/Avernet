@@ -1,5 +1,5 @@
-import { parse } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
+import { parseLosslessWorkflowText } from './losslessNumbers'
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -7,7 +7,7 @@ function record(value: unknown): value is Record<string, unknown> {
 
 /** A structural input boundary, not a replacement for the runtime validator. */
 export function parseWorkflowYaml(text: string): WorkflowSpec {
-  const value: unknown = parse(text, { uniqueKeys: true, maxAliasCount: 100 })
+  const value: unknown = parseLosslessWorkflowText(text)
   if (!record(value) || typeof value.id !== 'string' || !value.id.trim()
     || typeof value.title !== 'string' || !value.title.trim() || !Array.isArray(value.nodes)) {
     throw new Error('必须包含非空 id、title，以及 nodes 数组')

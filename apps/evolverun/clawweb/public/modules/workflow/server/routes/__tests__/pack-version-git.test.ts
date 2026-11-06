@@ -180,7 +180,8 @@ it('saves files without projecting Git YAML into the database and rejects workfl
   expect(await f.workflowSpecRepo.findByWorkflowId('flow')).toEqual(before);
   expect(await f.db.query('SELECT * FROM workflow_deploy_history')).toEqual([]);
   const yaml = await fetch(`${f.base}/pack-version`, { method: 'PUT', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...f.body, requestId: 'save-yaml-rejected', expectedSavedHead: result.commit,
+    body: JSON.stringify({ ...f.body, requestId: 'save-yaml-rejected', sourceVersion: 'draft',
+      sourceCommit: result.commit, expectedSavedHead: result.commit,
       changes: [{ path: 'workflows/flow.yaml', operation: 'replace', contentBase64: Buffer.from(stringify({ ...spec, title: 'Changed' })).toString('base64'), mode: '100644' }] }),
   });
   expect(yaml.status).toBe(400); expect(await yaml.json()).toMatchObject({ code: 'WORKFLOW_YAML_REQUIRES_DB_SAVE' });
@@ -206,29 +207,53 @@ it('denies an actor without edit permission before reading or saving Pack files'
   expect(await f.db.query('SELECT * FROM workflow_deploy_history')).toEqual([]);
 }, 30000);
 
-it('saves current release R over observed saved S with the same tree, without republishing', async () => {
+it('rejects current release R over observed saved S even with the same tree, without changing the draft', async () => {
   const f = await fixture();
-  const savedResponse = await f.save('save-before-release'); expect(savedResponse.status).toBe(200);
+  // Keep every active path and mode, including the unmodified non-Pack README.
+  // Only the asset bytes change, so this is a valid deployment candidate.
+  const savedResponse = await fetch(`${f.base}/pack-version`, { method: 'PUT',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...f.body,
+      requestId: 'save-before-release', changes: [{ ...f.body.changes[0], mode: '100644' }] }),
+  });
+  expect(savedResponse.status).toBe(200);
   const saved = await savedResponse.json();
+  const treeModes = (commit: string) => f.remoteGit('ls-tree', '-r', '-t', '--full-tree', commit)
+    .split('\n').map(line => line.replace(/^(\d{6} \w+) [a-f0-9]+\t/, '$1\t'));
+  expect(treeModes(f.sha)).toEqual([
+    '100644 blob\tREADME', '040000 tree\tpacks', '040000 tree\tpacks/pack',
+    '100644 blob\tpacks/pack/asset.bin', '100644 blob\tpacks/pack/workflow.pack.yaml',
+    '040000 tree\tpacks/pack/workflows', '100644 blob\tpacks/pack/workflows/flow.yaml',
+  ]);
+  expect(treeModes(saved.commit)).toEqual(treeModes(f.sha));
   const release = await f.deploy.deploy({ workflowId: 'flow', actorId: 'trusted', candidateCommit: saved.commit, autoRun: false });
   expect(release.commit).not.toBe(saved.commit);
   expect(f.remoteGit('rev-parse', `${release.commit}^{tree}`)).toBe(f.remoteGit('rev-parse', `${saved.commit}^{tree}`));
   const current = await fetch(`${f.base}/pack-version?version=current`);
   expect(current.status).toBe(200);
   expect(await current.json()).toMatchObject({ baseCommit: release.commit, draftHead: saved.commit });
-  const saveCurrent = (requestId: string) => fetch(`${f.base}/pack-version`, { method: 'PUT',
+  const beforeDraftResponse = await fetch(`${f.base}/pack-version?version=draft`);
+  expect(beforeDraftResponse.status).toBe(200);
+  const beforeDraft = await beforeDraftResponse.json();
+  expect(beforeDraft).toMatchObject({ baseCommit: saved.commit, draftHead: saved.commit,
+    versionFiles: expect.arrayContaining([{ path: 'asset.bin', contentBase64: 'AAE=', mode: '100644' }]) });
+  const savedTree = f.remoteGit('ls-tree', '-r', '-t', '--full-tree', saved.commit);
+  const pushesBefore = injection.pushes;
+  const requestId = 'save-current-after-release';
+  const rejected = await fetch(`${f.base}/pack-version`, { method: 'PUT',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...f.body, requestId,
       sourceCommit: release.commit, expectedSavedHead: saved.commit }),
   });
-  const edited = await saveCurrent('save-current-after-release'); expect(edited.status).toBe(200);
-  const result = await edited.json();
-  expect(f.remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(result.commit);
+  expect(rejected.status).toBe(409);
+  expect(await rejected.json()).toEqual({ error: 'Workflow operation could not be completed', code: 'VERSION_CONFLICT', requestId });
+  expect(injection.pushes).toBe(pushesBefore);
+  expect(f.remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(saved.commit);
+  expect(f.remoteGit('ls-tree', '-r', '-t', '--full-tree', 'refs/heads/saved/flow')).toBe(savedTree);
+  const afterDraftResponse = await fetch(`${f.base}/pack-version?version=draft`);
+  expect(afterDraftResponse.status).toBe(200);
+  expect(await afterDraftResponse.json()).toEqual(beforeDraft);
   expect(f.remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(release.commit);
   expect(f.remoteGit('tag', '--list')).toBe('deploy/flow/#1');
   expect(await f.db.query('SELECT action, is_active FROM workflow_deploy_history')).toEqual([{ action: 'deploy', is_active: 1 }]);
-  const stale = await saveCurrent('save-stale-observed-head');
-  expect(stale.status).toBe(409); expect((await stale.json()).code).toBe('VERSION_CONFLICT');
-  expect(f.remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(result.commit);
 }, 30000);
 
 it('rejects a draft source that differs from its observed head but saves a matching draft', async () => {

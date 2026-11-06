@@ -2,6 +2,7 @@ import { parse, stringify } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import type { PackVersionFile } from '../components/PackVersionEditor'
 import { parseWorkflowYaml, normalizationChanges } from './yamlDraft'
+import { parseLosslessWorkflowText } from './losslessNumbers'
 import type { Snapshot } from './packVersionSession'
 
 function decode(file: PackVersionFile): string {
@@ -51,6 +52,29 @@ export function packWorkflow(files: PackVersionFile[], id: string, expectedPackI
   const spec = parseWorkflowYaml(decode(file))
   if (spec.id !== id) throw new Error('工作流 YAML 身份与当前画布不一致。')
   return { packId, path, spec }
+}
+
+/** Read an old Git baseline without treating missing legacy fields as a candidate spec. */
+export function packWorkflowBaseline(files: PackVersionFile[], id: string, expectedPackId?: string): { packId: string; path: string; spec: WorkflowSpec | null } {
+  const { packId, path } = packManifest(files, id)
+  if (expectedPackId !== undefined && packId !== expectedPackId) throw new Error('Pack manifest 身份与 Git 基线不一致。')
+  const file = files.find(file => file.path === path)
+  if (!file) throw new Error('manifest 指向的工作流 YAML 不在完整版本中。')
+  const text = decode(file)
+  const value: unknown = parseLosslessWorkflowText(text)
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value as { id?: unknown }).id !== id) {
+    throw new Error('工作流 YAML 身份与当前画布不一致。')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.hasOwn(record, 'title') && Object.hasOwn(record, 'nodes')) return { packId, path, spec: parseWorkflowYaml(text) }
+  // Validate every present field under the same structural rules; do not expose
+  // synthetic defaults as a real baseline or permit them in edited candidates.
+  const supplemented = { ...record, ...(!Object.hasOwn(record, 'title') ? { title: 'legacy' } : {}),
+    ...(!Object.hasOwn(record, 'nodes') ? { nodes: [] } : {}) }
+  let json: string
+  try { json = JSON.stringify(supplemented) } catch { throw new Error('Git 基线包含循环引用，无法安全读取。') }
+  parseWorkflowYaml(json)
+  return { packId, path, spec: null }
 }
 
 /** Merge only the workflow file; unrelated resources retain their exact bytes and modes. */

@@ -48,7 +48,7 @@ async function readInput(init: RequestInit): Promise<SaveInput> {
 // handling, loses candidate bytes/modes/CAS, or resends without a new user save.
 it.each([
   { version: 'current' as const, draftHead: null },
-  { version: 'current' as const, draftHead: B },
+  { version: 'current' as const, draftHead: A },
   { version: 'draft' as const, draftHead: B },
 ])('keeps $version candidates editable after an origin denial (saved head $draftHead)', async ({ version, draftHead }) => {
   const { id, session, snapshot, candidate } = setup(version, draftHead)
