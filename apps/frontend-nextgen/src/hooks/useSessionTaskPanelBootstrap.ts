@@ -16,21 +16,19 @@ import { useEffect, useRef } from 'react';
 
 type PanelRef = React.RefObject<PanelHandle | null>;
 /**
- * 深链进入时，目标 Session 与持久副屏 owner 可异步就位。by_session 命中可能先返回；
- * 短暂等待 PanelHandle 出现，避免把此次自动恢复静默丢失。
+ * 深链进入时，GroupChatPane/PanelHandle 可能晚于 Session selection 异步就位；
+ * by_session/list 可能先返回。等待必须跟随当前 session 生命周期，而不是固定 2s，
+ * 否则冷启动深链加载群列表/会话较慢时，自动恢复会在 panel 挂载前静默丢失。
  */
-const PANEL_HANDLE_WAIT_TIMEOUT_MS = 2000;
 const PANEL_HANDLE_POLL_INTERVAL_MS = 100;
 
 async function waitForPanelHandle(
   panelRef: PanelRef,
   isCancelled: () => boolean,
 ): Promise<PanelHandle | null> {
-  const deadline = Date.now() + PANEL_HANDLE_WAIT_TIMEOUT_MS;
   while (!isCancelled()) {
     const panel = panelRef.current;
     if (panel) return panel;
-    if (Date.now() >= deadline) return null;
     await new Promise<void>((resolve) => {
       setTimeout(resolve, PANEL_HANDLE_POLL_INTERVAL_MS);
     });

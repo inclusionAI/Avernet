@@ -7,6 +7,7 @@ import { createGroupChatProvider } from '@/services/workspace/groupChatProvider'
 import type { GroupExecApprovalSnapshot } from '@/services/workspace/groupExecApprovalService';
 import type { GroupQuestionSnapshot } from '@/services/workspace/groupQuestionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
@@ -190,6 +191,41 @@ it('mount connects to the provider with conversationKey=sessionId, unmount disco
 
   unmount();
   expect(mockProvider.disconnect).toHaveBeenCalled();
+});
+
+it('同会话在列表详情补齐后重建 provider 不重复关闭副屏', async () => {
+  const lightweight: SessionView = {
+    ...session,
+    participants: [],
+    participantCount: 1,
+    participantDetailsLoaded: false,
+  };
+  // 详情补齐会重建 provider；这里让工厂返回不同对象，模拟真实 useMemo 输出变化。
+  mockedProviderFactory.mockImplementation(() => ({ ...mockProvider }));
+  const { result, rerender } = renderHook(
+    ({ current }: { current: SessionView }) => useGroupChat(current),
+    { initialProps: { current: lightweight } },
+  );
+
+  const closePanelForce = jest.fn();
+  act(() => {
+    (result.current.panelRef as { current: PanelHandle | null }).current = {
+      closePanelForce,
+    } as PanelHandle;
+  });
+  expect(closePanelForce).not.toHaveBeenCalled();
+
+  // 列表项 participants 为空；详情补齐后 liveEnabled 变化会重建 provider。
+  rerender({
+    current: {
+      ...session,
+      sessionId: lightweight.sessionId,
+      participants: [{ ...session.participants[0], mode: 'present' }],
+      participantDetailsLoaded: true,
+    },
+  });
+
+  expect(closePanelForce).not.toHaveBeenCalled();
 });
 
 it('absent mode keeps history refresh and pagination but blocks every send/reconnect entry', async () => {

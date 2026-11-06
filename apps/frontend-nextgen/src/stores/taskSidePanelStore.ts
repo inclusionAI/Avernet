@@ -59,6 +59,8 @@ export interface TaskSidePanelState {
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
+  /** 关闭 panel 时释放旧任务焦点，但不清理显式打开 intent。 */
+  clearActiveTask: (taskId?: string) => void;
   markTaskPanelOpenIntent: (taskId: string) => void;
   consumeTaskPanelOpenIntent: (taskId: string) => boolean;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
@@ -96,6 +98,11 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
       return { activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null, navByTask };
     });
   },
+  clearActiveTask: (taskId) =>
+    set((s) => ({
+      activeTaskId:
+        taskId === undefined || s.activeTaskId === taskId ? null : s.activeTaskId,
+    })),
   markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
   consumeTaskPanelOpenIntent: (taskId) => {
     const matched = get().taskPanelOpenIntentTaskId === taskId;

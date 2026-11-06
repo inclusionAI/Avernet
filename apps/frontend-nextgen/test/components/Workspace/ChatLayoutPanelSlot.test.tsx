@@ -269,6 +269,7 @@ describe('ChatLayoutPanelSlot', () => {
     expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
     expect(useTaskConversationNavigationStore.getState().originsByTask).toEqual({});
     expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
 
   it('目标会话迟到的 closePanelForce 仍被持续抑制，TaskPanel 不会一闪而逝', () => {
@@ -322,7 +323,7 @@ describe('ChatLayoutPanelSlot', () => {
     expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
   });
 
-  it('普通会话切换仍将 closePanelForce 透传给 SDK Panel，并清理旧任务宿主', () => {
+  it('普通会话切换仍将 closePanelForce 透传给 SDK Panel，并清理旧任务焦点状态', () => {
     const ref = React.createRef<import('@tc-chat/core').PanelHandle>();
     const store = useTaskConversationNavigationStore.getState();
     store.rememberOrigin('t1', {
@@ -340,6 +341,11 @@ describe('ChatLayoutPanelSlot', () => {
     const navigationId = store.beginNavigation('t1', '/workspace/chat', 's1');
     store.markRouteCommitted(navigationId);
     store.markRouteHydrated(navigationId);
+    act(() => {
+      const taskStore = useTaskSidePanelStore.getState();
+      taskStore.setActiveTask('t1');
+      taskStore.markTaskPanelOpenIntent('explicit-task');
+    });
     render(<ChatLayoutPanelSlot ref={ref} {...asRootInjected({ bridge: 'bridge' })} />);
     window.history.pushState({}, '', '/workspace/chat?bot=b2&session=s2');
 
@@ -347,6 +353,8 @@ describe('ChatLayoutPanelSlot', () => {
 
     expect(mockRawHandle.closePanelForce).toHaveBeenCalledTimes(1);
     expect(useTaskConversationNavigationStore.getState().originsByTask).toEqual({});
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBe('explicit-task');
   });
 
   it('任务节点跨 Bot/群会话路由时复用同一个 Panel/TaskPanel 实例，不重新挂载或恢复快照', () => {
