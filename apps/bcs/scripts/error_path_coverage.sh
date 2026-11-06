@@ -6,8 +6,13 @@ set -euo pipefail
 # by the final `cargo llvm-cov report` step in e2e_coverage.sh.
 #
 # The BCS libraries (bcs-message-flow, bcs-http) contain no #[cfg(test)] code,
-# so `cargo test --no-run` reuses the already-instrumented library objects
+# so `cargo test --no-run --profile=dev` reuses the already-instrumented library objects
 # and only compiles the test harness.
+#
+# CARGO_TARGET_DIR is aligned with prepare_bcs_coverage_bin (singlebox.sh):
+#   <bcs_dir>/target/cov-e2e/llvm-cov-target
+# This ensures test binaries land in the same directory as the instrumented
+# BCS objects, so cargo reuses them and cargo-llvm-cov can attribute coverage.
 #
 # Covered paths:
 #   group_messages_contract::session_chat_keeps_internal_error_as_server_error
@@ -22,9 +27,12 @@ set -euo pipefail
 #     → dispatch.rs: orphan bot skip path
 
 bcs_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cov_dir="${CARGO_TARGET_DIR:-$bcs_dir/target/cov-e2e}"
-cov_runtime="$cov_dir/llvm-cov-target"
-mkdir -p "$cov_runtime"
+# Align CARGO_TARGET_DIR with prepare_bcs_coverage_bin:
+#   cov_root="$BCS_DIR/target/cov-e2e"
+#   cov_dir="$cov_root/llvm-cov-target"
+#   export CARGO_TARGET_DIR="$cov_dir"
+cov_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
+mkdir -p "$cov_dir"
 
 echo "--- error-path coverage: building test targets ---"
 
@@ -33,8 +41,9 @@ echo "--- error-path coverage: building test targets ---"
   export CARGO_TARGET_DIR="$cov_dir"
   export RUSTFLAGS="-Cinstrument-coverage -Clink-dead-code"
   export CARGO_INCREMENTAL=0
+  export CARGO_PROFILE_DEV_DEBUG=line-tables-only
 
-  cargo test --no-run \
+  cargo test --no-run --profile=dev \
     -p bcs-http --test group_messages_contract \
     -p bcs-message-flow --test operation_output_uncertainty \
     -p bcs-message-flow --test contract_bot_event \
@@ -49,14 +58,18 @@ run_test_binary() {
   local found=0
   for t in "$cov_dir/debug/deps/${pattern}"-*; do
     if [[ -x "$t" ]] && ! [[ "$t" =~ \.d$ ]]; then
-      LLVM_PROFILE_FILE="$cov_runtime/error-path-test-%m-%p.profraw" \
+      # Profraw lands directly in $cov_dir (llvm-cov-target), where
+      # e2e_coverage.sh's `cargo llvm-cov report` reads it via
+      #   CARGO_TARGET_DIR=<bcs_dir>/target/cov-e2e
+      #   → <CARGO_TARGET_DIR>/llvm-cov-target/
+      LLVM_PROFILE_FILE="$cov_dir/error-path-test-%m-%p.profraw" \
         "$t" $test_names 2>&1 | tail -3
       found=1
       break
     fi
   done
   if [[ "$found" -eq 0 ]]; then
-    echo "WARN: test binary matching '${pattern}' not found"
+    echo "WARN: test binary matching '${pattern}' not found in $cov_dir/debug/deps/"
   fi
 }
 
