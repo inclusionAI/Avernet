@@ -26,7 +26,25 @@ acceptance_targets=()
 explicit_acceptance_targets=()
 coverage_modules=()
 reporter_command=()
+phase_timing_file=""
 source "$repo_root/apps/bcs/scripts/e2e-test/mock_services.sh"
+
+record_phase_timing() {
+  local phase="$1" start_epoch="$2" end_epoch="$3" status="$4"
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$phase" "$start_epoch" "$end_epoch" "$((end_epoch - start_epoch))" "$status" \
+    >> "$phase_timing_file"
+}
+
+timed_phase() {
+  local phase="$1"; shift
+  local start_epoch end_epoch status=0
+  start_epoch="$(date +%s)"
+  "$@" || status=$?
+  end_epoch="$(date +%s)"
+  record_phase_timing "$phase" "$start_epoch" "$end_epoch" "$status"
+  return "$status"
+}
 
 if [[ -n "${SINGLEBOX_COVERAGE_MODULE:-}" ]]; then
   requested_modules+=("$SINGLEBOX_COVERAGE_MODULE")
@@ -189,6 +207,10 @@ run_real_singlebox() {
     "$bcs_coverage_dir/cli_command_coverage.txt" \
     "$bcs_coverage_dir/cli_commands.log"
   mkdir -p "$coverage_root/raw" "$report_dir"
+  phase_timing_file="$report_dir/phase-timings.tsv"
+  printf 'phase\tstart_epoch\tend_epoch\tduration_seconds\tstatus\n' > "$phase_timing_file"
+  find "$bcs_coverage_dir" -name '*.profraw' -delete 2>/dev/null || true
+  find "$repo_root/apps/bcs/target/tmp" -name '*.profraw' -delete 2>/dev/null || true
   coverage_standalone_root="$coverage_root/standalone-openclaw"
   coverage_standalone_runtime="$coverage_root/standalone-runtime"
   echo "singlebox coverage real mode"
@@ -214,24 +236,27 @@ run_real_singlebox() {
   # `--with-bcs-coverage start all` below builds the instrumented binaries
   # under src/bcs/target/cov-e2e and exports BCS_BIN/BCS_CLI_BIN; the BCS e2e
   # reads the same instrumented bcs-cli.
-  env OCB_SKIP_GIT_HOOKS=1 BCS_SKIP_DEBUG_BUILD=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+  timed_phase "stack_setup" env OCB_SKIP_GIT_HOOKS=1 BCS_SKIP_DEBUG_BUILD=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/singlebox/singlebox.sh" --standalone setup all
   # Gateway, BCS, and Backend use different env var names for the same HMAC
   # principal contract. All three ends must receive the same coverage key.
-  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
-    principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
-    AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
-    AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
-    BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
-    BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
-    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
-    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
-    SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF="${SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF:-1}" \
-    SINGLEBOX_ACCEPTANCE_KNOWLEDGE_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/bot_knowledge/fixture_catalog.json" \
-    SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
-    bash "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start all
+  start_coverage_stack() {
+    env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+      principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
+      AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
+      AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
+      BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
+      BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
+      STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+      STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+      SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF="${SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF:-1}" \
+      SINGLEBOX_ACCEPTANCE_KNOWLEDGE_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/bot_knowledge/fixture_catalog.json" \
+      SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
+      bash "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start all
+  }
+  timed_phase "stack_start" start_coverage_stack
   local acceptance_status=0
   local bcs_e2e_status=0
   local backend_coverage_status=0
@@ -239,10 +264,13 @@ run_real_singlebox() {
   local summary_status=0
   local module_status=0
   local artifact_status=0
-  run_acceptance_smoke || acceptance_status=$?
-  run_bcs_e2e || bcs_e2e_status=$?
-  flush_coverage_processes
-  cleanup_real_singlebox
+  timed_phase "backend_acceptance" run_acceptance_smoke || acceptance_status=$?
+  timed_phase "bcs_e2e" run_bcs_e2e || bcs_e2e_status=$?
+  coverage_flush_and_cleanup() {
+    flush_coverage_processes
+    cleanup_real_singlebox
+  }
+  timed_phase "coverage_flush_and_cleanup" coverage_flush_and_cleanup || true
   trap - EXIT
   # Backend and BaaS coverage are independent (separate project dirs, data
   # files, and report paths), so render them concurrently. Each writes to its
@@ -250,6 +278,8 @@ run_real_singlebox() {
   local backend_report_log="$coverage_root/backend-report.log"
   local baas_report_log="$coverage_root/baas-report.log"
   local backend_report_pid baas_report_pid
+  local report_phase_start report_phase_end
+  report_phase_start="$(date +%s)"
   combine_python_coverage "backend" "$repo_root/apps/backend" "$coverage_root/raw/backend" \
     > "$backend_report_log" 2>&1 &
   backend_report_pid=$!
@@ -259,9 +289,15 @@ run_real_singlebox() {
   wait "$backend_report_pid" || backend_coverage_status=$?
   wait "$baas_report_pid" || baas_coverage_status=$?
   cat "$backend_report_log" "$baas_report_log"
+  report_phase_end="$(date +%s)"
+  record_phase_timing "python_coverage_reports" "$report_phase_start" "$report_phase_end" "$((backend_coverage_status || baas_coverage_status))"
+  local artifact_phase_start artifact_phase_end
+  artifact_phase_start="$(date +%s)"
   write_summary_artifacts "$acceptance_status" "$bcs_e2e_status" || summary_status=$?
   write_module_artifacts || module_status=$?
   verify_required_artifacts || artifact_status=$?
+  artifact_phase_end="$(date +%s)"
+  record_phase_timing "summary_and_artifacts" "$artifact_phase_start" "$artifact_phase_end" "$((summary_status || module_status || artifact_status))"
 
   if [[ "$acceptance_status" -ne 0 ]]; then
     echo "singlebox coverage collected, but Backend acceptance failed with exit code $acceptance_status" >&2
@@ -302,15 +338,69 @@ flush_coverage_processes() {
 run_acceptance_smoke() {
   local acceptance_log="$report_dir/acceptance.log"
   local junit_report="$report_dir/acceptance-junit.xml"
+  local owner_target="tests/community/acceptance/bot_ownership_sync"
+  local owner_selected=0
+  local owner_workers="${SINGLEBOX_ACCEPTANCE_OWNER_WORKERS:-2}"
+  local serial_status=0
+  local owner_status=0
+  local target
+  local serial_targets=()
+  local owner_junit="$report_dir/acceptance-owner-junit.xml"
+  local serial_junit="$report_dir/acceptance-serial-junit.xml"
   local rc=0
+
+  for target in "${acceptance_targets[@]}"; do
+    if [ "$target" = "$owner_target" ]; then
+      owner_selected=1
+    else
+      serial_targets+=("$target")
+    fi
+  done
+  if [ "$owner_selected" -eq 1 ] && { ! [[ "$owner_workers" =~ ^[0-9]+$ ]] || [ "$owner_workers" -lt 1 ] || [ "$owner_workers" -gt 2 ]; }; then
+    echo "SINGLEBOX_ACCEPTANCE_OWNER_WORKERS must be an integer in [1, 2]" >&2
+    return 2
+  fi
+
   (
     cd "$repo_root/apps/backend"
-    RUN_ACCEPTANCE=1 \
-      SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
-      SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
-      SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
-      SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
-      uv run pytest "${acceptance_targets[@]}" -q --junitxml "$junit_report"
+    if [ "$owner_selected" -eq 0 ]; then
+      RUN_ACCEPTANCE=1 \
+        SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
+        SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+        SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
+        SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
+        uv run pytest "${acceptance_targets[@]}" -q --junitxml "$junit_report" || rc=$?
+    else
+      if [ "${#serial_targets[@]}" -gt 0 ]; then
+        echo "Running non-owner acceptance targets serially"
+        RUN_ACCEPTANCE=1 \
+          SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
+          SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+          SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
+          SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
+          uv run pytest "${serial_targets[@]}" -q --junitxml "$serial_junit" || serial_status=$?
+      fi
+
+      echo "Running owner handoff acceptance with ${owner_workers} worker(s)"
+      RUN_ACCEPTANCE=1 \
+        SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
+        SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+        SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
+        SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
+        uv run pytest "$owner_target" -q -n "$owner_workers" --dist=load --junitxml "$owner_junit" || owner_status=$?
+
+      if [ "${#serial_targets[@]}" -gt 0 ] && [ -s "$serial_junit" ] && [ -s "$owner_junit" ]; then
+        "${reporter_command[@]}" "$script_dir/merge_junit_reports.py" \
+          "$junit_report" "$serial_junit" "$owner_junit" || rc=$?
+      elif [ -s "$owner_junit" ]; then
+        cp "$owner_junit" "$junit_report" || rc=$?
+      elif [ -s "$serial_junit" ]; then
+        cp "$serial_junit" "$junit_report" || rc=$?
+      fi
+      if [ "$serial_status" -ne 0 ] || [ "$owner_status" -ne 0 ]; then
+        rc=1
+      fi
+    fi
   ) > "$acceptance_log" 2>&1 || rc=$?
   cat "$acceptance_log"
   [ "$rc" -eq 0 ] || return "$rc"
@@ -624,6 +714,7 @@ verify_required_artifacts() {
     "$report_dir/summary.json"
     "$report_dir/summary.md"
     "$report_dir/dashboard.html"
+    "$report_dir/phase-timings.tsv"
   )
   local file
   for file in "${required[@]}"; do

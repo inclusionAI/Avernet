@@ -36,3 +36,13 @@ def test_oauth_production_paths_are_not_excluded_from_changed_line_coverage():
     runner = (REPO_ROOT / "apps/bcs/scripts/e2e_coverage.sh").read_text(encoding="utf-8")
     assert "e2e_unreachable_oauth" not in runner
     assert "oauth_skip_regex" not in runner
+
+
+def test_pushes_use_event_before_and_upload_phase_timings():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "github.event.before" in workflow
+    assert "SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.event_name == 'push' && github.event.before || 'origin/dev') }}" in workflow
+    assert "phase-timings.tsv" in workflow
+    assert "git diff --name-only -z \"${base_ref}\" \"${GITHUB_SHA}\"" in workflow
+    assert "git diff --name-only \"${SINGLEBOX_BASE_REF}\" --" not in workflow
