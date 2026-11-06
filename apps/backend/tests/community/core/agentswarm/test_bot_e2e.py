@@ -468,6 +468,28 @@ class TestBotKindEndToEnd:
             space_context=world.get(BusinessSpaceContextProtocol),
             baas_service=world.get(BaasService),
         )
+        # Keep the real RUNNING report visible until the swarm polls it.
+        # This makes the CI creation/apply overlap deterministic without sleeps.
+        polled_running = threading.Event()
+        applies = world.get(ApplyRunServiceProtocol)
+        compile_and_finish = applies._compile_apply_and_finish
+        bot_status = platform.bot_status
+
+        async def finish_after_poll(*args, **kwargs):
+            if kwargs["trigger"] == CREATE_ON_CONTAINER_TRIGGER:
+                assert polled_running.wait(10), "swarm never polled the running creation Apply"
+            return await compile_and_finish(*args, **kwargs)
+
+        def observe_status(bot_id, owner_id=""):
+            status = bot_status(bot_id, owner_id=owner_id)
+            report = applies.last_apply(entity_id=owner_id, bot_id=bot_id)
+            if (report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER
+                    and report.status is ApplyStatus.RUNNING):
+                polled_running.set()
+            return status
+
+        monkeypatch.setattr(applies, "_compile_apply_and_finish", finish_after_poll)
+        monkeypatch.setattr(platform, "bot_status", observe_status)
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
         script = [
@@ -512,6 +534,7 @@ class TestBotKindEndToEnd:
             pump.stop_and_join()
 
         assert run is not None, "run row vanished"
+        assert polled_running.is_set(), "creation Apply was not observed in flight"
         assert run.status is dm.RunStatus.COMPLETED, {
             "run": run,
             "creation_reports": [
