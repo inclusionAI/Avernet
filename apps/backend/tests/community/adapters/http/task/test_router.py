@@ -475,8 +475,12 @@ class TestRouter:
             ("需要测试能力", "t1", "t1"),
         )
 
-    def test_relay_search_rejects_unknown_fields(self, task_client):
+    def test_relay_search_ignores_unknown_fields(self, task_client):
         client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "t1", Status.RUNNING)
         before = len(svc.callback.calls)
         response = client.post(
             "/api/v1/collaboration/tasks/search",
@@ -489,8 +493,10 @@ class TestRouter:
             },
         )
 
-        assert response.status_code == 422, response.text
-        assert len(svc.callback.calls) == before
+        assert response.status_code == 200, response.text
+        assert len(svc.callback.calls) == before + 1
+
+        assert svc.callback.calls[-1] == ("search_bots", ("需要测试能力", "t1", "t1"))
 
     def test_relay_dispatch_uses_internal_network_and_origin_generation(
         self, task_client
@@ -517,7 +523,7 @@ class TestRouter:
         assert response.json()["data"] == {"ok": True, "node_id": "target"}
         assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
 
-    def test_relay_dispatch_rejects_unknown_fields(self, task_client):
+    def test_relay_dispatch_ignores_unknown_fields(self, task_client):
         client, svc = task_client
         svc.set_execution_config(
             {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
@@ -538,8 +544,10 @@ class TestRouter:
             },
         )
 
-        assert response.status_code == 422, response.text
-        assert len(svc.callback.calls) == before
+        assert response.status_code == 200, response.text
+        assert len(svc.callback.calls) == before + 1
+
+        assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
 
     def test_new_relay_report_requires_current_execution_generation(
         self,
@@ -811,7 +819,7 @@ class TestRouter:
         response = client.post(
             "/api/v1/collaboration/tasks/intake",
             headers={"X-Task-Intake-Session-ID": "tis-1"},
-            json={"action": "CONTINUE", "message": "补充验收"},
+            json={"action": "CONTINUE", "message": "补充验收", "owner_user_id": "attacker"},
         )
         assert response.status_code == 200, response.text
         assert response.json()["data"]["session_id"] == "tis-1"
@@ -872,14 +880,15 @@ class TestRouter:
         assert request.task_spec.goal.objective == "上线模型"
         assert request.execution_config["intake_session_id"] == "tis-1"
 
-    def test_start_rejects_client_supplied_task_fields(self, human_task_client):
+    def test_start_ignores_client_supplied_owner_fields(self, human_task_client):
         client, svc = human_task_client
         response = client.post(
             "/api/v1/collaboration/tasks/start",
             json={"session_id": "tis-1", "owner_user_id": "attacker"},
         )
-        assert response.status_code == 422
-        assert svc.callback.calls == []
+        assert response.status_code == 200, response.text
+        assert svc.callback.calls[0] == ("get_confirmed_intake", ("tis-1", "owner-1"))
+        assert svc.callback.calls[1][1].owner_user_id == "owner-1"
 
     def test_get_task_returns_dashboard(self, human_task_client):
         client, svc = human_task_client

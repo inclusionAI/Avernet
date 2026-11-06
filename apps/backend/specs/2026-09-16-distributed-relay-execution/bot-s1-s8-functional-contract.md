@@ -1,5 +1,14 @@
 # Bot S1-S6 函数式执行协议
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design.md`](../2026-09-23-task-cli/design.md)。
 
 ## 1. 文档定位

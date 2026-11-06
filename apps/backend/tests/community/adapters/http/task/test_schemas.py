@@ -434,7 +434,7 @@ def test_report_dto_rejects_empty_action_type() -> None:
     ), excinfo.value.errors()
 
 
-def test_relay_search_request_rejects_unknown_or_empty_fields() -> None:
+def test_relay_search_request_ignores_unknown_but_rejects_empty_fields() -> None:
     valid = {
         "query": "q",
         "task_id": "t1",
@@ -443,15 +443,16 @@ def test_relay_search_request_rejects_unknown_or_empty_fields() -> None:
     }
     assert TaskSearchRequestDTO.model_validate(valid).task_id == "t1"
 
-    with pytest.raises(ValidationError):
-        TaskSearchRequestDTO.model_validate({**valid, "extra": "x"})
+    assert TaskSearchRequestDTO.model_validate({**valid, "extra": "x"}).model_dump() == (
+        TaskSearchRequestDTO.model_validate(valid).model_dump()
+    )
     with pytest.raises(ValidationError):
         TaskSearchRequestDTO.model_validate({**valid, "task_id": ""})
     with pytest.raises(ValidationError):
         TaskSearchRequestDTO.model_validate({**valid, "task_id": " "})
 
 
-def test_relay_dispatch_request_rejects_unknown_or_empty_fields() -> None:
+def test_relay_dispatch_request_ignores_unknown_but_rejects_empty_fields() -> None:
     valid = {
         "task_id": "t1",
         "target_node_id": "target",
@@ -460,8 +461,9 @@ def test_relay_dispatch_request_rejects_unknown_or_empty_fields() -> None:
     }
     assert TaskDispatchRequestDTO.model_validate(valid).target_node_id == "target"
 
-    with pytest.raises(ValidationError):
-        TaskDispatchRequestDTO.model_validate({**valid, "extra": "x"})
+    assert TaskDispatchRequestDTO.model_validate({**valid, "extra": "x"}).model_dump() == (
+        TaskDispatchRequestDTO.model_validate(valid).model_dump()
+    )
     with pytest.raises(ValidationError):
         TaskDispatchRequestDTO.model_validate({**valid, "target_node_id": ""})
     with pytest.raises(ValidationError):

@@ -21,7 +21,7 @@ from agentclaw.community.core.task.domain.search_viewer import (
 class TaskSearchRequestDTO(BaseModel):
     """Search candidates for the current network-admitted Relay baton."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     query: str = Field(..., min_length=1)
     task_id: str = Field(..., min_length=1)

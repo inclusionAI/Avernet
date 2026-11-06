@@ -1,5 +1,14 @@
 # avernet-goal-cli 到分布式接力执行：端到端设计稿
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 > Relay 单个 Target Execution 的实现合同，2026-10-12。CLI 命令、Batch Schema、一个 Goal 多目标、Intake 和 `/start` 聚合响应以 [avernet-goal-cli 发起与澄清设计](design.md) 为唯一权威；本文只描述其中一个独立 Target Execution 进入 [Bot S1–S6 函数式执行协议](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md) 后的执行链路。本文残留的单目标命令和单结果示例不构成 CLI 合同。
 
 > 实现核对（2026-10-13）：Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已完成重构；Rust `avernet-goal-cli` 已迁移至 CLI 组织下的独立同名仓库并发布，Avernet 仓库只保留 Backend 实现与跨仓协议设计。
