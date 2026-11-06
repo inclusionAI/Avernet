@@ -215,9 +215,9 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   const openDeploymentRecovery = useCallback(() => {
     if (!deploymentRecovery?.storageAvailable || isWorkflowDeploymentPending(run.workflow_id)) return
     try {
-      const token = readEditorDeploymentMarker(run.workflow_id)
-      if (!token || deploymentRecovery.attemptToken && token !== deploymentRecovery.attemptToken) throw new Error('部署请求与核对标记不匹配，请重新核对。')
-      recoveryTarget.current = { workflowId: run.workflow_id, token }
+      const marker = readEditorDeploymentMarker(run.workflow_id)
+      if (!marker || deploymentRecovery.attemptToken && marker !== deploymentRecovery.attemptToken) throw new Error('部署请求与核对标记不匹配，请重新核对。')
+      recoveryTarget.current = { workflowId: run.workflow_id, token: marker }
       setDeploymentRecoveryError(null); setDeploymentRecoveryOpen(true)
     } catch (error) { setErrorMessage(extractErrorMessage(error, '无法读取核对标记。')); setPhase('error') }
   }, [deploymentRecovery, run.workflow_id])

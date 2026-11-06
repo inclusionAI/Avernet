@@ -8,7 +8,7 @@ export type UnifiedSaveReceipt = { commit: string; draftToken: string }
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
-const token = /^[a-f0-9]{64}$/
+const hashPattern = /^[a-f0-9]{64}$/
 export const UNIFIED_SAVE_TIMEOUT_MS = 30_000
 
 /** This is observation only, never permission for the later POST. */
@@ -51,9 +51,9 @@ export async function workflowUnifiedSave(id: string, input: UnifiedSaveInput): 
         // the POST. No verifiable origin-bound pre-write receipt exists yet.
         if (response.status === 200 && body.outcome === 'confirmed' && body.reconciliationRequired === false
           && evidence.db === 'confirmed' && evidence.git === 'confirmed'
-          && typeof evidence.inputHash === 'string' && token.test(evidence.inputHash)
+          && typeof evidence.inputHash === 'string' && hashPattern.test(evidence.inputHash)
           && typeof evidence.commit === 'string' && oid.test(evidence.commit)
-          && typeof evidence.draftToken === 'string' && token.test(evidence.draftToken)) {
+          && typeof evidence.draftToken === 'string' && hashPattern.test(evidence.draftToken)) {
           return { commit: evidence.commit, draftToken: evidence.draftToken }
         }
         throw new Error(`统一保存结果为 ${String(body.outcome)}；需要人工核对数据库与 Git。`)

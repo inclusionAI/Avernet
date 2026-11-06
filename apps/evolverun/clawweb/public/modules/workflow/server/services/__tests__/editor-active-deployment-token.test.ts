@@ -18,12 +18,12 @@ describe('active workflow baseline token', () => {
   });
 
   it('binds the workflow and every declared business field, including exact spec text', () => {
-    const token = editorActiveDeploymentToken('flow', row);
-    expect(editorActiveDeploymentToken('other', row)).not.toBe(token);
+    const activeHash = editorActiveDeploymentToken('flow', row);
+    expect(editorActiveDeploymentToken('other', row)).not.toBe(activeHash);
     for (const changed of [
       { pack_id: 'other' }, { deploy_number: 10 }, { version: 8 },
       { tag_name: null }, { action: 'rollback' }, { spec_json: '{ "title":"原文"}' },
-    ]) expect(editorActiveDeploymentToken('flow', { ...row, ...changed })).not.toBe(token);
+    ]) expect(editorActiveDeploymentToken('flow', { ...row, ...changed })).not.toBe(activeHash);
   });
 
   it('rejects indistinguishable SQLite text decoded from distinct invalid UTF-8 bytes', () => {

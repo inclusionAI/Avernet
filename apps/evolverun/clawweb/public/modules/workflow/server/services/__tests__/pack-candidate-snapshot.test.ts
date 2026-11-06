@@ -7,11 +7,12 @@ import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
 import { PackWorkflowContentChangedError, withPreparedPackCandidate, withPreparedPackCandidateWithWorkflow,
   type SavePackCandidateInput } from '../pack-candidate-save.js';
 
-const gate = vi.hoisted(() => ({ wait: undefined as undefined | (() => Promise<void>) }));
+const gate = vi.hoisted(() => ({ wait: undefined as undefined | (() => Promise<void>), clonedConfig: undefined as unknown }));
 vi.mock('../clawflows-git-client.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../clawflows-git-client.js')>();
   return { ...actual, cloneClawflows: async (...args: Parameters<typeof actual.cloneClawflows>) => {
     await gate.wait?.();
+    gate.clonedConfig = args[1];
     return actual.cloneClawflows(...args);
   } };
 });
@@ -20,7 +21,7 @@ let root: string, bare: string, seed: string, current: string;
 const b64 = (value: string) => Buffer.from(value).toString('base64');
 function input(): SavePackCandidateInput {
   return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: null,
-    config: { remoteUrl: bare, username: 'original', email: 'original@example.invalid', token: 'original-secret' },
+    config: { remoteUrl: bare, username: 'original', email: 'original@example.invalid', token: 'test-token' },
     preserveWorkflowContent: true,
     changes: [{ path: 'scripts/run', operation: 'replace', contentBase64: b64('original'), mode: '100755' }] };
 }
@@ -46,7 +47,7 @@ beforeEach(() => {
   current = runGit(seed, ['rev-parse', 'HEAD']);
   runGit(seed, ['push', bare, `${current}:refs/heads/wf/flow`]);
 });
-afterEach(() => { gate.wait = undefined; rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { gate.wait = undefined; gate.clonedConfig = undefined; rmSync(root, { recursive: true, force: true }); });
 
 describe('candidate call snapshots', () => {
   it.each(['legacy', 'workflow'] as const)('isolates %s construction, clone configuration and push from caller mutation', async kind => {
@@ -56,6 +57,7 @@ describe('candidate call snapshots', () => {
     const barrier = pauseClone();
     const callback = async (prepared: Parameters<Parameters<typeof withPreparedPackCandidate>[1]>[0], push: () => Promise<{ branch: string; commit: string }>) => {
       expect(JSON.stringify(prepared)).not.toContain('secret');
+      expect(JSON.stringify(prepared)).not.toContain('test-token');
       await push(); return prepared;
     };
     const promise = kind === 'legacy' ? withPreparedPackCandidate(value, callback)
@@ -64,12 +66,13 @@ describe('candidate call snapshots', () => {
     value.workflowId = 'other'; value.sourceVersion = 'draft'; value.sourceCommit = 'f'.repeat(40);
     value.expectedSavedHead = 'e'.repeat(40); value.preserveWorkflowContent = false;
     Object.assign(config, { remoteUrl: path.join(root, 'wrong-secret'), username: 'changed-secret',
-      email: 'changed@example.invalid', token: 'changed-secret' });
+      email: 'changed@example.invalid', token: 'dummy' });
     Object.assign(change, { path: 'scripts/evil', operation: 'create', contentBase64: b64('changed'), mode: '100644' });
     value.changes.push({ path: 'extra', operation: 'create', contentBase64: b64('extra'), mode: '100644' });
     value.config = { remoteUrl: 'wrong', username: 'wrong', email: 'wrong' };
     barrier.release();
     const result = await promise;
+    expect(gate.clonedConfig).toMatchObject({ token: 'test-token' });
     expect(result.workflowId).toBe('flow'); expect(result.branch).toBe('saved/flow');
     expect(result.sourceCommit).toBe(current); expect(result.expectedSavedHead).toBeNull();
     expect(result.sourceVersion).toBe('current');
@@ -96,7 +99,7 @@ describe('candidate call snapshots', () => {
   it('rejects an invalid trusted workflow before callback and push despite caller changes', async () => {
     const value = input(); const before = refs(); const barrier = pauseClone(); let called = false;
     const promise = withPreparedPackCandidateWithWorkflow(value, 'id: wrong\n', async (_prepared, push) => { called = true; return push(); });
-    await barrier.started; value.workflowId = 'wrong'; value.config.token = 'changed-secret'; barrier.release();
+    await barrier.started; value.workflowId = 'wrong'; value.config.token = 'dummy'; barrier.release();
     await expect(promise).rejects.toThrow('Workflow identity mismatch');
     expect(called).toBe(false); expect(refs()).toBe(before);
   });

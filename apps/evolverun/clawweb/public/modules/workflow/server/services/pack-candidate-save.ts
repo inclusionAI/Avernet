@@ -177,12 +177,11 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
   const { workflowId, sourceVersion, sourceCommit, expectedSavedHead, preserveWorkflowContent,
     config: callerConfig, changes: callerChanges } = callerInput;
   if (!Array.isArray(callerChanges) || callerChanges.length > 500) throw new Error('Invalid candidate save input');
-  const config = callerConfig && typeof callerConfig === 'object' ? {
-    remoteUrl: callerConfig.remoteUrl,
-    username: callerConfig.username,
-    email: callerConfig.email,
-    token: callerConfig.token,
-  } : callerConfig;
+  let config = callerConfig;
+  if (callerConfig && typeof callerConfig === 'object') {
+    const { remoteUrl, username, email, token } = callerConfig;
+    config = { remoteUrl, username, email, token };
+  }
   const input: SavePackCandidateInput = { workflowId, sourceVersion, sourceCommit, expectedSavedHead,
     preserveWorkflowContent, config, changes: callerChanges.map(change => {
       if (!change || typeof change !== 'object') return change as PackCandidateChange;

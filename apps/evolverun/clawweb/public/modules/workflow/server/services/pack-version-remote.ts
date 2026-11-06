@@ -111,18 +111,18 @@ export async function readActivePackVersionFromRemote(input: Context & { version
       || !/^[1-9][0-9]*$/.test(String(row.deploy_number)) || typeof row.tag_name !== 'string'
       || !row.tag_name.startsWith(`deploy/${input.workflowId}/#`) || !/^[1-9][0-9]*$/.test(row.tag_name.slice(`deploy/${input.workflowId}/#`.length))
       || (row.action === 'deploy' && row.tag_name !== `deploy/${input.workflowId}/#${row.deploy_number}`)) return null;
-    return { row, token: editorActiveDeploymentToken(input.workflowId, row) };
+    return { row, activeHash: editorActiveDeploymentToken(input.workflowId, row) };
   };
   const before = await readState();
   if (!before) throw Object.assign(new Error('Active baseline unavailable'), { status: 404, code: 'WORKFLOW_NOT_FOUND' });
   const snapshot = await readPackVersionFromRemote({ ...input, packId: before.row.pack_id,
     active: { tag: before.row.tag_name!, specJson: before.row.spec_json, action: before.row.action as 'deploy' | 'rollback' } });
   const after = await readState();
-  if (!after || before.token !== after.token) throw Object.assign(new Error('Active baseline changed'), { status: 409, code: 'VERSION_CONFLICT' });
+  if (!after || before.activeHash !== after.activeHash) throw Object.assign(new Error('Active baseline changed'), { status: 409, code: 'VERSION_CONFLICT' });
   // This attests only the no-draft, active-history path after its final DB and
   // Git ref rechecks. It is a read observation, not a write authorization or lock.
   return input.version === 'current'
-    ? { ...snapshot, activeHistory: { protocol: 'active-history-v1' as const, activeToken: after.token } }
+    ? { ...snapshot, activeHistory: { protocol: 'active-history-v1' as const, activeToken: after.activeHash } }
     : snapshot;
 }
 

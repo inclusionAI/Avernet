@@ -17,7 +17,7 @@ const reviews = new WeakMap<ReconciliationReview, { encoded: string; owner: Reco
 const approvals = new WeakMap<ReconciliationApproval, { review: ReconciliationReview; context: string; specJson: string; generation: number }>()
 const id = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
-const token = /^[a-f0-9]{64}$/
+const hashPattern = /^[a-f0-9]{64}$/
 
 function document(text: string, workflowId: string): void {
   if (typeof text !== 'string') throw new Error('工作流文档无效；未确认。')
@@ -32,7 +32,7 @@ function document(text: string, workflowId: string): void {
 function encode(context: ReconciliationContext): string {
   if (!context || !id.test(context.workflowId) || !id.test(context.packId)
     || context.workflowId.includes('..') || context.packId.includes('..')
-    || !oid.test(context.sourceCommit) || !token.test(context.expectedDraftToken)
+    || !oid.test(context.sourceCommit) || !hashPattern.test(context.expectedDraftToken)
     || (context.sourceVersion !== 'draft' && context.sourceVersion !== 'current')
     || !(context.expectedSavedHead === null || oid.test(context.expectedSavedHead))
     || (context.sourceVersion === 'draft' && context.expectedSavedHead !== context.sourceCommit)

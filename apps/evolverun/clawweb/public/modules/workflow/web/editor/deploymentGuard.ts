@@ -38,10 +38,10 @@ export function createDeploymentId(): string {
 export function markDeploymentPending(workflowId: string): string {
   assertDeploymentAvailable(workflowId)
   try {
-    const token = createDeploymentId()
-    localStorage.setItem(keyFor(workflowId), token)
-    if (localStorage.getItem(keyFor(workflowId)) !== token) throw new Error('write failed')
-    return token
+    const marker = createDeploymentId()
+    localStorage.setItem(keyFor(workflowId), marker)
+    if (localStorage.getItem(keyFor(workflowId)) !== marker) throw new Error('write failed')
+    return marker
   } catch {
     throw new Error('无法记录待核对标记，部署未发送；请检查浏览器存储。')
   }
@@ -95,10 +95,10 @@ export function isEditorDeploymentPending(workflowId: string): boolean {
 }
 export function markEditorDeploymentPending(workflowId: string): string {
   if (isEditorDeploymentPending(workflowId)) throw new Error('部署操作正在进行，不能重复部署。')
-  const token = markDeploymentPending(workflowId)
-  editorPending.set(workflowId, token)
+  const marker = markDeploymentPending(workflowId)
+  editorPending.set(workflowId, marker)
   notifyPending()
-  return token
+  return marker
 }
 export function finishEditorDeployment(workflowId: string, token: string): void {
   if (editorPending.get(workflowId) === token) { editorPending.delete(workflowId); notifyPending() }

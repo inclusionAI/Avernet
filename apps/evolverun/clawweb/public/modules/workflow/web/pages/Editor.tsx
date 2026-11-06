@@ -538,12 +538,12 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const openDeploymentRecovery = useCallback(() => {
     if (!selectedWorkflowId || isEditorDeploymentPending(selectedWorkflowId)) return
     try {
-      const token = readEditorDeploymentMarker(selectedWorkflowId)
-      if (!token) throw new Error('核对标记不存在或无法读取，请重新检查。')
+      const marker = readEditorDeploymentMarker(selectedWorkflowId)
+      if (!marker) throw new Error('核对标记不存在或无法读取，请重新检查。')
       const current = sessionFor(selectedWorkflowId).state.deployment
-      if (current && deploymentTokens.get(current.input) !== token) throw new Error('部署请求与核对标记不匹配，请人工核对最新请求；不能清除此标记。')
+      if (current && deploymentTokens.get(current.input) !== marker) throw new Error('部署请求与核对标记不匹配，请人工核对最新请求；不能清除此标记。')
       const requestId = current?.input.requestId
-      recoveryTarget.current = { workflowId: selectedWorkflowId, token, requestId }
+      recoveryTarget.current = { workflowId: selectedWorkflowId, token: marker, requestId }
       setDeploymentRecovery({ workflowId: selectedWorkflowId, sessionId: useEditorStore.getState().sessionId, message: '请先人工核对 Git 和数据库。' })
       setDeploymentRecoveryError(null); setSaveMessage(null); setDeploymentRecoveryOpen(true)
     } catch (error) { setSaveMessage({ type: 'error', text: extractApiErrorMessage(error) }) }

@@ -334,13 +334,13 @@ describe('AutoHeal first database-only draft from active history', () => {
 
   it.each(['first read', 'locked read'])('maps the dedicated token error independent of its message at %s', async stage => {
     const active = (await history.findActiveByWorkflowId('flow'))!;
-    const token = editorActiveDeploymentToken('flow', active);
+    const activeHash = editorActiveDeploymentToken('flow', active);
     const original = activeTokenHelper.editorActiveDeploymentToken;
     const compute = vi.spyOn(activeTokenHelper, 'editorActiveDeploymentToken');
     if (stage === 'locked read') compute.mockImplementationOnce(original);
     compute.mockImplementationOnce(() => { throw new InvalidEditorActiveDeploymentTokenInputError('a new diagnostic message'); });
     const before = historyBytes();
-    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: token }))
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
       .rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
     expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
   });
@@ -350,16 +350,16 @@ describe('AutoHeal first database-only draft from active history', () => {
     new TypeError('Ambiguous active workflow token text')])
     ('does not translate unrelated token computation failures: %s', async failure => {
       const active = (await history.findActiveByWorkflowId('flow'))!;
-      const token = editorActiveDeploymentToken('flow', active);
+      const activeHash = editorActiveDeploymentToken('flow', active);
       vi.spyOn(activeTokenHelper, 'editorActiveDeploymentToken').mockImplementationOnce(() => { throw failure; });
-      await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: token }))
+      await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
         .rejects.toBe(failure);
       expect(drafts()).toEqual([]);
     });
 
   it('propagates a locked database read failure with the token precondition', async () => {
     const active = (await history.findActiveByWorkflowId('flow'))!;
-    const token = editorActiveDeploymentToken('flow', active);
+    const activeHash = editorActiveDeploymentToken('flow', active);
     const failure = new Error('private database lock failure');
     const transaction = db.transaction.bind(db);
     vi.spyOn(db, 'transaction').mockImplementationOnce(fn => transaction(tx => {
@@ -369,7 +369,7 @@ describe('AutoHeal first database-only draft from active history', () => {
         exec: tx.exec.bind(tx), transaction: tx.transaction.bind(tx), close: tx.close.bind(tx) };
       return fn(failing);
     }));
-    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: token }))
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
       .rejects.toBe(failure);
     expect(drafts()).toEqual([]);
   });

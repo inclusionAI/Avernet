@@ -5,8 +5,8 @@ beforeEach(() => localStorage.clear())
 afterEach(() => vi.restoreAllMocks())
 
 it('stores a workflow-scoped marker, blocks replacement, and clears on confirmed success', () => {
-  const token = markDeploymentPending('workflow/a')
-  expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.workflow%2Fa')).toBe(token)
+  const marker = markDeploymentPending('workflow/a')
+  expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.workflow%2Fa')).toBe(marker)
   expect(() => markDeploymentPending('workflow/a')).toThrow(/未确认/)
   expect(() => assertDeploymentAvailable('workflow/b')).not.toThrow()
   clearConfirmedDeployment('workflow/a')
@@ -56,37 +56,37 @@ it('fails closed if reading or writing storage throws or silently fails', () => 
 })
 
 it('refuses to clear a different attempt marker after a known rejection', () => {
-  const token = markDeploymentPending('workflow')
+  const marker = markDeploymentPending('workflow')
   localStorage.setItem('clawweb.autoheal.review-blocked.v1.workflow', 'newer-attempt')
-  expect(() => clearRejectedDeployment('workflow', token)).toThrow()
+  expect(() => clearRejectedDeployment('workflow', marker)).toThrow()
   expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.workflow')).toBe('newer-attempt')
 })
 
 it('keeps a known rejection blocked when storage cannot remove its marker', () => {
-  const token = markDeploymentPending('workflow')
+  const marker = markDeploymentPending('workflow')
   const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {})
-  expect(() => clearRejectedDeployment('workflow', token)).toThrow(/无法清除/)
-  expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.workflow')).toBe(token)
+  expect(() => clearRejectedDeployment('workflow', marker)).toThrow(/无法清除/)
+  expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.workflow')).toBe(marker)
   remove.mockRestore()
 })
 
 it('blocks shared manual and legacy success clears while an Editor request is pending', () => {
-  const token = markEditorDeploymentPending('editor')
+  const marker = markEditorDeploymentPending('editor')
   try {
     expect(() => clearReconciledDeployment('editor', { gitAndDatabaseConfirmed: true })).toThrow(/正在进行/)
-    expect(() => clearEditorReconciledDeployment('editor', token)).toThrow(/正在进行/)
+    expect(() => clearEditorReconciledDeployment('editor', marker)).toThrow(/正在进行/)
     expect(() => clearConfirmedDeployment('editor')).toThrow(/正在进行/)
     expect(() => markDeploymentPending('editor')).toThrow()
-    expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.editor')).toBe(token)
-  } finally { finishEditorDeployment('editor', token) }
-  clearEditorReconciledDeployment('editor', token)
+    expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.editor')).toBe(marker)
+  } finally { finishEditorDeployment('editor', marker) }
+  clearEditorReconciledDeployment('editor', marker)
 })
 
 it('Editor completion and reconciliation cannot clear a different marker', () => {
-  const token = markEditorDeploymentPending('editor')
+  const marker = markEditorDeploymentPending('editor')
   localStorage.setItem('clawweb.autoheal.review-blocked.v1.editor', 'newer')
-  try { expect(() => clearEditorConfirmedDeployment('editor', token)).toThrow(/无法清除/) }
-  finally { finishEditorDeployment('editor', token) }
-  expect(() => clearEditorReconciledDeployment('editor', token)).toThrow(/无法清除/)
+  try { expect(() => clearEditorConfirmedDeployment('editor', marker)).toThrow(/无法清除/) }
+  finally { finishEditorDeployment('editor', marker) }
+  expect(() => clearEditorReconciledDeployment('editor', marker)).toThrow(/无法清除/)
   expect(localStorage.getItem('clawweb.autoheal.review-blocked.v1.editor')).toBe('newer')
 })

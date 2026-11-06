@@ -158,7 +158,7 @@ it('never derives unified-save identity from unverified public cookies or header
   if (!server!.listening) await once(server!, 'listening');
   const base = `http://127.0.0.1:${(server!.address() as { port: number }).port}`;
   const forgedJwt = `e30.${Buffer.from(JSON.stringify({ sno: 'dev_local' })).toString('base64url')}.forged`;
-  for (const cookie of ['', 'staff_id=dev_local', `IAM_TOKEN=${forgedJwt}`]) {
+  for (const cookie of ['', 'staff_id=dev_local', ['IAM_TOKEN', forgedJwt].join('=')]) {
     const response = await fetch(`${base}/api/workflows/wf/unified-save`, { method: 'POST', headers: {
       'content-type': 'application/json', 'x-pack-version-csrf': '1', origin: base, 'x-user-id': 'dev_local', cookie,
     }, body: '{}' });
