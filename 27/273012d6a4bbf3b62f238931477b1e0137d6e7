@@ -1,0 +1,44 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-run-subworkflows.test.ts
+  h_43af82e14600e4 41,49-54
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/pack-operation-migration.test.ts
+  h_43af82e14600e4 46-68,75-76
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-git-settings.test.ts
+  h_43af82e14600e4 344,353
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-lifecycle.test.ts
+  h_43af82e14600e4 10,41,61-62,70
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowDocument.test.tsx
+  h_43af82e14600e4 47-48,51,56-71,118,123,127,130-131,135,144-163
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowUnifiedSave.hook.test.tsx
+  h_43af82e14600e4 17,21,50,55,87,99-126,146,150-153,160,164-166,168,170-172
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packRenameSessionSafety.test.tsx
+  h_43af82e14600e4 68-69,242-248,258-271,276
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.trustedRecovery.test.ts
+  h_43af82e14600e4 26,31,39-46,73-74,81-86
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  h_43af82e14600e4 78,81-82,84,417
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPackSafety.test.tsx
+  h_43af82e14600e4 70-88,94-97,125-133,135-137
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPartialSaveCache.test.tsx
+  h_43af82e14600e4 25-26,50-97,109-110,117,121,126,137,139-143,145-152,156-158,162-164,167,169-170,172-173,175-178,181-184,186-187,189-194,196-199,201-204,207-228,231-235,237-245,248-251,255-258,261
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowTransition.test.tsx
+  h_43af82e14600e4 199
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  h_43af82e14600e4 261
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  h_43af82e14600e4 27-35
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  h_43af82e14600e4 173
+apps/evolverun/clawweb/scripts/ci/run-tests.mjs
+  h_43af82e14600e4 129-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "27273012d6a4bbf3b62f238931477b1e0137d6e7",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
