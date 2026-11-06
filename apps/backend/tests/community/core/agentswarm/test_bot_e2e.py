@@ -450,6 +450,12 @@ class TestBotKindEndToEnd:
         )
         from agentclaw.community.plugin_api.passport import PassportPlugin
 
+        from tests.community.framework.device_seams import (
+            RecordingDeviceSync, install_fake_sync_dispatcher,
+        )
+        # Provisioning supplies a local filesystem binding, so its native MCP
+        # delivery edge needs the same no-network stand-in as the engine WS.
+        install_fake_sync_dispatcher(world, plugin=RecordingDeviceSync())
         created = _stand_in_for_provisioning(world)
         ws = _ScriptedEngineWs(reply='{"answer": "survey ok"}')
         platform = AvernetBotPlatform(
@@ -506,7 +512,15 @@ class TestBotKindEndToEnd:
             pump.stop_and_join()
 
         assert run is not None, "run row vanished"
-        assert run.status is dm.RunStatus.COMPLETED
+        assert run.status is dm.RunStatus.COMPLETED, {
+            "run": run,
+            "creation_reports": [
+                world.get(ApplyRunServiceProtocol).last_apply(
+                    entity_id=OWNER, bot_id=bot["bot_id"],
+                )
+                for bot in created
+            ],
+        }
         assert run.termination_reason is dm.TerminationReason.FINISH
         assert run.final_answer == "e2e-bot-done"
 
