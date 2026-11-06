@@ -121,7 +121,8 @@ impl DbPlugin for RecordingDbPlugin {
                     results.push(DbTransactionStepResult::Rows(Vec::new()));
                 }
                 DbTransactionStep::Execute(statement)
-                | DbTransactionStep::ExecuteChecked { statement, .. } => {
+                | DbTransactionStep::ExecuteChecked { statement, .. }
+                | DbTransactionStep::QueryChecked { statement, .. } => {
                     self.transaction_statements
                         .lock()
                         .expect("transaction statements")
