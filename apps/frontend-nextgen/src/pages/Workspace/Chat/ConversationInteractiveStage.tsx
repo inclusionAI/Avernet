@@ -94,6 +94,7 @@ export function ConversationInteractiveStage(props: {
             sidePaneEnabled={presentation.sidePane}
             isRequesting={botChat.chat.isRequesting}
             isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
+            historyReady={botChat.historyReady}
             connectionStatus={botChat.connectionStatus}
             retryCount={botChat.chat.retryCount}
             supportState={botChat.supportState}

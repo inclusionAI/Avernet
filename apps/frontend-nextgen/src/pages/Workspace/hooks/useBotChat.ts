@@ -33,11 +33,9 @@ export function useBotChat(
   const sessionId = session?.sessionId ?? null;
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
-  // 进入流程信号（连接 / 历史双完成才就绪，任一失败即 failed）：useSessionDisplayStatus 的输入。
-  // 单聊 connect 与 loadHistory 并行（AC-3 边界），手动 reconnect / reloadHistory 成功后也回写信号，
-  // 避免失败态恢复后卡在「连接中」。
+  // 连接状态仍等待双完成，但 HTTP 历史独立就绪，先供阅读，不等待 IAM/握手。
   const [connectDone, setConnectDone] = useState(false);
-  const [historyDone, setHistoryDone] = useState(false);
+  const [historyProvider, setHistoryProvider] = useState<ReturnType<typeof createBotChatProvider> | null>(null);
   const [enterFailed, setEnterFailed] = useState(false);
   const [historyEmpty, setHistoryEmpty] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
@@ -49,12 +47,11 @@ export function useBotChat(
   }, [bot, sessionId, identityId]);
 
   const connectionRuntime = useBotConnectionRuntime(provider);
+  const historyDone = provider !== null && historyProvider === provider;
+  const currentProvider = useRef(provider);
+  currentProvider.current = provider;
 
-  // 副屏方式②数据桥（对应单聊 Bot render screens）：进入会话按 botId 拉 Bot 的 CDN 库映射写
-  // window.aixLibraryCdnMap，供引擎 resolveBusinessEntry 把 <AixUI component="lib.X"> 的 lib 解析成
-  // CDN URL。切换 Bot / 卸载时清旧 botId 的 CDN scope，避免残留串用（对齐 ocb replaceBotCdnScopes；
-  // cleanup 先于下一 effect 运行 → 先清旧再查新）。拉取失败静默降级，不阻塞会话主流程、不 toast
-  // （保持与 useGroupChat manifest 桥一致的静默降级策略）。
+  // 副屏 CDN 映射后台加载；切 Bot/卸载清旧 scope，失败不阻塞历史和连接。
   useEffect(() => {
     const botId = bot?.botId ?? null;
     const runtimeAllowsCdn = !bot?.isFriendBot
@@ -68,8 +65,7 @@ export function useBotChat(
     };
   }, [bot?.botId, bot?.isFriendBot, connectionRuntime, loadBotLibraryCdn]);
 
-  // panelRef 透传 SDK useChat：useChat 拿到 panelRef 后 chat.onRequest 会自动 flushContext()
-  // 并以 panelContext 注入请求，使 bot 引擎感知用户在副屏的交互（对应 useGroupChat:56 的 panelRef 注入）。
+  // panelRef 透传 SDK，发送时自动 flushContext() 注入副屏交互。
   const chat = useChat({
     provider: (provider ?? null) as never,
     conversationKey: sessionId ?? undefined,
@@ -95,7 +91,6 @@ export function useBotChat(
     prevRef.current = sessionId;
     setConnectDone(false);
     setEnterFailed(false);
-    // 切换会话:清空副屏 tab,避免旧会话副屏残留叠加到新会话(对齐 useGroupChat connect effect)。
     panelRef?.current?.closePanelForce();
     provider
       .connect()
@@ -140,7 +135,7 @@ export function useBotChat(
     let cancelled = false;
     setHasMoreHistory(false);
     setIsLoadingMoreHistory(false);
-    setHistoryDone(false);
+    setHistoryProvider(null);
     setHistoryEmpty(false);
     setEnterFailed(false);
     provider
@@ -151,7 +146,7 @@ export function useBotChat(
           chat.setMessages(merged);
           setHasMoreHistory(provider.hasMoreHistory);
           setHistoryEmpty(merged.length === 0);
-          setHistoryDone(true);
+          setHistoryProvider(provider);
         }
       })
       .catch((error: unknown) => {
@@ -208,14 +203,16 @@ export function useBotChat(
     setIsLoadingMoreHistory(true);
     try {
       const older = await provider.loadMoreHistory();
+      if (currentProvider.current !== provider) return;
       if (older.length > 0) {
         chat.setMessages((current) => prependUniqueMessages(current, older));
       }
       setHasMoreHistory(provider.hasMoreHistory);
     } catch (error) {
+      if (currentProvider.current !== provider) return;
       toast.error(error instanceof Error ? error.message : '加载更多历史消息失败');
     } finally {
-      setIsLoadingMoreHistory(false);
+      if (currentProvider.current === provider) setIsLoadingMoreHistory(false);
     }
   };
 
@@ -223,12 +220,14 @@ export function useBotChat(
     if (!provider || !sessionId) return;
     try {
       const h = await provider.loadHistory();
+      if (currentProvider.current !== provider) return;
       chat.setMessages(h);
       setHasMoreHistory(provider.hasMoreHistory);
       setEnterFailed(false);
       setHistoryEmpty(h.length === 0);
-      setHistoryDone(true);
+      setHistoryProvider(provider);
     } catch (e) {
+      if (currentProvider.current !== provider) return;
       setEnterFailed(true);
       toast.error(e instanceof Error ? e.message : '加载历史消息失败');
     }
@@ -238,6 +237,7 @@ export function useBotChat(
     chat,
     supportState,
     connectionStatus: displayStatus.status,
+    historyReady: historyDone,
     connectionRuntime,
     send,
     stop,
