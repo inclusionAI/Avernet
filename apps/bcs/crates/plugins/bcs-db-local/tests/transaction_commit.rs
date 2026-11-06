@@ -76,13 +76,13 @@ async fn query_checked_with_expected_min_rows_zero_always_continues() -> DbResul
 }
 
 #[tokio::test]
-async fn query_checked_stop_does_not_execute_later_query_with_bindings() -> DbResult<()> {
+async fn query_checked_stop_skips_later_steps() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     db.execute(DbStatement::new("CREATE TABLE t (k INTEGER PRIMARY KEY, v TEXT)")).await?;
     db.execute(DbStatement::new("INSERT INTO t VALUES (1, 'alpha')")).await?;
-    // Query returns one row (k=1, v='alpha'), expected_min_rows=2 → stops.
-    // The later step references query result row 0, but because the
-    // transaction stops, resolve_transaction_params is never called for it.
+    // Query returns 2 rows, expected_min_rows=5 → stops.
+    // The later INSERT step is skipped entirely because the transaction
+    // breaks after QueryChecked, regardless of whether later steps have bindings.
     let results = db.transaction(vec![
         DbTransactionStep::Execute(DbStatement::new("INSERT INTO t VALUES (2, 'before')")),
         DbTransactionStep::QueryChecked {
