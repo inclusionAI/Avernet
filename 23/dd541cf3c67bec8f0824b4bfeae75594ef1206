@@ -1,0 +1,16 @@
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/config_install.rs
+  h_9547b72f8f06cd 1-27
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  h_9547b72f8f06cd 99-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23dd541cf3c67bec8f0824b4bfeae75594ef1206",
+  "prompts": {},
+  "humans": {
+    "h_9547b72f8f06cd": {
+      "author": "ray <ray@U-PCF66F1V-2003.local>"
+    }
+  }
+}
