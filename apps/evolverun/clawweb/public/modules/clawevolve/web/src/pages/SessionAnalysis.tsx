@@ -1085,6 +1085,26 @@ function SessionAnalysisDetail() {
               </div>
             </section>
           )}
+          {task.mode === "ANALYZE_SINGLE" && task.status === "completed" && !task.sessionPreview && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="text-base font-semibold text-gray-900">Session 事件</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                {task.sessionPreviewUnavailableReason || "当前任务暂无在线会话预览，可查看下方报告或下载已有产物。"}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {task.artifacts?.includes("raw") && (
+                  <button className={secondaryButton} onClick={() => void download("raw")}>
+                    下载 Session 文件
+                  </button>
+                )}
+                {task.artifacts?.includes("trajectory") && (
+                  <button className={secondaryButton} onClick={() => void download("trajectory")}>
+                    下载运行轨迹
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
           {task.mode === "ANALYZE_SINGLE" && task.sessionPreview && (
             <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
               <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
