@@ -23,6 +23,9 @@ check.
   evaluation, and promotion boundaries.
 - [`rsi/candidate-version-binding.md`](rsi/candidate-version-binding.md): evidence
   for binding harness, model, environment, and observed execution identities.
+- [`rsi/evaluation-data-boundaries.md`](rsi/evaluation-data-boundaries.md): a
+  research boundary for training, development evaluation, and independent
+  acceptance data.
 
 The accepted decisions remain authoritative:
 
