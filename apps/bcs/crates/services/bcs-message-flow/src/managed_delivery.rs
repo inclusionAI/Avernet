@@ -307,13 +307,59 @@ impl ManagedMessageDelivery {
             }
             return Ok(original.clone());
         }
+        // Protected result park carried to the post-commit publish below:
+        // (parked identity, result message id, Manager target).
+        let mut pending_result_park: Option<(crate::queued_task_terminal::ResultLegIdentity, String, String)> = None;
         if command.reply.is_none() && outcome.changed {
-            command.reply = crate::task_failure::fallback(original, outcome.state, command.now_ms,
-                command.actor_id.as_deref(), command.transport_context_json.as_ref())
-                .map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+            // Protected result routing (caller-enabled Manager): the §15.4
+            // gate refuses ordinary content dispatch, so the failure notice
+            // must carry its own protected material and park the session
+            // identity BEFORE the queue commit — the same decision and the
+            // same park queued_task_terminal::commit performs for worker
+            // terminal callbacks. Parked material is published against the
+            // committed rows after the transaction lands below.
+            let mut protected_text: Option<String> = None;
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                let task = crate::queued_task::intent(original).ok().flatten()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch);
+                let failure = crate::task_failure::failure_reason(original, outcome.state,
+                    command.actor_id.as_deref(), command.transport_context_json.as_ref());
+                if let (Some(task), Some((cancelled, reason))) = (task, failure) {
+                    let text = crate::task_failure::failure_body(cancelled, &reason, false);
+                    let park = crate::queued_task_terminal::protect_result_leg(
+                        &flow, &task, &original.session_id, &original.group_id, &text, command.now_ms,
+                    ).await.map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+                    if let Some(park) = park {
+                        pending_result_park = Some((park,
+                            crate::queued_task_terminal::result_message_id(&task.task_id), task.manager.clone()));
+                        protected_text = Some(text);
+                    }
+                }
+            }
+            command.reply = match crate::task_failure::fallback(original, outcome.state, command.now_ms,
+                command.actor_id.as_deref(), command.transport_context_json.as_ref(), protected_text.as_deref()) {
+                Ok(reply) => reply,
+                Err(error) => {
+                    if let Some((parked, ..)) = pending_result_park.take() {
+                        if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                            crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                        }
+                    }
+                    return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(error.to_string())));
+                },
+            };
             if let (Some(policy), Some(reply)) = (&policy, command.reply.as_mut()) {
                 for target in &mut reply.targets { target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued; }
                 reply.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| reply.now_ms.saturating_add(ttl as i64));
+            }
+            if command.reply.is_none() {
+                // No notice was built (not a task leg / already notified):
+                // the reservation never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
             }
         }
         if start_abort
@@ -321,6 +367,11 @@ impl ManagedMessageDelivery {
             && !(event == Event::ScopeAbortRequested
                 && original.state.status == Status::CancelUnknown)
         {
+            if let Some((parked, ..)) = pending_result_park.take() {
+                if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                    crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                }
+            }
             return Err(ManagedDeliveryError::Conflict);
         }
         let mut primary = original.clone();
@@ -654,7 +705,7 @@ impl ManagedMessageDelivery {
             .iter()
             .map(|update| update.delivery.clone())
             .collect();
-        let (committed_reply, _guards) = {
+        let commit_outcome = {
             let _timing = crate::reply_timing::Timer::new("delivery.commit_repository");
             let repo = self.repo.clone();
             let cleanup = self.output_cleanup.get().cloned();
@@ -668,12 +719,39 @@ impl ManagedMessageDelivery {
                     flow.release_unsent_output(&terminal).await;
                 }
                 Ok(result)
-            }).await?
+            }).await
+        };
+        let (committed_reply, _guards) = match commit_outcome {
+            Ok(committed) => committed,
+            Err(error) => {
+                // The admission never landed; the reserved result identity
+                // never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
+                return Err(error);
+            }
         };
         if let Some(reply) = committed_reply {
             if !reply.duplicate {
+                if let Some((parked, message_id, manager)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::publish_result_leg_identity(
+                            &flow, &parked, &reply.deliveries, &message_id, &manager, command.now_ms,
+                        ).await;
+                    }
+                }
                 if let Some(hook) = &self.instrumentation { for row in &reply.deliveries { hook.event("admitted", row); } }
                 notifications.extend(reply.deliveries);
+            }
+        }
+        // A duplicate admission leaves the identity's publish to the ORIGINAL
+        // admission — this surplus reservation never meets its marked row.
+        if let Some((parked, ..)) = pending_result_park.take() {
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
             }
         }
         let _ = self.changes.send(notifications);

@@ -27,12 +27,14 @@ impl QueuedGroupProjection {
         projection.provider_route_headers.clear();
         Ok(projection)
     }
-    pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>) -> ServiceResult<Self> {
+    pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>, protected: Option<&str>) -> ServiceResult<Self> {
         let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
         projection.caller_execution = None;
         projection.sender_name = task.worker_name.clone();
         projection.target_tags = tags;
         projection.mentions = vec![task.manager.clone()];
+        let worker_id = task.worker.clone();
+        let worker_name = task.worker_name.clone();
         projection.task = Some(task);
         // The result delivery is a DIFFERENT execution than the dispatch it
         // answers (review P1.III.2): the worker's caller marks, task text
@@ -53,6 +55,22 @@ impl QueuedGroupProjection {
         // Manager's own Owner association never rides onto the Worker's
         // result delivery.
         projection.caller_lineage = None;
+        // Protected result routing (caller-enabled Manager): the §15.4 gate
+        // refuses ordinary content dispatch to caller-enabled bots, so the
+        // result rides the SAME protected transport as the session's human
+        // turns — with the RESULT's own material (the canonical result text
+        // as the digest input and the worker as the trusted ordinary
+        // sender), never the worker's dispatch facts above. `protected` is
+        // decided by the trusted terminal admission alone (config query +
+        // identity park); a request body can never inject it.
+        if let Some(text) = protected.map(str::trim).filter(|text| !text.is_empty()) {
+            projection.caller_required = true;
+            projection.caller_task = text.to_string();
+            projection.caller_channel = Some(serde_json::json!({
+                "actor_id": worker_id,
+                "actor_name": worker_name,
+            }));
+        }
         Ok(projection)
     }
     pub(crate) fn task(group: &Group, recipient: &str, sender_name: &str, task: crate::queued_task::TaskIntent) -> ServiceResult<Self> {

@@ -68,3 +68,16 @@ story_native_task_caller_delegation() {
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_native_task_caller_delegation")
 fi
+
+story_late_caller_manager_protected_result() {
+    info "Story: late enabled Manager receives Worker results over the protected transport"
+    local result=0
+    python3 "$SCRIPT_DIR/protected_result_leg_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Late-enabled Manager parks identity and rides protected result and failure legs" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_late_caller_manager_protected_result")
+fi
