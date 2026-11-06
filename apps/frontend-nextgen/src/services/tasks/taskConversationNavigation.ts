@@ -112,3 +112,18 @@ export function shouldPreserveTaskPanelDuringNavigation(): boolean {
   if (!navigation) return false;
   return !navigation.routeHydrated || isTaskNavigationAtCurrentRoute(navigation);
 }
+
+/**
+ * Release a task-navigation lease when the workspace selects a different conversation.
+ *
+ * Task navigation is allowed to retain the persistent panel across a route handoff, but
+ * that lease is scoped to its destination session. A directory click that selects another
+ * session must not inherit the old lease; otherwise the group route can still see the old
+ * URL while `history.replace` settles and closePanelForce remains suppressed.
+ */
+export function releaseTaskPanelNavigationForOtherSession(targetSessionId: string | null): void {
+  if (!targetSessionId) return;
+  const store = useTaskConversationNavigationStore.getState();
+  const navigation = store.navigation;
+  if (navigation && navigation.sessionId !== targetSessionId) store.completeNavigation(navigation.id);
+}

@@ -6,6 +6,8 @@ import { useGroupChat } from '@/pages/Workspace/hooks/useGroupChat';
 import { createGroupChatProvider } from '@/services/workspace/groupChatProvider';
 import type { GroupExecApprovalSnapshot } from '@/services/workspace/groupExecApprovalService';
 import type { GroupQuestionSnapshot } from '@/services/workspace/groupQuestionService';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -121,6 +123,8 @@ beforeEach(() => {
   // aixBridge 由 @/services/workspace/chatBridge mock 的 getter 在 useGroupChat 渲染时 ensure 指回单例,
   // 不在此 delete(单例跨 test 缓存,delete 后下一测试构造副作用不重跑);保留 resetWorkspace。
   useWorkspaceStore.getState().resetWorkspace();
+  useTaskConversationNavigationStore.getState().resetAll();
+  useTaskSidePanelStore.getState().resetAll();
   useWorkspaceStore.setState({ activeIdentityId: 'me', identities: [{ id: 'me', kind: 'user', displayName: 'Me', online: true }] });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,6 +230,29 @@ it('同会话在列表详情补齐后重建 provider 不重复关闭副屏', asy
   });
 
   expect(closePanelForce).not.toHaveBeenCalled();
+});
+
+it('手动切换群 session 时释放旧任务保活租约并清理副屏', async () => {
+  const { result, rerender } = renderHook(
+    ({ current }: { current: SessionView }) => useGroupChat(current),
+    { initialProps: { current: session } },
+  );
+
+  const closePanelForce = jest.fn();
+  act(() => {
+    (result.current.panelRef as { current: PanelHandle | null }).current = {
+      closePanelForce,
+    } as PanelHandle;
+  });
+  const store = useTaskConversationNavigationStore.getState();
+  const navigationId = store.beginNavigation('task-old', '/workspace/collaboration', 's1');
+  store.markRouteCommitted(navigationId);
+  useTaskSidePanelStore.getState().setActiveTask('task-old');
+
+  rerender({ current: { ...session, sessionId: 's2' } });
+
+  expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
+  expect(closePanelForce).toHaveBeenCalledTimes(1);
 });
 
 it('absent mode keeps history refresh and pagination but blocks every send/reconnect entry', async () => {
