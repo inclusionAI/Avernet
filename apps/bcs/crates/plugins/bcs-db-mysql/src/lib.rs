@@ -417,4 +417,56 @@ mod tests {
         );
     }
 
+    #[test]
+    fn query_checked_converts_from_db_transaction_step() {
+        let step = DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT 1"),
+            expected_min_rows: 3,
+        };
+        let prepared = PreparedTransactionStep::from(step);
+        assert!(matches!(prepared, PreparedTransactionStep::QueryChecked(_, 3)));
+    }
+
+    #[test]
+    fn query_checked_with_large_expected_min_rows() {
+        let step = DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT * FROM huge_table"),
+            expected_min_rows: u64::MAX,
+        };
+        let prepared = PreparedTransactionStep::from(step);
+        assert!(matches!(prepared, PreparedTransactionStep::QueryChecked(_, u64::MAX)));
+    }
+
+    #[test]
+    fn all_prepared_variants_convert_losslessly() {
+        let cases: Vec<(DbTransactionStep, &str)> = vec![
+            (DbTransactionStep::Query(DbStatement::new("SELECT 1")), "Query"),
+            (DbTransactionStep::Execute(DbStatement::new("INSERT INTO t VALUES (1)")), "Execute"),
+            (
+                DbTransactionStep::ExecuteChecked {
+                    statement: DbStatement::new("UPDATE t SET x=1 WHERE id=42"),
+                    expected_affected_rows: 1,
+                },
+                "ExecuteChecked",
+            ),
+            (
+                DbTransactionStep::QueryChecked {
+                    statement: DbStatement::new("SELECT * FROM t"),
+                    expected_min_rows: 10,
+                },
+                "QueryChecked",
+            ),
+        ];
+        for (step, expected_variant) in cases {
+            let prepared = PreparedTransactionStep::from(step);
+            let variant_name = match &prepared {
+                PreparedTransactionStep::Query(_) => "Query",
+                PreparedTransactionStep::Execute(_) => "Execute",
+                PreparedTransactionStep::ExecuteChecked(_, _) => "ExecuteChecked",
+                PreparedTransactionStep::QueryChecked(_, _) => "QueryChecked",
+            };
+            assert_eq!(variant_name, expected_variant, "variant mismatch for {expected_variant}");
+        }
+    }
+
 }
