@@ -14,9 +14,8 @@ import json
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.adapters.http.task.read_auth import task_read_actor
-from agentclaw.community.core.gateway_principal import VerifiedCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -106,7 +105,7 @@ def _normalize_content_fields(raw: dict) -> None:
 @envelope_errors
 async def list_task_artifacts(
     request: Request,
-    user: AuthenticatedUser | VerifiedCaller = Depends(task_read_actor),
+    user: AuthenticatedUser = Depends(get_current_user),
     task_id: str = Query(..., description="任务 ID(创建时签发;检索维度,必填)"),
     node_id: str | None = Query(
         None, description="产出节点 ID;指定则只列该节点产物"

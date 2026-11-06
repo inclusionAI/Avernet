@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from agentclaw.community.adapters.http.task.read_auth import task_read_actor
-
 import logging
 from types import SimpleNamespace
 
@@ -334,7 +332,7 @@ def human_task_client():
     svc = injector.get(TaskServiceProtocol)
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[task_read_actor] = app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id="id-1",
         staffId="owner-1",
         operatorName="owner",

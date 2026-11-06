@@ -1,8 +1,6 @@
 """读侧最小暴露:TaskNodeDTO.artifacts 富化 + graph_to_dto 零变化 + 轨迹 HTML 产物块(spec §7)。"""
 from __future__ import annotations
 
-from agentclaw.community.adapters.http.task.read_auth import task_read_actor
-
 from datetime import datetime
 
 from fastapi import FastAPI
@@ -238,7 +236,7 @@ def _client(records) -> TestClient:
     app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 
-    app.dependency_overrides[task_read_actor] = app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: object()
     attach_injector(app, injector)
     client = TestClient(app)
     client.app.state.artifact_service = module._artifact_service
