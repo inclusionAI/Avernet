@@ -1,0 +1,31 @@
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions.rs
+  s_8538143de29560::t_266b57dd91146d 1657-1662
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_8538143de29560::t_27cbc5a04e9a44 776,779-820,826
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_8538143de29560::t_289f67da456133 65-92
+apps/bcs/crates/services/bcs-message-flow/tests/contract_bot_event/task_routing.rs
+  s_8538143de29560::t_48408736e20e14 88,101,103
+apps/bcs/crates/services/bcs-message-flow/tests/operation_output_uncertainty.rs
+  s_8538143de29560::t_3b9f86d14c10ef 27-30,37-40
+apps/bcs/crates/services/bcs-message-flow/tests/support/session.rs
+  s_8538143de29560::t_dddbc9f9f04bf9 102
+apps/bcs/crates/services/bcs-message-flow/tests/support/task_handles.rs
+  s_8538143de29560::t_da5a7413d48385 160-165,221-223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c98ce7f411ccf698c0c689064d89e3a5963cc3b7",
+  "prompts": {},
+  "sessions": {
+    "s_8538143de29560": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abe4-191f-7a70-af7d-c9a7cb8741b5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
