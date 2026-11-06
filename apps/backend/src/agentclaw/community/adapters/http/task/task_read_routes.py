@@ -6,12 +6,16 @@
 ``get_current_user``,公开面经 gateway spanner 走 ``require_principal``。
 独立小模块的原因:task/router.py 已在 Rule 9 体积帽沿(1000 行),读侧属
 新的内聚关注点,按 relay/bbs/intake 子路由的既有先例拆出。
+
+Read services are synchronous and may call database or staff-directory plugins;
+offload them so a slow dependency cannot block this worker's event loop.
 """
 from __future__ import annotations
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -67,11 +71,15 @@ async def get_task_dashboard_internal(
     任务/节点不存在 → TaskNotFoundError/NodeNotFoundError → 404。"""
     del user
     if include_action_log:
-        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id, include_action_log=True
+        )
     else:
-        graph = service.get_task_dashboard(task_id, node_id)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id
+        )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
-    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
@@ -95,7 +103,7 @@ async def get_task_by_session_internal(
 ) -> Envelope[BySessionDTO]:
     """Resolve a chat session to its relay task node (internal mirror)."""
     del user
-    refs = service.get_task_nodes_by_session(session_id)
+    refs = await run_in_threadpool(service.get_task_nodes_by_session, session_id)
     if not refs:
         raise NotFound("task session not found")
     return envelope(by_session_refs_to_dto(session_id, refs), request)
@@ -150,9 +158,12 @@ async def list_tasks_internal(
             detail="page and page_size must be both provided or both omitted",
         )
     if page_size is None:
-        items = service.list_tasks(status, owner_user_id=user_id)
+        items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.list_tasks, status, owner_user_id=user_id
+        )
         return envelope([task_info_record_to_dto(item) for item in items], request)
-    items, total = service.list_tasks_page(
+    items, total = await run_in_threadpool(
+        service.list_tasks_page,
         status, owner_user_id=user_id, page=page or 1, page_size=page_size
     )
     return page_envelope(
