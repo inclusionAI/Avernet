@@ -1,0 +1,47 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/client_versions.rs
+  s_14f580f3a2c4d3::t_61a677d3cea259 50,60,70,74
+  s_bd63b08a84ff5c::t_97ba9175667fee 3,7-16,18,33-49,51-53,55-59,61-69
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_14f580f3a2c4d3::t_ac8fce31d38468 29-30,34-38
+  s_bd63b08a84ff5c::t_6c0bac05d9e66c 39-43
+  s_bd63b08a84ff5c::t_bbc80f2b40cd55 44
+apps/bcs-internal/docs/sofa-tracer.md
+  s_bd63b08a84ff5c::t_6c0bac05d9e66c 87-95
+  s_14f580f3a2c4d3::t_ad484f692ef64c 70-71,78-85
+  s_14f580f3a2c4d3::t_ba41296d28d431 226-256
+  s_bd63b08a84ff5c::t_63c681bf35ef43 86
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_bd63b08a84ff5c::t_75d4f6a038b9cf 141-151
+  s_14f580f3a2c4d3::t_61a677d3cea259 118-133,153-176,297-305,315,322-335
+  s_bd63b08a84ff5c::t_2687a8d1e42c50 134-140,152
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_14f580f3a2c4d3::t_51e78d012f84fa 93
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_14f580f3a2c4d3::t_765a6a8cbe6064 9-17,113
+apps/bcs-internal/Cargo.toml
+  s_14f580f3a2c4d3::t_51e78d012f84fa 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1db4c9e0c6c3a142410e9f255076094a1fbd6bc7",
+  "prompts": {},
+  "sessions": {
+    "s_14f580f3a2c4d3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aae7-4cd8-74b0-8e22-27155a285494",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_bd63b08a84ff5c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ab0e-eea1-7601-b5f0-d2ca7ef88eb0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

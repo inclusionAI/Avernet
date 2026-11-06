@@ -1,0 +1,30 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  h_b601d8706f5d44 17,25
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  h_b601d8706f5d44 21,23,27,32,46-50,81,211,220
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/skill/handbook.md
+  h_b601d8706f5d44 29
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  h_b601d8706f5d44 11
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/references/tool-contract.md
+  h_b601d8706f5d44 7-12
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  h_b601d8706f5d44 16,28-29,49,55,92,106,108,144,153-161,173,195-204,286
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/evals/recovery-behavior-cases.json
+  h_b601d8706f5d44 1-230
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  h_b601d8706f5d44 50-56,140-147,194,197
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  h_b601d8706f5d44 3,132-133,145-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "27d796f82c02375a3bb1765423540bd1a4545dc8",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
