@@ -133,7 +133,8 @@ async def resources(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetResourceItem]]:
-    items = await run_in_threadpool(
+    # The SkillSet management protocol defines list_resources as synchronous.
+    items = await run_in_threadpool(  # allow-run-in-threadpool
         service.list_resources,
         bot_id=bot_id,
         owner_id=owner_id,
