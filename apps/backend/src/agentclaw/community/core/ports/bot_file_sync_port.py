@@ -35,8 +35,13 @@ class BotFileSyncTarget:
     The port stays import-light: it never names ``apply_engine.context``
     (that would invert the ports → apply_engine consumer edge into a cycle),
     so the materialiser, which lives in apply_engine and owns the context,
-    lifts the five coords the implementation resolves devices and engine
-    strategy against, and hands them over as this value.
+    lifts the coords the implementation resolves devices and engine strategy
+    against, and hands them over as this value. ``entity_type`` is one of them:
+    a NAS-path resolver keys the storage id on it (``{env}_{entity_type}_…``),
+    and the port reads it off the dst bot record at the on_container phase
+    (the record exists by then). A missing record falls back to ``"staff"``,
+    the same default the rest of the codebase reads a bot record's
+    ``entity_type`` with.
     """
 
     bot_id: str
@@ -44,6 +49,7 @@ class BotFileSyncTarget:
     entity_id: str
     env: str
     engine_type: str
+    entity_type: str
 
 
 @dataclass(frozen=True)

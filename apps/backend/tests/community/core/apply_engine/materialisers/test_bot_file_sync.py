@@ -109,6 +109,9 @@ def test_write_succeeds_creates_the_entry_and_passes_coords_to_the_port() -> Non
     assert port.target.entity_id == "e"
     assert port.target.env == "dev"
     assert port.target.engine_type == "openclaw"
+    # The dst bot's entity_type is lifted off ctx.bot — the NAS path the port
+    # resolves keys its storage id on it.
+    assert port.target.entity_type == "staff"
     assert port.source_bot_id == "b_src"
     assert port.path == "workspace/"
     assert port.excludes == ("secrets/",)
