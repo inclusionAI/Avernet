@@ -19,8 +19,8 @@ describe('independent flow run links', () => {
   it('creates and upgrades SQLite through the migration runner and is idempotent', async () => {
     const raw = new Database(':memory:');
     const db = new SqliteDatabase(raw);
-    // Existing installation at the reserved v146; no unrelated tables are needed.
-    raw.exec('CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (146, \'existing\')');
+    // Existing installation at the reserved v146, including the run table required by v151.
+    raw.exec('CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (146, \'existing\')');
     await runMigrations(db, 'sqlite');
     await runMigrations(db, 'sqlite');
     const repo = new FlowRunLinkRepository(db);
@@ -38,7 +38,7 @@ describe('independent flow run links', () => {
     await runMigrations(db, 'sqlite');
     await new FlowRunLinkRepository(db).insert(link);
     expect(await new FlowRunLinkRepository(db).findByChild('child')).toEqual(link);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 148 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 151 });
     await db.close();
   });
 
@@ -60,7 +60,7 @@ describe('independent flow run links', () => {
 
   it('upgrades a v147 SQLite table in place without losing rows or enforcing its old VARCHAR declaration', async () => {
     const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
-    raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT);
+    raw.exec(`CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT);
       INSERT INTO schema_version VALUES (147, 'old');
       CREATE TABLE flow_run_links (child_flow_id VARCHAR(190) NOT NULL PRIMARY KEY,
         parent_flow_id VARCHAR(190) NOT NULL, parent_node_id VARCHAR(190) NOT NULL,
@@ -73,7 +73,7 @@ describe('independent flow run links', () => {
     const long = { ...link, childFlowId: 'c'.repeat(255), parentFlowId: 'p'.repeat(255),
       parentNodeId: 'n'.repeat(255), childWorkflowId: 'w'.repeat(255) };
     await repo.insert(long); expect(await repo.findByChild(long.childFlowId)).toEqual(long);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 148 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 151 });
     await db.close();
   });
 

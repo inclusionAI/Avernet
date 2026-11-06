@@ -11,8 +11,10 @@ import mysql from "mysql2/promise";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getCurrentEnv } from "./env.js";
-import { migrations, sqliteTriggers, type DbType } from "./schema.js";
+import { migrations, type DbType } from "./schema.js";
+import { ensureSqliteTriggers } from "./db/sqlite-triggers.js";
 import { workflowSnapshotMigrations } from "./schema-workflow-snapshot.js";
+import { OrdinaryMarkerSchemaIncompatible, OrdinaryRequestSchemaIncompatible, OrdinarySchemaDdlDenied, ordinaryRunRequestMigrations, confirmConcurrentOrdinarySqlite } from "./schema-ordinary-run-request.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
   type ResolvedDbConfig, type YamlAntLogsConfig } from "./db/config.js";
@@ -194,7 +196,24 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
   }
 }
 
-async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
+// Only an optional SQLite migration may defer on explicit lock/read-only errors.
+async function deferOptionalSqlite(db: IDatabase, version: number, error: unknown): Promise<boolean> {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (db.dbType !== "sqlite" || (version !== 150 && version !== 151)
+    || typeof code !== "string" || !/^SQLITE_(BUSY|READONLY)(?:_|$)/.test(code)) return false;
+  // Accept only known, individually verified concurrent versions; unknown progress fails closed.
+  const rows = await db.query<{ v: number | null }>("SELECT MAX(version) as v FROM schema_version");
+  if (!rows[0]) throw error;
+  if (rows[0].v != null && rows[0].v >= version) {
+    if (code !== "SQLITE_BUSY" || rows[0].v > 151) throw error;
+    for (let peer = version; peer <= rows[0].v; peer++) if (!await confirmConcurrentOrdinarySqlite(db, peer)) throw error;
+    if ((await db.query<{ v: number | null }>("SELECT MAX(version) as v FROM schema_version"))[0]?.v !== rows[0].v) throw error;
+    console.warn(`[clawweb] Migration v${version} recorded by peer; later migrations stopped (ordinary readiness not established)`);
+  } else console.warn(`[clawweb] Migration v${version} deferred: ${code}; later migrations stopped`);
+  return true;
+}
+
+async function runMigrations(db: IDatabase, dbType: DbType, onSqliteDeferred?: () => void): Promise<void> {
   const canDdl = await ensureSchemaVersionTable(db);
   if (!canDdl) {
     // Managed runtime accounts may deny CREATE regardless of whether the
@@ -205,15 +224,31 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
   }
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
+  let sqliteDdlDeferred = false;
 
   // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
-  for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
+  for (const migration of [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations].sort((a, b) => a.version - b.version)) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.
     if (!migration.selfHealing && migration.version <= current) continue;
     if (migration.sqliteOnly && dbType !== "sqlite") continue;
     if (migration.mysqlOnly && dbType !== "mysql" && dbType !== "zdas") continue;
-    if (migration.migrate) await migration.migrate(db);
+    if ("supportedDbTypes" in migration && !(migration.supportedDbTypes as readonly DbType[]).includes(dbType)) continue;
+    if (migration.migrate) {
+      try {
+        await migration.migrate(db);
+      } catch (error) {
+        if (await deferOptionalSqlite(db, migration.version, error)) { sqliteDdlDeferred = true; onSqliteDeferred?.(); break; }
+        if (!(error instanceof OrdinarySchemaDdlDenied || error instanceof OrdinaryMarkerSchemaIncompatible || error instanceof OrdinaryRequestSchemaIncompatible)
+          || error.version !== migration.version) throw error;
+        // MAX(version) is the ledger cursor: do not record this or any later
+        // migration until the operator provisions the missing schema.
+        if (db.dbType === "sqlite" && !(error instanceof OrdinarySchemaDdlDenied)) onSqliteDeferred?.();
+        const reason = error instanceof OrdinarySchemaDdlDenied ? `${error.operation} denied` : error.message;
+        console.warn(`[clawweb] Migration v${error.version} deferred: ordinary schema ${reason}; later migrations stopped`);
+        break;
+      }
+    }
     for (const ddl of migration.sql) {
       try {
         await db.exec(db.dialect.renderDdl(ddl));
@@ -242,25 +277,21 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
       }
     }
     if (canDdl) {
-      await db.exec(
-        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
-        [migration.version, migration.description]
-      );
+      try {
+        await db.exec(
+          "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+          [migration.version, migration.description]
+        );
+      } catch (error) {
+        if (await deferOptionalSqlite(db, migration.version, error)) { sqliteDdlDeferred = true; onSqliteDeferred?.(); break; }
+        throw error;
+      }
     }
     console.log(`[clawweb] Migration v${migration.version}: ${migration.description}`);
   }
 
-  // Apply SQLite AFTER UPDATE triggers for gmt_modified auto-update
-  if (dbType === "sqlite") {
-    for (const triggerDdl of sqliteTriggers) {
-      try {
-        await db.exec(triggerDdl);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[clawweb] SQLite trigger creation failed: ${msg}`);
-      }
-    }
-  }
+  // Trigger failures are fatal: a missing update trigger must not look ready.
+  if (dbType === "sqlite") await ensureSqliteTriggers(db, !sqliteDdlDeferred);
 }
 
 // ── Public API ──
@@ -298,7 +329,8 @@ export async function initDatabase(
     console.log("[clawweb] No application.yaml found, using defaults");
   }
 
-  let db: IDatabase;
+  let db: IDatabase | undefined;
+  let sqliteDeferred = false;
   try {
     if (config.mode === "mysql" || config.mode === "zdas") {
       db = await initMysql(config.mysql, config.mode);
@@ -306,9 +338,13 @@ export async function initDatabase(
       db = initSqlite(config.sqlitePath);
     }
 
-    if (schema === "migrate") await runMigrations(db, db.dbType as DbType);
+    if (schema === "migrate") await runMigrations(db, db.dbType as DbType, () => { sqliteDeferred = true; });
+    if (sqliteDeferred) throw new Error("SQLite migrations deferred; initialization incomplete");
   } catch (err) {
-    if (schema === "external") throw err;
+    if (db) {
+      try { await db.close(); } catch (closeError) { console.warn("[clawweb] Failed to close database after init failure:", closeError); }
+    }
+    if (schema === "external" || sqliteDeferred) throw err;
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[clawweb] Database init failed (mode=${config.mode}): ${msg}`);
     console.warn("[clawweb] Falling back to NoOp database — API will return 503");
@@ -317,7 +353,7 @@ export async function initDatabase(
 
   repos = { db };
   initializedSchema = schema;
-  console.log(`[clawweb] Database ready (type=${db.dbType})`);
+  console.log(db.dbType === "noop" ? "[clawweb] Database unavailable (type=noop)" : `[clawweb] Database ready (type=${db.dbType})`);
   return repos;
 }
 

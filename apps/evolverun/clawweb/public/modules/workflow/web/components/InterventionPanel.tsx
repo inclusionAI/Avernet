@@ -38,7 +38,7 @@ function isIntervenableNode(node: NodeExecution): boolean {
 const INTERVENABLE_STATUSES = new Set(['failed', 'blocked', 'waiting'])
 
 export default function InterventionPanel({ flowId, runStatus, nodes }: InterventionPanelProps) {
-  const { data: interventionInfo, isLoading } = useInterventions(flowId)
+  const { data: interventionInfo, isLoading, isError } = useInterventions(flowId)
   const interveneMutation = useIntervene(flowId)
   const updateSessionMutation = useUpdateSession(flowId)
   const { messages, sending, sendMessage, clearMessages } = useChat(flowId)
@@ -46,6 +46,17 @@ export default function InterventionPanel({ flowId, runStatus, nodes }: Interven
   // Only show intervention panel for intervenable statuses
   if (!INTERVENABLE_STATUSES.has(runStatus)) {
     return null
+  }
+
+  // Never present editable fields while the server policy is unavailable.
+  if (isError || (!isLoading && !interventionInfo)) {
+    return <div role="alert" className="rounded-lg border border-input bg-card p-4 text-sm text-muted-foreground">无法读取介入权限，操作已禁用。</div>
+  }
+  if (interventionInfo?.interventionReadOnly) {
+    return <div role="status" className="rounded-lg border border-input bg-card p-4 text-sm text-muted-foreground">
+      子运行的人工介入和会话设置暂不可用（当前只读）。
+      {interventionInfo.sessionConfigured ? ' 会话已配置，详情不予显示。' : ' 会话未配置或不完整。'}
+    </div>
   }
 
   return (
