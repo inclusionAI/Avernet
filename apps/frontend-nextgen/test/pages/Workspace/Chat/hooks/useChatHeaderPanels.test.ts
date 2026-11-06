@@ -84,6 +84,16 @@ beforeEach(() => {
   window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
 });
 
+it('收藏状态未知时禁用星标，后台确认后解除', () => {
+  const { options } = makeOptions({});
+  const { result, rerender } = renderHook(({ session }) => useChatHeaderPanels({ ...options, session }), {
+    initialProps: { session: makeSession({ favorite: undefined }) },
+  });
+  expect(result.current.favorites.disabled).toBe(true);
+  rerender({ session: makeSession({ favorite: false }) });
+  expect(result.current.favorites.disabled).toBe(false);
+});
+
 it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务副屏', async () => {
   const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
   mockGetTaskBySession.mockResolvedValue({

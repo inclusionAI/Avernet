@@ -170,7 +170,7 @@ class TaskNodeRunInfoRepository(TaskNodeRunInfoRepositoryProtocol):
                 db.query(self._model)
                 .filter(self._model.session_id == session_id)
                 .order_by(
-                    self._model.gmt_modified.desc().nullslast(),
+                    self._model.gmt_modified.desc(),
                     self._model.id.desc(),
                 )
                 .all()

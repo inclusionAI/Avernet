@@ -35,6 +35,7 @@ export function RoutineDetail({
   actions: (task: ManagedRoutine) => ReactNode;
 }) {
   const now = useRoutineClock();
+  const hideMissingTarget = Boolean(context.bot_type?.trim()) && context.bot_type !== 'service';
   const [detail, setDetail] = useState<ManagedRoutine>();
   const [history, setHistory] = useState<RuntimePage<RoutineRun>>({ items: [], total: 0, failed_targets: [] });
   const [detailError, setDetailError] = useState('');
@@ -153,12 +154,12 @@ export function RoutineDetail({
                   <div>开始：{formatTime(run.startedAt)}</div>
                   <div>结束：{formatTime(run.finishedAt)}</div>
                   <div>耗时：{run.duration || '未报告'}</div>
-                  <div>环境：{run.runtime_stage ? stageNames[run.runtime_stage] || run.runtime_stage : '未报告'}</div>
-                  <div className="break-all">运行实例：{run.device_uuid || '未报告'}</div>
-                  <div className="break-all">Caller：{run.operator_id || '未报告'}</div>
+                  {(!hideMissingTarget || run.runtime_stage?.trim()) && <div>环境：{run.runtime_stage ? stageNames[run.runtime_stage] || run.runtime_stage : '未报告'}</div>}
+                  {(!hideMissingTarget || run.device_uuid?.trim()) && <div className="break-all">运行实例：{run.device_uuid || '未报告'}</div>}
+                  {(!hideMissingTarget || run.operator_id?.trim()) && <div className="break-all">Caller：{run.operator_id || '未报告'}</div>}
                 </dl>
                 <div className="mt-4 flex justify-end">
-                  <RoutineRunConversation run={run} />
+                  <RoutineRunConversation run={run} botType={context.bot_type} />
                 </div>
               </article>
             ))}

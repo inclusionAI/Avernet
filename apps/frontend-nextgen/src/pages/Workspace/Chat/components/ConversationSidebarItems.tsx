@@ -40,6 +40,9 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       ? cache.sessions
       : undefined;
   const selectedBot = store.selectedBotId === botId && store.selectedSection === view.section;
+  // Browse-only managed/team Coding Bot 只能查看列表：已有 Session mutation 必须等
+  // 目标 Bot Runtime/controller ready，入口先隐藏。Bot 行 + 是显式激活入口，保留可点。
+  const hideCodingSessionActions = view.bot.isAgentCodingBot === true && !selectedBot;
   const othersArea =
     cache && cache.origin === 'others'
       ? {
@@ -70,11 +73,16 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
     <ConversationBotItem
       bot={view.bot}
       section={view.section}
-      sessionActions={{
-        run: (sessionId, action) => sessions.actions.run(botId, view.section, sessionId, action),
-        pending: sessions.actions.isPending(botId, view.section),
-        features: codingBotSessionFeatures(view.bot),
-      }}
+      sessionActions={
+        hideCodingSessionActions
+          ? undefined
+          : {
+              run: (sessionId: string, action: Parameters<typeof sessions.actions.run>[3]) =>
+                sessions.actions.run(botId, view.section, sessionId, action),
+              pending: sessions.actions.isPending(botId, view.section),
+              features: codingBotSessionFeatures(view.bot),
+            }
+      }
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
       botSelected={selectedBot}
@@ -92,10 +100,15 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
         store.setSessionKeyFilter(botId, nextKey);
         store.setExpandedBot(botId, true);
       }}
+      createSessionPending={sessions.isCreatingSession(botId)}
       onCreateSession={() => void sessions.createSession(botId)}
       onSelectSession={(sessionId) => sessions.selectMineSession(botId, sessionId)}
       onLoadMore={() => void sessions.loadMoreSessions(botId, view.section, scope)}
-      onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, view.section, sessionId)}
+      onToggleFavorite={
+        hideCodingSessionActions
+          ? undefined
+          : (sessionId: string) => void sessions.favorites.toggleFavorite(botId, view.section, sessionId)
+      }
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, view.section, sessionId)}
       onOpenBotManagement={onOpenBotManagement}
       replyingSessionId={replyingSessionId}

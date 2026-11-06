@@ -71,7 +71,7 @@ export const navigationItems: NavigationItem[] = [
   },
   {
     id: 'bot-workshop',
-    label: 'Bot管理',
+    label: 'Bot 管理',
     path: '/bot-workshop',
     icon: Bot,
     section: 'bot',

@@ -9,6 +9,9 @@ import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { fireEvent, render, renderHook, screen } from '@testing-library/react';
 
+// 资源面板跳转入口引入 history：jsdom 下真实 @umijs/max 会拉起 esbuild 触发
+// Buffer invariant 失败，按项目既有惯例用轻量桩替换（见 appRuntime.test.ts 等）。
+jest.mock('@umijs/max', () => ({ history: { push: () => undefined, replace: () => undefined } }));
 jest.mock('@/pages/Workspace/hooks/useBotSessionFiles');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
 jest.mock('@/pages/Workspace/hooks/useBotSkills');

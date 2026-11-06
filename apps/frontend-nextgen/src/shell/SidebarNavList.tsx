@@ -15,6 +15,21 @@ interface SidebarNavListProps {
 const SECTION_ORDER: NavigationSection[] = ['collab', 'bot'];
 
 /**
+ * 产品引导打标语义标识（配置规范 §4 契约）：导航 id → data-guide-target 值。
+ * 纯静态标记（零逻辑零行为变化）；运营经引导配置 target 字段引用，前端维护本映射。
+ * 展开态 / 折叠态 / <lg 抽屉三实例共用本组件，单点打标三处覆盖。
+ */
+const GUIDE_TARGET_BY_NAV_ID: Record<string, string> = {
+  conversation: 'menu-chat',
+  collaboration: 'menu-collab-groups',
+  'collaboration-square': 'menu-discover',
+  'bot-workshop': 'menu-bot-workshop',
+  'capability-workshop': 'menu-capability-workshop',
+  market: 'menu-capability-market',
+  knowledge: 'menu-knowledge',
+};
+
+/**
  * 一级导航内容本体（不含 `<aside>` 外壳）：协作 / Bot 双固定分组，
  * 不随路由整体换组（refactor-global-nav-shell）。由 AppSidebar 的内流外壳与 <lg 抽屉复用，保证两处一致。
  */
@@ -41,6 +56,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                   <IconButton
                     key={item.id}
                     ariaLabel={item.label}
+                    data-guide-target={GUIDE_TARGET_BY_NAV_ID[item.id]}
                     label={item.label}
                     className={cn(active && 'bg-selected text-foreground')}
                     icon={<Icon className="h-4 w-4" />}
@@ -77,6 +93,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                   <Button
                     key={item.id}
                     variant="ghost"
+                    data-guide-target={GUIDE_TARGET_BY_NAV_ID[item.id]}
                     className={cn(
                       // SVG 实测：药囊 h32 rx6 inset-x8（34px 行距=32+gap2）、icon 16 @x16、
                       // 文案 14px @x40；未选 #525252 文案 + #71717A 图标、选中 #EBEBEB 胶囊 + #09090B。

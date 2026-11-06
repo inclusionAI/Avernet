@@ -1,13 +1,25 @@
+import { getCapabilities } from '@/capabilities';
 import type { BotChatSessionView, BotModelView, ChatBotView } from '@/services/workspace/botSessionService';
 import { botSessionService } from '@/services/workspace/botSessionService';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { botModelContextKey, loadCachedBotModels } from '@/services/workspace/botModelCache';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 export interface UseBotModelsResult {
   models: BotModelView[];
   activeModelId: string | null;
   isLoadingModels: boolean;
+  loadModels: () => void;
   selectModel: (modelId: string) => Promise<boolean>;
+}
+
+/** 合并 capability 注入的模型徽标；getModelBadge 默认 null（无徽标时保持原列表项引用）。 */
+function withModelBadges(models: BotModelView[]): BotModelView[] {
+  return models.map((model) => {
+    const badgeResult = getCapabilities().getModelBadge(model);
+    const badge = badgeResult.status === 'available' ? badgeResult.value : null;
+    return badge ? { ...model, badge } : model;
+  });
 }
 
 /**
@@ -19,28 +31,41 @@ export function useBotModels(
   session: BotChatSessionView | null,
   activeIdentityId: string | null,
   onSessionModelChange: (botId: string, sessionId: string, model: string) => void,
+  autoLoad = true,
 ): UseBotModelsResult {
-  const [models, setModels] = useState<BotModelView[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const key = botModelContextKey(bot, activeIdentityId);
+  const context = useRef({ bot, activeIdentityId });
+  context.current = { bot, activeIdentityId };
+  const [request, setRequest] = useState({ key: '', revision: 0 });
+  const [state, setState] = useState<{ key: string; models: BotModelView[]; loading: boolean }>({
+    key: '', models: [], loading: false,
+  });
+  const models = state.key === key ? state.models : [];
+  const isLoadingModels = state.key === key && state.loading;
+  const loadModels = useCallback(() => setRequest((current) => ({ key, revision: current.revision + 1 })), [key]);
 
   useEffect(() => {
+    const { bot, activeIdentityId } = context.current;
+    if (!autoLoad && request.key !== key) return;
     if (!bot || !activeIdentityId || bot.isFriendBot) {
-      setModels([]);
-      setIsLoadingModels(false);
+      setState({ key, models: [], loading: false });
       return;
     }
     let cancelled = false;
-    setIsLoadingModels(true);
-    botSessionService.listModels(bot, activeIdentityId).then((res) => {
+    setState((current) => ({ key, models: current.key === key ? current.models : [], loading: true }));
+    loadCachedBotModels(bot, activeIdentityId).then((res) => {
       if (cancelled) return;
       if (!res.ok) toast.error(res.error.friendlyMessage);
-      else setModels(res.data);
-      setIsLoadingModels(false);
+      setState({ key, models: res.ok ? withModelBadges(res.data) : [], loading: false });
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      toast.error(error instanceof Error ? error.message : '模型列表加载失败');
+      setState({ key, models: [], loading: false });
     });
     return () => {
       cancelled = true;
     };
-  }, [bot, activeIdentityId]);
+  }, [key, autoLoad, request]);
 
   const activeModelId = useMemo(() => session?.model ?? models[0]?.modelId ?? null, [models, session?.model]);
 
@@ -59,5 +84,5 @@ export function useBotModels(
     [activeIdentityId, bot, onSessionModelChange, session],
   );
 
-  return { models, activeModelId, isLoadingModels, selectModel };
+  return { models, activeModelId, isLoadingModels, loadModels, selectModel };
 }

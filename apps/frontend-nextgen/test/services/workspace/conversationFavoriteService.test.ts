@@ -1,5 +1,6 @@
 import { botSessionService, type ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationFavoriteService } from '@/services/workspace/conversationFavoriteService';
+import { clearConversationFavoriteCache } from '@/services/workspace/conversationFavoriteCache';
 
 jest.mock('@/services/workspace/botSessionService', () => ({
   botSessionService: { listFavoriteSessionsPage: jest.fn(), toggleFavorite: jest.fn() },
@@ -22,7 +23,7 @@ const session = (sessionId: string) => ({
   gmtCreate: '',
   gmtModified: '',
 });
-beforeEach(() => jest.resetAllMocks());
+beforeEach(() => { jest.resetAllMocks(); clearConversationFavoriteCache(); });
 
 it('hydrates favorites beyond the first favorite page', async () => {
   list
@@ -62,4 +63,58 @@ it('delegates supported favorite mutations with the original bot context', async
     data: true,
   });
   expect(toggle).toHaveBeenCalledWith({ ...bot, isFriendBot: true }, 'user', 's1', true);
+});
+
+it('merges in-flight favorite pages and reuses them for different ordinary pages', async () => {
+  let finish!: (value: unknown) => void;
+  list.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const first = conversationFavoriteService.hydrate(bot, 'user', { items: [session('s1')], total: 1 });
+  const second = conversationFavoriteService.hydrate(bot, 'user', { items: [session('s2')], total: 1 });
+  expect(list).toHaveBeenCalledTimes(1);
+  finish({ ok: true, data: { items: [session('s1')], total: 1 } });
+  expect((await first).items[0].favorite).toBe(true);
+  expect((await second).items[0].favorite).toBe(false);
+  await conversationFavoriteService.hydrate(bot, 'user', { items: [session('s3')], total: 1 });
+  expect(list).toHaveBeenCalledTimes(1);
+});
+
+it('isolates owner, stage, viewer and instance ranges', async () => {
+  list.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
+  const input = { items: [session('s1')], total: 1 };
+  await conversationFavoriteService.hydrate(bot, 'user', input);
+  await conversationFavoriteService.hydrate({ ...bot, ownerId: 'other' }, 'user', input);
+  await conversationFavoriteService.hydrate({ ...bot, runtimeStage: 'online' }, 'user', input);
+  await conversationFavoriteService.hydrate(bot, 'user', input, { deviceUuid: 'device-1', stage: 'online' });
+  await conversationFavoriteService.hydrate(bot, 'user', input, { deviceUuid: 'device-2', stage: 'online' });
+  await conversationFavoriteService.hydrate(bot, 'other-user', input);
+  expect(list).toHaveBeenCalledTimes(6);
+  expect(list).toHaveBeenNthCalledWith(4, bot, 'user', 1, 100, { deviceUuid: 'device-1', stage: 'online' });
+});
+
+it('expires cached pages after 30 seconds and retries failed reads', async () => {
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  const input = { items: [session('s1')], total: 1 };
+  try {
+    list.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
+    await conversationFavoriteService.hydrate(bot, 'user', input);
+    now.mockReturnValue(31_001);
+    list.mockResolvedValueOnce({ ok: false, error: { friendlyMessage: '失败' } });
+    expect((await conversationFavoriteService.hydrate(bot, 'user', input)).items[0].favorite).toBeUndefined();
+    expect((await conversationFavoriteService.hydrate(bot, 'user', input)).items[0].favorite).toBe(false);
+    expect(list).toHaveBeenCalledTimes(3);
+  } finally { now.mockRestore(); }
+});
+
+it('invalidates reads around mutations; late old reads cannot mark stale favorite state', async () => {
+  let finish!: (value: unknown) => void;
+  list.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const input = { items: [session('s1')], total: 1 };
+  const pending = conversationFavoriteService.hydrate(bot, 'user', input);
+  toggle.mockResolvedValue({ ok: true, data: true });
+  await conversationFavoriteService.toggle(bot, 'user', 's1', true);
+  finish({ ok: true, data: { items: [], total: 0 } });
+  expect((await pending).items[0].favorite).toBeUndefined();
+  list.mockResolvedValue({ ok: true, data: { items: [session('s1')], total: 1 } });
+  expect((await conversationFavoriteService.hydrate(bot, 'user', input)).items[0].favorite).toBe(true);
+  expect(list).toHaveBeenCalledTimes(2);
 });

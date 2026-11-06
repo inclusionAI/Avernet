@@ -68,6 +68,7 @@ from agentclaw.community.core.repository.implementations.bot.explicit_env import
 )
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
@@ -171,6 +172,7 @@ class BotRepository(
         execution_options: Optional[dict] = None,
         env: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        mark("bot.by_owner")
         with self._db.orm_session() as db:
             q = db.query(self.Model).filter(
                 self.Model.bot_id == bot_id,
@@ -181,6 +183,7 @@ class BotRepository(
             if execution_options:
                 q = q.execution_options(**execution_options)
             bot = q.first()
+            mark("bot.by_owner.fetched")
             return bot.to_dict() if bot else None
 
     def get_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
@@ -705,6 +708,7 @@ class BotRepository(
             return bot.to_dict() if bot else None
 
     def get_by_binding_id(self, binding_id: int) -> Optional[Dict[str, Any]]:
+        mark("bot.by_binding")
         with self._db.orm_session() as db:
             bot = (
                 db.query(self.Model)
@@ -715,6 +719,7 @@ class BotRepository(
                 )
                 .first()
             )
+            mark("bot.by_binding.fetched")
             return bot.to_dict() if bot else None
 
     # ── search / active (env-scoped JOIN to bot_publish) ────────

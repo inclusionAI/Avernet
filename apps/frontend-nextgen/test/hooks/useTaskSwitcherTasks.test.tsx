@@ -60,6 +60,22 @@ beforeEach(() => {
 });
 
 describe('useTaskSwitcherTasks', () => {
+  it('后台标签页不轮询，回到前台恢复查询，卸载后移除监听', async () => {
+    jest.useFakeTimers();
+    const visibility = jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
+    try {
+      const { unmount } = renderHook(() => useTaskSwitcherTasks('u1', { currentTaskId: 't1' }));
+      await act(async () => { jest.advanceTimersByTime(120_000); });
+      expect(mockListMyTasks).not.toHaveBeenCalled();
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+      unmount();
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); jest.advanceTimersByTime(60_000); });
+      expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+    } finally { visibility.mockRestore(); jest.useRealTimers(); }
+  });
   it('listTasks 结果映射三桶状态与中文 label(执行中/待开始/已结束)', async () => {
     mockListMyTasks.mockResolvedValue({
       code: 0,

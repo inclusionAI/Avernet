@@ -43,6 +43,10 @@ export function AppSidebar({
   // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认展示；
   // 隐藏形态下未读数轮询随组件不挂载自然停止，通知 service 层不改。
   const { notificationBell } = getCapabilities().getShellVisibility().value;
+  // 产品引导（新版助手）常驻入口：capability 门控（Open Core null → 不渲染，布局零变化，
+  // 与 LegacyVersionSwitch 同款模式）
+  const guideAssistant = getCapabilities().getGuideAssistant();
+  const GuideEntry = guideAssistant.status === 'available' ? guideAssistant.value?.Entry : undefined;
 
   const shell = (
     <>
@@ -105,6 +109,7 @@ export function AppSidebar({
         <div className="flex flex-col items-center gap-1 bg-background/70 px-2 pb-3 pt-2">
           <LegacyVersionSwitch collapsed />
           <AccountBadge currentUser={currentUser} collapsed />
+          {GuideEntry ? <GuideEntry /> : null}
           <HelpMenu variant="more" />
         </div>
       ) : (
@@ -113,6 +118,7 @@ export function AppSidebar({
           <div className="flex items-center gap-1">
             <AccountBadge currentUser={currentUser} />
             <span className="ml-auto flex shrink-0 items-center">
+              {GuideEntry ? <GuideEntry /> : null}
               <HelpMenu variant="more" />
             </span>
           </div>

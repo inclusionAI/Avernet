@@ -663,8 +663,17 @@ class TestSessionsList:
 
 
 class TestSessionCreate:
+    @staticmethod
+    def _ack(model="default-model"):
+        return _ok({
+            "key": "agent:custom:session:abc:user:clouduser",
+            "resolved": {"modelProvider": "provider", "model": model},
+            "path": "/private/sessions.json",
+            "entry": {"sessionId": "internal-transcript-id"},
+        })
+
     async def test_sends_sessions_patch_with_key(self):
-        impl, client = _make_impl({"sessions.patch": _ok({})})
+        impl, client = _make_impl({"sessions.patch": self._ack()})
         await impl.session_create(key="new-key", token="tok")
         patch_calls = [c for c in client.calls if c[0] == "sessions.patch"]
         assert len(patch_calls) == 1
@@ -672,23 +681,52 @@ class TestSessionCreate:
         assert patch_calls[0][2] == 60.0
 
     async def test_sends_label_and_model_when_provided(self):
-        impl, client = _make_impl({"sessions.patch": _ok({})})
+        impl, client = _make_impl({"sessions.patch": self._ack()})
         await impl.session_create(key="k", label="My Session", model="qwen-plus", token="tok")
         params = client.calls[0][1]
         assert params["label"] == "My Session"
         assert params["model"] == "qwen-plus"
 
     async def test_omits_label_and_model_when_none(self):
-        impl, client = _make_impl({"sessions.patch": _ok({})})
+        impl, client = _make_impl({"sessions.patch": self._ack()})
         await impl.session_create(key="k", token="tok")
         params = client.calls[0][1]
         assert "label" not in params
         assert "model" not in params
 
-    async def test_returns_patch_params_dict(self):
-        impl, _ = _make_impl({"sessions.patch": _ok({})})
-        result = await impl.session_create(key="k", label="L", token="tok")
-        assert result == {"key": "k", "label": "L"}
+    @pytest.mark.parametrize("model", ["default-model", "provider/default-model"])
+    async def test_returns_ack_metadata_in_one_rpc_and_preserves_params(self, model):
+        impl, client = _make_impl({"sessions.patch": self._ack(model)})
+        result = await impl.session_create(
+            key="session:ABC:user:CloudUser", label="L", model="requested", token="tok",
+        )
+        assert result == {
+            "key": "session:ABC:user:CloudUser", "label": "L", "model": "requested",
+            "canonical_session_id": "agent:custom:session:abc:user:clouduser",
+            "resolved_model": "provider/default-model",
+        }
+        assert [call[0] for call in client.calls] == ["sessions.patch"]
+
+    async def test_returns_default_model_without_requesting_it(self):
+        impl, client = _make_impl({"sessions.patch": self._ack()})
+        result = await impl.session_create(key="k")
+        assert result["resolved_model"] == "provider/default-model"
+        assert "model" not in result
+        assert [call[0] for call in client.calls] == ["sessions.patch"]
+
+    @pytest.mark.parametrize("payload", [
+        None, [], {}, {"key": 123}, {"key": " "},
+        {"key": "k"}, {"key": "k", "resolved": []},
+        {"key": "k", "resolved": {}},
+        {"key": "k", "resolved": {"model": " ", "modelProvider": "p"}},
+        {"key": "k", "resolved": {"model": "m"}},
+        {"key": "k", "resolved": {"model": "m", "modelProvider": " "}},
+    ])
+    async def test_invalid_ack_does_not_start_readback_or_retry(self, payload):
+        impl, client = _make_impl({"sessions.patch": _ok(payload)})
+        with pytest.raises(RuntimeError, match="sessions.patch returned"):
+            await impl.session_create(key="k")
+        assert [call[0] for call in client.calls] == ["sessions.patch"]
 
     async def test_raises_runtime_error_on_gateway_failure(self):
         impl, _ = _make_impl({"sessions.patch": _err("patch failed")})

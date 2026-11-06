@@ -41,6 +41,8 @@ export const Points = {
     openWorkflowMenu: '工作台-我的对话-打开工作流菜单',
     engineUpdateEntry: '工作台-我的对话-点击引擎更新入口',
     emptyGuideExpo: '工作台-我的对话-空状态引导曝光',
+    createBotEntry: '工作台-我的对话-点击创建Bot入口',
+    discoverBotEntry: '工作台-我的对话-点击发现Bot入口',
   },
   // —— 工作台-我的协作（/workspace/collaboration）——
   workspaceCollab: {

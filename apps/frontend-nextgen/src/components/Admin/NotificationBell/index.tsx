@@ -68,7 +68,7 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
       }}
     >
       <PopoverTrigger asChild>
-        <span className="relative inline-flex">
+        <span className="relative inline-flex" data-guide-target="notification">
           <IconButton
             label="通知中心"
             // size/className 透传：折叠态工具簇经此收 28px + muted 色阶，bell-wiggle 等行为不受影响。

@@ -6,6 +6,7 @@ export interface BuildBotSessionCommandItemsParams {
   /** 好友 Bot 不开放 skill 命令。 */
   canUseSkills: boolean;
   skillItems: CommandItem[];
+  onSearchSkills?: (query: string) => Promise<CommandItem[]>;
   /** /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新,query 为过滤词(空串=刚唤起)。 */
   onSearchFiles: (query: string) => Promise<CommandItem[]>;
   skillsLoading: boolean;
@@ -18,6 +19,7 @@ export interface BuildBotSessionCommandItemsParams {
 export function buildBotSessionCommandItems({
   canUseSkills,
   skillItems,
+  onSearchSkills,
   onSearchFiles,
   skillsLoading,
   filesLoading,
@@ -38,6 +40,7 @@ export function buildBotSessionCommandItems({
           label: '技能',
           icon: <Zap className="h-3.5 w-3.5" />,
           items: skillItems,
+          onSearch: onSearchSkills,
           emptyText: skillsLoading ? '加载中…' : '暂无可用技能',
         },
       ],

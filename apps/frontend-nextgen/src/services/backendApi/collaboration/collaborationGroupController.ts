@@ -2,6 +2,7 @@ import type { MessageViewScope } from '@/domain/collaboration/types';
 import { isAceLoginResponse } from '../aceLoginBody';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';
+import type { ParticipantSummaryReadDto } from './participantTypes';
 
 export type GroupStrategy = 'chat' | 'manager_worker' | 'state_machine';
 export type DeliveryPolicy = { bot_final_delivery: 'send_to_driver' | 'inject_observers' };
@@ -18,6 +19,8 @@ export interface GroupParticipantDto {
   mode: 'auto' | 'muted' | 'absent' | 'present';
   /** 该成员的消息可见域（human 参与者专属；bot 不下发）。 */
   message_view_scope?: MessageViewScope;
+  /** 成员头像；旧响应可能缺省。 */
+  avatar_url?: string | null;
 }
 export interface GroupCollaborationChat {
   strategy: 'chat';
@@ -82,6 +85,23 @@ export interface GroupDetailData {
     state: 'running' | 'failed';
     started_at: string;
   };
+}
+/** 群列表轻量响应：不含 collaboration 等详情字段；participants 为成员摘要。 */
+export interface GroupSummaryData {
+  group_id: string;
+  version?: number;
+  kind: 'normal' | 'dm';
+  status: 'active' | 'dissolved';
+  visibility: GroupVisibility;
+  membership?: 'direct' | 'session_only';
+  originator_actor_id: string;
+  participant_count?: number; // 已部署接口必有；缺省仅兼容历史读取边界。
+  driver_bot_uuid?: string;
+  strategy?: GroupStrategy;
+  name?: string;
+  participants?: ParticipantSummaryReadDto[];
+  created_at: number;
+  updated_at: number;
 }
 export interface GroupCreateChatBody {
   group_kind: 'normal';
@@ -194,7 +214,7 @@ function validatePublicGroupCatalogResponse(value: unknown): PublicGroupCatalogR
 // query 无需 user_id。默认注入依赖 identityStore.currentIdentityId，身份未就绪/被清空时
 // user_id 时有时无（正是本接口 user_id 不稳定的原因）。显式关闭注入，与 listPublicGroups 一致。
 export async function listGroups(params: ListGroupsParams) {
-  return backendRequest<BackendApiEnvelope<BackendApiPage<GroupDetailData>>>('/openapi/v1/collaboration/groups', {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<GroupSummaryData>>>('/openapi/v1/collaboration/groups', {
     method: 'GET',
     params: params as Record<string, unknown>,
     injectUserId: false,

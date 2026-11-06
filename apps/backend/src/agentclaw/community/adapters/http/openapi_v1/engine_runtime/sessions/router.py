@@ -84,6 +84,7 @@ from agentclaw.community.core.expert_chat.errors import (
     ConnectionError as ExpertConnectionError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.utils.runtime_list_timing import mark
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
     tags=["sessions"],
@@ -149,6 +150,7 @@ async def list_sessions(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
@@ -262,7 +264,11 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title, device_uuid=device_uuid)
+    item = await reconcile_created_session(
+        relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id,
+        user_id=user_id, stage=stage, device_uuid=device_uuid,
+        created_item=result.data, requested_title=body.title,
+    )
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
@@ -285,6 +291,7 @@ async def list_session_favorites(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List sessions the acting user has favorited on this bot runtime."""
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
@@ -882,6 +889,7 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,

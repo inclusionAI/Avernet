@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import type { ParticipantView } from '@/domain/collaboration';
 import { MemberList } from '@/pages/Workspace/components/ManagePanel/MemberList';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -68,8 +69,10 @@ describe('MemberList', () => {
     // 标签分类型着色：成员类型默认蓝（primary），群主/主节点紫（purple），管理面板内字号统一为 10px。
     expect(screen.getByText('Bot')).toHaveClass('text-[11px]', 'bg-primary/10', 'text-primary');
     expect(screen.getByText('群主')).toHaveClass('text-[11px]', 'bg-purple/10', 'text-purple');
-    // bot 图标对齐 Bot 工坊信息列：主色软底圆形首字母（不再黑底 bg-foreground）。
-    expect(screen.getByText('驱')).toHaveClass('bg-primary/10', 'text-primary', 'font-medium');
+    // Bot 头像走统一头像链（无 avatarUrl 时按 actorId 生成默认图），不再渲染圆形首字母。
+    expect(
+      within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' }),
+    ).toBeInTheDocument();
     expect(memberRow('bot-driver').textContent).not.toContain('禁言');
     expect(memberRow('human-member').textContent).toContain('用户');
     // 自由聊天群：非 driver 一律展示「成员」（默认蓝）。
@@ -363,6 +366,78 @@ describe('MemberList', () => {
     await waitFor(() => {
       expect(screen.getAllByText('群主')).toHaveLength(2);
       expect(screen.getAllByText('自动')).toHaveLength(2);
+    });
+  });
+
+  describe('成员头像', () => {
+    it('Bot 成员按其 avatarUrl 渲染图片', () => {
+      renderMembers([{ ...baseParticipant, avatarUrl: '/avatars/driver.png' }]);
+
+      expect(within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' })).toHaveAttribute(
+        'src',
+        '/avatars/driver.png',
+      );
+    });
+
+    it('Bot 成员无 avatarUrl 时按 actorId 回退稳定默认图', () => {
+      renderMembers([baseParticipant]);
+
+      expect(within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' })).toHaveAttribute(
+        'src',
+        generateBotAvatar('bot-driver'),
+      );
+    });
+
+    it('Bot 成员头像加载失败后回退同 ID 默认图，换 URL 后重试', () => {
+      const { rerender } = renderMembers([{ ...baseParticipant, avatarUrl: '/bad.png' }]);
+      fireEvent.error(within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' }));
+      expect(within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' })).toHaveAttribute(
+        'src',
+        generateBotAvatar('bot-driver'),
+      );
+
+      rerender(
+        <MemberList
+          participants={[{ ...baseParticipant, avatarUrl: '/good.png' }]}
+          canManage={false}
+          onAddMany={jest.fn()}
+          onRemove={jest.fn()}
+          groupKind="free_chat"
+        />,
+      );
+      expect(within(memberRow('bot-driver')).getByRole('img', { name: '驱动 Bot' })).toHaveAttribute(
+        'src',
+        '/good.png',
+      );
+    });
+
+    it('Human 成员无头像沿用首字占位，不使用 Bot 默认图', () => {
+      renderMembers([
+        { ...baseParticipant, actorId: 'human-1', kind: 'human', name: '普通用户', role: 'member', mode: 'present' },
+      ]);
+
+      const row = memberRow('human-1');
+      expect(within(row).queryByRole('img')).toBeNull();
+      expect(row.textContent).toContain('普');
+    });
+
+    it('Human 成员有 URL 时渲染其头像图片', () => {
+      renderMembers([
+        {
+          ...baseParticipant,
+          actorId: 'human-1',
+          kind: 'human',
+          name: '普通用户',
+          role: 'member',
+          mode: 'present',
+          avatarUrl: 'https://example.test/u.png',
+        },
+      ]);
+
+      expect(within(memberRow('human-1')).getByRole('img', { name: '普通用户' })).toHaveAttribute(
+        'src',
+        'https://example.test/u.png',
+      );
     });
   });
 });

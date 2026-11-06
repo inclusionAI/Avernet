@@ -12,6 +12,9 @@ GET  /openapi/v1/collaboration/tasks/bbs/list   — 列 BBS 接力任务(分页;
 由 `@envelope_errors` + `ENVELOPE_ERRORS` 映射为统一 `ErrorEnvelope`——router 不手写
 `HTTPException` 处理领域错误。仅对纯输入校验(非法 status 过滤)用 `HTTPException` 走中央 handler,
 同样产出 `ErrorEnvelope`。对齐 api/task/task_service.py Protocol。
+
+The task list, dashboard and session lookup offload synchronous services,
+including display enrichment and artifacts, to keep the event loop responsive.
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
@@ -160,11 +164,15 @@ async def get_task_dashboard(
     → @envelope_errors 映射 404。"""
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     if include_action_log:
-        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id, include_action_log=True
+        )
     else:
-        graph = service.get_task_dashboard(task_id, node_id)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id
+        )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
-    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
@@ -188,7 +196,7 @@ async def get_task_by_session(
 ) -> Envelope[BySessionDTO]:
     """Resolve a chat session to the relay task node executing in it."""
     del principal
-    refs = service.get_task_nodes_by_session(session_id)
+    refs = await run_in_threadpool(service.get_task_nodes_by_session, session_id)
     if not refs:
         raise NotFound("task session not found")
     return envelope(by_session_refs_to_dto(session_id, refs), request)
@@ -292,9 +300,12 @@ async def list_tasks(
             detail="page and page_size must be both provided or both omitted",
         )
     if page_size is None:
-        items = service.list_tasks(status, owner_user_id=user_id)
+        items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.list_tasks, status, owner_user_id=user_id
+        )
         return envelope([task_info_record_to_dto(item) for item in items], request)
-    items, total = service.list_tasks_page(
+    items, total = await run_in_threadpool(
+        service.list_tasks_page,
         status, owner_user_id=user_id, page=page or 1, page_size=page_size
     )
     return page_envelope(
