@@ -24,6 +24,7 @@ so a caller can see it exists. A caller must never have to read prose to tell
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import time
 
 import jwt
@@ -532,7 +533,12 @@ class _Worker:
         else:
             self._repo.complete(task_id=task.id, worker_id=self._WORKER)
 
-    def turn(self) -> list:
+    def turn(
+        self,
+        *,
+        after_settle: Callable[[], None] | None = None,
+        first_task_type: str | None = None,
+    ) -> list:
         claimed = self._repo.claim_batch(
             worker_id=self._WORKER,
             env=get_current_env(),
@@ -540,10 +546,15 @@ class _Worker:
             limit=10,
             lease_seconds=300,
         )
+        if first_task_type is not None:
+            # Both orders are valid with second-granular enqueue/reschedule times.
+            claimed.sort(key=lambda task: task.task_type != first_task_type)
         settled = []
         for task in claimed:
             outcome = self._dispatch(task)
             self._settle(task, outcome)
+            if after_settle is not None:
+                after_settle()
             if task.task_type == CREATE_JOB_TASK_TYPE:
                 settled.append(outcome)
         return settled
@@ -970,7 +981,14 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     return order
 
 
-def test_a_teclaw_creation_walks_record_phase_container_ready(client, world):
+@pytest.mark.parametrize(
+    "first_task_type",
+    [CREATE_JOB_TASK_TYPE, APPLY_TASK_TYPE],
+    ids=["create-first", "apply-first"],
+)
+def test_a_teclaw_creation_walks_record_phase_container_ready(
+    client, world, first_task_type
+):
     """`AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`, with
     the report from the single phase, and the phase's files in the platform's
     store before the container was provisioned."""
@@ -999,14 +1017,17 @@ def test_a_teclaw_creation_walks_record_phase_container_ready(client, world):
     store = world.get(ManagedFilesStore)
     scope = ManagedFileScope(entity_type="staff", entity_id=_OWNER, bot_id=bot_id)
 
-    outcome = None
-    for _ in range(8):
-        turned = worker.turn()
+    def observe_state():
         if "provision" in order and "identity" not in seen_at_provision:
             seen_at_provision["identity"] = [r.rel_path for r in store.list(scope, category=CATEGORY_IDENTITY)]
         state = _poll(client, bot_id).json()["data"]["state"]
         if not states or states[-1] != state:
             states.append(state)
+
+    outcome = None
+    for _ in range(8):
+        # Applying and provisioning may share a batch; observe between them.
+        turned = worker.turn(after_settle=observe_state, first_task_type=first_task_type)
         outcome = next((o for o in turned if isinstance(o, (Complete, Fail))), None)
         if outcome is not None:
             break
