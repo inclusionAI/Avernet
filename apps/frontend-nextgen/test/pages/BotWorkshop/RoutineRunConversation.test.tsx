@@ -65,3 +65,20 @@ test('MyTask instance details expose the same read-only execution conversation',
   open();
   expect(screen.getByRole('dialog', { name: '执行会话详情' })).toHaveTextContent('MyTask historical answer');
 });
+
+
+test('renders historical input and output as Markdown with lists, code and tables', () => {
+  render(<RoutineRunConversation run={{ ...base,
+    input: '## 新闻任务\n\n请关注 **胡歌**\n\n- 最新动态\n- 新闻来源',
+    output: '**建议：**\n\n1. 检查 `SEARXNG_BASE_URL`\n2. 重试\n\n```text\nexample output\n```\n\n| 项目 | 状态 |\n| --- | --- |\n| 搜索 | 不可用 |\n\n[来源](https://example.com)',
+  }} />);
+  open();
+  const dialog = screen.getByRole('dialog');
+  expect(within(dialog).getByRole('heading', { name: '新闻任务', level: 2 })).toBeInTheDocument();
+  expect(within(dialog).getAllByRole('list')).toHaveLength(2);
+  expect(dialog.querySelector('strong')).toHaveTextContent('胡歌');
+  expect(dialog.querySelector('code')).toHaveTextContent('SEARXNG_BASE_URL');
+  expect(dialog.querySelector('pre')).toHaveTextContent('example output');
+  expect(within(dialog).getByRole('table')).toHaveTextContent('不可用');
+  expect(within(dialog).getByRole('link', { name: '来源' })).toHaveAttribute('href', 'https://example.com');
+});

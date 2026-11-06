@@ -3,7 +3,13 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 import { Empty } from '@/components/ui/Empty';
 import { runStatusLabel } from '@/services/botScheduledTasks/results';
 import { stageNames, type RoutineRun } from '@/services/botScheduledTasks/types';
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import MarkdownIt from 'markdown-it';
 import { useState } from 'react';
+
+// Historical execution text is Markdown, never executable HTML.
+const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
 
 const roleNames: Record<string, string> = {
   user: '用户', human: '用户', assistant: 'Bot', bot: 'Bot', system: '系统', tool: '工具',
@@ -40,7 +46,10 @@ export function RoutineRunConversation({ run }: { run: RoutineRun }) {
             )) : fields.map(([label, value]) => value?.trim() ? (
               <section key={label} className="rounded-lg border border-border bg-card p-4">
                 <h3 className="mb-2 text-xs font-medium text-muted-foreground">{label}</h3>
-                <p className="m-0 whitespace-pre-wrap break-words text-sm">{value}</p>
+                <SafeHtml
+                  className="markdown-body min-w-0 break-words text-sm [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto"
+                  html={sanitizeMarkdownHtml(markdown.render(value))}
+                />
               </section>
             ) : null)}
             {run.error?.trim() && (
