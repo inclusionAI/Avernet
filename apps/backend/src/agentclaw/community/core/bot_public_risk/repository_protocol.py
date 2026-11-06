@@ -56,6 +56,10 @@ class RiskRepository(Protocol):
         """Atomically replay identical request IDs or replace the current target; conflicting intent raises RequestConflict."""
         ...
 
+    def reapply_offline(self, record: RiskCheck, *, expected_risk_id: str, expected_version: int) -> tuple[RiskCheck, bool]:
+        """Replace only the matching offline legacy approval for its current owner."""
+        ...
+
     def get_by_request(self, *, env: str, client_scope: str, client_request_id: str) -> RiskCheck | None:
         ...
 
