@@ -150,6 +150,17 @@ than separate provider-specific backup factories. Published/Caller dispatch
 passes the existing runtime unchanged; only the coding strategy adapts it into
 this envelope. Other engines do not construct backup dependencies.
 
+## Coding runtime Bot type
+
+The coding strategy projects known template aliases at the runtime environment
+boundary: `applicationCoding` and `applicationCoding_oss` use `application`, and
+`personalCoding` uses `personal`. This preserves the control-plane Bot type and
+the complete template snapshot, including key, UID and version. Service Bots
+continue to obtain their type from the startup command; unknown factory template
+keys pass through unchanged. Repository projection remains optional and independent
+of this mapping. Historical container credentials require the matching startup
+script compatibility change; a Backend-only update does not repair stored aliases.
+
 ## Stable Bot addressing
 
 `addressing.py` owns the Backend-internal compatibility boundary. A request may

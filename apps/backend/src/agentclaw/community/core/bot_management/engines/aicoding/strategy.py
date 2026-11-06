@@ -44,6 +44,7 @@ from .restart_backup import AicodingRestartBackupMixin
 from .restart_task import AicodingDurableRestartMixin
 from .restart_baas import AicodingSubmissionMixin
 from .hosted_workspace_mixin import AicodingHostedWorkspaceMixin
+from .runtime_bot_type import LEGACY_BOT_TYPE_ENV_MAP
 
 # Legacy coding template types.  This is only used for old call sites that
 # identify coding bots by template_type (applicationCoding/personalCoding).
@@ -75,10 +76,6 @@ _FACTORY_SNAPSHOT_IDENTITY_KEYS = frozenset(
         "template_version_id",
     }
 )
-LEGACY_BOT_TYPE_ENV_MAP = {
-    "personalCoding": "personal",
-    "applicationCoding": "application",
-}
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 _AICODING_RESTART_MARKER_KEY = "_aicoding_restart"
@@ -471,7 +468,7 @@ class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableResta
             return None
         envs: Dict[str, str] = {}
 
-        # Historical template types expose stable legacy bot-type values, while
+        # Known template aliases expose stable runtime bot-type values, while
         # template-factory templates expose their template_type verbatim so new
         # template types do not require backend enum/map changes. Service bots
         # already convey their service identity through the startup command, so

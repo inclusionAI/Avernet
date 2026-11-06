@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+
+import pytest
 
 from agentclaw.community.core.bot_management.engines import (
     BotProvisioningContext,
@@ -18,6 +21,62 @@ from agentclaw.community.core.bot_management.engines.registry import (
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_baas_engine_bucket,
 )
+
+
+@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
+@pytest.mark.parametrize("with_repos", [False, True])
+@pytest.mark.parametrize(
+    ("template_type", "runtime_type"),
+    [
+        ("applicationCoding", "application"),
+        ("applicationCoding_oss", "application"),
+        ("personalCoding", "personal"),
+        ("applicationCoding_custom", "applicationCoding_custom"),
+    ],
+)
+def test_coding_runtime_projection_preserves_control_and_template_identity(
+    engine, bot_type, with_repos, template_type, runtime_type
+):
+    config = {
+        "template_key": template_type,
+        "template_uid": "coding-template-uid",
+        "template_version": "V2",
+        "bot_template_config": {"engine_config": {"type": ["claude-code"]}},
+        "backend_repo": [{"repo_url": "https://example.org/backend.git"}]
+        if with_repos else [],
+        "frontend_repo": [],
+        "lib_repo": [],
+        "init_repos": [{"url": "https://example.org/shared.git"}]
+        if with_repos else [],
+    }
+    original = deepcopy(config)
+    ctx, strategy = resolve_provisioning(
+        bot_id="b1",
+        owner_id="u1",
+        bot_type=bot_type,
+        active_engine=engine,
+        template_type=template_type,
+        template_config=config,
+    )
+
+    envs = strategy.build_extra_envs(ctx) or {}
+
+    if bot_type == "service":
+        assert "BOT_TYPE" not in envs
+    else:
+        assert envs["BOT_TYPE"] == runtime_type
+    if with_repos:
+        assert json.loads(envs["GIT_ADDRESSES"]) == [
+            "https://example.org/backend.git",
+            "https://example.org/shared.git",
+        ]
+    else:
+        assert "GIT_ADDRESSES" not in envs
+    assert ctx.bot_type == bot_type
+    assert ctx.template_type == template_type
+    assert ctx.template_config == original
+    assert config == original
 
 
 def test_resolve_baas_engine_bucket_routes_general_cc_by_template_type():
