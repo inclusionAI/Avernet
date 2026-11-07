@@ -45,6 +45,9 @@ def _engine_extra_envs_from_bot(bot: dict[str, Any]) -> dict[str, str]:
             template_config=template_config,
         )
         envs = strategy.build_extra_envs(ctx)
+        bot_name = bot.get("bot_name")
+        if isinstance(bot_name, str) and bot_name.strip():
+            envs = {**(envs or {}), "TEAMCLAW_BOT_NAME": bot_name.strip()}
         if envs:
             logger.info(
                 "[service_publish_extra_envs] engine extra_envs resolved: bot_id=%s env_keys=%s",

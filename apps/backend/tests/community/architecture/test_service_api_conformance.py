@@ -61,6 +61,8 @@ from agentclaw.community.core.cron.services.cron_admin import CronAdminService
 
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
 from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
 from agentclaw.community.core.service_bot.services.file_count_service import FileCountService
@@ -382,6 +384,7 @@ from agentclaw.community.api.bot_overview_service import BotOverviewServiceProto
 from agentclaw.community.core.bot_overview.service import BotOverviewService
 
 _PAIRS = [
+    (EngineSessionFilesProtocol, EngineSessionFilesService),
     (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),
     (BotKnowledgeServiceProtocol, BotKnowledgeService),

@@ -31,6 +31,7 @@ class SessionResourceModel(Base):
     tenant = Column(String(128), nullable=False)
     bot_uuid = Column(String(128), nullable=False)
     display_name = Column(String(255), nullable=False)
+    creator_name = Column(String(255), nullable=True)
     filename = Column(String(255), nullable=False)
     device_path = Column(String(2048), nullable=False)
     workspace_relative_path = Column(String(2048), nullable=False)
@@ -76,6 +77,7 @@ class SessionResourceModel(Base):
             tenant=self.tenant,
             bot_uuid=self.bot_uuid,
             display_name=self.display_name,
+            creator_name=self.creator_name,
             filename=self.filename,
             device_path=self.device_path,
             workspace_relative_path=self.workspace_relative_path,

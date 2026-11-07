@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import pytest_asyncio
 
@@ -174,3 +176,22 @@ async def test_ready_resource_can_be_cas_restarted_without_losing_transfer_sourc
     assert restarted.task_version == 2
     assert restarted.transfer_api_version is TransferApiVersion.SESSION_V2
     assert restarted.session_key_ciphertext == "enc:v1:ciphertext"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["上传者", None])
+async def test_repository_roundtrip_preserves_snapshot_across_state_changes(repo, name):
+    record = replace(_record(), creator_name=name)
+    assert repo.create(record).creator_name == name
+    assert repo.get_by_resource_id(record.resource_id).creator_name == name
+    started = repo.cas_start_materialization(
+        resource_id=record.resource_id, owner_id=record.owner_id, bot_id=record.bot_id,
+        session_key_hash=record.session_key_hash, transfer_id=record.transfer_id, task_id="t",
+    )
+    assert started.creator_name == name
+    finished = repo.cas_finish_materialization(
+        resource_id=record.resource_id, transfer_id=record.transfer_id, task_id="t",
+        task_version=started.task_version, ready=True, materialized_ref={}, error_code=None,
+    )
+    assert finished.creator_name == name
+    assert repo.list_owned(record.owner_id, record.bot_id, record.session_key_hash)[0].creator_name == name

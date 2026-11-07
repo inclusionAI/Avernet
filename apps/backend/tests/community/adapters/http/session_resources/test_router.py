@@ -166,6 +166,7 @@ async def test_upload_intent_keeps_the_primary_service_contract_only():
         "binding_id": None,
         "size_bytes": 12,
         "content_hash": "hash-1",
+        "creator_name": None,
     }
     assert result["files"][0]["resource_id"] == "sr_001"
     assert "mime_type" not in result["files"][0]
@@ -387,3 +388,20 @@ async def test_content_proxies_only_safe_headers_and_closes_upstream():
     assert "x-internal-token" not in response.headers
     assert [chunk async for chunk in response.body_iterator] == [b"hello"]
     assert service.content_closed is True
+
+
+@pytest.mark.asyncio
+async def test_upload_intent_passes_authenticated_nickname_not_login_or_target():
+    service = _Service()
+    await create_upload_intents(
+        body=UploadIntentRequest(
+            bot_id="bot-1", session_key="s", scope_type="friend_bot_chat",
+            engine_type="openclaw", target_entity_id="other-owner",
+            files=[{"filename": "a.txt"}],
+        ),
+        user=AuthenticatedUser("id", "actor-2", "login-name", nickName="上传者"),
+        service=service,
+    )
+    assert service.intent_kwargs["owner_id"] == "actor-2"
+    assert service.intent_kwargs["target_entity_id"] == "other-owner"
+    assert service.intent_kwargs["creator_name"] == "上传者"

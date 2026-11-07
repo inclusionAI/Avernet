@@ -434,6 +434,23 @@ async def test_other_engines_keep_original_preparation_rollback(lifecycle, engin
     assert not s.queue.tasks
 
 
+@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+@pytest.mark.parametrize("name", ["平台助手", None])
+def test_coding_restart_request_carries_platform_creator_name(lifecycle, engine, name):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+
+    lifecycle.repo.bot.update(active_engine=engine, bot_name=name)
+    lifecycle.service._build_engine_extra_envs = BotService._build_engine_extra_envs.__get__(lifecycle.service, BotService)
+    AicodingBaasPreparation(lifecycle.service).prepare(
+        bot_id="b", user_id="o", binding_id=7, bot=lifecycle.repo.bot,
+    )
+    envs = lifecycle.platform._build_create_bot_payload.call_args.kwargs["extra_envs"] or {}
+    assert envs.get("TEAMCLAW_BOT_NAME") == name
+    if name is None:
+        assert "TEAMCLAW_BOT_NAME" not in envs
+
+
 def test_coding_preflight_does_not_call_shared_restart_or_mutate_status(lifecycle):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
 

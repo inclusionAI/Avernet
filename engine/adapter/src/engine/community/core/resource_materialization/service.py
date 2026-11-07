@@ -14,6 +14,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -189,7 +190,10 @@ class ManifestStore:
                     "observed_mtime_ns": observed_mtime_ns,
                     "observed_inode": observed_inode,
                     "baas_tenant": baas_tenant,
-                    "source_kind": "baas_session_file",
+                    "source_kind": (
+                        "workspace_live" if entry.source_kind == "workspace_live"
+                        else "baas_session_file"
+                    ),
                     "source_attachment_id": None,
                     "source_url_hash": None,
                 }
@@ -249,6 +253,11 @@ class ResourceMaterializationService:
         root = self._workspace_root()
         entry = ManifestStore(root).get(resource_id)
         if entry is None or entry.status != "ready":
+            raise ResourceNotMaterializedError("resource_not_materialized")
+        # COSEC: live references require session-scoped descriptor reads; this
+        # legacy copy endpoint must never reopen their original workspace path.
+        if entry.source_kind == "workspace_live":
+            log.info("engine.resource_content.refused resource_id=%s reason=live_requires_session", resource_id)
             raise ResourceNotMaterializedError("resource_not_materialized")
         relative = Path(entry.relative_path)
         if relative.is_absolute() or ".." in relative.parts:
@@ -571,6 +580,9 @@ class ResourceMaterializationService:
                 observed_mtime_ns=observed.st_mtime_ns,
                 observed_inode=getattr(observed, "st_ino", None),
                 uploaded_at=request.uploaded_at,
+                creator_type=current.creator_type if current else "user",
+                creator_name=current.creator_name if current else request.creator_name,
+                created_at=(current.created_at or current.uploaded_at) if current else (request.uploaded_at or datetime.now(UTC)),
                 baas_tenant=request.tenant,
                 source_kind="temporary_url"
                 if chat_request is not None
@@ -591,6 +603,9 @@ class ResourceMaterializationService:
                 request.task_version,
                 self._path_hash(canonical),
                 actual_size,
+                extra={"creator_type": entry.creator_type,
+                       "creator_name_present": entry.creator_name is not None,
+                       "created_at": entry.created_at.isoformat() if entry.created_at else None},
             )
             return self._success_from_entry(entry)
         finally:

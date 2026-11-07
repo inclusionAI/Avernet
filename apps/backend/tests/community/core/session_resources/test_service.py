@@ -232,6 +232,7 @@ def _service(
     default_tenant="configured-tenant",
     bot_repository=None,
     bot_friend_repository=None,
+    staff_dept=None,
 ):
     repo = _Repo()
     http = _HttpClient(complete_status=complete_status)
@@ -245,6 +246,7 @@ def _service(
         default_tenant=default_tenant,
         bot_repository=bot_repository or _BotRepository(),
         bot_friend_repository=bot_friend_repository or _BotFriendRepository(),
+        staff_dept=staff_dept,
     )
     return service, repo, http
 

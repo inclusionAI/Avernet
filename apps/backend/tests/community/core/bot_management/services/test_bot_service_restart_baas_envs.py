@@ -375,7 +375,7 @@ class TestRestartBaasEnvInjection:
             "restart_workflow_baseline": 0,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
-            "envs": {"AGENTCLAW_SKILLS_LAYOUT": "legacy"},
+            "envs": {"AGENTCLAW_SKILLS_LAYOUT": "legacy", "TEAMCLAW_BOT_NAME": "TestBot"},
         }
         assert calls[1].kwargs["props"] == {
             "publish_id": "12372",
@@ -421,6 +421,7 @@ class TestRestartBaasEnvInjection:
         )
 
         expected_layout = {
+            "TEAMCLAW_BOT_NAME": "TestBot",
             "AGENTCLAW_SKILLS_LAYOUT": "pool",
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
             "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
@@ -578,12 +579,12 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         kwargs = baas.upgrade_bot.call_args.kwargs
-        assert kwargs["extra_envs"] is None
+        assert kwargs["extra_envs"] == {"TEAMCLAW_BOT_NAME": "TestBot"}
         # 沙箱覆写仍按重启链路透传；只是引擎策略不消费 model/runtime/token。
         assert kwargs["template_config"] == template_config
 
     def test_non_coding_engine_keeps_template_config_overrides(self):
-        """非 claude_code/aicoding 引擎门控不命中 → extra_envs=None，
+        """非 coding 引擎只注入平台 Bot 名称，
         但 template_config.envs/image/resource_spec 仍要透传给 BaaS /update。"""
         sandbox_overrides = {
             "model": "m1",  # 不应被 extra_envs 消费
@@ -600,7 +601,7 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         kwargs = baas.upgrade_bot.call_args.kwargs
-        assert kwargs["extra_envs"] is None
+        assert kwargs["extra_envs"] == {"TEAMCLAW_BOT_NAME": "TestBot"}
         assert kwargs["template_config"] == sandbox_overrides
 
     def test_template_uid_context_failure_keeps_template_config_overrides(self):
@@ -620,7 +621,7 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         kwargs = baas.upgrade_bot.call_args.kwargs
-        assert kwargs["extra_envs"] is None
+        assert kwargs["extra_envs"] == {"TEAMCLAW_BOT_NAME": "TestBot"}
         assert kwargs["template_config"] == sandbox_overrides
 
     def test_non_coding_template_type_no_envs(self):
@@ -634,7 +635,7 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         kwargs = baas.upgrade_bot.call_args.kwargs
-        assert kwargs["extra_envs"] is None
+        assert kwargs["extra_envs"] == {"TEAMCLAW_BOT_NAME": "TestBot"}
         assert kwargs["template_config"] == {"model": "m1"}
 
     def test_missing_model_runtime_still_injects_bot_type(self):
@@ -647,7 +648,7 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         envs = baas.upgrade_bot.call_args.kwargs["extra_envs"]
-        assert envs == {"BOT_TYPE": "application"}
+        assert envs == {"BOT_TYPE": "application", "TEAMCLAW_BOT_NAME": "TestBot"}
 
     def test_get_template_config_failure_does_not_block_restart(self):
         """template_service.get_template_config 抛异常 → 仅 warning，不阻断重启，
@@ -663,7 +664,7 @@ class TestRestartBaasEnvInjection:
         baas.upgrade_bot.assert_called_once()
         envs = baas.upgrade_bot.call_args.kwargs["extra_envs"]
         # template_config=None → build_aix_extra_envs 仍返回 {"BOT_TYPE": "application"}
-        assert envs == {"BOT_TYPE": "application"}
+        assert envs == {"BOT_TYPE": "application", "TEAMCLAW_BOT_NAME": "TestBot"}
 
 
 # ===========================================================================

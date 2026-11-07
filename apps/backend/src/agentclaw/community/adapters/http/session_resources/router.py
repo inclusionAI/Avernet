@@ -36,6 +36,7 @@ def _resource(record: SessionResourceRecord) -> dict:
     return {
         "resource_id": record.resource_id,
         "display_name": record.display_name,
+        "creator_name": record.creator_name,
         "status": record.status.value,
         "engine_type": record.engine_type,
         "size_bytes": record.size_bytes,
@@ -95,6 +96,7 @@ async def create_upload_intents(
         for item in body.files:
             intent = service.create_upload_intent(
                 owner_id=user.staffId,
+                creator_name=user.nickName,
                 bot_id=body.bot_id,
                 session_key=body.session_key,
                 scope_type=body.scope_type,

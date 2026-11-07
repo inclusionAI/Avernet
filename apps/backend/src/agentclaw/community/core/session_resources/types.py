@@ -11,6 +11,14 @@ def hash_identifier(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def safe_creator_name(value: str | None) -> str | None:
+    """Keep only an unambiguous name accepted by storage and Engine metadata."""
+    name = value.strip() if value else ""
+    if not name or len(name) > 255 or not name.isprintable():
+        return None
+    return name
+
+
 class SessionResourceStatus(str, Enum):
     UPLOAD_URL_ISSUED = "upload_url_issued"
     DEVICE_SYNCING = "device_syncing"
@@ -55,6 +63,7 @@ class SessionResourceRecord:
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
     binding_id: int | None = None
+    creator_name: str | None = None
 
 
 @dataclass(frozen=True)
