@@ -10,7 +10,8 @@ async fn sql_cannot_retire_human_with_owned_bot() {
     let db = Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap());
     for sql in lifecycle::SCHEMA { db.execute(DbStatement::new(*sql)).await.unwrap(); }
     let repo = PersistentBotRepo::with_sql_flavor(db.clone(), bcs_db_api::DbSqlFlavor::Sqlite);
-    let init = OwnershipInitialization { owner_user_id:"alice".into(), mutation:AuthorityMutation {
+    let init = OwnershipInitialization { initial_manager_user_ids: Vec::new(),
+                owner_user_id:"alice".into(), mutation:AuthorityMutation {
         mutation_id:"review-create".into(), actor:AuthorityActor::Human{user_id:"alice".into()} } };
     repo.create_registration_if_absent_with_ownership("review-owned".into(),
         bcs_service_api::BotCapabilities { name:Some("owned".into()), ..Default::default() },

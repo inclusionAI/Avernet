@@ -55,6 +55,8 @@ pub struct RegisterProviderBotParams {
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
+    /// Registration snapshot: first user is owner, remaining users are initial managers.
+    /// Requires 1..=101 raw user IDs; replay never synchronizes existing authority.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     pub domains: Vec<String>,

@@ -318,6 +318,7 @@ impl MemoryBotRepo {
         bot_id: &str,
         owner_user_id: &str,
         mutation: &AuthorityMutation,
+        initial_managers: &[String],
     ) -> ServiceResult<BotOwnershipView> {
         if owner_user_id.trim().is_empty()
             || owner_user_id != owner_user_id.trim()
@@ -331,6 +332,7 @@ impl MemoryBotRepo {
         ownership_composition::validate_mutation(mutation)?;
         let owner_actor =
             ownership_composition::owner_actor_id(owner_user_id);
+        let _write_guard = self.record_write_lock.lock().await;
         let ctx = memory_require_live_bot(self, bot_id).await?;
         // Ownership targets are physical Bots only: a Human ACTOR
         // row must never gain an owner edge (bcs-admin classify()
@@ -398,6 +400,31 @@ impl MemoryBotRepo {
             }
         }
 
+        // Keep Human staging and authority publication under the same lock span.
+        let mut bots = self.bots.write().await;
+        let deleted = self.deleted_bot_ids.read().await;
+        let mut new_humans = Vec::new();
+        for user in initial_managers {
+            let id = ownership_composition::owner_actor_id(user);
+            if deleted.contains(&id) || bots.get(&id).is_some_and(|row|
+                row.actor_kind != bcs_service_api::ActorKind::Human || row.env.as_deref() != Some(ctx.env.as_str())) {
+                return Err(registration_conflict("initial manager must be a live Human in this environment"));
+            }
+            if !bots.contains_key(&id) {
+                new_humans.push((id.clone(), RegisteredBotInner {
+                    bot_id: id.clone(), last_heartbeat: std::time::Instant::now(),
+                    capabilities: BotCapabilities { name: Some(user.clone()), visibility: "protected".into(), ..Default::default() },
+                    // Match ensure_human_actor: persistent identities do not expire on heartbeat cleanup.
+                    ws_connection: None, session_token: Some(uuid::Uuid::new_v4().to_string()), env: Some(ctx.env.clone()),
+                    status: bcs_service_api::ActorStatus::Online, actor_kind: bcs_service_api::ActorKind::Human,
+                    created_by: Some(user.clone()), protocol_version: 1, user_visibility: Default::default(),
+                    friend_ext: Default::default(), friend_check_in_strategy: Default::default(),
+                }));
+            }
+            staged.edges.insert((ctx.env.clone(), ctx.bot_id.clone(), id, MemoryAuthorityEdgeKind::Manager),
+                (MemoryAuthorityEdgeStatus::Approved, 0));
+        }
+
         let owner_edge_key = (
             ctx.env.clone(),
             ctx.bot_id.clone(),
@@ -437,7 +464,7 @@ impl MemoryBotRepo {
             .ownership_versions
             .insert((ctx.env.clone(), ctx.bot_id.clone()), 1);
         let after_state =
-            ownership_composition::initialize_audit_state(&owner_actor, 1);
+            crate::ownership_managers::audit_state(&owner_actor, initial_managers);
         let _ = &ctx;
         mem_append_audit(
             &mut staged,
@@ -451,8 +478,16 @@ impl MemoryBotRepo {
             None,
             &after_state,
         )?;
+        // Validate the return projection before publishing any staged writes.
+        let view = owner_view(bot_id, &owner_actor)?;
+        let mut audit_times = self.control_plane_audit.write().await;
+        let now = super::unix_millis();
+        for (id, human) in new_humans {
+            audit_times.insert(id.clone(), (now, now));
+            bots.insert(id, human);
+        }
         *state_guard = staged;
-        owner_view(bot_id, &owner_actor)
+        Ok(view)
     }
 }
 
@@ -662,5 +697,32 @@ impl MemoryBotRepo {
             ownership_version,
             owner_edges,
         }))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod initial_manager_tests {
+    use super::*;
+    use bcs_service_api::port::repo::BotRepoPort;
+    use bcs_service_api::types::bot_authority::AuthorityActor;
+
+    #[tokio::test]
+    async fn initialized_manager_humans_survive_heartbeat_cleanup() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+        repo.register_with_owner_and_token("bot".into(), BotCapabilities::default(), "alice", "bot-token")
+            .await.expect("register");
+        repo.ensure_human_actor("alice", "Alice").await.expect("owner Human");
+        repo.initialize_provider_authority("bot", OwnershipInitialization {
+            owner_user_id: "alice".into(), initial_manager_user_ids: vec!["bob".into()],
+            mutation: AuthorityMutation { mutation_id: "initialize".into(),
+                actor: AuthorityActor::Provider {provider_id: "provider".into()} },
+        }).await.expect("initialize authority");
+        repo.bots.write().await.get_mut("human_bob").expect("manager Human").last_heartbeat =
+            std::time::Instant::now() - std::time::Duration::from_secs(600);
+        assert!(repo.get("human_bob").await.is_some(), "Human identities must not expire with Bot heartbeats");
+        repo.cleanup_expired().await;
+        assert!(repo.get("human_bob").await.is_some());
     }
 }

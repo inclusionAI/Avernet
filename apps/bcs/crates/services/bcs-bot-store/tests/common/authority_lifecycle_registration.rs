@@ -476,6 +476,7 @@ pub async fn registration_creates_the_owner_actor_row_and_the_owner_can_manage(f
 
 pub async fn mutation_must_match_the_verified_initiator(fixture: &Fixture) {
     let forged = OwnershipInitialization {
+        initial_manager_user_ids: Vec::new(),
         owner_user_id: "11111111".to_string(),
         mutation: AuthorityMutation {
             mutation_id: "m-1".to_string(),

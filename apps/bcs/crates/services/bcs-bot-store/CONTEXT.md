@@ -334,3 +334,33 @@ repopulate stale names. Single reads add one indexed row lookup; batches retain
 invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
 not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
 Card-owned name even when a caller carries an older capabilities snapshot.
+
+
+## Provider initial manager snapshot
+
+`initialize_provider_authority` is Provider-only, distinct from governance backfill
+and ongoing manager edits/sync. Version-0 initialization commits owner/version,
+initial manager Human actors, manager edges and the Provider `initialize` audit
+snapshot together. An initialized Bot never reapplies the snapshot. Ordinary
+Provider Bot/binding creation retains its previous transaction boundary; A2A
+includes managers in its whole-registration composite. Human-token registration
+must supply an empty initial-manager list. No schema or runtime permission change.
+
+The input is bounded to 101 entries (100 initial managers). SQL adds five steps
+inside the existing transaction for a nonempty set: one batched Human insert,
+one live-Human count guard, one batched edge upsert, one exact-identity edge count
+guard and one guard consumption. At most 100 Human/edge rows are written per
+batch; the largest statement binds 500 values. No per-person network lookup or
+DB call is introduced. The two counts return one scalar each; predicate scans
+remain subject to existing indexes/collation. Existing deterministic rollback
+retries stay bounded to three; no new retry worker/cache exists. Memory validates
+and stages actors/edges before publishing under the existing record/authority
+lock order. Tests: `provider_initial_managers` (Memory application and SQLite),
+Provider A2A conformance, and `ownership_managers` bounded-statement unit test.
+
+Ordinary registration checks actual governance completion for both connection
+modes. A SQL governance read performs three queries when `created_by` is present:
+one Bot row, one Human existence count and the approved-owner edge read (normally
+0–1 rows). Gateway replays already paid this cost; new registrations and Plugin
+replays now also pay it to avoid reinitializing committed authority. No manager
+list is read. The underlying owner-edge integrity read remains unchanged.
