@@ -13,6 +13,7 @@ import { AutoHealSaveService } from '../auto-heal-save-service.js';
 import { editorActiveDeploymentToken, InvalidEditorActiveDeploymentTokenInputError } from '../editor-active-deployment-token.js';
 import * as activeTokenHelper from '../editor-active-deployment-token.js';
 import * as git from '../clawflows-git-client.js';
+import * as packSpec from '../pack-spec-save.js';
 import { mockPreparedSpecSave, preparedSaveIdentity, preparedSaveConfig, preparedSaveAuthor } from './auto-heal-prepared-save-fixture.js';
 
 const published: WorkflowSpec = { id: 'flow', version: '7', title: 'Published', nodes: [
@@ -76,6 +77,44 @@ describe('AutoHeal first-draft DB and policy checks inside prepared publication'
     raw.exec(`CREATE TABLE clawweb_pack_operations (request_id TEXT, workflow_id TEXT, phase TEXT, lock_workflow_id TEXT);
       INSERT INTO clawweb_pack_operations VALUES ('legacy-save', 'flow', 'unknown', 'flow');`);
   }
+
+  async function editorInput() {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    return { ...input(), packId: active.pack_id, expectedDraftAbsent: true as const,
+      expectedActiveDeployNumber: active.deploy_number, expectedActiveToken: editorActiveDeploymentToken('flow', active) };
+  }
+
+  it('creates the explicit Editor first draft without preparing or pushing Git', async () => {
+    const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
+    expect(await service().saveEditorFirstDraft(await editorInput())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack' });
+    expect(await specs.findByWorkflowId('flow')).toMatchObject({ spec_json: JSON.stringify(applied), owner_id: 'editor', pack_id: 'published-pack' });
+    expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+    expect(historyBytes()).toBe(beforeHistory); expect(permissionBytes()).toBe(beforePermissions);
+  });
+
+  it.each(['revoked edit', 'active changed', 'competing draft'] as const)('rejects %s under the first-draft transaction without Git', async mode => {
+    const request = await editorInput();
+    beforeTransaction(() => {
+      if (mode === 'revoked edit') raw.exec('UPDATE bot_workflow_permissions SET can_edit = 0');
+      if (mode === 'active changed') raw.exec("UPDATE workflow_deploy_history SET spec_json = 'changed' WHERE is_active = 1");
+      if (mode === 'competing draft') raw.prepare('INSERT INTO workflow_specs (workflow_id,pack_id,spec_json,title,owner_id,gmt_create,gmt_modified) VALUES (?,?,?,?,?,?,?)')
+        .run('flow', 'published-pack', '{"winner":true}', 'winner', 'other', 1, 1);
+    });
+    await expect(service().saveEditorFirstDraft(request)).rejects.toMatchObject({ status: mode === 'revoked edit' ? 403 : 409,
+      code: mode === 'revoked edit' ? 'FORBIDDEN' : mode === 'active changed' ? 'BASELINE_STALE' : 'DRAFT_ALREADY_EXISTS' });
+    expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+    expect(drafts()).toHaveLength(mode === 'competing draft' ? 1 : 0);
+    if (mode === 'competing draft') expect((await specs.findByWorkflowId('flow'))?.spec_json).toBe('{"winner":true}');
+  });
+
+  it('requires complete explicit Editor preconditions and forbids create-only', async () => {
+    const request = await editorInput();
+    for (const change of [{ expectedDraftAbsent: undefined }, { expectedActiveDeployNumber: undefined },
+      { expectedActiveToken: undefined }, { createOnly: true }]) {
+      await expect(service().saveEditorFirstDraft({ ...request, ...change } as never)).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+    }
+    expect(drafts()).toEqual([]); expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+  });
 
   it.each([undefined, null, 'published-pack'])('inserts the applied document with DB pack identity (packId=%s)', async packId => {
     const beforeHistory = historyBytes(), beforePermissions = permissionBytes();

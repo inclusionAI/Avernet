@@ -111,7 +111,7 @@ it('authorizes Pack snapshots while refusing retired journal recovery', async ()
   expect(snapshot.baseCommit).toBe(saved.commit);
   expect(snapshot.canWrite).toBe(false);
   expect(snapshot.versionFiles.some(file => file.path === 'workflows/local-flow.yaml')).toBe(true);
-  expect(execFileSync('git', ['--git-dir', gitDir!, 'rev-parse', 'refs/heads/saved/local-flow'], { encoding: 'utf8' }).trim()).toBe(saved.commit);
+  expect(execFileSync('git', ['--git-dir', gitDir!, 'rev-parse', 'refs/heads/wf/local-flow'], { encoding: 'utf8' }).trim()).toBe(saved.commit);
   expect((await fetch(snapshotUrl, { headers: { origin: 'https://evil.example' } })).status).toBe(403);
   expect((await fetch(snapshotUrl, { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403);
   expect((await fetch(`${base}/api/workflows/local-flow/PACK-VERSION/?version=draft`, { headers: { origin: 'https://evil.example' } })).status).toBe(403);
@@ -223,6 +223,8 @@ it('uses edit and an optional host policy for snapshot v2 while preserving non-v
   expect(capability.status).toBe(200); expect(await capability.json()).toMatchObject({ canDeploy: true, savedCommit: saved.commit, packId: saved.packId, activeCommit: null });
   const result = await post('editor-deploy/snapshot-v2', exact);
   expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ ok: true, deployed: true, candidateCommit: saved.commit });
+  expect(execFileSync('git', ['--git-dir', gitDir!, 'rev-parse', 'refs/heads/wf/acl-flow'], { encoding: 'utf8' }).trim()).toBe(saved.commit);
+  expect(execFileSync('git', ['--git-dir', gitDir!, 'rev-parse', 'refs/tags/deploy/acl-flow/#1^{commit}'], { encoding: 'utf8' }).trim()).toBe(saved.commit);
   expect(acl).toHaveBeenCalledTimes(3);
   expect(acl).toHaveBeenCalledWith({ actorId: 'dev_local', workflowId: spec.id, packId: saved.packId, candidateCommit: saved.commit });
   expect(await db.query("SELECT is_active FROM workflow_deploy_history WHERE workflow_id = 'acl-flow'")).toEqual([{ is_active: 1 }]);

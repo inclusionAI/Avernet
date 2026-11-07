@@ -41,7 +41,7 @@ export type AutoHealUnifiedSaveResponse = Readonly<{
   evidence: WorkflowUnifiedSaveResult['evidence']; reconciliationRequired: boolean;
 }>;
 
-/** A successful save has both a committed database draft and a Git identity. */
+/** Ordinary saves include a Git identity; the Editor first-draft stage is DB-only. */
 export type AutoHealSaveResult = { ok: true; saved: true; workflowId: string; packId: string; branch?: string; commit?: string };
 
 // Cast numeric identities and timestamps in SQL, before a driver can round a
@@ -130,6 +130,21 @@ export class AutoHealSaveService {
   }
 
   async save(input: AutoHealSaveInput): Promise<AutoHealSaveResult> {
+    return this.saveValidated(input, false);
+  }
+
+  /** Editor-only intermediate stage, never selected from request data. It is
+   * restricted to an absent draft and a fully observed active publication. */
+  async saveEditorFirstDraft(input: AutoHealSaveInput): Promise<AutoHealSaveResult> {
+    if (input.expectedDraftAbsent !== true || input.createOnly !== undefined
+      || !Number.isSafeInteger(input.expectedActiveDeployNumber) || input.expectedActiveDeployNumber! <= 0
+      || typeof input.expectedActiveToken !== 'string' || !/^[0-9a-f]{64}$/.test(input.expectedActiveToken)) {
+      throw new PackOperationError(400, 'INVALID_REQUEST');
+    }
+    return this.saveValidated(input, true);
+  }
+
+  private async saveValidated(input: AutoHealSaveInput, editorFirstDraft: boolean): Promise<AutoHealSaveResult> {
     if (!validPackGitId(input.workflowId) || /^__.+__$/.test(input.workflowId) || !input.spec
       || (input.createOnly !== undefined && typeof input.createOnly !== 'boolean')
       || (input.expectedDraftAbsent !== undefined && (input.expectedDraftAbsent !== true || input.createOnly !== undefined))
@@ -160,7 +175,7 @@ export class AutoHealSaveService {
     }
 
     const row = await readDraftSnapshot(this.db, input.workflowId);
-    if (!row) return this.saveFirstDraft(input, submitted, spec.title || input.workflowId);
+    if (!row) return this.saveFirstDraft(input, submitted, spec.title || input.workflowId, editorFirstDraft);
     if (row && !await this.botPermRepo.hasEditPermission(input.workflowId, input.actorId)) throw new PackOperationError(403, 'FORBIDDEN');
     if (input.expectedDraftAbsent) throw new PackOperationError(409, 'DRAFT_ALREADY_EXISTS');
     await assertNoUnresolvedLegacyPackOperation(this.db, input.workflowId);
@@ -202,7 +217,7 @@ export class AutoHealSaveService {
   }
 
   /** Restore only an already-published workflow, never create a new Pack identity. */
-  private async saveFirstDraft(input: AutoHealSaveInput, submitted: WorkflowSpec, title: string): Promise<AutoHealSaveResult> {
+  private async saveFirstDraft(input: AutoHealSaveInput, submitted: WorkflowSpec, title: string, editorFirstDraft: boolean): Promise<AutoHealSaveResult> {
     const active = await this.deployHistoryRepo?.findActiveByWorkflowId(input.workflowId);
     if (!active) throw new PackOperationError(input.expectedActiveToken === undefined ? 404 : 409,
       input.expectedActiveToken === undefined ? 'WORKFLOW_NOT_FOUND' : 'BASELINE_STALE');
@@ -217,7 +232,7 @@ export class AutoHealSaveService {
     if (input.packId != null && input.packId !== packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH');
     const conflict = () => new PackOperationError(409, input.expectedDraftAbsent ? 'DRAFT_ALREADY_EXISTS' : 'WORKFLOW_ALREADY_EXISTS');
 
-    return this.saveDraftWithGit(input, submitted, packId, async tx => {
+    const write = async (tx: IDatabase): Promise<DraftSnapshot> => {
       const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
       // Lock the existing active publication first to serialize first-draft saves,
       // rather than sharing a missing-draft gap lock before competing for active.
@@ -263,7 +278,16 @@ export class AutoHealSaveService {
         throw new Error('Workflow creation failed');
       }
       return created;
-    });
+    };
+    if (!editorFirstDraft) return this.saveDraftWithGit(input, submitted, packId, write);
+    let completed = false;
+    try {
+      await this.db.transaction(async tx => { await write(tx); completed = true; });
+    } catch (error) {
+      if (completed) throw new PackOperationError(503, 'SAVE_DB_OUTCOME_UNKNOWN', input.requestId);
+      throw error;
+    }
+    return { ok: true, saved: true, workflowId: input.workflowId, packId };
   }
 
   /** Prepare before the existing transaction; push only after its acknowledgement

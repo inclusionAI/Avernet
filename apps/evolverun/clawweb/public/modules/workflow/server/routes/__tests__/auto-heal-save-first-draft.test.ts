@@ -89,7 +89,7 @@ describe('POST /api/auto-heal/save first-draft policy with prepared Git transpor
     ['expectedActiveToken', 'A'.repeat(64)],
     ['expectedActiveToken', {}], ['createOnly', true], ['createOnly', false],
   ])('rejects invalid or missing %s=%j before invoking the save service', async (field, value) => {
-    const save = vi.spyOn(AutoHealSaveService.prototype, 'save');
+    const save = vi.spyOn(AutoHealSaveService.prototype, 'saveEditorFirstDraft');
     const before = historyBytes();
     expect(await post({ workflowId: 'flow', spec, ...validPreconditions, [field as string]: value }, editorEndpoint))
       .toMatchObject({ status: 400, body: { code: 'INVALID_REQUEST' } });
@@ -97,7 +97,7 @@ describe('POST /api/auto-heal/save first-draft policy with prepared Git transpor
   });
 
   it('requires a host-verified identity, never trusting an actor in the request body', async () => {
-    const save = vi.spyOn(AutoHealSaveService.prototype, 'save');
+    const save = vi.spyOn(AutoHealSaveService.prototype, 'saveEditorFirstDraft');
     for (const actor of [undefined, null, { actorId: 'unknown' }, { actorId: '  ' }]) {
       deps.resolvePrincipal = actor === undefined ? undefined : async () => actor;
       expect(await post({ workflowId: 'flow', spec, ...validPreconditions, actorId: 'editor' }, editorEndpoint))
@@ -118,11 +118,11 @@ describe('POST /api/auto-heal/save first-draft policy with prepared Git transpor
   it('passes all preconditions and trusted actor to the service and saves the matching first draft', async () => {
     const active = (await deps.deployHistoryRepo.findActiveByWorkflowId('flow'))!;
     const expectedActiveToken = editorActiveDeploymentToken('flow', active);
-    const save = vi.spyOn(AutoHealSaveService.prototype, 'save');
+    const save = vi.spyOn(AutoHealSaveService.prototype, 'saveEditorFirstDraft');
     const before = historyBytes();
     expect(await post({ workflowId: 'flow', spec, packId: active.pack_id, diagnosisId: 'diagnosis', note: 'note',
       ...validPreconditions, expectedActiveToken, actorId: 'impostor' }, editorEndpoint))
-      .toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: active.pack_id, ...preparedSaveIdentity } });
+      .toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: active.pack_id } });
     expect(save).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'flow', spec, actorId: 'editor',
       expectedDraftAbsent: true, expectedActiveDeployNumber: 5, expectedActiveToken, diagnosisId: 'diagnosis', note: 'note' }));

@@ -41,21 +41,27 @@ A duplicate matching manifest or overlapping Pack layout is rejected as 409
 only a fixed failure phase and error category, never Git credentials, raw errors,
 or file contents. Other errors may still return 503 `SERVICE_UNAVAILABLE`.
 
-`POST /api/auto-heal/save` validates an existing workflow's spec and stores the
-submitted document in `workflow_specs` in a database transaction. The database
-draft is the source of the workflow YAML used at deployment; an existing-workflow
-save does not write Git, allocate a release version, or return a Git commit. It
-requires edit permission and an existing workflow. If that workflow has an active
-database deployment but no draft row, saving creates its first database draft
-without Git or release-history writes; it does not provision a new Pack identity.
-The editor sends its first draft to the dedicated
-`POST /api/auto-heal/editor-save-first-draft` endpoint, supplying
-`expectedDraftAbsent: true`, the exact active `packId`,
-`expectedActiveDeployNumber`, and `expectedActiveToken` captured from the active
-database release. The endpoint requires those preconditions and does not fall
-back to legacy `/save`; hosts must mount it explicitly. The token binds
-the stored spec text and publication identity, and is checked again under the
-active-row transaction lock. Older AutoHeal clients may omit the optional token
+`POST /api/auto-heal/save` validates and transactionally stores an existing
+workflow draft, then writes its full Pack to `wf/<workflowId>`. It requires
+edit permission and an existing workflow; a successful response includes the
+Git branch and commit. A first draft restored through this ordinary endpoint
+also writes `wf`. Database and Git are not an atomic transaction: a failure
+after the DB commit can require reconciliation.
+
+The Editor uses `POST /api/auto-heal/editor-save-first-draft` as a **DB-only
+intermediate step** when an active deployment has no draft row. It supplies
+`expectedDraftAbsent: true`, the active `packId`, `expectedActiveDeployNumber`,
+and `expectedActiveToken` captured from the active database release. The host
+must authenticate the actor and explicitly call `saveEditorFirstDraft`; request
+fields cannot select this behavior for ordinary `/save`. This endpoint requires
+those preconditions, does not resolve or write Git, and does not fall back to
+legacy `/save`. Its success confirms only the DB draft, not a complete Pack save.
+The Editor must subsequently invoke unified save using the Git source commit and
+`wf` head observed before the first-draft step and the new draft token; only a
+confirmed unified save writes the complete Pack to `wf`. Concurrent Git changes
+must cause a conflict rather than replacing the observed baseline. The active
+token binds the stored spec text and publication identity, and is checked again
+under the active-row transaction lock. Older AutoHeal clients may omit the optional token
 and retain their previous behavior. If a draft already exists or another insert wins, the service
 returns 409 `DRAFT_ALREADY_EXISTS` without overwriting it; if the re-locked
 active release has a different deploy number, it returns 409 `BASELINE_STALE`

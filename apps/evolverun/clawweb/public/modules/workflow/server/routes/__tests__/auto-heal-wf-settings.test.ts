@@ -19,22 +19,33 @@ function post(endpoint: string, body: object) {
   });
 }
 afterEach(() => vi.restoreAllMocks());
-describe.each([
-  ['/save', { workflowId: 'flow', spec: { id: 'flow' } }],
-  ['/editor-save-first-draft', { workflowId: 'flow', spec: { id: 'flow' }, expectedDraftAbsent: true,
-    expectedActiveDeployNumber: 1, expectedActiveToken: 'a'.repeat(64) }],
-] as const)('%s Git settings', (endpoint, body) => {
-  it('resolves per request before invoking the save service', async () => {
+describe('/save Git settings', () => {
+  const body = { workflowId: 'flow', spec: { id: 'flow' } };
+  it('resolves per request and cannot enable DB-only from the request', async () => {
     const resolve = vi.spyOn(settings, 'resolveAutoHealGitSettings').mockResolvedValue(resolved);
     const save = vi.spyOn(AutoHealSaveService.prototype, 'save').mockResolvedValue({ ok: true, saved: true, workflowId: 'flow', packId: 'pack', branch: 'wf/flow', commit: 'a'.repeat(40) });
-    expect(await post(endpoint, body)).toMatchObject({ status: 200, body: { branch: 'wf/flow' } });
+    const firstDraft = vi.spyOn(AutoHealSaveService.prototype, 'saveEditorFirstDraft');
+    expect(await post('/save', { ...body, dbOnly: true })).toMatchObject({ status: 200, body: { branch: 'wf/flow' } });
     expect(resolve).toHaveBeenCalledWith(deps.db, deps.gitConfig, deps.gitAuthor);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'flow', actorId: 'editor' }));
+    expect(firstDraft).not.toHaveBeenCalled();
   });
   it('does not invoke the service when Git settings fail', async () => {
     vi.spyOn(settings, 'resolveAutoHealGitSettings').mockRejectedValue(Object.assign(new Error('private'), { status: 503 }));
     const save = vi.spyOn(AutoHealSaveService.prototype, 'save');
-    expect(await post(endpoint, body)).toMatchObject({ status: 503, body: { code: 'SAVE_FAILED' } });
+    expect(await post('/save', body)).toMatchObject({ status: 503, body: { code: 'SAVE_FAILED' } });
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe('/editor-save-first-draft', () => {
+  it('uses only the explicit DB-only service and does not resolve Git settings', async () => {
+    const resolve = vi.spyOn(settings, 'resolveAutoHealGitSettings');
+    const save = vi.spyOn(AutoHealSaveService.prototype, 'save');
+    const firstDraft = vi.spyOn(AutoHealSaveService.prototype, 'saveEditorFirstDraft').mockResolvedValue({ ok: true, saved: true, workflowId: 'flow', packId: 'pack' });
+    expect(await post('/editor-save-first-draft', { workflowId: 'flow', spec: { id: 'flow' }, expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 1, expectedActiveToken: 'a'.repeat(64) })).toMatchObject({ status: 200, body: { packId: 'pack' } });
+    expect(resolve).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+    expect(firstDraft).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'flow', actorId: 'editor' }));
   });
 });
