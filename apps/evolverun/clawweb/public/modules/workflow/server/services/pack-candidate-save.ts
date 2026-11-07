@@ -262,10 +262,20 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
           return value as Record<string, unknown>;
         } catch { throw new Error('Invalid manifest or workflow YAML'); }
       };
+      const rootManifestDeclaresWorkflow = async (): Promise<boolean> => {
+        const entry = entries.get('workflow.pack.yaml');
+        if (!entry) return false;
+        const manifest = await yamlObject(entry);
+        if (!Array.isArray(manifest.workflows)) throw new Error('Invalid pack manifest workflows');
+        return manifest.workflows.some(item => itemId(item) === input.workflowId);
+      };
       const locate = async (): Promise<{ root: string; id: string; workflow: string; entry: Entry }> => {
         let found: { root: string; id: string; workflow: string; entry: Entry } | undefined;
-        for (const [file, entry] of entries) {
-          if (!isCandidate(file)) continue;
+        const files = await rootManifestDeclaresWorkflow()
+          ? ['workflow.pack.yaml']
+          : [...entries.keys()].filter(isCandidate);
+        for (const file of files) {
+          const entry = entries.get(file)!;
           const manifest = await yamlObject(entry);
           if (!Array.isArray(manifest.workflows)) throw new Error('Invalid pack manifest workflows');
           const matches = manifest.workflows.filter(item => itemId(item) === input.workflowId);
@@ -282,12 +292,17 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
         if (!found) throw new Error('Pack manifest not found');
         return found;
       };
-      const rejectMixedRootLayout = () => {
+      const rejectMixedRootLayout = async () => {
         if (entries.has('workflow.pack.yaml') && [...entries.keys()].some(name => name.endsWith('/workflow.pack.yaml'))) {
+          // A root manifest declaring the selected workflow makes the packs/
+          // subtree ordinary; nested manifests there are preserved resources.
+          const nested = [...entries.keys()].filter(name => name !== 'workflow.pack.yaml'
+            && name.endsWith('/workflow.pack.yaml'));
+          if (await rootManifestDeclaresWorkflow() && nested.every(name => name.startsWith('packs/'))) return;
           throw new Error('Mixed root and nested Pack layout');
         }
       };
-      rejectMixedRootLayout();
+      await rejectMixedRootLayout();
       const sourcePack = await locate();
       let pack: { root: string; id: string } = sourcePack;
       if (protectTreeAliases) rejectProtectedTreeAliases(entries, sourcePack.root,
@@ -295,6 +310,8 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
       const rejectOverlappingPacks = () => {
         for (const name of entries.keys()) {
           if (name !== 'workflow.pack.yaml' && !name.endsWith('/workflow.pack.yaml')) continue;
+          // The packs/ subtree under a selected root Pack is ordinary.
+          if (pack.root === '' && name !== 'workflow.pack.yaml' && name.startsWith('packs/')) continue;
           const otherRoot = name.slice(0, -'workflow.pack.yaml'.length);
           if (otherRoot !== pack.root && (otherRoot.startsWith(pack.root) || pack.root.startsWith(otherRoot))) {
             throw new Error('Overlapping Pack layout');
@@ -381,7 +398,7 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
         if (matches.length !== 1) throw new Error('Pack manifest identity conflict');
         await requireOriginalBytes(entries.get(pack.root + workflowFile(matches[0])));
       }
-      rejectMixedRootLayout();
+      await rejectMixedRootLayout();
       rejectOverlappingPacks();
       // Full inventory reads every regular Pack blob, including unchanged legacy
       // files. Reject oversized final trees rather than publish unreadable drafts.
@@ -431,7 +448,7 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
           pack = { root: newRoot, id: newId };
         } else pack = { root: '', id: newId };
       }
-      rejectMixedRootLayout();
+      await rejectMixedRootLayout();
       rejectOverlappingPacks();
       const after = await locate();
       if (after.root !== pack.root || after.id !== pack.id) throw new Error('Pack manifest identity conflict');

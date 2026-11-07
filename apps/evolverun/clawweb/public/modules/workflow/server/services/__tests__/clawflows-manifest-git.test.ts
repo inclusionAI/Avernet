@@ -472,12 +472,14 @@ describe("manifest candidates are selected by pack identity", () => {
     await expect(ensurePackManifest(repo, "pack", "flow")).rejects.toThrow(/manifest/i);
     expect(readFileSync(path.join(repo, "packs/pack/workflow.pack.yaml"), "utf8")).toBe(other);
   });
-  it("fails closed for two target manifests without changing either", async () => {
+  it("prefers the root manifest and preserves nested Pack resources", async () => {
     put("workflow.pack.yaml", targetManifest); put("packs/pack/workflow.pack.yaml", targetManifest);
     put("packs/pack/workflows/flow.yaml", "id: flow\nnodes: []\n");
-    await expect(writeWorkflowSpecToRepo(repo, "pack", "flow", spec)).rejects.toThrow(/conflict/i);
-    await expect(ensurePackManifest(repo, "pack", "flow")).rejects.toThrow(/conflict/i);
+    await writeWorkflowSpecToRepo(repo, "pack", "flow", spec);
+    await ensurePackManifest(repo, "pack", "flow");
     expect(readFileSync(path.join(repo, "workflow.pack.yaml"), "utf8")).toBe(targetManifest);
+    expect(normalizePackManifest(parse(readFileSync(path.join(repo, "workflow.pack.yaml"), "utf8")))).toMatchObject({ id: "pack" });
+    expect(readFileSync(path.join(repo, "workflows/flow.yaml"), "utf8")).toContain("Updated");
     expect(readFileSync(path.join(repo, "packs/pack/workflow.pack.yaml"), "utf8")).toBe(targetManifest);
     expect(readFileSync(path.join(repo, "packs/pack/workflows/flow.yaml"), "utf8")).toBe("id: flow\nnodes: []\n");
   });
@@ -598,17 +600,27 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     ["save", "other"], ["deploy", "other"],
     ["save", "packs/other"], ["deploy", "packs/other"],
     ["save", "packs"], ["deploy", "packs"],
-  ])("rejects duplicate workflow ID during %s when another manifest is in %s", async (operation, directory) => {
+  ])("checks duplicate workflow ID during %s when another manifest is in %s", async (operation, directory) => {
     const otherId = path.basename(directory);
     const otherManifest = `id: ${otherId}\nversion: '1.0.0'\nworkflows: [{id: flow, file: workflows/flow.yaml}]\n`;
     put("workflow.pack.yaml", rootManifest); put("workflows/flow.yaml", rootSpec);
     put(`${directory}/workflow.pack.yaml`, otherManifest); put(`${directory}/workflows/flow.yaml`, "id: flow\ntitle: Other\nnodes: []\n"); seed();
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
     const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
-    await expect(readPackScriptSnapshot(work, "flow", "pack", "draft")).rejects.toThrow(/conflict|ambig/i);
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/workflow|conflict|ambig/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/workflow|conflict|ambig/i);
-    expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toBe(rootSpec);
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      const snapshot = await readPackScriptSnapshot(work, "flow", "pack", "draft", { includeVersionFiles: true });
+      expect(snapshot.packPath).toBe("");
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toContain("Updated");
+    } else {
+      await expect(readPackScriptSnapshot(work, "flow", "pack", "draft")).rejects.toThrow(/conflict|ambig/i);
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/workflow|conflict|ambig/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/workflow|conflict|ambig/i);
+    }
+    ordinary ? expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toContain("Updated")
+      : expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toBe(rootSpec);
     expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"])).toBe(base);
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
@@ -616,7 +628,7 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
   it.each([
     ["save", "other", "action"], ["deploy", "other", "action"], ["save", "packs/other", "action"], ["deploy", "packs/other", "action"],
     ["save", "other", "workflow"], ["deploy", "other", "workflow"], ["save", "packs/other", "workflow"], ["deploy", "packs/other", "workflow"],
-  ])("does not overwrite a %s target owned by an unrelated Pack at %s (%s)", async (operation, directory, kind) => {
+  ])("checks the %s target owned by an unrelated Pack at %s (%s)", async (operation, directory, kind) => {
     const otherId = path.basename(directory); const target = `${directory}/shared/flow.yaml`;
     const targetManifest = `id: pack\nversion: '1.0.0'\nworkflows: [{id: flow, file: ${target}}]\n`;
     const otherManifest = kind === "workflow"
@@ -626,9 +638,17 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     put(`${directory}/workflow.pack.yaml`, otherManifest); put(`${directory}/workflows/other.yaml`, "id: other-flow\nnodes: []\n"); seed();
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
     const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|conflict|shared/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|conflict|shared/i);
-    expect(readFileSync(path.join(work, target), "utf8")).toBe(rootSpec);
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated");
+    } else {
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|conflict|shared/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|conflict|shared/i);
+    }
+    ordinary ? expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated")
+      : expect(readFileSync(path.join(work, target), "utf8")).toBe(rootSpec);
     expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"])).toBe(base);
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
@@ -636,7 +656,7 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
   it.each([
     ["save", "other", false], ["deploy", "other", false], ["save", "packs/other", false], ["deploy", "packs/other", false],
     ["save", "other", true], ["deploy", "other", true], ["save", "packs/other", true], ["deploy", "packs/other", true],
-  ])("rejects %s when the workflow is another Pack manifest at %s (alias=%s)", async (operation, directory, useAlias) => {
+  ])("checks %s when the workflow is another Pack manifest at %s (alias=%s)", async (operation, directory, useAlias) => {
     // This is both a valid Pack manifest and a workflow with id flow.
     const otherManifest = "id: flow\nversion: '1.0.0'\nworkflows: [{id: other-flow, file: workflows/other.yaml}]\nnodes: []\n";
     put(`${directory}/workflow.pack.yaml`, otherManifest);
@@ -647,11 +667,18 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     const refs = runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname) %(objectname)"]);
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
     const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|manifest|conflict/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|manifest|conflict/i);
-    expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated");
+    } else {
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|manifest|conflict/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|manifest|conflict/i);
+    }
+    if (!ordinary) expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(readFileSync(path.join(work, "workflow.pack.yaml"), "utf8")).toBe(targetManifest);
-    expect(runGit(work, ["status", "--porcelain"])).toBe("");
+    expect(runGit(work, ["status", "--porcelain"])).toBe(ordinary ? `M ${directory}/workflow.pack.yaml` : "");
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname) %(objectname)"])).toBe(refs);
     expect(runGit(root, ["--git-dir", bare, "show", `${base}:${directory}/workflow.pack.yaml`])).toBe(otherManifest.trimEnd());
   });

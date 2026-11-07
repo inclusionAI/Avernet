@@ -21,7 +21,7 @@ import {
 import {
   inspectDeployCandidate, prepareDeployCandidate, pushPreparedDeployment, resumePreparedDeployment, DeploymentOutcomeUnknownError, DeploymentConflictError,
 } from '../auto-heal-deploy-git.js';
-import { restorePreparedGitBundle, createPreparedGitBundle, MAX_PREPARED_BUNDLE_BYTES } from '../pack-git-prepared.js';
+import { restorePreparedGitBundle, createPreparedGitBundle, readPreparedPackMetadata, MAX_PREPARED_BUNDLE_BYTES } from '../pack-git-prepared.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let root: string, remote: string, seed: string, current: string;
@@ -68,6 +68,18 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe('prepared save primitives with a real bare remote', () => {
+  it('reads the root Pack and preserves nested packs manifests as ordinary files', async () => {
+    mkdirSync(path.join(seed, 'packs/pack/workflows'), { recursive: true });
+    writeFileSync(path.join(seed, 'packs/pack/workflow.pack.yaml'), 'id: pack\nworkflows: [flow]\n');
+    writeFileSync(path.join(seed, 'packs/pack/workflows/flow.yaml'), 'id: flow\ntitle: Historical\n');
+    git(seed, 'add', '.'); git(seed, 'commit', '-m', 'nested resource');
+    const commit = git(seed, 'rev-parse', 'HEAD');
+    const metadata = await readPreparedPackMetadata(seed, 'flow', commit);
+    expect(metadata).toMatchObject({ packId: 'pack', packPath: '', workflowFile: 'workflows/flow.yaml' });
+    expect(metadata.content).toBe('id: flow\ntitle: Current\n');
+    expect(git(seed, 'ls-tree', '-r', '--name-only', commit).split('\n')).toContain('packs/pack/workflow.pack.yaml');
+  });
+
   it('exposes exact serializable metadata before push and touches wf only', async () => {
     const before = refs();
     let registered: PreparedPackCandidate | undefined;

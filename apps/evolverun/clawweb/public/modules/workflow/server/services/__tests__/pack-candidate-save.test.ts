@@ -312,7 +312,7 @@ describe('savePackCandidate', () => {
     expect(head()).toBe(result.commit);
   });
 
-  it('rejects mixed root and nested Pack layouts regardless of which workflow is selected', async () => {
+  it('allows editing ordinary packs/ resources for the selected root workflow', async () => {
     seedPack();
     const other = path.join(seed, 'packs/other');
     mkdirSync(path.join(other, 'workflows'), { recursive: true });
@@ -320,10 +320,12 @@ describe('savePackCandidate', () => {
     writeFileSync(path.join(other, 'workflows/other.yaml'), 'id: other\n');
     current = publish();
     runGit(seed, ['push', bare, `${current}:refs/heads/wf/other`]);
-    await expect(savePackCandidate(input({ changes: [{ path: 'packs/other/workflows/other.yaml', operation: 'replace',
-      contentBase64: b64('id: other\nmodified: true\n'), mode: '100644' }] }))).rejects.toThrow('Mixed root and nested Pack layout');
+    const result = await savePackCandidate(input({ changes: [{ path: 'packs/other/workflows/other.yaml', operation: 'replace',
+      contentBase64: b64('id: other\nmodified: true\n'), mode: '100644' }] }));
+    expect(show(result.commit, 'packs/other/workflows/other.yaml')).toBe('id: other\nmodified: true');
+    expect(show(result.commit, 'workflow.pack.yaml').trimEnd()).toBe('id: pack\nversion: 1\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml');
     await expect(savePackCandidate(input({ workflowId: 'other' }))).rejects.toThrow('Mixed root and nested Pack layout');
-    expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/*'])).toBe('');
+    expect(runGit(bare, ['ls-tree', '-r', '--name-only', result.commit])).toContain('packs/other/workflow.pack.yaml');
   });
   it('rejects introducing a nested manifest into a root Pack', async () => {
     current = seedPack();

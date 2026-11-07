@@ -182,14 +182,33 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     if (candidates.length > 1) throw new Error('Pack manifest conflict');
   }
   type Match = { candidate: Candidate; value: Record<string, unknown>; matching: unknown[] };
-  const matches: Match[] = [];
-  for (const candidate of candidates) {
+  const inspect = async (candidate: Candidate): Promise<Match> => {
     const value = await readYamlObject(candidate.manifest, 'pack manifest');
     if (!Array.isArray(value.workflows)) throw new Error('Pack manifest identity mismatch');
     const matching = value.workflows.filter(item => typeof item === 'string'
       ? item === workflowId : Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).id === workflowId));
-    if (!version || matching.length) matches.push({ candidate, value, matching });
+    return { candidate, value, matching };
+  };
+  // A repository-root manifest that declares the requested workflow is
+  // authoritative. Candidates under packs/ are ordinary resources and are not
+  // parsed; a matching manifest outside packs/ is still ambiguous.
+  const rootCandidate = candidates.find(candidate => candidate.packPath === '' && !candidate.directoryName);
+  const rootMatch = rootCandidate ? await inspect(rootCandidate) : undefined;
+  const rootActive = Boolean(rootMatch?.matching.length);
+  const selectedCandidates = rootActive
+    ? candidates.filter(candidate => candidate !== rootCandidate
+      && candidate.packPath !== 'packs' && !candidate.packPath.startsWith('packs/'))
+    : candidates.filter(candidate => candidate !== rootCandidate);
+  const inspected: Match[] = [];
+  if (!version && rootMatch) inspected.push(rootMatch);
+  if (rootActive) inspected.push(rootMatch!);
+  for (const candidate of selectedCandidates) {
+    const match = await inspect(candidate);
+    if (!version || match.matching.length) inspected.push(match);
   }
+  const outsidePacksDuplicate = inspected.some(match =>
+    match !== rootMatch && match.matching.length > 0 && match.candidate.packPath !== 'packs' && !match.candidate.packPath.startsWith('packs/'));
+  const matches = rootActive ? (outsidePacksDuplicate ? inspected : [rootMatch!]) : inspected;
   if (matches.length > 1) throw new Error('Pack manifest conflict');
   if (!matches.length) throw new Error('Pack manifest not found');
   const { candidate, value: manifestValue, matching } = matches[0];
@@ -229,9 +248,12 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
       ? root.find(entry => entry.name === 'packs')?.oid : baseCommit);
     if (!packTree) throw new Error('Invalid pack directory');
     const versionEntries = await list(packTree, true);
-    // A nested manifest marks an overlapping Pack namespace, including deeply
-    // nested layouts outside manifest discovery. Do not expose its contents.
-    if (versionEntries.some(entry => entry.name.endsWith('/workflow.pack.yaml'))) throw new Error('Mixed Pack layout');
+    // A root Pack can contain another Pack manifest as an ordinary resource
+    // under packs/. Only reject nested manifests outside the ordinary packs/
+    // directory, including deeper overlapping layouts under scripts/.
+    if (versionEntries.some(entry => entry.name.endsWith('/workflow.pack.yaml') && !entry.name.startsWith('packs/'))) {
+      throw new Error('Mixed Pack layout');
+    }
     const fileEntries = versionEntries.filter(entry => entry.type !== 'tree');
     if (fileEntries.length > MAX_FILES) throw new Error('Version file count limit exceeded');
     const versionFiles: NonNullable<PackScriptSnapshot['versionFiles']> = [];
