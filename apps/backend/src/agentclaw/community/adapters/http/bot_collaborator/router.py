@@ -7,6 +7,9 @@
 """
 from fastapi import APIRouter, Depends
 
+from agentclaw.community.adapters.http.bot_collaborator.converter_lock import _get_user_id, _lock_info
+from agentclaw.community.adapters.http.bot_collaborator.session_lock_router import router as session_lock_router
+
 from agentclaw.community.adapters.http.bot_collaborator.schemas import (
     ApiResponse,
     AddCollaboratorRequest,
@@ -24,16 +27,11 @@ from agentclaw.community.adapters.http.bot_collaborator.schemas import (
     CheckPermissionResponse,
     AcquireLockRequest,
     AcquireLockResponse,
-    LockInfo,
     ReleaseLockRequest,
     ReleaseLockResponse,
     GetLockInfoResponse,
     StealLockRequest,
     StealLockResponse,
-    SessionLockRequest,
-    SessionReleaseLockRequest,
-    SessionLockResponse,
-    SessionLockInfoResponse,
 )
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import collaborator_admin
@@ -721,23 +719,6 @@ async def check_collaborator_permission(
 # 协作锁 API
 # ============================================================================
 
-def _get_user_id(user: AuthenticatedUser) -> str | None:
-    """获取用户ID，匿名用户返回None。"""
-    user_id = user.staffId
-    return user_id if user_id and user_id != "anonymous" else None
-
-
-def _lock_info(lock, holder_name: str | None = None) -> LockInfo:
-    """构建LockInfo对象。"""
-    return LockInfo(
-        id=lock.id,
-        lock_key=lock.lock_key,
-        holder_user_id=lock.holder_user_id,
-        holder_name=holder_name,
-        gmt_create=lock.gmt_create,
-    )
-
-
 @router.post("/lock/acquire", response_model=ApiResponse, summary="获取协作锁")
 async def acquire_lock(
     request: AcquireLockRequest,
@@ -879,116 +860,4 @@ async def get_lock_info(
         logger.error(f"[get_lock_info] error: {e}")
         return ApiResponse(success=False, message=f"查询锁信息失败: {e}", error_code=500, data=None)
 
-
-# ============================================================================
-# 会话级锁（coding 应用）— key: session:{bot_id}:{owner_id}:{session_id}
-# 与上面的 bot 级协作锁同表（ac_bot_collab_lock）共存，互不影响。
-# 权限：调用方需为应用成员（owner 或协作者）。本期不在 OCB 强制（前端控制 +
-# 后续 engine chat.send 强制），故此处不挂 CollaboratorPermissionInterceptor。
-# ============================================================================
-@router.post("/session-lock/acquire", response_model=ApiResponse, summary="获取会话锁")
-async def acquire_session_lock(
-    request: SessionLockRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> ApiResponse:
-    """获取会话锁（支持重入）。他人持锁时 acquired=false。"""
-    user_id = _get_user_id(user)
-    if not user_id:
-        return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
-    try:
-        lock = service.acquire_session_lock(
-            request.bot_id, request.owner_id, request.session_id, user_id
-        )
-        if lock:
-            return ApiResponse(
-                success=True,
-                data=SessionLockResponse(acquired=True, lock=_lock_info(lock)).model_dump(),
-                message="获取会话锁成功",
-            )
-        return ApiResponse(
-            success=True,
-            data=SessionLockResponse(acquired=False, lock=None).model_dump(),
-            message="会话锁被其他用户持有",
-        )
-    except Exception as e:
-        logger.error(f"[acquire_session_lock] error: {e}")
-        return ApiResponse(success=False, message=f"获取会话锁失败: {e}", error_code=500, data=None)
-
-
-@router.post("/session-lock/release", response_model=ApiResponse, summary="释放会话锁")
-async def release_session_lock(
-    request: SessionReleaseLockRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> ApiResponse:
-    """释放会话锁。仅持有者可释放（force=true 除外）。"""
-    user_id = _get_user_id(user)
-    if not user_id:
-        return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
-    try:
-        success = service.release_session_lock(
-            request.bot_id, request.owner_id, request.session_id, user_id, request.force
-        )
-        return ApiResponse(
-            success=True,
-            data=ReleaseLockResponse(released=success).model_dump(),
-            message="释放会话锁成功" if success else "释放会话锁失败",
-        )
-    except LockReleaseDeniedError as e:
-        return ApiResponse(success=False, message=str(e), error_code=403, data=None)
-    except Exception as e:
-        logger.error(f"[release_session_lock] error: {e}")
-        return ApiResponse(success=False, message=f"释放会话锁失败: {e}", error_code=500, data=None)
-
-
-@router.post("/session-lock/steal", response_model=ApiResponse, summary="抢夺会话锁")
-async def steal_session_lock(
-    request: SessionLockRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> ApiResponse:
-    """抢夺会话锁。强制释放他人锁后获取。"""
-    user_id = _get_user_id(user)
-    if not user_id:
-        return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
-    try:
-        lock = service.steal_session_lock(
-            request.bot_id, request.owner_id, request.session_id, user_id
-        )
-        return ApiResponse(
-            success=True,
-            data=SessionLockResponse(acquired=True, lock=_lock_info(lock)).model_dump(),
-            message="抢锁成功",
-        )
-    except Exception as e:
-        logger.error(f"[steal_session_lock] error: {e}")
-        return ApiResponse(success=False, message=f"抢会话锁失败: {e}", error_code=500, data=None)
-
-
-@router.get("/session-lock/info", response_model=ApiResponse, summary="获取会话锁状态")
-async def get_session_lock_info(
-    bot_id: str,
-    owner_id: str,
-    session_id: str,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> ApiResponse:
-    """获取会话锁状态（locked / 持有者 / is_mine）。"""
-    user_id = _get_user_id(user)
-    if not user_id:
-        return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
-    try:
-        result = service.get_session_lock_info(bot_id, owner_id, session_id, user_id)
-        return ApiResponse(
-            success=True,
-            data=SessionLockInfoResponse(
-                locked=result.locked,
-                lock=_lock_info(result.lock, result.holder_name) if result.lock else None,
-                is_mine=result.is_mine,
-            ).model_dump(),
-            message="查询成功",
-        )
-    except Exception as e:
-        logger.error(f"[get_session_lock_info] error: {e}")
-        return ApiResponse(success=False, message=f"查询会话锁失败: {e}", error_code=500, data=None)
+router.include_router(session_lock_router)
