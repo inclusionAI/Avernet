@@ -109,6 +109,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
     def get_bot_override(
         self, *, bot_id: str, owner_id: str, server_code: str
     ) -> dict[str, Any] | None:
+        """Read at the stable Bot entity coordinate (legacy name: owner_id)."""
         return self.bot_mcp_config_repo.get_by_bot_and_server_code(
             bot_id=bot_id, owner_id=owner_id, server_code=server_code
         )

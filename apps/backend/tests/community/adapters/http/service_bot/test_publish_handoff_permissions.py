@@ -114,6 +114,26 @@ async def test_resource_locator_does_not_grant_owner_permission(publication, act
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("actor", ["B", "A", "outsider"])
+@pytest.mark.parametrize("publish_locator", ["A", "staff_A"])
+async def test_legacy_owner_and_entity_publish_rows_authorize_by_source_pk(publication, actor, publish_locator):
+    with publication.database.orm_session() as session:
+        session.get(BotModel, publication.pk).entity_id = "staff_A"
+    publication.record.owner_id = publish_locator
+
+    response = await upgrade(publication, actor)
+
+    if actor == "B":
+        assert response.success is True
+        publication.service.upgrade_publish.assert_called_once_with(publish_id=13820, owner_id="B")
+        assert publication.locks.get_lock_info.call_args.kwargs["owner_id"] == "B"
+    else:
+        assert response.status_code == 403
+        publication.service.upgrade_publish.assert_not_called()
+    assert publication.record.owner_id == publish_locator
+
+
+@pytest.mark.asyncio
 async def test_owner_equal_to_entity_keeps_existing_upgrade_behavior(publication):
     with publication.database.orm_session() as session:
         session.get(BotModel, publication.pk).owner_id = "A"
@@ -250,3 +270,135 @@ async def test_existing_admin_collaborator_keeps_upgrade_permission_after_handof
     assert permission["owner_id"] == "B"
     assert permission["user_id"] == "collaborator"
     assert publication.record.owner_id == "A"
+
+
+async def run_operations_command(world, action, actor):
+    from unittest.mock import AsyncMock
+    from agentclaw.community.adapters.http.service_bot import router_publish as routes
+    from agentclaw.community.adapters.http.service_bot.schemas_publish import UpdatePublishStatusRequest
+
+    world.record.ext = {}
+    kwargs = {
+        "publish_id": 13820,
+        "user": AuthenticatedUser(id=actor, staffId=actor, operatorName=actor),
+        "__interceptor_request__": world.request,
+    }
+    if action == "status":
+        command = Mock(return_value=SimpleNamespace(to_dict=lambda: {}))
+        world.service.update_publish_status_with_ext = command
+        kwargs.update(
+            request=UpdatePublishStatusRequest(
+                source_status="building", target_status="failed", failed_status="building",
+            ),
+            publish_service=world.service,
+        )
+        route = routes.update_publish_status
+    else:
+        command = AsyncMock(return_value={"success": True})
+        world.service.scale_bot = command
+        kwargs["flow_service"] = world.service
+        route = routes.scale_publish_bot
+    return await route(**kwargs), command
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+@pytest.mark.parametrize("actor", ["ops", "B", "A", "outsider", "anonymous"])
+async def test_operations_routes_preserve_scoped_admin_and_owner_access(publication, monkeypatch, action, actor):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    response, command = await run_operations_command(publication, action, actor)
+    if actor in {"ops", "B"}:
+        assert response.success is True
+        command.assert_called_once()
+    else:
+        assert response.status_code == 403
+        command.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+async def test_operations_admin_does_not_need_another_users_edit_lock(publication, monkeypatch, action):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    publication.locks.get_lock_info.return_value = SimpleNamespace(
+        has_collaborators=True, lock=SimpleNamespace(holder_user_id="editor"),
+    )
+    response, command = await run_operations_command(publication, action, "ops")
+    assert response.success is True
+    command.assert_called_once()
+    if action == "scale":
+        assert command.call_args.kwargs["operator"] == "ops"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+async def test_operations_admin_cannot_bypass_handoff_write_fence(publication, monkeypatch, action):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    with publication.database.orm_session() as session:
+        session.get(BotModel, publication.pk).ext = json.dumps({"owner_handoff": "pending"})
+    response, command = await run_operations_command(publication, action, "ops")
+    assert response.status_code == 423
+    command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_operations_whitelist_does_not_grant_other_publish_routes(publication, monkeypatch):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    response = await upgrade(publication, "ops")
+    assert response.status_code == 403
+    publication.service.upgrade_publish.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+async def test_empty_operations_whitelist_does_not_grant_access(publication, monkeypatch, action):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset())
+    response, command = await run_operations_command(publication, action, "ops")
+    assert response.status_code == 403
+    command.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+async def test_operations_admin_cannot_mutate_a_missing_source_bot(publication, monkeypatch, action):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    with publication.database.orm_session() as session:
+        session.get(BotModel, publication.pk).is_delete = 1
+    response, command = await run_operations_command(publication, action, "ops")
+    assert response.status_code == 404
+    command.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["status", "scale"])
+async def test_operations_admin_audit_keeps_actual_actor_and_current_owner(publication, monkeypatch, action):
+    import asyncio
+    from threading import Event
+    from agentclaw.community.core.access import admin_scopes
+    from agentclaw.community.core.bot_collaborator.interceptor.collaborator import CollaboratorPermissionInterceptor
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"ops"}))
+    # Real service dependencies are not Pydantic request models.
+    del publication.service.model_dump
+    recorded = Event()
+    log_repo = Mock()
+    log_repo.insert.side_effect = lambda row: recorded.set()
+    monkeypatch.setattr(CollaboratorPermissionInterceptor, "_get_log_repository", lambda self, injector: log_repo)
+    response, _ = await run_operations_command(publication, action, "ops")
+    assert response.success is True
+    assert await asyncio.to_thread(recorded.wait, 2)
+    row = log_repo.insert.call_args.args[0]
+    assert row["operator_id"] == "ops"
+    assert row["owner_id"] == "B"
+    assert row["bot_id"] == "service"

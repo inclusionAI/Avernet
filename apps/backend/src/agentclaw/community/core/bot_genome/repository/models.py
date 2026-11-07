@@ -25,6 +25,7 @@ there).
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -45,6 +46,7 @@ from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_genome.limits import MAX_AUDIT_ACTOR_CHARS
+from agentclaw.community.core.bot_genome.models import ProvenanceKind  # re-exported: what a ref move's `moved_kind` is
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
 )
@@ -99,10 +101,20 @@ class GenomeRefRow(BaseModel):
     revision_id: str
     version: int = 1
     moved_at: datetime
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     run_id: Optional[str] = None
     reason: Optional[str] = None
+    labels: str = "[]"  #: JSON list of strings; today only ``"partial"``, on ``active`` or ``previous``
+
+
+class SettleResult(StrEnum):
+    """What ``GenomePromotionRepositoryProtocol.settle`` did."""
+
+    SETTLED = "settled"  #: the row took its final status (and the refs moved, when asked)
+    REF_CONFLICT = "ref_conflict"  #: ``active`` had moved; nothing moved and the row is ``apply_failed``
+    ALREADY_SETTLED = "already_settled"  #: the row was final already; nothing changed
+    NOT_FOUND = "not_found"
 
 
 class GenomeRefEventRow(BaseModel):
@@ -115,7 +127,7 @@ class GenomeRefEventRow(BaseModel):
     name: str
     from_revision_id: Optional[str]
     to_revision_id: str
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     run_id: Optional[str] = None
     reason: Optional[str] = None
@@ -139,7 +151,7 @@ class CandidateRefRequest(BaseModel):
     """What ``GenomeRevisionRepositoryProtocol.record`` needs to name a run's candidate ref in the same transaction."""
 
     run_id: str
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     moved_at: datetime
 
@@ -174,9 +186,10 @@ class GenomePromotionRow(BaseModel):
     actor_run_id: Optional[str] = None  #: the evolution run, for a ``strategy_run`` actor
     reason: str
     status: str
-    apply_kind: str
+    apply_id: Optional[str] = None  #: the apply run delivering it, once started
     apply_detail: str = ""
     created_at: datetime
+    settled_at: Optional[datetime] = None  #: when the delivery ended; ``None`` while pending or applying
     gmt_create: datetime = Field(default_factory=datetime.now)
     gmt_modified: datetime = Field(default_factory=datetime.now)
 
@@ -245,6 +258,9 @@ class GenomeRefModel(Base):
     moved_actor = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     run_id = Column(String(64), nullable=True)
     reason = Column(String(1024), nullable=True)
+    labels = Column(
+        String(256), nullable=False, default="[]", comment='JSON list of strings; today only "partial", on active or previous'
+    )
 
     __table_args__ = (UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "name", name="uk_bot_ref"),)
 
@@ -304,10 +320,13 @@ class GenomePromotionModel(Base):
     actor_id = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     actor_run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     reason = Column(String(1024), nullable=False)
-    status = Column(String(16), nullable=False, comment="applying/applied/apply_failed")
-    apply_kind = Column(String(16), nullable=False, comment="the applier that took it (pending/direct/…)")
-    apply_detail = Column(String(1024), nullable=False, default="", comment="the applier's last word")
+    status = Column(String(16), nullable=False, comment="pending/applying/applied/applied_partial/apply_failed")
+    apply_id = Column(String(32), nullable=True, comment="the apply run delivering it, once started")
+    apply_detail = Column(String(1024), nullable=False, default="", comment="one line on how the delivery went")
     created_at = Column(DateTime, nullable=False)
+    settled_at = Column(
+        DateTime, nullable=True, comment="when the delivery ended and the promotion took its final status"
+    )
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 

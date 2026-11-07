@@ -4,7 +4,14 @@ External credential/runtime fixtures are explicit contract doubles. They cannot
 establish enterprise AAC behavior, which remains a deployment acceptance gate.
 """
 
+from agentclaw.community.core.bot_management.ownership_sync.notifications import (
+    DisabledBotOwnershipSync,
+)
 from agentclaw.community.api.owner_handoff_service import OwnerHandoffServiceProtocol
+from agentclaw.community.api.space_service import SpaceServiceProtocol, SpaceAccessServiceProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_management.owner_handoff.contracts import (
     OwnerHandoffPolicy,
 )
@@ -56,6 +63,10 @@ def _register_command(method, suffix, *, forbidden):
             world.get(BotRepository),
             Queue(),
             OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
+            DisabledBotManagerSync(),
+            world.get(SpaceServiceProtocol),
+            world.get(SpaceAccessServiceProtocol),
+            ownership_sync=DisabledBotOwnershipSync(),
         )
         world.injector.binder.bind(OwnerHandoffServiceProtocol, to=service, scope=None)
         if not suffix:

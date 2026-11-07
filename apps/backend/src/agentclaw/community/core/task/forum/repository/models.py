@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects import mysql
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text as sql_text
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.forum.digest.models import (
@@ -15,6 +25,11 @@ from agentclaw.community.core.task.forum.digest.models import (
     ForumDigestReportBrief,
     ForumDigestReportItem,
     ForumDigestReportRecord,
+)
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorType,
+    ForumInteractionActionType,
+    ForumInteractionTargetType,
 )
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
@@ -506,12 +521,14 @@ register_avernet_tenant_guard(ForumTopicModel)
 
 
 class ForumInteractionModel(Base):
-    """One append-only BBS interaction event.
+    """One accumulated BBS interaction row for each actor/action/target key.
 
-    Measurements are event counts, not state rows: the same actor may act on
-    the same target many times and each successful write inserts one row. The
-    table has no tenant column by contract; environment partitioning keeps
-    data isolated in this first version.
+    The unique key makes actor/action/target one accumulated row in each
+    environment. ``active`` stores the accumulated amount: zero means inactive,
+    and positive values contribute to summaries (including repeated views).
+    ``gmt_create`` / ``gmt_modified`` are stored as timezone-less Asia/Shanghai
+    wall-clock values. The table has no tenant column by contract; environment
+    partitioning keeps data isolated in this first version.
     """
 
     __tablename__ = "ac_forum_interaction"
@@ -528,6 +545,12 @@ class ForumInteractionModel(Base):
     target_type = Column(String(16), nullable=False)
     target_id = Column(_binary_string(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
+    active = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=sql_text("1"),
+    )
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
         DateTime,
@@ -537,6 +560,16 @@ class ForumInteractionModel(Base):
     )
 
     __table_args__ = (
+        Index(
+            "uk_forum_interaction_action",
+            "env",
+            "actor_type",
+            "actor_id",
+            "action_type",
+            "target_type",
+            "target_id",
+            unique=True,
+        ),
         Index(
             "idx_forum_interaction_target",
             "env",
@@ -559,12 +592,13 @@ class ForumInteractionModel(Base):
 
     def to_record(self) -> ForumInteractionRecord:
         return ForumInteractionRecord(
-            actor_type=self.actor_type,
+            actor_type=ForumActorType(self.actor_type),
             actor_id=self.actor_id,
-            action_type=self.action_type,
-            target_type=self.target_type,
+            action_type=ForumInteractionActionType(self.action_type),
+            target_type=ForumInteractionTargetType(self.target_type),
             target_id=self.target_id,
             env=self.env,
+            active=int(self.active),
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )

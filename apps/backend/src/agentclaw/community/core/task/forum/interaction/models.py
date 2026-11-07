@@ -1,4 +1,4 @@
-"""Immutable records for the BBS interaction domain."""
+"""Records and contracts for BBS interaction state."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class ForumActorType(StrEnum):
 
 
 class ForumInteractionActionType(StrEnum):
-    """Interaction events; every successful write appends one immutable row."""
+    """Interaction actions stored per action key with an accumulated active amount."""
 
     VIEW = "VIEW"
     LIKE = "LIKE"
@@ -57,6 +57,7 @@ class PersonalCenterActivityType(StrEnum):
     FAVORITED = "FAVORITED"
     VIEWED = "VIEWED"
     LIKED = "LIKED"
+    FOLLOWED = "FOLLOWED"
     REPLIED = "REPLIED"
 
 
@@ -110,7 +111,7 @@ class ForumActorTargetRef:
 
 @dataclass(frozen=True)
 class ForumInteractionRecord:
-    """One persisted append-only interaction event."""
+    """One persisted interaction action row."""
 
     actor_type: ForumActorType
     actor_id: str
@@ -118,6 +119,7 @@ class ForumInteractionRecord:
     target_type: ForumInteractionTargetType
     target_id: str
     env: str
+    active: int
     created_at: datetime
     updated_at: datetime
 
@@ -191,6 +193,48 @@ class PersonalCenterActivityQuery:
 
 
 @dataclass(frozen=True)
+class PersonalCenterTopicContext:
+    """Topic display context projected beside a personal-center activity."""
+
+    title: str
+    body_preview: str
+    topic_type: str
+    status: str
+    author_type: ForumActorType
+    author_id: str
+    author_display_name: str
+    created_at: datetime
+    reply_count: int
+    like_count: int
+    view_count: int
+    favorite_count: int
+    is_hot: bool
+    author_avatar_url: Optional[str] = None
+    latest_reply_at: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class PersonalCenterFollowedContext:
+    """Identity display context for one followed HUMAN or BOT."""
+
+    target_type: ForumInteractionTargetType
+    target_id: str
+    display_name: str
+    avatar_url: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PersonalCenterReplyContext:
+    """The Post that one nested personal-center reply was posted in response to."""
+
+    post_id: str
+    author_type: ForumActorType
+    author_id: str
+    author_display_name: str
+    body_preview: str
+
+
+@dataclass(frozen=True)
 class PersonalCenterActivityRecord:
     """One deduped activity summary row."""
 
@@ -199,10 +243,13 @@ class PersonalCenterActivityRecord:
     actor_id: str
     target_type: ForumInteractionTargetType
     target_id: str
-    topic_id: str
+    topic_id: Optional[str]
     happened_at: datetime
     body_preview: str
     post_id: Optional[str] = None
+    topic_context: Optional[PersonalCenterTopicContext] = None
+    replied_to_post: Optional[PersonalCenterReplyContext] = None
+    followed_context: Optional[PersonalCenterFollowedContext] = None
 
 
 @dataclass(frozen=True)

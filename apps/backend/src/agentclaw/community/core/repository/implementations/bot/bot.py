@@ -221,6 +221,28 @@ class BotRepository(
             )
             return self._to_caller_identity_dict(bot) if bot else None
 
+    def is_soft_deleted(self, bot_id: str, entity_id: str) -> bool:
+        """Whether a soft-deleted Bot already exists for this bot and entity.
+
+        The ordinary lookups all filter ``is_delete == 0``, so "already
+        deleted" and "never landed" both read as ``None``. A teardown that
+        has to tell them apart asks here.
+        """
+        with self._db.orm_session() as db:
+            # COSEC: SQLAlchemy binds both identifiers; never interpolate
+            # request values into a raw SQL expression.
+            return (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.entity_id == entity_id,
+                    self.Model.is_delete == 1,
+                    self._env(),
+                )
+                .first()
+                is not None
+            )
+
     def get_by_pk(self, bot_pk: int) -> Optional[Dict[str, Any]]:
         """Query one live Bot by the immutable ``ac_bots.id`` key."""
         with self._db.orm_session() as db:
@@ -234,6 +256,24 @@ class BotRepository(
                 .first()
             )
             return self._to_caller_identity_dict(bot) if bot else None
+
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """Keep explicit account lookups separate from legacy entity aliases."""
+        with self._db.orm_session() as db:
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .limit(2)
+                .all()
+            )
+            return [self._to_caller_identity_dict(bot) for bot in bots]
 
     def list_matches_by_legacy_locator(
         self, bot_id: str, locator: str

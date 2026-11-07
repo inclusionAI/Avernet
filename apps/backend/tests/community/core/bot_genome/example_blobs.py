@@ -14,8 +14,8 @@ from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 
 EXAMPLES = Path(__file__).resolve().parents[4] / "api-contracts" / "genome" / "v1" / "examples"
-SUPPORT_BOT = "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe"
-SUPPORT_BOT_CANDIDATE = "sha256:5deca3495156b975acac9f4138966c19ce2d535943ce2ad625c238880373183b"
+SUPPORT_BOT = "sha256:03dd8ae31e03dd12f9eca965000af1a4af950d867da49da4faa93f4d43153894"
+SUPPORT_BOT_CANDIDATE = "sha256:74fef9e67c35b6f56f49307f1d84b670a43508a37952583f5d118baa3ba78e5f"
 MEMORY_BOT = "sha256:22755f072e4c98e18595150e6ac125eb3300274ab668c37b731cc1bfd9cd3196"
 
 

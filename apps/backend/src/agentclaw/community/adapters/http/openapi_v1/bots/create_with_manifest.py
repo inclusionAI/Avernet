@@ -51,6 +51,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.openapi_v1.bots.schemas import BotCreate
 from agentclaw.community.api.apply_run_service import (
     ApplyRunServiceProtocol,
 )
@@ -200,6 +201,19 @@ async def create_bot_with_manifest(
     creates, so the status poll and every later operation on the bot find an
     ordinary bot grant in place.
     """
+    return await submit_manifest_creation(
+        body=body, request=request, owner_id=owner_id, owner_name=owner_name,
+        caller=caller, bot_service=bot_service, bot_repo=bot_repo,
+        passport_plugin=passport_plugin, skill_set_factory=skill_set_factory,
+        space_context=space_context, manifest_seam=manifest_seam,
+    )
+
+
+def prepare_manifest_creation(
+    *, body: BotCreate, owner_id: str, bot_repo: BotRepository,
+    space_context: BusinessSpaceContextProtocol,
+) -> tuple[str, BotCreateSpec, BotCreateContext]:
+    """Resolve the shared public Bot request into existing creation inputs."""
     _require_publicly_creatable_engine(body.engine)
     validate_engine_cluster(body.engine, body.cluster_name)
     _require_service_capable_engine(body.bot_type, body.engine)
@@ -208,6 +222,36 @@ async def create_bot_with_manifest(
         header_space_id=body.space_id,
     )
     bot_id = generate_bot_id(owner_id, bot_repo)
+    return (
+        bot_id,
+        BotCreateSpec(
+            entity_id=owner_id,
+            engine_type=body.engine,
+            bot_type=body.bot_type,
+            bot_name=body.bot_name,
+            bot_desc=body.bot_desc,
+            space_id=current_space.numeric_id,
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+            engine_properties=_engine_properties_from_body(body),
+        ),
+        BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode.CLOUD,
+            space_kind=current_space.kind,
+            space_quota=True,
+        ),
+    )
+
+
+async def submit_manifest_creation(
+    *, body: BotCreateWithManifest, request: Request, owner_id: str, owner_name: str,
+    caller, bot_service: BotServiceProtocol, bot_repo: BotRepository,
+    passport_plugin: PassportPlugin, skill_set_factory: SkillSetServiceFactoryProtocol,
+    space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
+) -> Envelope[BotCreateWithManifestAccepted]:
+    """Map an ordinary Manifest request into the existing Bot creation flow."""
+    bot_id, spec, context = prepare_manifest_creation(
+        body=body, owner_id=owner_id, bot_repo=bot_repo, space_context=space_context,
+    )
     # Granted before submission for the reason the ordinary create is: nothing
     # is created until the user authorizes, and the poll is bot-scoped. A
     # no-op for a human caller. See ``creation_grant.py``.
@@ -219,21 +263,8 @@ async def create_bot_with_manifest(
             bot_id=bot_id,
             document=body.config_manifest,
             modifier=owner_id,
-            spec=BotCreateSpec(
-                entity_id=owner_id,
-                engine_type=body.engine,
-                bot_type=body.bot_type,
-                bot_name=body.bot_name,
-                bot_desc=body.bot_desc,
-                space_id=current_space.numeric_id,
-                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
-                engine_properties=_engine_properties_from_body(body),
-            ),
-            context=BotCreateContext(
-                deployment_mode=BotCreateDeploymentMode.CLOUD,
-                space_kind=current_space.kind,
-                space_quota=True,
-            ),
+            spec=spec,
+            context=context,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             skill_set_factory=skill_set_factory,
@@ -329,7 +360,6 @@ async def get_bot_create_with_manifest_status(
     # storage key, never a request parameter — see ``resolve_manifest_entity_id``.
     entity_id = owner_id
     bot = bot_repo.get_by_id_and_entity(bot_id, entity_id)
-    report = apply_service.last_apply(entity_id=entity_id, bot_id=bot_id)
 
     # Which order this bot's creation ran in (W8): with a record, the bot's
     # own engine decides; before one exists the answer does not matter, since
@@ -338,6 +368,9 @@ async def get_bot_create_with_manifest_status(
         apply_service.delivery_for_bot(bot).creation_sequence
         if bot is not None
         else CreationSequence.CREATE_BETWEEN_PHASES
+    )
+    report = apply_service.last_apply(
+        entity_id=entity_id, bot_id=bot_id, trigger=_terminal_trigger(sequence)
     )
     status = _creation_state(
         bot=bot,
@@ -447,13 +480,9 @@ def _creation_state(
             record,
         )
     if record.status is TaskStatus.SUCCEEDED:
-        # The job finished, so the creation is over — even though the newest
-        # apply record is not the post-container one. That happens when an
-        # explicit apply has landed since, which this endpoint deliberately does
-        # not report: it answers "how did the creation end", and
-        # `GET .../config-manifest/last-apply` answers "how is the bot
-        # configured now". Reading the creation's own record back would need a
-        # trigger-filtered query the design chose not to add.
+        # The job finished without a retained terminal-phase report. Later
+        # explicit applies are excluded by the trigger-filtered read: this
+        # endpoint describes the original creation, not current configuration.
         return (CreationState.READY, record)
     if record.status in TERMINAL_STATUSES:
         # The job gave up with the bot never reaching a container.
@@ -546,6 +575,8 @@ def _message(state: CreationState, job) -> str:
         return str(getattr(job, "last_error", "") or "authorization was declined")
     if state is CreationState.AUTHORIZATION_EXPIRED:
         return "the authorization window elapsed before the user responded"
+    if state is CreationState.APPLY_FAILED and "bound Manifest" in str(getattr(job, "last_error", "") or ""):
+        return "bound Manifest has changed; creation stopped without replacing the stored document"
     if state is CreationState.CREATE_FAILED:
         return str(
             getattr(job, "last_error", "") or "the bot could not be provisioned"

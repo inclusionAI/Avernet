@@ -1,6 +1,7 @@
 import type {
   CommunityReplyPage,
   CommunityReplyPager,
+  CommunityPostLocation,
   CommunityTopic,
   CommunityTopicPage,
   CommunityTopicQuery,
@@ -45,6 +46,12 @@ export interface CommunityGateway {
     helpful: boolean,
     signal?: AbortSignal,
   ): Promise<void>;
+  getPostLocation(
+    topicId: string,
+    postId: string,
+    pageSize: number,
+    signal?: AbortSignal,
+  ): Promise<CommunityPostLocation>;
   createInteraction(input: RecordInteractionInput, signal?: AbortSignal): Promise<void>;
   getInteractionSummary(query: InteractionSummaryQuery, signal?: AbortSignal): Promise<InteractionSummary>;
   getInteractionSummaryBatch(

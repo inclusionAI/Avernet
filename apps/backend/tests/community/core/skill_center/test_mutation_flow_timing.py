@@ -349,3 +349,28 @@ async def test_apply_plan_validates_retired_mappings_before_runtime_write() -> N
     )
 
     assert engine.validated_retired == retired
+
+
+@pytest.mark.asyncio
+async def test_unchanged_desired_state_retries_a_failed_runtime_delivery() -> None:
+    runtime = _PlanRuntime()
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=runtime, recovery=MagicMock()
+    )
+    outcomes = []
+    runtime.fail_apply_once = True
+    for changed in (True, False):
+        outcomes.append(await flow.apply(
+            bot={"owner_id": "owner-1", "status": "ACTIVE"},
+            bot_id="bot-1",
+            engine_type="openclaw",
+            scope=ProjectionScope(skills=True),
+            mutation=lambda: DesiredStateMutation(
+                item={"id": "set-1"}, changed=changed,
+                previous_state=CapabilityDesiredState(set(), {}, {}),
+            ),
+        ))
+    assert outcomes[0]["runtime_projection"]["status"] == "PENDING"
+    assert outcomes[0]["runtime_projection"]["issues"][0]["code"] == "RUNTIME_PROJECTION_UNAVAILABLE"
+    assert outcomes[1]["changed"] is False
+    assert outcomes[1]["runtime_projection"]["status"] == "CONVERGED"

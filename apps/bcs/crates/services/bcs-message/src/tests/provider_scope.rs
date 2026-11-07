@@ -28,7 +28,7 @@ async fn same_owner_history_cannot_be_read_by_public_or_foreign_viewers() {
         .with_bot_provider_repo(metadata);
     let provider = admin.register_provider_with_policy(
         "Local".into(), None, ProviderAuthMode::StaticBearer, "alice".into(),
-        None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+        None, None, None, None, Some(ProviderCollaborationScope::SameOwner), None,
     ).await.unwrap();
     let (local, _) = admin.register_provider_bot_with_bot_uuid(
         &provider.provider.provider_id, &provider.provider_admin_token,

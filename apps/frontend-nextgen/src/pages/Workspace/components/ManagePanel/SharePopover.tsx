@@ -78,7 +78,7 @@ export function SharePopover({ open, anchorRef, title, onCreate, onClose, align 
         className="w-80 rounded-xl border-border bg-popover p-0 shadow-lg"
       >
         {/* 头部：着色 glyph + 标题 + 关闭。拆分上下结构（头/体）给气泡一个清晰的章节感。 */}
-        <div className="flex items-center gap-2.5 border-b border-border/60 px-3.5 py-3">
+        <div className="flex items-center gap-2.5 border-b border-divider/60 px-3.5 py-3">
           <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Share2 className="size-3.5" aria-hidden />
           </span>
@@ -132,7 +132,7 @@ export function SharePopover({ open, anchorRef, title, onCreate, onClose, align 
                   className="-mr-1 -mt-0.5 size-6 shrink-0 rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
                 />
               </div>
-              <div className="mt-1.5 flex items-center justify-between border-t border-border/60 pt-1.5">
+              <div className="mt-1.5 flex items-center justify-between border-t border-divider/60 pt-1.5">
                 <span className="text-[11px] leading-4 text-muted-foreground">链接 {expiryLabel}后过期</span>
                 <Button
                   size="sm"

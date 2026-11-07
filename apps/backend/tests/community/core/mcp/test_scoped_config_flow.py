@@ -77,6 +77,8 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
 ) -> None:
     engine = create_engine("sqlite:///:memory:")
     UserMCPConfig.__table__.create(engine)
+    from agentclaw.community.plugin_api.models import BotModel
+    BotModel.__table__.create(engine)
     BotMCPConfig.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
 
@@ -97,6 +99,8 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
 
     db = _Database()
     with db.transactional_orm_session() as session:
+        session.add(BotModel(bot_id="bot-x", entity_id="owner", entity_type="staff",
+                             creator_id="owner", owner_id="owner", env=get_current_env()))
         session.add_all(
             [
                 UserMCPConfig(

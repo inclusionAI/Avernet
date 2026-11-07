@@ -4,8 +4,9 @@
 # a single cargo llvm-cov nextest invocation emits BOTH junit (pass rate) and
 # cobertura (coverage), so the pass-rate verdict and coverage artifacts come
 # from the same build — no second run. After the unit gate confirms 100% pass,
-# a coverage gate (cov_gate.py) enforces changed-line >= 80% and overall-line
-# > 84% (mirrors the GitHub CI gate) against those same artifacts.
+# a coverage gate (cov_gate.py) enforces changed-line > 85% for at least 51
+# instrumentable changed lines and overall-line > 87% (mirrors the GitHub CI
+# gate) against those same artifacts.
 #
 # Invoked by scripts/ci/pre_push.sh when the push range touches src/bcs/.
 # Mirrors ci_test.sh's --base/--head contract and OCB_PRE_PUSH_ENABLE_BCS*
@@ -126,14 +127,14 @@ bcs_parallel_gates() {
   echo ""
   echo "== launching bcs gates in parallel =="
   printf '  unit: apps/bcs/scripts/ci_test.sh --fast-fail %s  (log: %s)\n' "${unit_cov_args[*]:-}" "$unit_log"
-  printf '  e2e:  apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref %s --changed-line-min 50   (log: %s)\n' "$base" "$e2e_log"
+  printf '  e2e:  apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 54 --bcs-method-min 48 --force-rebuild --changed-base-ref %s --changed-line-min 65   (log: %s)\n' "$base" "$e2e_log"
   echo ""
 
   _launch_tagged unit "$unit_exit" \
     "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
   local u_reader=$_TASK_READER u_pid=$_TASK_PID
   _launch_tagged e2e "$e2e_exit" \
-    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 50
+    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 54 --bcs-method-min 48 --force-rebuild --changed-base-ref "$base" --changed-line-min 65
   local e_reader=$_TASK_READER e_pid=$_TASK_PID
 
   # Wait for the first gate to finish (exitfile written) or die abnormally.
@@ -202,7 +203,7 @@ bcs_parallel_gates() {
 }
 
 # ----------------------------------------------------------------------------
-# Unit coverage gate (changed-line >= 80%, overall-line > 84%).
+# Unit coverage gate (changed-line > 85% for >50 lines, overall-line > 87%).
 # The unit gate above already ran ci_test.sh WITH --coverage (single llvm-cov
 # nextest pass -> testresult/{junit,cobertura}.xml) AND confirmed the 100% pass
 # rate via fast-fail. So coverage is already collected — this step only enforces
@@ -220,7 +221,7 @@ bcs_coverage_gate() {
     return 0
   fi
   echo ""
-  echo "== required: bcs unit coverage gate (changed-line>=80%, overall-line>84%) =="
+  echo "== required: bcs unit coverage gate (changed-line>85% for >50 lines, overall-line>87%) =="
   # Enforce thresholds. cov_gate.py reads testresult/{junit,cobertura}.xml (the
   # SAME artifacts produced by the unit gate's single llvm-cov nextest pass),
   # diffs src/bcs against --base-ref, and maps changed lines onto cobertura
@@ -230,11 +231,12 @@ bcs_coverage_gate() {
         --base-ref "$base" \
         --bcs-dir "$PWD" \
         --pass-rate-min 100 \
-        --overall-line-min 84 \
-        --changed-line-min 80 )
+        --overall-line-min 87 \
+        --changed-line-min 85 \
+        --changed-line-min-lines 51 )
   local rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    echo "Result: push BLOCKED — coverage gate failed (changed-line < 80% or overall-line <= 84%)."
+    echo "Result: push BLOCKED — coverage gate failed (see pass-rate and coverage errors above)."
     return 1
   fi
   echo "Result: coverage gate PASSED."
@@ -265,5 +267,5 @@ elif [[ $unit_on -eq 1 ]]; then
   run_required "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
   bcs_coverage_gate "$base" || exit 1
 else
-  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 50
+  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 54 --bcs-method-min 48 --force-rebuild --changed-base-ref "$base" --changed-line-min 65
 fi

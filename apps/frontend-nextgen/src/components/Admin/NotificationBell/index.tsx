@@ -19,7 +19,7 @@ function categoryFromItemType(itemType: NotificationSummary['itemType']): WorkOr
 
 export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md'; className?: string }) {
   const navigate = useNavigate();
-  const { unreadCount, recent, loadingRecent, loadRecent, markAllRead } = useNotifications();
+  const { unreadCount, recent, loadingRecent, loadRecent, markAllRead, markOneRead } = useNotifications();
   const [open, setOpen] = useState(false);
   // 全部已读 in-flight 态：按钮 loading 防抖，避免连点重复调用 markAllRead 接口。
   const [markingAll, setMarkingAll] = useState(false);
@@ -38,11 +38,25 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
     if (open) void loadRecent();
   }, [open, loadRecent]);
 
-  const goWorkOrders = (item?: NotificationSummary) => {
-    // 无条目=「查看全部」直达；单条点击按其分类携带 category 深链（页面挂载时消费）。
+  const goWorkOrders = async (item?: NotificationSummary) => {
+    // BBS notice carries a stable internal target. It navigates directly to the
+    // topic and marker post; other items keep the notification-center category link.
+    if (item?.bbsTarget?.topicId) {
+      const { topicId, postId } = item.bbsTarget;
+      const query = new URLSearchParams({ topicId });
+      if (postId) query.set('postId', postId);
+      if (!item.isRead) {
+        void markOneRead(item.notificationId).finally(() => {
+          void loadRecent();
+        });
+      }
+      setOpen(false);
+      navigate(`/lab/community?${query.toString()}`);
+      return;
+    }
     const cat = item ? categoryFromItemType(item.itemType) : null;
-    navigate(cat ? `/ticket-center?category=${cat}` : '/ticket-center');
     setOpen(false);
+    navigate(cat ? `/ticket-center?category=${cat}` : '/ticket-center');
   };
 
   return (
@@ -109,8 +123,8 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
             </div>
           )}
         </div>
-        <div className="border-t border-border px-4 py-2">
-          <Button variant="ghost" size="sm" className="w-full" onClick={() => goWorkOrders()}>
+        <div className="border-t border-divider px-4 py-2">
+          <Button variant="ghost" size="sm" className="w-full" onClick={() => void goWorkOrders()}>
             查看全部
           </Button>
         </div>

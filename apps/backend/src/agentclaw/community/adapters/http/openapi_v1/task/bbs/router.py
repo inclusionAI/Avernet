@@ -35,6 +35,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
 )
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
+    MAX_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
@@ -43,6 +44,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
+    enrich_personal_center_bot_display_names,
 )
 
 from .interaction_schemas import (
@@ -73,6 +75,7 @@ from .schemas import (
     CreateTopicRequestUnified,
     PostHelpfulUpdated,
     PostItem,
+    PostLocation,
     SetPostHelpfulRequest,
     domain_topic_config,
     ReplyCreated,
@@ -132,14 +135,27 @@ async def list_topics(
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
         "'my topics' view, server-side paginated.",
     ),
+    following: bool = Query(
+        default=False,
+        description="Return only Topics authored by humans and Bots actively "
+        "followed by the verified end user.",
+    ),
+    principal: Principal = Depends(require_principal),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
     """List or search Topics in the caller's tenant and environment."""
+    following_owner_id: str | None = None
+    if following:
+        if not principal.has_user:
+            raise Forbidden("following topics require an end-user caller")
+        following_owner_id = principal.user_id
+
     result = service.list_topics(
         keyword=keyword,
         status=status,
         topic_type=topic_type,
         author_id=author_id,
+        following_owner_id=following_owner_id,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -206,6 +222,37 @@ async def list_posts(
         [PostItem.from_record(post) for post in items],
         request,
     )
+
+
+@read_router.get(
+    "/topics/{topic_id}/posts/{post_id}/location",
+    response_model=Envelope[PostLocation],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_post_location(
+    topic_id: TopicIdPath,
+    request: Request,
+    post_id: str = Path(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Stable Post id exactly as returned by BBS APIs.",
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Page size used by the caller to render first-level replies.",
+    ),
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostLocation]:
+    """Resolve a direct or nested reply to its exact public reply page."""
+    location = service.get_post_location(
+        topic_id=topic_id,
+        post_id=post_id,
+        page_size=page_size,
+    )
+    return envelope(PostLocation.from_record(location), request)
 
 
 @read_router.post(
@@ -462,6 +509,7 @@ async def create_interaction(
         action_type=body.action_type,
         target_type=body.target_type,
         target_id=body.target_id,
+        active=body.active,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)
@@ -570,11 +618,11 @@ async def get_personal_center_activities(
     ),
     activity_type: PersonalCenterActivityTypeWire = Query(
         default="ALL",
-        description="Activity kind filter, or ALL for every supported activity.",
+        description="Activity kind filter, or ALL for every supported activity including follows.",
     ),
     target_type: PersonalCenterTargetTypeWire = Query(
         default="ALL",
-        description="Content target type filter, or ALL for Topics and Posts.",
+        description="Content or identity target type filter, or ALL for every supported target.",
     ),
     principal: Principal = Depends(require_principal),
     service: ForumPersonalCenterActivityServiceProtocol = Injected(
@@ -594,6 +642,7 @@ async def get_personal_center_activities(
             page_size=page_params.page_size,
         )
     )
+    result = enrich_personal_center_bot_display_names(result, request=request)
     return page_envelope(
         result.total,
         [PersonalCenterActivityItem.from_record(item) for item in result.items],

@@ -1,0 +1,60 @@
+{
+  "messageId" : "fixture-message",
+  "contextId" : "fixture-context",
+  "taskId" : "fixture-task",
+  "role" : "ROLE_AGENT",
+  "parts" : [ {
+    "data" : {
+      "$schema" : "https://json-schema.org/draft/2020-12/schema",
+      "x-bcs-exec" : {
+        "tools" : {
+          "tool-1" : {
+            "argsSha256" : "f9c2b15e32e9aeaab8ba1d5d34649ebbe05b0bb93473d39794d27070fa69397b",
+            "args" : {
+              "orderId" : "order-1"
+            },
+            "name" : "query_order"
+          }
+        },
+        "expiresAtMs" : 4102444800000,
+        "profile" : "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/structured-input-exec/v1.md",
+        "accepted" : { },
+        "version" : 1.0
+      },
+      "additionalProperties" : false,
+      "type" : "object",
+      "required" : [ "decisions" ],
+      "properties" : {
+        "decisions" : {
+          "type" : "object",
+          "minProperties" : 1.0,
+          "properties" : {
+            "tool-1" : {
+              "type" : "string",
+              "enum" : [ "allow_once", "deny" ],
+              "title" : "允许调用工具 query_order？"
+            }
+          },
+          "additionalProperties" : false
+        }
+      }
+    },
+    "metadata" : {
+      "https://github.com/a2aproject/experimental-ext-structured-input/tree/main/v1" : {
+        "id" : "fixture-request",
+        "type" : "input_schema"
+      }
+    },
+    "filename" : "",
+    "mediaType" : ""
+  } ],
+  "metadata" : {
+    "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/structured-input-exec/v1.md" : {
+      "id" : "fixture-request",
+      "accepted" : { },
+      "version" : 1.0
+    }
+  },
+  "extensions" : [ ],
+  "referenceTaskIds" : [ ]
+}

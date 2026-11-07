@@ -19,6 +19,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
+from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.di import config as cfg
@@ -280,6 +281,7 @@ async def get_openclaw_configs(
     owner_id: str = Query(..., description="用户身份 ID"),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
     user: AuthenticatedUser = Depends(get_current_user),
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> OpenClawConfigsResponse:
     """获取多环境 OpenClaw 配置
 
@@ -290,6 +292,9 @@ async def get_openclaw_configs(
     if user.staffId != owner_id:
         raise HTTPException(status_code=403, detail="无权限访问此资源")
     try:
+        # The generator accepts stable resource locators for internal builds.
+        # This HTTP surface still requires the actual current Owner.
+        bot_service.get_bot(bot_id=bot_id, user_id=user.staffId)
         configs = await service.generate_openclaw_configs(
             bot_id=bot_id,
             owner_id=owner_id,

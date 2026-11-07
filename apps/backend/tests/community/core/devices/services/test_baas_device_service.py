@@ -113,11 +113,15 @@ def _operator(staff_id: str = "u001") -> OperatorContext:
 
 
 class TestUpdateDeviceHeaders:
-    def test_teclaw_uses_teclaw_authorization_rule_builder(self):
+    @pytest.mark.parametrize("single_device", [True, False])
+    def test_teclaw_uses_teclaw_authorization_rule_builder(self, single_device):
         baas = MagicMock()
         rule = MagicMock()
         baas._build_teclaw_outbound_operation_rule.return_value = rule
         baas.get_device_by_uuid.return_value = {"provider_device_id": "PAAS-1"}
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "DEVICE-1", "provider_device_id": "PAAS-1"}
+        ]
         svc = _make_service(baas_service=baas)
         device = AllocatedDevice(
             device_id="BOT-teclaw",
@@ -125,7 +129,7 @@ class TestUpdateDeviceHeaders:
             device_props={
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
-                "device_uuid": "DEVICE-1",
+                **({"device_uuid": "DEVICE-1"} if single_device else {}),
             },
         )
 
@@ -139,8 +143,9 @@ class TestUpdateDeviceHeaders:
             agent_pass_token="passport-token"
         )
         baas._build_outbound_operation_rule.assert_not_called()
-        baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
-        assert result == [{"baas_device_uuid": "DEVICE-1", "paas_device_id": "PAAS-1"}]
+        baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule, mode="replace")
+        device_key = "baas_device_uuid" if single_device else "device_uuid"
+        assert result == [{device_key: "DEVICE-1", "paas_device_id": "PAAS-1"}]
 
     def test_teclaw_skips_update_when_rule_builder_returns_none(self):
         baas = MagicMock()
@@ -181,6 +186,7 @@ class TestUpdateDeviceHeaders:
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
                 "device_uuid": "DEVICE-1",
+                "engine_type": "openclaw",
             },
         )
 
@@ -203,6 +209,7 @@ class TestUpdateDeviceHeaders:
             owner_id="u1",
             agent_pass_token="passport-token",
             agent_code="agent-code",
+            engine_type="openclaw",
             extra_properties=envelope,
         )
         baas._build_teclaw_outbound_operation_rule.assert_not_called()
@@ -218,7 +225,12 @@ class TestUpdateDeviceHeaders:
         device = AllocatedDevice(
             device_id="BOT-baas",
             device_provider=BAAS_DEVICE_PROVIDER,
-            device_props={"bolt_id": "bot-1", "entity_id": "u1", "device_uuid": "DEVICE-1"},
+            device_props={
+                "bolt_id": "bot-1",
+                "entity_id": "u1",
+                "device_uuid": "DEVICE-1",
+                "engine_type": "openclaw",
+            },
         )
         with patch(
             "agentclaw.community.core.bot_management.engines"
@@ -228,6 +240,7 @@ class TestUpdateDeviceHeaders:
             svc.update_device_headers(device=device, agent_pass_token="t", agent_code="a")
         baas._build_outbound_operation_rule.assert_called_once_with(
             bot_id="bot-1", owner_id="u1", agent_pass_token="t", agent_code="a",
+            engine_type="openclaw",
             extra_properties=None,
         )
 
@@ -707,13 +720,13 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b1", "bot_type": "desktop"}
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_fallback_via_binding_record(self):
         """服务 BOT：直接查不到，通过 binding 的 bolt_id + entity_id 查到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = {"bot_id": "b2", "bot_type": "service"}
+        bot_query.get_by_id_and_entity.return_value = {"bot_id": "b2", "bot_type": "service"}
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -725,7 +738,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b2", "bot_type": "service"}
-        bot_query.get_by_id_and_owner.assert_called_once_with("b2", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("b2", "u001")
 
     def test_binding_not_found_returns_none(self):
         """binding_id 在两张表都查不到。"""
@@ -739,7 +752,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(99)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_without_bolt_id_returns_none(self):
         """binding 记录存在但 device_props 里没有 bolt_id。"""
@@ -753,7 +766,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_with_none_device_props_returns_none(self):
         """binding 记录的 device_props 为 None。"""
@@ -772,7 +785,7 @@ class TestResolveBotByBindingId:
         """binding 有 bolt_id 但 ac_bots 按 bot_id+owner_id 也查不到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = None
+        bot_query.get_by_id_and_entity.return_value = None
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -784,7 +797,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_called_once_with("nonexistent", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("nonexistent", "u001")
 
 
 # ===========================================================================

@@ -97,7 +97,7 @@ export function ResourceManageModal({ sessionId, messages, onClose }: ResourceMa
               {filtered.map((item, idx) => (
                 <li
                   key={`${item.name}-${idx}`}
-                  className="flex items-center justify-between border-b border-border py-1.5 last:border-b-0"
+                  className="flex items-center justify-between border-b border-divider py-1.5 last:border-b-0"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <FileText aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />

@@ -7,12 +7,14 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 ```yaml
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
+  - RecordingBcsOwnershipPlugin
   - "Local* and Noop* implementations, including LocalSkillCenterGateway"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.plugins.community.knowledge_catalog
   - agentclaw.community.core.economy.governance.orm    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
@@ -70,6 +72,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.auth
   - agentclaw.community.plugin_api.auth_relationship
   - agentclaw.community.plugin_api.base
+  - agentclaw.community.plugin_api.bcs_managers
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.database
@@ -118,3 +121,15 @@ internal_dependencies:
 ### Change impact
 
 Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. `LocalSkillCenterGateway` is a stateful offline Fake and records every call through `MockSeam`; it never selects a default Team or retries publish submission. Its public catalogue and tag tree are derived from public Fake submissions. Team catalogue reads stay Team-scoped, while publish status and public Reference version/download reads resolve the globally unique skill code without a Team. Each Fake submission creates a readable deterministic ZIP in an owned temporary directory, and exact download returns the SHA-256 of those actual bytes. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.
+
+## Recording ownership delivery
+
+`RecordingBcsOwnershipPlugin` implements `BcsOwnershipPlugin` v1 for
+TEST/CORP_TEST. It records snapshots, isolates simulated Owner state by complete
+`SyncKey`, and supports scripted results/errors. An unscripted initial call
+idempotently confirms an already-initialized fixture; it does not register Bots
+or Humans, initialize version-0 ownership, or prove BCS authorization. Script
+those failure outcomes explicitly. Consumer conformance lives in
+`tests/community/contracts/test_bcs_ownership.py`; singlebox selects real HTTP
+delivery instead. Neither these recordings nor handoff boundary doubles prove
+real AAC authorization, credential retirement, or device updates.

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui';
+import { CollapsibleUserText } from '@/components/Workspace/ChatPanel/CollapsibleUserText';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import {
   MessageCopyAction,
@@ -122,6 +123,22 @@ export function ChatMessageList({
               const isLastMessage = index === messages.length - 1;
               const sender = resolveSender(message);
               const messageText = getMessageText(message);
+              const blocks = getMessageBlocks(message);
+              // 超长 user 纯文本消息折叠(design D3):仅「单一 text block」进入折叠路径,
+              // 含图片等附件的消息完整渲染不折叠;renderText 为 SDK Bubble 的 text block
+              // escape hatch,设置后 markdown prop 对 text block 不生效,由折叠壳内部复刻。
+              // 回复期间最新一条 user 消息 forceExpanded(延迟折叠,回复结束自然收起,design D4)。
+              const collapsibleUserText =
+                message.role === 'user' &&
+                blocks.length === 1 &&
+                blocks[0].type === 'text'
+                  ? (text: string) => (
+                      <CollapsibleUserText
+                        content={text}
+                        forceExpanded={isRequesting && message.id === latestUserMessageId}
+                      />
+                    )
+                  : undefined;
               return (
                 // 分组间距(mb-4/mb-6)落在消息项外壳：操作行随内容列渲染在气泡紧下方，
                 // 不再隔着 mb 间距悬浮（dmore 实测：操作图标 x=36 与正文左对齐、距正文 ~8px）。
@@ -152,8 +169,9 @@ export function ChatMessageList({
                         maxWidth: '48rem',
                       }}
                       timestamp={undefined}
-                      blocks={getMessageBlocks(message)}
+                      blocks={blocks}
                       preset="openclaw"
+                      renderText={collapsibleUserText}
                       markdown={{ preset: 'full', extensions: [aixUiPlugin, fileRefPlugin] }}
                       tool={{ defaultCollapsed: !(isLastMessage && isRequesting) }}
                       isStreaming={isLastMessage && isRequesting && message.role === 'assistant'}

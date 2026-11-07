@@ -87,8 +87,8 @@ export function BotChatRelatedTraceList({
 }: Props) {
   const groups = groupBotChatRelatedTraces(page, scope);
   return (
-    <aside className="flex min-h-[560px] min-w-0 flex-col border-b border-border bg-muted lg:border-b-0 lg:border-r">
-      <div className="border-b border-border px-4 py-3">
+    <aside className="flex min-h-[560px] min-w-0 flex-col border-b border-divider bg-muted lg:border-b-0 lg:border-r">
+      <div className="border-b border-divider px-4 py-3">
         <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           关联 Trace
         </div>

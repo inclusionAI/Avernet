@@ -150,6 +150,16 @@ impl GroupManagementService for GroupManagement {
                 .await;
         }
 
+        // P3 prewarm intent (spec §7 member-entry): no trusted subject for
+        // the added member here — record the non-sensitive intent only
+        // (group, member kind). Identity and containers are established
+        // per message by the admission seam, never on membership change.
+        tracing::info!(
+            group_id = %cmd.group_id,
+            member_kind = ?bot.actor_kind,
+            "caller prewarm intent recorded for member entry (no identity, no ensure)"
+        );
+
         Ok(GroupAddMemberResult {
             group_id: cmd.group_id,
             member: GroupParticipantView {

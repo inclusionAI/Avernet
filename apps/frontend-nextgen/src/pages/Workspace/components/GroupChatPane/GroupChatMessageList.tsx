@@ -1,3 +1,4 @@
+import { isTaskUiOnlyMessage } from '@/domain/groupTasks/projection';
 import { Button } from '@/components/ui';
 import { MessageSelectionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { GroupView, SessionView } from '@/domain/collaboration';
@@ -40,7 +41,7 @@ interface GroupChatMessageListProps {
 
 /** 群聊消息列表及 Driver/Manager 启动提示。 */
 export function GroupChatMessageList({
-  messages,
+  messages: allMessages,
   group,
   session,
   isRequesting,
@@ -60,6 +61,7 @@ export function GroupChatMessageList({
   onInsertDraft,
   highlightMessageId,
 }: GroupChatMessageListProps) {
+  const messages = useMemo(() => group.kind === 'task_master_slave' ? allMessages.filter((message) => !isTaskUiOnlyMessage(message)) : allMessages, [allMessages, group.kind]);
   const latestUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   const hasStreamingMessage = useMemo(
     () => messages.some((message) => message.role === 'assistant' && message.status === 'streaming'),

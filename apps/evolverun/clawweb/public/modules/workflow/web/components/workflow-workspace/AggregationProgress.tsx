@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useIssueGroups } from './issue-groups';
 
 /** Independent from the already-completed single-run analysis task. */
-export default function AggregationProgress({ workflowId, flowId }: { workflowId: string; flowId: string }) {
+export default function AggregationProgress({ workflowId, flowId, readOnly = false }: { workflowId: string; flowId: string; readOnly?: boolean }) {
   const query = useIssueGroups(workflowId);
   const groups = query.data?.groups.filter(group => group.flowIds.includes(flowId)
     || group.summarySources?.some(source => source.flowId === flowId)) ?? [];
@@ -18,6 +18,6 @@ export default function AggregationProgress({ workflowId, flowId }: { workflowId
                 : group.aggregationStatus === 'too_large' ? '输入超出上限，未生成聚合' : '尚未生成聚合'}</p>
           {group.summary && (group.stale || group.aggregationStatus === 'failed') && <p>保留上次有效结论；尚未覆盖最新分析。</p>}
         </div>)}
-    <Link className="mt-2 inline-block text-blue-600" to={`/workflows/workspace?${new URLSearchParams({ workflowId, tab: 'evolution', evoTab: 'diagnosis', runId: flowId })}`}>查看聚合结论与来源</Link>
+    {!readOnly && <Link className="mt-2 inline-block text-blue-600" to={`/workflows/workspace?${new URLSearchParams({ workflowId, tab: 'evolution', evoTab: 'diagnosis', runId: flowId })}`}>查看聚合结论与来源</Link>}
   </section>;
 }

@@ -81,7 +81,7 @@ class BusinessCore:
         delivered = {name: value for name, value in identity.items() if name != "key"}
         # Platform resources and Loop context are outer input fields. They do
         # not change the native business call's data or output requirements.
-        for name in ("target_skill", "loop"):
+        for name in ("target_skill", "loop", "reference_materials"):
             if name in self.base_input:
                 delivered[name] = self.base_input[name]
         if history:

@@ -192,6 +192,10 @@ async fn ws_fixture() -> WsFixture {
         frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
         run_channels: Arc::new(RunChannelManager::new()),
         delivery_admission: Arc::new(support::AllowAllAdmission),
+        // No lease wiring here: workbench-send path only needs the
+        // admission fence; lease commands answer an explicit error.
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     WsFixture {
         state,
@@ -231,6 +235,7 @@ async fn stale_connection_send_is_reauthorized_and_rejected_after_session_remova
     let _protected_rx = connection.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_alice".to_string()),
+        caller_ingress: None,
     };
 
     // Send #1 (b2 still in the Session): admitted end-to-end.

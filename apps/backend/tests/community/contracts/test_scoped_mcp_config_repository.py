@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPConfig, UserMCPConfig
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
@@ -23,6 +24,7 @@ from agentclaw.community.core.repository.protocols.bot.mcp import (
 def test_atomic_replace_contract_updates_both_scopes_and_clears_bot_rules() -> None:
     engine = create_engine("sqlite:///:memory:")
     UserMCPConfig.__table__.create(engine)
+    BotModel.__table__.create(engine)
     BotMCPConfig.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
 
@@ -42,6 +44,9 @@ def test_atomic_replace_contract_updates_both_scopes_and_clears_bot_rules() -> N
         orm_session = transactional_orm_session
 
     db = Database()
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(bot_id="bot-x", entity_id="owner", entity_type="staff",
+                             creator_id="owner", owner_id="owner"))
     subject: ScopedMCPConfigRepositoryProtocol = ScopedMCPConfigRepository(db)
     assert isinstance(subject, ScopedMCPConfigRepositoryProtocol)
 

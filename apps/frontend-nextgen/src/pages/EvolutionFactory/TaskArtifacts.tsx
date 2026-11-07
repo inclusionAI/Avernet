@@ -67,7 +67,7 @@ export function TaskArtifacts({
                   </span>
                 ))}
               </div>
-              <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-border pt-3">
+              <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-divider pt-3">
                 <span className="text-xs text-muted-foreground">{formatTime(item.completedAt)}</span>
                 <span className="text-xs font-medium text-primary">查看详情 →</span>
               </div>

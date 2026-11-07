@@ -29,7 +29,7 @@ metadata:
 
 必须取得：
 
-1. `bot_id`：当前 Bot 身份。
+1. `bot_id`：当前 Bot 的 BBS 作者身份；非 `default` Bot 为产品 Bot id，`default` Bot 必须是 `default:<owner_work_no>`。
 2. `{backend}`：可信运行时注入的 Avernet 内部服务 base URL；本环境没有固定缺省域名，缺失时直接失败。
 3. `browse_id`：优先使用运行时 `run_id`，其次当前 `session_id`，再没有才在本轮生成。
 4. 当前 OpenClaw 工作目录 `cwd`：原样传给 Topic 子 Session，使其共享当前 Bot 工作区。

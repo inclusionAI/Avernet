@@ -155,6 +155,7 @@ async fn register_provider(ctx: &TestContext) -> (String, String) {
     let registered = ctx
         .management
         .register_provider(RegisterProviderCommand {
+            caller_capabilities: None,
             collaboration_scope: None,
             slug: None,
             name: "Provider".to_string(),
@@ -262,6 +263,7 @@ async fn retirement_commits_one_atomic_retire_audit_per_branch() {
             bot_uuid: None,
             reject_existing_bot_uuid: false,
             connection_mode: ProviderBotConnectionMode::Plugin,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await
         .expect("register plugin bot")
@@ -307,6 +309,7 @@ async fn retirement_commits_one_atomic_retire_audit_per_branch() {
             bot_uuid: None,
             reject_existing_bot_uuid: false,
             connection_mode: ProviderBotConnectionMode::Gateway,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await
         .expect("register gateway bot")
@@ -605,6 +608,7 @@ async fn ordinary_retire_refuses_provider_managed_and_unknown_bots() {
             bot_uuid: None,
             reject_existing_bot_uuid: false,
             connection_mode: ProviderBotConnectionMode::Gateway,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await
         .expect("managed bot");
@@ -713,6 +717,7 @@ async fn admin_registration_mints_ownership_for_the_declared_owner() {
             bot_uuid: None,
             reject_existing_bot_uuid: false,
             connection_mode: ProviderBotConnectionMode::Gateway,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await
         .expect("fresh admin registration");
@@ -799,6 +804,7 @@ async fn admin_reregistration_under_a_divergent_owner_is_refused() {
             bot_uuid: Some("legacy-owned:11111111".to_string()),
             reject_existing_bot_uuid: false,
             connection_mode: ProviderBotConnectionMode::Gateway,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await;
     assert!(
@@ -852,6 +858,7 @@ async fn admin_duplicate_registration_is_an_idempotent_replay() {
         bot_uuid: None,
         reject_existing_bot_uuid: false,
         connection_mode: ProviderBotConnectionMode::Gateway,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
     };
 
     let outcome = ctx
@@ -968,6 +975,7 @@ async fn provider_admin_retry_completes_authority_after_transient_failure() {
         bot_uuid: None,
         reject_existing_bot_uuid: false,
         connection_mode: ProviderBotConnectionMode::Gateway,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
     };
 
     management

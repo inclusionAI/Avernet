@@ -7,7 +7,12 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class ServicePublicationFacadeProtocol(Protocol):
-    """Resolve, authorize and orchestrate service-Bot publication operations."""
+    """Resolve, authorize and orchestrate service-Bot publication operations.
+
+    Engine strategies may add namespaced response extensions to restart
+    acknowledgements and lifecycle cards without changing product status.
+    Missing engine-owned extensions preserve the original response shape.
+    """
 
     def list_publications(
         self, bot_id: str, *, actor_id: str, owner_id: str

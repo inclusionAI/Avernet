@@ -21,9 +21,13 @@ export function classifyResult(json, child) {
 export function writeReports(root, output, rows, metadata) {
   const map = coverage.createCoverageMap({});
   const suites = [];
-  const parser = new XMLParser({ ignoreAttributes: false,
+  // JUnit logs are already escaped XML. Keep them opaque in both directions:
+  // decoding megabytes of console output can exhaust the entity budget even
+  // when every test passed. Suite/case/failure metadata retains normal parsing.
+  const stopNodes = ['*.system-out', '*.system-err'];
+  const parser = new XMLParser({ ignoreAttributes: false, stopNodes,
     processEntities: { maxTotalExpansions: 1_000_000, maxExpandedLength: 50_000_000 } });
-  const builder = new XMLBuilder({ ignoreAttributes: false, format: true });
+  const builder = new XMLBuilder({ ignoreAttributes: false, format: true, stopNodes });
   for (const row of rows) {
     try {
       if (row.coverageFile) {

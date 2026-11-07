@@ -23,10 +23,23 @@ pub struct BotRunScope {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BotRunTransportOwner {
     WebSocket,
+    A2a { provider_id: String, provider_bot_ref: String },
     HttpProvider {
         provider_id: String,
         provider_bot_ref: String,
     },
+}
+
+impl BotRunTransportOwner {
+    pub fn from_target(target: &bcs_domain::BotDeliveryTarget) -> Self {
+        match target {
+            bcs_domain::BotDeliveryTarget::WebSocket { .. } => Self::WebSocket,
+            bcs_domain::BotDeliveryTarget::HttpProvider { provider_id, provider_bot_ref, .. } =>
+                Self::HttpProvider { provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone() },
+            bcs_domain::BotDeliveryTarget::A2a { provider_id, provider_bot_ref, .. } =>
+                Self::A2a { provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone() },
+        }
+    }
 }
 
 /// Abort-routing snapshot captured before `chat.send` delivery begins.
@@ -51,6 +64,7 @@ pub struct ActiveBotRunContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderRunTransport {
+    A2a { binding: bcs_domain::a2a::A2aBinding, update_mode: bcs_domain::a2a::A2aUpdateMode },
     Negotiating,
     Sse,
     Callback,
@@ -69,6 +83,16 @@ pub trait BotRunContextPort: Send + Sync {
     /// distinction. The caller binds and validates the alias before this call.
     async fn put_alias_context(&self, context: BotRunContext) {
         self.put_context(context).await;
+    }
+
+    /// Canonical A2A Run only: revalidate exact scope, expected deadline and
+    /// live transport, then update context/active/transport lifetimes together.
+    /// False means missing/expired/terminal/stale state; cache write failures
+    /// must propagate. Never creates a producer or revives terminal work.
+    async fn reschedule_deadline(
+        &self, _scope: &BotRunScope, _run_id: &str, _expected_deadline_ms: u64, _deadline_ms: u64,
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InvalidOperation {message:"Run deadline updates are not configured".into(),request_id:None})
     }
 
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext>;

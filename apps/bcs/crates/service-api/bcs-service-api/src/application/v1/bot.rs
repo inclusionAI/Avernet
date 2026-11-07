@@ -70,6 +70,9 @@ pub struct PhysicalBot {
     pub bot_id: String,
     pub kind: BotKind,
     pub name: String,
+    /// Current display avatar; absent avatars serialize as null.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub visibility: BotVisibility,
     pub status: BotStatus,
     pub env: String,
@@ -105,6 +108,9 @@ pub struct HumanBot {
     pub bot_id: String,
     pub kind: BotKind,
     pub name: String,
+    /// Human avatars are not stored in BCS and always project as null.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub visibility: BotVisibility,
     pub status: BotStatus,
     pub env: String,

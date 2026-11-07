@@ -1,7 +1,7 @@
 import { CANCEL_UI_TEXT, SEND_BAN_UI_TEXT } from '@/adapters/a2a/bootstrap';
 import { clearBotCdnConfig, queryAndRegisterBotLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { listTaskPreflightMessages, mergeTaskPreflightMessages } from '@/services/tasks/taskPreflightMessageStore';
-import { createBotChatProvider, type BotChatState } from '@/services/workspace/botChatProvider';
+import { createBotChatProvider, isAicodingConnectionEngine, type BotChatState } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { enrichFileRefContent } from './botChatMessagePrefill';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
+import { useBotConnectionRuntime } from './useBotConnectionRuntime';
 import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
 export interface SendFileRefs {
@@ -18,7 +19,6 @@ export interface SendFileRefs {
   fileRefDisplay?: Array<{ insert_id: string; name: string }>;
 }
 export type BotLibraryCdnLoader = (botId: string) => Promise<number>;
-
 /** useBotChat —— bot 单聊对话 Hook(镜像 useGroupChat)。 */
 export function useBotChat(
   bot: ChatBotView | null,
@@ -48,6 +48,8 @@ export function useBotChat(
     return createBotChatProvider({ bot, userId: identityId, sessionId });
   }, [bot, sessionId, identityId]);
 
+  const connectionRuntime = useBotConnectionRuntime(provider);
+
   // 副屏方式②数据桥（对应单聊 Bot render screens）：进入会话按 botId 拉 Bot 的 CDN 库映射写
   // window.aixLibraryCdnMap，供引擎 resolveBusinessEntry 把 <AixUI component="lib.X"> 的 lib 解析成
   // CDN URL。切换 Bot / 卸载时清旧 botId 的 CDN scope，避免残留串用（对齐 ocb replaceBotCdnScopes；
@@ -55,14 +57,16 @@ export function useBotChat(
   // （保持与 useGroupChat manifest 桥一致的静默降级策略）。
   useEffect(() => {
     const botId = bot?.botId ?? null;
-    if (!botId) return;
+    const runtimeAllowsCdn = !bot?.isFriendBot
+      || (connectionRuntime.resolved && !isAicodingConnectionEngine(connectionRuntime.engine));
+    if (!botId || !runtimeAllowsCdn) return;
     void loadBotLibraryCdn(botId).catch(() => {
       /* 静默降级：方式②副屏不可用不阻断会话主流程 */
     });
     return () => {
       clearBotCdnConfig(botId);
     };
-  }, [bot?.botId, loadBotLibraryCdn]);
+  }, [bot?.botId, bot?.isFriendBot, connectionRuntime, loadBotLibraryCdn]);
 
   // panelRef 透传 SDK useChat：useChat 拿到 panelRef 后 chat.onRequest 会自动 flushContext()
   // 并以 panelContext 注入请求，使 bot 引擎感知用户在副屏的交互（对应 useGroupChat:56 的 panelRef 注入）。
@@ -234,6 +238,7 @@ export function useBotChat(
     chat,
     supportState,
     connectionStatus: displayStatus.status,
+    connectionRuntime,
     send,
     stop,
     reconnect,

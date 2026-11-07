@@ -1,4 +1,16 @@
 export type SessionRecoveryTermination = { status: 'remote_stopped' | 'remote_stop_failed' | 'stop_pending'; aisJobId: string | null };
+export type SessionRecoveryOwnerRequest = {
+  requestId: string;
+  revision: number;
+  status: 'pending' | 'confirmed';
+  reason: 'permission';
+  summary: string;
+  instructions: string;
+  evidence_ids: string[];
+  resumePhase: SessionRecoveryTask['phase'];
+  createdAtMs: number;
+  feedback?: { userId: string; text: string; atMs: number };
+};
 export type SessionRecoveryTask = {
   taskId: string;
   final_summary?: string;
@@ -10,6 +22,7 @@ export type SessionRecoveryTask = {
   status: 'running' | 'waiting_owner' | 'waiting_effect' | 'completed' | 'failed' | 'canceled';
   completionReason?: 'user_continued' | 'target_unavailable' | 'owner_handoff' | 'mcp_permission_required';
   phase: 'assess' | 'observe' | 'plan' | 'apply' | 'verify';
+  ownerRequest?: SessionRecoveryOwnerRequest;
   request: { diagnosis: string; error_location?: string; target: { bot_id: string; entity_id: string; env: 'pre' | 'prod'; engine: 'OC' | 'CC' | 'TE' }; session_key: string; session_id?: string; event_id: string; delivery_key: string; tc_fault_label: string | null };
   plan: null | {
     digest: string; approvedAt: number | null;

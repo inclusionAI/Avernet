@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-a2a-binding-api.workspace = true
 bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
@@ -33,6 +34,7 @@ bcs-bot-store = { workspace = true }
 bcs-user-directory-api = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-group-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-test-support = { workspace = true }
@@ -43,3 +45,7 @@ bcs-organization-store = { workspace = true }
 bcs-domain = { workspace = true }
 tokio-test = "0.4"
 tempfile = { workspace = true }
+# The bot_profile integration test mounts the committed SQLite migration
+# chain (bootstrap_migrations), whose version checksums need these helpers.
+hex = { workspace = true }
+sha2 = { workspace = true }

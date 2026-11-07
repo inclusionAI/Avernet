@@ -43,7 +43,7 @@ from typing import Iterator, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
-from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.registry import GivesUp, HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import (
     Complete,
@@ -51,6 +51,7 @@ from agentclaw.community.core.task_queue.types import (
     Reschedule,
     Retry,
     TaskRecord,
+    TaskStatus,
 )
 from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
@@ -193,14 +194,16 @@ class TaskWorker(LifecycleBase):
 
         Public so tests can drive the worker deterministically without sleeping.
         """
-        claimed = await self._db(
-            self._repo.claim_batch,
+        claimed, retired = await self._db(
+            self._repo.claim_batch_reporting_retired,
             worker_id=self._worker_id,
             env=self._env,
             app=self._app,
             limit=self._config.batch_size,
             lease_seconds=self._config.lease_seconds,
         )
+        for task in retired:
+            await self._give_up(task)
         if not claimed:
             return 0
         await asyncio.gather(*(self._run_guarded(task) for task in claimed))
@@ -370,12 +373,14 @@ class TaskWorker(LifecycleBase):
             return
 
         if isinstance(outcome, Fail):
-            await self._write_outcome(
+            failed = await self._write_outcome(
                 self._repo.fail,
                 task_id=task.id,
                 worker_id=self._worker_id,
                 error=outcome.error,
             )
+            if failed:
+                await self._give_up(task)
             return
 
         # Reschedule / Retry both re-pend the task with a delay. The repository
@@ -390,13 +395,34 @@ class TaskWorker(LifecycleBase):
         else:  # pragma: no cover - defensive; outcomes are a closed union
             raise TypeError(f"unknown TaskOutcome: {outcome!r}")
 
-        await self._write_outcome(
+        written = await self._write_outcome(
             self._repo.reschedule,
             task_id=task.id,
             worker_id=self._worker_id,
             delay_seconds=delay,
             error=error,
         )
+        # ``reschedule`` answers True both when it re-pended the task and when it retired it past the
+        # deadline; only a handler with a give-up hook pays the one read that tells them apart.
+        if written and isinstance(self._registry.get(task.task_type), GivesUp):
+            current = await self._db(self._repo.get_by_id, task_id=task.id)
+            if current is not None and current.status is TaskStatus.TIMED_OUT:
+                await self._give_up(current)
+
+    async def _give_up(self, task: TaskRecord) -> None:
+        """Run the task type's give-up hook, if it has one (``registry.GivesUp``); never raise."""
+        handler = self._registry.get(task.task_type)
+        if not isinstance(handler, GivesUp):
+            return
+        try:
+            with self._restored_trace(task):
+                await asyncio.to_thread(handler.on_give_up, task)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "[TaskWorker] give-up hook raised for task id=%s type=%s", task.id, task.task_type
+            )
 
     def _backoff(self, attempts: int) -> float:
         """Exponential backoff from the (already-incremented) attempt count,

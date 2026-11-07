@@ -129,7 +129,7 @@ export function GroupChatComposer({
       // 输出中不阻塞发送：消息进入后端投递队列依次消费（拥塞控制归属后端）。
       if ((!hasText && !hasImages) || images.isProcessing || images.isUploading) return;
       const quotedContent = quote ? `${buildQuotePrompt(quote.senderName, quote.text)}\n\n${content}` : content;
-      // 任务胶囊选中态：逐胶囊构造 /task 指令消息发到群聊，由 bot/skill 解析触发（每胶囊各发起一个任务）。
+      // 任务胶囊选中态：逐胶囊构造任务指令消息发到群聊，由 bot/skill 解析触发（每胶囊各发起一个任务）。
       if (execution && execution.selections.length > 0) {
         for (const instruction of buildTaskInstructions(quotedContent, execution.selections)) {
           onSend(instruction, [], undefined);

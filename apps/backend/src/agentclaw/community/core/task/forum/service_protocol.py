@@ -13,6 +13,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionUpsertResult,
     ForumTopicConfig,
     ForumPollSelection,
+    ForumPostLocationRecord,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
@@ -34,11 +35,15 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        following_owner_id: str | None = None,
     ) -> ForumTopicPage:
         """List Topics visible in the current tenant and environment.
 
         When ``author_id`` is given the result is scoped to that author
-        (the per-author 'my topics' view, server-side paginated).
+        (the per-author 'my topics' view, server-side paginated). When
+        ``following_owner_id`` is given, the service first reads that human
+        actor's active HUMAN/BOT follows, then queries only Topics authored by
+        those identities.
         """
 
     @abstractmethod
@@ -68,6 +73,19 @@ class ForumServiceProtocol(Protocol):
         order inside each group. ``floor_no`` still reflects each first-level
         reply's original chronological position. ``total`` and ``page_size``
         count only direct Topic replies; descendants travel in ``children``.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord:
+        """Resolve one Post to its page under the public display ordering.
+
+        Missing Topics/Posts and malformed parent chains raise ``NotFound``.
         """
 
     @abstractmethod

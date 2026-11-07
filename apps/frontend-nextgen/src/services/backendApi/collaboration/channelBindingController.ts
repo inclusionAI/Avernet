@@ -1,3 +1,4 @@
+import type { GroupContextDelivery } from '@/domain/collaboration/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -25,6 +26,7 @@ export type DingTalkSendMode =
 
 /** 钉钉渠道配置（POST/PATCH 的 config 子对象，全 snake_case）。 */
 export interface DingTalkConfigPayload {
+  group_context_delivery?: GroupContextDelivery;
   robot_code: string;
   client_id: string;
   client_secret: string;
@@ -69,6 +71,7 @@ export interface ChannelBindingDto {
   status: ChannelBindingStatus;
   created_by?: string | null;
   config: {
+    group_context_delivery?: GroupContextDelivery;
     robot_code?: string;
     client_id?: string;
     client_secret?: string;

@@ -90,6 +90,54 @@ impl BotControlPlaneCore {
 
 #[async_trait]
 impl BotControlPlaneCoreService for BotControlPlaneCore {
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane.get_caller_configuration(bot_id, env).await
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, bcs_service_api::port::repo::BotCallerConfiguration)>> {
+        self.control_plane.get_caller_configurations(bot_ids, env).await
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane.sync_caller_configuration(bot_id, env, snapshot).await
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane
+            .get_provider_caller_configuration(bot_id, env, provider_id)
+            .await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane
+            .sync_provider_caller_configuration(bot_id, env, provider_id, snapshot)
+            .await
+    }
+
     async fn get_record(
         &self,
         bot_id: &str,

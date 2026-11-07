@@ -40,6 +40,7 @@ beforeEach(async () => {
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   repo = new EvolveRepository(db);
+  vi.spyOn(repo, "canApplySkillToBot").mockResolvedValue(true);
   improvementRepo = new InsightImprovementRepository(db);
   benchDomainRepo = new BenchDomainRepository(db);
   benchTemplateRepo = new BenchTemplateRepository(db);

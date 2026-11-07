@@ -109,21 +109,20 @@ class BcnConfig:
 
 @dataclass(frozen=True)
 class OpenApiBotConfig:
-    """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
-    Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
-    ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-    ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
-    per ``get_current_env()`` — mirrors the ``bcn`` block convention
-    (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
-    Bearer ``api_key`` (env-injected, no Mist in the community build); empty
-    -> the OpenApiBotPort stays None (fail-closed; ``single_bot`` dispatch
-    degrades). ``api_key_prefix`` is the optional allowed-bots grant path
-    segment; empty -> the adapter falls back to ``api_key[:10]``.
+    """``openapi_bot`` block for BaaS Open API single-bot task dispatch.
+
+    The community adapter uses the env-selected Bearer ``api_key`` against
+    ``/openapi/v1/messages`` and the optional allowed-bots grant path. Keys are
+    literal env-injected secrets: ``api_key_secret`` for pre/dev and
+    ``api_key_secret_prod`` for prod. An empty selected key or host makes the
+    ``OpenApiBotPort`` ``None`` (fail-closed). ``api_key_prefix`` defaults to
+    ``api_key[:10]`` of the selected key.
     """
 
     base_url: str = ""  # env-aware resolved prod host
     base_url_pre: str = ""  # env-aware pre host
-    api_key_secret: str = ""  # LITERAL Bearer api_key (no Mist in community)
+    api_key_secret: str = ""  # LITERAL non-prod (pre/dev) Bearer api_key (no Mist in community)
+    api_key_secret_prod: str = ""  # LITERAL prod/gray Bearer api_key (no Mist in community)
     api_key_prefix: str = ""
 
 

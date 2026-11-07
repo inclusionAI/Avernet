@@ -1,6 +1,6 @@
 import type { BotRuntimeIdentity } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
-import type { RecoveryStoredTask, RecoveryJudgment, RecoveryPlan, RecoveryEvidence } from "./task-contracts.js";
+import type { RecoveryStoredTask, RecoveryJudgment, RecoveryPlan, RecoveryEvidence, RecoveryOwnerHandoffContent } from "./task-contracts.js";
 import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
 export type RecoveryRequest = {
   event_id: string;
@@ -36,6 +36,9 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView>;
   terminate(taskId: string, actor: RecoveryActor, reason?: unknown): Promise<RecoveryTaskView & { termination: RecoveryTermination }>;
   decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone?: boolean, feedback?: string): Promise<void>;
+  requestOwner(taskId: string, version: number, input: import("./task-contracts.js").RecoveryOwnerRequestInput & { executionId: string; reportSummary?: string }): Promise<void>;
+  /** Saves the receipt before asynchronous dispatch. Does not approve any environment action. */
+  confirmOwner(taskId: string, requestId: string, actor: RecoveryActor, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;
   assess(taskId: string, version: number, input: import("./task-contracts.js").RecoveryAssessment, finalSummary?: unknown): Promise<void>;
@@ -43,7 +46,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void>;
   finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
-  finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void>;
+  finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; handoff?: RecoveryOwnerHandoffContent; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void>;
   finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
   /** Only infrastructure callers supply failureCode; Agent business blocks are not technical alarms. */
   executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown, failureCode?: string): Promise<void>;

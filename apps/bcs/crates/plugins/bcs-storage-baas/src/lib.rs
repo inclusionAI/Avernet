@@ -3,6 +3,8 @@
 //! sync-to-DONE, downloads go through sync `POST /share-link`, delete is by
 //! transfer_id. See design-baas-plugin spec.
 
+use bcs_network_tracing::RequestBuilderExt;
+
 pub mod config;
 pub mod error;
 pub mod factory;
@@ -226,7 +228,7 @@ impl StoragePlugin for BaasStoragePlugin {
         });
         let resp = self
             .auth(self.http.post(format!("{base}/upload-url")).json(&body))
-            .send()
+            .send_traced()
             .await
             .map_err(|e| StorageError::Backend(e.into()))?;
         let data = baas_data(resp).await?;
@@ -292,7 +294,7 @@ impl StoragePlugin for BaasStoragePlugin {
         let base = self.base_for_session(session_id);
         let resp = self.auth(self.http.post(format!("{base}/upload-url/{}/complete",
                     percent_encode_path(&pending.transfer_id))).json(&serde_json::json!({})))
-            .send().await.map_err(|e| StorageError::Backend(e.into()))?;
+            .send_traced().await.map_err(|e| StorageError::Backend(e.into()))?;
         let _data = baas_data(resp).await?; // sync DONE; data has status
         Ok(StorageObjectMeta { key: handle.key.clone(), size: 0, sha256: None })
             }).await
@@ -305,7 +307,7 @@ impl StoragePlugin for BaasStoragePlugin {
         let session_id = session_id_from_key(&handle.key);
         let base = self.base_for_session(session_id);
         let resp = self.auth(self.http.delete(format!("{base}/upload-url/{}",
-                    percent_encode_path(&pending.transfer_id)))).send().await
+                    percent_encode_path(&pending.transfer_id)))).send_traced().await
             .map_err(|e| StorageError::Backend(e.into()))?;
         // CANCELLED (or already terminal) — treat 2xx + TRANSFER_STATE_CONFLICT as Ok.
         let _ = baas_data_or_conflict_ok(resp).await?;
@@ -331,7 +333,7 @@ impl StoragePlugin for BaasStoragePlugin {
             body["show"] = serde_json::Value::Bool(true);
         }
         let resp = self.auth(self.http.post(format!("{base}/transfers/{}/share-link",
-                    percent_encode_path(&ready.transfer_id))).json(&body)).send().await
+                    percent_encode_path(&ready.transfer_id))).json(&body)).send_traced().await
             .map_err(|e| StorageError::Backend(e.into()))?;
         let data = baas_data(resp).await?;
         let share_url = data["share_url"].as_str().ok_or_else(|| bad("missing share_url"))?.to_string();
@@ -348,7 +350,7 @@ impl StoragePlugin for BaasStoragePlugin {
         let session_id = session_id_from_key(&handle.key);
         let root = self.session_path_root(session_id);
         let resp = self.auth(self.http.delete(format!("{root}/transfers/{}",
-                    percent_encode_path(&ready.transfer_id)))).send().await
+                    percent_encode_path(&ready.transfer_id)))).send_traced().await
             .map_err(|e| StorageError::Backend(e.into()))?;
         if resp.status().is_success() {
             return Ok(());

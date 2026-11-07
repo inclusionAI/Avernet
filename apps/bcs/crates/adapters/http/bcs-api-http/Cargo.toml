@@ -34,11 +34,15 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+bcs-app-auth = { workspace = true }
+bcs-auth-api = { workspace = true }
+bcs-auth-oauth = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 tokio = { workspace = true }
+tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }

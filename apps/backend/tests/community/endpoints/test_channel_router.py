@@ -176,6 +176,42 @@ def get_openclaw_configs_owner_can_access():
     """Owner can access their own openclaw configs."""
 
 
+def _seed_handed_off_bot(world):
+    _seed_bot_with_openclaw_template(world)
+    make_staff_user(world, user_id="u_new_owner")
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.plugin_api.models import BotModel
+
+    # Seed the committed handoff state; generic Bot updates intentionally do not
+    # allow Owner changes outside the handoff transaction.
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.bot_id == "bot_test").update({BotModel.owner_id: "u_new_owner"})
+
+
+@endpoint_test(
+    method="GET", path="/api/channels/openclaw-configs", scenario="handoff_new_owner",
+    input=CaseInput(
+        query_params={"bot_id": "bot_test", "owner_id": "u_new_owner"},
+        headers={"x-user-id": "u_new_owner"},
+    ),
+    seed=_seed_handed_off_bot, expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def get_openclaw_configs_new_owner_after_handoff():
+    """A current Owner can generate configs from the unchanged Bot workspace."""
+
+
+@endpoint_test(
+    method="GET", path="/api/channels/openclaw-configs", scenario="handoff_old_owner_denied",
+    input=CaseInput(
+        query_params={"bot_id": "bot_test", "owner_id": "u_owner"},
+        headers={"x-user-id": "u_owner"},
+    ),
+    seed=_seed_handed_off_bot, expect=ExpectError(status=400),
+)
+def get_openclaw_configs_old_owner_cannot_use_entity_as_authority():
+    """The retained entity address does not grant its former Owner access."""
+
+
 @endpoint_test(
     method="GET",
     path="/api/channels/openclaw-configs",

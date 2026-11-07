@@ -4,9 +4,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from time import monotonic
 
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_space_manager_sync,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.kernel.bot_manager_sync import SpaceChange
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -72,3 +77,18 @@ def notify_bot_collaboration_changed(
         # execution_phase logs the exception class and identifiers, not payloads.
         # This is not a durable retry mechanism. Persistence never runs here.
         return
+
+
+def notify_space_membership_changed(
+    sync: BotManagerSyncProtocol,
+    *,
+    change: SpaceChange,
+) -> None:
+    """Post-commit Space hint must not misreport an approval as failed.
+
+    Only the small references the caller already carries enter the log
+    (tenant, env, reference count) — never user ids or full ref payloads.
+    Like the Bot hook above, this only submits work to the notifier: it
+    never raises, never persists, and no HTTP runs in this file.
+    """
+    notify_space_manager_sync(sync, change=change)

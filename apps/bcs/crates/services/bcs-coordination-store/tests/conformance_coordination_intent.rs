@@ -15,12 +15,12 @@ fn context() -> CoordinationContext {
 }
 async fn fixture() -> (CoordinationCacheStore, Arc<InMemoryCachePlugin>) {
     let cache = Arc::new(InMemoryCachePlugin::new());
-    // The Python producer writes this UTF-8 JSON directly with SET NX EX 86400.
+    // The Python producer writes this UTF-8 JSON directly with SET NX EX 604800.
     let payload = json!({"intent_id": ID, "v": 2, "tool": "bcs_assign_task",
         "arguments": {"target_bot": "worker", "message": "中".repeat(4198) + "\n\"🙂"},
         "created_at_ms": now_ms(), "expires_at_ms": now_ms() + 86400000});
     cache.set_value(&format!("bcs:coordination:v2:{ID}:payload"), serde_json::to_vec(&payload).unwrap(),
-        Some(Duration::from_secs(86400)), CacheSetMode::InsertOnly).await.unwrap();
+        Some(Duration::from_secs(604800)), CacheSetMode::InsertOnly).await.unwrap();
     (CoordinationCacheStore::new(cache.clone()), cache)
 }
 #[tokio::test]
@@ -33,6 +33,7 @@ async fn shared_cache_contract_and_immutable_receipts() {
     let token = claim["claim_token"].as_str().unwrap();
     let result = CoordinationResult { status: CoordinationStatus::Applied, task_id: Some("task-real".into()), error_code: None };
     other.finish(ID, &context(), token, &result).await.unwrap();
+    assert_eq!(other.task_result(ID).await.unwrap(), Some(result.clone()));
     let conflicting = CoordinationResult { status: CoordinationStatus::Failed, ..result.clone() };
     assert!(other.finish(ID, &context(), token, &conflicting).await.is_err());
     assert!(other.finish(ID, &context(), "wrong", &result).await.is_err());
@@ -120,4 +121,23 @@ async fn uncertain_claim_does_not_execute_and_finish_retries_only_receipt() {
             assert_eq!(cache.receipt_writes.load(std::sync::atomic::Ordering::SeqCst), 2);
         }
     }
+}
+
+#[tokio::test]
+async fn task_correlation_is_shared_immutable_and_read_only() {
+    let (store, cache) = fixture().await;
+    assert!(store.task_result(ID).await.unwrap().is_none());
+    assert!(store.task_delivery(ID).await.unwrap().is_none());
+    store.record_task_delivery(ID, "delivery-1").await.unwrap();
+    let bcs_cache_api::CacheTtl::ExpiresIn(ttl) = cache.ttl(&format!("bcs:coordination:v2:{ID}:delivery")).await.unwrap() else {
+        panic!("correlation must expire");
+    };
+    assert!((604790..=604800).contains(&ttl.as_secs()));
+    let other = CoordinationCacheStore::new(cache.clone());
+    assert_eq!(other.task_delivery(ID).await.unwrap().as_deref(), Some("delivery-1"));
+    other.record_task_delivery(ID, "delivery-1").await.unwrap();
+    assert!(other.record_task_delivery(ID, "delivery-2").await.is_err());
+    assert!(cache.get_value(&format!("bcs:coordination:v2:{ID}:claim")).await.unwrap().is_none());
+    cache.delete(&format!("bcs:coordination:v2:{ID}:delivery")).await.unwrap();
+    assert!(other.task_delivery(ID).await.unwrap().is_none());
 }

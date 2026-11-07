@@ -29,7 +29,7 @@ export function LinkPanel({ botId, editable }: { botId: string; editable: boolea
     }
   };
   return (
-    <section className="space-y-3 border-t border-border p-5">
+    <section className="space-y-3 border-t border-divider p-5">
       <h2 className="text-sm font-semibold">关联链接</h2>
       {links.loading ? (
         <Spin tip="加载关联链接…" />

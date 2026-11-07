@@ -23,9 +23,6 @@ async-trait = { workspace = true }
 # Error handling
 anyhow    = { workspace = true }
 
-# Home directory
-dirs = { workspace = true }
-
 # Serialization
 serde      = { workspace = true }
 serde_json = { workspace = true }
@@ -49,19 +46,16 @@ urlencoding = "2"
 
 # Charset detection for text uploads (see guess_charset helper).
 chardetng = { workspace = true }
-encoding_rs = { workspace = true }
 
 # UUID
 uuid = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
-base64 = { workspace = true }
 tempfile = { workspace = true }
 
 # Workspace crates
 bcs-config     = { workspace = true }
-bcs-config-api = { workspace = true }
 bcs-protocol    = { workspace = true }
 
 # Local timestamp for chat ack line

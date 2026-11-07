@@ -18,8 +18,10 @@ they pick up the swapped repositories transparently.
 from __future__ import annotations
 
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
+from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 
@@ -746,6 +748,7 @@ class BotManagementModule(Module):
         bot_repository: BotRepository,
         delivery_strategies: DeliveryStrategyFactory,
         compilers: StateCompilers,
+        completion_handlers: StateCompletionHandlers,
     ) -> ApplyRunService:
         """The apply lifecycle, over a delivery seam and a compiler map it does not assemble.
 
@@ -757,7 +760,8 @@ class BotManagementModule(Module):
         hands over the finished seam. The compilers are a map multibinding
         the same way: ``manifest_fetch_module`` contributes the Manifest row
         beside the fetch pipeline it compiles through, and a genome row comes
-        from the genome module.
+        from the genome module. The completion subscribers are the same shape;
+        only the genome contributes one (the Manifest wants no notice).
         """
         return ApplyRunService(
             manifest_service,
@@ -767,6 +771,7 @@ class BotManagementModule(Module):
             bot_repository,
             delivery_strategies=delivery_strategies,
             compilers=compilers,
+            completion_handlers=completion_handlers,
         )
 
     @singleton
@@ -798,6 +803,7 @@ class BotManagementModule(Module):
         imports ``creation`` for the triggers), behind the same lazy queue provider.
         """
         return BotCreationManifestSeam(
+            validate_creation_spec=validate_creation_source,
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
@@ -840,6 +846,7 @@ class BotManagementModule(Module):
             )
 
         return BotCreateWithManifestHandler(
+            validate_creation_spec=validate_creation_source,
             manifest_seam_provider=lambda: injector.get(ManifestCreationSeam),
             apply_service_provider=lambda: injector.get(
                 ApplyRunService

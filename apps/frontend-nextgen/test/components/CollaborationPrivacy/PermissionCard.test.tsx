@@ -68,9 +68,11 @@ describe('PermissionCard', () => {
   it('only shows verified Bot identity fields in the card header', () => {
     renderCard();
 
-    expect(screen.getByRole('heading', { name: '协作助手' })).toHaveAttribute('title', '协作助手');
+    expect(screen.getByRole('heading', { name: '协作助手' })).toBeInTheDocument();
+    // unify-tooltip-antd：标题/UUID 的原生 title 已迁移统一 Tooltip，关闭态不渲染气泡
+    expect(screen.getByRole('heading', { name: '协作助手' })).not.toHaveAttribute('title');
     expect(screen.getByText('Bot UUID')).toBeInTheDocument();
-    expect(screen.getByTitle('bot-1')).toHaveTextContent('bot-1');
+    expect(screen.getByText('bot-1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '复制 协作助手 的 Bot UUID' })).toBeEnabled();
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
   });
@@ -111,7 +113,7 @@ describe('PermissionCard', () => {
     const title = screen.getByRole('heading', { name: '协作助手' });
     const refreshButton = screen.getByRole('button', { name: '刷新 协作助手 的权限状态' });
     const uuidLabel = screen.getByText('Bot UUID');
-    const uuidValue = screen.getByTitle('bot-1');
+    const uuidValue = screen.getByText('bot-1');
     const copyButton = screen.getByRole('button', { name: '复制 协作助手 的 Bot UUID' });
 
     expect(title.parentElement).toContainElement(refreshButton);

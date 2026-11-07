@@ -1019,23 +1019,31 @@ class TestGetActiveByBotUuidOnly:
 
 
 class TestCompleteDestroy:
-    def test_complete_destroy_calls_two_updates(self, repo, mock_session):
+    def test_complete_destroy_calls_three_updates(self, repo, mock_session):
         repo.complete_destroy(bot_id=5, tenant="t1", env="dev", modifier="admin")
 
         assert (
-            mock_session.query.return_value.filter.return_value.update.call_count == 2
+            mock_session.query.return_value.filter.return_value.update.call_count == 3
         )
 
-        # First update: status = RELEASED
-        call_kwargs_1 = (
+        # First update: soft-delete live bot-device relationships
+        call_kwargs_0 = (
             mock_session.query.return_value.filter.return_value.update.call_args_list[0]
+        )
+        update_dict_0 = call_kwargs_0[0][0]
+        assert update_dict_0["is_deleted"] is not None
+        assert update_dict_0["modifier"] == "admin"
+
+        # Second update: status = RELEASED
+        call_kwargs_1 = (
+            mock_session.query.return_value.filter.return_value.update.call_args_list[1]
         )
         update_dict_1 = call_kwargs_1[0][0]
         assert update_dict_1["status"] == "RELEASED"
         assert update_dict_1["modifier"] == "admin"
 
         call_kwargs_2 = (
-            mock_session.query.return_value.filter.return_value.update.call_args_list[1]
+            mock_session.query.return_value.filter.return_value.update.call_args_list[2]
         )
         update_dict_2 = call_kwargs_2[0][0]
         assert update_dict_2["is_deleted"] == 5
@@ -1043,7 +1051,7 @@ class TestCompleteDestroy:
     def test_complete_destroy_uses_is_deleted_filter(self, repo, mock_session):
         repo.complete_destroy(bot_id=5, tenant="t1", env="dev", modifier="admin")
 
-        assert mock_session.query.call_count == 2
+        assert mock_session.query.call_count == 3
 
 
 # ==================== complete_update_transfer ====================

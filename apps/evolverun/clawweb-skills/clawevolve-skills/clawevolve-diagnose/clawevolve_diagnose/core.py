@@ -16,7 +16,8 @@ from .models import Diagnosis
 def select_business_core(args: Any) -> BusinessCore | None:
     if getattr(args, "skip_clawweb_report", False) or not getattr(args, "clawweb_url", ""):
         return None
-    selection = begin_stage_core(task_id=args.task_id, step_id=args.step_id, clawweb_url=args.clawweb_url)
+    selection = begin_stage_core(task_id=args.task_id, step_id=args.step_id, clawweb_url=args.clawweb_url,
+        **({"reference_materials_version": args.reference_materials_version} if getattr(args, "reference_materials_version", "") else {}))
     return BusinessCore(selection, model=str(getattr(args, "model", "") or "")) if selection["selected"] else None
 
 

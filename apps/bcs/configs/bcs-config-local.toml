@@ -213,6 +213,42 @@ mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
 
+# =============================================================================
+# V1 API authentication chain: [api.auth] (commented — local keeps the
+# compatibility assembly by default)
+# =============================================================================
+# The legacy [auth] above (chain = ["local", "session"], mock user) serves
+# the legacy HTTP/WS surfaces ONLY. It is NOT inherited by [api.auth]: the
+# V1 chain never implicitly enables a local/mock source, and an explicit
+# [api.auth] lists only real registered sources. The commented block below
+# is the gateway-only shape for exercising the V1 composite chain locally;
+# enable an OAuth source instead of a mock when testing the login family.
+# Uncommenting this section makes the V1 surface explicit and removes the
+# cookie-based legacy fallback from the V1 protected routes.
+#
+# [api.auth]
+# chain = ["gateway"]
+#
+# [api.auth.gateway]
+# issuers = ["gateway", "backend"]
+# audience = "bcs"
+# key_id = "bare"
+# signing_key_secret = "bcs-api-principal-signing-key"
+
+# Trusted-App authority scope (bot-authority spec §3.1): an explicit allow
+# list of App scope rules the local dev BCS answers. The single entry names
+# the Backend service itself: the singlebox Backend PUTs manager snapshots
+# directly at this BCS under a self-signed X-Avernet-Principal (iss=backend,
+# aud=bcs, verified with the shared local signing key), so it is authorized
+# through the REAL authority policy path — byte-exact app name + tenant, no
+# wildcards, deny-everything default for every other App. Local/dev-only
+# identifiers; a production BCS provisions its own rules here.
+[bot_authority]
+[[bot_authority.trusted_apps]]
+app = "backend"
+tenant = "teamclaw"
+actions = ["managers:sync", "ownership:sync"]
+
 [bcsfuse]
 enabled = true
 url = "http://127.0.0.1:8765"
@@ -257,6 +293,9 @@ allow_loopback = false
 token_secret = "local-development-only-token-secret"
 public_claim_enabled = false
 public_claim_max_count = 1000
+# Explicitly authorize manual issuance; empty denies /api/v1/.../invite-codes/init.
+# Use user_id from /openapi/v1/auth/user, never provider IDs, usernames or human_ IDs.
+issuer_user_ids = []
 default_ttl_seconds = 86400
 base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"
@@ -285,3 +324,8 @@ schema_version = 1
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
+
+[a2a_input]
+# Human approval wait is separate from the existing execution timeout.
+wait_timeout_ms = 600000
+total_timeout_ms = 1800000

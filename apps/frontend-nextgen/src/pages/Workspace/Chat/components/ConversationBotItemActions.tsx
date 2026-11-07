@@ -9,7 +9,7 @@ import { Button, IconButton } from '@/components/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { Bot, MoreHorizontal, Plus } from 'lucide-react';
+import { Bot, ChevronDown, MoreHorizontal, Plus } from 'lucide-react';
 import React from 'react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
@@ -19,6 +19,8 @@ import { ConversationSessionSearchIconButton } from './ConversationSessionSearch
 export interface ConversationBotItemActionsProps {
   /** 行 Bot:筛选 botId / 埋点参数 / 「Bot 管理」菜单项回调透传。 */
   bot: ChatBotView;
+  /** 当前 Bot 是否展开；展开时在操作组首位展示收起入口。 */
+  expanded: boolean;
   /** 他人发起只读视角:新建与「更多操作」入口不渲染(检索/筛选保留)。 */
   isOthers: boolean;
   /** Bot 非可用态(FAILED/PENDING):会话类入口不渲染;「更多操作」入口常驻显示(2026-10-21 运维直达)。 */
@@ -41,6 +43,8 @@ export interface ConversationBotItemActionsProps {
   scope: ConversationSessionScope;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
+  /** 收起当前 Bot 的会话列表。 */
+  onCollapse(): void;
   /** 新建会话(新建埋点随入口内聚)。 */
   onCreateSession(): void;
   /** 检索按钮开关:展开联动与输入框开关态由父级承载(handleSearchToggle)。 */
@@ -56,6 +60,7 @@ export interface ConversationBotItemActionsProps {
 export function ConversationBotItemActions(props: ConversationBotItemActionsProps) {
   const {
     bot,
+    expanded,
     isOthers,
     unavailable,
     actionsPinned,
@@ -69,6 +74,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     scope,
     onOriginChange,
     onScopeChange,
+    onCollapse,
     onCreateSession,
     onSearchToggle,
     showMenu,
@@ -79,11 +85,13 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
   return (
     <div
       className={cn(
-        'absolute top-1/2 right-2 z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
-        'mask-[linear-gradient(to_right,transparent,black_20px)]',
+        'absolute top-1/2 right-2 z-10 flex -translate-y-1/2 items-center gap-0.5 pl-2.5',
+        'mask-[linear-gradient(to_right,transparent,black_10px)]',
         // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
         // right-2 贴行右缘(#2990 紧凑单行形态:行尾不再保留展开箭头位,折叠角标为
         // 名称行内元素;按钮间保持 gap-0.5 一致的 2px 间隙)。
+        // 渐隐区 20px→10px(2026-11-03 紧凑化):4 按钮让位 122→112px、3 按钮 96→86px,
+        // 让出的宽度归还名称(用户反馈 hover/展开后名称近零)。
         'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
         // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
         // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点);
@@ -94,6 +102,19 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         unavailable && 'opacity-100',
       )}
     >
+      {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。 */}
+      {expanded && !unavailable && (
+        <IconButton
+          label="收起会话列表"
+          size="sm"
+          icon={<ChevronDown className="h-3.5 w-3.5" />}
+          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={(event) => {
+            event.stopPropagation();
+            onCollapse();
+          }}
+        />
+      )}
       {/* 会话类入口(新建/检索/筛选)仅可用 Bot 渲染:不可用 Bot 的会话操作无意义(2026-10-21)。 */}
       {!isOthers && !unavailable && (
         <IconButton

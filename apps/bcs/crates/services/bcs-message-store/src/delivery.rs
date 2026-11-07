@@ -99,7 +99,11 @@ async fn control_page(db: &dyn bcs_db_api::DbPlugin, env: &str, category: usize,
         0 => ("status = 'dispatching' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
         1 => ("status = 'running' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
         2 => ("status = 'cancelling' AND abort_request_id IS NULL", "delivery_id"),
-        _ => ("status = 'cancelling' AND cancel_deadline_at_ms <= ? AND abort_request_id IS NOT NULL", "cancel_deadline_at_ms, delivery_id"),
+        3 => ("status = 'cancelling' AND cancel_deadline_at_ms <= ? AND abort_request_id IS NOT NULL", "cancel_deadline_at_ms, delivery_id"),
+        // Uncertain sends whose execution budget lapsed (spec 队列 TTL 与执行
+        // 期限): never a "stopped" lane release — the runtime converts the
+        // lapsed deadline into a cancel intent for the delivery arbitration.
+        _ => ("status = 'unknown' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
     };
     let mut params = vec![env.into()];
     if category != 2 { params.push(now.into()); }
@@ -203,7 +207,7 @@ pub(crate) fn apply_changes(
     Ok(())
 }
 
-fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
+pub(crate) fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
     let result = decode_delivery(&row);
     if result.is_err() {
         // Bounded, metadata-only diagnostics. Serde errors may contain input
@@ -568,8 +572,15 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         Ok(BoundDeliveryContexts { rows, total: total as u64 })
     }
     async fn lookup(&self, scope: DeliveryLookup) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+        if let DeliveryLookup::TaskPrefixes { ref prefixes, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::lookup_batch(self, prefixes, retained_after_ms, legacy_intents).await;
+        }
+        if let DeliveryLookup::TaskPrefix { ref prefix, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::lookup(self, prefix, retained_after_ms, legacy_intents).await;
+        }
         let mut params = vec![self.env.as_str().into()];
         let predicate = match scope {
+            DeliveryLookup::TaskPrefix { .. } | DeliveryLookup::TaskPrefixes { .. } => unreachable!(),
             DeliveryLookup::Ids(ids) => {
                 if ids.len() > 8 { return Err(MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
                 if ids.is_empty() { return Ok(Vec::new()); }
@@ -579,6 +590,10 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             }
             DeliveryLookup::Id(id) => { params.push(id.into()); "delivery_id = ?" }
             DeliveryLookup::Request(id) => { params.push(id.into()); "request_id = ?" }
+            DeliveryLookup::CanonicalRun { bot, session, run } => {
+                params.extend([bot.into(),session.into(),run.into()]);
+                "target_bot_id = ? AND session_id = ? AND run_id = ? LIMIT 2"
+            }
             DeliveryLookup::Run { bot, alias } => {
                 let mut params = Vec::new();
                 for _ in 0..3 { params.extend([DbValue::from(self.env.as_str()), DbValue::from(bot.as_str()), DbValue::from(alias.as_str())]); }
@@ -625,8 +640,9 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             let mut seen = BTreeSet::new();
             let mut full = Vec::new();
             // Reserve a share for each disjoint action before lending spare capacity.
-            for category in 0..4 {
-                let quota = (limit / 4 + usize::from(category < limit % 4)).max(1).min(limit - result.len());
+            let categories = 5;
+            for category in 0..categories {
+                let quota = (limit / categories + usize::from(category < limit % categories)).max(1).min(limit - result.len());
                 if quota == 0 { continue; }
                 let rows = control_page(self.db.as_ref(), &self.env, category, now_ms, quota).await?;
                 if rows.len() == quota { full.push((category, quota)); }

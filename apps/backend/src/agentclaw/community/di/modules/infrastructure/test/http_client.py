@@ -1,9 +1,8 @@
 """HTTP-client concern — fixed no-network test bindings."""
+
 from __future__ import annotations
 
 from typing import Annotated
-
-from injector import Module, provider, singleton
 
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
@@ -13,6 +12,7 @@ from agentclaw.community.plugin_api.http_client import (
     HttpClient,
 )
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
+from injector import Module, provider, singleton
 
 
 class TestHttpClientModule(Module):
@@ -39,3 +39,8 @@ class TestHttpClientModule(Module):
         self,
     ) -> Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL]:
         return LocalHttpClient(base_url="http://localhost:8080")
+
+    @singleton
+    @provider
+    def knowledge_http_client(self) -> Annotated[HttpClient, "knowledge"]:
+        return LocalHttpClient(base_url="")

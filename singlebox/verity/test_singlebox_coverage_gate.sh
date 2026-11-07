@@ -131,6 +131,10 @@ cat > "${tmp}/apps/bcs/scripts/e2e_coverage.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 expected_bot_data_dir="${PWD}/singlebox/.dependencies/coverage/singlebox/standalone-openclaw/profiles"
+if [[ "${BCS_E2E_CHANGED_LINE_MIN:-}" != "65" ]]; then
+  echo "BCS E2E should enforce changed-line coverage above 65%" >&2
+  exit 17
+fi
 if [[ "${BCS_BOTS_DATA_DIR:-}" != "$expected_bot_data_dir" ]]; then
   echo "BCS E2E should read bot sessions from the coverage standalone profile root" >&2
   exit 15
@@ -141,6 +145,9 @@ cov_dir="${PWD}/apps/bcs/target/cov-e2e"
 mkdir -p "$cov_dir"
 cat > "$cov_dir/summary.json" <<'JSON'
 {"data":[{"totals":{"lines":{"covered":45,"count":100},"functions":{"covered":40,"count":100},"regions":{"covered":30,"count":100},"branches":{"covered":0,"count":0}}}]}
+JSON
+cat > "$cov_dir/oauth_e2e.json" <<'JSON'
+{"status":"passed","scenarios":["mixed-sqlite","mixed-memory","compatibility-and-chain-selection","pending-capacity","startup-validation"],"checks":[{"path":"/auth/url","status":200}],"provider_calls":{"authorize":1,"exchange":1,"userinfo":1}}
 JSON
 printf '%s\n' '<coverage line-rate="0.45"></coverage>' > "$cov_dir/cobertura.xml"
 printf '%s\n' 'TOTAL 100 55 45.00%' > "$cov_dir/coverage.txt"
@@ -250,7 +257,7 @@ test_default_mode_runs_real_singlebox() {
     fail "default coverage mode should run every manifest acceptance target"
   [ "$(grep -Fc -- '--standalone --with-bcs-coverage start all' "$log")" -eq 1 ] || \
     fail "all modules should share one singlebox startup"
-  grep -Fx -- "--skip-start --bcs-line-min 41 --bcs-method-min 36" "$bcs_log" >/dev/null || \
+  grep -Fx -- "--skip-start --bcs-line-min 54 --bcs-method-min 48" "$bcs_log" >/dev/null || \
     fail "default coverage mode should run BCS E2E against the shared stack"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"
@@ -260,7 +267,7 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
-  for artifact in e2e.log cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
+  for artifact in e2e.log oauth_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
     [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
       fail "BCS artifact missing: ${artifact}"
   done

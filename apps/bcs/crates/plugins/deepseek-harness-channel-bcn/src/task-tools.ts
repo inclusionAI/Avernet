@@ -2,7 +2,6 @@ import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { BcnBridge } from './bridge.js';
 
 export const BCS_ASSIGN_TASK_TOOL_NAME = 'bcs_assign_task';
-export const BCS_SEND_TASK_MESSAGE_TOOL_NAME = 'bcs_send_task_message';
 export const BCS_TASK_COMPLETE_TOOL_NAME = 'bcs_task_complete';
 
 export function createBcsAssignTaskTool(bridge: BcnBridge): ToolDefinition {
@@ -11,7 +10,9 @@ export function createBcsAssignTaskTool(bridge: BcnBridge): ToolDefinition {
     description:
       'Dispatch a task to a sub bot in this task group. Returns immediately; ' +
       "the sub bot's response will arrive as a follow-up message. " +
-      'You can dispatch multiple sub bots in parallel.',
+      'You can dispatch multiple sub bots in parallel. Use task_ref for on-demand status/cancel. ' +
+      'For a blocked result, send a follow-up to the same Worker and include needed context. ' +
+      'unknown/not_found never proves the previous task stopped or is safe to resend.',
     parameters: {
       target_bot: {
         type: 'string',
@@ -25,6 +26,7 @@ export function createBcsAssignTaskTool(bridge: BcnBridge): ToolDefinition {
         required: true,
         description: 'The task description or instruction to send to the sub bot.',
       },
+      timeout_s: { type: 'number', description: 'Optional positive runtime seconds; clamped to server policy.' },
       response_mode: {
         type: 'string',
         enum: ['after-last-tool-call', 'full'],
@@ -44,30 +46,8 @@ export function createBcsAssignTaskTool(bridge: BcnBridge): ToolDefinition {
         args.message,
         args.response_mode,
         exec.signal,
+        args.timeout_s,
       );
-    },
-  });
-}
-
-export function createBcsSendTaskMessageTool(bridge: BcnBridge): ToolDefinition {
-  return defineTool({
-    name: BCS_SEND_TASK_MESSAGE_TOOL_NAME,
-    description:
-      'Send a task-scoped message from this worker bot to the manager bot. ' +
-      'Use this for progress updates, blockers, intermediate findings, or supplemental information.',
-    parameters: {
-      message: {
-        type: 'string',
-        required: true,
-        description: 'The task-scoped message to send to the manager bot.',
-      },
-    },
-    output: {
-      schema: { type: 'json' },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
-    },
-    async execute(args, exec) {
-      return bridge.sendTaskMessage(exec.agent, args.message, exec.signal);
     },
   });
 }
@@ -92,5 +72,25 @@ export function createBcsTaskCompleteTool(bridge: BcnBridge): ToolDefinition {
     async execute(args, exec) {
       return bridge.completeTask(exec.agent, args.summary, exec.signal);
     },
+  });
+}
+
+
+export function createBcsTaskStatusTool(bridge: BcnBridge): ToolDefinition {
+  return defineTool({
+    name: 'bcs_task_status',
+    description: 'Query 1..20 task refs on demand, not by polling. unknown/not_found never proves stopped or safe to resend.',
+    parameters: { task_refs: { type: 'array', items: { type: 'string' }, required: true } },
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    async execute(args, exec) { return bridge.taskControl(exec.agent, 'task.status', { task_refs: args.task_refs }, exec.signal); },
+  });
+}
+export function createBcsCancelTaskTool(bridge: BcnBridge): ToolDefinition {
+  return defineTool({
+    name: 'bcs_cancel_task',
+    description: 'Request cancellation and wait briefly for confirmed stop. unknown/not_found/cancel_failed is not stopped. Side effects are not rolled back.',
+    parameters: { task_ref: { type: 'string', required: true }, reason: { type: 'string', required: true } },
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    async execute(args, exec) { return bridge.taskControl(exec.agent, 'task.cancel', args, exec.signal); },
   });
 }

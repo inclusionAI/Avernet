@@ -15,6 +15,16 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 use tracing::Instrument;
 
+/// Fail-safe queue TTL when an admission carries NO expiry of its own and
+/// the live delivery policy configures NO `queue_ttl_ms` (the fresh-deploy
+/// default). Before §15.98 the policy overwrite turned that combination into
+/// a NULL expire — silent immortal queued rows for BOTH owner and caller
+/// flows; the floor bounds the damage until someone configures a real TTL.
+const QUEUE_TTL_FALLBACK_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Warn about the config gap once per process, not per admission.
+static QUEUE_TTL_FALLBACK_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
 
 // Once persistence starts, cancellation of the caller must not release the Bot
@@ -135,7 +145,7 @@ impl ManagedMessageDelivery {
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
         if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
-            | Event::DefinitelyNotSent { .. }) {
+            | Event::DefinitelyNotSent { .. } | Event::TransportUnknown | Event::Recover) {
             if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
                 if task.leg == crate::queued_task::TaskLeg::Dispatch { bots.push(task.manager); }
             }
@@ -217,6 +227,22 @@ impl ManagedMessageDelivery {
         {
             return Err(ManagedDeliveryError::Conflict);
         }
+        if command.event == Event::RunDeadlineAdjusted {
+            if command.deadline_at_ms.is_none_or(|deadline| deadline <= command.now_ms)
+                || original.run_deadline_at_ms.is_none_or(|deadline| deadline <= command.now_ms)
+                || command.request_id.is_none() || command.reply.is_some()
+                || command.transport_context_json.is_some() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if original.run_deadline_at_ms == command.deadline_at_ms {
+                // Only live execution states may take the idempotent shortcut.
+                if !matches!(original.state.status, Status::Dispatching | Status::Running) {
+                    return Err(ManagedDeliveryError::Conflict);
+                }
+                MessageDeliveryCore.transition(original.state, command.expected_state_version, command.event)?;
+                return Ok(original.clone());
+            }
+        }
         let mut event = command.event;
         let manual = matches!(event, Event::ResolveNotSent | Event::ResolveStopped);
         if manual && (!matches!(original.state.status, Status::Unknown | Status::CancelUnknown)
@@ -229,6 +255,19 @@ impl ManagedMessageDelivery {
             if let Some(policy) = &policy {
                 event = Event::DefinitelyNotSent { retry: original.attempt_no <= policy.policy.safe_retry.as_ref().map_or(0, |retry| retry.max_retries) };
             }
+        }
+        // Spec §6.8 execution-ready barrier (review-V P1-3): a barrier-parked
+        // Dispatching row is NOT restart uncertainty — its protected send was
+        // refused BEFORE acceptance (retryable HISTORY_NOT_READY), so the
+        // startup recovery sweep must leave it parked with its committed
+        // digest/attempt for the same-dispatch redrive. The run-deadline
+        // control remains its convergence bound.
+        if event == Event::Recover
+            && original.state.status == Status::Dispatching
+            && original.wait_reason
+                == Some(bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier)
+        {
+            return Ok(original.clone());
         }
         let mut changed = BTreeMap::new();
         if event == Event::CancelRequested
@@ -268,13 +307,59 @@ impl ManagedMessageDelivery {
             }
             return Ok(original.clone());
         }
+        // Protected result park carried to the post-commit publish below:
+        // (parked identity, result message id, Manager target).
+        let mut pending_result_park: Option<(crate::queued_task_terminal::ResultLegIdentity, String, String)> = None;
         if command.reply.is_none() && outcome.changed {
-            command.reply = crate::task_failure::fallback(original, outcome.state, command.now_ms,
-                command.actor_id.as_deref(), command.transport_context_json.as_ref())
-                .map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+            // Protected result routing (caller-enabled Manager): the §15.4
+            // gate refuses ordinary content dispatch, so the failure notice
+            // must carry its own protected material and park the session
+            // identity BEFORE the queue commit — the same decision and the
+            // same park queued_task_terminal::commit performs for worker
+            // terminal callbacks. Parked material is published against the
+            // committed rows after the transaction lands below.
+            let mut protected_text: Option<String> = None;
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                let task = crate::queued_task::intent(original).ok().flatten()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch);
+                let failure = crate::task_failure::failure_reason(original, outcome.state,
+                    command.actor_id.as_deref(), command.transport_context_json.as_ref());
+                if let (Some(task), Some((cancelled, reason))) = (task, failure) {
+                    let text = crate::task_failure::failure_body(cancelled, &reason, false);
+                    let park = crate::queued_task_terminal::protect_result_leg(
+                        &flow, &task, &original.session_id, &original.group_id, &text, command.now_ms,
+                    ).await.map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+                    if let Some(park) = park {
+                        pending_result_park = Some((park,
+                            crate::queued_task_terminal::result_message_id(&task.task_id), task.manager.clone()));
+                        protected_text = Some(text);
+                    }
+                }
+            }
+            command.reply = match crate::task_failure::fallback(original, outcome.state, command.now_ms,
+                command.actor_id.as_deref(), command.transport_context_json.as_ref(), protected_text.as_deref()) {
+                Ok(reply) => reply,
+                Err(error) => {
+                    if let Some((parked, ..)) = pending_result_park.take() {
+                        if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                            crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                        }
+                    }
+                    return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(error.to_string())));
+                },
+            };
             if let (Some(policy), Some(reply)) = (&policy, command.reply.as_mut()) {
                 for target in &mut reply.targets { target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued; }
                 reply.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| reply.now_ms.saturating_add(ttl as i64));
+            }
+            if command.reply.is_none() {
+                // No notice was built (not a task leg / already notified):
+                // the reservation never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
             }
         }
         if start_abort
@@ -282,12 +367,20 @@ impl ManagedMessageDelivery {
             && !(event == Event::ScopeAbortRequested
                 && original.state.status == Status::CancelUnknown)
         {
+            if let Some((parked, ..)) = pending_result_park.take() {
+                if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                    crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                }
+            }
             return Err(ManagedDeliveryError::Conflict);
         }
         let mut primary = original.clone();
         primary.state = outcome.state;
         if primary.state.status != original.state.status
             && matches!(primary.state.status, Status::Unknown | Status::CancelUnknown)
+            // Caller rows never re-arm the queue TTL: uncertainty resolves
+            // only on stop/terminal evidence, never on TTL expiry.
+            && primary.semantic_projection_json.get("caller_required").is_none()
         {
             primary.expire_at_ms = policy
                 .as_ref()
@@ -299,8 +392,18 @@ impl ManagedMessageDelivery {
         {
             primary.last_error_code = Some("unknown_ttl_expired".into());
         }
+        if event == Event::AbortUnconfirmed && command.transport_context_json.as_ref().and_then(|v| v.get("task_cancel_rejected")).and_then(|v| v.as_bool()) == Some(true) {
+            primary.last_error_code = Some("task_cancel_rejected".into());
+        }
         if event == Event::Failed {
             primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
+        }
+        if let Some(reply) = &command.reply {
+            let marker = if reply.message_id.starts_with("task-unknown:") { Some("task_uncertainty_notified") }
+                else if reply.message_id.starts_with("task-timeout-unknown:") { Some("task_timeout_notified") } else { None };
+            if let Some(marker) = marker {
+                primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))[marker] = serde_json::json!(true);
+            }
         }
         if manual {
             let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));
@@ -333,6 +436,17 @@ impl ManagedMessageDelivery {
             primary.abort_started_at_ms = Some(command.now_ms);
             primary.cancel_deadline_at_ms = command.deadline_at_ms;
         }
+        // Queue expiry is never a stop substitute for a maybe-sent caller
+        // dispatch: the batch loop converts TTL lapse into a cancel intent
+        // and any other caller of this CAS must not bypass the arbitration
+        // (spec 队列 TTL 与执行期限). A queued caller row that never started
+        // may still expire normally.
+        if matches!(command.event, Event::QueueExpired)
+            && primary.semantic_projection_json.get("caller_required").is_some()
+            && primary.state.may_have_been_sent
+        {
+            return Err(ManagedDeliveryError::Conflict);
+        }
         let cancel_reason = command.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()).map(str::to_owned);
         let task_timeout = command.transport_context_json.as_ref().and_then(|v| v.get("task_timeout")).and_then(|v| v.as_bool()) == Some(true);
         if event == Event::StartSend {
@@ -351,14 +465,140 @@ impl ManagedMessageDelivery {
             }
             primary.transport_context_json = command.transport_context_json;
             primary.run_deadline_at_ms = command.deadline_at_ms;
+            // Caller rows clear the queue TTL in the same CAS once the
+            // attempt authorizes: from here on the row keeps only the run
+            // deadline, and an uncertain attempt must not expire into a
+            // "stopped" lane release (spec 队列 TTL 与执行期限).
+            if primary.semantic_projection_json.get("caller_required").is_some() {
+                primary.expire_at_ms = None;
+            }
+        }
+        if event == Event::RunDeadlineAdjusted {
+            primary.run_deadline_at_ms = command.deadline_at_ms;
         }
         if event == Event::Accepted {
             primary.accepted_at_ms = Some(command.now_ms);
+        }
+        if event == Event::CommitCallerDispatch {
+            // Typed caller dispatch commit (§7.5.1/wire contract): merge the
+            // canonical digest/deadline/revision into the caller row's semantic
+            // projection. Never stamps submitted/accepted; never carries body,
+            // identity or binding material.
+            let Some(commit) = command.caller_dispatch_commit.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if commit.request_digest.len() != 71 || commit.not_after_ms <= command.now_ms {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            let deadline_ok = primary
+                .run_deadline_at_ms
+                .map(|run_deadline| commit.not_after_ms <= run_deadline)
+                .unwrap_or(true);
+            if !deadline_ok {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            // Idempotent at the same state version: identical payload = no
+            // conflict; a different payload at the same version conflicts.
+            if let Some(existing) = object.get("caller_dispatch") {
+                let identical = existing.get("version").and_then(|v| v.as_i64()) == Some(1)
+                    && existing.get("caller_request_digest").and_then(|v| v.as_str()) == Some(commit.request_digest.as_str())
+                    && existing.get("caller_not_after_ms").and_then(|v| v.as_i64()) == Some(commit.not_after_ms)
+                    && existing.get("caller_control_revision").and_then(|v| v.as_u64()) == Some(commit.control_revision);
+                if !identical {
+                    return Err(ManagedDeliveryError::Conflict);
+                }
+            } else {
+                object.insert(
+                    "caller_dispatch".to_string(),
+                    serde_json::json!({
+                        "version": 1i64,
+                        "caller_request_digest": commit.request_digest,
+                        "caller_not_after_ms": commit.not_after_ms,
+                        "caller_control_revision": commit.control_revision,
+                    }),
+                );
+            }
+        }
+        if command.caller_terminal.is_some() {
+            // Typed Provider terminal observation (spec "终态仲裁"): the
+            // outcome/event_seq/control_revision evidence becomes durable in
+            // the SAME CAS as the ordinary terminal transition. An already
+            // committed terminal is immutable — only the method-level
+            // duplicate pre-check may pass; in-place mutation refuses.
+            // Never a result body, identity or credential.
+            let Some(terminal) = command.caller_terminal.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            if object.get("caller_terminal").is_some() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            object.insert(
+                "caller_terminal".to_string(),
+                serde_json::json!({
+                    "version": 1i64,
+                    "outcome": terminal.outcome.as_str(),
+                    "event_seq": terminal.event_seq,
+                    "caller_control_revision": terminal.control_revision,
+                }),
+            );
+        }
+        if event == Event::CancelCallerDispatch {
+            // Typed caller cancel intent (spec §"取消意图与回执"): the stable
+            // cancel_request_id / frozen revision / reason / original not_after
+            // become durable in the SAME CAS that moves the row to Cancelling.
+            // A committed intent is never overwritten here — replay is
+            // pre-checked by `cancel_caller_dispatch`; the apply arm refuses
+            // any in-place mutation of an existing intent. Never identity
+            // material; the lane stays held until fenced/stopped evidence.
+            let Some(cancel) = command.caller_cancel.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if cancel.cancel_request_id.trim().is_empty() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            if object.get("caller_cancel").is_some() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            object.insert(
+                "caller_cancel".to_string(),
+                serde_json::json!({
+                    "version": 1i64,
+                    "cancel_request_id": cancel.cancel_request_id,
+                    "caller_control_revision": cancel.control_revision,
+                    "reason": cancel.reason.as_str(),
+                    "not_after_ms": cancel.not_after_ms,
+                    "cancel_state": "requested",
+                }),
+            );
+            primary.cancel_requested_at_ms = Some(command.now_ms);
+            primary.cancel_deadline_at_ms = Some(cancel.not_after_ms);
         }
         if matches!(
             event,
             Event::CancelRequested | Event::WithdrawBoundContext | Event::ScopeAbortRequested
         ) {
+            primary.cancel_reason = cancel_reason.clone().or(primary.cancel_reason);
             if let Some(reason) = cancel_reason {
                 primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))["cancel_reason"] = serde_json::json!(reason);
             }
@@ -465,7 +705,7 @@ impl ManagedMessageDelivery {
             .iter()
             .map(|update| update.delivery.clone())
             .collect();
-        let (committed_reply, _guards) = {
+        let commit_outcome = {
             let _timing = crate::reply_timing::Timer::new("delivery.commit_repository");
             let repo = self.repo.clone();
             let cleanup = self.output_cleanup.get().cloned();
@@ -479,12 +719,39 @@ impl ManagedMessageDelivery {
                     flow.release_unsent_output(&terminal).await;
                 }
                 Ok(result)
-            }).await?
+            }).await
+        };
+        let (committed_reply, _guards) = match commit_outcome {
+            Ok(committed) => committed,
+            Err(error) => {
+                // The admission never landed; the reserved result identity
+                // never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
+                return Err(error);
+            }
         };
         if let Some(reply) = committed_reply {
             if !reply.duplicate {
+                if let Some((parked, message_id, manager)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::publish_result_leg_identity(
+                            &flow, &parked, &reply.deliveries, &message_id, &manager, command.now_ms,
+                        ).await;
+                    }
+                }
                 if let Some(hook) = &self.instrumentation { for row in &reply.deliveries { hook.event("admitted", row); } }
                 notifications.extend(reply.deliveries);
+            }
+        }
+        // A duplicate admission leaves the identity's publish to the ORIGINAL
+        // admission — this surplus reservation never meets its marked row.
+        if let Some((parked, ..)) = pending_result_park.take() {
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
             }
         }
         let _ = self.changes.send(notifications);
@@ -521,272 +788,4 @@ impl ManagedMessageDelivery {
     }
 }
 
-#[async_trait]
-impl ManagedMessageDeliveryService for ManagedMessageDelivery {
-    async fn bounded_contexts(&self, carrier: &str, limit: usize) -> Result<BoundDeliveryContexts, ManagedDeliveryError> {
-        let start = std::time::Instant::now();
-        let result = self.repo.bounded_contexts(carrier, limit).await;
-        self.observe_operation("bounded_contexts", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, |v| v.rows.len()), result.is_ok());
-        Ok(result?)
-    }
-    async fn lane_blocked(&self, row: &PersistedMessageDelivery) -> Result<bool, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.lane_blocked(row).await;
-        self.observe_operation("lane_blocked", start.elapsed().as_secs_f64(), usize::from(result.is_ok()), result.is_ok()); Ok(result?)
-    }
-    fn observe_operation(&self, operation: &'static str, seconds: f64, rows: usize, success: bool) { if let Some(hook) = &self.instrumentation { hook.operation(operation, seconds, rows, success); } }
-    async fn lookup(&self, scope: DeliveryLookup) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.lookup(scope).await;
-        self.observe_operation("lookup", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
-    }
-    async fn queued_bots(&self, after: &str, limit: usize) -> Result<Vec<String>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.queued_bots(after, limit).await;
-        self.observe_operation("queued_bots", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
-    }
-    async fn active_count(&self, bot: &str) -> Result<u64, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.active_count(bot).await;
-        self.observe_operation("active_count", start.elapsed().as_secs_f64(), usize::from(result.is_ok()), result.is_ok()); Ok(result?)
-    }
-    async fn queued_heads(&self, bot: &str, after: &str, limit: usize) -> Result<Vec<bcs_service_api::core::message_delivery::DeliveryScheduleEntry>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.queued_heads(bot, after, limit).await;
-        self.observe_operation("queued_heads", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
-    }
-    async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.work_batch(kind, now_ms, after, limit).await;
-        let operation = match kind { DeliveryWorkBatch::Expired => "expiry_batch", DeliveryWorkBatch::Control => "control_batch", DeliveryWorkBatch::Recovery => "recovery_batch" };
-        self.observe_operation(operation, start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
-    }
-    async fn queue_statistics(&self) -> Result<Vec<DeliveryQueueStatistic>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.queue_statistics().await;
-        self.observe_operation("queue_statistics", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
-    }
-    async fn unfinished(&self) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        Ok(self.repo.list_unfinished_deliveries().await?)
-    }
-    async fn update_wait_reasons(
-        &self,
-        waiting: Vec<(String, bcs_domain::message_delivery::DeliveryWaitReason)>,
-        now_ms: i64,
-    ) -> Result<(), ManagedDeliveryError> {
-        if waiting.is_empty() {
-            return Ok(());
-        }
-        let reasons: BTreeMap<_, _> = waiting.into_iter().collect();
-        let mut owners = BTreeMap::new();
-        for id in reasons.keys() {
-            if let Some(row) = self.repo.get_delivery(id).await? { owners.insert(id.clone(), row.target_bot_id); }
-        }
-        let _guards = self.mutations.acquire(owners.values().cloned()).await;
-        let mut updates = Vec::new();
-        for id in reasons.keys() {
-            let Some(mut row) = self.repo.get_delivery(id).await? else { continue; };
-            if owners.get(id) != Some(&row.target_bot_id) { return Err(ManagedDeliveryError::Conflict); }
-            let Some(reason) = reasons.get(&row.delivery_id) else {
-                continue;
-            };
-            if row.state.status != Status::Queued || row.wait_reason == Some(*reason) {
-                continue;
-            }
-            let expected_state_version = row.state.state_version;
-            row.state.state_version = expected_state_version
-                .checked_add(1)
-                .ok_or(ManagedDeliveryError::Conflict)?;
-            row.wait_reason = Some(*reason);
-            row.updated_at_ms = now_ms;
-            updates.push(DeliveryCompareAndSet {
-                expected_state_version,
-                delivery: row,
-            });
-        }
-        if !updates.is_empty() {
-            let notifications = updates.iter().map(|u| u.delivery.clone()).collect();
-            let repo = self.repo.clone();
-            let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None).await }).await?;
-            let _ = self.changes.send(notifications);
-        }
-        Ok(())
-    }
-    async fn accept_run(
-        &self,
-        request_id: &str,
-        bot_id: &str,
-        downstream_run_id: Option<&str>,
-        now_ms: i64,
-    ) -> Result<Option<PersistedMessageDelivery>, ManagedDeliveryError> {
-        let _guards = self.mutations.acquire([bot_id.to_string()]).await;
-        let rows = self.repo.lookup(DeliveryLookup::Request(request_id.into())).await?;
-        let Some(original) = rows
-            .iter()
-            .find(|d| d.request_id.as_deref() == Some(request_id))
-        else {
-            return Ok(None);
-        };
-        if original.target_bot_id != bot_id || downstream_run_id.is_some_and(str::is_empty) {
-            return Err(ManagedDeliveryError::Conflict);
-        }
-        let outcome = MessageDeliveryCore.transition(
-            original.state,
-            original.state.state_version,
-            Event::Accepted,
-        )?;
-        if !matches!(
-            original.state.status,
-            Status::Dispatching
-                | Status::Running
-                | Status::Unknown
-                | Status::Cancelling
-                | Status::CancelUnknown
-        ) {
-            return Ok(Some(original.clone()));
-        }
-        let mut next = original.clone();
-        if let Some(alias) = downstream_run_id {
-            if self.repo.lookup(DeliveryLookup::Run { bot: bot_id.into(), alias: alias.into() }).await?.iter().any(|d| {
-                d.delivery_id != original.delivery_id
-                    && d.target_bot_id == bot_id
-                    && (d.run_id.as_deref() == Some(alias)
-                        || d.request_id.as_deref() == Some(alias)
-                        || d.transport_context_json
-                            .as_ref()
-                            .and_then(|v| v.get("downstream_run_id"))
-                            .and_then(|v| v.as_str())
-                            == Some(alias))
-            }) {
-                return Err(ManagedDeliveryError::Conflict);
-            }
-            let metadata = next
-                .transport_context_json
-                .as_mut()
-                .and_then(serde_json::Value::as_object_mut)
-                .ok_or(ManagedDeliveryError::Conflict)?;
-            if metadata
-                .get("downstream_run_id")
-                .and_then(|v| v.as_str())
-                .is_some_and(|old| old != alias)
-            {
-                return Err(ManagedDeliveryError::Conflict);
-            }
-            metadata.insert(
-                "downstream_run_id".into(),
-                serde_json::Value::String(alias.into()),
-            );
-        }
-        if !outcome.changed
-            && original.accepted_at_ms.is_some()
-            && next.transport_context_json == original.transport_context_json
-        {
-            return Ok(Some(original.clone()));
-        }
-        next.state = outcome.state;
-        next.state.state_version = original
-            .state
-            .state_version
-            .checked_add(1)
-            .ok_or(ManagedDeliveryError::Conflict)?;
-        next.accepted_at_ms.get_or_insert(now_ms);
-        next.updated_at_ms = now_ms;
-        let updates = vec![DeliveryCompareAndSet {
-                    expected_state_version: original.state.state_version,
-                    delivery: next.clone(),
-                }];
-        let repo = self.repo.clone();
-        let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None).await }).await?;
-        let _ = self.changes.send(vec![next.clone()]);
-        Ok(Some(next))
-    }
-
-    async fn admit(
-        &self,
-        command: AdmitMessageDeliveries,
-    ) -> Result<DeliveryAdmissionResult, ManagedDeliveryError> {
-        self.admit_batch(vec![command]).await?.pop().ok_or(ManagedDeliveryError::Conflict)
-    }
-    async fn admit_batch(&self, mut commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
-        let _slot = self
-            .admission_slots
-            .try_acquire()
-            .map_err(|_| ManagedDeliveryError::Conflict)?;
-        let bots: Vec<String> = commands.iter().flat_map(|c| c.targets.iter().map(|t| t.target_bot_id.clone())).collect();
-        let _guards = self.mutations.acquire(bots).await;
-        let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
-        if let Some(policy) = &policy {
-          for command in &mut commands {
-            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System | bcs_domain::message_delivery::DeliveryFlowKind::Task | bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) { return Err(ManagedDeliveryError::Conflict); }
-            for target in &mut command.targets {
-                let drain = target.kind == DeliveryType::Send && target.semantic_projection_json.get("drain_context").and_then(|v| v.as_bool()) == Some(true)
-                    && !self.repo.lookup(DeliveryLookup::LanePendingContextCarrier { bot: target.target_bot_id.clone(), session: command.message.session_id.clone(), now_ms: command.now_ms }).await?.is_empty();
-                let enabled = match command.flow_kind {
-                    bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a => policy.policy.manages_direct_a2a(&target.target_bot_id),
-                    bcs_domain::message_delivery::DeliveryFlowKind::System => policy.policy.manages_system(&target.target_bot_id),
-                    bcs_domain::message_delivery::DeliveryFlowKind::Task => policy.policy.manages_task(&target.target_bot_id),
-                    _ => policy.policy.manages_group(&target.target_bot_id),
-                };
-                if (!enabled && !drain)
-                    || (drain && target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()) != Some(policy.version))
-                    || target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()).is_some_and(|version| version != policy.version) {
-                    return Err(ManagedDeliveryError::Conflict);
-                }
-                target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued;
-            }
-            let policy_expiry = policy.policy.queue_ttl_ms.map(|ttl| command.now_ms.saturating_add(ttl as i64));
-            command.expire_at_ms = if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
-                let deadline = command.targets.first().and_then(|t| t.semantic_projection_json.get("expires_at_ms")).and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?;
-                Some(policy_expiry.map_or(deadline, |expiry| expiry.min(deadline)))
-            } else { policy_expiry };
-          }
-        }
-        if !self
-            .admission_available
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err(ManagedDeliveryError::Conflict);
-        }
-        let repo = self.repo.clone();
-        let (results, _guards) = persist_with_guards(_guards, async move { repo.admit_batch(commands).await }).await?;
-        for result in &results {
-        tracing::debug!(message_id = %result.message.message_id, session_id = %result.message.session_id,
-            duplicate = result.duplicate, target_count = result.deliveries.len(),
-            rejected_count = result.deliveries.iter().filter(|row| row.state.status == Status::RejectedCapacity).count(),
-            "managed message admission committed");
-        if !result.duplicate {
-            if let Some(hook) = &self.instrumentation { for row in &result.deliveries { hook.event("admitted", row); } }
-            let _ = self.changes.send(result.deliveries.clone());
-        }
-        }
-        Ok(results)
-    }
-    async fn snapshot(
-        &self,
-        session_id: Option<&str>,
-    ) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        Ok(self.repo.list_deliveries(session_id).await?)
-    }
-    async fn transition(
-        &self,
-        command: DeliveryTransitionCommand,
-    ) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {
-        self.apply(command).await
-    }
-    async fn recover(&self, now_ms: i64) -> Result<(), ManagedDeliveryError> {
-        let mut cursor = String::new();
-        loop {
-        let batch = self.repo.work_batch(DeliveryWorkBatch::Recovery, now_ms, &cursor, 200).await?;
-        if batch.is_empty() { break; }
-        for row in batch {
-            cursor = row.delivery_id.clone();
-            self.apply(DeliveryTransitionCommand {
-                delivery_id: row.delivery_id,
-                expected_state_version: row.state.state_version,
-                event: Event::Recover,
-                now_ms,
-                request_id: None,
-                actor_id: None,
-                reply: None,
-                transport_context_json: None,
-                deadline_at_ms: None,
-            })
-            .await?;
-        }
-        }
-        Ok(())
-    }
-}
+mod service;

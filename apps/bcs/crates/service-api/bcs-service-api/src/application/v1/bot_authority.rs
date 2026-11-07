@@ -34,7 +34,8 @@ pub use crate::types::bot_authority::{
     AuthorityConflictCode, AuthorityMutation, AuthorityActor,
     AuthorityActorKind, BotAccessRelation, BotOwnershipView, BotRoleQuery,
     ManagerEdit, ManagerEditAction, ManagerListQuery, ManagerPage,
-    ManagerSetChange, ManagerSync, TransferAction, TransferChange,
+    ManagerSetChange, ManagerSync, OwnershipChange, OwnershipSync,
+    TransferAction, TransferChange,
     TransferCommand, TransferDirection, TransferKey, TransferListQuery,
     TransferOutcome, TransferPage, TransferStatus, TransferView,
     DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, human_user_id_of_actor,
@@ -165,6 +166,12 @@ pub trait BotAuthorityService: Send + Sync {
         caller: &AuthenticatedCaller,
         command: ManagerSync,
     ) -> Result<ManagerSetChange, ApplicationError>;
+
+    async fn sync_ownership(
+        &self,
+        caller: &AuthenticatedCaller,
+        command: OwnershipSync,
+    ) -> Result<OwnershipChange, ApplicationError>;
 
     async fn change_transfer(
         &self,

@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui';
+import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import type { ConversationBotView } from '@/domain/conversation';
 import { ConversationSessionPlaceholder } from '@/pages/Workspace/Chat/components/ConversationSessionPlaceholder';
-import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
@@ -26,12 +27,25 @@ const a: ConversationBotView = {
   bot: { botId: 'a', realBotId: 'a', displayName: 'Bot A', chatable: true, online: true },
 };
 const b: ConversationBotView = { ...a, bot: { ...a.bot, botId: 'b', realBotId: 'b', displayName: 'Bot B' } };
+const codingBotView: ConversationBotView = {
+  section: 'managed',
+  bot: {
+    botId: 'coding:owner',
+    realBotId: 'coding',
+    ownerId: 'owner',
+    displayName: 'Coding Bot',
+    chatable: true,
+    online: true,
+    isAgentCodingBot: true,
+  },
+};
 const friendBotView: ConversationBotView = {
   section: 'friend',
   bot: { botId: 'f', realBotId: 'f', displayName: 'Bot F', chatable: true, online: true },
 };
 const options = { userId: 'user', managedBots: [a, b], friendBots: [] };
 const friendOptions = { userId: 'user', managedBots: [a, b], friendBots: [friendBotView] };
+const codingOptions = { userId: 'user', managedBots: [codingBotView], friendBots: [] };
 const s = (id: string, botId: string) => ({
   sessionId: id,
   botId,
@@ -41,13 +55,27 @@ const s = (id: string, botId: string) => ({
   gmtModified: '',
 });
 const onOpenList = jest.fn();
+/** 展开/切台解耦后，空 Bot 的占位态入口是深链式选中(sessionId=null)：
+ *  模拟 /workspace/chat?section=managed&botId=b 无 session 的路由注入（同 useConversationRouteResolver 场景）。 */
+const openManagedBotViaRoute = (botId: string, sessions: ReturnType<typeof useConversationSessions>) => {
+  store.getState().selectConversation({
+    botId,
+    section: 'managed',
+    origin: 'mine',
+    scope: store.getState().effectiveScopeByManagedBotId[botId] ?? 'all',
+    friendUserId: null,
+    sessionId: null,
+  });
+  sessions.toggleBot(botId, 'managed');
+};
 function Fixture() {
   const sessions = useConversationSessions(options);
   const selection = useConversationSelection({ ...options, hydrated: true });
   const placeholder = useConversationSessionPlaceholder({ ...options, sessions });
   return (
     <>
-      <Button onClick={() => sessions.toggleBot('b', 'managed')}>展开 B</Button>
+      <Button onClick={() => openManagedBotViaRoute('b', sessions)}>深链进入 B</Button>
+      <Button onClick={() => sessions.selectMineSession('b', 'B首条')}>点选 B 首条</Button>
       {placeholder ? (
         <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />
       ) : (
@@ -56,12 +84,36 @@ function Fixture() {
     </>
   );
 }
+function CodingFixture() {
+  const sessions = useConversationSessions(codingOptions);
+  const placeholder = useConversationSessionPlaceholder({ ...codingOptions, sessions });
+  return (
+    <>
+      <Button onClick={() => openManagedBotViaRoute('coding:owner', sessions)}>深链进入 Coding</Button>
+      {placeholder && <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />}
+    </>
+  );
+}
 function FriendFixture() {
   const sessions = useConversationSessions(friendOptions);
   const placeholder = useConversationSessionPlaceholder({ ...friendOptions, sessions });
   return (
     <>
-      <Button onClick={() => sessions.toggleBot('f', 'friend')}>展开 F</Button>
+      <Button
+        onClick={() => {
+          store.getState().selectConversation({
+            botId: 'f',
+            section: 'friend',
+            origin: 'mine',
+            scope: 'all',
+            friendUserId: null,
+            sessionId: null,
+          });
+          sessions.toggleBot('f', 'friend');
+        }}
+      >
+        深链进入 F
+      </Button>
       {placeholder ? (
         <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />
       ) : (
@@ -79,7 +131,8 @@ function SearchFixture() {
     <>
       <Button onClick={() => sessions.selectMineSession('a', '旧会话')}>打开会话</Button>
       <Button onClick={() => sessions.selectMineSession('a', 'zz9')}>打开过滤结果</Button>
-      <Button onClick={() => sessions.toggleBot('b', 'managed')}>展开 B</Button>
+      <Button onClick={() => sessions.selectMineSession('b', 'B首条')}>点选 B 首条</Button>
+      <Button onClick={() => openManagedBotViaRoute('b', sessions)}>深链进入 B</Button>
       <Button onClick={() => store.getState().setSessionKeyFilter('a', 'agent:zz')}>应用搜索</Button>
       <Button onClick={() => store.getState().setSessionKeyFilter('a', '')}>清空搜索</Button>
       {placeholder ? (
@@ -150,10 +203,13 @@ beforeEach(() => {
   jest.mocked(conversationService.listManagedSessions).mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
   jest.mocked(botSessionService.createSession).mockResolvedValue({ ok: true, data: s('新建会话', 'b') });
 });
-it('empty expanded Bot replaces old chat with creation prompt, and creates/selects its new session', async () => {
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
+});
+it('deep-linking into an empty Bot replaces old chat with creation prompt, and creates/selects its new session', async () => {
   render(<Fixture />);
   expect(screen.getByTestId('chat-session')).toHaveTextContent('旧会话');
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   expect(await screen.findByText('Bot B 暂无会话')).toBeInTheDocument();
   expect(screen.queryByTestId('chat-session')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
@@ -161,7 +217,34 @@ it('empty expanded Bot replaces old chat with creation prompt, and creates/selec
   expect(botSessionService.createSession).toHaveBeenCalledWith(b.bot, 'user');
   expect(store.getState().sessionsByBotId.b.sessions.total).toBe(1);
 });
-it('loading does not show old chat or a false empty prompt, then renders the first session', async () => {
+it('Coding Bot creation always delegates to AIXCoding and never falls back to the generic service', async () => {
+  const createSession = jest.fn().mockResolvedValue({
+    ok: true,
+    session: { sessionId: 'coding-session', title: '新对话' },
+  });
+  extendCapabilities({
+    getCodingBotConversationHost: () => ({
+      status: 'available',
+      value: { Stage: () => null, createSession },
+    }),
+  });
+
+  render(<CodingFixture />);
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 Coding' }));
+  await screen.findByText('Coding Bot 暂无会话');
+  fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+
+  await waitFor(() => expect(store.getState().selectedSessionId).toBe('coding-session'));
+  expect(createSession).toHaveBeenCalledWith({
+    botId: 'coding',
+    userId: 'user',
+    ownerId: 'owner',
+    title: '新对话',
+  });
+  expect(botSessionService.createSession).not.toHaveBeenCalled();
+});
+
+it('loading does not show old chat or a false empty prompt, then waits for a manual pick', async () => {
   let resolve!: (data: Awaited<ReturnType<typeof conversationService.listManagedSessions>>) => void;
   jest.mocked(conversationService.listManagedSessions).mockReturnValue(
     new Promise((r) => {
@@ -169,31 +252,37 @@ it('loading does not show old chat or a false empty prompt, then renders the fir
     }),
   );
   render(<Fixture />);
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   expect(screen.getByRole('status', { name: '加载会话列表' })).toBeInTheDocument();
   expect(screen.queryByText('Bot B 暂无会话')).not.toBeInTheDocument();
   expect(screen.queryByTestId('chat-session')).not.toBeInTheDocument();
   await act(async () => resolve({ ok: true, data: { items: [s('B首条', 'b'), s('B次条', 'b')], total: 2 } }));
+  // 列表到达后不自动首选；舞台停在未选提示，等用户点行。
+  expect(screen.getByText('请选择一个会话')).toBeInTheDocument();
+  expect(screen.queryByTestId('chat-session')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '点选 B 首条' }));
   expect(screen.getByTestId('chat-session')).toHaveTextContent('B首条');
 });
-it('failed list shows retry rather than creation; retry selects the first loaded session', async () => {
+it('failed list shows retry rather than creation; retry restores the list for a manual pick', async () => {
   jest
     .mocked(conversationService.listManagedSessions)
     .mockResolvedValueOnce({ ok: false, error: { code: 'FAIL', friendlyMessage: '网络失败', canRetry: true } })
     .mockResolvedValueOnce({ ok: true, data: { items: [s('B首条', 'b')], total: 1 } });
   render(<Fixture />);
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   expect(await screen.findByText('网络失败')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '创建会话' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
-  await waitFor(() => expect(screen.getByTestId('chat-session')).toHaveTextContent('B首条'));
+  await waitFor(() => expect(screen.getByText('请选择一个会话')).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '点选 B 首条' }));
+  expect(screen.getByTestId('chat-session')).toHaveTextContent('B首条');
 });
 it('creation failure retains target empty state and supports retry without duplicate clicks', async () => {
   jest
     .mocked(botSessionService.createSession)
     .mockResolvedValueOnce({ ok: false, error: { code: 'FAIL', friendlyMessage: '创建失败', canRetry: true } });
   render(<Fixture />);
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   await screen.findByText('Bot B 暂无会话');
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
@@ -205,7 +294,7 @@ it('creation failure retains target empty state and supports retry without dupli
 it('empty favorites can switch to all before creating, without creating while filtering favorites', async () => {
   store.getState().setManagedBotScope('b', 'favorite');
   render(<Fixture />);
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   expect(await screen.findByText('暂无已收藏会话')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '查看全部会话' }));
   await screen.findByText('Bot B 暂无会话');
@@ -214,7 +303,7 @@ it('empty favorites can switch to all before creating, without creating while fi
 });
 it('empty state retains the mobile session-list entry', async () => {
   render(<Fixture />);
-  fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
   await screen.findByText('Bot B 暂无会话');
   fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }));
   expect(onOpenList).toHaveBeenCalledTimes(1);
@@ -225,7 +314,7 @@ it('好友 favorite 空列表显示收藏空态,查看全部会话写好友范�
   render(<FriendFixture />);
   // 好友 Bot 生效范围读 scopeByFriendBotId(主选中范围恒 all,不随好友筛选变化)。
   act(() => store.getState().setFriendBotScope('f', 'favorite'));
-  fireEvent.click(screen.getByRole('button', { name: '展开 F' }));
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 F' }));
   expect(await screen.findByText('暂无已收藏会话')).toBeInTheDocument();
   // favorite 空态不给创建入口(不误发创建请求)。
   expect(screen.queryByRole('button', { name: '创建会话' })).not.toBeInTheDocument();
@@ -358,19 +447,20 @@ describe('sessionKey 搜索不关闭已打开的主会话', () => {
     expect(screen.queryByTestId('chat-session')).not.toBeInTheDocument();
   });
 
-  it('自动首选的会话在搜索重拉与空结果后仍保持打开', async () => {
+  it('选中的会话在搜索重拉与空结果后仍保持打开（深链态先就位再点行）', async () => {
     const firstLoad = deferred<Awaited<ReturnType<typeof conversationService.listManagedSessions>>>();
     jest.mocked(conversationService.listManagedSessions).mockReturnValueOnce(firstLoad.promise);
     render(<SearchFixture />);
 
-    // 真实展开流程:begin 记录首选意图,列表到达后 complete 自动首选首条并保留快照。
-    fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+    // 展开/切台解耦后：深链态(sessionId=null)先就位，用户点行建立主会话并保留快照。
+    fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
     await act(async () => {
       firstLoad.resolve({ ok: true, data: { items: [s('B首条', 'b')], total: 1 } });
       await firstLoad.promise;
     });
-    await waitFor(() => expect(store.getState().selectedSessionId).toBe('B首条'));
+    fireEvent.click(screen.getByRole('button', { name: '点选 B 首条' }));
     expect(screen.getByTestId('chat-session')).toHaveTextContent('B首条');
+    expect(store.getState().selectedSessionId).toBe('B首条');
 
     const filteredLoad = deferred<Awaited<ReturnType<typeof conversationService.listManagedSessions>>>();
     jest.mocked(conversationService.listManagedSessions).mockReturnValueOnce(filteredLoad.promise);
@@ -394,7 +484,7 @@ describe('sessionKey 搜索不关闭已打开的主会话', () => {
       store.getState().setSessionKeyFilter('b', 'agent:zz');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '展开 B' }));
+    fireEvent.click(screen.getByRole('button', { name: '深链进入 B' }));
     expect(await screen.findByText('Bot B 暂无会话')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '创建会话' }));

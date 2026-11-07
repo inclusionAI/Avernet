@@ -38,6 +38,11 @@ enum TextProjection {
     ExplicitMentions,
 }
 
+#[allow(dead_code)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// A routing decision is fixed at admission; current membership/security is
 /// still checked at dispatch. This snapshot is not an authorization grant.
 #[derive(Clone, Serialize, Deserialize)]
@@ -47,8 +52,62 @@ pub struct QueuedGroupProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     caller_execution: Option<crate::caller_execution::ExecutionRef>,
     version: u32,
+    /// Caller anti-downgrade marker (§15.4 guard): the runtime refuses an
+    /// ordinary prepare on ANY row CARRYING the key — presence alone
+    /// decides, a serialized false would refuse every ordinary row. The
+    /// field is declared (strict decode accepts carrier rows) but only
+    /// serializes when true: ordinary rows stay key-free byte-shape.
+    #[serde(default, skip_serializing_if = "is_false")]
+    caller_required: bool,
+    /// Task text protected-projected by admission (§15.57): a digest input,
+    /// never identity material. Serializes only when non-empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    caller_task: String,
+    /// Caller delegation correlation (§15.71, P1-2/P1-9): the trusted
+    /// task edge's non-secret assign facts — the delegate parent run, the
+    /// invocation marker, and the target's config-decided purpose. A
+    /// typed passthrough field (non-secret ids only): the runtime gate
+    /// and the terminal claim gate read them back; absent on ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_delegation: Option<serde_json::Value>,
+    /// Delegation-only lineage marker (spec §7.2.1, review batch-3 §3.1):
+    /// the trusted admission sets it for a caller-DISABLED routed target in
+    /// a lease-admitted caller group — the row keeps the ORDINARY Owner
+    /// execution (never the protected branch) while the runtime registers
+    /// the delegation-only root association against its own handoff-parked
+    /// Human identity. Non-secret mode field only: presence decides, the
+    /// association material itself never persists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_lineage: Option<String>,
+    /// Trusted ordinary sender facts of the original channel message —
+    /// the envelope `from` zone's source on protected dispatch (queue
+    /// admission, human P2C admission and the delegated task_assign edge
+    /// all write it; the protected caller subject never substitutes). A
+    /// typed passthrough field: non-secret actor ids only, absent on
+    /// ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_channel: Option<serde_json::Value>,
+    /// Protected-dispatch runtime CAS passthrough (managed_delivery): the
+    /// StartSend CommitCallerDispatch facts, the typed terminal arbitration
+    /// and the cancel intent all park nested objects on this same top-level
+    /// map — request bodies can never write them. Declared so the strict
+    /// decode accepts rows that have been through real dispatch; the
+    /// Manager-facing result/notice projections strip them. Non-secret
+    /// control facts only, absent on ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_dispatch: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_terminal: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_cancel: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_rejected_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_uncertain_id: Option<String>,
+    #[serde(default)]
+    task_control_notice: bool,
     /// Initialization context must survive ordinary history TTL/count limits.
     #[serde(default)]
     required_context: bool,
@@ -114,7 +173,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         if target != prepared.command.target || !flow.bot_delivery.is_available(&target).await { return false; }
         match prepared.transport_context_json.get("connection_id").and_then(|v| v.as_str()) {
             Some(id) => flow.bot_delivery.connection_identity(&target).await.as_deref() == Some(id),
-            None => target.is_http_provider(),
+            None => target.is_gateway(),
         }
     }
     async fn is_available(&self, bot_id: &str) -> bool {
@@ -125,6 +184,109 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             Ok(target) => flow.bot_delivery.is_available(&target).await,
             Err(_) => false,
         }
+    }
+
+    /// Real protected-dispatch resolution (review P1-5): the caller row's
+    /// own Provider delivery target with its Provider-authorized service
+    /// token, plus the provider routing fields for the wire association.
+    /// Only HttpProvider shapes resolve — caller containers exist behind a
+    /// Provider webhook (spec §10.8); anything else (unregistered bot,
+    /// WebSocket-only target, dead flow handle) refuses and the runtime
+    /// keeps the anti-downgrade guard fail-closed.
+    ///
+    /// Dispatch-time access parity (review P1): BEFORE any of that, the
+    /// row passes the SAME revalidation the ordinary prepare runs at
+    /// pickup — session scope+Running, group Active, session participant
+    /// scope, task association, BOTH actors' membership, target hidden —
+    /// and the outbound interceptor chain over the protected task text
+    /// with the channel's trusted ordinary sender facts (never the
+    /// protected subject). Queue dwell is a live revocation window; a
+    /// removed member or a deployed policy must refuse HERE, before any
+    /// identity is claimed or a wire touched.
+    async fn resolve_caller_dispatch(
+        &self,
+        delivery: &PersistedMessageDelivery,
+    ) -> Option<bcs_service_api::CallerDispatchContext> {
+        let flow = self.flow.upgrade()?;
+        if let Err(reason) = revalidate_queued_access(&flow, delivery).await {
+            tracing::warn!(
+                delivery_id = %delivery.delivery_id,
+                bot_id = %delivery.target_bot_id,
+                reason = %reason,
+                "CALLER_ACCESS_REVOKED: the queued caller row failed dispatch-time access revalidation, staying closed"
+            );
+            return None;
+        }
+        let target = flow
+            .registry
+            .resolve_delivery_target(&delivery.target_bot_id)
+            .await
+            .ok()?;
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            bcs_to_provider_token,
+            ..
+        } = &target else {
+            return None;
+        };
+        // The protected task text and the trusted channel facts the
+        // interceptor candidate carries — same shape the runtime's claim
+        // guard demands. Missing facts are a misbuilt row: fail closed.
+        let caller_task = delivery
+            .semantic_projection_json
+            .get("caller_task")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())?;
+        let channel = delivery.semantic_projection_json.get("caller_channel")?;
+        let channel_actor_id = channel
+            .get("actor_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())?;
+        let channel_actor_name = channel
+            .get("actor_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let candidate = GroupMessage {
+            id: delivery.run_id.clone().unwrap_or_else(|| delivery.delivery_id.clone()),
+            timestamp: bcs_protocol::now_ms(),
+            sender: channel_actor_id.to_string(),
+            content: caller_task.to_string(),
+            message_type: GroupMessageType::Bot,
+            bot_name: Some(channel_actor_name),
+            role: MessageRole::User,
+            run_id: String::new(),
+            history_meta: None,
+            metadata: None,
+            attachments: None,
+        };
+        let routing_target = RoutingTarget {
+            bot_uuid: delivery.target_bot_id.clone(),
+            url: String::new(),
+            is_driver: false,
+            delivery_type: DeliveryType::Send,
+        };
+        if let Err(reason) = apply_outbound_interceptors(
+            &flow, &delivery.group_id, &candidate, &routing_target,
+        ).await {
+            tracing::warn!(
+                delivery_id = %delivery.delivery_id,
+                bot_id = %delivery.target_bot_id,
+                interceptor = %reason.interceptor_id,
+                code = %reason.code,
+                "CALLER_ACCESS_REVOKED: the queued caller row failed the outbound policy chain, staying closed"
+            );
+            return None;
+        }
+        Some(bcs_service_api::CallerDispatchContext {
+            service_credential: bcs_to_provider_token.clone(),
+            provider_id: provider_id.clone(),
+            provider_bot_ref: provider_bot_ref.clone(),
+            target,
+        })
     }
 
     async fn prepare(
@@ -182,27 +344,8 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         {
             return Err(invalid("queue send-start scope mismatch"));
         }
-        let matches_owner = match (&command.target, &transport.owner) {
-            (BotDeliveryTarget::WebSocket { .. }, BotRunTransportOwner::WebSocket) => {
-                transport.connection_id.is_some()
-            }
-            (
-                BotDeliveryTarget::HttpProvider {
-                    provider_id,
-                    provider_bot_ref,
-                    ..
-                },
-                BotRunTransportOwner::HttpProvider {
-                    provider_id: original_id,
-                    provider_bot_ref: original_ref,
-                },
-            ) => {
-                provider_id == original_id
-                    && provider_bot_ref == original_ref
-                    && transport.connection_id.is_none()
-            }
-            _ => false,
-        };
+        let matches_owner = transport.owner == BotRunTransportOwner::from_target(&command.target)
+            && transport.connection_id.is_some() == matches!(&command.target, BotDeliveryTarget::WebSocket { .. });
         if !matches_owner || command.provider_bypass_headers != transport.provider_route_headers {
             return Err(invalid("queue original transport owner mismatch"));
         }
@@ -240,7 +383,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             if task.leg == crate::queued_task::TaskLeg::Dispatch) {
             delivery.send_started_at_ms.and_then(|started| u64::try_from(started).ok())
                 .ok_or_else(|| invalid("task send start missing"))?
-                .saturating_add(flow.provider_chat_run_timeout_ms)
+                .saturating_add(flow.provider_chat_run_timeout_ms).max(deadline_ms.saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64))
         } else { deadline_ms };
         run_context
             .put_context(bcs_service_api::BotRunContext {
@@ -318,7 +461,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         }
         let target = flow
             .registry
-            .resolve_delivery_target(&delivery.target_bot_id)
+            .resolve_abort_target(&delivery.target_bot_id)
             .await?;
         let run_id = delivery
             .run_id
@@ -329,6 +472,20 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         // scope/accepted alias rather than treating an expired index as proof
         // that the downstream work stopped.
         let downstream_run_id = metadata.downstream_run_id.unwrap_or_else(|| run_id.clone());
+        if let BotRunTransportOwner::A2a { provider_id, provider_bot_ref } = &metadata.owner {
+            if !matches!(&target, BotDeliveryTarget::A2a { provider_id: current_id, provider_bot_ref: current_ref, .. }
+                if current_id == provider_id && current_ref == provider_bot_ref) {
+                return Err(invalid("queue original A2A owner changed"));
+            }
+            // A2A cancellation addresses one persisted remote Task through the
+            // canonical local Run. It does not use the legacy Provider scope
+            // abort or require a WebSocket connection identity.
+            return Ok(bcs_service_api::BotAbortDeliveryCommand {
+                target, command_id:String::new(), group_id:delivery.group_id.clone(),
+                session_id:delivery.session_id.clone(), run_id:Some(run_id.clone()),
+                provider_bypass_headers:Vec::new(), timeout_ms:30_000,
+            });
+        }
         let worker_task = matches!(crate::queued_task::intent(delivery), Ok(Some(task))
             if task.leg == crate::queued_task::TaskLeg::Dispatch);
         if worker_task && let (BotRunTransportOwner::HttpProvider { provider_id, provider_bot_ref },
@@ -395,162 +552,7 @@ fn invalid(message: &str) -> ServiceError {
     }
 }
 
-impl QueuedGroupProjection {
-    pub(crate) fn timeout_notice(row: &PersistedMessageDelivery, manager: &str) -> ServiceResult<Self> {
-        let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
-        projection.caller_execution = None;
-        projection.task = None;
-        projection.mentions = vec![manager.to_string()];
-        projection.target_tags.clear();
-        projection.sender_name = bcs_service_api::core::BCS_SYSTEM_MESSAGE.into();
-        projection.sender_owner = None;
-        projection.text_projection = TextProjection::Original;
-        projection.reply_context = None;
-        projection.forward_hop = None;
-        projection.provider_route_headers.clear();
-        Ok(projection)
-    }
-    pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>) -> ServiceResult<Self> {
-        let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
-        projection.caller_execution = None;
-        projection.sender_name = task.worker_name.clone();
-        projection.target_tags = tags;
-        projection.mentions = vec![task.manager.clone()];
-        projection.task = Some(task);
-        Ok(projection)
-    }
-    pub(crate) fn task(group: &Group, recipient: &str, sender_name: &str, task: crate::queued_task::TaskIntent) -> ServiceResult<Self> {
-        let mut projection = Self::system(group, recipient, false)?;
-        projection.sender_name = sender_name.into();
-        projection.mentions = vec![recipient.into()];
-        projection.task = Some(task);
-        Ok(projection)
-    }
-    pub(crate) fn system(group: &Group, recipient: &str, required_context: bool) -> ServiceResult<Self> {
-        let participant = group.participants.iter().find(|p| p.bot_uuid == recipient)
-            .ok_or_else(|| invalid("system queue target is not a session participant"))?;
-        let snapshot = crate::protocol_context::group_context_input(group);
-        Ok(Self {
-            caller_execution: None,
-            version: 1, task: None, required_context, drain_context: false, policy_version: None,
-            driver_bot: snapshot.driver_bot, originator: snapshot.originator,
-            participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
-                id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
-            }).collect(),
-            direct_bot: false,
-            group_type: crate::protocol_context::group_type_wire(group.group_strategy),
-            mentions: Vec::new(), target_tags: participant.tags.clone(),
-            sender_name: bcs_service_api::core::BCS_SYSTEM_MESSAGE.into(), sender_owner: None,
-            thinking: None, text_projection: TextProjection::Original,
-            reply_context: None, forward_hop: None, provider_route_headers: Vec::new(),
-            admission_rejection: None,
-        })
-    }
-    pub fn with_reply_context(
-        mut self,
-        mut context: bcs_protocol::GroupContext,
-        forward_hop: Option<u32>,
-        strip_mentions: bool,
-    ) -> Self {
-        context.message.clear();
-        self.reply_context = Some(context);
-        self.forward_hop = forward_hop;
-        self.text_projection = if strip_mentions {
-            TextProjection::RoutedMentions
-        } else {
-            TextProjection::Original
-        };
-        self
-    }
-    pub async fn capture(
-        flow: &BcsMessageFlow,
-        group: &Group,
-        command: &WebSendCommand,
-        decision: &RoutingDecision,
-        target: &RoutingTarget,
-        sender_name: String,
-        sender_owner: Option<String>,
-    ) -> ServiceResult<Self> {
-        if command.session_id.as_deref().is_none_or(|s| s.is_empty()) {
-            return Err(invalid("queue admission requires a canonical session"));
-        }
-        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await?.is_http_provider();
-        // WS does not consume Provider-only headers. Preserve only explicitly
-        // approved routing metadata for a later Bot relay, never credentials.
-        let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|
-            is_provider || flow.queue_persistable_headers.iter().any(|a| a.eq_ignore_ascii_case(name))).cloned().collect();
-        let header_snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
-        let admission_rejection = header_snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
-        let provider_route_headers = header_snapshot.unwrap_or_default();
-        let participant = group
-            .participants
-            .iter()
-            .find(|p| p.bot_uuid == target.bot_uuid)
-            .ok_or_else(|| invalid("queue target is not a session participant"))?;
-        let snapshot = crate::protocol_context::group_context_input(group);
-        Ok(Self {
-            caller_execution: crate::caller_execution::ExecutionRef::from_command(command),
-            task: None,
-            required_context: false,
-            drain_context: false,
-            policy_version: None,
-            provider_route_headers,
-            admission_rejection,
-            version: 1,
-            reply_context: None,
-            forward_hop: None,
-            driver_bot: snapshot.driver_bot,
-            originator: snapshot.originator,
-            participants: snapshot
-                .participants
-                .into_iter()
-                .map(|p| ParticipantProjection {
-                    id: p.id,
-                    name: p.name,
-                    role: p.role,
-                    is_bot: p.is_bot,
-                })
-                .collect(),
-            direct_bot: context_projection_for_delivery(flow, group, command.session_id.as_deref())
-                .await
-                == ContextProjection::DirectBot,
-            group_type: crate::protocol_context::group_type_wire(group.group_strategy),
-            mentions: decision.mentions.clone(),
-            target_tags: participant.tags.clone(),
-            sender_name,
-            sender_owner,
-            thinking: command.thinking.clone(),
-            text_projection: if group.group_kind == GroupKind::Dm {
-                TextProjection::Original
-            } else if command.mentions.is_empty() {
-                TextProjection::RoutedMentions
-            } else {
-                TextProjection::ExplicitMentions
-            },
-        })
-    }
-
-    fn decode(row: &PersistedMessageDelivery) -> Result<Self, String> {
-        let projection: Self = serde_json::from_value(row.semantic_projection_json.clone())
-            .map_err(|_| "invalid queued group projection".to_string())?;
-        if projection.version != 1 || !matches!(row.flow_kind, DeliveryFlowKind::Group | DeliveryFlowKind::System | DeliveryFlowKind::Task)
-            || (row.flow_kind != DeliveryFlowKind::System && projection.required_context)
-            || (projection.task.is_some() != (row.flow_kind == DeliveryFlowKind::Task)) {
-            return Err("unsupported queued group projection version or flow".into());
-        }
-        Ok(projection)
-    }
-
-    fn project_text(&self, text: &str) -> Result<String, String> {
-        let pattern = match self.text_projection {
-            TextProjection::Original => return Ok(text.to_string()),
-            TextProjection::RoutedMentions => r"@([-\w\p{Unified_Ideograph}:]+)",
-            TextProjection::ExplicitMentions => r"@([\w\p{Unified_Ideograph}:]+)",
-        };
-        let mentions = regex::Regex::new(pattern).map_err(|_| "invalid mention projection")?;
-        Ok(mentions.replace_all(text, "$1").into_owned())
-    }
-}
+mod projection;
 
 /// Canonical queued content is the only durable source of attachment payloads.
 /// External source attribution is stored once, not on each target delivery.
@@ -581,13 +583,18 @@ pub async fn prepare_queued_group(
     prepare_queued_group_bounded(flow, row, contexts, contexts.len() as u64).await
 }
 
-async fn prepare_queued_group_bounded(
+/// Dispatch-time access revalidation shared by the ordinary prepare and the
+/// protected caller branch (review P1): the queue dwell between admission
+/// and the scheduler's pick is a live revocation window — sessions
+/// complete, groups close, members get removed, targets get hidden. Both
+/// dispatch surfaces must refuse on the SAME facts before anything reaches
+/// a wire or an identity handoff. Returns the session-scoped group plus the
+/// canonical source message for the callers' downstream needs (payload
+/// reads, sender identity, interceptor candidates).
+pub(crate) async fn revalidate_queued_access(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
-    contexts: &[PersistedMessageDelivery],
-    total: u64,
-) -> ServiceResult<PreparedManagedDelivery> {
-    let projection = QueuedGroupProjection::decode(row).map_err(|e| invalid(&e))?;
+) -> ServiceResult<(Group, bcs_domain::PersistedMessage)> {
     let repo = flow
         .message_repo
         .as_ref()
@@ -604,7 +611,9 @@ async fn prepare_queued_group_bounded(
     if session.group_id != row.group_id {
         return Err(invalid("queue session scope mismatch"));
     }
-    if session.status != bcs_service_api::SessionStatus::Running {
+    let rejection_notice = row.flow_kind == DeliveryFlowKind::System
+        && QueuedGroupProjection::decode(row).map_err(|error| invalid(&error))?.task_rejected_id.is_some();
+    if session.status != bcs_service_api::SessionStatus::Running && !rejection_notice {
         return Err(invalid("queue session is no longer running"));
     }
     let mut group = flow
@@ -643,12 +652,38 @@ async fn prepare_queued_group_bounded(
     if bot.status == ActorStatus::Hidden {
         return Err(invalid("queue target is hidden"));
     }
+    Ok((group, source))
+}
+
+async fn prepare_queued_group_bounded(
+    flow: &BcsMessageFlow,
+    row: &PersistedMessageDelivery,
+    contexts: &[PersistedMessageDelivery],
+    total: u64,
+) -> ServiceResult<PreparedManagedDelivery> {
+    let projection = QueuedGroupProjection::decode(row).map_err(|e| invalid(&e))?;
+    let repo = flow
+        .message_repo
+        .as_ref()
+        .ok_or_else(|| invalid("queue message repository unavailable"))?;
+    let (group, source) = revalidate_queued_access(flow, row).await?;
     let limits = match &flow.delivery_policy { Some(p) => p.snapshot.read().await.policy.clone(), None => Default::default() };
     let payload = read_bounded_queued_payload(repo.as_ref(), row, contexts, total, limits.max_context_messages, limits.max_context_bytes, |d, text| {
         let projection = QueuedGroupProjection::decode(d)?;
         if d.delivery_id == row.delivery_id && projection.task.as_ref().is_some_and(|t| t.leg == crate::queued_task::TaskLeg::Result) {
-            return source.content.get("task_result_text").and_then(|v| v.as_str()).map(str::to_owned)
-                .ok_or_else(|| "canonical task result missing".into());
+            let body = source.content.get("task_result_text").and_then(|v| v.as_str())
+                .ok_or_else(|| "canonical task result missing".to_string())?;
+            let task = projection.task.as_ref().expect("result task checked above");
+            let state = source.content.get("task_state").and_then(|v| v.as_str()).unwrap_or("completed");
+            return Ok(crate::task_presentation::result(task, state, body));
+        }
+        if d.delivery_id == row.delivery_id && d.flow_kind == DeliveryFlowKind::System {
+            if let Some(notice) = source.content.get("task_timeout_notice") {
+                let task: crate::queued_task::TaskIntent = serde_json::from_value(notice["task"].clone())
+                    .map_err(|_| "invalid task timeout notice".to_string())?;
+                let body = notice["body"].as_str().ok_or_else(|| "missing task timeout notice body".to_string())?;
+                return Ok(crate::task_presentation::result(&task, notice["state"].as_str().unwrap_or("timeout_unknown"), body));
+            }
         }
         projection.project_text(text)
     })
@@ -697,7 +732,7 @@ async fn prepare_queued_group_bounded(
                 .await
                 .ok_or_else(|| invalid("queue transport cannot pin current Bot connection"))?,
         ),
-        BotDeliveryTarget::HttpProvider { .. } => None,
+        BotDeliveryTarget::HttpProvider { .. } | BotDeliveryTarget::A2a { .. } => None,
     };
     let protocol_version = frame_protocol_version(
         flow.registry.get_protocol_version(&row.target_bot_id).await,
@@ -720,6 +755,15 @@ async fn prepare_queued_group_bounded(
         None => BotDeliveryKind::Send,
     };
     let task_id = projection.task.as_ref().map(|t| t.task_id.clone());
+    // Put the current task envelope first, before optional protocol/history text.
+    // Keep the authorized body intact; the matching embedded copy is removed once.
+    let task_heading = projection.task.as_ref().and_then(|task| match task.leg {
+        crate::queued_task::TaskLeg::Dispatch => Some(crate::task_presentation::dispatch(&projection.sender_name,
+            task.assignment_intent_id.as_deref(), &task.task_id, "").trim_end().to_string()),
+        crate::queued_task::TaskLeg::Result => Some(crate::task_presentation::result(task,
+            source.content["task_state"].as_str().unwrap_or("completed"), "").lines().next().unwrap_or("").to_string()),
+        _ => None,
+    });
     let mut frame = if let Some(mut context) = projection.reply_context {
         if !context.message.is_empty()
             || context.recipient.as_deref() != Some(row.target_bot_id.as_str())
@@ -800,10 +844,29 @@ async fn prepare_queued_group_bounded(
             Some(&row.session_id),
         )
     };
+    if let (Some(heading), bcs_protocol::BcsFrame::Request(request)) = (task_heading, &mut frame) {
+        if let Some(text) = request.params.as_mut().and_then(|params| params.get_mut("message"))
+            .and_then(|message| message.get_mut("content")).and_then(|blocks| blocks.get_mut(0))
+            .and_then(|block| block.get_mut("text")) {
+            if let Some(body) = text.as_str() {
+                *text = serde_json::Value::String(format!("{heading}\n{}", body.replacen(&format!("{heading}\n"), "", 1)));
+            }
+        }
+    }
     if let (Some(task_id), bcs_protocol::BcsFrame::Request(request)) = (task_id, &mut frame) {
         if let Some(params) = request.params.as_mut() {
             params["task_id"] = serde_json::json!(task_id);
             params["idempotency_key"] = serde_json::json!(row.idempotency_key);
+            if delivery_target.is_http_provider() {
+                if let Some(seconds) = projection.task.as_ref()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch)
+                    .and_then(|task| task.timeout_s) {
+                    let budget_ms = seconds.saturating_mul(1000)
+                        .saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64)
+                        .max(flow.provider_chat_run_timeout_ms);
+                    params["timeout_ms"] = serde_json::json!(budget_ms);
+                }
+            }
         }
     }
     if let Some(identity) = source.content.get("channel_sender_identity") {
@@ -837,17 +900,7 @@ async fn prepare_queued_group_bounded(
             &row.group_id, &row.session_id,
             source.content.get("source_im_message_id").and_then(|v| v.as_str()), &mut frame).await?)
     } else { None };
-    let owner = match &delivery_target {
-        BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
-        BotDeliveryTarget::HttpProvider {
-            provider_id,
-            provider_bot_ref,
-            ..
-        } => BotRunTransportOwner::HttpProvider {
-            provider_id: provider_id.clone(),
-            provider_bot_ref: provider_bot_ref.clone(),
-        },
-    };
+    let owner = BotRunTransportOwner::from_target(&delivery_target);
     let transport = QueuedTransportContext {
         caller_expires_at_ms,
         provider_route_headers: provider_route_headers.clone(),
@@ -875,3 +928,7 @@ async fn prepare_queued_group_bounded(
         transport_context_json: transport_json,
     })
 }
+
+#[cfg(test)]
+#[path = "queued_group/tests.rs"]
+mod task_result_caller_marks_tests;

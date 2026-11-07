@@ -65,7 +65,7 @@ async def get_skill_set_skills(
     ),
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
-    owner_id_hint = user_id or entity_id
+    owner_id_hint = entity_id or user_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -135,7 +135,7 @@ async def add_skills_to_set(
     """Add skills to a skill set."""
     # The published batch body carries the addressed Bot owner in ``user_id``;
     # the authenticated actor still comes exclusively from ``ctx`` below.
-    owner_id_hint = request.user_id or entity_id
+    owner_id_hint = entity_id or request.user_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = request.bot_id or bot_id
     (
@@ -252,7 +252,7 @@ async def remove_skill_from_set(
     ),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
-    owner_id_hint = user_id or entity_id
+    owner_id_hint = entity_id or user_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -322,7 +322,7 @@ async def ensure_default_skill_set(
         entity_type=effective_entity_type,
     )
     skill_set = service.ensure_default_skill_set(
-        user_id=ctx.user_id, bolt_id=effective_bot_id
+        user_id=effective_entity_id, bolt_id=effective_bot_id
     )
     # Remove 'skills' key if present to avoid Pydantic validation error
     skill_set_clean = {k: v for k, v in skill_set.items() if k != "skills"}
@@ -373,7 +373,7 @@ async def get_default_skill_set(
         entity_type=effective_entity_type,
     )
     skill_set = service.get_default_skill_set(
-        user_id=ctx.user_id, bolt_id=effective_bot_id
+        user_id=effective_entity_id, bolt_id=effective_bot_id
     )
     if not skill_set:
         raise HTTPException(status_code=404, detail="No default skill set found")

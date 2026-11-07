@@ -18,3 +18,13 @@ reads each file's category and name off its path.
 
 Boundary metadata lives in the parent package's `README.md`
 (`core/bot_config_manifest`), which this package is part of.
+
+All configurable identity files, including `IDENTITY.md`, share the same rules:
+an absent identity category does nothing, a declared category replaces the file
+set, and empty writes delete stored objects. Only `MEMORY.md` is protected from
+Manifest declarations and cleanup.
+
+A live Apply composes a complete snapshot from the current platform entities,
+including identity files retained by the materialiser. The snapshot does not
+depend on which files the latest Apply selected. First provisioning carries
+the prepared files, and runtime composes retain engine ownership.

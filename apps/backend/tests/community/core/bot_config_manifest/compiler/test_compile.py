@@ -9,6 +9,10 @@ import yaml
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.apply_engine.compiler import CompileRefused
+from agentclaw.community.core.apply_engine.compiler import StateRef
+from agentclaw.community.core.bot_config_manifest.binding import (
+    ManifestBindingMismatchError, bound_manifest_state, manifest_digest,
+)
 from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
@@ -54,6 +58,63 @@ script:
 DOCUMENT = DOCUMENT_TEMPLATE.format(digest=digest_of(PACKAGE))
 
 
+@pytest.mark.asyncio
+async def test_bound_check_cannot_authorize_a_different_document_in_the_worker():
+    compiler, content = _compiler(DOCUMENT)
+    ref = bound_manifest_state(manifest_digest(DOCUMENT))
+    compiler.check(make_context(), ref)
+    compiler._manifests._document = DOCUMENT.replace("server_code: gh", "server_code: other")
+    with pytest.raises(CompileRefused, match="bound Manifest has changed"):
+        await compiler.compile(make_context(), ref, only=())
+    assert content.blobs == {}, "even an empty phase verifies before filing or fetching"
+
+
+@pytest.mark.asyncio
+async def test_bound_compile_reads_once_and_executes_that_same_parsed_document():
+    original = 'schema_version: 1\nmanifest:\n  identity:\n    - type: CLAUDE.md\n      content: original\n'
+    compiler, content = _compiler(original)
+    reads = []
+
+    def read_once(**kwargs):
+        reads.append(kwargs)
+        return SimpleNamespace(document=original if len(reads) == 1 else original.replace("original", "changed"))
+
+    compiler._manifests.get = read_once
+    result = await compiler.compile(make_context(), bound_manifest_state(manifest_digest(original)))
+    assert len(reads) == 1
+    assert result.state.identity.entries[0].content.digest == digest_of(b"original")
+
+
+@pytest.mark.parametrize("reference", ["", "unknown:" + "a" * 64, "sha256-json-v1:bad"])
+@pytest.mark.asyncio
+async def test_invalid_bound_reference_cannot_fall_back_to_current_document(reference):
+    compiler, _ = _compiler(DOCUMENT)
+    with pytest.raises(CompileRefused, match="invalid bound Manifest reference"):
+        await compiler.compile(make_context(), StateRef("manifest", reference))
+
+
+@pytest.mark.asyncio
+async def test_missing_bound_document_refuses_but_ordinary_apply_can_use_updated_document():
+    compiler, _ = _compiler(None)
+    with pytest.raises(CompileRefused, match="document is missing"):
+        await compiler.compile(make_context(), bound_manifest_state(manifest_digest(DOCUMENT)))
+    compiler._manifests._document = 'schema_version: 1\nmanifest:\n  mcp:\n    - server_code: updated\n'
+    result = await compiler.compile(make_context(), MANIFEST_STATE)
+    assert result.state.mcp.entries[0].server_code == "updated"
+
+
+def test_binding_preserves_canonical_semantics_and_rejects_execution_scope_mismatch():
+    from dataclasses import replace
+
+    assert manifest_digest('schema_version: 1\nmanifest: {}') == manifest_digest('{"manifest": {}, "schema_version": 1}')
+    assert manifest_digest('schema_version: 1\nmanifest: {}') != manifest_digest('schema_version: 1\nmanifest: {resources: []}')
+    compiler, _ = _compiler(DOCUMENT)
+    ref = bound_manifest_state(manifest_digest(DOCUMENT))
+    for ctx in [replace(make_context(), env="prod"), replace(make_context(), tenant="other")]:
+        with pytest.raises(ManifestBindingMismatchError, match="scope"):
+            compiler.check(ctx, ref)
+
+
 class _Manifests:
     def __init__(self, document: str | None) -> None:
         self._document = document
@@ -96,16 +157,30 @@ async def test_a_stored_document_compiles_to_a_complete_state() -> None:
     assert [e.path for e in state.resources.entries] == ["data/faq.csv"]
     assert [e.name for e in state.skills.entries] == ["quality-check"]
     assert [e.server_code for e in state.mcp.entries] == ["gh"]
-    assert state.engine_config is None and state.cli_tools is None
+    assert state.engine_config is None and state.cli_tools.entries == ()
     assert state.declared == (
         Section.SCRIPT,
         Category.IDENTITY,
         Category.RESOURCES,
         Category.SKILLS,
         Category.MCP,
+        Category.CLI_TOOLS,
     )
     for digest in (state.identity.entries[0].content.digest, state.resources.entries[0].content.digest):
         assert content.is_reachable(None, digest, produced_by="manifest")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["claude_code", "teclaw"])
+async def test_version_only_manifest_clears_every_supported_category(engine) -> None:
+    ctx = make_context(engine_type=engine)
+    compiler, _ = _compiler("schema_version: 1\n")
+    state = (await compiler.compile(ctx, MANIFEST_STATE)).state
+    expected = (Category.IDENTITY, Category.RESOURCES, Category.SKILLS, Category.MCP, Category.CLI_TOOLS)
+    if engine == "claude_code":
+        expected = (Section.SCRIPT, *expected)
+    assert state.declared == expected
+    assert all(state.declaration(construct).entries == () for construct in expected)
 
 
 @pytest.mark.asyncio
@@ -115,7 +190,6 @@ async def test_no_document_compiles_to_the_empty_state_and_null_script_declares_
     compiler, _ = _compiler("schema_version: 1\nscript: null\n")
     state = (await compiler.compile(make_context(), MANIFEST_STATE)).state
     assert state.script is not None and state.script.entries == ()
-    assert state.declared == (Section.SCRIPT,)
 
 
 @pytest.mark.asyncio
@@ -125,7 +199,7 @@ async def test_compile_document_takes_a_parsed_document_as_is() -> None:
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n  engine_config:\n    config:\n      model: fast\n"
     )
     state = (await compiler.compile_document(make_context(), parsed)).state
-    assert state.mcp.entries[0].server_code == "gh" and state.script is None
+    assert state.mcp.entries[0].server_code == "gh" and state.script.entries == ()
     assert state.engine_config.entries[0].config["model"] == "fast"
 
 

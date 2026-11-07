@@ -26,9 +26,9 @@ Three invariants:
   has no "who wrote this" ledger and needs none; what it never touches is
   the protected set (``core/workspace/protected_entries``: the identity
   files, the skills trees, the engine's state and configuration, dotfiles),
-  which other constructs or the engine own. ``plan`` reports what the clear
-  will remove as ``removals`` (``listed − declared``), so a dry run shows
-  the bot-written file that is about to go.
+  which other constructs or the engine own. The preview reports planned
+  removals; the writer reports removed files and empty directories from
+  the fresh listing used by the clear.
 - **Replace, don't diff.** Every apply rewrites every member — a drifted
   file would survive a source-side comparison — so ``plan`` classifies for
   the report only (``created`` when the path was not listed under the root,
@@ -52,10 +52,10 @@ Two things are re-asked here rather than trusted:
 
 The write window: the transport has no rename, so a stop between the clear
 and the last member leaves the root partly written; the member's result row
-says ``failed`` and the next apply converges it. Costs: one recursive listing
-of the workspace in ``plan`` (no per-member ``exists`` probes); one listing
-of the root and one delete per unprotected root entry, run concurrently, in
-the clear; one upload per member and one row rewrite in ``write``.
+says ``failed`` and the next apply converges it. Plan and clear each list the
+root and then only recurse into unprotected directories. Clear deletes each
+unprotected root entry concurrently. Write uploads each member and replaces
+the rows.
 """
 
 from __future__ import annotations
@@ -78,6 +78,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
     Materialiser,
@@ -148,8 +149,10 @@ class ResourcesMaterialiser(Materialiser):
                        PlannedEntry(<2026>, "created"),
                        PlannedEntry(<2025>, "updated")),
                        removals=("data/notes.txt",))
-        write   -> (EntryResult(RESOURCES, "data/prices/2026.csv", CREATED),
-                    EntryResult(RESOURCES, "data/prices/2025.csv", UPDATED))
+        write   -> CategoryWriteResult(
+                       entries=(EntryResult(RESOURCES, "data/prices/2026.csv", CREATED),
+                                EntryResult(RESOURCES, "data/prices/2025.csv", UPDATED)),
+                       removals=("data/notes.txt",))
 
     ``removals`` is what the clear takes away and the declaration does not
     put back — the audit row for the root's ownership rule. ``plan`` never
@@ -213,7 +216,7 @@ class ResourcesMaterialiser(Materialiser):
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
     async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
-        """Classify against one recursive listing of the workspace; what it has and the declaration lacks is ``removals``.
+        """Classify against a snapshot of the unprotected workspace entries.
 
         The listing is the port's, which knows no policy; the protected root
         entries (``core/workspace/protected_entries``) are left out here, so
@@ -228,24 +231,20 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         try:
-            entries = await self._resources.list_entries(
-                entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine, recursive=True
+            _, entries = await self._workspace_snapshot(
+                dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
             )
         except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
             raise ResourcesRootNotListed() from exc
-        listed = frozenset(
-            entry.path
-            for entry in entries
-            if not entry.is_dir and not is_protected_root_entry(entry.path.split("/", 1)[0])
-        )
+        listed = frozenset(entry.path for entry in entries if not entry.is_dir)
         planned = tuple(
             PlannedEntry(intent=intent, outcome="updated" if intent.identity in listed else "created")
             for intent in intents
         )
         declared = {intent.identity for intent in intents}
-        return CategoryPlan(entries=planned, removals=tuple(sorted(listed - declared)))
+        return CategoryPlan(entries=planned, removals=_removals(entries, declared))
 
-    async def write(self, ctx: ApplyContext, plan: CategoryPlan) -> Sequence[EntryResult]:
+    async def write(self, ctx: ApplyContext, plan: CategoryPlan) -> CategoryWriteResult:
         """Clear the root, write every member in declaration order, then replace the rows.
 
         A clear that fails raises ``ResourcesRootNotCleared`` with nothing
@@ -260,7 +259,7 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
-        await self._clear(coords)
+        cleared = await self._clear(coords)
         results: list[EntryResult] = []
         written: list[WrittenFile] = []
         for planned in plan.entries:
@@ -287,13 +286,14 @@ class ResourcesMaterialiser(Materialiser):
             raise ConfirmedPartialWriteError(
                 "the resource files were written but the bot's resource rows could not be replaced"
             ) from exc
-        return tuple(results)
+        declared = {planned.intent.identity for planned in plan.entries}
+        return CategoryWriteResult(tuple(results), _removals(cleared, declared))
 
-    async def _clear(self, coords: dict[str, str]) -> None:
+    async def _clear(self, coords: dict[str, str]) -> tuple[WorkspaceEntry, ...]:
         """Delete every unprotected root entry, concurrently, or raise ``ResourcesRootNotCleared``.
 
-        One listing of the root names what is there; the protected entries
-        (``core/workspace/protected_entries``) are skipped, and the rest go in
+        A fresh snapshot records descendants for the report. The shallow
+        listing determines which actual root entries to delete. They go in
         one ``asyncio.gather`` — a directory by the port's tree delete, a file
         by its delete. A root with nothing unprotected is already clear (a
         first apply). The transports' one failure signal is a ``False``, and
@@ -303,18 +303,67 @@ class ResourcesMaterialiser(Materialiser):
         words.
         """
         try:
-            entries = await self._resources.list_entries(**coords)
-            targets = [entry for entry in entries if not is_protected_root_entry(entry.path)]
+            targets, entries = await self._workspace_snapshot(coords)
             done = await asyncio.gather(*(self._remove(coords, entry) for entry in targets))
         except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
             raise ResourcesRootNotCleared() from exc
         if not all(done):
             raise ResourcesRootNotCleared()
+        return entries
+
+    async def _workspace_snapshot(
+        self, coords: dict[str, str]
+    ) -> tuple[tuple[WorkspaceEntry, ...], tuple[WorkspaceEntry, ...]]:
+        """Read the unprotected roots and their descendants without following protected trees."""
+        roots = await self._resources.list_entries(**coords)
+        _validate_workspace_listing(roots, shallow=True)
+        targets = tuple(entry for entry in roots if not is_protected_root_entry(entry.path))
+        entries = list(targets)
+        for target in targets:
+            if not target.is_dir:
+                continue
+            descendants = await self._resources.list_entries(**coords, prefix=target.path, recursive=True)
+            _validate_workspace_listing(descendants, prefix=target.path)
+            entries.extend(descendants)
+        return targets, tuple(entries)
 
     async def _remove(self, coords: dict[str, str], entry: WorkspaceEntry) -> bool:
         if entry.is_dir:
             return await self._resources.delete_dir(**coords, path=entry.path)
         return await self._resources.delete(**coords, path=entry.path)
+
+
+def _validate_workspace_listing(
+    entries: Sequence[WorkspaceEntry], *, shallow: bool = False, prefix: str = ""
+) -> None:
+    """Fail closed when a filesystem reports a path outside the listing contract."""
+    for entry in entries:
+        parts = entry.path.split("/")
+        if (
+            any(part in ("", ".", "..") or "\x00" in part for part in parts)
+            or (shallow and len(parts) != 1)
+            or (prefix and not entry.path.startswith(f"{prefix}/"))
+        ):
+            raise ValueError("invalid workspace listing path")
+
+
+def _removals(entries: Sequence[WorkspaceEntry], declared: set[str]) -> tuple[str, ...]:
+    """Report removed files and empty directories, excluding rebuilt paths."""
+    files: set[str] = set()
+    directories: set[str] = set()
+    for entry in entries:
+        if not is_protected_root_entry(entry.path.split("/", 1)[0]):
+            (directories if entry.is_dir else files).add(entry.path)
+
+    # Directories containing old files are already represented by those files.
+    # Only proper ancestors of declared files are rebuilt as directories.
+    excluded: set[str] = set()
+    for path in files | declared:
+        while "/" in path:
+            path = path.rsplit("/", 1)[0]
+            excluded.add(path)
+    empty = {f"{path}/" for path in directories - excluded}
+    return tuple(sorted((files - declared) | empty))
 
 
 def _stored(entry: DesiredResource) -> ContentRef:

@@ -153,6 +153,7 @@ class TestCreateBotBcnRegister:
 
         svc._bcn_service.register_provider_bot.assert_called_once_with(
             teamclaw_bot_uuid="cc-svc-1",
+            provider_bot_ref="cc-svc-1:staff_u1",
             owner_workno="u1",
             name="cc-svc-bot",
             summary="service desc",
@@ -387,6 +388,7 @@ class TestCreateBotBcnRegister:
 
         svc._bcn_service.register_provider_bot.assert_called_once_with(
             teamclaw_bot_uuid="oc-svc-1",
+            provider_bot_ref="oc-svc-1:staff_u1",
             owner_workno="u1",
             name="oc-svc-bot",
             summary="oc svc desc",
@@ -498,6 +500,8 @@ def test_deferred_create_registers_all_engine_types_once(engine, bot_type):
         )
     assert record["bot_id"] == "all-1"
     expected = dict(teamclaw_bot_uuid="all-1", owner_workno="u1", name="all-bots", summary="description")
+    if bot_type == "service":
+        expected["provider_bot_ref"] = "all-1:staff_u1"
     if engine == "openclaw" and bot_type in ("personal", "desktop"):
         expected["connection_mode"] = "plugin"
     svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)

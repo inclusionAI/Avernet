@@ -785,7 +785,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     taskGroupParams('manager-session', 'manager-run', 'manager'),
   );
   const state = harness.state('bcs_grp_test:manager-session');
-  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task', 'bcs_task_complete']);
+  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task', 'bcs_task_status', 'bcs_cancel_task', 'bcs_task_complete']);
   emitClaim(harness, state, state.followups[0] as UserMessage);
 
   const assign = state.tools.find(tool => tool.name === 'bcs_assign_task');
@@ -798,7 +798,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     response_mode: 'after-last-tool-call',
   }, toolRunContext(state.agent)), {
     ok: true,
-    task_id: 'task-1',
+    task_ref: 'T-task1',
     status: 'dispatched',
   });
   assert.deepEqual(await complete.execute({ summary: ' All work is done. ' }, toolRunContext(state.agent)), {
@@ -822,7 +822,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
   await bridge.dispose();
 });
 
-test('registers only the worker task-message tool for a manager-worker worker', async () => {
+test('does not expose a worker task-message tool for a manager-worker worker', async () => {
   const harness = new FakeHarness();
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
@@ -833,19 +833,8 @@ test('registers only the worker task-message tool for a manager-worker worker', 
     taskGroupParams('worker-session', 'worker-run', 'worker'),
   );
   const state = harness.state('bcs_grp_test:worker-session');
-  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_send_task_message']);
-  emitClaim(harness, state, state.followups[0] as UserMessage);
-
-  const sendMessage = state.tools[0];
-  assert.ok(sendMessage);
-  assert.deepEqual(await sendMessage.execute({ message: ' Blocked on credentials. ' }, toolRunContext(state.agent)), {
-    ok: true,
-    status: 'sent',
-  });
-  assert.deepEqual(client.requests, [{
-    method: 'task.message',
-    params: { group_id: 'bcs_grp_test:worker-session', message: 'Blocked on credentials.' },
-  }]);
+  assert.deepEqual(state.tools.map(tool => tool.name), []);
+  assert.deepEqual(client.requests, []);
   await bridge.dispose();
 });
 

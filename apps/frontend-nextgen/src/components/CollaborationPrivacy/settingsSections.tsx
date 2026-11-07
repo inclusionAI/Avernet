@@ -10,7 +10,7 @@ import type { DirectSetting } from '@/services/collaborationPrivacy';
 import { cn } from '@/utils/cn';
 import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
 import { ControlStateTooltip, LabelHelpTooltip } from './HelpTooltip';
-import { RelationCard } from './RelationCard';
+import { RelationCard, type RelationCardProps } from './RelationCard';
 import { RequestList } from './RequestList';
 
 export interface VisibilitySectionCallbacks {
@@ -149,7 +149,7 @@ export function BotAbilitySettings({
       {grid ? (
         <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">{rows}</div>
       ) : (
-        <div className="divide-y divide-border">{rows}</div>
+        <div className="divide-y divide-divider">{rows}</div>
       )}
     </>
   );
@@ -160,6 +160,8 @@ interface BotVisibilitySettingsProps extends VisibilitySectionCallbacks {
   showUserVisibility?: boolean;
   /** 外部 Bot 无审批链路：不渲染待审批/审批链接，也不因审批态禁用编辑（数据面已由外部合同归一）。 */
   isExternalBot?: boolean;
+  /** 公开风险前置检测在途态（仅影响「对用户」行，bot-public-risk-check）。 */
+  userRiskStatus?: RelationCardProps['riskStatus'];
 }
 
 /** Bot 可见性分区：标题 + 双 audience 行（对用户 / 对 Bot 独立配置）。 */
@@ -167,6 +169,7 @@ export function BotVisibilitySettings({
   bot,
   showUserVisibility = true,
   isExternalBot = false,
+  userRiskStatus,
   onEditPublication,
   onViewScope,
 }: BotVisibilitySettingsProps) {
@@ -179,13 +182,14 @@ export function BotVisibilitySettings({
           content={showUserVisibility ? botVisibilitySection.description : visibilityAudience.bot.description}
         />
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-divider">
         {showUserVisibility && (
           <RelationCard
             audience="user"
             config={bot.publication.user}
             pending={bot.pendingPublications.user}
             disabled={!bot.joinedBcn}
+            riskStatus={userRiskStatus}
             onEdit={() => onEditPublication(bot, 'user')}
             onViewScope={() => onViewScope(bot, 'user')}
           />
@@ -234,7 +238,7 @@ export function PublishApprovalSettings({
           content="控制共同编辑者发布该 Bot 前是否需要 Owner 审批；仅团队空间 Bot 展示本组。"
         />
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-divider">
         <SettingRow
           label="共同编辑者发布需 Owner 审批"
           description="开启后，共同编辑者发布该 Bot 前需经 Owner 审批；关闭后可直接发布。"

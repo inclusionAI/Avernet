@@ -69,10 +69,10 @@ export function useSessionTaskPanelBootstrap({
 
   useEffect(() => {
     if (!sessionId || !userId) return undefined;
-    // 正在展示的任务面板优先于“会话最新任务”自动恢复。任务节点会话导航会往返重挂
-    // 会话页，此组件 ref 不应作为唯一记忆；已有 activeTaskId 时继续沿用当前副屏。
-    if (useTaskSidePanelStore.getState().activeTaskId) return undefined;
-    const bootstrapKey = `${userId}:${sessionId}`;
+    // 任务列表「进入对话」是显式焦点切换，必须优先于已有活跃任务；普通进入才沿用当前副屏。
+    const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
+    if (!requestedTaskId && useTaskSidePanelStore.getState().activeTaskId) return undefined;
+    const bootstrapKey = `${userId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
     if (bootstrapKeyRef.current === bootstrapKey) return undefined;
     bootstrapKeyRef.current = bootstrapKey;
     let cancelled = false;
@@ -80,13 +80,19 @@ export function useSessionTaskPanelBootstrap({
     void (async () => {
       try {
         const result = await listMyTasks({ user_id: userId });
-        if (cancelled || isEnvelopeFailure(result) || !result.data) return;
+        if (cancelled) return;
+        if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(requestedTaskId);
+        if (isEnvelopeFailure(result) || !result.data) return;
         const records = Array.isArray(result.data) ? result.data : normalizeMyTaskPage(result.data).items;
-        const record = findLatestTaskForSession(records, sessionId);
+        const record = requestedTaskId
+          ? records.find((item) => item.task_id === requestedTaskId && resolveTaskMainSessionId(item) === sessionId)
+          : findLatestTaskForSession(records, sessionId);
         const panel = panelRef.current;
         if (cancelled || !record || !panel) return;
         useTaskSidePanelStore.getState().setActiveTask(record.task_id);
+        useTaskSidePanelStore.getState().markTaskPanelOpenIntent(record.task_id);
         panel.openTab(buildSessionTaskPanelTab(record, userId));
+        if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(record.task_id);
       } catch {
         // 副屏自动恢复是增强体验：查询失败不阻断会话，历史分页加载后旧消息仍可兜底。
       }

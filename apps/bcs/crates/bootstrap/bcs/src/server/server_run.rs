@@ -1,8 +1,43 @@
 //! Extracted verbatim from `server.rs`: router building, lifecycle init, scanners, and run loops.
 use super::*;
 
+/// Both mounted OAuth entries (plan Task 11): the LEGACY `/auth/*`
+/// route state and the V1 `/openapi/v1/auth/*` application service.
+/// They share the same strict session identity port, provider chain,
+/// and pending-login store, and differ ONLY in the flow namespace and
+/// callback base the application service pins at construction.
+struct SecureOAuthEntries {
+    legacy_state: Arc<bcs_http::oauth::OAuthRouteState>,
+    v1_service: Arc<dyn bcs_service_api::application::v1::AuthService>,
+    v1_public_base_url: String,
+}
+
 impl BcsServer {
-    fn build_full_oauth_route_state(&self) -> Option<Arc<bcs_http::oauth::OAuthRouteState>> {
+    /// The finite EXACT trusted-origin subset of `cors.allowed_origins`
+    /// for the legacy entry's cookie CSRF gate (plan §8.3 compatibility
+    /// tightening): wildcards (`*`), the literal `null`, and empty
+    /// entries are EXCLUDED. When nothing remains, cookie-authenticated
+    /// unsafe writes are rejected (fail closed). Origins are never
+    /// inferred from Host or Referer.
+    fn exact_cors_origins(config: &crate::config::BcsConfig) -> Vec<String> {
+        let mut trusted: Vec<String> = config
+            .cors
+            .allowed_origins
+            .iter()
+            .map(|origin| origin.trim())
+            .filter(|origin| {
+                !origin.is_empty()
+                    && *origin != "null"
+                    && *origin != "*"
+                    && !origin.contains('*')
+            })
+            .map(str::to_string)
+            .collect();
+        trusted.dedup();
+        trusted
+    }
+
+    fn build_secure_oauth_entries(&self) -> Option<SecureOAuthEntries> {
         let auth_chain = Arc::clone(&self.state.auth_chain);
         // `auth_config.oauth` is the resolved form: present only when a
         // non-empty jwt_secret was configured (I6 gate lives in resolve).
@@ -13,10 +48,8 @@ impl BcsServer {
             if !resolved.jwt_secret.is_empty() {
                 let base = resolved.base_url.trim();
                 if base.starts_with("http://") || base.starts_with("https://") {
-                    let mut providers: std::collections::HashMap<
-                        String,
-                        Arc<dyn bcs_auth_api::OAuthProvider>,
-                    > = std::collections::HashMap::new();
+                    let mut providers: Vec<(String, Arc<dyn bcs_auth_api::OAuthProvider>)> =
+                        Vec::new();
 
                     // Build every configured provider instance via the
                     // composition-root factory. A misconfigured provider
@@ -26,7 +59,7 @@ impl BcsServer {
                     for (name, cfg) in &raw.providers {
                         match crate::auth_wiring::build_oauth_provider(name, cfg) {
                             Ok(provider) => {
-                                providers.insert(name.clone(), provider);
+                                providers.push((name.clone(), provider));
                             }
                             Err(e) => {
                                 panic!("Invalid OAuth provider configuration: {e}");
@@ -35,22 +68,106 @@ impl BcsServer {
                     }
 
                     if !providers.is_empty() {
-                        if let Some(user_port) = self.state.user_identity_port.clone() {
-                            let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new(
-                                &resolved.jwt_secret,
-                                user_port,
-                                providers,
-                                resolved.clone(),
-                                Some(auth_chain),
-                            ));
+                        // Deterministic chain order (the legacy entry has
+                        // always sorted by name; the application service
+                        // preserves this injection order).
+                        providers.sort_by(|a, b| a.0.cmp(&b.0));
+
+                        if let (Some(user_port), Some(identities)) = (
+                            self.state.user_identity_port.clone(),
+                            self.state.auth_session_identity.clone(),
+                        ) {
+                            // Shared, in-process, atomically-consumed pending
+                            // login store (plan §8.4; multiple instances must
+                            // hold one logical store instead — documented).
+                            let pending = std::sync::Arc::new(
+                                bcs_auth_oauth::MemoryPendingOAuthLoginStore::new(),
+                            );
+                            let provider_bridge = std::sync::Arc::new(
+                                crate::api_auth_ports::ConfiguredOAuthProviderBridge::new(
+                                    providers.clone(),
+                                ),
+                            );
+
+                            // Both entries share ONE strict identity port
+                            // (state lives there), differ only in the flow
+                            // namespace / callback base, which the routes pin.
+                            let legacy_bridge =
+                                crate::api_auth_ports::StrictSessionPortBridge::new(
+                                    std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
+                                        bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
+                                        identities.clone(),
+                                        resolved.env.clone(),
+                                        resolved.idle_timeout_secs(),
+                                    )),
+                                    identities.clone(),
+                                    resolved.env.clone(),
+                                );
+                            let v1_bridge = crate::api_auth_ports::StrictSessionPortBridge::new(
+                                std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
+                                    bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
+                                    identities.clone(),
+                                    resolved.env.clone(),
+                                    resolved.idle_timeout_secs(),
+                                )),
+                                identities,
+                                resolved.env.clone(),
+                            );
+                            let pending =
+                                std::sync::Arc::new(crate::api_auth_ports::PendingLoginStoreBridge::new(pending));
+
+                            let success_redirect =
+                                resolved.success_redirect_location().to_string();
+                            let legacy_service = std::sync::Arc::new(
+                                bcs_app_auth::AuthApplicationService::new(
+                                    provider_bridge.clone(),
+                                    std::sync::Arc::new(legacy_bridge),
+                                    pending.clone(),
+                                    success_redirect.clone(),
+                                    "legacy".to_string(),
+                                ),
+                            );
+                            let v1_service =
+                                std::sync::Arc::new(bcs_app_auth::AuthApplicationService::new(
+                                    provider_bridge,
+                                    std::sync::Arc::new(v1_bridge),
+                                    pending.clone(),
+                                    success_redirect,
+                                    "v1".to_string(),
+                                ));
+
+                            let trusted_origins = Self::exact_cors_origins(&self.config);
+                            if trusted_origins.len() != self.config.cors.allowed_origins.len() {
+                                warn!(
+                                    exact = trusted_origins.len(),
+                                    configured = self.config.cors.allowed_origins.len(),
+                                    "legacy cookie CSRF trust derived from cors.allowed_origins: \
+                                     wildcard/null entries excluded"
+                                );
+                            }
+                            let legacy_state =
+                                std::sync::Arc::new(bcs_http::oauth::OAuthRouteState::new(
+                                    legacy_service,
+                                    user_port,
+                                    resolved.clone(),
+                                    Some(auth_chain),
+                                    trusted_origins,
+                                ));
 
                             info!(
-                                providers = ?route_state.providers.keys().collect::<Vec<_>>(),
+                                providers = ?providers.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(),
                                 cookie_secure = resolved.cookie_secure,
                                 env = %resolved.env,
-                                "Mounting OAuth routes"
+                                "Mounting OAuth routes (legacy entry, secured shared services)"
                             );
-                            return Some(route_state);
+                            return Some(SecureOAuthEntries {
+                                legacy_state,
+                                v1_service,
+                                v1_public_base_url: format!(
+                                    "{}/openapi/v1/auth",
+                                    resolved.base_url.trim_end_matches('/')
+                                ),
+                            });
                         }
                     } else {
                         warn!(
@@ -72,21 +189,14 @@ impl BcsServer {
         None
     }
 
-    fn openapi_auth_public_base_url(&self) -> Option<String> {
-        self.state
-            .auth_config
-            .oauth
-            .as_ref()
-            .map(|oauth| format!("{}/openapi/v1/auth", oauth.base_url.trim_end_matches('/')))
-    }
-
     /// Build the `/auth/*` router.
     ///
     /// Two mounting paths:
     /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
     ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
     ///    mounts the complete OAuth protocol routes with the auth chain
-    ///    injected as the `/auth/user` fallback.
+    ///    injected as the `/auth/user` fallback, driven by the injected
+    ///    LEGACY-flow secure `AuthService`.
     /// 2. **Identity-only** — when no usable OAuth config exists but an auth
     ///    chain (e.g. the `local` mock plugin) is present: mounts just
     ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
@@ -133,22 +243,63 @@ impl BcsServer {
             group_session_connections.clone(),
             web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
             ws_lifecycle_hook(&self.state),
+            Arc::clone(&self.state.auth_chain),
         );
-        let oauth_state = self.build_full_oauth_route_state();
+        let secure_oauth = self.build_secure_oauth_entries();
+        let oauth_state = secure_oauth.as_ref().map(|entries| entries.legacy_state.clone());
+        // The V1 login family's mount: an EXPLICIT [api.auth] decides it
+        // outright (OAuth-less chains keep auth_service unset, so the login
+        // family answers auth_not_configured while /user still projects the
+        // verified Human — spec §4.3/§8.2); the [auth.oauth]-derived mount
+        // exists only for the compat selection. The legacy /auth/* router
+        // state mounts either way: the native Human chain keeps its own
+        // primitives.
+        let (oauth_v1_service, oauth_v1_base_url) = if self.state.config.api.auth.is_some() {
+            match &self.state.explicit_api_auth {
+                Some(explicit) => (
+                    Some(Arc::clone(&explicit.auth_service)),
+                    Some(explicit.public_base_url.clone()),
+                ),
+                None => (None, None),
+            }
+        } else {
+            (
+                secure_oauth.as_ref().map(|entries| entries.v1_service.clone()),
+                secure_oauth
+                    .as_ref()
+                    .map(|entries| entries.v1_public_base_url.clone()),
+            )
+        };
         let mut openapi_v1 = self.state.openapi_v1.clone()
             .with_bot_self_service(Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
                 crate::agent_identity::build_agent_identity_port()?,
                 self.state.services.registry.clone(),
             )));
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
+        openapi_v1.worker_task_service = Some(Arc::new(
+            bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),
+        ));
         let mut browser_v1 = openapi_v1.clone();
         browser_v1.principal_verifier = Arc::new(crate::browser_principal::BrowserPrincipalVerifier(
             self.state.auth_chain.clone(),
         ));
         if let (Some(auth_service), Some(public_base_url)) =
-            (oauth_state.clone(), self.openapi_auth_public_base_url())
+            (oauth_v1_service, oauth_v1_base_url)
         {
             openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
+            if self.state.config.api.auth.is_none() {
+                openapi_v1.auth_user_verifier = Some(Arc::new(
+                    crate::compat_auth_principal::CompatAuthPrincipalVerifier(self.state.auth_chain.clone()),
+                ));
+                // The compat V1 facade uses the same exact CORS trust as
+                // legacy OAuth. Explicit chains retain their own origins.
+                let origins = Self::exact_cors_origins(&self.config);
+                if !origins.is_empty() {
+                    let origins = bcs_api_http::TrustedBrowserOrigins::new(origins)
+                        .map_err(crate::BcsError::InvalidConfig)?;
+                    openapi_v1 = openapi_v1.with_trusted_browser_origins(origins);
+                }
+            }
         }
 
         let mut router = Router::new()
@@ -168,7 +319,10 @@ impl BcsServer {
             .merge(bcs_api_http::v1::human::router(browser_v1))
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
+                // ONE final stateful verifier Arc with the main V1 ApiState;
+                // the per-actual-source CSRF origins travel with it.
                 self.state.gateway_principal_verifier.clone(),
+                self.state.openapi_v1.trusted_browser_origins.clone(),
             ))
             .merge(group_session_websocket_router);
 
@@ -184,6 +338,21 @@ impl BcsServer {
                 .cloned()
                 .collect::<std::collections::HashSet<_>>(),
         );
+
+        let mut untraced_routes = vec![
+            "/health".to_string(),
+            "/manifest".to_string(),
+            "/assets/{bundle_name}/{file_name}".to_string(),
+            "/api/v1/collaboration/manifest".to_string(),
+            "/api/v1/collaboration/assets/{bundle_name}/{file_name}".to_string(),
+            bcs_ws::web::FRONTEND_WS_ENDPOINT.to_string(),
+            bcs_ws::bot::BOT_WS_ENDPOINT.to_string(),
+            bcs_ws::web::GROUP_SESSION_WS_ENDPOINT.to_string(),
+        ];
+        if let Some(metrics) = &self.state.metrics {
+            untraced_routes.push(metrics.endpoint_path.clone());
+        }
+        let trace_filter = bcs_network_tracing::HttpServerFilter::new(untraced_routes);
 
         Ok(router
             .layer(middleware::from_fn(debug_middleware))
@@ -222,7 +391,8 @@ impl BcsServer {
                     .allow_methods(AllowMethods::mirror_request())
                     .allow_headers(AllowHeaders::mirror_request())
                     .allow_credentials(true),
-            ))
+            )
+            .layer(middleware::from_fn_with_state(trace_filter, bcs_network_tracing::http_server)))
     }
 
     async fn initialize_lifecycle(&self) -> Result<()> {
@@ -275,6 +445,8 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _a2a_card_refresh = self.state.services.a2a_bot_management.clone()
+            .map(super::a2a_wiring::start_card_refresh);
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));

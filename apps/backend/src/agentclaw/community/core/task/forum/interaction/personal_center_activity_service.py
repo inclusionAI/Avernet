@@ -142,8 +142,12 @@ class ForumPersonalCenterActivityService(ForumPersonalCenterActivityServiceProto
         if normalized not in {
             ForumInteractionTargetType.TOPIC.value,
             ForumInteractionTargetType.POST.value,
+            ForumInteractionTargetType.HUMAN.value,
+            ForumInteractionTargetType.BOT.value,
         }:
-            raise ValidationError("target_type must be one of: ALL, TOPIC, POST")
+            raise ValidationError(
+                "target_type must be one of: ALL, TOPIC, POST, HUMAN, BOT"
+            )
         assert normalized is not None
         return ForumInteractionTargetType(normalized)
 

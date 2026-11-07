@@ -20,7 +20,9 @@ Two layers are captured per profile:
   ``tests/community/local/test_load_yaml_configs.py``.
 - ``typed`` — every neutral ``ConfigModule`` dataclass, resolved against the
   merged config. This additionally catches ``di/config.py`` **code-default**
-  changes (folded in by the providers), which the raw layer cannot see.
+  changes (folded in by the providers), which the raw layer cannot see. The shared
+  bot-manager/ownership sync block additionally uses its strict parser to pin
+  defaults, including ownership disabled when omitted.
 
 The merge uses ``_deep_merge`` (the ``YamlConfigProvider`` merge) consistently
 for every profile. For the corp/sofapy path this is an approximation of sofapy's
@@ -47,6 +49,7 @@ from agentclaw.community.core.config.provider import (
     set_config_provider,
 )
 from agentclaw.community.core.config.yaml_provider import _deep_merge
+from agentclaw.community.di.bot_manager_sync_config import parse_manager_sync_config
 from agentclaw.community.di.modules.config_module import ConfigModule
 
 _BACKEND = Path(__file__).resolve().parents[3]
@@ -114,6 +117,15 @@ PROFILE_PAIRS: dict[str, tuple[str, str | None]] = {
 _HOME = os.path.expanduser("~")
 _CWD_PREFIX = os.path.abspath(os.curdir).rstrip(os.sep) + os.sep
 
+# Shipped code/yaml defaults contain literal paths under the repo's build-host
+# user home (``/home/admin``, e.g. di/config.py workspace roots,
+# application-singlebox.yaml nas/git dirs, cli-capabilities.yaml,
+# local-mcp-servers.yaml). Normalizing only ``$HOME`` keeps these literals
+# machine-dependent: on any host whose HOME is not /home/admin they survive
+# verbatim and the golden drifts. Canonicalize both the live HOME and the
+# baked-in host user so the snapshot stays machine-independent everywhere.
+_HOME_PREFIXES = tuple(p for p in (_HOME, "/home/admin") if p)
+
 
 def _load(name: str | None, config_dirs: tuple[Path, ...]) -> dict[str, Any]:
     if not name:
@@ -137,8 +149,10 @@ def _normalize(obj: Any) -> Any:
         return [_normalize(x) for x in obj]
     if isinstance(obj, str) and os.path.isabs(obj) and obj.startswith(_CWD_PREFIX):
         return "<CWD>/" + obj.removeprefix(_CWD_PREFIX).replace(os.sep, "/")
-    if isinstance(obj, str) and _HOME and _HOME in obj:
-        return obj.replace(_HOME, "~")
+    if isinstance(obj, str):
+        for prefix in _HOME_PREFIXES:
+            if prefix in obj:
+                return obj.replace(prefix, "~")
     return obj
 
 
@@ -184,6 +198,9 @@ def compute_effective_config(
         typed = {
             name: _normalize(getattr(module, name)()) for name in _PROVIDER_METHODS
         }
+        typed["bot_manager_sync"] = _normalize(
+            parse_manager_sync_config(user_config.get("bot_manager_sync"))
+        )
     finally:
         config_provider._provider = saved_provider
         config_provider._cached = saved_cached

@@ -232,7 +232,9 @@ class TeclawProviderBehavior(ProviderBehavior):
             raise PublishFlowServiceError(
                 f"teclaw build produced no config_artifact dict for bot={bot_id}"
             )
-        ctx_dev = self._resolver.resolve_for_bot(bot_id, owner_id)
+        # The Bot was already resolved by source PK. Device access uses its
+        # current Owner, while staged file keys below use its immutable entity.
+        ctx_dev = self._resolver.resolve_for_bot(bot_id, str(bot["owner_id"]))
         device_fs = self._device_fs_dispatcher.dispatch(ctx_dev)
         refs = await self._teclaw_file_promotion.stage_files(
             device_fs=device_fs,

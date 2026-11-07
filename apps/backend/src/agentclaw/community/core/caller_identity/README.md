@@ -20,6 +20,13 @@ internal_dependencies:
 
 ### Change impact
 
+OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve
+their `OwnerIdDep` locator through `openapi_v1.bot_address` before passing an
+entity to Core. A legacy `owner_id` may identify the current Owner or the
+immutable entity; an explicit `entity_id` is an exact address. Core entity
+arguments remain strict, and `actor_id` remains the authenticated caller.
+This preserves access after handoff without granting the former Owner access.
+
 Explicit OpenAPI friend IAM preparation carries a server-verified
 `friend_user_id` and owned `session_id`. The adapter verifies friendship, resolves
 the effective chat stage, and loads the actual entity address from the exact
@@ -55,3 +62,38 @@ at their known fields; there is no custom recursive boundary logging mechanism.
 
 These checks verify Backend behavior. Actual TeClaw append precedence and
 Caller identity require a separate deployed runtime integration test.
+
+### Admin-authorized call-type editing
+
+Only the MCP and CLI call-type mutation services allow the actual Bot Owner or
+an actor in configured `admin.super_admin` to edit. Other callers, including
+operator-only users and collaborators, remain denied; the shared owner-only
+asset guards and read policies are unchanged. Role membership is resolved from
+trusted configuration, with no HTTP authorization flag. The final effective
+Caller-to-Owner transition still requires a super admin.
+
+The authenticated actor remains the modifier and collaboration-lock holder.
+Active resource discovery and Passport queries/updates use the true current
+Owner, while preliminary checks, transactional writes and conditional
+compensation use the target lock key `bot_id:entity_id`. This immutable entity
+locator remains stable after an ownership handoff. Another holder's lock,
+missing/stale epochs and transaction-time lock races are still rejected.
+Existing active-service/engine checks and Passport synchronization/compensation
+remain in place; successful identity updates take effect immediately.
+
+The `caller_call_type_edit_authorized` / `caller_call_type_edit_denied` events
+record actor, Owner, entity, Bot, resource kind/code and the permission reason.
+The existing `caller_owner_transition_authorized` event records the final
+aggregate transition. Neither event logs credentials.
+
+## Stable edit-lock coordinates
+
+Caller MCP/CLI edits, lock-epoch checks, compensation and draft editability use
+`bot_id:entity_id` from the resolved Bot, matching CollaboratorLockService.
+Owner authorization, the lock holder and credential subjects remain personnel
+identities. `CallerIamTokenContext` carries the required resolved `entity_id`
+alongside the current `owner_id`; IAM refresh uses the entity for lock lookup and
+the Owner for permission and runtime requests. No browser request or response
+schema changes. Consumers constructing this internal context must supply entity;
+the in-repository producer and tests are updated together. A missing entity must
+not silently bypass another user's lock by querying a new Owner-qualified key.

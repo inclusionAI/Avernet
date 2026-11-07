@@ -27,6 +27,12 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
     WorkOrderApproverModel,
 )
+from agentclaw.community.core.repository.implementations.bot.owner_handoff_space import (
+    handoff_space_id,
+)
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
@@ -151,6 +157,7 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
             if ext.get("owner_handoff"):
                 raise HandoffError("BOT_OWNER_HANDOFF_IN_PROGRESS")
             self._assert_orders(db, bot)
+            handoff_space_id(db, bot, new_owner_id)
             bindings = self._bindings(db, bot_pk)
             if len(bindings) > 1 or any(b.status == "PENDING" for b in bindings):
                 raise HandoffError("EXECUTION_IDENTITY_CONFLICT")
@@ -278,7 +285,7 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
             raise HandoffError("HANDOFF_LOCK_CONFLICT")
 
     def finish(self, operation_id, worker):
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             row = (
                 self._query(db)
                 .filter(OwnerHandoffModel.operation_id == operation_id)
@@ -295,6 +302,7 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
             ):
                 raise HandoffError("BOT_IDENTITY_CONFLICT")
             self._assert_orders(db, bot)
+            target_space_id = handoff_space_id(db, bot, row.new_owner_id)
             bindings = self._bindings(db, row.bot_pk)
             if row.binding_id is None:
                 if bindings:
@@ -312,8 +320,15 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
                 binding.authorization_id = row.authorization_id
                 binding.agent_id = row.agent_id
                 binding.credential_status = "ISSUED"
+            # Preserve unvisited legacy owner-key overrides before responsibility
+            # changes; immutable entity identity and canonical values stay put.
+            CapabilityDesiredStateRepository.normalize_mcp_config_address(
+                db, bot_id=bot.bot_id, owner_id=bot.entity_id, env=bot.env,
+            )
+            db.flush()
             self._unfreeze(db, row, bot)
             bot.owner_id = row.new_owner_id
+            bot.space_id = target_space_id
             bot.owner_name = row.new_owner_name
             bot.modifier_id = row.actor_id
             db.query(BotCollaboratorModel).filter(

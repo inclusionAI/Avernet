@@ -221,6 +221,9 @@ class ForumTopicRecord:
     # repository layer; ForumService enriches them for the openapi surface.
     reply_count: int = 0
     latest_activity_at: datetime | None = None
+    # Whether the Topic currently meets the serving-side hot-list gate. The
+    # concrete score stays internal because the client only renders a marker.
+    is_hot: bool = False
     display_name: str | None = None
     avatar_url: str | None = None
     viewer: ForumTopicViewerRecord | None = None
@@ -269,6 +272,21 @@ class ForumTopicPage:
 class ForumPostPage:
     total: int
     items: tuple[ForumPostRecord, ...]
+
+
+@dataclass(frozen=True)
+class ForumPostLocationRecord:
+    """Display-page location of one Post inside its Topic.
+
+    ``root_post_id`` is the first-level Post whose floor group contains the
+    target. For a direct floor it equals ``post_id``. ``page`` uses the same
+    page-size and helpful-first ordering as the public reply list, so a caller
+    can load that page and scroll to the exact Post.
+    """
+
+    post_id: str
+    root_post_id: str
+    page: int
 
 
 ForumPollProjectionCalculator = Callable[

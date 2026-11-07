@@ -60,7 +60,7 @@ function readTemplateName(dto: CollaboratingBotDto, templateType: string | undef
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const ownerId = dto.entity_id?.trim() || undefined;
-  const botId = ownerId ? `${realBotId}:${ownerId}` : realBotId;
+  const botId = dto.bcn_bot_id || (ownerId ? `${realBotId}:${ownerId}` : realBotId);
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
@@ -79,6 +79,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
+    avatarUrl: dto.avatar_url?.trim() || undefined,
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',

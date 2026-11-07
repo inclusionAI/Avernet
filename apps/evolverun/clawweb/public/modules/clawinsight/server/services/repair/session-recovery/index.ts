@@ -15,22 +15,23 @@ import { HttpRecoveryResultReporter } from "./result-reporter.js";
 import type { SessionRecoveryRuntime } from "./contracts.js";
 import type { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import { SessionRecoveryError } from "./errors.js";
+import { logRepairEvent } from "../common/logging.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
-import type { DingTalkNotificationSender } from "../../notifications/dingtalk-sender.js";
+import type { RecoveryNotificationSender } from "./notification.js";
 
 export function createSessionRecoveryRuntime(options: {
   db: IDatabase; repo: EvolveRepository; runtime: BotRuntime; targets: BotTargetResolver; ais: AisExecutor;
   publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore;
-  notificationSender?: Pick<DingTalkNotificationSender, "sendNotification"> | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
+  notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
-    console.warn("[session-recovery] unavailable: task database is not configured");
+    logRepairEvent("session-recovery", "session_recovery_runtime", "unavailable", { reason: "task database is not configured" });
     return undefined;
   }
   if (!Number.isSafeInteger(options.snapshotId) || options.snapshotId <= 0) {
-    console.warn("[session-recovery] unavailable: AIS Snapshot is not configured");
+    logRepairEvent("session-recovery", "session_recovery_runtime", "unavailable", { reason: "AIS Snapshot is not configured" });
     return undefined;
   }
   const controlPlaneEnvironment = getCurrentEnv() === "prod" ? "prod" : "pre";
@@ -42,7 +43,7 @@ export function createSessionRecoveryRuntime(options: {
     config: notificationConfig, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
-  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig);
+  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment);
   const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,

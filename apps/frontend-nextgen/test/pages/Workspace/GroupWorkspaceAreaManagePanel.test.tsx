@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const baseGroup = {
   groupId: 'g1',
@@ -25,9 +25,16 @@ const baseGroup = {
 };
 
 // 可变 mock 状态：测试内切换 selectedGroupId 后 rerender，模拟侧栏切群。
-const mockState: { selectedGroupId: string | null } = { selectedGroupId: 'g1' };
+const mockState: { selectedGroupId: string | null; hideGroup?: boolean; expandedGroupIds?: Record<string, true> } = { selectedGroupId: 'g1' };
+const mockSessionLoad = jest.fn();
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
+const mockOpenSession = jest.fn();
+const mockApplySessionUpdate = jest.fn();
+const mockGetSessionDetail = jest.fn(async (sessionId: string) => ({
+  ok: true,
+  data: { sessionId, title: '会话详情' },
+}));
 const mockCreateGroupShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/groups/test' } }));
 const mockCreateSessionShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/sessions/test' } }));
 
@@ -41,13 +48,13 @@ const mockStore = {
 jest.mock('@/stores/workspaceStore', () => ({
   useWorkspaceStore: (selector?: (s: typeof mockStore) => unknown) => (selector ? selector(mockStore) : mockStore),
 }));
-jest.mock('@/services/workspace/sessionService', () => ({ sessionService: { getSessionDetail: jest.fn() } }));
+jest.mock('@/services/workspace/sessionService', () => ({ sessionService: { getSessionDetail: mockGetSessionDetail } }));
 jest.mock('sonner', () => ({ toast: { info: jest.fn(), error: jest.fn(), success: jest.fn() } }));
 
 jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
   useGroupWorkspace: () => ({
-    groups: [baseGroup],
-    expandedGroupIds: {} as Record<string, true>,
+    groups: mockState.hideGroup ? [] : [baseGroup],
+    expandedGroupIds: mockState.expandedGroupIds ?? {},
     selectedGroupId: mockState.selectedGroupId,
     selectedGroup: baseGroup,
     canManageGroup: { allowed: true },
@@ -76,7 +83,9 @@ jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
 // 会话数据可切换：接线守护用例需注入选中会话（resources 副屏渲染条件之一）。
 const sessionsMock = { selectedSession: null as { sessionId: string; title: string } | null };
 jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
-  useGroupSessions: () => ({
+  useGroupSessions: (groupId: string, expandedGroupIds: string[]) => {
+    mockSessionLoad(groupId, expandedGroupIds);
+    return ({
     sessionsByGroupId: {},
     hasMoreSessionsByGroupId: {},
     totalSessionsByGroupId: {},
@@ -87,18 +96,19 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     reloadGroup: jest.fn(),
     selectedSession: sessionsMock.selectedSession,
     selectedSessionId: sessionsMock.selectedSession?.sessionId ?? null,
-    openSession: jest.fn(),
+    openSession: mockOpenSession,
     createSessionIn: jest.fn(),
     leaveSession: jest.fn(),
     updateMemberMode: jest.fn(),
-    applySessionUpdate: jest.fn(),
+    applySessionUpdate: mockApplySessionUpdate,
     favoriteSessionIds: [],
     sessionSearchText: '',
     setSessionSearchText: jest.fn(),
     toggleFavorite: jest.fn(),
     renameSession: jest.fn(),
     deleteSession: jest.fn(),
-  }),
+  });
+  },
 }));
 // GroupWorkspaceArea 直接读 chat.chat.messages / chat.panelRef（头部图标域编排），
 // 桩件需提供最小 chat 契约（其余 chat.* 字段仅作为 props 透传给已 mock 的 GroupChatPane）。
@@ -125,6 +135,8 @@ jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
       <button type="button" onClick={() => onTogglePanel('manage')}>
         打开管理面板
       </button>
+      <button type="button" onClick={() => onTogglePanel('sessionManage')}>打开会话管理面板</button>
+      <button type="button" onClick={() => onTogglePanel('none')}>关闭临时面板</button>
       <button type="button" onClick={() => onTogglePanel('resources')}>
         打开资源面板
       </button>
@@ -156,7 +168,14 @@ jest.mock('@/pages/Workspace/components/GroupSidebar', () => {
   const actual = jest.requireActual<typeof import('@/pages/Workspace/components/GroupSidebar')>(
     '@/pages/Workspace/components/GroupSidebar',
   );
-  return { ...actual, GroupSidebar: () => <aside data-testid="in-flow-group-sidebar" /> };
+  return {
+    ...actual,
+    GroupSidebar: ({ onManageSession }: { onManageSession: (groupId: string, sessionId: string) => void }) => (
+      <aside data-testid="in-flow-group-sidebar">
+        <button type="button" onClick={() => onManageSession('g1', 's1')}>侧栏管理会话</button>
+      </aside>
+    ),
+  };
 });
 
 const { GroupWorkspaceArea } =
@@ -169,9 +188,80 @@ function renderArea() {
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
+    mockState.hideGroup = false;
+    mockState.expandedGroupIds = {};
+    mockSessionLoad.mockClear();
+    sessionsMock.selectedSession = null;
+    mockOpenSession.mockClear();
+    mockOnSelectGroup.mockClear();
+    mockGetSessionDetail.mockClear();
+    mockApplySessionUpdate.mockClear();
     mockReloadSelectedGroup.mockClear();
     mockCreateGroupShare.mockClear();
     mockCreateSessionShare.mockClear();
+  });
+
+  it('筛选隐藏/恢复当前已展开群不改变数据加载的 expandedGroupIds', () => {
+    mockState.expandedGroupIds = { g1: true };
+    const view = renderArea();
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+    mockState.hideGroup = true;
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+    mockState.hideGroup = false;
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+  });
+
+  it('受限群入口仍只加载 scope 内的展开群', () => {
+    mockState.expandedGroupIds = { g1: true, other: true };
+    render(<GroupWorkspaceArea
+      scope={{ identityId: 'human-1', group: baseGroup, session: null }}
+      mobileListOpen={false} onCloseMobileList={jest.fn()}
+    />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+  });
+
+  it('本地覆盖层通过 Portal 定位，不再抬高整个会话遮挡持久副屏', () => {
+    sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
+    renderArea();
+    const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
+    expect(conversation).not.toHaveClass('z-20');
+
+    fireEvent.click(screen.getByRole('button', { name: '打开会话管理面板' }));
+    expect(conversation).toHaveClass('isolate');
+    expect(conversation).not.toHaveClass('z-20');
+    fireEvent.click(screen.getByRole('button', { name: '关闭临时面板' }));
+    expect(conversation).not.toHaveClass('z-20');
+  });
+
+  it('侧栏管理当前会话只补拉详情，不重新选群或触发会话历史刷新', async () => {
+    sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
+    renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '侧栏管理会话' }));
+
+    expect(mockOnSelectGroup).not.toHaveBeenCalled();
+    expect(mockOpenSession).not.toHaveBeenCalled();
+    expect(mockGetSessionDetail).toHaveBeenCalledWith('s1');
+    await waitFor(() => expect(mockApplySessionUpdate).toHaveBeenCalledWith('s1', {
+      sessionId: 's1', title: '会话详情',
+    }));
+    expect(screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]')).not.toHaveClass('z-20');
+  });
+
+  it.each([
+    ['g1', 's2'],
+    ['g2', 's1'],
+  ])('管理非当前会话仍通过 openSession 选中目标（当前 %s/%s）', async (groupId, sessionId) => {
+    mockState.selectedGroupId = groupId;
+    sessionsMock.selectedSession = { sessionId, title: '其他会话' };
+    renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '侧栏管理会话' }));
+
+    expect(mockOnSelectGroup).not.toHaveBeenCalled();
+    expect(mockOpenSession).toHaveBeenCalledTimes(1);
+    expect(mockOpenSession).toHaveBeenCalledWith('g1', 's1');
+    await waitFor(() => expect(mockApplySessionUpdate).toHaveBeenCalled());
   });
 
   it('管理面板分享有效期传入 createShare 的第二个参数，不作为目标 ID', () => {

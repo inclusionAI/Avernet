@@ -34,8 +34,9 @@ use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityMutation, BotAccessRelation, BotOwnershipView,
     BotRoleQuery, ManagerEdit, ManagerListQuery, ManagerPage, ManagerSetChange,
-    ManagerSync, TransferAction, TransferCommand, TransferKey, TransferListQuery,
-    TransferOutcome, TransferPage, TransferView, TransferStatus,
+    ManagerSync, OwnershipChange, OwnershipSync, TransferAction, TransferCommand,
+    TransferKey, TransferListQuery, TransferOutcome, TransferPage, TransferView,
+    TransferStatus,
 };
 
 const ENV: &str = "local";
@@ -181,6 +182,24 @@ fn transfer_read_rule() -> AuthorityAppScopeRule {
     )
 }
 
+fn ownership_sync_rule() -> AuthorityAppScopeRule {
+    rule(
+        APP_NAME,
+        TenantScope::Exact("tenant-a".to_string()),
+        &[AuthorityAction::OwnershipSync],
+    )
+}
+
+/// The adapter's dead placeholder mutation: the facade always
+/// rebuilds the mutation from the VERIFIED identity, so the
+/// harness commands carry this through untouched.
+fn unused_placeholder_mutation() -> AuthorityMutation {
+    AuthorityMutation {
+        mutation_id: String::new(),
+        actor: AuthorityActor::System { name: "unused".to_string() },
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AuthorizationTestingCore: a strict stub that records commands so
 // policy tests can observe exactly what the facade submitted.
@@ -189,6 +208,7 @@ fn transfer_read_rule() -> AuthorityAppScopeRule {
 #[derive(Default)]
 struct RecordingCore {
     sync_bot_ids: std::sync::Mutex<Vec<String>>,
+    ownership_sync_commands: std::sync::Mutex<Vec<(String, AuthorityActor)>>,
     transfer_commands: std::sync::Mutex<Vec<(TransferAction, String, String)>>,
     transfer_row: std::sync::Mutex<Option<TransferView>>,
 }
@@ -294,6 +314,22 @@ impl BotAuthorityCoreService for RecordingCore {
             added: 0,
             removed: 0,
             total: 0,
+        })
+    }
+
+    async fn sync_ownership(
+        &self,
+        command: OwnershipSync,
+    ) -> bcs_service_api::ServiceResult<OwnershipChange> {
+        self.ownership_sync_commands
+            .lock()
+            .expect("ownership sync lock")
+            .push((command.bot_id.clone(), command.mutation.actor.clone()));
+        Ok(OwnershipChange {
+            bot_id: command.bot_id,
+            owner_user_id: Some("alice".to_string()),
+            previous_owner_user_id: Some("bob".to_string()),
+            changed: true,
         })
     }
 
@@ -729,7 +765,7 @@ async fn config_level_rejections_fail_startup_construction() {
 }
 
 #[tokio::test]
-async fn allowed_actions_are_exactly_the_four_frozen_strings() {
+async fn allowed_actions_are_exactly_the_five_frozen_strings() {
     assert_eq!(AuthorityAction::parse("managers:sync"), Some(AuthorityAction::ManagersSync));
     assert_eq!(AuthorityAction::parse("ownership:read"), Some(AuthorityAction::OwnershipRead));
     assert_eq!(AuthorityAction::parse("ownership:accept"), Some(AuthorityAction::OwnershipAccept));
@@ -737,9 +773,56 @@ async fn allowed_actions_are_exactly_the_four_frozen_strings() {
         AuthorityAction::parse("ownership:reject"),
         Some(AuthorityAction::OwnershipReject)
     );
-    for unknown in ["managers:delete", "sync", "ownership:reject ", "", "managers"] {
+    assert_eq!(
+        AuthorityAction::parse("ownership:sync"),
+        Some(AuthorityAction::OwnershipSync)
+    );
+    for unknown in ["managers:delete", "sync", "ownership:reject ", "ownership:sync ", "", "managers"] {
         assert_eq!(AuthorityAction::parse(unknown), None);
     }
+}
+
+#[tokio::test]
+async fn ownership_sync_authorizes_independently_of_managers_sync() {
+    // A rule granting ONLY managers:sync must not authorize
+    // ownership:sync (设计 §8.3 权限隔离), and vice versa.
+    let managers_only = sync_policy(vec![full_sync_rule()]);
+    let caller = app_caller(7, Some("tenant-a"));
+    assert!(operator_forbidden_code(
+        &managers_only
+            .authorize(
+                &caller,
+                AuthorityAction::OwnershipSync,
+                "bot-1")
+            .expect_err("managers-only rule lacks ownership:sync")
+    ));
+
+    // The mirror: a rule granting only ownership:sync
+    // authorizes ownership:sync and nothing else.
+    let ownership_only = sync_policy(vec![rule(
+        APP_NAME,
+        TenantScope::Exact("tenant-a".to_string()),
+        &[AuthorityAction::OwnershipSync],
+    )]);
+    let actor = ownership_only
+        .authorize(
+            &caller,
+            AuthorityAction::OwnershipSync,
+            "bot-1")
+        .expect("ownership:sync rule authorizes the action");
+    assert_eq!(
+        actor,
+        AuthorityActor::Service { app_id: 7 },
+        "a trusted App acts under its real service id"
+    );
+    assert!(operator_forbidden_code(
+        &ownership_only
+            .authorize(
+                &caller,
+                AuthorityAction::ManagersSync,
+                "bot-1")
+            .expect_err("ownership-only rule lacks managers:sync")
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -937,6 +1020,105 @@ async fn provider_style_credentials_gain_no_authority_actions() {
     }
     assert!(core.sync_bot_ids.lock().expect("lock").is_empty());
     assert!(core.transfer_commands.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn ownership_sync_is_trusted_app_only() {
+    let core = Arc::new(RecordingCore::default());
+    // Built first: the `service` binding below would shadow the
+    // `service()` constructor for a second in-place call.
+    let managers_only = service(
+        core.clone(),
+        sync_policy(vec![full_sync_rule()]),
+        Arc::new(AllowInviteCode),
+    );
+    let service = service(
+        core.clone(),
+        sync_policy(vec![ownership_sync_rule()]),
+        Arc::new(AllowInviteCode),
+    );
+
+    // A Human-only credential is denied and never falls back to
+    // the App scope (设计 §2).
+    let error = service
+        .sync_ownership(
+            &human_caller("alice", Some("tenant-a")),
+            OwnershipSync {
+                bot_id: "bot-1".to_string(),
+                owner_user_id: "bob".to_string(),
+                mutation: unused_placeholder_mutation(),
+            },
+        )
+        .await
+        .expect_err("Human-only denied");
+    assert!(operator_forbidden_code(&error));
+    assert!(core.ownership_sync_commands.lock().expect("lock").is_empty());
+
+    // The scoped App passes, and the facade built the mutation
+    // from the VERIFIED App identity (the audit keeps the app id).
+    let result = service
+        .sync_ownership(
+            &app_caller(7, Some("tenant-a")),
+            OwnershipSync {
+                bot_id: "bot-1".to_string(),
+                owner_user_id: "bob".to_string(),
+                mutation: unused_placeholder_mutation(),
+            },
+        )
+        .await
+        .expect("scoped app syncs");
+    assert!(result.changed);
+    let recorded = core.ownership_sync_commands.lock().expect("lock").clone();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].1, AuthorityActor::Service { app_id: 7 });
+
+    // A dual Human+App credential is processed as the App (sync
+    // 始终显式选择 App 身份).
+    let result = service
+        .sync_ownership(
+            &user_plus_app_caller("mallory", 7),
+            OwnershipSync {
+                bot_id: "bot-2".to_string(),
+                owner_user_id: "bob".to_string(),
+                mutation: unused_placeholder_mutation(),
+            },
+        )
+        .await
+        .expect("dual identity processes as App");
+    assert!(result.changed);
+    let recorded = core.ownership_sync_commands.lock().expect("lock").clone();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded[1].1, AuthorityActor::Service { app_id: 7 });
+
+    // An App with ONLY the managers:sync scope cannot sync
+    // ownership (设计 §8.3 权限隔离).
+    let error = managers_only
+        .sync_ownership(
+            &app_caller(7, Some("tenant-a")),
+            OwnershipSync {
+                bot_id: "bot-1".to_string(),
+                owner_user_id: "bob".to_string(),
+                mutation: unused_placeholder_mutation(),
+            },
+        )
+        .await
+        .expect_err("managers-only scope denies ownership sync");
+    assert!(operator_forbidden_code(&error));
+
+    // A tenant outside the rule is denied (byte-exact tenant).
+    let error = service
+        .sync_ownership(
+            &app_caller(7, Some("tenant-b")),
+            OwnershipSync {
+                bot_id: "bot-1".to_string(),
+                owner_user_id: "bob".to_string(),
+                mutation: unused_placeholder_mutation(),
+            },
+        )
+        .await
+        .expect_err("tenant mismatch denied");
+    assert!(operator_forbidden_code(&error));
+    assert_eq!(core.ownership_sync_commands.lock().expect("lock").len(), 2);
 }
 
 #[tokio::test]

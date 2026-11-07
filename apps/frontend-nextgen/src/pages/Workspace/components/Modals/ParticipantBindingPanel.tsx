@@ -2,6 +2,7 @@ import { Badge, Button } from '@/components/ui';
 import type { ParticipantDefinition } from '@/services/workspace/collaborationDefinitionService';
 import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 export interface ParticipantBindingPanelProps {
   definitions: ParticipantDefinition[];
@@ -9,7 +10,7 @@ export interface ParticipantBindingPanelProps {
   bindings: Record<string, string>;
   activeKey: string;
   onActiveKeyChange: (key: string) => void;
-  /** 保留兼容：Bot 名称在下方成员选择器的已选项中展示。 */
+  /** 解析角色当前绑定的 Bot 名称。 */
   botNameResolver?: (botId: string) => string | undefined;
   /** 保留兼容：解绑由下方当前角色的已选 Bot 移除入口完成。 */
   onUnbind?: (key: string) => void;
@@ -21,7 +22,10 @@ export function ParticipantBindingPanel({
   bindings,
   activeKey,
   onActiveKeyChange,
+  botNameResolver,
 }: ParticipantBindingPanelProps) {
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [activeKey]);
   const boundCount = definitions.filter((definition) => Boolean(bindings[definition.key])).length;
   const botCount = new Set(Object.values(bindings).filter(Boolean)).size;
   const currentIndex = Math.max(
@@ -35,25 +39,25 @@ export function ParticipantBindingPanel({
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
-        <span className="text-xs font-semibold text-foreground">角色绑定</span>
-        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+    <div data-role-binding-panel className="min-w-0 border-t border-border pt-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">角色绑定</span>
+        <span className="text-xs text-muted-foreground">
           已绑定 {boundCount} / {definitions.length} 个角色，共 {botCount} 个 Bot
         </span>
       </div>
-      <div className="flex items-stretch gap-2 p-3">
+      <div className="flex items-center gap-2">
         <Button
           variant="secondary"
           size="icon"
           aria-label="上一个角色"
           disabled={currentIndex <= 0}
-          className="size-10 shrink-0"
+          className="hidden size-7 shrink-0 rounded-full border-0 bg-muted/60 sm:inline-flex"
           onClick={() => move(-1)}
         >
           <ChevronLeft className="size-4" aria-hidden />
         </Button>
-        <div data-testid="role-binding-strip" className="app-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto">
+        <div data-testid="role-binding-strip" className="app-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto p-px">
           {definitions.map((definition) => {
             const active = definition.key === activeKey;
             const bound = Boolean(bindings[definition.key]);
@@ -61,28 +65,34 @@ export function ParticipantBindingPanel({
             return (
               <Button
                 key={definition.key}
+                ref={active ? activeRef : undefined}
                 variant="ghost"
                 size="sm"
                 aria-label={`选择角色 ${label}`}
                 aria-pressed={active}
                 className={cn(
-                  'h-10 min-w-[150px] flex-1 justify-between rounded-lg border px-3 text-left',
+                  'h-16 w-40 flex-none flex-col items-stretch justify-center gap-1 rounded-lg border px-3 py-2 text-left',
                   active
-                    ? 'border-primary bg-primary/10 text-primary hover:bg-primary/10'
-                    : 'border-border bg-background text-foreground hover:border-primary/30 hover:bg-primary/10',
+                    ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/15 hover:bg-primary/5'
+                    : 'border-border bg-background text-foreground hover:border-primary/40 hover:bg-muted/40',
                 )}
                 onClick={() => onActiveKeyChange(definition.key)}
               >
-                <span className="min-w-0 truncate text-xs font-semibold">
-                  {label}
-                  {definition.required ? <span className="text-destructive"> *</span> : null}
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-medium">
+                    {label}
+                    {definition.required ? <span className="text-destructive"> *</span> : null}
+                  </span>
+                  <Badge
+                    className="shrink-0 border-0 bg-transparent px-0 text-[10px]"
+                    tone={bound ? 'success' : definition.required ? 'warning' : 'neutral'}
+                  >
+                    {bound ? '已绑定' : definition.required ? '需绑定' : '可选'}
+                  </Badge>
                 </span>
-                <Badge
-                  className="shrink-0 text-[10px]"
-                  tone={bound ? 'success' : definition.required ? 'warning' : 'neutral'}
-                >
-                  {bound ? '已绑定' : definition.required ? '需绑定' : '可选'}
-                </Badge>
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {bound ? botNameResolver?.(bindings[definition.key]) || '已选择 Bot' : '选择执行 Bot'}
+                </span>
               </Button>
             );
           })}
@@ -92,7 +102,7 @@ export function ParticipantBindingPanel({
           size="icon"
           aria-label="下一个角色"
           disabled={currentIndex >= definitions.length - 1}
-          className="size-10 shrink-0"
+          className="hidden size-7 shrink-0 rounded-full border-0 bg-muted/60 sm:inline-flex"
           onClick={() => move(1)}
         >
           <ChevronRight className="size-4" aria-hidden />

@@ -15,9 +15,10 @@
 // 顶层 props（剔除保留键），并透传 tab/params/payload/onAction/onInteraction/eventEmitter。
 import { Skeleton } from '@/components/ui';
 import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
+import { useCollaborationGroupLaunchStore } from '@/stores/collaborationGroupLaunchStore';
 import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent/registry';
-import { Component, type ComponentType, useEffect, useState } from 'react';
+import { Component, type ComponentType, useCallback, useEffect, useId, useState } from 'react';
 import { resolveBcsStateMachineApiBaseUrl } from './bcsPanelBaseUrl';
 import { RESERVED_DATA_KEYS, resolveExportName } from './resolveUmdExport';
 import { resolveUmdComponent } from './resolveUmdModule';
@@ -78,6 +79,12 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
   const cdn = tabData.cdn as string | undefined;
   const exportName = resolveExportName(tabData);
   const data = (tabData.data as Record<string, unknown> | undefined) ?? {};
+  const instanceId = useId();
+  const source = `${instanceId}:${tab?.id ?? ''}:${cdn}:${exportName}`;
+  const onOpenCreateGroup = useCallback((options?: unknown) => {
+    useCollaborationGroupLaunchStore.getState().open(source, options);
+  }, [source]);
+  useEffect(() => () => useCollaborationGroupLaunchStore.getState().close(source), [source]);
 
   const [state, setState] = useState<UmdState>({ Component: null, error: null });
 
@@ -155,6 +162,7 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
         onInteraction={onInteraction}
         eventEmitter={eventEmitter}
         {...flattened}
+        onOpenCreateGroup={onOpenCreateGroup}
       />
     </PanelRenderErrorBoundary>
   );

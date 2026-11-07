@@ -51,6 +51,7 @@ export function ChatPanel({
   fileChip,
   command,
   composerHeader,
+  composerPlaceholder,
   fileToolbar,
   senderRef,
   mode,
@@ -64,12 +65,14 @@ export function ChatPanel({
   onManageFiles,
   headerActions,
   highlightMessageId,
+  sidePaneEnabled = true,
   sidePaneOpen,
   onToggleSidePane,
   onSidePaneIsOpenChange,
 }: ChatPanelProps) {
   const persistentPanelHost = usePersistentChatLayoutPanelHost();
-  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const storedLinkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const linkedSession = sidePaneEnabled ? storedLinkedSession : null;
   const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -249,7 +252,7 @@ export function ChatPanel({
             loading={isRequesting}
             disabled={target.status !== 'available' || !isInteractive || isRequesting}
             submitType="enter"
-            placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
+            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'}
             fileChip={fileChip}
             command={command}
             slots={{ header: composerHeader }}
@@ -278,16 +281,18 @@ export function ChatPanel({
           </>
         )}
 
-        <ChatLayoutPanelSlot
-          ref={panelRef}
-          onAction={onPanelAction}
-          bridge={chatBridge}
-          dismissOnOutside={false}
-          onOpenStateChange={onSidePaneIsOpenChange}
-        />
+        {sidePaneEnabled ? (
+          <ChatLayoutPanelSlot
+            ref={panelRef}
+            onAction={onPanelAction}
+            bridge={chatBridge}
+            dismissOnOutside={false}
+            onOpenStateChange={onSidePaneIsOpenChange}
+          />
+        ) : null}
       </ChatLayout>
       {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+      {sidePaneEnabled && !persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
         <SidePanelCollapseButton onClick={onToggleSidePane} />
       ) : null}
     </section>

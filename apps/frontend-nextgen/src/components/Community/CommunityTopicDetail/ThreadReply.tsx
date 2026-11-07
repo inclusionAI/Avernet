@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/Button';
 import type { CommunityReply, InteractionSummary } from '@/domain/community/types';
+import { Heart, MessageSquare } from 'lucide-react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type ReplyElementRegistrar } from './model';
-import { MessageSquare } from 'lucide-react';
+import { cn } from '@/utils/cn';
 
 interface ThreadReplyProps {
   reply: CommunityReply;
@@ -15,7 +16,12 @@ interface ThreadReplyProps {
   loadAuthorSummary?: (author: CommunityReply['author']) => void;
   followAuthor?: (author: CommunityReply['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityReply['author']) => boolean;
+  authorFollowed?: (author: CommunityReply['author']) => boolean;
   canReply?: boolean;
+  likeCount?: number;
+  liked?: boolean;
+  likePending?: boolean;
+  onLike?: (postId: string) => void;
   onReply?: (target: { postId: string; authorName: string }) => void;
 }
 
@@ -30,11 +36,20 @@ export function ThreadReply({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   canReply = false,
+  likeCount = 0,
+  liked = false,
+  likePending = false,
+  onLike,
   onReply,
 }: ThreadReplyProps) {
   return (
-    <article data-post-id={reply.id} ref={registerElement?.(reply.id)} className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
+    <article
+      data-post-id={reply.id}
+      ref={registerElement?.(reply.id)}
+      className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5"
+    >
       <div className="flex items-center gap-2">
         <CommunityAuthorAvatar
           author={reply.author}
@@ -44,6 +59,7 @@ export function ThreadReply({
           onLoadSummary={() => loadAuthorSummary?.(reply.author)}
           onFollow={() => void followAuthor?.(reply.author)}
           followLoading={authorFollowLoading?.(reply.author) === true}
+          followed={authorFollowed?.(reply.author) === true}
         />
         <span className="text-xs font-semibold text-foreground">{reply.author.displayName}</span>
         <span className="text-xs text-muted-foreground">回复</span>
@@ -63,19 +79,39 @@ export function ThreadReply({
       </div>
       <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
-        {canReply ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[11px] text-primary"
-            leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
-            onClick={() => onReply?.({ postId: reply.id, authorName: reply.author.displayName })}
-          >
-            回复
-          </Button>
-        ) : (
-          <span />
-        )}
+        <div className="flex items-center gap-1">
+          {canReply ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
+              aria-label="回复"
+              onClick={() => onReply?.({ postId: reply.id, authorName: reply.author.displayName })}
+            >
+              <MessageSquare className="size-3.5" aria-hidden />
+              回复
+            </Button>
+          ) : null}
+          {onLike ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-busy={likePending}
+              aria-label="点赞回复"
+              aria-pressed={liked}
+              onClick={() => onLike(reply.id)}
+              className={cn(
+                'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors',
+                liked
+                  ? 'text-destructive hover:text-destructive'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+              {likeCount}
+            </Button>
+          ) : null}
+        </div>
         <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
       </div>
     </article>

@@ -85,7 +85,8 @@ impl MemoryBotRepo {
             ));
         }
 
-        // Lock order (documented): authority -> profiles ->
+        let _write_guard = self.record_write_lock.lock().await;
+        // Lock order (documented): record write -> authority -> profiles ->
         // bots -> tokens -> deleted IDs -> binding index ->
         // control-plane audit. No await inside the span
         // before the blocking file publication task, which

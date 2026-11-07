@@ -63,9 +63,6 @@ impl Bot {
             if bot.bot_uuid.as_str() == requester {
                 continue;
             }
-            if !matches_discovery_selector(&bot, &command) {
-                continue;
-            }
             let visibility = bot.capabilities.visibility.clone();
             if let Some(visibility_filter) = command.visibility.as_deref() {
                 if visibility != visibility_filter {
@@ -81,6 +78,7 @@ impl Bot {
             };
             let agent_code = bot.capabilities.agent_code.clone();
             entries.push(BotDiscoveryEntry {
+                agent_card: None,
                 bot_uuid: bot.bot_uuid,
                 capabilities: bot.capabilities,
                 visibility,
@@ -93,6 +91,7 @@ impl Bot {
                 }),
             });
         }
+        let entries = self.filter_discovery_cards(entries, &command).await?;
         Ok(BotDiscoveryResult {
             count: entries.len(),
             bots: entries,
@@ -128,6 +127,7 @@ impl Bot {
         let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
 
         BotDetailResult {
+            agent_card: None,
             bot_uuid: bot.bot_uuid,
             capabilities: bot.capabilities,
             status: bot.status,
@@ -156,6 +156,7 @@ impl Bot {
         for bot in page {
             items.push(self.bot_to_query_entry(bot).await);
         }
+        self.attach_query_cards(&mut items).await?;
         Ok(BotPagedListResult {
             items,
             total,
@@ -198,12 +199,13 @@ impl Bot {
         }
         entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         let total = entries.len() as u64;
-        let items = entries
+        let mut items = entries
             .into_iter()
             .skip(to_usize(offset))
             .take(to_usize(limit))
             .map(|(_, _, entry)| entry)
-            .collect();
+            .collect::<Vec<_>>();
+        self.attach_query_cards(&mut items).await?;
 
         Ok(BotPagedListResult {
             items,
@@ -220,6 +222,7 @@ impl Bot {
     ) -> BotQueryEntry {
         let visibility = bot.capabilities.visibility.clone();
         BotQueryEntry {
+            agent_card: None,
             bot_uuid: bot.bot_uuid,
             capabilities: bot.capabilities,
             visibility,
@@ -245,6 +248,7 @@ impl Bot {
         let visibility = bot.capabilities.visibility.clone();
         let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
         BotQueryEntry {
+            agent_card: None,
             bot_uuid: bot.bot_uuid,
             capabilities: bot.capabilities,
             visibility,
@@ -422,6 +426,7 @@ pub(super) fn discover_entry(
     };
 
     Some(BotDiscoveryEntry {
+        agent_card: None,
         bot_uuid: bot.bot_uuid,
         capabilities: bot.capabilities,
         visibility,

@@ -25,6 +25,8 @@ export async function fixture(autoDraft = false, count = 3, full = false) {
     CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, is_active INTEGER, version INTEGER, spec_json TEXT);`);
   f.raw.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 7, 1, 7, '{}')");
   let clock = Date.parse('2026-11-01T02:00:00Z');
+  // Initial policy predates the 09:00 opportunity even when tests run later.
+  vi.spyOn(Date, 'now').mockReturnValue(clock - 86400000);
   let owner: string | null = 'owner'; let permitted = true;
   const observations = new Map<string, AnalysisObservation>();
   const settings = createAutoAnalysisSettings({ repo: new AppConfigRepository(f.db), environmentDefault: '' });

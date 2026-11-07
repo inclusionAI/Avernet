@@ -35,4 +35,37 @@ describe('ReleaseNotesModal', () => {
     render(<ReleaseNotesModal open data={null} onClose={jest.fn()} />);
     expect(document.body.textContent).toContain('暂无内容');
   });
+
+  it('richText 渲染：markdown-body 排版、链接新窗口、颜色还原、空标题剪除', () => {
+    render(
+      <ReleaseNotesModal
+        open
+        data={{
+          version: '1.2.0',
+          date: '2026-10-14',
+          userReadmeHtml: '<p>须知</p>',
+          releaseNoteHtml:
+            '<p>详见<a href="https://example.com/manual">文档</a></p><p><span style="color:#FF0000">请重启 bot</span></p><h2>&nbsp;</h2><h2><strong>【20260101】</strong></h2>',
+        }}
+        onClose={jest.fn()}
+      />,
+    );
+    expect(document.body.querySelectorAll('.markdown-body').length).toBeGreaterThanOrEqual(2);
+    const link = document.body.querySelector('a[href="https://example.com/manual"]');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(document.body.querySelector('.markdown-body span[style]')?.getAttribute('style')).toContain('color');
+    expect(document.body.querySelectorAll('.markdown-body h2').length).toBe(1);
+    expect(document.body.textContent).toContain('v1.2.0 · 2026-10-14');
+  });
+
+  it('头部显示解耦：version 为空仍显示日期', () => {
+    render(
+      <ReleaseNotesModal
+        open
+        data={{ version: '', date: '2026-10-14', userReadmeHtml: '<p>须知</p>', releaseNoteHtml: '<p>发布说明</p>' }}
+        onClose={jest.fn()}
+      />,
+    );
+    expect(document.body.textContent).toContain('2026-10-14');
+  });
 });

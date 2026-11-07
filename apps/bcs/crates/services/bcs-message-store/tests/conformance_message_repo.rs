@@ -6,9 +6,7 @@ use bcs_message_store::MemoryMessageRepo;
 use bcs_message_store::MySqlMessageStore;
 use bcs_test_support::contract::repo::message_repo_contract_tests;
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[tokio::test]
 async fn memory_message_repo_passes_contract() {
@@ -149,3 +147,6 @@ mod history_window;
 
 #[path = "support/history_read.rs"]
 mod history_read;
+
+#[path = "support/cancelled_history.rs"]
+mod cancelled_history;

@@ -27,10 +27,12 @@ const MATRIX_BASELINE: Record<string, WorkOrderTypeMeta> = {
   HUMAN2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
+  // bot-public-risk-check：Bot 公开风险前置检测结果通知（后端 #3224 已推送）
+  BOT_PUBLIC_RISK: { label: 'Bot公开风险检测', tone: 'purple', category: 'NOTICE' },
 };
 
 describe('消息文案矩阵基线（§4.2 全量事件）', () => {
-  it('覆盖且仅覆盖契约里的 14 个 event_type：后端增删事件必须显式改基线', () => {
+  it('覆盖且仅覆盖契约里的 15 个 event_type：后端增删事件必须显式改基线', () => {
     expect(Object.keys(WORK_ORDER_TYPE_META).sort()).toEqual(Object.keys(MATRIX_BASELINE).sort());
   });
 
@@ -38,10 +40,10 @@ describe('消息文案矩阵基线（§4.2 全量事件）', () => {
     expect(WORK_ORDER_TYPE_META[eventType]).toEqual(expected);
   });
 
-  it('分类配比与契约一致：4 个 APPROVAL / 10 个 NOTICE', () => {
+  it('分类配比与契约一致：4 个 APPROVAL / 11 个 NOTICE', () => {
     const categories = Object.values(WORK_ORDER_TYPE_META).map((m) => m.category);
     expect(categories.filter((c) => c === 'APPROVAL')).toHaveLength(4);
-    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(10);
+    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(11);
   });
 
   it('resolveWorkOrderType 对全量事件都返回基线 meta（不落 fallback）', () => {

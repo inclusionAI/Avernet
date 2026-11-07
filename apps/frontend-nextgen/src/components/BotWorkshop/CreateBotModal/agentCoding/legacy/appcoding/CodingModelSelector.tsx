@@ -55,7 +55,7 @@ export function CodingModelSelector({
         onClick={() => onSelect(model)}
         disabled={disabled}
         className={cn(
-          'h-auto min-h-0 w-full cursor-pointer justify-start rounded-none border-0 border-t border-slate-50 bg-transparent px-3 py-2.5 text-left text-[13px] font-medium shadow-none transition-colors',
+          'h-auto min-h-0 w-full cursor-pointer justify-start rounded-none border-0 border-t border-divider bg-transparent px-3 py-2.5 text-left text-[13px] font-medium shadow-none transition-colors',
           selected ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50',
         )}
       >
@@ -163,7 +163,7 @@ export function CodingModelSelector({
         <div className="absolute z-50 mt-1 max-h-80 w-full overflow-hidden rounded-lg border border-input bg-background shadow-lg">
           {groupedEntries.length > 0 ? (
             <div className="flex max-h-80 min-h-[120px] overflow-hidden">
-              <div className="min-h-0 w-44 shrink-0 max-h-80 overflow-y-auto overscroll-contain border-r border-slate-100 bg-slate-50/70">
+              <div className="min-h-0 w-44 shrink-0 max-h-80 overflow-y-auto overscroll-contain border-r border-divider bg-slate-50/70">
                 {groupedEntries.map(([runtime, runtimeModels]) => {
                   const active = activeRuntimeGroup === runtime;
                   const count = runtimeModels.filter((model) => !!model.id).length;

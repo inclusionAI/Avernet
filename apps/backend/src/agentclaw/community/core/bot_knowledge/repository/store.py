@@ -55,12 +55,20 @@ def require_space(
     *,
     include_owner: bool = True,
     lock: bool = False,
-) -> None:
+) -> int:
     space_query = session.query(SpaceModel).filter(
-        SpaceModel.id == bot.space_id,
         SpaceModel.env == bot.env,
         SpaceModel.deleted_at.is_(None),
     )
+    if bot.space_id is None:
+        # Resolve only this Owner's existing personal space. Never assign the
+        # ORM attribute: reads and selection writes must not move the Bot.
+        space_query = space_query.filter(
+            SpaceModel.space_type == "PERSONAL",
+            SpaceModel.personal_owner_id == bot.owner_id,
+        )
+    else:
+        space_query = space_query.filter(SpaceModel.id == bot.space_id)
     space = (space_query.with_for_update() if lock else space_query).one_or_none()
     if space is None:
         raise KnowledgeError("SPACE_NOT_FOUND", 404)
@@ -68,7 +76,7 @@ def require_space(
     # explicit editors need not have a Space-member row (nor does ownership
     # derive from one). Keep the Space existence/deletion check for both.
     if space.space_type == "PERSONAL":
-        return
+        return space.id
     required = {bot.owner_id} if include_owner else set()
     if actor_id is not None:
         required.add(actor_id)
@@ -81,14 +89,13 @@ def require_space(
     members = (members_query.with_for_update() if lock else members_query).all()
     if {m[0] for m in members} != required:
         raise KnowledgeError("SPACE_MEMBER_REQUIRED", 403)
+    return space.id
 
 
-def require_editor(
-    session, bot: BotModel, actor_id: str, *, lock: bool = False
-) -> None:
-    require_space(session, bot, actor_id, lock=lock)
+def require_editor(session, bot: BotModel, actor_id: str, *, lock: bool = False) -> int:
+    space_id = require_space(session, bot, actor_id, lock=lock)
     if actor_id == bot.owner_id:
-        return
+        return space_id
     collaborator_query = session.query(BotCollaboratorModel).filter(
         BotCollaboratorModel.bot_pk == bot.id,
         BotCollaboratorModel.env == bot.env,
@@ -100,6 +107,7 @@ def require_editor(
     ).one_or_none()
     if row is None:
         raise KnowledgeError("BOT_EDITOR_REQUIRED", 403)
+    return space_id
 
 
 def require_editable(session, bot: BotModel, *, lock: bool = False) -> None:
@@ -165,12 +173,12 @@ class BotKnowledgeRepository:
         with self.db.orm_session() as session:
             bot = resolve_bot(session, scope)
             if actor_id is None:
-                require_space(session, bot, include_owner=include_owner)
+                space_id = require_space(session, bot, include_owner=include_owner)
             else:
-                require_editor(session, bot, actor_id)
+                space_id = require_editor(session, bot, actor_id)
             if for_edit:
                 require_editable(session, bot)
-            return bot.to_dict()
+            return bot.to_dict() | {"space_id": space_id}
 
     def mutate(
         self,
@@ -185,9 +193,9 @@ class BotKnowledgeRepository:
         try:
             with self.db.transactional_orm_session() as session:
                 bot = resolve_bot(session, scope, lock=True)
-                require_editor(session, bot, actor_id, lock=True)
+                current_space_id = require_editor(session, bot, actor_id, lock=True)
                 require_editable(session, bot, lock=True)
-                if bot.space_id != space_id:
+                if current_space_id != space_id:
                     raise KnowledgeError("SPACE_MISMATCH", 403)
                 row = (
                     session.query(Binding)
@@ -200,7 +208,7 @@ class BotKnowledgeRepository:
                     .one_or_none()
                 )
                 previous = row.revision if row else 0
-                current_space = row is not None and row.space_id == bot.space_id
+                current_space = row is not None and row.space_id == current_space_id
                 # Other-space rows are absent from this space's public view.
                 # Reclaim them with revision=0, but never reset the stored CAS
                 # counter: an old-space request must not match the new state.
@@ -217,7 +225,7 @@ class BotKnowledgeRepository:
                         .filter(
                             Binding.bot_pk == bot.id,
                             Binding.env == scope.env,
-                            Binding.space_id == bot.space_id,
+                            Binding.space_id == space_id,
                             Binding.enabled.is_(True),
                         )
                         .count()
@@ -227,7 +235,7 @@ class BotKnowledgeRepository:
                 if row is None:
                     row = Binding(
                         bot_pk=bot.id,
-                        space_id=bot.space_id,
+                        space_id=space_id,
                         env=scope.env,
                         kb_id=kb_id,
                         enabled=False,
@@ -236,7 +244,7 @@ class BotKnowledgeRepository:
                     )
                     session.add(row)
                 changed = not current_space or row.enabled != value
-                row.space_id = bot.space_id
+                row.space_id = space_id
                 row.enabled = value
                 if changed or not previous:
                     row.revision += 1
@@ -251,7 +259,7 @@ class BotKnowledgeRepository:
         with self.db.orm_session() as session:
             try:
                 bot = resolve_bot(session, scope)
-                require_space(session, bot)
+                space_id = require_space(session, bot)
             except KnowledgeError as exc:
                 if exc.status in (403, 404):
                     return ()
@@ -261,7 +269,7 @@ class BotKnowledgeRepository:
                 .filter(
                     Binding.env == scope.env,
                     Binding.bot_pk == bot.id,
-                    Binding.space_id == bot.space_id,
+                    Binding.space_id == space_id,
                     Binding.enabled.is_(True),
                 )
                 .order_by(Binding.kb_id)
@@ -282,13 +290,13 @@ class BotKnowledgeRepository:
     ) -> dict:
         with self.db.orm_session() as session:
             bot = resolve_bot(session, scope)
-            require_editor(session, bot, actor_id)
+            space_id = require_editor(session, bot, actor_id)
             rows = (
                 session.query(Binding)
                 .filter(
                     Binding.env == scope.env,
                     Binding.bot_pk == bot.id,
-                    Binding.space_id == bot.space_id,
+                    Binding.space_id == space_id,
                     Binding.id > cursor,
                 )
                 .order_by(Binding.id)

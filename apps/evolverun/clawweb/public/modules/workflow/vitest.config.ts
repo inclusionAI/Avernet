@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Only browser tests need a DOM. Avoid creating jsdom for server/shared
+    // suites so the full coverage run stays within the CI package budget.
+    environmentMatchGlobs: [["server/**", "node"], ["shared/**", "node"]],
     setupFiles: ["./web/test/setup.ts"],
     globals: true,
     css: false,

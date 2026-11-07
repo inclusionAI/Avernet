@@ -369,6 +369,29 @@ class TestGetRunResult:
         assert result.data.session_id == "sess-from-meta"
 
     @pytest.mark.asyncio
+    async def test_session_id_from_result_extra_when_metadata_session_id_is_invalid(
+        self,
+    ):
+        """A non-string metadata session ID falls back to result_extra."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(
+            metadata={"session_id": {"invalid": True}},
+            result_extra={
+                "session_id": "sess-from-extra",
+                "usage": {"prompt_tokens": 5},
+            },
+        )
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+
+        result = await get_run_result(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+        assert result.data.session_id == "sess-from-extra"
+
+    @pytest.mark.asyncio
     async def test_session_id_empty_when_neither_has_it(self):
         """session_id is '' when metadata is None and result_extra is None."""
         api_key = _make_api_key_record()

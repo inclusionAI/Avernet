@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol, TYPE_CHECKING
+from typing import Any, Callable, Mapping, Protocol, TYPE_CHECKING
 
 from .aicoding.strategy import (
     AICODING_ENGINE_TYPE,
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     # Neutral contract only — never import core/devices here (the engine
     # composition root must not reverse-couple into device internals).
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+    from agentclaw.community.core.common_config.common_config_service_protocol import (
+        CommonConfigServiceProtocol,
+    )
 
 logger = get_logger()
 
@@ -233,6 +236,27 @@ class EngineProvisioningRegistry:
         return self._default
 
 
+_restart_common_config_provider: Callable[[], CommonConfigServiceProtocol] | None = None
+
+
+def configure_restart_common_config(
+    provider: Callable[[], CommonConfigServiceProtocol],
+) -> None:
+    """Supply the process-wide strategies' lazy dependency during DI bootstrap.
+
+    Registration does not query configuration or replace strategy instances.
+    The DI module captures its injector; core never locates a global container.
+    """
+    global _restart_common_config_provider
+    _restart_common_config_provider = provider
+
+
+def _restart_common_config() -> CommonConfigServiceProtocol:
+    if _restart_common_config_provider is None:
+        raise RuntimeError("Coding restart common configuration is not wired")
+    return _restart_common_config_provider()
+
+
 def _build_default_registry() -> EngineProvisioningRegistry:
     """Assemble the process-wide strategy registry with all known engines.
 
@@ -241,8 +265,10 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     obvious and no lazy double-checked-locking is needed.
     """
     registry = EngineProvisioningRegistry()
-    registry.register(AicodingProvisioningStrategy(AICODING_ENGINE_TYPE))
-    registry.register(AicodingProvisioningStrategy(CLAUDE_CODE_ENGINE_TYPE))
+    registry.register(AicodingProvisioningStrategy(
+        AICODING_ENGINE_TYPE, common_config_provider=_restart_common_config))
+    registry.register(AicodingProvisioningStrategy(
+        CLAUDE_CODE_ENGINE_TYPE, common_config_provider=_restart_common_config))
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry
@@ -574,6 +600,36 @@ def resolve_restart_strategy(bot):
     )
 
 
+def resolve_status_ext(bot: dict, *, response_ext: dict, public=False) -> dict:
+    """Delegate response extension projection to the registered engine policy."""
+    _, strategy = resolve_restart_strategy(bot)
+    return strategy.project_status_ext(
+        ext=bot.get('ext') or {}, response_ext=response_ext, public=public,
+    )
+
+
+def _published_restart_strategy(record):
+    """Select the policy captured when the published restart was admitted."""
+    engine = ((record.ext or {}).get('restart') or {}).get('engine')
+    return get_engine_provisioning_registry().resolve(normalize_engine_type(engine))
+
+
+def resolve_published_status_ext(record, *, progress=None, public=False) -> dict:
+    return _published_restart_strategy(record).project_status_ext(
+        ext=record.ext or {}, response_ext={}, published=True, progress=progress, public=public,
+    )
+
+
+def resolve_published_restart_result(record):
+    return _published_restart_strategy(record).published_restart_result(record=record)
+
+
+def observe_published_restart_status(record, *, progress, mutate_ext):
+    _published_restart_strategy(record).observe_published_restart(
+        record=record, progress=progress, mutate_ext=mutate_ext,
+    )
+
+
 async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any,
                                   operation_id: str | None = None,
                                   restart_key: str | None = None) -> None:
@@ -582,18 +638,20 @@ async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime:
     Published/caller paths hold no restart lock, so the engine-owned async
     adapter runs the returned verifier inline (coding offloads both phases).
     """
-    from .aicoding.restart_dependencies import RestartBackupDependencies
-
     ctx, strategy = resolve_restart_strategy(bot)
     await strategy.prepare_restart_async(
         ctx, device_id=device_id,
-        restart_dependencies=RestartBackupDependencies.for_instance(target_runtime),
+        target_runtime=target_runtime,
         operation_id=operation_id, restart_key=restart_key
     )
 
 
 __all__ = [
     "prepare_instance_restart",
+    "resolve_status_ext",
+    "resolve_published_status_ext",
+    "resolve_published_restart_result",
+    "observe_published_restart_status",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",
@@ -602,6 +660,7 @@ __all__ = [
     "DefaultCapabilitiesEngineBucketResolverRegistry",
     "DefaultSkillSetSelectionResolverRegistry",
     "EngineProvisioningRegistry",
+    "configure_restart_common_config",
     "get_baas_engine_bucket_resolver_registry",
     "get_cli_defaults_resolver_registry",
     "get_default_capabilities_engine_bucket_resolver_registry",

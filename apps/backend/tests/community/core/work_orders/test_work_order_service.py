@@ -6,6 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
 from agentclaw.community.core.work_orders.callbacks import (
@@ -183,6 +187,7 @@ def _service(
             staff_dept,
             skill_handler,
             decision_callbacks,
+            DisabledBotManagerSync(),
         ),
         repository,
         spaces,
@@ -216,6 +221,7 @@ def _bot_editor_service():
         staff_dept,
         skill_handler,
         decision_callbacks,
+        DisabledBotManagerSync(),
     )
     return (
         service,
@@ -771,6 +777,7 @@ def test_review_requires_owner_and_delegates(
 ) -> None:
     service, repository, _, access, notifications = _service()
     repository.get_detail.return_value = _detail()
+    access.require_space_owner.return_value = (_space(), MagicMock())
     notification = WorkOrderNotificationDraft(
         recipient_user_id="applicant-1",
         notification_category=NotificationCategory.NOTICE,
@@ -818,6 +825,7 @@ def test_review_requires_owner_and_delegates(
 def test_approve_accepts_missing_or_blank_remark(value: str | None) -> None:
     service, repository, _, access, notifications = _service()
     repository.get_detail.return_value = _detail()
+    access.require_space_owner.return_value = (_space(), MagicMock())
     notification = WorkOrderNotificationDraft(
         recipient_user_id="applicant-1",
         notification_category=NotificationCategory.NOTICE,

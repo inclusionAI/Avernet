@@ -1,4 +1,4 @@
-"""Domain tests for append-only BBS interaction events and summaries."""
+"""Domain tests for BBS interaction state and summaries."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicAnalysisRecord,
     ForumTopicRecord,
 )
+from agentclaw.community.core.work_orders.models import WorkOrderEventType
 
 
 _NOW = datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc)
@@ -94,6 +95,7 @@ class FakeRepository(ForumInteractionRepositoryProtocol):
             target_type=ForumInteractionTargetType(kwargs["target_type"]),
             target_id=kwargs["target_id"],
             env="test",
+            active=kwargs["active"],
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -126,6 +128,19 @@ class FakeRepository(ForumInteractionRepositoryProtocol):
         return {pair: ForumStatsRecord(like_count=7) for pair in pairs}
 
 
+def test_record_interaction_rejects_bare_default_bot_actor():
+    service = ForumInteractionService(FakeRepository(), FakeVerifier(), FakeAuthorStatsService())
+    with pytest.raises(ValidationError, match="default:<work_no>"):
+        service.record_interaction(
+            actor_type="BOT",
+            actor_id="default",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id="default:149844",
+            active=1,
+        )
+
+
 class FakeVerifier(ForumInteractionTargetVerifierProtocol):
     def __init__(
         self,
@@ -144,10 +159,6 @@ class FakeVerifier(ForumInteractionTargetVerifierProtocol):
     def verify_post(self, post_id: str):
         self.calls.append(("post", post_id))
         return self.post
-
-    def verify_human(self, human_id: str):
-        self.calls.append(("human", human_id))
-        return True
 
     def verify_bot(self, bot_id: str):
         self.calls.append(("bot", bot_id))
@@ -197,6 +208,7 @@ def _request(
     target_id: str = "topic-1",
     actor_type: str = "HUMAN",
     actor_id: str = "user-a",
+    active: int = 1,
 ):
     return _service().record_interaction(
         actor_type=actor_type,
@@ -204,6 +216,7 @@ def _request(
         action_type=action_type,
         target_type=target_type,
         target_id=target_id,
+        active=active,
     )
 
 
@@ -212,7 +225,7 @@ def _request(
     [("TOPIC", "topic-1"), ("POST", "post-1")],
 )
 @pytest.mark.parametrize("action_type", ["VIEW", "LIKE", "FAVORITE", "FOLLOW"])
-def test_content_matrix_appends_one_event(action_type, target_type, target_id):
+def test_content_matrix_records_active_state(action_type, target_type, target_id):
     repo = FakeRepository()
     verifier = FakeVerifier()
 
@@ -222,6 +235,7 @@ def test_content_matrix_appends_one_event(action_type, target_type, target_id):
         action_type=action_type,
         target_type=target_type,
         target_id=target_id,
+        active=1,
     )
 
     assert repo.inserted == [
@@ -231,6 +245,7 @@ def test_content_matrix_appends_one_event(action_type, target_type, target_id):
             "action_type": action_type,
             "target_type": target_type,
             "target_id": target_id,
+            "active": 1,
         }
     ]
     expected_call = "topic" if target_type == "TOPIC" else "post"
@@ -251,6 +266,7 @@ def test_identity_target_only_accepts_follow(target_type):
         action_type="FOLLOW",
         target_type=target_type,
         target_id=target_id,
+        active=1,
     )
 
     assert repo.inserted == [
@@ -260,6 +276,38 @@ def test_identity_target_only_accepts_follow(target_type):
             "action_type": "FOLLOW",
             "target_type": target_type,
             "target_id": target_id,
+            "active": 1,
+        }
+    ]
+
+
+def test_active_state_is_validated_and_passed_to_persistence():
+    repo = FakeRepository()
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=0)
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=True)
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=False)
+
+    record = _service(repository=repo).record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=-1,
+    )
+
+    assert record.active == -1
+    assert repo.inserted == [
+        {
+            "actor_type": "HUMAN",
+            "actor_id": "user-a",
+            "action_type": "LIKE",
+            "target_type": "TOPIC",
+            "target_id": "topic-1",
+            "active": -1,
         }
     ]
 
@@ -286,6 +334,7 @@ def test_accept_requires_help_topic_and_first_level_post():
         action_type="ACCEPT",
         target_type="POST",
         target_id="post-1",
+        active=1,
     )
 
     assert repo.inserted[0]["action_type"] == "ACCEPT"
@@ -307,6 +356,7 @@ def test_accept_rejects_invalid_post_or_topic(topic, post, match):
             action_type="ACCEPT",
             target_type="POST",
             target_id="post-1",
+            active=1,
         )
 
 
@@ -319,6 +369,7 @@ def test_accept_requires_topic_author_identity():
             action_type="ACCEPT",
             target_type="POST",
             target_id="post-1",
+            active=1,
         )
 
 
@@ -331,6 +382,7 @@ def test_missing_topic_and_post_targets_are_not_writable():
             action_type="VIEW",
             target_type="TOPIC",
             target_id="missing",
+            active=1,
         )
     with pytest.raises(NotFound, match="post target"):
         _service(verifier=verifier).record_interaction(
@@ -339,25 +391,27 @@ def test_missing_topic_and_post_targets_are_not_writable():
             action_type="LIKE",
             target_type="POST",
             target_id="missing",
+            active=1,
         )
 
 
-def test_identity_verifier_failure_is_not_treated_as_valid_target():
-    class FailingVerifier(FakeVerifier):
-        def verify_human(self, human_id: str):
-            raise RuntimeError("directory unavailable")
+def test_human_follow_target_does_not_require_staff_directory_validation():
+    verifier = FakeVerifier()
+    result = _service(verifier=verifier).record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FOLLOW",
+        target_type="HUMAN",
+        target_id="user-b",
+        active=1,
+    )
 
-    with pytest.raises(RuntimeError, match="directory unavailable"):
-        _service(verifier=FailingVerifier()).record_interaction(
-            actor_type="HUMAN",
-            actor_id="user-a",
-            action_type="FOLLOW",
-            target_type="HUMAN",
-            target_id="user-b",
-        )
+    assert result.target_type == ForumInteractionTargetType.HUMAN
+    assert result.target_id == "user-b"
+    assert verifier.calls == []
 
 
-def test_repository_failure_prevents_a_successful_event():
+def test_repository_failure_prevents_a_successful_state():
     class FailingRepository(FakeRepository):
         def insert_interaction(self, **kwargs):
             raise RuntimeError("database unavailable")
@@ -369,6 +423,7 @@ def test_repository_failure_prevents_a_successful_event():
             action_type="LIKE",
             target_type="TOPIC",
             target_id="topic-1",
+            active=1,
         )
 
 
@@ -449,3 +504,122 @@ def test_actor_dimension_counts_only_follow_events_and_author_production():
         result.stats.accepted_reply_count,
     ) == (8, 9, 10)
     assert stats.single_actors == []
+
+
+class FakeNotificationPublisher:
+    def __init__(self) -> None:
+        self.notices: list[dict] = []
+
+    def notify(self, **kwargs):
+        self.notices.append(dict(kwargs))
+
+
+def _notifying_service(
+    *,
+    repository=None,
+    verifier=None,
+    publisher=None,
+):
+    from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+        NotifyingForumInteractionService,
+    )
+
+    return NotifyingForumInteractionService(
+        repository or FakeRepository(),
+        verifier or FakeVerifier(),
+        FakeAuthorStatsService(),
+        publisher or FakeNotificationPublisher(),
+    )
+
+
+def test_notifying_interaction_deactivation_and_other_actions_do_not_notify():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=-1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+
+    assert publisher.notices == []
+
+
+def test_notifying_interaction_emits_notices_for_identity_and_post_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-b",
+        active=1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert [notice["event_type"] for notice in publisher.notices] == [
+        WorkOrderEventType.BBS_FOLLOWED,
+        WorkOrderEventType.BBS_LIKED,
+    ]
+    assert publisher.notices[0]["recipient_type"] == "BOT"
+    assert publisher.notices[1]["recipient_type"] == "HUMAN"
+    assert publisher.notices[1]["topic_title"] == "Topic"
+
+
+def test_notifying_interaction_recipient_handles_missing_post_or_topic_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=None, post=None), publisher=publisher
+    )
+
+    post_result = service._recipient(
+        target=ForumInteractionTargetType.POST,
+        target_id="post-missing",
+    )
+    topic_result = service._recipient(
+        target=ForumInteractionTargetType.TOPIC,
+        target_id="topic-missing",
+    )
+
+    assert post_result == ("POST", "post-missing", None, "post-missing", None)
+    assert topic_result == ("TOPIC", "topic-missing", "topic-missing", None, None)
+
+
+def test_notifying_interaction_uses_post_topic_title_when_available():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=_topic(topic_type="HELP"), post=_post()),
+        publisher=publisher,
+    )
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FAVORITE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert publisher.notices[0]["event_type"] == WorkOrderEventType.BBS_FAVORITED
+    assert publisher.notices[0]["topic_title"] == "Topic"

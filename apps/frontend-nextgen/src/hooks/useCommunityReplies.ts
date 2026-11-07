@@ -53,6 +53,16 @@ export function useCommunityReplies({
     setReplyError(null);
     return fetchReplies(topicId, 1);
   }, [fetchReplies]);
+  const openReplyPage = useCallback(
+    async (topicId: string, page: number): Promise<CommunityReplyPage> => {
+      setReplyTotal(0);
+      setReplyPage(page);
+      setReplyError(null);
+      return fetchReplies(topicId, page);
+    },
+    [fetchReplies],
+  );
+
 
   const goToReplyPage = useCallback(
     async (page: number): Promise<CommunityReplyPage> => {
@@ -70,6 +80,7 @@ export function useCommunityReplies({
   return {
     resetReplies,
     openFirstReplyPage,
+    openReplyPage,
     goToReplyPage,
     replyPage,
     replyPageCount,

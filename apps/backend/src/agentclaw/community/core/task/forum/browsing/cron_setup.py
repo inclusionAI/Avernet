@@ -42,7 +42,7 @@ logger = get_logger()
 # Fixed cron schedule + runtime for the BBS Browse Loop (B mode).
 BBS_BROWSE_LOOP_CRON_EXPR = "0 * * * *"
 BBS_BROWSE_LOOP_CRON_TIMEZONE = "Asia/Shanghai"
-BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS = 600
+BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS = 55 * 60
 BBS_BROWSE_LOOP_CRON_KIND = "agentTurn"
 BBS_DIGEST_LOOP_CRON_NAME = "bbs-digest-loop"
 BBS_DIGEST_LOOP_CRON_TIMEOUT_SECS = 600
@@ -62,10 +62,17 @@ _BBS_BROWSE_CRON_NAMESPACE = "bbs-browse"
 _BBS_DIGEST_CRON_NAMESPACE = "bbs-digest"
 
 
-def bbs_browse_loop_cron_body(*, bot_id: str, backend_base_url: str) -> dict[str, Any]:
+def bbs_browse_loop_cron_body(
+    *,
+    bot_id: str,
+    owner_user_id: str,
+    backend_base_url: str,
+) -> dict[str, Any]:
     """The fixed cron body the backend upserts for an openclaw subscription."""
     if not bot_id:
         raise ValueError("bot_id is required in the BBS cron payload")
+    if not owner_user_id.strip():
+        raise ValueError("owner_user_id is required in the BBS cron payload")
     if not backend_base_url.strip():
         raise ValueError("backend_base_url is required in the BBS cron payload")
     return {
@@ -73,6 +80,7 @@ def bbs_browse_loop_cron_body(*, bot_id: str, backend_base_url: str) -> dict[str
         "schedule": BBS_BROWSE_LOOP_CRON_EXPR,
         "command": browse_cron_message(
             bot_id=bot_id,
+            owner_user_id=owner_user_id,
             backend_base_url=backend_base_url,
         ),
         "timezone": BBS_BROWSE_LOOP_CRON_TIMEZONE,
@@ -95,10 +103,17 @@ def bbs_digest_loop_cron_expr(env: str) -> str:
     raise ValueError(f"unknown normalized environment: {env}")
 
 
-def bbs_digest_loop_cron_body(*, bot_id: str, backend_base_url: str) -> dict[str, Any]:
+def bbs_digest_loop_cron_body(
+    *,
+    bot_id: str,
+    owner_user_id: str,
+    backend_base_url: str,
+) -> dict[str, Any]:
     """The fixed cron body the backend upserts for a digest subscription."""
     if not bot_id:
         raise ValueError("bot_id is required in the BBS digest cron payload")
+    if not owner_user_id.strip():
+        raise ValueError("owner_user_id is required in the BBS digest cron payload")
     if not backend_base_url.strip():
         raise ValueError("backend_base_url is required in the BBS digest cron payload")
     return {
@@ -106,6 +121,7 @@ def bbs_digest_loop_cron_body(*, bot_id: str, backend_base_url: str) -> dict[str
         "schedule": bbs_digest_loop_cron_expr(get_current_env()),
         "command": digest_cron_message(
             bot_id=bot_id,
+            owner_user_id=owner_user_id,
             backend_base_url=backend_base_url,
         ),
         "timezone": BBS_BROWSE_LOOP_CRON_TIMEZONE,
@@ -161,6 +177,7 @@ class _BbsCronManager:
 
         body = self._body_factory(
             bot_id=bot_id,
+            owner_user_id=owner_user_id,
             backend_base_url=self._backend_base_url,
         )
         result: dict[str, Any]
@@ -264,7 +281,7 @@ class BbsBrowseCronManager(_BbsCronManager):
 
 
 class BbsDigestCronManager(_BbsCronManager):
-    """Create/remove the Bot-side digest-collection cron for a subscription."""
+    """Remove the now-disabled Bot-side digest cron for a subscription."""
 
     def __init__(
         self,

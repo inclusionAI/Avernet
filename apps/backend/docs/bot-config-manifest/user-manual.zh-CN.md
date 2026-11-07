@@ -301,26 +301,26 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 
 ### 3.3 覆盖的单位是「类目区域」
 
-让清单生效 = 把**每个被声明的类目**覆盖到恰好等于声明。没声明的类目**完全不碰**。
+有效的 v1 清单完整声明 Bot 支持的类目。省略集合类目等价于 `[]`，省略顶层 `script` 等价于 `script: null`。
 
 | 类目 | 被覆盖的区域 |
 | --- | --- |
-| `skills` | **active skill set**。它等于声明；没列出的 skill 被移除 |
+| `skills` | 受管理的 Direct 安装和未被 Set 引用的 Bot 本地技能包 |
 | `identity` | **identity 文件集合**，减去保留名单（见 §8） |
-| `resources` | **仅声明的 `path` 子树**。声明的 `path` 之外一律不碰——workspace 是 bot 的工作区，不是清单的 |
-| `mcp` | **已启用的 server 集合** |
+| `resources` | workspace 中的非保护根条目，包括手工上传和 Bot 生成的普通文件 |
+| `mcp` | 受管理的 Direct 安装和 Bot override，保留现有 Set、平台默认及 Skill 依赖供应规则 |
 
-`resources` 是绝不能读成「区域 = 整个 workspace」的那一个。
+设备模式下，非保护目录会递归删除，包括首次创建时容器启动后生成的普通文件。
 
 **最容易搞错的是这三态，务必分清**：
 
 | 写法 | 含义 | 结果 |
 | --- | --- | --- |
-| `skills:` 整段不写 | 「我对 skills 没意见」 | 一个都不碰 |
-| `skills: []` | 「skill 集合是空的」——空集合**也是**声明 | **所有 skill 被移除** |
+| 省略 `skills` | 等价于 `skills: []` | 清理受管理技能 |
+| `skills: []` | 「skill 集合是空的」——空集合**也是**声明 | 清理受管理技能 |
 | `DELETE` 整份清单 | 没有任何类目被声明 | **什么都不删**，此前装上的东西留在 bot 上，只是不再有人管它 |
 
-后两行看起来矛盾，其实是同一条规则：`[]` 是声明，缺席不是声明。
+仅写 `schema_version: 1` 是有效文档，Apply 会清空适用的受管理类目。
 
 ### 3.4 类目是 all-or-nothing 写入的
 
@@ -700,7 +700,7 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 | `entries[].action` | 逐条：`created` / `updated` / `unchanged` / `skipped` / `failed` |
 | `entries[].error` | 这一条为什么没成 |
 | `result` | `RUNNING` 表示还在做；三个终态是从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
-| `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
+| `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目。Resources 的空目录用 `data/` 一类带尾斜杠的路径表示，dry-run 报预计移除，真实 Apply 在清理成功后报告确认移除的目录 |
 | `categories[].aborted` / `partially_written` | 这个类目有没有收敛；**只有 `partially_written: true` 意味着「写了一半」**，需要再 apply 一次收敛。`aborted` 单独为真表示什么都没写、没有东西要回滚 |
 | `trigger` | 这次 apply 是谁发起的：`explicit`（`POST …/apply`）、`put`（`PUT` 之后自动跟的那一次）、`create:pre_container` / `create:on_container`（用清单创建 bot 的两个阶段）、`dry_run`（预览报告，不落库）。**没有 `restart` / `republish`**——第一期它们不是 apply 点（§7） |
 
@@ -777,9 +777,10 @@ identity:
   `BOOTSTRAP` / `KNOWLEDGE` / `CLAUDE` / `GREETING` / `README`（物理文件为
   `<type>.md`）。**claude_code 引擎的 bot 只允许 `CLAUDE.md`**，写别的在 `PUT`
   时就报错，而不是 apply 时静默跳过。
-- **`MEMORY.md` 与 `IDENTITY.md` 声明不了**：它们是引擎生成的运行期状态，被列入
-  保留名单——apply 永不写、永不删。清单里写了会在 `PUT` 时被拒绝（否则你会得到
-  一份「被接受但永远收敛不了」的文档）。
+- **`MEMORY.md` 声明不了**：apply 永不写、永不删，`PUT` 明确拒绝。
+- **`IDENTITY.md` 可显式写入**：仅限目标 engine 原本允许该文件时，内容沿原身份
+  写入路径；显式空内容可清空。省略 identity 类目等价于 `identity: []`，清空可管理
+  集合，非空列表完整替换，未列出的 IDENTITY.md 同样移除。
 - **优先取源、少用内联。**内联内容游离于版本控制之外，久了会变成「藏在配置里的
   第二份人设」，排查「这句话哪来的」要看两个地方。
 - apply 走的是现有 IdentityService，所以现有派生行为原样生效（例如
@@ -854,11 +855,13 @@ resources:
   写在 git 源上会被 `PUT` **拒绝**而不是忽略。
 - **一个 git 源可以服务多个条目**：源上的 `subpath` 与条目上的 `subpath` 拼接
   （源在前），一次 apply 只 clone 一次。上面两条目录/文件条目引用的就是同一个源。
+- **Git 中的软链接和 submodule**：仓库中未选中的链接不影响取源；所选文件、目录内成员
+  或路径父级包含软链接或 submodule 时拒绝读取。目录条目没有限定子路径时，整个来源
+  属于选中范围。Git 仍会 checkout 整仓，并检查整仓成员数量和大小限制。
 - **`strip_components` 不做魔法**：只按你写的层数剥，**不会**自动探测单一顶层目录
   ——同一份声明的行为不取决于归档内部长什么样。业务习惯 `zip -r kb.zip kb/` 打出
   的那层壳目录，就用 `strip_components: 1` 消掉。
-- **目录级所有权**：`path` 下整棵树归清单管辖，源里没有的文件在 apply 时被清除
-  （包括手工添加的）。**`path` 之外完全不碰。**
+- **资源范围**：Apply 清理 workspace 中的非保护根条目，再写回清单声明的文件和目录。
 - **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（所有权无法定义），
   `PUT` 时拒绝。
 - **权限被拍平**：归档里的可执行位不保留。要装可执行物，那是 `cli_tools` 的事
@@ -895,10 +898,11 @@ mcp:
   容器级 mcporter `headerPolicies` 仍会按 host 动态生效，当前不能由单个 Manifest
   条目关闭。
 - LOCAL/stdio MCP 可以只写 `server_code`，但不能携带非空远程 `config`。
-- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
-  server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
-  在界面上手工开的），配置改变记 `updated`，已经一致的记 `unchanged`。安装关系与
-  Bot override 同事务保存，随后按既有 best-effort 语义投影。
+- 条目省略 `config` 或显式写 `config: {}` 都会清除该 Bot 的 override，非空 `config` 完整替换它。没有保存 override 时使用继承配置。保存配置本身不启用 MCP。
+- apply 校验注册表、权限及实际保留/替换后的配置，再收敛 **Direct MCP 供应**。
+  当前 active 普通集、Default（扣除 exclusion）及对应平台默认供应不在范围内；
+  省略它们不操作，显式声明冲突项则整次 Apply 拒绝。管理范围内父条目被省略时，
+  撤销供应并清 override，包含无 Direct Installation 的暂存配置；整个 `mcp` 类别缺席等价于 `mcp: []`。配置变化记 `updated`，一致记 `unchanged`，提交后仍 best-effort 投影。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
@@ -1156,14 +1160,13 @@ apply 一次**，让平台副本落上文件——否则第一份带 `platform` 
 1. **通过界面安装的 skill 会被移除**——当一份声明了 `skills` 的清单被应用时。
    对一个被声明的类目，清单是唯一的所有者：在那个类目上，**清单与界面互斥**。
 2. **被声明类目内、由 bot 自己创建的文件会被移除**，除非它在保留名单里。
-   保留名单**只有两个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
+   保留名单**只有一个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
 
    ```text
    MEMORY.md
-   IDENTITY.md
    ```
 
-   它们是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
+   它是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
    能对它达成同一份契约。
 3. **首启有一段 ACTIVE-but-unconfigured 窗口**（§7），期间启动的扩容实例会看到
    只下发了一部分的内容。（之后实例不会发散：它们共享同一份挂载。）
@@ -1196,7 +1199,7 @@ teclaw 收下整包 artifact 并替换，ARCA 现在对被声明的类目做同�
 | `on_fetch_failure: skip` | 该取值已删除 | 改 `keep_last` 或 `fail` |
 | 未知的 `mode` 取值 | 拼错 | 只有 `strict` / `non_strict` |
 | `identity.type` 非法 | 不在白名单，或 bot 是 claude_code 引擎（只允许 `CLAUDE.md`） | 见 §5.1 |
-| `identity.type` 是 `MEMORY.md` / `IDENTITY.md` | 保留名单 | 删掉这条 |
+| `identity.type` 是 `MEMORY.md` | 保留名单 | 删掉这条 |
 | `resources.path` 绝对路径或含 `../` | 路径穿越 | 改成 workspace 相对路径 |
 | `resources` 条目嵌套在另一个目录条目之下 | 所有权无法定义 | 拆开或收缩目录条目 |
 | `skills` 非 git 源缺 `digest` | 该形态强制 | 补 `digest` |
@@ -1318,8 +1321,7 @@ bot 也是队列上的一个任务。所以部署里必须满足两个前提：
 创建 bot 时，清单在**申请授权之前**就被校验，所以写错不会浪费一次授权。
 
 **Q：清单和界面能混用吗？**
-能，但边界是类目：**声明了的类目由清单独占**（界面改动会被覆盖、界面装的会被
-移除），**没声明的类目完全归你手工管**。别在同一个类目上两边都动。
+可以。每次 Apply 会按有效清单覆盖支持的类目，界面改动也会参与下一次收敛。需要保留的内容应写入清单。
 
 **Q：`DELETE` 清单会把装上的东西删掉吗？**
 不会。删除声明 ≠ 删除资产——那些实体留在 bot 上，只是不再有人管它。要清空某个
@@ -1771,7 +1773,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
 | `finished_at` | datetime \| null | 结束时间。**`null` 有两个原因，别拿它判「在跑」**：`result` 是 `RUNNING`（真的在跑），或者这是一份**空报告**（`result` 为空串）。要判在飞的活，读 `result == "RUNNING"`，不要读 `finished_at == null` |
 | `sources` | object[] | git 源的溯源，**每条声明一行**，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
-| `categories` | object[] | 每个**被声明的**类目一行，见下。文档没提的类目不出现，因为它根本没被碰 |
+| `categories` | object[] | 每个参与 Apply 的类目一行，包括有效文档中缺省但支持的类目 |
 | `entries` | object[] | 每个**被声明的条目**一行，跨所有类目，见下 |
 | `notes` | string[] | 不属于任何条目的 apply 级说明。今天只有一处：teclaw 上「所有类目都写完了、最后整包 artifact 重投失败」记在这里，而不是让整次 apply 失败。ARCA 上恒为空 |
 
@@ -1798,7 +1800,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `category` | string | 类目名，或 `script` |
 | `aborted` | bool | 这个类目没有收敛（至少一条声明的条目没能物化）。**单独看它并不保证「这块区域没被动过」**，要和下一个字段一起读 |
 | `partially_written` | bool | 失败发生在**写了一半的时候**，这块区域可能已经变了。`aborted` 为真而它为假 = 什么都没写、没有东西要回滚；它为真 = 再 apply 一次收敛 |
-| `removed` | string[] | 覆盖**删掉了什么**。它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
+| `removed` | string[] | 覆盖**删掉了什么**。它不在 `entries` 里，因为被删的东西根本没有对应的声明条目。Resources 的空目录用 `data/` 一类带尾斜杠的路径表示，dry-run 报预计移除，真实 Apply 在清理成功后报告确认移除的目录 |
 
 `entries[]`：
 
@@ -2326,7 +2328,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- | --- |
 | `schema_version` | ✅ | `1` | 未知版本拒绝写入 |
 | `sources` | ❌ | 命名源字典（§4.1、§6） | 每个源声明 `protocol`（`git` \| `oss`）与 `url`；**四个取源类目都能用 `from` 引用它** |
-| `manifest` | ❌ | 六个类目，见下 | 缺省的类目完全不碰 |
+| `manifest` | ❌ | 六个类目，见下 | 支持的类目缺省时清空 |
 | `script` | ❌ | `{ body: <shell> }` | teclaw / desktop **写入即拒**；≤ 24 KiB |
 
 ### 源（`sources.<name>`，或条目里内联的 `source`）
@@ -2357,7 +2359,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 类目 | 键字段 | 约束 | 被覆盖的区域 |
 | --- | --- | --- | --- |
-| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
+| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 与其他文件统一按集合替换** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |
@@ -2379,7 +2381,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 写了下面任何一条，提交时就会被拒绝（不是静默忽略）：
 
 - `${OCB_*}`、`on_fetch_failure: skip`、`apply_once`；
-- `identity.type` 是 `MEMORY.md` / `IDENTITY.md`；
+- `identity.type` 是 `MEMORY.md`；
 - 一个条目上同时有两个来源，或 `content` 条目上写了 `auth`/`digest`/`on_fetch_failure`；
 - git 源条目上写了 `digest`；用了 `from` 的条目上写了 `auth`；
 - `source` URL 里带 `user:token@`；

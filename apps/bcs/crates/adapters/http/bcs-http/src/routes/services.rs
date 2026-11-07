@@ -118,7 +118,7 @@ pub async fn post_invocation(
                         opening_message_override: None,
                         input: outcome.session.input.clone().unwrap_or(Value::Null),
                         caller_id: outcome.session.caller_id.clone(),
-                        authenticated_human: None,
+                        authenticated_human: None, caller_association: None,
                     })
                     .await
                 {
@@ -139,7 +139,7 @@ pub async fn post_invocation(
                     group.label.as_deref(),
                 )
                 .unwrap_or_default();
-                let _task = tokio::spawn(async move {
+                let _task = tokio::spawn(bcs_network_tracing::in_current_context(async move {
                     let _ = notify
                         .notify(
                             &gid,
@@ -155,7 +155,7 @@ pub async fn post_invocation(
                             &session_participants,
                         )
                         .await;
-                });
+                }));
             }
             // Per spec, successful service invocations return 202 Accepted
             (

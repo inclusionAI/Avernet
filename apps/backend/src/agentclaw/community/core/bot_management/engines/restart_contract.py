@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
 
 
 @dataclass(frozen=True)
@@ -17,3 +18,24 @@ class RestartServices:
     template_service: Any
     # Existing BotService instance, reused by the engine-owned restart executor.
     lifecycle: BotService
+
+
+@dataclass(frozen=True)
+class PublishedRestartServices:
+    """Existing publish persistence supplied to an engine restart strategy.
+
+    The strategy owns its metadata and failure policy. Shared orchestration
+    supplies read, atomic ext mutation and status/ext CAS operations only.
+    """
+
+    get_record: Callable[[int], BotPublishRecord | None]
+    mutate_ext: Callable[..., dict]
+    update_status: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class RestartAdmission:
+    """Engine-owned admission; default engines add no task or response fields."""
+
+    operation_id: str | None = None
+    ext: dict[str, Any] = field(default_factory=dict)

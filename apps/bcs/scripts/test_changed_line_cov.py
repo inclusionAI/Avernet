@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -179,16 +181,39 @@ class MeasureTest(unittest.TestCase):
     def test_e2e_memory_skip_list_is_valid(self):
         """The list in e2e_coverage.sh must exist and must not hide reachable in-memory repos."""
         script = (SCRIPTS / "e2e_coverage.sh").read_text()
-        body = script.split("e2e_unreachable_memory_repos=(", 1)[1].split(")", 1)[0]
-        listed = [line.strip() for line in body.splitlines() if line.strip()]
-        self.assertEqual(len(listed), 17)
+        # Comments may contain parentheses; only a standalone closing line
+        # terminates the array. Shell tokenization drops comments, not entries.
+        array = re.search(r"(?ms)^  e2e_unreachable_memory_repos=\((.*?)^  \)", script)
+        self.assertIsNotNone(array)
+        listed = shlex.split(array.group(1), comments=True)
+        # The list drifts as memory-only modules land; pin the curated
+        # authority entries instead of a fragile raw count.
+        for expected in ("bcs-bot-store/src/memory.rs",
+                         "bcs-bot-store/src/memory_authority.rs",
+                         "bcs-bot-store/src/memory_ownership_sync.rs"):
+            self.assertIn(expected, listed)
         services = SCRIPTS.parent / "crates" / "services"
         for entry in listed:
             self.assertTrue((services / entry).exists(), entry)
         for reachable in ("bcs-chat-run-store/src/memory.rs",
                           "bcs-interaction/src/memory_store.rs",
-                          "bcs-channel-store/src/memory.rs"):
+                          "bcs-channel-store/src/memory.rs",
+                          "bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs",
+                          "bcs-message-flow/src/delivery_runtime/caller_delegate.rs"):
             self.assertNotIn(reachable, listed)
+        # Exercise the actual shell assignment used by the gate. Even with
+        # zero E2E hits, both production delegate paths must stay in scope.
+        assignment = next(line for line in script.splitlines()
+                          if line.startswith("  changed_skip_regex="))
+        skip = subprocess.check_output(
+            ["bash", "-eu", "-c", array.group(0) + "\n" + assignment
+             + '\nprintf "%s" "$changed_skip_regex"'], text=True)
+        paths = ["crates/services/bcs-message-flow/src/" + name for name in (
+            "caller_dispatch_pipeline/delegate.rs", "delivery_runtime/caller_delegate.rs")]
+        result = changed_line_cov.measure({path: {1} for path in paths},
+                                          {path: {1: 0} for path in paths}, IGNORE, skip)
+        self.assertEqual(result.skipped, [])
+        self.assertEqual((result.covered, result.instrumentable), (0, 2))
 
     def test_rate_is_none_without_instrumentable_lines(self):
         result = changed_line_cov.measure({"crates/tools/bcs-bridge/src/x.rs": {1}}, {}, IGNORE)
@@ -296,6 +321,21 @@ class GateIsReportOnlyTest(unittest.TestCase):
         proc = self.gate_with([(1, 1), (2, 0), (3, 0)])  # default min-lines 20 > 2
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("fewer than 20 lines in scope — reported only", proc.stdout)
+
+    def test_ci_changed_line_threshold_and_minimum_size(self):
+        source = self.bcs / "crates/a/src/lib.rs"
+        source.write_text("fn a() {}\n" + "".join(f"fn f{i}() {{}}\n" for i in range(20)))
+        self.git("commit", "-q", "-am", "twenty changed lines")
+        report = self.root / "cobertura.xml"
+        for total, covered, expected in [(19, 0, 0), (20, 13, 1), (20, 14, 0)]:
+            with self.subTest(total=total, covered=covered):
+                report.write_text(cobertura(str(self.bcs), [("crates/a/src/lib.rs",
+                    [(line, int(line < covered + 2)) for line in range(2, total + 2)],
+                )]))
+                proc = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~2",
+                                     "--ignore-filename-regex", IGNORE,
+                                     "--changed-line-min", "65")
+                self.assertEqual(proc.returncode, expected, proc.stdout + proc.stderr)
 
     def test_changed_line_gate_passes_when_not_applicable(self):
         proc = self.gate_with([(1, 1)])  # changed lines 2-3 not instrumentable

@@ -71,7 +71,9 @@ class OpenApiBotPort(Protocol):
 
 @runtime_checkable
 class BcsBotIdentityResolver(Protocol):
-    """把任务领域的产品 Bot ID 解析为 BCS 使用的 ``bot_id:owner_id`` UUID。"""
+    """把任务领域的产品 Bot ID 解析为 BCS 使用的稳定 ``bot_id:entity_id`` 身份。
+
+    已限定的外部身份保持不变；裸产品 ID 必须先解析唯一 Bot。"""
 
     def resolve_many(self, product_bot_ids: list[str]) -> dict[str, str]: ...
 

@@ -75,7 +75,7 @@ export function DomainEditors({
             <Field label="描述">
               <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
-            <div className="flex justify-end gap-2 border-t border-border pt-4">
+            <div className="flex justify-end gap-2 border-t border-divider pt-4">
               <Button type="button" variant="outline" disabled={busy} onClick={() => setEditDomain(false)}>
                 取消
               </Button>

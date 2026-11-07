@@ -1,3 +1,7 @@
+import { withStepReportDelivery } from "./step-report-delivery.js";
+import { createReferenceMaterialsRouter } from "./reference-materials.js";
+import { ReferenceMaterials, signedMaterials, referenceMaterialsCommand } from "../services/evolve/reference-materials.js";
+import { createEvolveTaskAccess, isSkillTask } from "./evolve-task-access.js";
 import { teamclawScope, teamclawTaskConfig, matchesSpaceBot } from "../services/evolve/teamclaw-scope.js";
 import type { AisStatusHandler } from "../services/ais/status-handler.js";
 import { aisSessionLogArchives } from "../services/ais/session-log-archives.js";
@@ -311,6 +315,10 @@ async function signedLoopStageInput(
   input: Record<string, unknown>,
   signer: Pick<ObjectStore, "createSignedUrl">,
 ): Promise<Record<string, unknown>> {
+  if (input.reference_materials) {
+    const taskId = String((input.task as { task_id?: string } | undefined)?.task_id ?? "");
+    input = { ...input, reference_materials: await signedMaterials(input.reference_materials, taskId, signer) };
+  }
   const loop = isRecord(input.loop) ? input.loop : null;
   const feedback = loop && isRecord(loop.user_feedback) ? loop.user_feedback : null;
   const files = feedback && Array.isArray(feedback.files) ? feedback.files : null;
@@ -863,31 +871,6 @@ function publicTask(task: Record<string, unknown>, steps?: EvolveStepRow[], incl
   delete rest.config_json;
   return { ...rest, config, steps: steps?.map((item) => stepView(item, includeStepOutput)) };
 }
-function isTaskShared(task: { config_json: string }): boolean {
-  const config = parseJson(task.config_json) as Record<string, unknown> | null;
-  return config?.shared === true;
-}
-function canReadTask(req: Request, task: EvolveTaskRow): boolean {
-  const scope = teamclawScope(req);
-  if (scope) return scope.taskIds.has(String(task.task_id));
-  const actor = resolveRequestUserId(req);
-  return Boolean(actor && (actor === "dev_local" || task.user_id === actor || task.created_by === actor
-    || req.isClawEvolveAdmin || isTaskShared(task)));
-}
-function canManageTask(req: Request, task: EvolveTaskRow): boolean {
-  const scope = teamclawScope(req);
-  if (scope) return scope.taskIds.has(String(task.task_id));
-  const actor = resolveRequestUserId(req);
-  return Boolean(actor && (actor === "dev_local" || task.created_by === actor
-    || req.isClawEvolveAdmin));
-}
-function canManageTaskLogs(req: Request, task: EvolveTaskRow): boolean {
-  const scope = teamclawScope(req);
-  if (scope) return scope.taskIds.has(String(task.task_id));
-  const actor = resolveRequestUserId(req);
-  return Boolean(actor && (actor === "dev_local" || actor === task.user_id || actor === task.created_by
-    || req.isClawEvolveAdmin));
-}
 function taskLogArchiveView(row: import("../repositories/evolve-repository.js").EvolveTaskLogArchiveRow) {
   return {
     archiveId: row.archive_id,
@@ -1092,7 +1075,7 @@ async function createStageExtensionStep(
     stepType: "stage_extension",
     stepNo: Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1,
     roundNo: options.roundNo ?? null,
-    command: stageRuntimeCommand(task.task_id, stepId, "execute"),
+    command: referenceMaterialsCommand(task, stageRuntimeCommand(task.task_id, stepId, "execute")),
   });
   await stageSkillRepo.createExtensionRun({
     stepId,
@@ -1177,8 +1160,8 @@ async function createBuiltinDiagnoseStep(
     publicCommand = withoutDiagnoseApiKey(publicCommand);
     dispatchCommand = withoutDiagnoseApiKey(dispatchCommand);
   }
-  publicCommand = withFrozenSessionIds(publicCommand, config.sessionSource);
-  dispatchCommand = withFrozenSessionIds(dispatchCommand, config.sessionSource);
+  publicCommand = referenceMaterialsCommand(task, withFrozenSessionIds(publicCommand, config.sessionSource));
+  dispatchCommand = referenceMaterialsCommand(task, withFrozenSessionIds(dispatchCommand, config.sessionSource));
   const steps = await repo.listSteps(task.task_id);
   const step = await repo.createStep({
     stepId,
@@ -1229,11 +1212,11 @@ async function createBuiltinHardeningStep(
   if (config.model && !readNodeCommandOption(hardeningTemplate, "model")) {
     hardeningSystemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
   }
-  const command = renderCommand(
+  const command = referenceMaterialsCommand(task, renderCommand(
     hardeningTemplate,
     {},
     hardeningSystemArgs,
-  );
+  ));
   const steps = await repo.listSteps(task.task_id);
   const step = await repo.createStep({
     stepId, taskId: task.task_id, stepType: "hardening",
@@ -1278,11 +1261,11 @@ async function createPlanStep(
       ["run-dir", quoteCommandArgument(`/home/admin/.openclaw/workspace/clawevolve_results/${task.task_id}/diagnose`)],
     );
   }
-  const nextCommand = renderCommand(
+  const nextCommand = referenceMaterialsCommand(task, renderCommand(
     taskConfig?.nodeCommands?.plan ?? "/clawevolve-plan",
     {},
     systemArgs,
-  );
+  ));
   const existingSteps = await repo.listSteps(task.task_id);
   const next = await repo.createStep({
     stepId: nextStepId, taskId: task.task_id, stepType: "plan",
@@ -1337,7 +1320,7 @@ async function createOptimizeStep(
   }
   if (config?.trainBenchOwnerUserId) optimizeSystemArgs.push(["train-bench-owner-id", safeBenchCommandValue("trainOwner", config.trainBenchOwnerUserId)]);
   if (config?.testBenchOwnerUserId) optimizeSystemArgs.push(["test-bench-owner-id", safeBenchCommandValue("testOwner", config.testBenchOwnerUserId)]);
-  const command = renderCommand(nodeOptimize, {}, optimizeSystemArgs);
+  const command = referenceMaterialsCommand(task, renderCommand(nodeOptimize, {}, optimizeSystemArgs));
   const ownerUserId = safeBenchCommandValue("ownerId", config?.ownerUserId ?? task.user_id);
   const commandWithOwner = `${command} --owner-id ${ownerUserId}`;
   const stepNo = Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1;
@@ -1642,8 +1625,10 @@ async function stageRuntimeInput(
       user_feedback: answer.feedback,
     };
   }
+  const referenceMaterials = (parseJson(task.config_json) as Record<string, unknown> | null)?.reference_materials;
   const common = {
     ...(testInput ?? {}),
+    ...(referenceMaterials ? { reference_materials: referenceMaterials } : {}),
     ...(mode === "replace" ? { model: config.model ?? "", command: step.command } : {}),
     task: {
       task_id: task.task_id,
@@ -1866,7 +1851,7 @@ async function createNextStageLoopStep(
       stepType: "stage_extension",
       stepNo: Math.max(0, ...steps.map((item) => item.step_no)) + 1,
       roundNo: step.round_no,
-      command: stageRuntimeCommand(task.task_id, stepId, "execute"),
+      command: referenceMaterialsCommand(task, stageRuntimeCommand(task.task_id, stepId, "execute")),
       ext,
     });
     await stageSkillRepo.createExtensionRun({
@@ -2194,6 +2179,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const runAnalysisStarter = deps.runAnalysisStarter
     ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
   const modelConfig = deps.modelConfig ?? { defaultModel: "", models: [] };
+  const { canReadTask, canManageTask, canManageTaskLogs, teamSpaceIds } = createEvolveTaskAccess({
+    spaces: deps.hostSpaces, resolveUserId: resolveRequestUserId,
+  });
+
+  const materials = new ReferenceMaterials(artifactStore, artifactUrlStore);
+  router.use(createReferenceMaterialsRouter({ repo, materials, actor: resolveRequestUserId, canRead: canReadTask }));
 
   router.use((req, res, next) => {
     if (!deps.capabilities) { next(); return; }
@@ -2364,6 +2355,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
 
   router.post(["/diagnoses", "/tasks"], asyncHandler(async (req: Request, res: Response) => {
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
+    const materialUploadId = req.body?.referenceMaterialsUploadId;
+    if (materialUploadId !== undefined) {
+      if (typeof materialUploadId !== "string" || req.body?.input != null || req.body?.improvementId != null
+        || !["full", "hardening"].includes(req.body?.taskType)) {
+        res.status(422).json({ error: "参考材料仅支持 Bot 自进化、Skill 优化与 Skill 加固任务" }); return;
+      }
+      if (!resolveRequestUserId(req)) { res.status(401).json({ error: "请先登录再绑定参考材料" }); return; }
+    }
     const discriminatedInput = isRecord(req.body?.input) ? req.body.input : null;
     if (discriminatedInput?.type === "insight_improvement") {
       if (!insightTaskService) {
@@ -2728,7 +2727,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } catch (error) {
       res.status(409).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
+    let referenceMaterials;
+    if (materialUploadId !== undefined) {
+      try { referenceMaterials = await materials.bind(resolveRequestUserId(req)!, materialUploadId, taskId); }
+      catch (error) { res.status(Number((error as { status?: number }).status) || 503).json({ error: (error as Error).message }); return; }
+    }
     const config = {
+      ...(referenceMaterials ? { reference_materials: referenceMaterials } : {}),
       flow: freezeEvolutionFlow(flow, stageSelection),
       ...(presentation ? { presentation } : {}),
       ...(taskType === "full" ? { inputMode } : {}),
@@ -3633,6 +3638,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const status = String(req.query.status ?? "all");
     const result = await repo.listTasksPage({
       createdBy: teamclawScope(req) ? null : scope === "all" ? null : actor,
+      skillTeamSpaceIds: !teamclawScope(req) && scope === "mine" && req.query.targetType !== "bot"
+        ? await teamSpaceIds(req) : undefined,
       authorizedBots: teamclawScope(req)?.bots,
       ownerUserId: scope === "all" ? String(req.query.ownerUserId ?? "").trim() || null : null,
       page,
@@ -3656,6 +3663,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (task && ['repair', 'workflow_repair'].includes(task.task_type)) {
       res.status(404).json({ error: "任务不存在" }); return;
     }
+    if (task && isSkillTask(task)) {
+      const allowed = req.path.startsWith("/log-archives")
+        ? await canManageTaskLogs(req, task)
+        : req.method === "GET" || req.method === "HEAD"
+          ? await canReadTask(req, task) : await canManageTask(req, task);
+      if (!allowed) { res.status(403).json({ error: "没有访问或操作该 Skill 任务的权限" }); return; }
+    }
     next();
   }));
 
@@ -3663,7 +3677,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task || ["session_analysis", "session_export"].includes(task.task_type)) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canReadTask(req, task)) { res.status(403).json({ code: "TASK_NOT_SHARED", error: "权限不足，请联系任务 Owner 开启分享" }); return; }
+    if (!await canReadTask(req, task)) { res.status(403).json({ code: "TASK_NOT_SHARED", error: "权限不足，请联系任务 Owner 开启分享" }); return; }
     const initialPack = (await repo.listPacks(task.user_id, task.bot_id)).find((pack) =>
       pack.source_task_id === task.task_id && pack.source_kind === "baseline" && pack.status === "available");
     const taskView = publicTask(
@@ -3684,8 +3698,16 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const implementations = new Map(await Promise.all([...implementationIds]
       .map(async (implementationId) => [implementationId, await stageSkillRepo?.findImplementation(implementationId)] as const)));
     const extensionByStep = new Map(extensionRuns.map((run) => [run.step_id, run]));
+    const canManageSkillTask = isSkillTask(task) && await canManageTask(req, task);
     res.json({
       ...view,
+      ...(isSkillTask(task) ? {
+        canManage: canManageSkillTask,
+        canApplySkill: Boolean(hostLocalSkills) && canManageSkillTask && task.status === "waiting_acceptance" && await repo.canApplySkillToBot(
+          resolveRequestUserId(req)!, task.user_id, task.bot_id,
+          (parseJson(task.config_json) as ExtendedTaskConfig | null)?.targetSkill?.botEnv ?? taskBotEnv(task),
+        ),
+      } : {}),
       steps: taskView.steps?.map((step) => {
         const run = extensionByStep.get(step.stepId);
         const frozen = run ? taskExtensions(task, run.stage_key)[run.extension_mode] : undefined;
@@ -3736,7 +3758,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       || interaction.task_id !== task.task_id || interaction.step_id !== step.step_id) {
       res.status(404).json({ error: "待上传反馈的问题不存在" }); return;
     }
-    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以上传反馈" }); return; }
+    if (!await canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以上传反馈" }); return; }
     if (step.status !== "waiting_context" || interaction.status !== "waiting") {
       res.status(409).json({ error: "当前 Stage 不在等待反馈" }); return;
     }
@@ -3781,7 +3803,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       || interaction.task_id !== task.task_id || interaction.step_id !== step.step_id) {
       res.status(404).json({ error: "反馈附件不存在" }); return;
     }
-    if (!canReadTask(req, task)) { res.status(403).json({ error: "无权查看反馈附件" }); return; }
+    if (!await canReadTask(req, task)) { res.status(403).json({ error: "无权查看反馈附件" }); return; }
     const answer = parseJson(interaction.response_json);
     const files = isRecord(answer) && answer.action === "continue" && isRecord(answer.feedback)
       && Array.isArray(answer.feedback.files) ? answer.feedback.files : [];
@@ -3810,7 +3832,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       || interaction.task_id !== task.task_id || interaction.step_id !== step.step_id) {
       res.status(404).json({ error: "待回答问题不存在" }); return;
     }
-    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以回答" }); return; }
+    if (!await canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以回答" }); return; }
     if (TERMINAL_TASK_STATUSES.has(task.status)) {
       res.status(409).json({ error: "任务已结束，不能继续回答" }); return;
     }
@@ -3914,7 +3936,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo || !artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canReadTask(req, task)) { res.status(403).json({ error: "没有查看该任务的权限" }); return; }
+    if (!await canReadTask(req, task)) { res.status(403).json({ error: "没有查看该任务的权限" }); return; }
     const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
     const target = config.targetSkill;
     if (!target) { res.status(404).json({ error: "该任务不是 Skill 进化任务" }); return; }
@@ -3939,7 +3961,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以确认版本" }); return; }
+    if (!await canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以确认版本" }); return; }
     if (task.task_type === "stage_test") {
       res.status(409).json({ error: "Stage 集成测试不能确认或应用 Skill 版本" }); return;
     }
@@ -3969,6 +3991,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       }
       res.json({ taskId: task.task_id, status: "completed", decision });
       return;
+    }
+    if (!await repo.canApplySkillToBot(actorId, task.user_id, task.bot_id, target.botEnv ?? taskBotEnv(task))) {
+      res.status(403).json({ code: "SKILL_APPLY_FORBIDDEN", error: "仅源 Bot 的 Owner 或协作者可应用候选版本" }); return;
     }
     const asset = await skillAssetRepo.findAsset(target.assetId);
     if (!asset || asset.owner_user_id !== (target.ownerUserId ?? task.user_id) || asset.bot_id !== task.bot_id
@@ -4003,7 +4028,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         skillId: target.skillId,
         ownerUserId: asset.owner_user_id,
         identity: {
-          userId: task.user_id,
+          userId: actorId,
           authorization: req.header("Authorization") || undefined,
           cookie: req.header("Cookie") || undefined,
           referer: req.header("Referer") || undefined,
@@ -4048,7 +4073,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           botId: task.bot_id, botEnv: asset.bot_env ?? target.botEnv ?? (String(config.botEnv ?? "").trim() || undefined),
           skillId: target.skillId, ownerUserId: asset.owner_user_id,
           expectedSha256: target.baseline.sha256,
-          identity: { userId: task.user_id, authorization: req.header("Authorization") || undefined,
+          identity: { userId: actorId, authorization: req.header("Authorization") || undefined,
             cookie: req.header("Cookie") || undefined, referer: req.header("Referer") || undefined,
             origin: req.header("Origin") || undefined },
         },
@@ -4095,7 +4120,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可获取日志" }); return; }
+    if (!await canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可获取日志" }); return; }
     const sessions = aisSessionLogArchives(task, await repo.listSteps(task.task_id), getArtifactBucket());
     res.json({ items: [...sessions, ...(await repo.listTaskLogArchives(task.task_id)).map(taskLogArchiveView)] });
   }));
@@ -4104,7 +4129,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可获取日志" }); return; }
+    if (!await canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可获取日志" }); return; }
     let active;
     try {
       active = await repo.findActiveTaskLogArchive(task.task_id);
@@ -4174,7 +4199,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可下载日志" }); return; }
+    if (!await canManageTaskLogs(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可下载日志" }); return; }
     if (String(req.params.archiveId).startsWith("AIS-")) {
       const archive = aisSessionLogArchives(task, await repo.listSteps(task.task_id), getArtifactBucket())
         .find(item => item.archiveId === req.params.archiveId);
@@ -4204,7 +4229,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const task = await repo.findTask(String(req.params.taskId));
     if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
-    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可修改分享设置" }); return; }
+    if (!await canManageTask(req, task)) { res.status(403).json({ error: "只有任务 Owner 或管理员可修改分享设置" }); return; }
     if (typeof req.body?.shared !== "boolean") { res.status(400).json({ error: "shared 必须为布尔值" }); return; }
     const config = (parseJson(task.config_json) as Record<string, unknown> | null) ?? {};
     await repo.updateTaskConfig(task.task_id, { ...config, shared: req.body.shared });
@@ -4292,6 +4317,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const newStepId = id("STEP");
     const failedExt = parseJson(failedStep.ext_json);
     const retryExt: Record<string, unknown> = isRecord(failedExt) ? { ...failedExt } : {};
+    delete retryExt.report_delivery; // Delivery receipts belong to the original Step.
     if (stageSkillRepo && coreStageBinding(task, failedStep.step_type)) {
       const answeredStepIds = new Set((await stageSkillRepo.listInteractions(taskId))
         .filter((interaction) => {
@@ -4352,7 +4378,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         stepType: "stage_extension",
         stepNo: Math.max(...steps.map((item) => item.step_no)) + 1,
         roundNo: failedStep.round_no,
-        command: stageRuntimeCommand(taskId, newStepId, "execute"),
+        command: referenceMaterialsCommand(task, stageRuntimeCommand(taskId, newStepId, "execute")),
         ext: retryStepExt,
       });
       await stageSkillRepo.createExtensionRun({
@@ -4454,8 +4480,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }
       }
       try {
+        // Template retries reconstruct the command; copied commands already
+        // retain the original material protocol requirement.
         publicCommand = withFrozenSessionIds(publicCommand, config.sessionSource);
         dispatchCommand = withFrozenSessionIds(dispatchCommand, config.sessionSource);
+        if (template) {
+          publicCommand = referenceMaterialsCommand(task, publicCommand);
+          dispatchCommand = referenceMaterialsCommand(task, dispatchCommand);
+        }
       } catch (error) {
         res.status(409).json({ error: `冻结 Session 范围无法安全重试：${error instanceof Error ? error.message : String(error)}` }); return;
       }
@@ -4949,6 +4981,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return;
     }
     const taskConfig = (parseJson(task.config_json) as Record<string, unknown> | null) ?? {};
+    const deliveredMaterials = taskConfig.reference_materials ? await materials.stepInput(taskConfig.reference_materials, task.task_id) : null;
     const planDiagnose = previous.filter((item) => item.step_type === "diagnose" && item.status === "succeeded").at(-1);
     const sourceTaskIds = step.step_type === "optimize"
       ? ((taskConfig.sourceDiagnosisTaskIds as string[] | undefined) ?? [task.task_id])
@@ -4973,6 +5006,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       : undefined;
     res.json({
       protocolVersion: "1.0",
+      ...(deliveredMaterials ? { reference_materials: deliveredMaterials } : {}),
       ...(step.step_type === "hardening" && stageSkillRepo ? {
         businessInput: await signedLoopStageInput(
           await stageRuntimeInput(repo, stageSkillRepo, task, step, "hardening", "replace", null, skillPackages),
@@ -5270,7 +5304,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     res.json({ ok: true });
   }));
 
-  router.post("/internal/tasks/:taskId/steps/:stepId/report", asyncHandler(async (req, res) => {
+  router.post("/internal/tasks/:taskId/steps/:stepId/report", asyncHandler(withStepReportDelivery(repo, async (req, res) => {
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const stepId = String(req.params.stepId);
     const step = await repo.findStep(stepId);
@@ -6277,7 +6311,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return;
     }
     res.json({ ok: true, duplicate: false, stepId: stepId, status, nextStep: null });
-  }));
+  })));
 
   // Workflow-evolution knowledge endpoints. Mounted AFTER the legacy task-creating
   // POST /diagnoses so that legacy callers keep their route unchanged while new
@@ -6392,7 +6426,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(409).json({ error: "分析任务绑定无效" });
       return;
     }
-    if (!canReadTask(req, task)) { res.status(403).json({ error: "无权查看该分析任务" }); return; }
+    if (!await canReadTask(req, task)) { res.status(403).json({ error: "无权查看该分析任务" }); return; }
     const output = parseJson(step.output_json) as { analysisProgress?: unknown } | null;
     res.json({
       analysisId: analysis.analysis_id,

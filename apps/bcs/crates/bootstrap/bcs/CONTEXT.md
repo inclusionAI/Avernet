@@ -13,6 +13,10 @@ publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
 acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
 the existing metrics::InstrumentedMessageFlowService export.
+Native Task dispatch also forwards to the matching inner entrypoint with its
+request ID and command intact, rather than selecting the ordinary-dispatch
+fallback. Parent correlation, Caller inheritance and replay checks remain owned
+by the application; success and failure each record one Task dispatch metric.
 
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
@@ -165,6 +169,9 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
 ## Runtime ownership
 
 The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring.
+The SQLite schema bootstrap and versioned migration chain are owned by the
+`bcs-db-migrations` library (normal dependency); this crate re-exports that
+API as `bcs::migrations` and calls it during startup.
 Eventing workers initialize in orchestrator registration order and shut down in
 reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
@@ -223,3 +230,52 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A input composition
+
+The optional `a2a_grpc` configuration is validated before startup and injected
+into both Card selection and the shared delivery adapter. Bootstrap owns this
+concrete binding choice. Its explicit routes map selected Card interfaces to
+deployment-owned MOSN metadata; the adapter dials only the local sidecar. An
+absent configuration preserves HTTP-only selection. Core owns no tonic types,
+channels, registry calls or transport-specific routing headers.
+
+The infrastructure composition root passes full Card declarations to the outbound
+adapter and wires its InteractionProviderPort into the existing Provider mux.
+It injects the same managed-delivery service and tracked Run-context port used by
+the queue, the generic RunBudgetCore and a weak InteractionService back-reference.
+There is no adapter-to-concrete-service import or strong service cycle.
+`a2a_input.wait_timeout_ms` (600000) and `total_timeout_ms` (1800000) configure
+independent human-wait/total caps; typed config validation enforces positive
+wait <= total <= one day. Execution continues to use its existing timeout.
+Test-only server constructors retain the legacy mux unless explicitly configured;
+the production infrastructure path enables the supported Structured Input profile.
+
+## OAuth entry compatibility
+
+When `[api.auth]` is absent and the legacy OAuth facade is mounted, bootstrap
+injects `CompatAuthPrincipalVerifier` only for V1 current-user lookup. Protected
+V1 APIs retain Gateway-only trust; explicit auth chains never use this override.
+The compat projection preserves the verified provider and avatar from one legacy
+chain pass, and propagates dependency failures rather than retrying another chain.
+
+Explicit OAuth selection resolves its signing secret once and rejects a mismatch
+with a configured legacy OAuth session reader/writer's `auth.oauth.jwt_secret`.
+Both entries share one Cookie and session scope; independent signing keys are
+not independent namespaces. Errors identify the configuration fields, not keys.
+
+## Invite-code issuer policy
+
+Bootstrap injects `[invite].issuer_user_ids` (default empty) into the invite-code
+application facade. Only exact verified user IDs are authorized for manual
+issuance, regardless of authentication source or the binding-gate switch.
+Configuration changes require restart; policy enforcement and creator audit
+metadata stay in application, not the router or authentication verifier.
+
+## A2A anonymous access policy
+
+`a2a_allow_anonymous` is a root boolean setting, false by default. Enabling it
+allows anonymous calls only for Cards that permit them. It is injected into
+Provider-admin registration, scoped registration and runtime target resolution.
+It does not disable Provider management authentication or satisfy a Card that
+requires Bearer, OAuth or another unsupported scheme.

@@ -54,7 +54,7 @@
    且允许透传覆盖"的决策:
    ```
    execution_config["main_session_id"] = main_session_id
-   execution_config.setdefault("lifecycle_stage", "draft")
+   execution_config.setdefault("lifecycle_stage", "online")
    task_request = replace(task_request, execution_config=execution_config)
    ```
 4. `result = await service.execute(task_request)`;失败则 `result.extend_props` 合并
@@ -81,7 +81,7 @@
            "session_id": main_session_id,
            "sender_options": {"from": task_request.owner_user_id},
            "bot_options": {"lifecycle_stage":
-               task_request.execution_config.get("lifecycle_stage", "draft")},
+               task_request.execution_config.get("lifecycle_stage", "online")},
        })`;
    `bot_port is None` → 与 benchmark_routes.py:120 一致的失败 envelope;
    抛异常 → 替换 `result(success=False, error="auto task launch send failed: <exc>")`,
@@ -126,10 +126,10 @@
 - **happy (relay)**:`execution_config.main_session_id` + service.execute 返 relay mode →
   断言
   - `service.requests[0].execution_config["main_session_id"] == <预期 session_id>`,
-    且 `lifecycle_stage == "draft"`(无透传时);
+    且 `lifecycle_stage == "online"`(无透传时);
   - `bot_port.send_calls[0].metadata["session_id"] == <预期 session_id>`,
     `sender_options.from == task_request.owner_user_id`,
-    `bot_options.lifecycle_stage == "draft"`,
+    `bot_options.lifecycle_stage == "online"`,
     `metadata["benchmark"] is False`,`metadata["auto"] is True`;
   - `launch_message` 含 `<!--` 隐藏指令 wrapper(因为 root_instruction 非空);
   - `service.node_updates[0]["extend_props_patch"] == {"run_id": "openapi-run-1"}`;

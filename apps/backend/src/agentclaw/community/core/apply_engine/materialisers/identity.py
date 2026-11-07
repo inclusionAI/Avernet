@@ -30,13 +30,10 @@ An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
 "source": {"protocol": "oss", "bucket": "team-artifacts",
 "key": "identity/soul.md", "auth": "oss-prod"}}``.
 
-The area this overwrites is the bot's identity
-file set, minus ``MEMORY.md`` / ``IDENTITY.md`` — engine-generated runtime
-state that apply never writes and never removes, whatever a document says.
-The validator refuses their *declaration*; this module refuses to reach them
-from the removal side too, which is the half the validator cannot see, so the
-guarantee holds even for a document that arrives without the validator in its
-history (a hand-built apply in W8's lifecycle points).
+The area this overwrites is the bot's identity file set minus ``MEMORY.md``,
+which remains engine-owned and cannot be declared or removed. ``IDENTITY.md``
+follows the same replacement and empty-write rules as other configurable files.
+An undeclared identity category is left untouched by the orchestrator.
 
 **Same write path as the public API, by reuse rather than imitation.** The
 materialiser derives the entity pair exactly as the identity router does —
@@ -77,6 +74,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -114,12 +112,15 @@ class IdentityMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "updated"),),
                        removals=("OKR.md",))
-        write   -> (EntryResult(Category.IDENTITY, "SOUL.md",
-                                EntryOutcome.UPDATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.IDENTITY, "SOUL.md",
+                                EntryOutcome.UPDATED),),
+            removals=("OKR.md",),
+        )
 
     A removal is an **empty write**, not a delete: the domain reads absent and
-    empty as one state, and ``IdentityService`` exposes no delete. A reserved
-    name (``MEMORY.md``, ``IDENTITY.md``) never receives even that.
+    empty as one state, and ``IdentityService`` exposes no delete. ``MEMORY.md``
+    never receives even that.
     """
 
     construct = Category.IDENTITY
@@ -199,16 +200,16 @@ class IdentityMaterialiser(Materialiser):
                 current = await self._identity.read_identity_file(
                     entity_type, entity_id, ctx.bot_id, intent.identity, ctx.owner_id
                 )
-            if not current:
-                outcome = EntryOutcome.CREATED.value
-            elif current == intent.value:
+            # Absent and empty are the same domain state for every identity file.
+            if current == intent.value:
                 outcome = EntryOutcome.UNCHANGED.value
+            elif not current:
+                outcome = EntryOutcome.CREATED.value
             else:
                 outcome = EntryOutcome.UPDATED.value
             planned.append(PlannedEntry(intent, outcome))
 
-        # The area: files that exist, minus the reserved names — never removal
-        # candidates, never emptied, whatever the document does or omits.
+        # A declared category replaces all configurable files; memory is engine-owned.
         existing = {
             file_type
             for file_type, exists in presence.items()
@@ -219,7 +220,7 @@ class IdentityMaterialiser(Materialiser):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Execute the plan: write each changed file, empty each removal.
 
         An ``unchanged`` entry calls nothing — that absence is what the
@@ -265,7 +266,7 @@ class IdentityMaterialiser(Materialiser):
             await self._identity.update_bot_file(
                 entity_type, entity_id, ctx.bot_id, file_type, "", ctx.actor_id
             )
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 def _coords(ctx: ApplyContext) -> tuple[str, str]:

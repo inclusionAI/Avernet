@@ -20,6 +20,24 @@ def test_relay_test_generation_is_an_explicit_placeholder() -> None:
     assert _findings(_diff('"relay_token": "generation-1",')) == []
 
 
+def test_agentswarm_public_protocol_label_is_not_a_credential() -> None:
+    field = "_ZERO_CHECK_OPEN_API_" + "TOKEN"
+    label = "OPEN_API:app:agentswarm"
+    for path in ["example.py", "example.yaml", "example.rs"]:
+        assert _findings(_diff(f'{field} = "{label}"', path=path)) == []
+
+
+def test_protocol_label_exception_is_exact_and_does_not_hide_credentials() -> None:
+    label = "OPEN_API:app:agentswarm"
+    for value in [label + ":secret-123456789", "OPEN_API:app:other-application",
+                  label.lower(), "prefix:" + label]:
+        assert _findings(_diff('auth_' + 'token = "' + value + '"'))
+    secret = "ghp_" + "a" * 30
+    findings = _findings(_diff('auth_' + 'token = "' + label + '"; other = "' + secret + '"'))
+    assert findings and findings[0].rule == "GitHub token"
+    assert secret not in findings[0].content
+
+
 def test_real_high_entropy_token_assignment_is_still_rejected() -> None:
     credential_line = "auth_" + "token" + ' = "a-real-looking-secret-value-12345"'
     findings = _findings(_diff(credential_line))
@@ -89,3 +107,25 @@ def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
         findings = _findings(_diff(line, path="example.rs"))
         assert findings, expression
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_rust_credential_named_declarations_are_types_not_secrets() -> None:
+    declarations = [
+        "    session_SLOT: Option<&str>,",
+        "    async fn named_provider(&self,name:&str,SLOT:&str)->ServiceResult<ProviderBasicInfo> {",
+        "pub struct Registration {pub card:Card,pub bot_runtime_SLOT:Option<String>}",
+    ]
+    for line in declarations:
+        assert _findings(_diff(line.replace("SLOT", "token"), path="example.rs")) == []
+    literal = 'pub struct Record { SLOT: "a-real-looking-' + 'secret-value-12345" }'
+    assert _findings(_diff(literal.replace("SLOT", "token"), path="example.rs"))
+
+
+def test_python_runtime_credential_lookup_does_not_treat_field_label_as_value() -> None:
+    line = 'SLOT = registration["bot_runtime_SLOT"]'.replace("SLOT", "token")
+    assert _findings(_diff(line)) == []
+    secret = "ghp_" + "a" * 30
+    # Known credentials stay forbidden even when used as lookup keys.
+    assert _findings(_diff('SLOT = registration["' + secret + '"]'))
+    literal = 'SLOT = "a-real-looking-' + 'secret-value-12345"'
+    assert _findings(_diff(literal.replace("SLOT", "token")))

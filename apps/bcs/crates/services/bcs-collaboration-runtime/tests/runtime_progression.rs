@@ -56,6 +56,11 @@ use bcs_service_api::{
 
 use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
 
+use bcs_service_api::application::caller_identity::{
+    AuthenticatedHumanCallerIngress, HumanCallerAuthSource,
+};
+use bcs_service_api::application::principal::HumanActor;
+
 use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 
 use bcs_session_store::MemorySessionRepo;
@@ -81,6 +86,9 @@ mod history_identity;
 
 #[path = "runtime_progression/history_persistence.rs"]
 mod history_persistence;
+
+#[path = "runtime_progression/caller_orchestration.rs"]
+mod caller_orchestration;
 
 #[path = "runtime_progression/support.rs"]
 mod fixtures;

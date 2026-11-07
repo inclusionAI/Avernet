@@ -22,6 +22,11 @@ legacy admin responses deserialize with null slug and version 1.0.
   Only normal Group creation applies it. The legacy shared DTO also validates
   this field on DM requests, but DM creation ignores valid values. V1 has a
   separate DM request variant and rejects the field entirely.
+- Bot profile-write DTOs (`AdminOnboardRequest`, `RegisterProviderBotRequest`)
+  carry `avatar_url` as the presence-aware `AvatarField`: an omitted key keeps
+  the stored avatar, `""` clears it, a plain string sets it, and explicit `null`
+  or non-strings fail deserialization (bot-avatar plan §4). The field never
+  serializes on any legacy response.
 
 ## Consumes
 

@@ -215,7 +215,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
               />
             ) : (
               <div className="min-w-0 rounded-lg border border-border bg-muted/40">
-                <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                <div className="flex items-center justify-between gap-3 border-b border-divider px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">
                       {mode === 'self' ? '终端安装命令' : '发送给 Bot 的接入指引'}
@@ -238,7 +238,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
                 <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
                   {botName.trim() ? command : '请输入 Bot 名称'}
                 </pre>
-                <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                <p className="border-t border-divider px-3 py-2 text-xs text-muted-foreground">
                   Token 有效期至：{formatExpiresAt(expiresAt)}。
                 </p>
               </div>

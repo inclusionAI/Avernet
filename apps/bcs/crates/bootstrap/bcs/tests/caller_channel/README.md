@@ -24,3 +24,16 @@ must not appear in the database or debug logs.
 story into the same profile pool as `scripts/e2e_coverage.sh`. Existing global
 and changed-line coverage gates remain unchanged. This fixture does not test a
 private channel plugin or BaaS runtime behavior.
+
+The same test executable supports `--cache-fixture-port` with the
+`task-cache-e2e` cache factory. Its loopback-only producer endpoint populates
+coordination cache records in the shared in-memory plugin. The task-cache story
+creates task lifecycles through HTTP/WS and checks full-intent lookup/cancellation
+through the signed public routes and internal MCP routes. Read-only SQLite
+inspection identifies admitted deliveries for correlation fixtures. Missing,
+rejected, orphaned and legacy correlations are exercised without modifying
+persisted lifecycle state. The fixture is absent from the ordinary BCS binary.
+
+```sh
+python3 scripts/e2e-test/task_cache_story.py --binary target/debug/bcs-caller-e2e
+```

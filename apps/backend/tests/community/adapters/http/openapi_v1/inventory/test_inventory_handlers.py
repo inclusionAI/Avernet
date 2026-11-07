@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 from datetime import datetime
+import json
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +18,9 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
@@ -23,6 +28,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
+)
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import BotInventoryService
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
@@ -99,18 +107,23 @@ def publication_repo(monkeypatch):
 
 
 @pytest.fixture
-def client(bot_service, desktop_service, publication_repo):
+def access_service():
+    access = MagicMock()
+    access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+        int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
+    }
+    return access
+
+
+@pytest.fixture
+def client(bot_service, desktop_service, publication_repo, access_service):
     class _M(Module):
         def configure(self, binder):
             space = NoopBusinessSpaceContext()
-            access = MagicMock()
-            access.get_operable_permission_levels.side_effect = lambda **kwargs: {
-                int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
-            }
             inventory = BotInventoryService(
                 bot_service=bot_service,
                 desktop_service=desktop_service,
-                access_service=access,
+                access_service=access_service,
                 business_space=space,
                 lifecycle_view=BotLifecycleView(ServiceLifecycleView(publication_repo)),
                 edit_lock_view=MagicMock(states_for_bots=MagicMock(return_value={})),
@@ -120,6 +133,15 @@ def client(bot_service, desktop_service, publication_repo):
             binder.bind(DesktopBotInventoryPort, to=desktop_service)
             binder.bind(BusinessSpaceContextProtocol, to=space)
             binder.bind(BotInventoryServiceProtocol, to=inventory)
+            # list_inventory derives copy_state per card (Route B / FE contract):
+            # no ac_bot_copy row for these legacy fixtures → build_copy_state_summary
+            # returns None at the first guard, so no apply_repo calls land.
+            copy_repo = MagicMock()
+            copy_repo.get_by_dst_bot_id.return_value = None
+            binder.bind(BotCopyRepositoryProtocol, to=copy_repo)
+            binder.bind(
+                BotConfigManifestApplyRepositoryProtocol, to=MagicMock()
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -166,6 +188,55 @@ def test_list_inventory_carries_template_snapshot_verbatim(client):
     # Desktop rows carry no template identity.
     assert by_id["l1"]["template_type"] is None
     assert by_id["l1"]["template_config"] is None
+
+
+@pytest.mark.parametrize("engine", ["claude_code", "openclaw", "hermes", "deepseek_harness"])
+@pytest.mark.parametrize(
+    "status,display_state,actions",
+    [
+        ("RECYCLED", "dormant", ["view", "activate", "delete"]),
+        ("RECYCLING", "pending", ["view"]),
+        ("REACTIVATING", "pending", ["view"]),
+    ],
+)
+def test_inventory_recycled_personal_bot_activation(
+    client, bot_service, engine, status, display_state, actions,
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [{**CLOUD, "active_engine": engine, "status": status,
+                   "binding_id": None, "ext": {}}],
+    }
+
+    data = _ok(client.get("/openapi/v1/bots/all", params={"deploy_mode": "cloud"}))
+
+    item, = data["items"]
+    assert item["status"] == status
+    assert item["publish"] is None
+    assert item["display_state"] == display_state
+    assert item["actions"] == actions
+    assert {"chat", "edit", "restart", "engine_restart"}.isdisjoint(item["actions"])
+
+
+@pytest.mark.parametrize("level", [PermissionLevel.ADMIN, PermissionLevel.MEMBER])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_inventory_recycled_bot_activation_is_owner_only(
+    client, bot_service, access_service, level, explicit,
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [{**CLOUD, "active_engine": "claude_code", "status": "RECYCLED",
+                   "owner_id": "other-owner", "binding_id": None}],
+    }
+    access_service.get_operable_permission_levels.side_effect = None
+    access_service.get_operable_permission_levels.return_value = {1: level}
+    access_service.has_explicit_membership.return_value = {1} if explicit else set()
+
+    data = _ok(client.get("/openapi/v1/bots/all", params={"deploy_mode": "cloud"}))
+
+    item, = data["items"]
+    assert item["display_state"] == "dormant"
+    assert item["actions"] == ["view"]
 
 
 def test_inventory_openapi_declares_upgrade_action(client):
@@ -333,3 +404,25 @@ def test_list_inventory_total_includes_cloud_rows_beyond_first_fetch_window(clie
     ids = {item["bot_id"] for item in data["items"]}
     assert "c249" in ids
     assert "l1" in ids
+
+
+@pytest.mark.parametrize("stored_ext", [
+    {"avatar_url": "avatar", "expert_origin": {"expert_name": "产品经理", "source_commit": "private-commit", "content_digest": "private-digest"}},
+    '{"expert_origin":{"expert_name":"产品经理","source_commit":"private-commit"}}',
+])
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
+def test_inventory_http_projects_only_expert_name(client, bot_service, stored_ext, bot_type):
+    bot_service.list_bots_by_conditions.return_value = {"total": 1, "items": [{**CLOUD, "ext": stored_ext, "bot_type": bot_type}]}
+    data = _ok(client.get("/openapi/v1/bots/all"))
+    by_id = {item["bot_id"]: item for item in data["items"]}
+    assert by_id["c1"]["expert_name"] == "产品经理"
+    assert by_id["l1"]["expert_name"] is None
+    assert "expert_origin" not in str(data)
+    assert "private-commit" not in str(data)
+    assert "private-digest" not in str(data)
+    schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
+    assert "expert_name" not in schema["required"]
+    assert schema["properties"]["expert_name"]["readOnly"] is True
+    public_root = next(parent for parent in Path(__file__).resolve().parents if (parent / "apps/gateway/configs/schemas/bots.openapi.json").exists())
+    published = json.loads((public_root / "apps/gateway/configs/schemas/bots.openapi.json").read_text())
+    assert published["components"]["schemas"]["BotInventoryItem"]["properties"]["expert_name"] == schema["properties"]["expert_name"]

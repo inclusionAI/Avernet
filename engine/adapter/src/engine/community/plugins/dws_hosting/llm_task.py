@@ -39,15 +39,15 @@ async def invoke(config, data, prompt: str, schema: dict, *, failure: str) -> di
             "prompt": prompt,
             "input": data,
             "schema": schema,
-            "timeoutMs": 30000,
+            "timeoutMs": 60000,
             "thinking": "off",
-            "maxTokens": 2048,
+            "maxTokens": 10240,
         },
     }
     try:
         # Do not follow redirects or inherit a proxy carrying the gateway token.
         async with httpx.AsyncClient(
-            timeout=35, trust_env=False, follow_redirects=False
+            timeout=65, trust_env=False, follow_redirects=False
         ) as client:
             response = await client.post(
                 endpoint, json=body, headers={"Authorization": "Bearer " + config.token}

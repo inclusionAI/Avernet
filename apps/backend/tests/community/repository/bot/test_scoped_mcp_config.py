@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPConfig, UserMCPConfig
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
@@ -24,8 +25,13 @@ class _Database:
     def __init__(self) -> None:
         self.engine = create_engine("sqlite:///:memory:")
         UserMCPConfig.__table__.create(self.engine)
+        BotModel.__table__.create(self.engine)
         BotMCPConfig.__table__.create(self.engine)
         self._sessions = sessionmaker(bind=self.engine)
+        with self.transactional_orm_session() as session:
+            for bot_id in ("bot-x", "bot-y"):
+                session.add(BotModel(bot_id=bot_id, entity_id="owner", entity_type="staff",
+                                     creator_id="owner", owner_id="owner", env=get_current_env()))
 
     @contextmanager
     def transactional_orm_session(self):
@@ -205,6 +211,8 @@ def test_replace_is_tenant_scoped_for_both_user_and_bot_rows() -> None:
     db = _Database()
     for tenant in ("tenant-a", "tenant-b"):
         with avernet_tenant_scope(tenant), db.transactional_orm_session() as session:
+            session.add(BotModel(bot_id="bot-x", entity_id="owner", entity_type="staff",
+                                 creator_id="owner", owner_id="owner", env=get_current_env()))
             session.add_all(
                 [
                     UserMCPConfig(

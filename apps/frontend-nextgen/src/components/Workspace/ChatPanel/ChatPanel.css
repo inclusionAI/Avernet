@@ -1,7 +1,7 @@
 /*
  * ChatLayout 的 ResizeHandle 默认占 12px 且视觉上透明，形成对话区与副屏之间的
- * 大空隙。这里仅在 Workspace ChatPanel 内把它回正为 1px border token 分隔线，
- * 与左侧 Bot 列表/会话区的分隔样式一致；其它 SDK 副屏消费方不受影响。
+ * 大空隙。这里在 Workspace 单聊 ChatPanel 与协作群 GroupChatPane 内把它回正为
+ * 1px border token 分隔线，与左侧 Bot 列表/会话区的分隔样式一致；其它 SDK 副屏消费方不受影响。
  */
 .workspace-chat-panel-layout > div:nth-child(2) {
   flex-basis: 1px;

@@ -74,6 +74,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -176,8 +177,11 @@ class CliToolsMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),),
                        removals=("retired-tool",))
-        write   -> (EntryResult(Category.CLI_TOOLS, "mycli",
-                                EntryOutcome.CREATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.CLI_TOOLS, "mycli",
+                                EntryOutcome.CREATED),),
+            removals=("retired-tool",),
+        )
     """
 
     construct = Category.CLI_TOOLS
@@ -254,7 +258,7 @@ class CliToolsMaterialiser(Materialiser):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """One call: ``CliToolService.replace_all``.
 
         The service recomputes removals from the same table ``plan`` read, so
@@ -291,7 +295,7 @@ class CliToolsMaterialiser(Materialiser):
                     note=outcome.detail if not failed else None,
                 )
             )
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 __all__ = ["CliToolsMaterialiser", "context_for"]

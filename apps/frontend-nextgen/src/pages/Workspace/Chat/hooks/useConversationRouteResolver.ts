@@ -3,18 +3,26 @@
 // - section 缺失且目录可匹配时补齐;目录无匹配保持 null,待 hydration 完成后重解析
 //   (旧/外部链接原样透传);
 // - 完整目录到达后按管理→团队→好友归类;不能拿旧 friend 缓存搭配 team 请求身份。
-import type { ConversationBotView, ConversationRouteState } from '@/domain/conversation';
+import {
+  extractCodingSessionCreatorUserId,
+  resolveCodingSessionOrigin,
+  type ConversationBotView,
+  type ConversationRouteState,
+} from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { useConversationStore, type ConversationState } from '@/stores/conversationStore';
 import { useCallback, useEffect, useRef } from 'react';
 
 export function useConversationRouteResolver(options: {
+  userId?: string | null;
   managedBots: ConversationBotView[];
   friendBots: ConversationBotView[];
   /** 目录 hydration 是否完成(完成后才按目录重解析未决 section)。 */
   hydrated: boolean;
   /** 目录 key(managed 形如 section=botId / friend 为纯 botId),变化触发重解析。 */
   managedBotIdKey: string;
+  /** managed/team 目录中的 Coding Bot key(section=botId)，仅内容变化时重建解析器。 */
+  managedCodingBotIdKey: string;
   friendBotIdKey: string;
   /** 当前选中是否仍在目录(丢失时按完整目录归类重解析)。 */
   selectedInDirectory: boolean;
@@ -23,8 +31,18 @@ export function useConversationRouteResolver(options: {
   /** 会话 Store 订阅态(丢失类重解析依赖 selectedBotId 变化触发)。 */
   store: ConversationState;
 }): (route: ConversationRouteState) => void {
-  const { managedBots, friendBots, hydrated, managedBotIdKey, friendBotIdKey, selectedInDirectory, selection, store } =
-    options;
+  const {
+    userId,
+    managedBots,
+    friendBots,
+    hydrated,
+    managedBotIdKey,
+    managedCodingBotIdKey,
+    friendBotIdKey,
+    selectedInDirectory,
+    selection,
+    store,
+  } = options;
   const selectedBotId = store.selectedBotId;
 
   // 入向:URL → Store。section 缺失且目录可匹配时补齐;目录无匹配保持 null,
@@ -57,17 +75,25 @@ export function useConversationRouteResolver(options: {
           : friendBotIdKey.split('|').includes(route.botId)
           ? 'friend'
           : null);
-      const managedOrigin = isManagedConversationSection(section) ? route.origin ?? 'mine' : 'mine';
+      const selectedIsCodingBot =
+        isManagedConversationSection(section) && managedCodingBotIdKey.split('|').includes(`${section}=${route.botId}`);
+      const codingOrigin =
+        selectedIsCodingBot && route.sessionId ? resolveCodingSessionOrigin(route.sessionId, userId) : null;
+      // Coding Session 的创建者由 sessionId 权威表达；深链缺失或携带了错误 origin 时，
+      // 与 AIXCoding 路由模式一样先切到正确来源，再解析会话。
+      const managedOrigin = isManagedConversationSection(section) ? codingOrigin ?? route.origin ?? 'mine' : 'mine';
       const scope =
         isManagedConversationSection(section) && managedOrigin === 'mine'
           ? route.scope ?? storeNow.effectiveScopeByManagedBotId[route.botId] ?? 'all'
           : 'all';
       const friendUserId =
-        isManagedConversationSection(section) && managedOrigin === 'others' ? route.friendUserId ?? null : null;
-      // origin=others 缺 friend 的非法 URL:sessionId 无法归属到某好友,从选中态剔除,
-      // 避免投影回写 origin=others&session=… 残缺组合(AC-13 路由语法)。
+        isManagedConversationSection(section) && managedOrigin === 'others'
+          ? route.friendUserId ??
+            (selectedIsCodingBot ? extractCodingSessionCreatorUserId(route.sessionId ?? '') : null)
+          : null;
+      // 普通 Bot 的 others 仍要求好友分组身份；Coding Bot 可直接由 sessionId 解析创建者。
       const sessionId =
-        isManagedConversationSection(section) && managedOrigin === 'others' && !friendUserId
+        isManagedConversationSection(section) && managedOrigin === 'others' && !friendUserId && !selectedIsCodingBot
           ? null
           : route.sessionId ?? null;
       storeNow.setExpandedBot(route.botId, true);
@@ -89,7 +115,7 @@ export function useConversationRouteResolver(options: {
         sessionId,
       });
     },
-    [friendBotIdKey, managedBotIdKey],
+    [friendBotIdKey, managedBotIdKey, managedCodingBotIdKey, userId],
   );
 
   // 目录 hydration 完成后,对仍未解析 section 的待定路由重解析一次。

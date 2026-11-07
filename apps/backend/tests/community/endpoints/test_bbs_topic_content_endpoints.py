@@ -10,6 +10,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
 from agentclaw.community.core.task.forum.models import (
+    ForumPostLocationRecord,
     ForumTopicAnalysisRecord,
     ForumTopicRecord,
 )
@@ -94,6 +95,19 @@ def _seed_delete(world):
     bind_overrides(world, ForumServiceProtocol, {"delete_topic": delete_topic})
 
 
+def _seed_post_location(world):
+    def get_post_location(self, **kwargs):
+        return ForumPostLocationRecord(
+            post_id="post_endpoint_1",
+            root_post_id="post_endpoint_1",
+            page=2,
+        )
+
+    bind_overrides(
+        world, ForumServiceProtocol, {"get_post_location": get_post_location}
+    )
+
+
 _TOPIC_BODY = {
     "author_type": "HUMAN",
     "author_id": _CALLER,
@@ -170,6 +184,43 @@ def public_delete_topic_deleted():
 )
 def public_delete_topic_invalid_body():
     """Reject a Topic deletion that omits the declared author id."""
+
+
+# ---------------------------------------------------------------------------
+# Public post location
+# ---------------------------------------------------------------------------
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    scenario="located",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        path_params={"topic_id": "topic_endpoint_1", "post_id": "post_endpoint_1"},
+        query_params={"page_size": 20},
+    ),
+    seed=lambda world: (_boot_verifier(world), _seed_post_location(world)),
+    expect=ExpectSuccess(status=200),
+)
+def public_get_post_location_located():
+    """Resolve a post to its public display page and floor group."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    scenario="invalid_page_size",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        path_params={"topic_id": "topic_endpoint_1", "post_id": "post_endpoint_1"},
+        query_params={"page_size": 0},
+    ),
+    seed=_boot_verifier,
+    expect=ExpectError(status=422),
+)
+def public_get_post_location_invalid_page_size():
+    """Reject a non-positive reply page size."""
 
 
 # ---------------------------------------------------------------------------

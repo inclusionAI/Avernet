@@ -155,7 +155,7 @@ async def list_sessions(
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     params: dict[str, Any] = _window(page)
-    if owner_id == user_id:
+    if (facts.owner_id if facts is not None else owner_id) == user_id:
         params.update(user_id=user_id, source="all_but_others")
     if agent_id:
         params["agent_id"] = agent_id

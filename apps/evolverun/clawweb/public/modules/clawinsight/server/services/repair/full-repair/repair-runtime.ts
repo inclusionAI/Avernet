@@ -2612,7 +2612,7 @@ export class RepairTaskService {
       const step = await this.currentStep(task, config);
       const jobId = config.execution.jobId ?? step.bot_run_id;
       if (task.status === "canceled") {
-        const termination = await this.stopTerminatedAisJob(step.step_id, jobId);
+        const termination = await this.stopTerminatedAisJob(step.step_id, jobId, task.created_by);
         return {
           ...await this.view(task, { canOperate: true, canManageShare: true }),
           termination,
@@ -2669,7 +2669,7 @@ export class RepairTaskService {
       });
       if (transitioned.outcome === "conflict") continue;
 
-      const termination = await this.stopTerminatedAisJob(step.step_id, jobId);
+      const termination = await this.stopTerminatedAisJob(step.step_id, jobId, task.created_by);
       const reloaded = await this.deps.repo.findTask(task.task_id);
       if (!reloaded) repairNotFound("repair_task_not_found", "Repair Task 不存在");
       return {
@@ -4557,14 +4557,14 @@ export class RepairTaskService {
         executionTicket,
         ...(llmApiKey ? { llmApiKey } : {}),
       });
-      if (config.aisExecution) await this.deps.repo.markExternalDispatched(config.aisExecution.stepId, jobId, { executionId: config.execution.executionId, jobId });
+      if (config.aisExecution) await this.deps.repo.markExternalDispatched(config.aisExecution.stepId, jobId, { executionId: config.execution.executionId, jobId, submittedBy: task.created_by });
       const latestTask = await this.deps.repo.findTask(taskId);
       if (!latestTask) return;
       const latest = taskConfig(latestTask);
       if (latestTask.status === "canceled"
         || latest.execution.state === "ended"
         || latest.execution.invalidatedAt != null) {
-        await this.stopTerminatedAisJob(config.current.stepId, jobId);
+        await this.stopTerminatedAisJob(config.current.stepId, jobId, task.created_by);
         return;
       }
       if (latest.execution.executionId === config.execution.executionId) {
@@ -5273,11 +5273,12 @@ export class RepairTaskService {
   private async stopTerminatedAisJob(
     stepId: string,
     jobId: string | null,
+    userId: string,
   ): Promise<{ status: string; aisJobId: string | null }> {
     if (!jobId) return { status: "stop_pending", aisJobId: null };
     let result: { status: "remote_stopped" | "remote_stop_failed"; error?: string };
     try {
-      await this.deps.ais.stopExecution(jobId);
+      await this.deps.ais.stopExecution(jobId, userId);
       result = { status: "remote_stopped" };
     } catch {
       result = { status: "remote_stop_failed", error: "AIS stopExecution failed" };

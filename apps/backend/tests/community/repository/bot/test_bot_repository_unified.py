@@ -579,6 +579,16 @@ def test_soft_delete_is_flag_not_hard(repo, db):
     assert repo.soft_delete_by_owner("b1", "emp1") is False
 
 
+def test_is_soft_deleted_distinguishes_deleted_from_absent(repo):
+    assert repo.is_soft_deleted("b1", "staff_x") is False
+    repo.insert(_data(bot_id="b1"))
+    assert repo.is_soft_deleted("b1", "staff_x") is False
+    assert repo.soft_delete_by_owner("b1", "emp1") is True
+    assert repo.is_soft_deleted("b1", "staff_x") is True
+    # A different entity for the same bot id is not this bot.
+    assert repo.is_soft_deleted("b1", "staff_other") is False
+
+
 # ── device-provider real join (adopt prod — drop stub) ──────────────
 
 

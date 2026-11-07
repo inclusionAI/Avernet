@@ -1,5 +1,6 @@
 import type { DeliveryStatusView } from '@/domain/collaboration/types';
 import { isActiveDelivery, isProcessingDelivery, isQueuedDelivery } from '@/domain/collaboration/types';
+import { deliveryTaskStatus, isTerminalTask } from '@/domain/groupTasks/projection';
 import { create } from 'zustand';
 
 /**
@@ -31,10 +32,15 @@ export const useMessageDeliveryStore = create<MessageDeliveryState>((set) => ({
       const existing = sessionDeliveries[delivery.delivery_id];
       // state_version 小的不覆盖大的（last-write-wins）
       if (existing && existing.state_version >= delivery.state_version) return state;
+      const next = { ...sessionDeliveries, [delivery.delivery_id]: delivery };
+      // Keep a bounded recent-task history, without evicting running or uncertain tasks.
+      const terminalTasks = Object.values(next).filter((row) => row.task && isTerminalTask(deliveryTaskStatus(row)))
+        .sort((a, b) => (b.task?.finished_at ?? b.task?.last_activity_at ?? 0) - (a.task?.finished_at ?? a.task?.last_activity_at ?? 0));
+      for (const row of terminalTasks.slice(100)) delete next[row.delivery_id];
       return {
         deliveriesBySessionId: {
           ...state.deliveriesBySessionId,
-          [sessionId]: { ...sessionDeliveries, [delivery.delivery_id]: delivery },
+          [sessionId]: next,
         },
       };
     }),

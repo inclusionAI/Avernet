@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.engines.registry import resolve_published_status_ext
 from agentclaw.community.core.devices.errors import (
     DeviceServiceError,
     InvalidDeviceStatusError,
@@ -64,6 +65,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishNotFoundError,
     PublishStatusInvalidError,
+    UpgradeDraftRestartError,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
@@ -319,7 +321,7 @@ class ServicePublicationFacade:
             key=lambda item: ((item.version or 0), (item.id or 0)),
             default=None,
         )
-        return {
+        result = {
             "bot_id": record.source_bot_id,
             "publication_id": record.id,
             "card_id": f"service:{record.source_bot_id}:{record.id}",
@@ -335,6 +337,11 @@ class ServicePublicationFacade:
             "created_at": record.gmt_create,
             "updated_at": record.gmt_modified,
         }
+
+        ext = resolve_published_status_ext(record, public=True)
+        if ext:
+            result["ext"] = ext
+        return result
 
     @staticmethod
     def _visible_records(records: list[BotPublishRecord]) -> list[BotPublishRecord]:
@@ -531,6 +538,12 @@ class ServicePublicationFacade:
                 publish_id=record.id,
                 owner_id=bot["owner_id"],
             )
+        except UpgradeDraftRestartError as exc:
+            # The draft remains available through get/list lifecycle; retain the
+            # public API's existing upstream failure envelope.
+            raise ServiceContainerUpstreamError(
+                f"draft {exc.draft_record.id} created but restart submission failed"
+            ) from exc
         except (PublishNotFoundError, PublishStatusInvalidError) as exc:
             # The record may have changed between the projection check and the
             # domain write. Expose that race as the same stable state conflict.
@@ -728,7 +741,10 @@ class ServicePublicationFacade:
         result = self._flow_service.restart_bot(record.id, actor_id)
         if not result.get("success"):
             raise ServicePublicationConflictError("restart is unavailable")
-        return self._operation(record, action="restart_publish", result=result)
+        acknowledgement = self._operation(record, action="restart_publish", result=result)
+        if result.get("ext"):
+            acknowledgement["ext"] = result["ext"]
+        return acknowledgement
 
     async def cancel_staging(
         self, bot_id: str, *, actor_id: str, owner_id: str

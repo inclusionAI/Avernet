@@ -9,6 +9,9 @@ from sqlalchemy import event
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -59,6 +62,7 @@ def move_to_new_space(db, scope):
         BotRepository(db),
         SpaceAccessService(SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())),
         quota,
+        DisabledBotManagerSync(),
     ).change_space(
         bot_id=scope.bot_id, owner_id=scope.owner_id, space_id=2, env=scope.env
     )

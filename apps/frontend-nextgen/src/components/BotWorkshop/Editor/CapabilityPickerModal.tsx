@@ -278,7 +278,7 @@ export function CapabilityPickerModal({
             </Button>
           ) : null}
         </div>
-        <ModalFooter className="shrink-0 border-t border-border pt-4">
+        <ModalFooter className="shrink-0 border-t border-divider pt-4">
           <Button variant="secondary" onClick={close}>
             取消
           </Button>

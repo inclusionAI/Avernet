@@ -12,6 +12,9 @@ from enum import Enum
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.identity import (
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     NodeActionEvent,
@@ -25,6 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportEventType,
     TaskReportResult,
     TaskReportStatus,
+    TaskRuntimeProfile,
 )
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
@@ -113,6 +117,10 @@ def _fingerprint(command: TaskReportCommand) -> str:
         ),
         "trace": asdict(command.trace) if command.trace is not None else None,
     }
+    # 终态最终产物参与 event fingerprint。仅在携带时加入键,保持旧无产物报文
+    # 的 fingerprint 兼容,避免发布后历史 event_id 重放被误判冲突。
+    if command.artifact_patch is not None:
+        canonical["artifacts"] = [asdict(item) for item in command.artifact_patch]
     raw = json.dumps(
         _json_value(canonical),
         sort_keys=True,
@@ -257,6 +265,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=getattr(patch, "artifact_patch", None),
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
             elif (
                 patch.actual_goal is not None
@@ -300,6 +309,13 @@ def apply_relay_report(
         else:
             if f"{command.node_id}:EXECUTION_RESULT:{attempt}" not in receipts:
                 raise TaskStateError("PLAN_RESULT requires accepted execution first")
+            if (
+                command.event is not None
+                and command.artifact_patch is not None
+            ):
+                raise TaskStateError(
+                    "successor PLAN_RESULT events must not carry artifacts"
+                )
             next_node = command.event
             acceptance = command.task_acceptance_result
             failure = str(command.failure_reason or "").strip()
@@ -322,6 +338,8 @@ def apply_relay_report(
                 graph.status = Status.DONE
                 graph.extend_props.pop("hung_reason", None)
                 graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
                 graph.extend_props["gaps"] = []
                 graph.extend_props["task_acceptance_result"] = _json_value(
                     asdict(acceptance)
@@ -329,12 +347,17 @@ def apply_relay_report(
                 # 产物发布点 ②(spec §5.1):completion 写点同闭包 capture,重复内容
                 # 由 select-first 查重吸收。
                 default_publish_service().capture_node(
-                    graph, node, artifact_patch=None, now_ms=now
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": True,
+                        "final_conclusion": command.final_conclusion,
                         "task_acceptance_result": asdict(acceptance),
                         "progress_reason": command.progress_reason,
                     },
@@ -357,10 +380,21 @@ def apply_relay_report(
                 node.run_info.failure_reason = failure
                 graph.status = Status.HUNG
                 graph.extend_props["hung_reason"] = failure
+                graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
+                default_publish_service().capture_node(
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
+                    derive_text_from_output=False,
+                )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": False,
+                        "final_conclusion": command.final_conclusion,
                         "failure_reason": failure,
                         "progress_reason": command.progress_reason,
                     },
@@ -390,19 +424,19 @@ def apply_relay_report(
                 mode = next_node.run_info.run_mode
                 assignee = next_node.run_info.assignee
                 config = graph.extend_props.get("execution_config") or {}
-                allowed = (graph.extend_props.get("runtime_profile") or {}).get(
-                    "allowed_run_modes"
-                ) or ["single_bot", "coop_group", "bbs"]
+                allowed = TaskRuntimeProfile.run_modes_from_graph(graph)
                 if mode not in allowed:
-                    raise TaskStateError("planned run mode is not allowed")
+                    raise TaskStateError(f"planned run mode is not allowed: {mode}")
                 if mode == "coop_group" and config.get("intake_session_id"):
                     raise TaskStateError(
                         "Group relay handoff is not supported in the first release"
                     )
                 planned_group_formation: dict[str, Any] | None = None
                 if mode == "single_bot":
-                    if not assignee:
-                        raise TaskStateError("single_bot plan requires a bot assignee")
+                    if not is_dispatchable_single_bot_assignee(assignee):
+                        raise TaskStateError("single_bot plan requires a real bot assignee")
+                    assignee = str(assignee or "").strip()
+                    next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
                         is not None

@@ -51,6 +51,7 @@ function MenuBody({
   onManageFiles,
   onDynamic,
   onPickWorkflow,
+  dynamicTaskEnabled,
   workflowEnabled,
   disabled,
   workflows,
@@ -64,6 +65,8 @@ function MenuBody({
   onManageFiles?: () => void;
   onDynamic?: () => void;
   onPickWorkflow?: (w: WorkflowPanelItem) => void;
+  /** 是否安装了 task-intent-recognition；未安装时「任务」仅可见、不可选择。 */
+  dynamicTaskEnabled: boolean;
   /** 工作流任务是否可点(功能开关 × enableWorkflow)。false 时只展示、屏蔽点击，不展开二级列表。 */
   workflowEnabled: boolean;
   disabled?: boolean;
@@ -123,7 +126,12 @@ function MenuBody({
       )}
       {showTaskEntries ? (
         <>
-          <MenuRow icon={<Sparkles className="size-3.5" />} label="任务" onClick={onDynamic} disabled={disabled} />
+          <MenuRow
+            icon={<Sparkles className="size-3.5" />}
+            label="任务"
+            onClick={onDynamic}
+            disabled={disabled || !dynamicTaskEnabled}
+          />
           <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
             <PopoverTrigger asChild>
               <MenuRow
@@ -223,6 +231,7 @@ export function ComposerCapabilitiesMenu({
                 close();
               } : undefined}
               onPickWorkflow={execution && enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+              dynamicTaskEnabled={execution?.dynamicTaskEnabled ?? true}
               workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
               disabled={disabled}
               workflows={execution?.workflows ?? []}
@@ -237,7 +246,7 @@ export function ComposerCapabilitiesMenu({
          * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。 */}
         {capabilitySets ? (
           <>
-            <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-border" />
+            <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-divider" />
             <Popover
               open={capabilityOpen}
               onOpenChange={(next) => {

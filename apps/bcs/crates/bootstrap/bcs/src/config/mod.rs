@@ -17,6 +17,7 @@
 //! - `tests` — configuration tests (colocated at module scope).
 
 mod bot_authority;
+mod a2a_input;
 mod collaboration;
 mod http;
 mod invite;
@@ -47,7 +48,7 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig,
+    ApiAuthConfig, ApiConfig, AuthChainConfig, AuthSdkConfig,
     ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
     HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
     LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,

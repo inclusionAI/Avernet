@@ -48,6 +48,29 @@ DEFAULT_BBS_MAX_DEPTH = 3
 MAX_GRAPH_VERSION_RETRIES = 3
 
 
+def _used_executor_ids(graph: TaskExecutionGraph) -> list[str]:
+    """Project all bot IDs that have already executed on a relay chain.
+
+    This is a read-only, chain-level helper. It intentionally excludes group
+    IDs because they are not bot identities. BBS claims are included through
+    ``bbs_owner``.
+    """
+    used_ids: set[str] = set()
+    for node in graph.tasks:
+        runtime = node.run_info
+        mode = str(runtime.run_mode or "").strip()
+        if mode == "single_bot":
+            assignee = runtime.assignee
+        elif mode == "bbs":
+            assignee = runtime.extend_props.get("bbs_owner") or runtime.assignee
+        else:
+            continue
+        candidate = str(assignee or "").strip()
+        if candidate and candidate not in {"NOT_DECIDED"}:
+            used_ids.add(candidate)
+    return sorted(used_ids)
+
+
 def get_node(graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
     return next((node for node in graph.tasks if node.node_id == node_id), None)
 
@@ -534,6 +557,10 @@ def claim_bbs_owner(
     """Claim centralized root BBS or a Relay target BBS node atomically."""
     with self._lock_for(task_id):
         graph = self._require_graph(task_id)
+        if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(graph):
+            raise TaskStateError(
+                f"claim_bbs_owner: BBS run mode is not allowed by runtime profile task={task_id}"
+            )
         if not graph.extend_props.get("bbs_mode"):
             raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
         target_id = node_id or task_id
@@ -742,6 +769,7 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
             gaps=[],
             task_id=task_id,
             node_id=node_id,
+            used_executor_ids=_used_executor_ids(graph),
             attempt=graph_node_attempt(current),
             root_task_spec=root.task_spec,
             current_task_spec=current.task_spec,

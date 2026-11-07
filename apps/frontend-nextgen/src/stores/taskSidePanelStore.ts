@@ -89,9 +89,12 @@ const initial = {
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
   ...initial,
   setActiveTask: (taskId) => {
-    // 用户切到某任务（含新任务夺焦）即消费该任务的进展徽标。
+    // 切到/打开任务时重置导航，让面板默认选中第一节点。
     useTaskUpdateAttentionStore.getState().clearTaskUpdate(taskId);
-    set({ activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null });
+    set((s) => {
+      const navByTask = { ...s.navByTask, [taskId]: emptyRecord };
+      return { activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null, navByTask };
+    });
   },
   markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
   consumeTaskPanelOpenIntent: (taskId) => {

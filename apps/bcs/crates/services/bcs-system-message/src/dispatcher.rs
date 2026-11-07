@@ -394,19 +394,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                 terminal: false,
                             })
                             .await;
-                        let transport_owner = match &cmd.cmd.target {
-                            BotDeliveryTarget::WebSocket { .. } => {
-                                BotRunTransportOwner::WebSocket
-                            }
-                            BotDeliveryTarget::HttpProvider {
-                                provider_id,
-                                provider_bot_ref,
-                                ..
-                            } => BotRunTransportOwner::HttpProvider {
-                                provider_id: provider_id.clone(),
-                                provider_bot_ref: provider_bot_ref.clone(),
-                            },
-                        };
+                        let transport_owner = BotRunTransportOwner::from_target(&cmd.cmd.target);
                         let context = ActiveBotRunContext {
                             canonical_run_id: cmd.run_id.clone(),
                             downstream_run_id: cmd.run_id.clone(),

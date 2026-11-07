@@ -12,6 +12,7 @@
 //! `docs/superpowers/specs/2026-08-27-bcs-run-governance-design.md`.
 
 pub mod memory;
+pub mod a2a;
 pub mod sql;
 mod sqlite_schema_v32;
 

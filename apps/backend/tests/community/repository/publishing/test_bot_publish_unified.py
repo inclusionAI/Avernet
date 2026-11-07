@@ -971,3 +971,37 @@ def test_threshold_boundary(tmp_path):
     over = _artifact_of_json_size(ARTIFACT_OSS_THRESHOLD_BYTES + 1)
     repo.insert(_data(publish_bot_id="b-over", ext={"config_artifact": over}))
     assert fake.put_calls == 1
+
+
+def test_upgrade_restart_failure_keeps_persisted_draft_for_idempotent_retry(repo):
+    from unittest.mock import Mock
+
+    from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
+    from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
+
+    original = repo.insert(_data(status=PublishStatus.SUCCESS, ext=None))
+    bot_repo = Mock()
+    bot_repo.get_by_pk.return_value = {
+        "id": 1, "bot_id": "src-bot", "entity_id": "emp001",
+        "owner_id": "current-owner", "env": "dev", "active_engine": "openclaw",
+    }
+    lifecycle = Mock()
+    lifecycle.is_teclaw_bot.return_value = False
+    lifecycle.restart_bot.side_effect = RuntimeError("provider unavailable")
+    service = BotPublishService(
+        bot_publish_repo=repo, bot_repo=bot_repo, bot_service=lifecycle,
+        publish_flow_service_provider=Mock(), device_binding_repo=Mock(),
+        bcn_service=Mock(), quality_task_service=Mock(), publish_operation_repo=Mock(),
+        task_queue_service=Mock(), bot_process_registry=Mock(), common_config_service=Mock(),
+    )
+    service._env = "dev"
+    service._get_next_version = Mock(return_value=2)
+    with pytest.raises(UpgradeDraftRestartError) as raised:
+        service.upgrade_publish(original.id, "collaborator")
+    draft = repo.get_by_id(raised.value.draft_record.id)
+    assert draft.status == PublishStatus.DRAFT
+    assert draft.last_pub_id == original.id
+    assert draft.source_bot_pk == original.source_bot_pk
+    assert service.upgrade_publish(original.id, "collaborator").id == draft.id
+    assert lifecycle.restart_bot.call_count == 1
+    lifecycle.restart_bot.assert_called_once_with(bot_id="src-bot", user_id="current-owner")

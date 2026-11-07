@@ -28,7 +28,12 @@ function nonEmpty(value: string | null): string | undefined {
 export function parseConversationRoute(input: URLSearchParams | string): ConversationRouteState {
   const params = typeof input === 'string' ? new URLSearchParams(input) : input;
   const section = toEnumValue(SECTIONS, params.get('section'));
-  const botId = nonEmpty(params.get('bot'));
+  // 老版分享链接兼容（老版 /private-chat/chat?id=bot_id:owner_id 重定向后落本页）：
+  // bot 缺省时，含冒号的 id 复合串视同 bot 别名；bot 参数始终优先，无冒号的 id 不接管。
+  const legacyBotId = params.get('id');
+  const botId =
+    nonEmpty(params.get('bot')) ??
+    (legacyBotId && legacyBotId.includes(':') ? nonEmpty(legacyBotId) : undefined);
   let origin = toEnumValue(ORIGINS, params.get('origin'));
   let scope = toEnumValue(SCOPES, params.get('scope'));
   let friendUserId = nonEmpty(params.get('friend'));

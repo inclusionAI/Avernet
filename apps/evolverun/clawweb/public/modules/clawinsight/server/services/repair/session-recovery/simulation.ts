@@ -14,7 +14,7 @@ export type RecoverySimulation = {
 };
 export type RecoverySimulationAssessment = {
   knowledge?: Array<{ path: string; sha256: string }>;
-  decision: "message" | "environment" | "observe" | "insufficient_evidence" | "user_continued";
+  decision: "message" | "environment" | "observe" | "insufficient_evidence" | "user_continued" | "owner_handoff";
   summary: string;
   evidence_ids: string[];
   message?: string;

@@ -19,6 +19,8 @@ function toChatBotView(bot: {
   reachability?: string;
   engine?: string;
   botType?: string;
+  templateType?: string;
+  templateName?: string;
   detailsResolved?: boolean;
   /** Bot 实例运行状态(ACTIVE/PENDING/FAILED);2026-10-21 起从 metadata 详情透传,缺省视为可用。 */
   botStatus?: string;
@@ -34,6 +36,8 @@ function toChatBotView(bot: {
     chatable: bot.detailsResolved !== false,
     engine: bot.engine,
     botType: bot.botType,
+    templateType: bot.templateType,
+    templateName: bot.templateName,
     isFriendBot: true,
     status: bot.botStatus,
   };

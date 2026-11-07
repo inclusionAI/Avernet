@@ -55,6 +55,7 @@ async fn deleting_session_aborts_all_active_state_machine_runs() {
             input: json!({"question": "delete the session"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -117,7 +118,7 @@ async fn deleting_group_aborts_active_state_machine_runs() {
             opening_message_override: None,
             input: json!({"question": "delete the group"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -173,6 +174,7 @@ async fn retrying_deleted_group_cleanup_aborts_orphaned_active_runs() {
             input: json!({"question": "recover orphaned run"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -243,6 +245,7 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
             input: json!({"question": "review this"}),
             caller_id: Some("driver-bot".to_string()),
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");

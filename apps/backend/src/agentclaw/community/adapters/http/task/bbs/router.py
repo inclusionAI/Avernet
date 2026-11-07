@@ -9,8 +9,10 @@ cannot drift.
 from __future__ import annotations
 
 from typing import Annotated, Any
-from fastapi import APIRouter, Body, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
     BrowseReportCreated,
@@ -64,6 +66,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
+)
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
@@ -98,6 +104,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
+    enrich_personal_center_bot_display_names,
 )
 
 router = APIRouter(
@@ -148,16 +155,35 @@ async def list_topics_internal(
         max_length=256,
         description="Optional author filter: return only Topics authored by "
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
-        "my topics view, server-side paginated.",
+        "'my topics' view, server-side paginated.",
+    ),
+    following: bool = Query(
+        default=False,
+        description="Return only Topics authored by humans and Bots actively "
+        "followed by the actor named by following_owner_id.",
+    ),
+    following_owner_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="The human actor whose active follows define the "
+        "following feed. Required when following=true; accepted only on this "
+        "trusted internal surface.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
-    """List or search Topics in the current tenant and environment."""
+    """List or search Topics in the caller's tenant and environment."""
+    following_owner: str | None = None
+    if following:
+        if following_owner_id is None or not following_owner_id.strip():
+            raise Forbidden("following topics require a following owner")
+        following_owner = following_owner_id.strip()
+
     result = service.list_topics(
         keyword=keyword,
         status=status,
         topic_type=topic_type,
         author_id=author_id,
+        following_owner_id=following_owner,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -412,16 +438,26 @@ async def upsert_subscription_internal(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
+    user: AuthenticatedUser = Depends(get_current_user),
+    grant_service: TaskClaimGrantServiceProtocol = Injected(
+        TaskClaimGrantServiceProtocol
+    ),
     provisioner: BbsBrowseSubscriptionProvisioner = Injected(
         BbsBrowseSubscriptionProvisioner
     ),
 ) -> Envelope[SubscriptionItem]:
-    """加入/更新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
+    """授权 Bot 后加入/更新「逛论坛」订阅（统一 B 方案）。
 
-    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才
-    写入订阅记录。若装配失败，本次尝试不会留下数据库开关，用户可以重试。已存在的
-    OpenClaw 订阅仍同步保存备注并后台修复两条 cron。
+    Bot 授权必须在请求内同步完成，因为它依赖当前浏览器的登录 Cookie；授权成功后才启动异步
+    装配。新订阅先返回 202，后台装配 `bbs-browse-loop`、清理历史 `bbs-digest-loop`，成功后才
+    写入订阅记录。已存在的 OpenClaw 订阅同步保存备注并后台修复 Browse cron。
     """
+    await grant_service.grant(
+        bcs_bot_id=compose_bot_identity(bot_id, owner_user_id),
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=user.id,
+    )
     note = body.note if body is not None else None
     result = provisioner.join_or_refresh(
         bot_id=bot_id,
@@ -678,6 +714,7 @@ async def create_interaction_internal(
         action_type=body.action_type,
         target_type=body.target_type,
         target_id=body.target_id,
+        active=body.active,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)
@@ -772,6 +809,7 @@ async def get_personal_center_activities_internal(
             page_size=page_params.page_size,
         )
     )
+    result = enrich_personal_center_bot_display_names(result, request=request)
     return page_envelope(
         result.total,
         [PersonalCenterActivityItemWire.from_record(item) for item in result.items],

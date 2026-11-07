@@ -16,7 +16,10 @@ from agentclaw.community.core.desktop_bot.services.desktop_bot_service import De
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision, map_baas_to_local
 from agentclaw.community.di.config import DesktopBotPeriodicScanConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
-from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.cache import (
+    CacheLockInfrastructureError,
+    CachePlugin,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -282,9 +285,10 @@ class DesktopBotLifecycle(LifecycleBase):
     async def _guarded_scan(self) -> None:
         """Acquire the single-instance lock, scan once, then release.
 
-        If the lock is held by another worker (or the distributed cache is unreachable),
-        skip this round entirely — safe degradation: missing one
-        reconciliation round is preferable to N workers scanning at once.
+        If the lock is held by another worker, skip this round entirely.
+        If the distributed cache is unreachable, skip the round too, but keep
+        the infrastructure symptom distinct so it is not misread as lock
+        contention. If it is held by another worker, the lock is not released.
 
         Even when the lock is won, a cross-worker timestamp throttle
         (``_SCAN_TS_KEY``) is checked first: workers hold staggered sleep
@@ -292,12 +296,19 @@ class DesktopBotLifecycle(LifecycleBase):
         the global scan frequency would far exceed the configured interval.
         """
         try:
-            token = self._cache.acquire_lock(
+            token = self._cache.acquire_lock_strict(
                 self._scan_lock_key, ttl=_SCAN_LOCK_TTL_SECONDS,
             )
+        except CacheLockInfrastructureError as e:
+            logger.warning(
+                "[periodic-scan] cache lock backend unavailable, skip round: %s",
+                e,
+            )
+            return
         except Exception as e:
             logger.warning(
-                "[periodic-scan] acquire_lock failed, skip round: %s", e,
+                "[periodic-scan] acquire_lock failed, skip round: %s",
+                e,
             )
             return
 

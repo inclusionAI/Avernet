@@ -21,6 +21,8 @@ if TYPE_CHECKING:
         GenomeRefEventRow,
         GenomeRefRow,
         GenomeRevisionRow,
+        ProvenanceKind,
+        SettleResult,
     )
 
 
@@ -122,7 +124,7 @@ class GenomeRefRepositoryProtocol(Protocol):
         name: str,
         revision_id: str,
         expected_revision_id: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
@@ -146,7 +148,7 @@ class GenomeRefRepositoryProtocol(Protocol):
         bot_id: str,
         revision_id: str,
         expected_active: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
@@ -186,26 +188,63 @@ class GenomePatchRepositoryProtocol(Protocol):
 
 @runtime_checkable
 class GenomePromotionRepositoryProtocol(Protocol):
-    """``ac_genome_promotion``: one row per promotion, written when it starts and when delivery answers."""
+    """``ac_genome_promotion``: one row per promotion, ``pending`` → ``applying`` → settled.
+
+    A promotion is filed before its delivery starts and moves the refs only
+    when it settles, in the same transaction that gives it its final status.
+    Only a ``pending`` or ``applying`` row changes; a settled one is final.
+    """
 
     @abstractmethod
     def insert(self, row: GenomePromotionRow) -> GenomePromotionRow: ...
 
     @abstractmethod
-    def start(
-        self,
-        row: GenomePromotionRow,
-        *,
-        expected_active: Optional[str],
-        expected_statuses: tuple[str, ...],
-        moved_at: datetime,
+    def mark_applying(
+        self, *, env: str, entity_id: str, bot_id: str, promotion_id: str, apply_id: str
     ) -> Optional[GenomePromotionRow]:
-        """Move ``active``/``previous`` to ``row.revision_id`` by compare-and-swap, mark it ``promoted``, file ``row``.
+        """``pending`` → ``applying`` with the delivering apply's id; ``None`` when the row is not ``pending``."""
+        ...
 
-        One transaction: a lost compare-and-swap, a revision whose status is
-        no longer one of ``expected_statuses`` (``None`` either way) or a
-        failed write leaves no ref moved, no status changed and no row.
-        Re-promoting the current ``active`` leaves ``previous`` untouched.
+    @abstractmethod
+    def settle(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        promotion_id: str,
+        apply_id: str,
+        status: str,
+        apply_detail: str,
+        move_refs: bool,
+        labels: tuple[str, ...],
+        expected_statuses: tuple[str, ...],
+        settled_at: datetime,
+    ) -> SettleResult:
+        """Give a ``pending``/``applying`` promotion its final ``status``; with ``move_refs``, move the refs too.
+
+        One transaction: ``active`` → the promotion's revision by
+        compare-and-swap against its ``from_revision_id``, ``previous`` → the
+        old ``active``, ``active``'s ``labels``, the revision marked
+        ``promoted`` (from one of ``expected_statuses``), and the row, which
+        also records ``apply_id`` (the apply can end before the request that
+        started it records the association). A lost
+        compare-and-swap or a revision status that moved rolls all of it back
+        and records the row ``apply_failed`` instead (``REF_CONFLICT``). A row
+        already settled is left alone (``ALREADY_SETTLED``); a missing one is
+        ``NOT_FOUND``.
+        """
+        ...
+
+    @abstractmethod
+    def fail_stale_pending(
+        self, *, env: str, entity_id: str, bot_id: str, older_than: datetime, apply_detail: str, settled_at: datetime
+    ) -> int:
+        """Settle as ``apply_failed`` the bot's ``pending`` rows with no apply id created before ``older_than``.
+
+        Such a row belongs to a request that died between filing the
+        promotion and starting its apply: no apply will ever report on it.
+        Answers how many rows it settled.
         """
         ...
 
@@ -230,5 +269,8 @@ class GenomePromotionRepositoryProtocol(Protocol):
         status: str,
         apply_detail: str,
     ) -> Optional[GenomePromotionRow]:
-        """Record delivery's answer; ``None`` when the row is gone."""
+        """Settle a ``pending``/``applying`` row with no ref move (a delivery that never started).
+
+        ``None`` when the row is gone; a row already settled is returned unchanged.
+        """
         ...

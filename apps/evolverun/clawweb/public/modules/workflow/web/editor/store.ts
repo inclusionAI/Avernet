@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { originalActiveDraftBaseline, originalDraftPackId, type ActiveDraftBaseline } from '../api/editorWorkflowSource'
 import type { WorkflowSpec, WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import { getResultBranchIds, getResultBranches, withResultBranches } from './contracts'
 import { branchEditError, canConnect, computeDagLayout, dependencies, findNodeReferences, graphMutationError, validateSpec, type Position, type ValidationError } from './graph'
@@ -19,12 +20,15 @@ export interface EditorState extends Snapshot {
   /** Monotonic editor lifetime, independent of workflow ID, saved baseline and undo history. */
   sessionId: number
   isDirty: boolean
+  /** Layout is session-only and has an independent loss boundary from the spec. */
+  isLayoutDirty: boolean
   validationErrors: ValidationError[]
   pendingEdits: Record<string, string>
   actionError: string | null
   canUndo: boolean
   canRedo: boolean
-  loadSpec: (spec: WorkflowSpec) => void
+  loadSpec: (spec: WorkflowSpec, databaseSpec?: WorkflowSpec | null, activeDeployNumber?: number | null) => void
+  replaceSession: (spec: WorkflowSpec, expected: EditorState, isNew: boolean, databaseSpec?: WorkflowSpec | null, activeDeployNumber?: number | null) => boolean
   createNew: (id: string, title: string) => void
   updateSpecField: (field: string, value: unknown) => void
   addNode: (node: EditorNode) => void
@@ -42,7 +46,7 @@ export interface EditorState extends Snapshot {
   endTransaction: () => void
   undo: () => void
   redo: () => void
-  completeSave: (savedSpec: WorkflowSpec, specAtRequest: WorkflowSpec, sessionId: number) => boolean
+  completeSave: (savedSpec: WorkflowSpec, specAtRequest: WorkflowSpec, sessionId: number, initialDatabaseSpec?: WorkflowSpec, expectedInitialActive?: ActiveDraftBaseline) => boolean
   markClean: (savedSpec?: WorkflowSpec) => void
   importYaml: (spec: WorkflowSpec) => void
   reset: (options?: { force?: boolean }) => void
@@ -51,6 +55,14 @@ interface HistoryState {
   _past: Snapshot[]
   _future: Snapshot[]
   _savedSpec: WorkflowSpec | null
+  /** Confirmed DB draft; null means absent, separate from the canvas dirty baseline. */
+  _databaseSpec: WorkflowSpec | null
+  /** Raw pack_id captured with the original draft; undefined means untrusted. */
+  _databasePackId: string | null | undefined
+  _activeBaseline: ActiveDraftBaseline | undefined
+  /** Active publication seen when no draft exists; null once a draft exists. */
+  _activeDeployNumber: number | null
+  _baselinePositions: Positions
   _transaction: Snapshot | null
   _transactionDepth: number
 }
@@ -85,10 +97,13 @@ function identityChangedDuringSave(current: WorkflowSpec, source: WorkflowSpec, 
   return !equal(current[field], source[field])
 }
 function historyInitial(): HistoryState {
-  return { _past: [], _future: [], _savedSpec: null, _transaction: null, _transactionDepth: 0 }
+  return { _past: [], _future: [], _savedSpec: null, _databaseSpec: null, _databasePackId: undefined, _activeBaseline: undefined, _activeDeployNumber: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
 }
+
+const positiveDeployNumber = (value: number | null | undefined): value is number =>
+  value !== null && Number.isSafeInteger(value) && value > 0
 function initial(sessionId = 0) {
-  return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
+  return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, isLayoutDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
 }
 
 /** Positions live only in this editor session, not localStorage or the execution document.
@@ -103,6 +118,18 @@ function positionsFor(spec: WorkflowSpec, previous?: Snapshot): Positions {
   }))
 }
 
+/** Validate and clone before any navigation or session replacement. */
+export function prepareWorkflowSession(incoming: WorkflowSpec): { spec: WorkflowSpec; positions: Positions; errors: ValidationError[] } | null {
+  try {
+    const spec = clone(incoming)
+    const errors = validateSpec(spec)
+    if (errors.some(error => error.type === 'invalid-structure') || typeof spec.id !== 'string' || !spec.id.trim()
+      || typeof spec.title !== 'string' || !spec.title.trim()
+      || !(spec.version === undefined || spec.version === null || typeof spec.version === 'string' && spec.version.trim() || typeof spec.version === 'number' && Number.isFinite(spec.version))) return null
+    return { spec, positions: positionsFor(spec), errors }
+  } catch { return null }
+}
+
 export const useEditorStore = create<StoreState>((set, get) => {
   const fail = (message: string) => { set({ actionError: message }); return false }
   const ready = () => !Object.keys(get().pendingEdits).length || fail('有未应用草稿，请先应用或放弃: ' + Object.values(get().pendingEdits).join('; '))
@@ -114,7 +141,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
     if (sameDocument(state, next)) { set({ actionError: null }); return }
     const past = state._transaction ? state._past : [...state._past, snapshot(state)].slice(-HISTORY_LIMIT)
     set({ ...next, _past: past, _future: [], canUndo: past.length > 0, canRedo: false,
-      isDirty: !equal(next.spec, state._savedSpec), actionError: null,
+      isDirty: !equal(next.spec, state._savedSpec), isLayoutDirty: !equal(next.positions, state._baselinePositions), actionError: null,
       validationErrors: next.spec ? validateSpec(next.spec) : [] })
   }
 
@@ -138,19 +165,43 @@ export const useEditorStore = create<StoreState>((set, get) => {
 
   return {
     ...initial(),
-    loadSpec: (incoming) => {
+    loadSpec: (incoming, databaseSpec = incoming, activeDeployNumber) => {
       if (!ready()) return
       const state = get()
+      // Loading historical documents is a structural boundary, not the stricter
+      // session-replacement/version policy. Preserve their source values as-is.
+      if (validateSpec(incoming).some(error => error.type === 'invalid-structure')
+        || typeof incoming.id !== 'string' || !incoming.id.trim()
+        || databaseSpec !== null && (validateSpec(databaseSpec).some(error => error.type === 'invalid-structure') || databaseSpec.id !== incoming.id || activeDeployNumber !== undefined && activeDeployNumber !== null)
+        || databaseSpec === null && !positiveDeployNumber(activeDeployNumber)) {
+        fail('工作流或数据库基线身份/结构无效，未替换当前文档'); return
+      }
       // A same-ID refetch can still be a different source/version. Never overwrite
       // edits just because workflow identity is unchanged.
-      if (state.isDirty) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
-      if (validateSpec(incoming).some((error) => error.type === 'invalid-structure')) { fail('工作流结构无效，未替换当前文档'); return }
+      if (state.isDirty || (state.isLayoutDirty && state.spec?.id !== incoming.id)) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
+      const activeBaseline = databaseSpec === null ? originalActiveDraftBaseline(incoming) : undefined
       const spec = clone(incoming)
-      set({ ...initial(state.sessionId + 1), spec, positions: positionsFor(spec, state), _savedSpec: clone(spec), validationErrors: validateSpec(spec) })
+      const positions = positionsFor(spec, state)
+      const baseline = state.spec?.id === spec.id && state.isLayoutDirty ? state._baselinePositions : positions
+      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _databasePackId: databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
+    },
+    replaceSession: (incoming, expected, isNew, databaseSpec = incoming, activeDeployNumber) => {
+      if (get() !== expected) return false
+      const prepared = prepareWorkflowSession(incoming)
+      const database = isNew || databaseSpec === null ? null : prepareWorkflowSession(databaseSpec)
+      if (!prepared
+        || !isNew && databaseSpec !== null && (!database || database.spec.id !== prepared.spec.id || activeDeployNumber !== undefined && activeDeployNumber !== null)
+        || !isNew && databaseSpec === null && !positiveDeployNumber(activeDeployNumber)
+        || get() !== expected) return false
+      const { spec, positions, errors } = prepared
+      const activeBaseline = !isNew && databaseSpec === null ? originalActiveDraftBaseline(incoming) : undefined
+      set({ ...initial(expected.sessionId + 1), spec, positions, _baselinePositions: clone(positions),
+        _savedSpec: isNew ? null : clone(spec), _databaseSpec: database ? clone(database.spec) : null, _databasePackId: isNew ? undefined : databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: !isNew && databaseSpec === null ? activeDeployNumber : null, isDirty: isNew, validationErrors: errors })
+      return true
     },
     createNew: (id, title) => {
       if (!ready()) return
-      if (get().isDirty) { fail('当前工作流有未保存修改，不能新建覆盖'); return }
+      if (get().isDirty || get().isLayoutDirty) { fail('当前工作流有未保存修改，不能新建覆盖'); return }
       const spec: WorkflowSpec = { id, version: '1.0.0', title, nodes: [] }
       set({ ...initial(get().sessionId + 1), spec, isDirty: true, validationErrors: validateSpec(spec) })
     },
@@ -261,7 +312,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!previous) { set({ actionError: null }); return }
       const past = state._past.slice(0, -1)
       set({ ...snapshot(previous), _past: past, _future: [...state._future, snapshot(state)].slice(-HISTORY_LIMIT),
-        canUndo: past.length > 0, canRedo: true, isDirty: !equal(previous.spec, state._savedSpec),
+        canUndo: past.length > 0, canRedo: true, isDirty: !equal(previous.spec, state._savedSpec), isLayoutDirty: !equal(previous.positions, state._baselinePositions),
         validationErrors: previous.spec ? validateSpec(previous.spec) : [], actionError: null })
     },
     redo: () => {
@@ -271,10 +322,10 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!next) { set({ actionError: null }); return }
       const future = state._future.slice(0, -1)
       set({ ...snapshot(next), _past: [...state._past, snapshot(state)].slice(-HISTORY_LIMIT), _future: future,
-        canUndo: true, canRedo: future.length > 0, isDirty: !equal(next.spec, state._savedSpec),
+        canUndo: true, canRedo: future.length > 0, isDirty: !equal(next.spec, state._savedSpec), isLayoutDirty: !equal(next.positions, state._baselinePositions),
         validationErrors: next.spec ? validateSpec(next.spec) : [], actionError: null })
     },
-    completeSave: (savedSpec, specAtRequest, sessionId) => {
+    completeSave: (savedSpec, specAtRequest, sessionId, initialDatabaseSpec, expectedInitialActive) => {
       const state = get()
       const request = clone(specAtRequest), saved = clone(savedSpec)
       if (state.sessionId !== sessionId) { fail('保存结果已过期，未修改当前编辑器会话'); return false }
@@ -284,6 +335,24 @@ export const useEditorStore = create<StoreState>((set, get) => {
         return false
       }
       if (state.spec.id !== request.id) { fail('保存期间工作流标识发生变化，请重新确认后再保存'); return false }
+      let initialPackId: string | null | undefined
+      if (state._databaseSpec === null && state._activeBaseline && initialDatabaseSpec === undefined) {
+        fail('首次草稿缺少同一数据库行身份凭证，未标记为已保存'); return false
+      }
+      if (initialDatabaseSpec !== undefined) {
+        initialPackId = originalDraftPackId(initialDatabaseSpec)
+        // Only a newly-created session can acquire this evidence. Never adopt a
+        // new binding for an existing draft, even when its document is identical.
+        const newSession = state._savedSpec === null && state._databasePackId === undefined && state._activeDeployNumber === null && state._activeBaseline === undefined && expectedInitialActive === undefined
+        const firstDraft = state._savedSpec !== null && state._activeBaseline !== undefined
+          && state._databasePackId === initialPackId && state._activeDeployNumber === state._activeBaseline.deployNumber
+          && state._activeBaseline.packId === initialPackId && expectedInitialActive !== undefined
+          && equal(state._activeBaseline, expectedInitialActive)
+        if (initialPackId === undefined || state._databaseSpec !== null || !(newSession || firstDraft)
+          || !equal(initialDatabaseSpec, request) || !equal(initialDatabaseSpec, saved)) {
+          fail('创建后的数据库身份或文档基线无法确认，未标记为已保存'); return false
+        }
+      }
 
       const current = state.spec
       const spec = { ...current, id: saved.id, title: identityChangedDuringSave(current, request, 'title') ? current.title : saved.title }
@@ -292,7 +361,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       } else if (Object.hasOwn(saved, 'facade')) spec.facade = clone(saved.facade)
       else delete spec.facade
 
-      set({ spec: clone(spec), _savedSpec: saved, isDirty: !equal(spec, saved),
+      set({ spec: clone(spec), _savedSpec: saved, _databaseSpec: clone(saved), _databasePackId: initialDatabaseSpec === undefined ? state._databasePackId : initialPackId, _activeBaseline: undefined, _activeDeployNumber: null, isDirty: !equal(spec, saved),
         validationErrors: validateSpec(spec), actionError: null })
       return true
     },
@@ -301,7 +370,9 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!state.spec) { fail('尚未加载工作流，不能标记已保存'); return }
       if (savedSpec && savedSpec.id !== state.spec.id) { fail('保存结果属于其他工作流，未修改当前保存基线'); return }
       const baseline = clone(savedSpec ?? state.spec)
-      set({ _savedSpec: baseline, isDirty: !equal(state.spec, baseline), actionError: null })
+      const databaseSpec = state._databaseSpec === null ? null : baseline
+      set({ _savedSpec: baseline, _databaseSpec: databaseSpec, _activeDeployNumber: databaseSpec === null ? state._activeDeployNumber : null,
+        isDirty: !equal(state.spec, baseline), actionError: null })
     },
     importYaml: (incoming) => {
       if (!ready()) return
@@ -313,8 +384,21 @@ export const useEditorStore = create<StoreState>((set, get) => {
     reset: (options) => {
       if (options?.force === true) { set(initial(get().sessionId + 1)); return }
       if (!ready()) return
-      if (get().isDirty) { fail('当前工作流有未保存修改，不能重置；请先保存或显式放弃'); return }
+      if (get().isDirty || get().isLayoutDirty) { fail('当前工作流有未保存修改，不能重置；请先保存或显式放弃'); return }
       set(initial(get().sessionId + 1))
     },
   }
 })
+
+// This listener must outlive Editor: SPA navigation leaves the Zustand draft in memory.
+// It warns only; browser policy controls the prompt, and no draft is persisted here.
+if (typeof window !== 'undefined') {
+  const beforeUnload = (event: BeforeUnloadEvent) => {
+    const state = useEditorStore.getState()
+    if (!state.isDirty && !state.isLayoutDirty && !Object.keys(state.pendingEdits).length) return
+    event.preventDefault()
+    event.returnValue = ''
+  }
+  window.addEventListener('beforeunload', beforeUnload)
+  if (import.meta.hot) import.meta.hot.dispose(() => window.removeEventListener('beforeunload', beforeUnload))
+}

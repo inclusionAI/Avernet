@@ -274,7 +274,7 @@ class TestSingleProcessEndToEnd:
         assert run.ended_at is not None
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
-        assert sorted(a.name for a in agents) == ["a1", "a2"]
+        assert sorted(a.name.split("_", 1)[0] for a in agents) == ["a1", "a2"]
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
         assert all(a.attempts == 1 for a in agents)
 
@@ -284,10 +284,12 @@ class TestSingleProcessEndToEnd:
             assert (result.payload is not None) != (result.artifact_key is not None)
         payloads = {repos["agent"].get(dm.RunId(run_id), s.source_agent_id, TENANT).name: s.payload
                     for s in results}
-        assert payloads == {
-            "a1": {"answer": "done-a1"},
-            "a2": {"answer": "done-a2"},
-        }
+        stems = {k.split("_", 1)[0] for k in payloads}
+        assert stems == {"a1", "a2"}
+        for k, payload in payloads.items():
+            expected = {"a1": {"answer": "done-a1"},
+                       "a2": {"answer": "done-a2"}}[k.split("_", 1)[0]]
+            assert payload == expected
 
         rounds = repos["round"].list_by_run(dm.RunId(run_id), TENANT)
         assert len(rounds) == 1

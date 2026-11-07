@@ -243,21 +243,27 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
 
     bcs::migrations::run_sqlite_migrations(db.as_ref())
         .await
-        .expect("run migration chain with 037");
+        .expect("run migration chain through A2A 038");
 
-    // 37 recorded exactly once; a re-run changes nothing.
+    // The complete chain is recorded exactly once; a re-run changes nothing.
     let history = db
         .query(DbStatement::new(
             "SELECT version, name, dialect, checksum FROM bcs_schema_migrations ORDER BY version",
         ))
         .await
         .expect("history");
-    assert_eq!(history.len(), 37, "full chain recorded");
-    let last = history.last().expect("bot_authority present");
+    assert_eq!(history.len() as i64, bcs::migrations::sqlite_target_version(), "full chain recorded");
+    let authority = history.iter()
+        .find(|row| row.get("version") == Some(&DbValue::I64(37)))
+        .expect("bot_authority present");
     assert_eq!(
-        last.get("name"),
+        authority.get("name"),
         Some(&DbValue::String("bot_authority".into()))
     );
+    assert_eq!(history.last().expect("chain tail present").get("name"),Some(&DbValue::String("auth_session_version".into())));
+    assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("group_agent_cards".into()))), "Group Card migration recorded");
+    assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("bot_avatar".into()))), "avatar migration recorded");
+    assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("bot_a2a".into()))), "A2A migration recorded");
     bcs::migrations::run_sqlite_migrations(db.as_ref())
         .await
         .expect("idempotent re-run");

@@ -86,7 +86,7 @@ def test_collaboration_online_filter_reaches_scoped_repository():
 
 def test_metadata_projection_has_stage_information_but_no_runtime_internals(catalog_client):
     catalog_client.service.list_bots_by_owner_bot_pairs.return_value = {"total": 1, "items": [{
-        "bot_id": "b1", "owner_id": "other", "bot_type": "service", "status": "ACTIVE",
+        "bot_id": "b1", "owner_id": "other", "entity_id": "stable", "bot_type": "service", "status": "ACTIVE",
         "online_available": True, "live_version": 3, "conversation_stage": "online",
         "binding_id": 71, "ext": {"binding": {"online": 71}},
     }]}

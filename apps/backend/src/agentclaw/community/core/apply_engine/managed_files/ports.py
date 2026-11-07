@@ -125,9 +125,7 @@ class PlatformIdentity(_StorePort, IdentityFilePort):
         scope = self._scope(entity_type, entity_id, bot_id)
         rel_path = _identity_path(file_type)
         if not content:
-            # The domain's own "absent": an empty write removes the file. In
-            # the store that is a delete, so the composer never references an
-            # empty object.
+            # Empty writes remove the stored object for every identity filename.
             await asyncio.to_thread(
                 self._store.delete, scope, rel_path=rel_path
             )

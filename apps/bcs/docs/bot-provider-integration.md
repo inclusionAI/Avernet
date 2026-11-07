@@ -5,6 +5,11 @@
 This document describes how a self-hosted bot platform connects to Avernet's
 Bot Coordination Network (BCN) as a Bot Provider.
 
+`chat.inject` and `chat.history` are deprecated downstream methods. New
+integrations do not need to implement them. References to their fields below
+describe legacy compatibility only, not current integration requirements.
+This deprecation does not remove BCS's own conversation history APIs.
+
 For Human-issued token registration in either upstream or gateway mode, see
 [Provider-scoped registration](../specs/2026-09-20-provider-token-registration/README.md).
 Provider affiliation now belongs to `bcs_bots`; gateway compatibility bindings
@@ -38,10 +43,9 @@ context by `session_id`.
 | 2. Register the Provider | Record the Provider ID, and store the returned Provider management token and BCS-to-Provider downstream token securely. |
 | 3. Register Bots | Register display name, summary, owner, and `provider_bot_ref` for each bot under the Provider, and store the Bot runtime token when one is returned. |
 | 4. Implement `chat.send` | For protocol 1.0, acknowledge then call back. For protocol 2.0, negotiate SSE or JSON callback fallback on the same response. |
-| 5. Implement `chat.inject` | Write context into the session state for `(provider_bot_ref, session_id)`, without triggering reasoning. |
-| 6. Return events | Stream protocol 2.0 events on the accepted SSE response, or call `/bot/events` only after returning a JSON ack. Use downstream `id` as `run_id`. |
+| 5. Return events | Stream protocol 2.0 events on the accepted SSE response, or call `/bot/events` only after returning a JSON ack. Use downstream `id` as `run_id`. |
 
-After `chat.send -> final` works, add `chat.abort`, `chat.history`, `bot.ping`,
+After `chat.send -> final` works, add `chat.abort`, `bot.ping`,
 rate limiting, retries, and monitoring.
 
 ## Token and Authentication Boundary
@@ -128,8 +132,8 @@ With the Provider Admin Bearer token, register a Bot using
 }
 ```
 
-Gateway registration fails with HTTP 400 before Bot creation if neither address
-is configured. Plugin/WebSocket Bots reject an explicit webhook URL. URLs use the
+Without either `agent_card_url` or `agent_card`, gateway registration fails with HTTP 400 before Bot
+creation if neither webhook address is configured. Plugin/WebSocket Bots reject an explicit webhook URL. URLs use the
 existing outbound URL validation policy. Registration replay preserves the saved
 URL when omitted; an explicitly different URL returns HTTP 409. Use PATCH to
 change it. Authentication and protocol version remain Provider settings.
@@ -169,9 +173,9 @@ present, otherwise to the Provider default, using the body `method` for the acti
 | Method | Minimal requirement | Description |
 | --- | --- | --- |
 | `chat.send` | Required | Ask the target bot to reply. The Provider should acknowledge quickly, then run bot logic asynchronously. |
-| `chat.inject` | Required | Inject context without triggering a bot reply. This supports the collaboration semantic where observers receive context. |
+| `chat.inject` | Deprecated | Legacy context-only delivery; not required for new integrations. |
 | `chat.abort` | Recommended | Best-effort cancellation for running tasks in the current session by `session_id`. |
-| `chat.history` | Recommended | Return the session history maintained by the Provider, useful for context recovery and display. |
+| `chat.history` | Deprecated | Legacy Provider history retrieval; not required for new integrations. |
 | `bot.ping` | Optional | Health probe that reports whether the bot is ready. |
 
 At minimum, the Provider should validate:
@@ -376,8 +380,8 @@ and Provider must also enforce a stable business operation key at the side-effec
 boundary. Configure node retries only when repeating that operation is safe.
 
 The Provider should maintain session context by `(provider_bot_ref,
-session_id)`. `chat.inject` must write context but must not trigger bot
-reasoning.
+session_id)`. Legacy implementations retaining deprecated `chat.inject`
+must preserve its context-only behavior without triggering reasoning.
 
 ### `chat.abort` response
 
@@ -402,7 +406,6 @@ stably returns 410 `run_terminated` without side effects.
   `provider_id`.
 - Bot registration can be mapped to the Provider's own `provider_bot_ref`.
 - `chat.send` can start one bot run and call back final before timeout.
-- `chat.inject` only writes context and does not trigger a reply.
 - Provider performs idempotency deduplication by `id`.
 - Provider records `provider_id`, `provider_bot_ref`, `session_id`, `run_id`,
   error codes, and latency for troubleshooting.
@@ -428,3 +431,20 @@ differences:
   integration.
 - [BCS Bot Integration Guide](../../../docs/bot-integration.md): bot runtime protocol for
   direct WebSocket integration.
+
+
+## Register an A2A Bot through the Provider API
+
+`POST /providers/{provider_id}/bots` accepts exactly one of `agent_card_url` or
+a complete `agent_card` JSON object, with the same Provider Admin Bearer.
+Supply exactly one owner and a stable provider_bot_ref. The A2A name defaults
+to Card.name; an explicit name is a local alias. Summary defaults to the Card
+description when omitted. Legacy non-A2A requests still require their name.
+
+Both sources share declaration/egress validation and atomic Bot, binding,
+ownership, profile, audit and full Card creation. No webhook is needed; plugin
+mode and mixed webhook/source inputs are rejected. Duplicate Provider/ref
+returns 409 without replaying credentials. Updates use expected_revision.
+Only URL-backed Cards refresh automatically; inline Cards require explicit
+updates. Storage keeps only the Card, optional source URL and revision.
+Full contract: repository-root `docs/specs/a2a/provider-admin-registration-v1.md`.

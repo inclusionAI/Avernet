@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
     mode: "mysql" as "mysql" | "sqlite", sqlitePath: ":memory:",
     mysql: { host: "localhost", port: 3306, user: "test", password: "", database: "test", poolSize: 1, poolMin: 0 },
   },
-  query: vi.fn(async (_sql: string) => [[{ v: 0 }], []]),
+  query: vi.fn(async (_sql: string, _params?: unknown[]): Promise<unknown[]> => { throw new Error("Unexpected query"); }),
   connection: vi.fn(async () => ({ release: vi.fn() })),
   close: vi.fn(async () => {}),
   repair: vi.fn(async () => {}),
@@ -25,14 +25,24 @@ vi.mock("../schema.js", () => ({
   sqliteTriggers: [],
 }));
 vi.mock("../schema-workflow-snapshot.js", () => ({ workflowSnapshotMigrations: [] }));
+vi.mock("../schema-ordinary-run-request.js", () => ({ ordinaryRunRequestMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";
+const ledgerInsert = "INSERT INTO schema_version (version, description) VALUES (?, ?)";
+
+function schemaQuery(sql: string): unknown[] {
+  if (sql === "SELECT MAX(version) as v FROM schema_version") return [[{ v: 0 }], []];
+  if (/^CREATE TABLE IF NOT EXISTS schema_version\b/.test(sql) || sql === "CREATE TABLE ordinary_probe (id INT)"
+    || sql === ledgerInsert) return [{ affectedRows: 1 }, []];
+  throw new Error(`Unexpected SQL: ${sql}`);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   state.config.mode = "mysql";
   state.connection.mockResolvedValue({ release: vi.fn() });
-  state.query.mockResolvedValue([[{ v: 0 }], []]);
+  state.query.mockReset();
+  state.query.mockImplementation(async sql => schemaQuery(sql));
 });
 afterEach(async () => { await closeDatabase(); });
 
@@ -43,7 +53,21 @@ describe("database initialization strategy", () => {
     const sql = state.query.mock.calls.map(([sql]) => sql);
     expect(sql).toContain("CREATE TABLE ordinary_probe (id INT)");
     expect(sql).toContain("SELECT MAX(version) as v FROM schema_version");
-    expect(sql.filter(sql => sql.startsWith("INSERT INTO schema_version"))).toHaveLength(2);
+    expect(state.query.mock.calls.filter(([query]) => query === ledgerInsert).map(([, params]) => params)).toEqual([
+      [1, "ordinary"], [2, "repair"],
+    ]);
+    expect(sql.some(query => /clawweb_pack_operations/i.test(query))).toBe(false);
+    expect(state.repair).toHaveBeenCalledOnce();
+  });
+
+  it("keeps retired v149 untouched while still running self-healing repairs", async () => {
+    state.query.mockImplementation(async sql => sql === "SELECT MAX(version) as v FROM schema_version"
+      ? [[{ v: 149 }], []] : schemaQuery(sql));
+    expect((await initDatabase()).db.dbType).toBe("mysql");
+    expect(state.query.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual([
+      [2, "repair"],
+    ]);
+    expect(state.query.mock.calls.some(([sql]) => /clawweb_pack_operations/i.test(sql))).toBe(false);
     expect(state.repair).toHaveBeenCalledOnce();
   });
 

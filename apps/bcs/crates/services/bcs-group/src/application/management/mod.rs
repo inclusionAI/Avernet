@@ -32,7 +32,8 @@ use bcs_service_api::{
     SessionKind, SessionManagementService, SystemMessageEvent,
     WorkbenchChatAbortAuthorizationCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
-    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
+    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchSpeakingModeCommand,
+    WorkbenchUseCaseError, backfill_bot_names,
     generated_group_id, validate_sender_routes,
 };
 use tracing::warn;
@@ -91,6 +92,13 @@ pub struct GroupManagement {
     /// fallback to Group membership. A missing wiring
     /// fails closed.
     session_authorization: Option<Arc<dyn SessionAuthorizationCoreService>>,
+
+    /// Batched caller-config read plane for the connect-time
+    /// `speaking_mode` projection. None = no caller capability is wired,
+    /// which resolves to `Plain` (the same closed-by-assembly default
+    /// every other caller consumer follows).
+    caller_config_plane:
+        Option<Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>>,
 }
 
 pub struct GroupManagementWithRuntimeCleanup {
@@ -234,6 +242,8 @@ impl GroupManagement {
             v1_openapi_create_policy: false,
             bot_authority: None,
             session_authorization: None,
+
+            caller_config_plane: None,
         }
     }
 
@@ -305,6 +315,68 @@ impl GroupManagement {
             ))
             .into()),
         }
+    }
+
+    pub fn with_caller_config_plane(
+        mut self,
+        plane: Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>,
+    ) -> Self {
+        self.caller_config_plane = Some(plane);
+        self
+    }
+
+    /// Advisory session-UI semantics for the Workbench connect outcome: the
+    /// same `resolve_speaking_mode` reduction the message admission fence
+    /// performs, read over the CURRENT membership and the CURRENT per-bot
+    /// caller configuration. State-machine groups use the same caller-aware
+    /// projection so a caller-enabled bot can show the speaking-lease control;
+    /// message/state-machine admission still re-resolves authoritatively.
+    /// Without a wired caller-config plane no caller capability exists, so
+    /// the reduction stays `Plain` (assembly-closed default).
+    pub(crate) async fn resolve_connect_speaking_mode(
+        &self,
+        participants: &[WorkbenchParticipantView],
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        use bcs_domain::speaking_lease::SessionSpeakingMode;
+
+        // Human members carry the canonical `human_<staff_no>` actor id — the
+        // same format every Workbench scope check trims on.
+        let has_human_member = participants
+            .iter()
+            .any(|participant| participant.bot_uuid.starts_with("human_"));
+        if !has_human_member {
+            return SessionSpeakingMode::Plain;
+        }
+        let Some(plane) = self.caller_config_plane.as_ref() else {
+            return SessionSpeakingMode::Plain;
+        };
+        let bot_ids: Vec<String> = participants
+            .iter()
+            .filter(|participant| !participant.bot_uuid.starts_with("human_"))
+            .map(|participant| participant.bot_uuid.clone())
+            .collect();
+        if bot_ids.is_empty() {
+            return SessionSpeakingMode::Plain;
+        }
+        // One batched read (§15.96) over the same cache path the message
+        // fence uses; a read failure keeps the advisory projection Plain
+        // instead of failing the connect handshake.
+        let any_bot_caller_enabled = match plane
+            .get_caller_configurations(&bot_ids, &bcs_config::resolve_env_str())
+            .await
+        {
+            Ok(configs) => configs.iter().any(|(_, config)| {
+                config
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.caller_identity.enabled)
+            }),
+            Err(_) => false,
+        };
+        bcs_domain::speaking_lease::resolve_speaking_mode(
+            has_human_member,
+            any_bot_caller_enabled,
+        )
     }
 
     pub fn with_channel_binding_cleanup(
@@ -409,6 +481,25 @@ pub(crate) async fn human_has_group_access(
     }
 
     Ok(false)
+}
+
+pub(crate) fn workbench_participants(group: &DomainGroup) -> Vec<WorkbenchParticipantView> {
+    workbench_participants_from_slice(&group.participants)
+}
+
+pub(crate) fn workbench_participants_from_slice(
+    participants: &[bcs_service_api::Participant],
+) -> Vec<WorkbenchParticipantView> {
+    participants
+        .iter()
+        .map(|participant| WorkbenchParticipantView {
+            bot_uuid: participant.bot_uuid.clone(),
+            role: participant_role_to_wire(participant.role).to_string(),
+            kind: participant.effective_kind(),
+            mode: participant.mode,
+            message_view_scope: participant.message_view_scope,
+        })
+        .collect()
 }
 
 pub(crate) fn group_mutation_command(

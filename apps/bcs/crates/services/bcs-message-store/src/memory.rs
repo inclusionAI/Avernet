@@ -281,7 +281,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = query.limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -403,7 +405,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -573,12 +577,35 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     }
     async fn lookup(&self, scope: bcs_service_api::port::repo::message_delivery::DeliveryLookup) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::DeliveryLookup as Q;
+        if let Q::TaskPrefixes { ref prefixes, retained_after_ms, ref legacy_intents } = scope {
+            if prefixes.is_empty() || prefixes.len() > 20 { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("invalid task batch".into())); }
+            let rows = self.list_deliveries(None).await?;
+            let mut found = std::collections::BTreeMap::new();
+            for prefix in prefixes {
+                for row in crate::task_lookup::memory(&rows, prefix, retained_after_ms, legacy_intents)? { found.insert(row.delivery_id.clone(), row); }
+            }
+            return Ok(found.into_values().collect());
+        }
+        if let Q::TaskPrefix { ref prefix, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::memory(&self.list_deliveries(None).await?, prefix, retained_after_ms, legacy_intents);
+        }
         if matches!(&scope, Q::Ids(ids) if ids.len() > 8) { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
+        if let Q::CanonicalRun {bot, session, run} = &scope {
+            let sessions = self.sessions.read().await;
+            return Ok(sessions.get(session).into_iter().flat_map(|entry|&entry.deliveries)
+                .filter(|row|row.target_bot_id == *bot && row.run_id.as_ref() == Some(run)).take(2).cloned().collect());
+        }
+        if let Q::Id(id) = &scope {
+            return Ok(self.sessions.read().await.values().flat_map(|entry|&entry.deliveries)
+                .find(|row|row.delivery_id == *id).cloned().into_iter().collect());
+        }
         let rows = self.list_deliveries(None).await?;
         Ok(rows.into_iter().filter(|d| match &scope {
             Q::Ids(ids) => ids.contains(&d.delivery_id),
+            Q::TaskPrefix { .. } | Q::TaskPrefixes { .. } => unreachable!(),
             Q::Id(id) => d.delivery_id == *id,
             Q::Request(id) => d.request_id.as_ref() == Some(id),
+            Q::CanonicalRun {bot,session,run} => d.target_bot_id == *bot && d.session_id == *session && d.run_id.as_ref() == Some(run),
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),
             Q::Bound(id) => d.bound_to_delivery_id.as_ref() == Some(id) && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Bound,
             Q::Lane { bot, session } | Q::LanePending { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),

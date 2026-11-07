@@ -76,15 +76,17 @@ class FakeResourceFiles:
 
 
 class FakeActivation:
-    def __init__(self, installed, defaults):
-        self.installed, self.defaults = installed, defaults
+    """``supplied`` is what the bot's skill sets supply: MCP codes (the platform defaults included) and skill names."""
+
+    def __init__(self, installed, supplied, supplied_skills=()):
+        self.installed, self.supplied, self.supplied_skills = installed, supplied, set(supplied_skills)
 
     def list_installed_mcps(self, *, bot_id, owner_id, actor_id):
         self.asked_for = (owner_id, actor_id)
         return set(self.installed)
 
-    def platform_default_mcp_codes(self, *, bot_id, owner_id, actor_id):
-        return frozenset(self.defaults)
+    def set_supplied_capabilities(self, *, bot_id, owner_id, actor_id):
+        return frozenset(self.supplied_skills), frozenset(self.supplied)
 
 
 class FakeMcpConfig:
@@ -152,10 +154,16 @@ async def test_skills_are_classified_by_locator() -> None:
     capabilities = FakeCapabilities(assets)
     skills = await _reader(capabilities=capabilities, skill_factory=factory).skills(BOT)
     assert capabilities.asked_for == "u1", "active skills are the owner's rows"
-    assert [(s.name, s.origin, s.center_version, s.repo_path, s.files) for s in skills] == [
-        ("tidy", "local", None, None, (("SKILL.md", b"---\nname: tidy\n---\n"),)),
-        ("refund", "center", "v7", None, ()),
-        ("weather", "repo", None, "team/weather", ()),
+    with_a_set = await _reader(
+        capabilities=FakeCapabilities(assets),
+        skill_factory=factory,
+        activation=FakeActivation(set(), set(), supplied_skills={"refund"}),
+    ).skills(BOT)
+    assert [s.name for s in with_a_set] == ["tidy", "weather"], "a skill a set supplies is not the revision's"
+    assert [(s.name, s.origin, s.repo_path, s.files) for s in skills] == [
+        ("tidy", "local", None, (("SKILL.md", b"---\nname: tidy\n---\n"),)),
+        ("refund", "center", None, ()),
+        ("weather", "repo", "team/weather", ()),
     ]
     call = factory.calls[0]
     assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == (
@@ -215,8 +223,8 @@ async def test_a_listed_file_that_cannot_be_read_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override() -> None:
-    activation = FakeActivation({"mcp.b", "mcp.a", "mcp.default"}, {"mcp.default"})
+async def test_mcp_servers_exclude_what_skill_sets_supply_and_carry_the_bot_override() -> None:
+    activation = FakeActivation({"mcp.b", "mcp.a", "mcp.default", "mcp.from-a-set"}, {"mcp.default", "mcp.from-a-set"})
     reader = _reader(
         activation=activation,
         mcp_config=FakeMcpConfig({"mcp.a": {"url": "https://a.example.com/mcp"}, "mcp.b": {}}),

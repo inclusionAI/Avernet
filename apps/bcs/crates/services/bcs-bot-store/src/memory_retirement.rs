@@ -89,6 +89,7 @@ impl MemoryBotRepo {
         command: RetireCommand,
     ) -> ServiceResult<bool> {
         ownership::validate_mutation(mutation)?;
+        let _write_guard = self.record_write_lock.lock().await;
         let env = resolve_env();
         let now = super::unix_millis();
         // Pre-read: an early NotFound fast-path (parameter
@@ -103,7 +104,7 @@ impl MemoryBotRepo {
         }
 
         // Lock order (this module's documented order):
-        // authority → bots → tokens → deleted IDs.
+        // record write → authority → bots → tokens → deleted IDs.
         let mut state_guard = self.authority.write().await;
         // Bot retirement is not a Human lifecycle command. Refuse under the
         // same authority lock used by ownership registration and transfers.

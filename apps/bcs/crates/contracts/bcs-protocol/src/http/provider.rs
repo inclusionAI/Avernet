@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::avatar::AvatarField;
 use crate::{Attachment, Skill, deserialize_skills};
 
 fn default_worker_send_task_message_enabled() -> bool {
@@ -105,6 +106,13 @@ pub struct RegisterProviderRequest {
     pub coordination: Option<ProviderCoordinationConfigDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_scope: Option<String>,
+    /// Optional caller-capability declaration (spec §10.7.3), stored under
+    /// `bcs_providers.config.$.caller_capabilities`. Absent = undeclared
+    /// (caller traffic stays gated off for this provider; backward
+    /// compatible). Present = the strict ProviderCallerCapabilities shape
+    /// (four mandatory fields; `container_routing` defaults to "ensure").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +150,11 @@ pub struct ProviderInfoResponse {
     pub coordination: Option<ProviderCoordinationConfigDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization_management: Option<ProviderOrganizationManagementConfigDto>,
+    /// Readback of the stored caller-capability declaration, present only
+    /// when the provider carries one (additive wire field; old consumers
+    /// ignore it, undeclared providers see nothing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
     pub disabled: bool,
     pub created_at: u64,
     pub updated_at: u64,
@@ -170,11 +183,22 @@ pub struct PatchProviderRequest {
     pub organization_management: Option<ProviderOrganizationManagementConfigDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_scope: Option<String>,
+    /// Caller-capability declaration (spec §10.7.3). Omitted or null
+    /// preserves the stored declaration; there is no remove semantics —
+    /// to disable caller work set `supports_caller: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
-    pub name: String,
+    /// Optional A2A display alias; legacy registrations still require a name.
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub agent_card_url: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub agent_card: Option<Value>,
     /// Overrides the Provider's default downlink URL for this Bot.
     #[serde(default)]
     pub webhook_url: Option<String>,
@@ -197,6 +221,12 @@ pub struct RegisterProviderBotRequest {
     /// connects over WebSocket; accepted only for allow-listed providers.
     #[serde(default)]
     pub connection_mode: Option<ProviderBotConnectionModeDto>,
+    /// Bot avatar URL for the record's dedicated avatar field. Omission
+    /// keeps the stored avatar; an explicit value replaces it and the
+    /// empty string clears it. Explicit `null` and non-string values fail
+    /// deserialization (bot-avatar plan Task 5).
+    #[serde(default, skip_serializing_if = "AvatarField::is_omitted")]
+    pub avatar_url: AvatarField,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,4 +376,77 @@ pub struct ProviderHistoryResponse {
     pub next_before: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_after: Option<u64>,
+}
+
+// ---------------------------------------------------------------------------
+// Caller configuration sub-resource DTOs (spec §10.7.2; P1.1)
+//
+// Strict by design: the caller configuration namespace crosses trust
+// boundaries (Provider control plane → BCS), so unknown fields, credential
+// smuggles (`cookie`, `authorization`, `token`, ...) and wrong types are
+// rejected instead of silently ignored. `enabled` is always required: old
+// clients must not silently flip a Bot's caller switch.
+// ---------------------------------------------------------------------------
+
+/// Minimum isolation a Bot requires for caller execution. V1 has exactly one
+/// value; the Gateway's actual guarantee (`container_bound`) is deliberately
+/// not a configurable value here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallerMinimumIsolationDto {
+    CallerContainer,
+}
+
+impl Default for CallerMinimumIsolationDto {
+    fn default() -> Self {
+        Self::CallerContainer
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallerIdentityConfigDto {
+    pub enabled: bool,
+    #[serde(default)]
+    pub minimum_isolation: CallerMinimumIsolationDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallerIdentitySnapshotDto {
+    pub source_revision: u64,
+    pub caller_identity: CallerIdentityConfigDto,
+}
+
+/// GET `/providers/{provider_id}/bots/{provider_bot_ref}/caller`.
+/// `snapshot: null` means "existing, never configured" and is never a
+/// fabricated disabled snapshot or a zero revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderBotCallerConfigResponse {
+    pub snapshot: Option<CallerIdentitySnapshotDto>,
+}
+
+/// PATCH body: a full authoritative-source snapshot, never a partial patch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchProviderBotCallerConfigRequest {
+    pub snapshot: CallerIdentitySnapshotDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum CallerConfigSyncStatusDto {
+    Applied,
+    Unchanged,
+    Stale,
+}
+
+/// PATCH response confirms the storage linearization only: it is not
+/// Provider readiness and not an execution authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncProviderBotCallerConfigResponse {
+    pub snapshot: Option<CallerIdentitySnapshotDto>,
+    pub sync_status: CallerConfigSyncStatusDto,
 }

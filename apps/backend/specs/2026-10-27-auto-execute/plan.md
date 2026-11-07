@@ -34,7 +34,7 @@
 - 实现按 design.md "执行流程" 10 步;`main_session_id` 校验失败、`bot_port is None` 等失败路径都走
   `return envelope(op_result_to_dto(TaskOpResult(...)), request)`;
 - `metadata.bot_options.lifecycle_stage` 取
-  `task_request.execution_config.get("lifecycle_stage", "draft")`,因为 step 3 已经 `setdefault`,
+  `task_request.execution_config.get("lifecycle_stage", "online")`,因为 step 3 已经 `setdefault`,
   等价于直接取 `task_request.execution_config["lifecycle_stage"]`。
 
 ## Step 3 — 注册到 router.py
@@ -60,7 +60,7 @@
 - 一次性构造 FastAPI app + attach_injector + 注入两个 stub(参照 benchmark 测试的 wiring);
 - 用例覆盖 design.md "Validation" 段罗列的所有 7 类:happy(relay)、happy(非 relay)、
   error:main_session_id 缺失、error:relay 空 root_instruction、
-  error:send_message 抛错、error:bot_port 未注入、透传 lifecycle_stage 覆盖 draft 默认;
+  error:send_message 抛错、error:bot_port 未注入、透传 lifecycle_stage 覆盖 online 默认;
 - 断言点见 design.md "Validation"。
 
 ## Step 5 — 更新 coverage_baseline.txt

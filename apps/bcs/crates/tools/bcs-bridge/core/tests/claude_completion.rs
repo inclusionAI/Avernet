@@ -13,8 +13,13 @@ async fn run_case(case: &str, mode: &str) -> Result<bcs_bridge_core::engine::Tur
     run_case_traced(case, Some(mode), None).await
 }
 async fn run_case_traced(case: &str, mode: Option<&str>, trace: Option<bcs_bridge_core::engine::trace::TraceContext>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
+    run_case_with_init(case, mode, trace, None).await
+}
+async fn run_case_with_init(case: &str, mode: Option<&str>, trace: Option<bcs_bridge_core::engine::trace::TraceContext>, init: Option<serde_json::Value>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_cc_hook_idle.py");
-    let factory = ClaudeCodeFactory::custom("fixture", "python3", vec![script.into(), case.into()]);
+    let mut args = vec![script.into(), case.into()];
+    if let Some(init) = init { args.extend(["--init-fields".into(), init.to_string()]); }
+    let factory = ClaudeCodeFactory::custom("fixture", "python3", args);
     let mut options = toml::Table::new();
     if let Some(mode) = mode { options.insert("completion_mode".into(), mode.into()); }
     let engine = factory.build("python3".into(), &options)?;
@@ -43,6 +48,60 @@ async fn run_engine_case(case: &str, engine: Arc<dyn Engine>, trace: Option<bcs_
 async fn omitted_completion_mode_uses_hook_idle() {
     let result = run_case_traced("midturn", None, None).await.unwrap();
     assert_eq!(result.final_text.as_deref(), Some("DONE"));
+}
+
+#[tokio::test]
+async fn native_versions_at_or_above_minimum_accept_correct_completion() {
+    for version in ["2.1.199", "2.1.200", "2.1.248", "2.1.258", "2.1.1000", "2.2.0", "2.10.0", "3.0.0", "10.0.0", "2.1.199+build.1", "2.1.200-rc.1"] {
+        for mode in [None, Some("hook_idle")] {
+            let result = run_case_with_init("basic", mode, None,
+                Some(serde_json::json!({"claude_code_version": version}))).await.expect(version);
+            assert_eq!(result.final_text.as_deref(), Some("DONE"), "{version} {mode:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn older_or_invalid_native_versions_are_rejected() {
+    let mut inputs: Vec<serde_json::Value> = ["0.0.0", "1.99.999", "2.0.9999", "2.1.9", "2.1.198", "2.1.199-rc.1", "", "unknown", "2.1", "2.1.199.1", "v2.1.258", "2.01.258", " 2.1.258", "18446744073709551616.1.199"]
+        .into_iter().map(|version| serde_json::json!({"claude_code_version": version})).collect();
+    inputs.extend([
+        serde_json::json!({}), serde_json::json!({"claude_code_version": null}),
+        serde_json::json!({"claude_code_version": 258}), serde_json::json!({"claude_code_version": true}),
+        serde_json::json!({"claude_code_version": [2, 1, 258]}),
+    ]);
+    for init in inputs {
+        for mode in [None, Some("hook_idle")] {
+            let error = run_case_with_init("basic", mode, None, Some(init.clone())).await.expect_err("must reject native version");
+            assert_eq!(error, "engine protocol error: completion_capability_unavailable", "{init} {mode:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn newer_native_versions_preserve_completion_order() {
+    for case in ["alive", "queued", "blocked", "midturn"] {
+        let result = run_case_with_init(case, None, None,
+            Some(serde_json::json!({"claude_code_version": "2.1.258"}))).await.expect(case);
+        assert_eq!(result.final_text.as_deref(), Some("DONE"), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn newer_native_versions_do_not_bypass_evidence_checks() {
+    for (case, expected) in [
+        ("missing_hook", "completion_evidence_unavailable"),
+        ("missing_tasks", "completion_evidence_unavailable"),
+        ("wrong_session", "completion_evidence_conflict"),
+        ("duplicate_result", "completion_evidence_conflict"),
+        ("unknown_task", "completion_capability_unavailable"),
+        ("scheduled", "completion_capability_unavailable"),
+        ("no_idle", "completion_evidence_unavailable"),
+    ] {
+        let error = run_case_with_init(case, None, None,
+            Some(serde_json::json!({"claude_code_version": "2.1.258"}))).await.expect_err(case);
+        assert_eq!(error, format!("engine protocol error: {expected}"), "{case}");
+    }
 }
 
 #[tokio::test]

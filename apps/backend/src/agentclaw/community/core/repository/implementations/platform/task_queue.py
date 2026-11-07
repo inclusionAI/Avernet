@@ -98,6 +98,7 @@ from agentclaw.community.core.task_queue.repository.trace_carrier import (
 )
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES,
+    ClaimOutcome,
     EnqueueResult,
     TaskRecord,
     TaskStatus,
@@ -744,9 +745,23 @@ class TaskQueueRepository(
         limit: int,
         lease_seconds: int,
     ) -> List[TaskRecord]:
+        return self.claim_batch_reporting_retired(
+            worker_id=worker_id, env=env, app=app, limit=limit, lease_seconds=lease_seconds
+        ).won
+
+    def claim_batch_reporting_retired(
+        self,
+        *,
+        worker_id: str,
+        env: str,
+        app: str,
+        limit: int,
+        lease_seconds: int,
+    ) -> ClaimOutcome:
         if limit <= 0:
-            return []
+            return ClaimOutcome([], [])
         won: List[TaskRecord] = []
+        retired: List[TaskRecord] = []
         with self._db.orm_session() as db:
             # 1) Read candidates (cheap, no lock) -- one query per eligibility
             #    branch, reclaimable rows first. See _read_candidates.
@@ -785,7 +800,7 @@ class TaskQueueRepository(
                 #     has passed, retire it as TIMED_OUT (terminal) so it stops
                 #     being a candidate. (If instead another worker just claimed
                 #     it, this matches nothing — harmless.)
-                db.query(self.Model).filter(
+                timed_out = db.query(self.Model).filter(
                     self.Model.id == task_id,
                     self._eligible(env, app),
                     self.Model.deadline_at <= func.now(),
@@ -800,6 +815,10 @@ class TaskQueueRepository(
                     },
                     synchronize_session=False,
                 )
+                if timed_out == 1:
+                    row = db.query(self.Model).filter(self.Model.id == task_id).first()
+                    if row is not None:
+                        retired.append(row.to_record())
         if won:
             logger.info(
                 "[task_queue.claim] worker=%s app=%s claimed %d/%d candidates",
@@ -808,7 +827,7 @@ class TaskQueueRepository(
                 len(won),
                 len(candidate_ids),
             )
-        return won
+        return ClaimOutcome(won, retired)
 
     # ── outcome transitions (CAS-guarded on the holder) ─────────────────
 

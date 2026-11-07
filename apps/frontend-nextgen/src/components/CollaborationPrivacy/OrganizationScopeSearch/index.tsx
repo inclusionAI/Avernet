@@ -205,7 +205,7 @@ export function OrganizationScopeSearch({
         </div>
       )}
 
-      <div className="border-t border-border pt-3">
+      <div className="border-t border-divider pt-3">
         <div className="flex items-center justify-between gap-3">
           <p className="m-0 text-xs font-medium text-foreground">
             {organizationScopeCopy.selectedTitle}（{value.length}）

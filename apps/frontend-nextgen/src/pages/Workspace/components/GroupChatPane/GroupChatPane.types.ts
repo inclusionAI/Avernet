@@ -3,6 +3,7 @@ import type { DeliveryStatusView, GroupView, IdentityView, ParticipantMode, Sess
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { GroupChatQuestionsModel } from '@/pages/Workspace/hooks/useGroupChatQuestions';
+import type { GroupSpeakingLeaseModel } from '@/pages/Workspace/hooks/useSpeakingLease';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -30,6 +31,11 @@ export interface GroupChatPaneProps {
    */
   questions?: GroupChatQuestionsModel;
   execApprovals?: GroupChatExecApprovalsModel;
+  /**
+   * 发言权模型（useGroupChat 内 useSpeakingLease 输出）。
+   * 仅 speakingMode === 'lease_required' 时输入区上方渲染发言权条。
+   */
+  speakingLease?: GroupSpeakingLeaseModel;
   /** 建群后 Driver/Manager 尚未产生第一条消息时的瞬态处理状态。 */
   groupBootstrapProcessing?: boolean;
   supportState: GroupChatState;
@@ -57,6 +63,7 @@ export interface GroupChatPaneProps {
   reconnect: () => Promise<void> | void;
   /** <lg 打开协作群会话列表。 */
   onOpenSessionList?: () => void;
+  onLocateSession?: () => void;
   /** 重新加载会话历史：error 状态下的「重新加载历史」走此出口（直连 provider.loadHistory）。 */
   reloadHistory: () => Promise<void> | void;
   /** 历史消息是否还有更早一页可加载（顶部「加载更多」显隐）。 */

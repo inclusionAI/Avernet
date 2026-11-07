@@ -43,6 +43,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyRepository,
 )
 
+from ._empty_cli_tools import EmptyCliTools
 from ._fakes import (
     resource_rows_for,
     manifest_compilers,
@@ -63,8 +64,7 @@ from ._fakes import (
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
-#: Declares one container-bound category and nothing else, so which phase it
-#: lands in is the whole observation.
+#: Names one MCP server. Every other supported category has an empty target.
 _DOCUMENT = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: github\n"
 _TECLAW_BOT = {
     "bot_id": _BOT,
@@ -160,10 +160,11 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             content=FakeManifestContent(),
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=EmptyCliTools(),
+            shared_skills=object(),
         )
 
-    device_ports = device_port_bundle(activation_service=device_activation)
+    device_ports = device_port_bundle(activation_service=device_activation, cli_tool_service=EmptyCliTools())
 
     # The composition root's own assembly, over this rig's fakes: the two port
     # bundles, the teclaw strategy the deployment's mode names, and a lookup
@@ -177,7 +178,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         )
         if mode is TeclawDeliveryMode.PLATFORM
         else TeclawDeviceDelivery(
-            ports=device_ports, cli_tool_service=lambda: None
+            ports=device_ports, cli_tool_service=EmptyCliTools
         )
     )
     service = ApplyRunService(
@@ -185,6 +186,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
         delivery_strategies=DeliveryStrategyFactory(
@@ -244,9 +246,12 @@ def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase
     )
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
-    assert [c.construct.value for c in report.categories] == ["mcp"]
+    assert [c.construct.value for c in report.categories] == [
+        "identity", "resources", "skills", "mcp", "cli_tools",
+    ]
     # The platform ports were used, the device ports were not.
-    assert platform_activation.configured == [("github", None)]
+    assert platform_activation.installed == {"github"}
+    assert platform_activation.configured == []
     assert device_activation.activated == []
     assert device_activation.configured == []
     # One closing redeliver, after the categories.
@@ -278,10 +283,13 @@ def test_the_device_shape_is_the_pre_w8_shape() -> None:
         bot=_TECLAW_BOT, mode=TeclawDeliveryMode.DEVICE, redeliver=redeliver
     )
     pre = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
-    assert pre.categories == ()  # mcp is not pre-container with the switch off
+    assert [c.construct.value for c in pre.categories] == ["cli_tools"]
     on = _apply(service, _TECLAW_BOT, ApplyPhase.ON_CONTAINER)
-    assert [c.construct.value for c in on.categories] == ["mcp"]
-    assert device_activation.configured == [("github", None)]
+    assert [c.construct.value for c in on.categories] == [
+        "identity", "resources", "skills", "mcp",
+    ]
+    assert device_activation.installed == {"github"}
+    assert device_activation.configured == []
     assert platform_activation.activated == []
     assert platform_activation.configured == []
     assert calls == []
@@ -299,10 +307,13 @@ def test_arca_is_unaffected_by_the_deployments_teclaw_mode() -> None:
         bot=_ARCA_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     pre = _apply(service, _ARCA_BOT, ApplyPhase.PRE_CONTAINER)
-    assert pre.categories == ()
+    assert [c.construct.value for c in pre.categories] == ["script"]
     on = _apply(service, _ARCA_BOT, ApplyPhase.ON_CONTAINER)
-    assert [c.construct.value for c in on.categories] == ["mcp"]
-    assert device_activation.configured == [("github", None)]
+    assert [c.construct.value for c in on.categories] == [
+        "identity", "resources", "skills", "mcp", "cli_tools",
+    ]
+    assert device_activation.installed == {"github"}
+    assert device_activation.configured == []
     assert platform_activation.activated == []
     assert platform_activation.configured == []
     assert calls == []
@@ -325,7 +336,9 @@ async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
     report = await service.dry_run(
         entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY, state=MANIFEST_STATE
     )
-    assert [c.construct.value for c in report.categories] == ["mcp"]
+    assert [c.construct.value for c in report.categories] == [
+        "identity", "resources", "skills", "mcp", "cli_tools",
+    ]
     assert platform_activation.activated == []
     assert device_activation.activated == []
     assert calls == []  # the closing step is a real-apply thing
@@ -341,7 +354,8 @@ def test_a_raising_closing_step_is_a_note_not_a_failure() -> None:
     )
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
-    assert platform_activation.configured == [("github", None)]
+    assert platform_activation.installed == {"github"}
+    assert platform_activation.configured == []
     assert report.notes == ("delivery could not be closed: ConnectionError",)
 
 
@@ -424,6 +438,29 @@ def _phase_report(apply_id, trigger, *, sources=(), categories=()):
         sources=tuple(sources),
         categories=tuple(categories),
     )
+
+
+@pytest.mark.parametrize("kind,reference", [
+    ("manifest", None),
+    ("manifest", "sha256-json-v1:" + "a" * 64),
+    ("genome", "promotion-1"),
+])
+def test_phase_carry_preserves_current_state_in_the_api_report(kind, reference):
+    from dataclasses import replace
+
+    from agentclaw.community.core.apply_engine.compiler import StateRef
+    from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import apply_payload
+
+    earlier = _phase_report("a", "create:pre_container")
+    current = replace(
+        _phase_report("b", "create:on_container"),
+        state=StateRef(kind, reference),
+    )
+    merged = _folded(earlier, current)
+    assert merged.state == current.state
+    assert apply_payload(merged).state.model_dump() == {
+        "kind": kind, "reference": reference,
+    }
 
 
 def test_one_source_used_by_both_phases_is_one_row() -> None:

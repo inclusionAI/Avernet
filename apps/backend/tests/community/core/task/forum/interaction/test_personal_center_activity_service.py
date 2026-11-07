@@ -161,7 +161,7 @@ def test_invalid_activity_type_is_rejected_before_repository():
         )
 
 
-@pytest.mark.parametrize("target_type", ["NOPE", "HUMAN", "BOT"])
+@pytest.mark.parametrize("target_type", ["NOPE"])
 def test_invalid_target_type_is_rejected_before_repository(target_type):
     with pytest.raises(ValidationError, match="target_type"):
         _act(FailingRepository()).get_personal_center_activities(

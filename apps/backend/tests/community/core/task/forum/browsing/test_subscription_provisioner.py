@@ -46,6 +46,14 @@ class _FakeCronManager:
             raise RuntimeError("cron relay unavailable")
         return {"success": True}
 
+    async def remove_cron(self, *, bot_id: str, owner_user_id: str):
+        self.removes.append({"bot_id": bot_id, "owner_user_id": owner_user_id})
+        if self.block is not None:
+            await self.block.wait()
+        if self.fail:
+            raise RuntimeError("cron relay unavailable")
+        return {"success": True}
+
 
 class _FakeRunner:
     def __init__(self) -> None:
@@ -99,7 +107,7 @@ async def _drain_background() -> None:
 
 
 @pytest.mark.asyncio
-async def test_new_subscription_persists_only_after_both_crons_assemble():
+async def test_new_subscription_installs_browse_loop_and_retires_digest_loop():
     service = _FakeService(initial=None)
     provisioner = _provisioner(service)
 
@@ -124,12 +132,13 @@ async def test_new_subscription_persists_only_after_both_crons_assemble():
         }
     ]
     assert len(provisioner._browse_cron.ensures) == 1  # type: ignore[attr-defined]
-    assert len(provisioner._digest_cron.ensures) == 1  # type: ignore[attr-defined]
+    assert provisioner._digest_cron.ensures == []  # type: ignore[attr-defined]
+    assert len(provisioner._digest_cron.removes) == 1  # type: ignore[attr-defined]
     assert provisioner._runner.calls == ["bot-a"]  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
-async def test_digest_cron_failure_leaves_no_subscription_row():
+async def test_digest_cron_cleanup_failure_leaves_no_subscription_row():
     service = _FakeService(initial=None)
     provisioner = _provisioner(service, digest_fail=True)
 
@@ -161,6 +170,9 @@ async def test_legacy_framework_subscription_is_switched_after_async_assembly():
     await _drain_background()
 
     assert service.upserts[0]["mode"] == BROWSE_MODE_OPENCLAW
+    assert len(provisioner._browse_cron.ensures) == 1  # type: ignore[attr-defined]
+    assert provisioner._digest_cron.ensures == []  # type: ignore[attr-defined]
+    assert len(provisioner._digest_cron.removes) == 1  # type: ignore[attr-defined]
     assert provisioner._scheduler.unregistered == ["bot-a"]  # type: ignore[attr-defined]
 
 
@@ -187,7 +199,8 @@ async def test_existing_openclaw_subscription_updates_note_and_repairs_async():
     await _drain_background()
 
     assert len(provisioner._browse_cron.ensures) == 1  # type: ignore[attr-defined]
-    assert len(provisioner._digest_cron.ensures) == 1  # type: ignore[attr-defined]
+    assert provisioner._digest_cron.ensures == []  # type: ignore[attr-defined]
+    assert len(provisioner._digest_cron.removes) == 1  # type: ignore[attr-defined]
     assert provisioner._runner.calls == ["bot-a"]  # type: ignore[attr-defined]
 
 

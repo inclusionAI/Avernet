@@ -176,6 +176,9 @@ use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery};
 use secrecy::{ExposeSecret, Secret};
 
 mod channel_wiring;
+mod a2a_wiring;
+mod auth_resources;
+mod infrastructure_helpers;
 mod http_middleware;
 mod lifecycle_wiring;
 mod output_admission_wiring;
@@ -189,6 +192,7 @@ mod wiring_common;
 mod ws_dispatch;
 mod ws_handlers;
 
+use auth_resources::*;
 use channel_wiring::*;
 use http_middleware::*;
 use lifecycle_wiring::*;
@@ -303,6 +307,7 @@ mod tests {
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let (_provider_core, _provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                false,
                 &provider_repos,
                 bot_registry,
                 relation,
@@ -314,7 +319,7 @@ mod tests {
             );
 
         let registered = provider_management
-            .register_provider(RegisterProviderCommand {
+            .register_provider(RegisterProviderCommand { caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
@@ -342,6 +347,7 @@ mod tests {
                 bot_uuid: None,
                 reject_existing_bot_uuid: false,
                 connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
+                avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
             })
             .await
             .expect("register provider bot");
@@ -819,7 +825,7 @@ mod tests {
             .state
             .services
             .provider_management
-            .register_provider(RegisterProviderCommand {
+            .register_provider(RegisterProviderCommand { caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),

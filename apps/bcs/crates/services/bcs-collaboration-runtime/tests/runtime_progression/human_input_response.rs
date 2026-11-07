@@ -88,6 +88,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             participant_bindings: None,
             opening_message_override: None,
             input: json!({"proposal": "ship it"}),
+                                               caller_association: None,
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
@@ -249,6 +250,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             caller_actor_id: "human_1001".to_string(),
             content: "这个方案可以发布".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("route session message to HumanInput");
@@ -368,6 +370,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             participant_bindings: None,
             opening_message_override: None,
             input: json!({"question": "wait for the bot"}),
+                                                        caller_association: None,
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
@@ -384,6 +387,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             caller_actor_id: "human_1001".to_string(),
             content: "这条消息不能发送给 bot".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect_err("state-machine chat must reject input while no HumanInput is pending");
@@ -447,6 +451,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             participant_bindings: None,
             opening_message_override: None,
             input: json!({"proposal": "validate errors"}),
+                                                       caller_association: None,
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
@@ -479,6 +484,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                     actor_id: "human_1001".to_string(),
                     display_name: Some("Reviewer".to_string()),
                 }),
+                caller_association: None,
             })
             .await
             .expect_err("invalid run context must reject start");
@@ -492,6 +498,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             caller_actor_id: "human_1001".to_string(),
             content: "regular chat".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("regular group remains outside state-machine input routing");
@@ -520,6 +527,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                 caller_actor_id: "human_1001".to_string(),
                 content: "invalid context".to_string(),
                 source: HumanResponseSource::Http,
+                caller_ingress: None,
             })
             .await
             .expect_err("invalid state-machine input context must be rejected");
@@ -642,6 +650,7 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
             participant_bindings: None,
             opening_message_override: None,
             input: json!({"proposal": "ship it"}),
+                                               caller_association: None,
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
@@ -695,6 +704,7 @@ async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
             participant_bindings: None,
             opening_message_override: None,
             input: json!({"proposal": "ship it"}),
+                                               caller_association: None,
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
@@ -792,7 +802,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start judged Human run");

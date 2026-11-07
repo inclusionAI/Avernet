@@ -3,23 +3,22 @@
 //! Moved verbatim from `memory.rs` during the crate split.
 
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use tokio::fs;
-use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BotCapabilities, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
-    ServiceResult, UserVisibility, is_mock_token,
+    ServiceResult, UserVisibility,
 };
 
 use super::MemoryBotRepo;
 use crate::memory_authority::{MemoryAuthorityEdgeKind, MemoryAuthorityEdgeStatus};
-use super::{BotConnection, PersistedCapabilities, RegisteredBotInner, is_legacy_namespace, unix_millis};
+use super::{PersistedCapabilities, RegisteredBotInner, is_legacy_namespace, unix_millis};
 
 #[async_trait]
 impl BotRepoPort for MemoryBotRepo {
@@ -90,104 +89,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
-        self.deleted_bot_ids.write().await.remove(&bot_id);
-
-        // Update binding channel index
-        self.sync_binding_channel_index(&bot_id, &capabilities)
-            .await;
-
-        // Pre-read created_by from disk before acquiring lock
-        let persisted = {
-            let path = self.bot_info_path(&bot_id);
-            if let Ok(content) = fs::read_to_string(&path).await {
-                serde_json::from_str::<PersistedCapabilities>(&content).ok()
-            } else {
-                None
-            }
-        };
-        let persisted_created_by = persisted.as_ref().and_then(|value| value.created_by.clone());
-        let persisted_user_visibility = persisted
-            .as_ref()
-            .map(|value| value.user_visibility)
-            .unwrap_or_default();
-        let persisted_friend_ext = persisted
-            .as_ref()
-            .map(|value| value.friend_ext.clone())
-            .unwrap_or_default();
-        let persisted_friend_check_in_strategy = persisted
-            .as_ref()
-            .map(|value| value.friend_check_in_strategy)
-            .unwrap_or_default();
-
-        let mut bots = self.bots.write().await;
-
-        if let Some(existing) = bots.get_mut(&bot_id) {
-            // Update existing registration
-            existing.last_heartbeat = Instant::now();
-            // Merge capabilities, keeping non-empty values
-            if capabilities.name.is_some() {
-                existing.capabilities.name = capabilities.name;
-            }
-            if capabilities.summary.is_some() {
-                existing.capabilities.summary = capabilities.summary;
-            }
-            if !capabilities.domains.is_empty() {
-                existing.capabilities.domains = capabilities.domains;
-            }
-            if !capabilities.skills.is_empty() {
-                existing.capabilities.skills = capabilities.skills;
-            }
-            if !capabilities.scopes.is_empty() {
-                existing.capabilities.scopes = capabilities.scopes;
-            }
-            if capabilities.binding_channels.is_some() {
-                existing.capabilities.binding_channels = capabilities.binding_channels;
-            }
-            if !capabilities.visibility.is_empty() {
-                existing.capabilities.visibility = capabilities.visibility.clone();
-            }
-            // agent_code: 从请求中更新（允许设置或清除）
-            if capabilities.agent_code.is_some() {
-                existing.capabilities.agent_code = capabilities.agent_code;
-            }
-            // agent_token: 从请求中更新（允许设置）
-            if capabilities.agent_token.is_some() {
-                existing.capabilities.agent_token = capabilities.agent_token;
-            }
-            // Load created_by from disk if not already set in memory
-            if existing.created_by.is_none() && persisted_created_by.is_some() {
-                existing.created_by = persisted_created_by;
-            }
-            debug!(bot_id = %bot_id, "Bot registration updated");
-        } else {
-            // New registration
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_id: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities,
-                    ws_connection: None,
-                    session_token: None,
-                    env: Some(resolve_env()),
-                    status: bcs_service_api::ActorStatus::Online,
-                    actor_kind: bcs_service_api::ActorKind::Bot,
-                    created_by: persisted_created_by,
-                    protocol_version: 1,
-                    user_visibility: persisted_user_visibility,
-                    friend_ext: persisted_friend_ext,
-                    friend_check_in_strategy: persisted_friend_check_in_strategy,
-                },
-            );
-            info!(bot_id = %bot_id, "Bot registered");
-        }
-
-        let now = unix_millis();
-        let mut audit = self.control_plane_audit.write().await;
-        let entry = audit.entry(bot_id).or_insert((now, now));
-        entry.1 = now;
-
-        Ok(())
+        self.register_impl(bot_id, capabilities).await
     }
 
     async fn update_capabilities(
@@ -195,6 +97,7 @@ impl BotRepoPort for MemoryBotRepo {
         bot_id: &str,
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.remove(bot_id);
         self.sync_binding_channel_index(bot_id, &capabilities)
             .await;
@@ -222,142 +125,7 @@ impl BotRepoPort for MemoryBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
-        self.deleted_bot_ids.write().await.remove(&bot_id);
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let persisted_created_by = {
-            let bots = self.bots.read().await;
-            bots.get(&bot_id)
-                .and_then(|bot| bot.created_by.clone())
-                .unwrap_or_else(|| created_by.to_string())
-        };
-        let persisted_attributes = {
-            let path = self.bot_info_path(&bot_id);
-            if let Ok(content) = fs::read_to_string(&path).await {
-                serde_json::from_str::<PersistedCapabilities>(&content)
-                    .ok()
-                    .map(|value| {
-                        (
-                            value.user_visibility,
-                            value.friend_ext,
-                            value.friend_check_in_strategy,
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                Default::default()
-            }
-        };
-
-        let persisted = PersistedCapabilities {
-            bot_id: bot_id.clone(),
-            name: capabilities.name.clone(),
-            summary: capabilities.summary.clone(),
-            domains: capabilities.domains.clone(),
-            skills: capabilities.skills.clone(),
-            scopes: capabilities.scopes.clone(),
-            binding_channels: capabilities.binding_channels.clone(),
-            token: Some(token.to_string()),
-            registered_at: now,
-            hidden: false,
-            created_by: Some(persisted_created_by),
-            visibility: if capabilities.visibility.is_empty() {
-                None
-            } else {
-                Some(capabilities.visibility.clone())
-            },
-            agent_code: capabilities.agent_code.clone(),
-            agent_token: capabilities.agent_token.clone(),
-            user_visibility: persisted_attributes.0,
-            friend_ext: persisted_attributes.1.clone(),
-            friend_check_in_strategy: persisted_attributes.2,
-        };
-
-        let path = self.bot_info_path(&bot_id);
-        let dir = path.parent().ok_or_else(|| {
-            ServiceError::InternalError(format!("Invalid path for bot: {}", bot_id))
-        })?;
-        fs::create_dir_all(dir).await?;
-        let content = serde_json::to_string_pretty(&persisted)?;
-        fs::write(&path, content).await?;
-
-        self.sync_binding_channel_index(&bot_id, &capabilities)
-            .await;
-
-        let previous_token = {
-            let mut bots = self.bots.write().await;
-            if let Some(existing) = bots.get_mut(&bot_id) {
-                existing.last_heartbeat = Instant::now();
-                if capabilities.name.is_some() {
-                    existing.capabilities.name = capabilities.name.clone();
-                }
-                if capabilities.summary.is_some() {
-                    existing.capabilities.summary = capabilities.summary.clone();
-                }
-                if !capabilities.domains.is_empty() {
-                    existing.capabilities.domains = capabilities.domains.clone();
-                }
-                if !capabilities.skills.is_empty() {
-                    existing.capabilities.skills = capabilities.skills.clone();
-                }
-                if !capabilities.scopes.is_empty() {
-                    existing.capabilities.scopes = capabilities.scopes.clone();
-                }
-                if capabilities.binding_channels.is_some() {
-                    existing.capabilities.binding_channels = capabilities.binding_channels.clone();
-                }
-                if !capabilities.visibility.is_empty() {
-                    existing.capabilities.visibility = capabilities.visibility.clone();
-                }
-                if capabilities.agent_code.is_some() {
-                    existing.capabilities.agent_code = capabilities.agent_code.clone();
-                }
-                if capabilities.agent_token.is_some() {
-                    existing.capabilities.agent_token = capabilities.agent_token.clone();
-                }
-                if existing.created_by.is_none() {
-                    existing.created_by = Some(created_by.to_string());
-                }
-                existing.session_token.replace(token.to_string())
-            } else {
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_id: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities,
-                        ws_connection: None,
-                        session_token: Some(token.to_string()),
-                        env: Some(resolve_env()),
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        created_by: Some(created_by.to_string()),
-                        protocol_version: 1,
-                        user_visibility: persisted_attributes.0,
-                        friend_ext: persisted_attributes.1,
-                        friend_check_in_strategy: persisted_attributes.2,
-                    },
-                );
-                None
-            }
-        };
-
-        let mut token_to_bot = self.token_to_bot.write().await;
-        if let Some(previous_token) = previous_token.filter(|previous| previous != token) {
-            token_to_bot.remove(&previous_token);
-        }
-        token_to_bot.insert(token.to_string(), bot_id.clone());
-
-        let now = unix_millis();
-        let mut audit = self.control_plane_audit.write().await;
-        let entry = audit.entry(bot_id.clone()).or_insert((now, now));
-        entry.1 = now;
-
-        info!(bot_id = %bot_id, "Bot registered with owner and token");
-        Ok(())
+        self.register_with_owner_and_token_impl(bot_id, capabilities, created_by, token).await
     }
 
     async fn update_status(&self, bot_id: &str) -> bool {
@@ -671,6 +439,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn soft_delete(&self, bot_id: &str) -> bool {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.insert(bot_id.to_string());
         let mut bots = self.bots.write().await;
         let memory_removed = bots.remove(bot_id).is_some();
@@ -704,6 +473,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         // Update binding channel index
         self.sync_binding_channel_index(bot_id, caps).await;
 
@@ -736,7 +506,31 @@ impl BotRepoPort for MemoryBotRepo {
         Ok(())
     }
 
+    async fn update_profile_existing(
+        &self,
+        bot_id: &str,
+        update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_profile_existing_impl(bot_id, update).await
+    }
+
+    async fn update_avatar_existing(
+        &self,
+        bot_id: &str,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_avatar_existing_impl(bot_id, avatar).await
+    }
+
+    async fn read_avatar_batch(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::BotAvatarMap> {
+        self.read_avatar_batch_impl(bot_ids).await
+    }
+
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         let visibility_value = if visibility.is_empty() {
             "private"
         } else {
@@ -751,14 +545,16 @@ impl BotRepoPort for MemoryBotRepo {
             }
         }
 
-        // Update on disk (only the visibility field)
+        // Update on disk (only the visibility field; the stored avatar
+        // sibling field is preserved through the profile record).
         let path = self.bot_info_path(bot_id);
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path).await {
-                if let Ok(mut persisted) = serde_json::from_str::<PersistedCapabilities>(&content) {
-                    persisted.visibility = Some(visibility_value.to_string());
-                    let updated = serde_json::to_string_pretty(&persisted)?;
-                    fs::write(&path, updated).await?;
+                if let Ok(mut stored) =
+                    serde_json::from_str::<super::profile::StoredBotProfile>(&content)
+                {
+                    stored.record.visibility = Some(visibility_value.to_string());
+                    self.write_stored_profile(bot_id, &stored).await?;
                     info!(bot_id = %bot_id, visibility = %visibility_value, "Updated visibility on disk");
                 }
             }
@@ -954,6 +750,7 @@ impl BotRepoPort for MemoryBotRepo {
         created_by: &str,
         overwrite: bool,
     ) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         // Update in-memory (respects overwrite flag; early return if not overwriting and already claimed)
         let already_claimed = {
             let mut bots = self.bots.write().await;
@@ -973,15 +770,17 @@ impl BotRepoPort for MemoryBotRepo {
             return Ok(());
         }
 
-        // Update on disk (respects overwrite flag)
+        // Update on disk (respects overwrite flag; the stored avatar sibling
+        // field is preserved through the profile record)
         let path = self.bot_info_path(bot_id);
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path).await {
-                if let Ok(mut persisted) = serde_json::from_str::<PersistedCapabilities>(&content) {
-                    if overwrite || persisted.created_by.is_none() {
-                        persisted.created_by = Some(created_by.to_string());
-                        let updated = serde_json::to_string_pretty(&persisted)?;
-                        fs::write(&path, updated).await?;
+                if let Ok(mut stored) =
+                    serde_json::from_str::<super::profile::StoredBotProfile>(&content)
+                {
+                    if overwrite || stored.record.created_by.is_none() {
+                        stored.record.created_by = Some(created_by.to_string());
+                        self.write_stored_profile(bot_id, &stored).await?;
                         info!(bot_id = %bot_id, created_by = %created_by, overwrite = overwrite, "Updated created_by on disk");
                     }
                 }
@@ -992,105 +791,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn save_token(&self, bot_id: &str, token: &str) -> ServiceResult<()> {
-        // We need to save token separately since it's not in BotCapabilities
-        // Read the persisted file directly, update token, and save back
-        let path = self.bot_info_path(bot_id);
-
-        // Try to load existing persisted data
-        let mut persisted = if path.exists() {
-            match fs::read_to_string(&path).await {
-                Ok(content) => serde_json::from_str::<PersistedCapabilities>(&content)
-                    .unwrap_or_else(|_| PersistedCapabilities {
-                        bot_id: bot_id.to_string(),
-                        name: None,
-                        summary: None,
-                        domains: vec![],
-                        skills: vec![],
-                        scopes: vec![],
-                        binding_channels: None,
-                        token: Some(token.to_string()),
-                        registered_at: 0,
-                        hidden: false,
-                        created_by: None,
-                        visibility: None,
-                        agent_code: None,
-                        agent_token: None,
-                        user_visibility: UserVisibility::default(),
-                        friend_ext: serde_json::Map::new(),
-                        friend_check_in_strategy: FriendCheckInStrategy::default(),
-                    }),
-                Err(_) => PersistedCapabilities {
-                    bot_id: bot_id.to_string(),
-                    name: None,
-                    summary: None,
-                    domains: vec![],
-                    skills: vec![],
-                    scopes: vec![],
-                    binding_channels: None,
-                    token: Some(token.to_string()),
-                    registered_at: 0,
-                    hidden: false,
-                    created_by: None,
-                    visibility: None,
-                    agent_code: None,
-                    agent_token: None,
-                    user_visibility: UserVisibility::default(),
-                    friend_ext: serde_json::Map::new(),
-                    friend_check_in_strategy: FriendCheckInStrategy::default(),
-                },
-            }
-        } else {
-            PersistedCapabilities {
-                bot_id: bot_id.to_string(),
-                name: None,
-                summary: None,
-                domains: vec![],
-                skills: vec![],
-                scopes: vec![],
-                binding_channels: None,
-                token: Some(token.to_string()),
-                registered_at: 0,
-                hidden: false,
-                created_by: None,
-                visibility: None,
-                agent_code: None,
-                agent_token: None,
-                user_visibility: UserVisibility::default(),
-                friend_ext: serde_json::Map::new(),
-                friend_check_in_strategy: FriendCheckInStrategy::default(),
-            }
-        };
-
-        let previous_token = persisted.token.clone();
-
-        // Update token
-        persisted.token = Some(token.to_string());
-
-        // Ensure directory exists
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).await?;
-        }
-
-        // Save
-        let content = serde_json::to_string_pretty(&persisted)?;
-        fs::write(&path, content).await?;
-
-        let previous_token = {
-            let mut bots = self.bots.write().await;
-            if let Some(bot) = bots.get_mut(bot_id) {
-                bot.session_token.replace(token.to_string()).or(previous_token)
-            } else {
-                previous_token
-            }
-        };
-        let mut token_to_bot = self.token_to_bot.write().await;
-        if let Some(previous_token) = previous_token.filter(|previous| previous != token) {
-            token_to_bot.remove(&previous_token);
-        }
-        token_to_bot.insert(token.to_string(), bot_id.to_string());
-
-        info!(bot_id = %bot_id, "Token saved to storage");
-        Ok(())
+        self.save_token_impl(bot_id, token).await
     }
 
     async fn load_token(&self, bot_id: &str) -> Option<String> {
@@ -1125,49 +826,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn find_bot_by_token(&self, token: &str) -> Option<String> {
-        // First check in-memory token mapping (fast path)
-        {
-            let token_to_bot = self.token_to_bot.read().await;
-            if let Some(bot_id) = token_to_bot.get(token) {
-                if self.deleted_bot_ids.read().await.contains(bot_id) {
-                    return None;
-                }
-                return Some(bot_id.clone());
-            }
-        }
-
-        // Fall back to scanning disk (slow path, for BCS server restarts)
-        let mut entries = match fs::read_dir(&self.bots_base_dir).await {
-            Ok(entries) => entries,
-            Err(_) => return None,
-        };
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            if !entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-
-            let bot_id = entry.file_name().to_string_lossy().to_string();
-            if self.deleted_bot_ids.read().await.contains(&bot_id) {
-                continue;
-            }
-            let path = self.bot_info_path(&bot_id);
-
-            if !path.exists() {
-                continue;
-            }
-
-            if let Ok(content) = fs::read_to_string(&path).await {
-                if let Ok(persisted) = serde_json::from_str::<PersistedCapabilities>(&content) {
-                    if persisted.token.as_deref() == Some(token) {
-                        debug!(bot_id = %bot_id, "Found bot by token on disk");
-                        return Some(bot_id);
-                    }
-                }
-            }
-        }
-
-        None
+        self.find_bot_by_token_impl(token).await
     }
 
     async fn find_bot_by_binding_channel(
@@ -1253,345 +912,47 @@ impl BotRepoPort for MemoryBotRepo {
         &self,
         bot_id: String,
     ) -> Result<String, ConnectStreamError> {
-        let existing_token = self.load_token(&bot_id).await;
-        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
-        let bot_exists = {
-            let in_mem = self.bots.read().await.get(&bot_id).is_some();
-            in_mem || existing_token.is_some() || self.bot_info_path(&bot_id).exists()
-        };
-        let in_memory_connected = {
-            let bots = self.bots.read().await;
-            bots.get(&bot_id)
-                .map(|bot| bot.ws_connection.is_some())
-                .unwrap_or(false)
-        };
-        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
-
-        match (bot_exists, is_mock, in_memory_connected) {
-            (false, _, _) => {
-                let session_token = uuid::Uuid::new_v4().to_string();
-                let mut bots = self.bots.write().await;
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_id: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: BotCapabilities::default(),
-                        ws_connection: Some(BotConnection {
-                            session_token: session_token.clone(),
-                            connected_at: Instant::now(),
-                        }),
-                        session_token: Some(session_token.clone()),
-                        env: Some(resolve_env()),
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        created_by: None,
-                        protocol_version: 1,
-                        user_visibility: UserVisibility::default(),
-                        friend_ext: serde_json::Map::new(),
-                        friend_check_in_strategy: FriendCheckInStrategy::default(),
-                    },
-                );
-                self.token_to_bot
-                    .write()
-                    .await
-                    .insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "create",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: create"
-                );
-                Ok(session_token)
-            }
-            (true, true, _) => {
-                let previous_mock = existing_token.clone();
-                let session_token = uuid::Uuid::new_v4().to_string();
-                // Persist FIRST (disk file): if this fails, surface the error
-                // before any in-memory mutation, so memory and the persisted
-                // file never split into a half-state that only surfaces as a
-                // stale-MOCK reconnect after a restart. Persisting before the
-                // `bots.write()` lock also sidesteps the prior deadlock:
-                // `save_token` re-acquires `bots.write()`.
-                if let Err(err) = self.save_token(&bot_id, &session_token).await {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        bot_id = %bot_id,
-                        error = %err,
-                        "connect_or_promote_streaming: promote_mock disk persist failed; refusing ws"
-                    );
-                    return Err(ConnectStreamError::InternalError(format!(
-                        "promote_mock: failed to persist promoted token: {err}"
-                    )));
-                }
-                let mut bots = self.bots.write().await;
-                if let Some(bot) = bots.get_mut(&bot_id) {
-                    bot.ws_connection = Some(BotConnection {
-                        session_token: session_token.clone(),
-                        connected_at: Instant::now(),
-                    });
-                    bot.session_token = Some(session_token.clone());
-                    bot.last_heartbeat = Instant::now();
-                } else {
-                    bots.insert(
-                        bot_id.clone(),
-                        RegisteredBotInner {
-                            bot_id: bot_id.clone(),
-                            last_heartbeat: Instant::now(),
-                            capabilities: BotCapabilities::default(),
-                            status: bcs_service_api::ActorStatus::Online,
-                            actor_kind: bcs_service_api::ActorKind::Bot,
-                            created_by: None,
-                            protocol_version: 1,
-                            user_visibility: UserVisibility::default(),
-                            friend_ext: serde_json::Map::new(),
-                            friend_check_in_strategy: FriendCheckInStrategy::default(),
-                            env: Some(resolve_env()),
-                            ws_connection: Some(BotConnection {
-                                session_token: session_token.clone(),
-                                connected_at: Instant::now(),
-                            }),
-                            session_token: Some(session_token.clone()),
-                        },
-                    );
-                }
-                let mut token_to_bot = self.token_to_bot.write().await;
-                if let Some(prev) = previous_mock {
-                    token_to_bot.remove(&prev);
-                }
-                token_to_bot.insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "promote_mock",
-                    previous_token_kind = "mock",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: promote_mock"
-                );
-                Ok(session_token)
-            }
-            (true, false, true) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_connected",
-                    "connect_or_promote_streaming: real-token bot already connected"
-                );
-                Err(ConnectStreamError::AlreadyConnected(bot_id))
-            }
-            (true, false, false) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_registered",
-                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
-                );
-                Err(ConnectStreamError::AlreadyRegistered(bot_id))
-            }
-        }
+        self.connect_or_promote_streaming_impl(bot_id).await
     }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
-        let mut bots = self.bots.write().await;
-
-        // Check if bot is already connected
-        if let Some(bot) = bots.get(&bot_id) {
-            if bot.ws_connection.is_some() {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot already has an active streaming connection");
-                return Err(());
-            }
-        }
-
-        // Generate session token
-        let session_token = uuid::Uuid::new_v4().to_string();
-
-        // Either create new bot entry or update existing one
-        if let Some(bot) = bots.get_mut(&bot_id) {
-            bot.ws_connection = Some(BotConnection {
-                session_token: session_token.clone(),
-                connected_at: Instant::now(),
-            });
-            bot.session_token = Some(session_token.clone());
-            bot.last_heartbeat = Instant::now();
-        } else {
-            // Create new bot entry (will be updated with capabilities on onboard)
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_id: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities: BotCapabilities::default(),
-                    ws_connection: Some(BotConnection {
-                        session_token: session_token.clone(),
-                        connected_at: Instant::now(),
-                    }),
-                    session_token: Some(session_token.clone()),
-                    env: Some(resolve_env()),
-                    status: bcs_service_api::ActorStatus::Online,
-                    actor_kind: bcs_service_api::ActorKind::Bot,
-                    created_by: None,
-                    protocol_version: 1,
-                    user_visibility: UserVisibility::default(),
-                    friend_ext: serde_json::Map::new(),
-                    friend_check_in_strategy: FriendCheckInStrategy::default(),
-                },
-            );
-        }
-
-        // Store token mapping
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(session_token.clone(), bot_id.clone());
-
-        info!(bot_id = %bot_id, token = %session_token, "Bot streaming connection registered");
-
-        Ok(session_token)
+        self.register_streaming_connection_impl(bot_id).await
     }
 
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()> {
-        // Check if token is valid and get bot_id
-        let bot_id = {
-            let token_to_bot = self.token_to_bot.read().await;
-            match token_to_bot.get(&existing_token) {
-                Some(id) => id.clone(),
-                None => {
-                    warn!(request_id = %bcs_observability::CurrentRequestId, token = %existing_token, "Unknown token for reconnection");
-                    return Err(());
-                }
-            }
-        };
-
-        let mut bots = self.bots.write().await;
-
-        // Check if bot is already connected
-        if let Some(bot) = bots.get(&bot_id) {
-            if bot.ws_connection.is_some() {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot already has an active connection");
-                return Err(());
-            }
-        }
-
-        // Update or create bot entry with connection
-        if let Some(bot) = bots.get_mut(&bot_id) {
-            bot.ws_connection = Some(BotConnection {
-                session_token: existing_token.clone(),
-                connected_at: Instant::now(),
-            });
-            bot.last_heartbeat = Instant::now();
-        } else {
-            // Bot not in memory, create entry (capabilities will be loaded from disk)
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_id: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities: BotCapabilities::default(),
-                    ws_connection: Some(BotConnection {
-                        session_token: existing_token.clone(),
-                        connected_at: Instant::now(),
-                    }),
-                    session_token: Some(existing_token.clone()),
-                    env: Some(resolve_env()),
-                    status: bcs_service_api::ActorStatus::Online,
-                    actor_kind: bcs_service_api::ActorKind::Bot,
-                    created_by: None,
-                    protocol_version: 1,
-                    user_visibility: UserVisibility::default(),
-                    friend_ext: serde_json::Map::new(),
-                    friend_check_in_strategy: FriendCheckInStrategy::default(),
-                },
-            );
-        }
-
-        info!(bot_id = %bot_id, token = %existing_token, "Bot streaming connection re-established");
-
-        Ok((bot_id, existing_token))
+        self.reconnect_streaming_impl(existing_token).await
     }
 
     async fn disconnect_streaming(&self, bot_id: &str) {
-        let mut bots = self.bots.write().await;
-
-        if let Some(bot) = bots.get_mut(bot_id) {
-            if let Some(conn) = bot.ws_connection.take() {
-                // DO NOT remove token_to_bot mapping - token should persist for reconnection
-                info!(
-                    bot_id = %bot_id,
-                    token = %conn.session_token,
-                    duration_ms = conn.connected_at.elapsed().as_millis() as u64,
-                    "Bot streaming connection removed (token preserved for reconnection)"
-                );
-            }
-        } else {
-            debug!(bot_id = %bot_id, "Bot not found for disconnect");
-        }
+        self.disconnect_streaming_impl(bot_id).await
     }
 
     async fn is_connected(&self, bot_id: &str) -> bool {
-        let bots = self.bots.read().await;
-        bots.get(bot_id)
-            .map(|b| b.ws_connection.is_some())
-            .unwrap_or(false)
+        self.is_connected_impl(bot_id).await
     }
 
     async fn send_frame(&self, bot_id: &str, _frame: String) -> Result<(), ()> {
-        warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
-        Err(())
+        self.send_frame_impl(bot_id, _frame).await
     }
 
     async fn list_connected(&self) -> Vec<String> {
-        let bots = self.bots.read().await;
-        bots.iter()
-            .filter(|(_, b)| b.ws_connection.is_some())
-            .map(|(id, _)| id.clone())
-            .collect()
+        self.list_connected_impl().await
     }
 
     async fn store_token_mapping(&self, token: String, bot_id: String) {
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(token.clone(), bot_id.clone());
-        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+        self.store_token_mapping_impl(token, bot_id).await
     }
 
     async fn get_protocol_version(&self, bot_id: &str) -> u32 {
-        let bots = self.bots.read().await;
-        bots.get(bot_id).map(|b| b.protocol_version).unwrap_or(1)
+        self.get_protocol_version_impl(bot_id).await
     }
 
     async fn set_protocol_version(&self, bot_id: &str, version: u32) {
-        let mut bots = self.bots.write().await;
-        if let Some(bot) = bots.get_mut(bot_id) {
-            bot.protocol_version = version;
-        }
+        self.set_protocol_version_impl(bot_id, version).await
     }
 
     async fn register_http_connection(&self, bot_id: String, token: String) -> String {
-        // Create a minimal bot entry if it doesn't exist
-        {
-            let mut bots = self.bots.write().await;
-            if !bots.contains_key(&bot_id) {
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_id: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: BotCapabilities::default(),
-                        ws_connection: None,
-                        session_token: Some(token.clone()),
-                        env: Some(resolve_env()),
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        created_by: None,
-                        protocol_version: 1,
-                        user_visibility: UserVisibility::default(),
-                        friend_ext: serde_json::Map::new(),
-                        friend_check_in_strategy: FriendCheckInStrategy::default(),
-                    },
-                );
-                info!(bot_id = %bot_id, "Created minimal bot entry for HTTP connection");
-            }
-        }
-        // Store token mapping
-        self.store_token_mapping(token.clone(), bot_id.clone())
-            .await;
-        token
+        self.register_http_connection_impl(bot_id, token).await
     }
 
     async fn send_request(
@@ -1601,45 +962,10 @@ impl BotRepoPort for MemoryBotRepo {
         params: serde_json::Value,
         timeout_ms: u64,
     ) -> Result<serde_json::Value, String> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let frame = serde_json::json!({
-            "type": "req",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        });
-        let frame_str = serde_json::to_string(&frame).map_err(|e| e.to_string())?;
-
-        let (tx, rx) = oneshot::channel::<serde_json::Value>();
-        {
-            let mut pending = self.pending_requests.write().await;
-            pending.insert(request_id.clone(), tx);
-        }
-
-        if self.send_frame(bot_id, frame_str).await.is_err() {
-            let mut pending = self.pending_requests.write().await;
-            pending.remove(&request_id);
-            return Err(format!("Bot '{}' not connected", bot_id));
-        }
-
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
-            Ok(Ok(payload)) => Ok(payload),
-            Ok(Err(_)) => Err("Request channel closed".to_string()),
-            Err(_) => {
-                let mut pending = self.pending_requests.write().await;
-                pending.remove(&request_id);
-                Err(format!(
-                    "Request to bot '{}' timed out after {}ms",
-                    bot_id, timeout_ms
-                ))
-            }
-        }
+        self.send_request_impl(bot_id, method, params, timeout_ms).await
     }
 
     async fn resolve_pending_request(&self, request_id: &str, response: serde_json::Value) {
-        let mut pending = self.pending_requests.write().await;
-        if let Some(tx) = pending.remove(request_id) {
-            let _ = tx.send(response);
-        }
+        self.resolve_pending_request_impl(request_id, response).await
     }
 }

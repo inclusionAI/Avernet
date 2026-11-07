@@ -1,4 +1,5 @@
 import { backendRequest } from '../httpClient';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 import { userScopedParams } from './botController';
 import type { ChannelDto } from './botEditorChannelDtos';
@@ -202,7 +203,8 @@ export const botEditorController = {
       { method: 'POST', params: userScopedParams(), rawBody: body },
     );
   },
-  listBotMcps: (botId: string) => request<BotMcpDto[]>(path(botId, 'mcps')),
+  listBotMcps: (botId: string, ownerId?: string) =>
+    request<BotMcpDto[]>(path(botId, 'mcps'), 'GET', { owner_id: ownerId }),
   listMcpServers: () =>
     request<BackendApiPage<McpServerDto>>('/openapi/v1/bots/mcp/servers', 'GET', { page: 1, page_size: 100 }),
   searchMarketMcpServers: (params: { keyword?: string; tenants?: string[] } = {}) =>
@@ -362,13 +364,15 @@ export const botEditorController = {
       page_size: 20,
       owner_id: ownerId,
     }),
-  listIdentityFiles: (botId: string, ownerId?: string) =>
+  listIdentityFiles: (botId: string, ownerId?: string, stage?: BotRuntimeStage) =>
     request<{ bot_id: string; files: IdentityFileInfoDto[] }>(path(botId, 'identity'), 'GET', {
       owner_id: ownerId,
+      stage,
     }),
-  getIdentityFile: (botId: string, type: string) => request<IdentityFileDto>(path(botId, `identity/${type}`)),
-  updateIdentityFile: (botId: string, type: string, content: string) =>
-    request(path(botId, `identity/${type}`), 'PUT', {}, { content }),
+  getIdentityFile: (botId: string, type: string, ownerId?: string, stage?: BotRuntimeStage) =>
+    request<IdentityFileDto>(path(botId, `identity/${type}`), 'GET', { owner_id: ownerId, stage }),
+  updateIdentityFile: (botId: string, type: string, content: string, ownerId?: string) =>
+    request(path(botId, `identity/${type}`), 'PUT', { owner_id: ownerId, stage: 'draft' }, { content }),
   listChannels: (botId: string, ownerId?: string) =>
     request<ChannelDto[] | BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', {
       page: 1,
@@ -423,18 +427,18 @@ export const botEditorController = {
     request<RenderScreenDto>(path(botId, `render-screens/${id}`), 'PATCH', { owner_id: ownerId }, body),
   deleteRenderScreen: (botId: string, id: number, ownerId?: string) =>
     request(path(botId, `render-screens/${id}`), 'DELETE', { owner_id: ownerId }),
-  getLifecycle: (botId: string) =>
-    request<{ bot_id: string; items: ServicePublicationDto[] }>(path(botId, 'lifecycle')),
-  upgradeLifecycle: (botId: string, publicationId: number) =>
-    request<ServicePublicationDto>(path(botId, `lifecycle/${publicationId}/upgrade`), 'POST'),
-  advanceLifecycle: (botId: string, stage: 'prestable' | 'online') =>
-    request(path(botId, 'lifecycle/advance'), 'POST', {}, { stage }),
-  restartLifecycle: (botId: string, stage: 'prestable' | 'online') =>
-    request(path(botId, 'lifecycle/restart'), 'POST', {}, { stage }),
-  cancelStaging: (botId: string) => request(path(botId, 'lifecycle/cancel-staging'), 'POST'),
-  offlineLifecycle: (botId: string) => request(path(botId, 'lifecycle/offline'), 'POST'),
-  retryLifecycle: (botId: string) => request(path(botId, 'lifecycle/retry'), 'POST'),
-  deleteLifecycleDraft: (botId: string) => request(path(botId, 'lifecycle'), 'DELETE'),
+  getLifecycle: (botId: string, ownerId?: string) =>
+    request<{ bot_id: string; items: ServicePublicationDto[] }>(path(botId, 'lifecycle'), 'GET', { owner_id: ownerId }),
+  upgradeLifecycle: (botId: string, publicationId: number, ownerId?: string) =>
+    request<ServicePublicationDto>(path(botId, `lifecycle/${publicationId}/upgrade`), 'POST', { owner_id: ownerId }),
+  advanceLifecycle: (botId: string, stage: 'prestable' | 'online', ownerId?: string) =>
+    request(path(botId, 'lifecycle/advance'), 'POST', { owner_id: ownerId }, { stage }),
+  restartLifecycle: (botId: string, stage: 'prestable' | 'online', ownerId?: string) =>
+    request(path(botId, 'lifecycle/restart'), 'POST', { owner_id: ownerId }, { stage }),
+  cancelStaging: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/cancel-staging'), 'POST', { owner_id: ownerId }),
+  offlineLifecycle: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/offline'), 'POST', { owner_id: ownerId }),
+  retryLifecycle: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/retry'), 'POST', { owner_id: ownerId }),
+  deleteLifecycleDraft: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle'), 'DELETE', { owner_id: ownerId }),
   getEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock'), 'GET', { owner_id: ownerId }),
   /** 成功响应也可能 acquired=false；抢占必须另经用户确认。 */

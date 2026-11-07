@@ -7,6 +7,7 @@
 pub mod collaboration_draft;
 pub mod bot_authority;
 pub mod bot_control_plane;
+pub mod bot_profile;
 pub mod agent_registration;
 pub mod authorization_snapshot;
 pub mod error;
@@ -51,3 +52,7 @@ pub struct GroupHumanNotifyPolicy {
     pub mode: HumanMentionNotifyMode,
     pub driver_bot_id: String,
 }
+
+pub mod a2a_bot;
+
+pub mod run_budget;

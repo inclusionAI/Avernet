@@ -19,6 +19,7 @@ from agentclaw.community.core.bot_genome.repository.models import (
     GenomePatchRow,
     GenomePromotionRow,
     GenomeRevisionRow,
+    SettleResult,
 )
 from agentclaw.community.core.repository.implementations.bot import genome as genome_repositories
 from agentclaw.community.core.repository.implementations.bot.genome import (
@@ -316,7 +317,6 @@ def test_promotions_round_trip_list_and_finish(db):
             actor_id="u1",
             reason="ship",
             status="applying",
-            apply_kind="pending",
             created_at=created_at,
         )
 
@@ -424,48 +424,138 @@ def test_candidate_prefixes_are_matched_literally(db):
     assert [r.name for r in repo.list(**BOT, name_prefix="candidate/run_7/")] == ["candidate/run_7/1"]
 
 
-def test_promotion_start_moves_marks_and_files_in_one_transaction(db):
+PROMOTABLE = ("draft", "accepted", "promoted")
+
+
+def _in_flight(revision_id: str, promotion_id: str, from_revision_id: str | None) -> GenomePromotionRow:
+    return GenomePromotionRow(
+        **BOT,
+        promotion_id=promotion_id,
+        ref="active",
+        revision_id=revision_id,
+        from_revision_id=from_revision_id,
+        actor_kind="user",
+        actor_id="u1",
+        reason="r",
+        status="pending",
+        created_at=NOW,
+    )
+
+
+def _settle(
+    promotions, promotion_id: str, *, status="applied", labels=(), statuses=PROMOTABLE, move_refs=True, apply_id="ap_1"
+):
+    return promotions.settle(
+        **BOT,
+        promotion_id=promotion_id,
+        apply_id=apply_id,
+        status=status,
+        apply_detail="applied",
+        move_refs=move_refs,
+        labels=labels,
+        expected_statuses=statuses,
+        settled_at=NOW,
+    )
+
+
+def test_a_promotion_is_filed_pending_then_marked_applying_once(db):
+    promotions = GenomePromotionRepository(db)
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    applying = promotions.mark_applying(**BOT, promotion_id="a" * 32, apply_id="ap_1")
+    assert (applying.status, applying.apply_id, applying.settled_at) == ("applying", "ap_1", None)
+    assert promotions.mark_applying(**BOT, promotion_id="a" * 32, apply_id="ap_2") is None, "only a pending row"
+    assert promotions.mark_applying(**OTHER, promotion_id="a" * 32, apply_id="ap_2") is None
+
+
+def test_settling_moves_the_pair_labels_active_and_marks_the_revision_in_one_transaction(db):
     revisions, refs, promotions = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePromotionRepository(db)
     revisions.insert(_revision(R1))
     revisions.insert(_revision(R2))
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    assert _settle(promotions, "a" * 32, status="applied_partial", labels=("partial",)) is SettleResult.SETTLED
+    active = refs.get(**BOT, name="active")
+    assert (active.revision_id, active.labels) == (R1, '["partial"]')
+    row = promotions.get(**BOT, promotion_id="a" * 32)
+    assert (row.status, row.settled_at, revisions.get(**BOT, revision_id=R1).status) == (
+        "applied_partial",
+        NOW,
+        "promoted",
+    )
+    assert _settle(promotions, "a" * 32) is SettleResult.ALREADY_SETTLED, "settling twice changes nothing"
+    assert promotions.get(**BOT, promotion_id="a" * 32).status == "applied_partial"
 
-    def _row(revision_id: str, promotion_id: str) -> GenomePromotionRow:
-        return GenomePromotionRow(
-            **BOT,
-            promotion_id=promotion_id,
-            ref="active",
-            revision_id=revision_id,
-            from_revision_id=None,
-            actor_kind="user",
-            actor_id="u1",
-            reason="r",
-            status="applying",
-            apply_kind="pending",
-            created_at=NOW,
-        )
+    promotions.insert(_in_flight(R2, "b" * 32, R1))
+    assert _settle(promotions, "b" * 32) is SettleResult.SETTLED
+    by_name = {r.name: r for r in refs.list(**BOT)}
+    assert (by_name["active"].revision_id, by_name["active"].labels) == (R2, "[]"), "a complete move clears the label"
+    assert (by_name["previous"].revision_id, by_name["previous"].labels) == (R1, '["partial"]'), (
+        "previous keeps the labels it had as active: going back to it says it was only partly delivered"
+    )
 
-    promotable = ("draft", "accepted", "promoted")
-    first = promotions.start(_row(R1, "a" * 32), expected_active=None, expected_statuses=promotable, moved_at=NOW)
-    assert first is not None and refs.get(**BOT, name="active").revision_id == R1
-    assert revisions.get(**BOT, revision_id=R1).status == "promoted"
-    assert (
-        promotions.start(_row(R2, "b" * 32), expected_active=R3, expected_statuses=promotable, moved_at=NOW) is None
-    ), "a lost CAS"
-    assert refs.get(**BOT, name="active").revision_id == R1 and promotions.get(**BOT, promotion_id="b" * 32) is None
-    assert revisions.get(**BOT, revision_id=R2).status == "draft"
-    assert (
-        promotions.start(_row(R2, "s" * 32), expected_active=R1, expected_statuses=("accepted",), moved_at=NOW) is None
-    ), "status moved out of the expected set"
+
+def test_a_lost_compare_and_swap_moves_nothing_and_fails_the_promotion(db):
+    revisions, refs, promotions = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePromotionRepository(db)
+    revisions.insert(_revision(R1))
+    revisions.insert(_revision(R2))
+    refs.move_pair(**BOT, revision_id=R1, expected_active=None, **_stamp())
+    promotions.insert(_in_flight(R2, "b" * 32, R3))  # expected active R3, but it is R1
+    assert _settle(promotions, "b" * 32) is SettleResult.REF_CONFLICT
     assert refs.get(**BOT, name="active").revision_id == R1 and revisions.get(**BOT, revision_id=R2).status == "draft"
-    assert promotions.get(**BOT, promotion_id="s" * 32) is None
-    second = promotions.start(_row(R2, "c" * 32), expected_active=R1, expected_statuses=promotable, moved_at=NOW)
-    assert second is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
-    assert (
-        promotions.start(
-            _row("sha256:" + "f" * 64, "d" * 32), expected_active=R2, expected_statuses=promotable, moved_at=NOW
-        )
-        is None
-    ), "not this bot's revision"
-    assert {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
-    again = promotions.start(_row(R2, "e" * 32), expected_active=R2, expected_statuses=promotable, moved_at=NOW)
-    assert again is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
+    row = promotions.get(**BOT, promotion_id="b" * 32)
+    assert row.status == "apply_failed" and "no ref moved" in row.apply_detail and row.settled_at == NOW
+
+
+def test_a_revision_whose_status_moved_is_not_promoted(db):
+    revisions, refs, promotions = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePromotionRepository(db)
+    revisions.insert(_revision(R1))
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    assert _settle(promotions, "a" * 32, statuses=("accepted",)) is SettleResult.REF_CONFLICT
+    assert refs.get(**BOT, name="active") is None and revisions.get(**BOT, revision_id=R1).status == "draft"
+
+
+def test_settling_without_refs_and_the_missing_row(db):
+    refs, promotions = GenomeRefRepository(db), GenomePromotionRepository(db)
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    assert _settle(promotions, "a" * 32, status="apply_failed", move_refs=False) is SettleResult.SETTLED
+    assert refs.get(**BOT, name="active") is None
+    assert _settle(promotions, "z" * 32) is SettleResult.NOT_FOUND
+    assert _settle(promotions, "a" * 32, status="apply_failed", move_refs=False) is SettleResult.ALREADY_SETTLED
+
+
+def test_finish_settles_only_a_row_in_flight(db):
+    promotions = GenomePromotionRepository(db)
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    failed = promotions.finish(**BOT, promotion_id="a" * 32, status="apply_failed", apply_detail="busy")
+    assert (failed.status, failed.apply_detail) == ("apply_failed", "busy") and failed.settled_at is not None
+    again = promotions.finish(**BOT, promotion_id="a" * 32, status="applied", apply_detail="late")
+    assert (again.status, again.apply_detail) == ("apply_failed", "busy"), "a settled row is final"
+
+
+def test_stale_pending_rows_without_an_apply_are_failed(db):
+    promotions = GenomePromotionRepository(db)
+    promotions.insert(_in_flight(R1, "a" * 32, None))  # created at NOW, never started
+    promotions.insert(_in_flight(R1, "b" * 32, None))
+    promotions.mark_applying(**BOT, promotion_id="b" * 32, apply_id="ap_1")
+    fresh = _in_flight(R1, "c" * 32, None).model_copy(update={"created_at": NOW + timedelta(minutes=10)})
+    promotions.insert(fresh)
+    settled = promotions.fail_stale_pending(
+        **BOT, older_than=NOW + timedelta(minutes=5), apply_detail="never started", settled_at=NOW
+    )
+    assert settled == 1
+    assert [promotions.get(**BOT, promotion_id=p * 32).status for p in "abc"] == ["apply_failed", "applying", "pending"]
+
+
+def test_settling_records_the_apply_even_when_the_request_never_marked_the_row_applying(db):
+    """A worker can settle before the request records the association, or the request can die first: the
+    settle writes the apply id itself, on success and on a lost compare-and-swap alike."""
+    revisions, promotions = GenomeRevisionRepository(db), GenomePromotionRepository(db)
+    revisions.insert(_revision(R1, status="draft"))
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    assert _settle(promotions, "a" * 32, apply_id="ap_9") is SettleResult.SETTLED
+    settled = promotions.get(**BOT, promotion_id="a" * 32)
+    assert (settled.status, settled.apply_id) == ("applied", "ap_9")
+    assert promotions.mark_applying(**BOT, promotion_id="a" * 32, apply_id="ap_9") is None, "late, and harmless"
+    promotions.insert(_in_flight(R1, "b" * 32, "sha256:" + "0" * 64))  # expects an active the bot never had
+    assert _settle(promotions, "b" * 32, apply_id="ap_10") is SettleResult.REF_CONFLICT
+    lost = promotions.get(**BOT, promotion_id="b" * 32)
+    assert (lost.status, lost.apply_id) == ("apply_failed", "ap_10")

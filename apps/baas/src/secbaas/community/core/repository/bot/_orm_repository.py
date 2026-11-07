@@ -644,6 +644,25 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         log.info("complete_destroy: bot_id=%s, tenant=%s, env=%s", bot_id, tenant, env)
         from sqlalchemy import func as sa_func
 
+        from secbaas.community.core.repository.bot_device_rel import BotDeviceRelModel
+
+        # A DESTROY completion must retire relationships even when no
+        # device-level publish records were created (for example, an
+        # idempotent retry after the devices were already released).
+        self._session.query(BotDeviceRelModel).filter(
+            BotDeviceRelModel.bot_id == bot_id,
+            BotDeviceRelModel.tenant == tenant,
+            BotDeviceRelModel.env == env,
+            BotDeviceRelModel.is_deleted == 0,
+        ).update(
+            {
+                "is_deleted": BotDeviceRelModel.id,
+                "modifier": modifier,
+                "gmt_modified": sa_func.now(),
+            },
+            synchronize_session=False,
+        )
+
         self._session.query(BotModel).filter(
             BotModel.id == bot_id,
             BotModel.tenant == tenant,

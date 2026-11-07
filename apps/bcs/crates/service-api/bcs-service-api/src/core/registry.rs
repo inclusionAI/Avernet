@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use super::{ActorStatus, EnsureHumanResult, ServiceError, ServiceResult};
 use crate::types::bot_authority::{AuthorityMutation, BotOwnershipView};
+use crate::types::bot_profile::{AvatarChange, BotAvatarMap, ExistingProfileUpdate, ProfileWrite};
 use bcs_domain::Group;
 
 pub use bcs_domain::registry::deserialize_skills;
@@ -324,6 +325,14 @@ pub trait BotRegistryCoreService: Send + Sync {
         })
     }
 
+    /// Cancellation-only target resolution. May use a previously validated A2A
+    /// Card after refresh failure, but must retain current affiliation, enabled
+    /// Provider/binding/downlink and credential checks. It does not authorize a
+    /// send or infer remote task identity; the adapter cancels a frozen Run.
+    async fn resolve_abort_target(&self,bot_id:&str)->ServiceResult<BotDeliveryTarget> {
+        self.resolve_delivery_target(bot_id).await
+    }
+
     async fn resolve_coordination_surface(
         &self,
         bot_id: &str,
@@ -519,6 +528,57 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// This avoids the risk of overwriting name/summary with stale or None values
     /// when only a visibility change is needed.
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()>;
+
+    /// Existing-only Bot profile write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_profile_existing`, delegating
+    /// persistence to the repository. Missing/tombstoned targets stay
+    /// `ProfileWrite::Missing` — no INSERT, and never a silent success.
+    /// Unconfigured core implementations fail closed instead of defaulting
+    /// the repo's per-record write contract to a silent success.
+    async fn update_profile_existing(
+        &self,
+        _bot_id: &str,
+        _update: ExistingProfileUpdate,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot profile update is not configured".into(),
+        ))
+    }
+
+    /// Existing-only avatar write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_avatar_existing`. Same
+    /// fail-closed default discipline as
+    /// [`update_profile_existing`](Self::update_profile_existing).
+    async fn update_avatar_existing(
+        &self,
+        _bot_id: &str,
+        _avatar: AvatarChange,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot avatar update is not configured".into(),
+        ))
+    }
+
+    /// Batched avatar URLs for a whole participant result page (bot-avatar
+    /// plan Task 4).
+    ///
+    /// Unlike the repository's bounded `read_avatar_batch`, the core accepts
+    /// the full submitted page: it deduplicates the ids and chunks them into
+    /// store-sized batches, merging each batch's map into one result. The
+    /// query budget stays one repository batch read per chunk; an empty page
+    /// issues no repository call at all. The core does NOT authorize which
+    /// resources are visible — environment isolation, Human-exclusion and
+    /// tombstone-display semantics belong to the repository read. Read
+    /// failures propagate; they are never swallowed into an empty map.
+    ///
+    /// This default is fail-closed and `NoopBotRegistryCoreService` does NOT
+    /// override it, so Noop-wired V1 fixtures fail every list/detail path
+    /// that projects avatars — loudly by design.
+    async fn avatar_urls(&self, _bot_ids: &[String]) -> ServiceResult<BotAvatarMap> {
+        Err(ServiceError::InternalError(
+            "bot avatar url lookup is not configured".into(),
+        ))
+    }
 
     /// DEPRECATED: Hidden mechanism is deprecated. Use `visibility` field instead,
     /// and use [`update_actor_status`](Self::update_actor_status) for the
@@ -917,75 +977,5 @@ fn needs_bot_name_backfill(participant: &bcs_domain::Participant) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use bcs_domain::ActorKind;
-
-    /// Bot Authority Task 4 (plan §3.1): the committed registration
-    /// receipt and the domain query projection must stay separable.
-    ///
-    /// 1. `RegisteredBot` (get/list/discovery) serializes without any
-    ///    credential — `agent_code`/`agent_token` are skip-serializing
-    ///    and a runtime token is not even a field.
-    /// 2. The wire registration fields stay exactly
-    ///    `bot_uuid`/`bot_name`/`bot_token` (openapi plugin response
-    ///    shape); no query/log serialization capability is added to
-    ///    `CommittedBotRegistration`.
-    ///
-    /// The negative half is a REVIEW-ENFORCED firewall, not a
-    /// compile-enforced one (stable Rust cannot assert the ABSENCE of
-    /// a trait impl): the receipt deliberately derives no
-    /// `Serialize`/`Deserialize`, and the commented-out
-    /// serialization call below exists so any reviewer who adds it
-    /// sees this invariant while re-enabling it. The positive
-    /// assertions above are the executable part of this test.
-    #[test]
-    fn registration_receipt_is_separate_from_registered_bot() {
-        let registered = RegisteredBot {
-            bot_uuid: "bot_x".to_string(),
-            capabilities: BotCapabilities {
-                name: Some("Bot X".to_string()),
-                agent_code: Some("code-must-not-leak".to_string()),
-                agent_token: Some("secret-must-not-leak".to_string()),
-                ..Default::default()
-            },
-            env: Some("test".to_string()),
-            created_by: Some("11111111".to_string()),
-            actor_kind: ActorKind::Bot,
-            status: ActorStatus::Online,
-        };
-        let bot_json = serde_json::to_string(&registered)
-            .expect("query projection stays serializable (existing contract)");
-        assert!(
-            !bot_json.contains("bot_token"),
-            "query projection must never carry a bot token: {bot_json}"
-        );
-        assert!(
-            !bot_json.contains("agent_token") && !bot_json.contains("agent_code"),
-            "query projection must never carry agent credentials: {bot_json}"
-        );
-
-        // Committed receipt keeps the frozen registration wire fields.
-        let receipt = CommittedBotRegistration {
-            bot_uuid: "bot_x".to_string(),
-            bot_name: "Bot X".to_string(),
-            bot_token: "runtime-token".to_string(),
-        };
-        assert_eq!(receipt.bot_uuid, "bot_x");
-        assert_eq!(receipt.bot_name, "Bot X");
-        assert_eq!(receipt.bot_token, "runtime-token");
-
-        // Negative half of the isolation rule: the receipt has NO
-        // query/log serialization capability — a REVIEW-ENFORCED
-        // firewall (stable Rust cannot assert the absence of a trait
-        // impl at runtime or compile time from inside a passing
-        // test): unlike `RegisteredBot`, the type derives no
-        // `Serialize`/`Deserialize` and carries no serde/Display/log
-        // dump anywhere in this crate. Any reviewer re-enabling the
-        // serialization below must first read this invariant and the
-        // doc on `CommittedBotRegistration`.
-        //
-        // let leaked = serde_json::to_string(&receipt);
-        drop(receipt);
-    }
-}
+#[path = "registry_tests.rs"]
+mod tests;

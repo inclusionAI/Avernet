@@ -128,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {!hideNavigation && inlineNavEntries === 0 && (
               <div
                 data-testid="primary-nav-fallback-strip"
-                className="flex h-12 shrink-0 items-center border-b border-border bg-card px-2 lg:hidden"
+                className="flex h-12 shrink-0 items-center border-b border-divider bg-card px-2 lg:hidden"
               >
                 <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={openNav} />
               </div>

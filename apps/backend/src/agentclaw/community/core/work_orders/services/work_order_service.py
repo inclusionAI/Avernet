@@ -6,6 +6,7 @@ import json
 
 from injector import inject
 
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -88,7 +89,10 @@ from agentclaw.community.core.work_orders.work_order_service_protocol import (
 from agentclaw.community.core.work_orders.execution import (
     execution_phase,
     notify_bot_collaboration_changed,
+    notify_space_membership_changed,
 )
+from agentclaw.community.kernel.bot_manager_sync import SpaceChange
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 logger = get_logger()
 
@@ -108,6 +112,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
         staff_dept: StaffDeptPlugin,
         skill_collaborator_approval_handler: SkillCollaboratorApprovalHandlerProtocol,
         decision_callbacks: WorkOrderDecisionCallbackDispatcher,
+        bot_manager_sync: BotManagerSyncProtocol,
     ) -> None:
         self._repository = repository
         self._spaces = spaces
@@ -120,6 +125,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
         self._staff_dept = staff_dept
         self._skill_collaborator_approval_handler = skill_collaborator_approval_handler
         self._decision_callbacks = decision_callbacks
+        self._manager_sync = bot_manager_sync
 
     @staticmethod
     def _required_text(value: str, *, limit: int, error: type[Exception]) -> str:
@@ -371,6 +377,23 @@ class WorkOrderService(WorkOrderServiceProtocol):
                         bot_id=bot_id,
                         owner_id=owner_id,
                     )
+            if biz_type == WorkOrderBizType.SPACE_JOIN.value:
+                # The generic-AUTO completion just made the applicant a Space
+                # member. The Space identifier travels exactly as the completed
+                # transaction validated it (the repository resolved the Space
+                # from this very biz_id); the background resolver extends the
+                # refs while the Space exists, so no extra read joins the
+                # local transaction and terminal REJECTED/FAILED states never
+                # reach this branch.
+                notify_space_membership_changed(
+                    self._manager_sync,
+                    change=SpaceChange(
+                        avernet_tenant=get_current_avernet_tenant(),
+                        env=get_current_env(),
+                        space_refs=(biz_id, f"team:{biz_id}"),
+                        user_ids=(applicant,),
+                    ),
+                )
             result = result.model_copy(
                 update={
                     "status": WorkOrderEventStatus.APPROVED,
@@ -843,7 +866,9 @@ class WorkOrderService(WorkOrderServiceProtocol):
         if detail.work_order.biz_type != WorkOrderBizType.SPACE_JOIN.value:
             raise WorkOrderNotFoundError("space join work order not found")
         try:
-            self._access.require_space_owner(space_id=detail.space_id, user_id=actor_id)
+            space, _ = self._access.require_space_owner(
+                space_id=detail.space_id, user_id=actor_id
+            )
         except SpaceAccessDeniedError as exc:
             raise WorkOrderAccessDeniedError("space owner role required") from exc
         applicant_user_name = (
@@ -858,7 +883,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
             target_status=target_status,
             review_remark=review_remark,
         )
-        return self._repository.review_space_join(
+        result = self._repository.review_space_join(
             work_order_id=detail.work_order.id,
             reviewer_user_id=actor_id,
             review_remark=review_remark,
@@ -867,6 +892,25 @@ class WorkOrderService(WorkOrderServiceProtocol):
             applicant_user_name=applicant_user_name,
             env=get_current_env(),
         )
+        if target_status is WorkOrderStatus.APPROVED:
+            # The applicant just (re-)joined: the permission check above already
+            # resolved the Space, so the hint carries its complete refs. It is
+            # strictly post-commit and replaces any collaborator re-insertion
+            # for the membership-restoration case the review write handled.
+            notify_space_membership_changed(
+                self._manager_sync,
+                change=SpaceChange(
+                    avernet_tenant=get_current_avernet_tenant(),
+                    env=get_current_env(),
+                    space_refs=(
+                        str(space.id),
+                        f"team:{space.id}",
+                        space.space_code,
+                    ),
+                    user_ids=(detail.work_order.applicant_user_id,),
+                ),
+            )
+        return result
 
     def _review_bot_editor_request(
         self,

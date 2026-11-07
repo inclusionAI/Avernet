@@ -5,8 +5,6 @@ export interface CapabilitySetManagerProps {
   botId?: string;
   ownerId?: string;
   sets: BotCapabilitySet[];
-  /** 编辑器与调试面板并列时使用单列成员布局。 */
-  compact?: boolean;
   mySkills: BotEditorSkill[];
   marketSkills: BotEditorSkill[];
   skillCenterSkills: BotEditorSkill[];

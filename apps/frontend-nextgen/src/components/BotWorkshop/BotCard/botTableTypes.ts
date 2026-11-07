@@ -35,6 +35,12 @@ export interface BotTableProps {
   getCollaborationMode?: (bot: BotDomain) => 'authorize' | 'request' | undefined;
   getGeneralConfigAvailability?: (bot: BotDomain) => { enabled: boolean; disabledReason?: string } | undefined;
   onGeneralConfig?: (bot: BotDomain) => void;
+  /** 复制 Bot 入口可用性;engine/编辑权限/状态前置规则在 canCopyBot 内收敛。 */
+  getCopyAvailability?: (bot: BotDomain) => { visible: boolean; enabled: boolean; disabledReason?: string } | undefined;
+  /** 触发复制 Modal。仅在 getCopyAvailability(bot).enabled 时回调。 */
+  onCopy?: (bot: BotDomain) => void;
+  /** 重试复制(dst bot);BotStatusCell 在 copy_state=FAILED 时浮现的重试入口。 */
+  onRetryCopy?: (bot: BotDomain) => void;
 }
 
 export type BotTableColumnOptions = Pick<
@@ -62,6 +68,9 @@ export type BotTableColumnOptions = Pick<
   | 'getCollaborationMode'
   | 'getGeneralConfigAvailability'
   | 'onGeneralConfig'
+  | 'getCopyAvailability'
+  | 'onCopy'
+  | 'onRetryCopy'
 > & {
   showOwner: boolean;
   showDescriptionColumn: boolean;

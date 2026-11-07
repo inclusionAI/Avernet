@@ -94,8 +94,8 @@ describe('BotTable 表格结构', () => {
       '描述',
       '状态',
       '版本',
-      'Bot 标签',
       '容器信息',
+      'Bot 标签',
       '操作',
     ]);
     expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1132px]');

@@ -134,7 +134,7 @@ session:
 | --- | --- |
 | Ordinary structured-routing group | `bcs_route` |
 | Manager in a `manager_worker` group | `bcs_assign_task`, `bcs_task_complete` |
-| Worker in a `manager_worker` group | `bcs_send_task_message` |
+| Worker in a `manager_worker` group | No coordination emission tool; return a normal final reply |
 | Mention-routing group, or manager-worker session without a valid recipient role | None |
 
 The manager/worker decision uses only the server-delivered
@@ -315,9 +315,10 @@ sends:
 - model-visible `tool/result` content and its `isError` flag;
 - assistant-visible text and final routing metadata.
 
-Calls to `bcs_assign_task`, `bcs_send_task_message`, and `bcs_task_complete`
-use the existing BCN `task.dispatch`, `task.message`, and `task.complete`
-requests. Their arguments and model-visible results also appear through the
+Calls to `bcs_assign_task` and `bcs_task_complete` use BCN `task.dispatch`
+and `task.complete`. Manager-only `bcs_task_status` and `bcs_cancel_task` use
+`task.status` and `task.cancel`. Workers return their normal final reply instead
+of calling the retired worker-message tool. Their arguments and model-visible results also appear through the
 same canonical `agent/tool` telemetry as other DSH tools.
 
 The plugin does not send raw reasoning, credentials, internal exception stacks,
@@ -344,3 +345,22 @@ before npm publication. Any later listing on
 [deepseek-harness-plugin.com](https://deepseek-harness-plugin.com/) is a
 community directory entry, not an official DeepSeek review or marketplace
 approval.
+
+
+## Manager–Worker task handles
+
+`bcs_send_task_message` is retired from model-visible tools. Worker final replies
+are automatically returned as task results. When blocked, end the turn and state
+what is needed; the Manager assigns a follow-up to the same Worker, including
+necessary context. Do not use old worker-message examples as invocation guidance.
+
+Managers use `bcs_assign_task` (optional positive `timeout_s`), `bcs_task_status`
+(1–20 refs, on demand only), and `bcs_cancel_task` (ref and reason). `task_ref` is
+`T-` plus eight hex digits; ambiguous refs require a longer prefix. `stored` is not
+admission or completion. `unknown`/`not_found` never proves stopped or safe to
+resend. Cancellation waits briefly for confirmation, never exposes `cancelling`,
+and does not roll back side effects. FIFO is not business idempotence.
+
+The server consumes old task.message/v2 echoes for one compatibility release;
+that compatibility path is not a newly exposed tool. Remove it only after old
+producers and queued work have drained (cached payloads live for 24 hours).

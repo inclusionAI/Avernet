@@ -19,7 +19,7 @@ The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 import base64
 import re
 import time
@@ -818,6 +818,7 @@ class BaasService:  # pragma: no cover
             bot_id,
             owner_id,
             agent_pass_token,
+            engine_type=engine,
             extra_properties=extra_properties,
         )
 
@@ -2642,6 +2643,7 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        engine_type: str = "",
         *,
         extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
@@ -2658,6 +2660,7 @@ class BaasService:  # pragma: no cover
             owner_id=owner_id,
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
+            engine_type=engine_type,
             bot_type_resolver=self._resolve_bot_type,
             extra_properties=extra_properties,
         )
@@ -2728,7 +2731,7 @@ class BaasService:  # pragma: no cover
         for device in devices:
             paas_device_id = device["provider_device_id"]
             device_uuid = device.get("device_uuid", "")
-            self.update_device_outbound_rule(paas_device_id, outbound_rule)
+            self.update_device_outbound_rule(paas_device_id, outbound_rule, mode="replace")
             updated_devices.append({
                 "device_uuid": device_uuid,
                 "paas_device_id": paas_device_id,
@@ -3083,11 +3086,14 @@ class BaasService:  # pragma: no cover
             raise
 
     def update_device_outbound_rule(
-        self, paas_device_id: str, outbound_rule: OutBoundOperationRule
+        self, paas_device_id: str, outbound_rule: OutBoundOperationRule,
+        *, mode: Literal["append", "replace"] = "append",
     ) -> bool:
         """更新 PaaS 设备的出站 header 规则。
 
-        调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule
+        默认使用 append 模式去重替换匹配规则，保留独立下发的其他 header。
+        Teclaw 全局规则使用默认替换语义，不发送 mode 参数（append 仅支持 session 规则）。
+        调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append
 
         Args:
             paas_device_id: PaaS 设备 ID（即 provider_device_id）
@@ -3099,41 +3105,59 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: 更新失败
         """
-        logger.info(
-            f"[BaasService.update_device_outbound_rule] Updating outbound rule: "
-            f"paas_device_id={paas_device_id}"
-        )
-
+        route = f"/api/v1/paas/devices/{paas_device_id}/outbound-rule"
         payload = self._outbound_rule_to_dict(outbound_rule)
-
+        # COSEC: rule values/placeholders may contain credentials; log descriptors only.
+        rules = [
+            {"domains": rule.domains, "header_name": rule.header_name, "action": rule.action}
+            for rule in outbound_rule.header_operation_rules
+        ]
+        started = time.perf_counter()
+        status_code = None
+        result_code = None
+        logger.info(
+            "baas_outbound_update_requested system=baas operation=update_device_outbound_rule "
+            "method=PUT route=%s paas_device_id=%s mode=%s mode_query_present=%s rules=%s",
+            route, paas_device_id, mode, mode == "append", rules,
+        )
         try:
             response = self._http.put(
-                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule",
+                route,
+                **({"params": {"mode": "append"}} if mode == "append" else {}),
                 json=payload,
                 timeout=30.0,
             )
+            status_code = response.status_code
             response.raise_for_status()
             response_data = response.json()
+            result_code = response_data.get("code")
 
-            if response_data.get("code") != 0:
+            if result_code != 0:
                 raise BaasServiceError(
                     f"BaaS API error: {response_data.get('message', 'Unknown error')}"
                 )
 
             logger.info(
-                f"[BaasService.update_device_outbound_rule] Success: "
-                f"paas_device_id={paas_device_id}"
+                "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
+                "paas_device_id=%s mode=%s status_code=%s result_code=%s duration_ms=%s",
+                paas_device_id, mode, status_code, result_code,
+                int((time.perf_counter() - started) * 1000),
             )
             return True
 
-        except httpx.HTTPStatusError as e:
+        except Exception as exc:
             logger.error(
-                f"[BaasService.update_device_outbound_rule] HTTP error: "
-                f"{e.response.status_code} - {e.response.text}"
+                "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+                "paas_device_id=%s mode=%s status_code=%s result_code=%s "
+                "error_type=%s duration_ms=%s",
+                paas_device_id, mode, status_code, result_code, type(exc).__name__,
+                int((time.perf_counter() - started) * 1000),
             )
-            raise BaasServiceError(
-                f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
+            if isinstance(exc, httpx.HTTPStatusError):
+                raise BaasServiceError(
+                    f"BaaS API error: {exc.response.status_code} - {exc.response.text}"
+                ) from exc
+            raise
 
     def append_token_outbound_rule(
         self,

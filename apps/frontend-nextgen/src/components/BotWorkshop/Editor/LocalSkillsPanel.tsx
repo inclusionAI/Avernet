@@ -29,7 +29,7 @@ export function LocalSkillsPanel({
     }
   };
   return (
-    <section className={`space-y-3 ${embedded ? 'rounded-lg border border-border p-3' : 'border-t border-border p-5'}`}>
+    <section className={`space-y-3 ${embedded ? 'rounded-lg border border-border p-3' : 'border-t border-divider p-5'}`}>
       <h3 className="text-sm font-semibold">本地 Skill 管理</h3>
       <p className="text-xs text-muted-foreground">上传同名 Skill 会替换已有内容。删除前请先停用并移除能力集引用。</p>
       <Input

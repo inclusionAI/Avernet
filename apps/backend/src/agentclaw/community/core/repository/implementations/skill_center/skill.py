@@ -225,6 +225,21 @@ class SkillRepository(
             )
             return _skill_to_dict(s) if s else None
 
+    def list_center_by_name(self, name: str) -> List[dict]:
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.name == name,
+                    self.Skill.git_path.like("center://%"),
+                    self.Skill.offline_at.is_(None),
+                    self.Skill.env == get_current_env(),
+                )
+                .order_by(self.Skill.id)
+                .all()
+            )
+            return [_skill_to_dict(row) for row in rows]
+
     def get_by_link_name(
         self, link_name: str, bolt_id: Optional[str] = None
     ) -> Optional[dict]:

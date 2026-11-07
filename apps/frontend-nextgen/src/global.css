@@ -101,6 +101,10 @@
   --input: 240 5.9% 90%;
   --ring: 240 5.9% 10%; /* 亮色焦点环刻意取近黑、不跟随 --primary（对比 17.72）；仅暗色跟随主色，见 ui-interaction-spec §2.1 */
 
+  /* 分割线（单侧结构性分界）：全局统一 #EEEEEE 1px（DMore 视觉稿基线）。
+     与 --border 分离 — border 同时承担输入框/卡片描边，不随分割线统一走。 */
+  --divider: 0 0% 93.3%;
+
   /* 圆角系统 §2.4 */
   --radius: 0.5rem;
   --radius-sm: 0.25rem;
@@ -138,6 +142,12 @@
   /* 系统消息详情提示：固定深灰实底，保持长文本的阅读对比度。 */
   --color-system-message-tooltip: rgb(76, 76, 77);
   --color-system-message-tooltip-foreground: hsl(0deg 0% 98%);
+
+  /* 悬浮提示气泡（ui/Tooltip，unify-tooltip-antd）：底色对齐 antd Tooltip 基线。
+     亮色 = antd colorBgSpotlight（黑 85% 半透明，design.md 取证 antd@6.6.1）；
+     文字恒白（colorTextLightSolid），不随明暗翻转。暗色映射见 .dark 块。 */
+  --tooltip-bg: 0 0% 4% / 0.85;
+  --color-tooltip: hsl(var(--tooltip-bg));
   --shell-header-height: 56px;
   --shell-sidebar-width: 224px; /* SVG 稿 rail 实宽 200（restore-design-v2 精修）；品牌锁版换新版后加宽至 224（单行预算 200px：图标组 96px + 锁版 ≤104px），见 AppSidebar 品牌区注释 */
 
@@ -230,6 +240,7 @@
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
   --ring: 221.7 100% 62%; /* D2: follow --primary */
+  --divider: 240 3.7% 20%; /* 分割线暗色态：较 --border 亮一阶保持可见 */
 
   /* 业务蓝（admin 品牌蓝 / Button primary）暗色覆盖：亮色态值无自动暗色适配，
      这里补暗色值，使 var(--color-primary) 系在暗色下对比度不掉。
@@ -239,6 +250,10 @@
   --color-primary-active: color-mix(in srgb, hsl(var(--brand)) 80%, black);
   --color-primary-weak: hsl(var(--brand) / 0.48);
   --color-primary-soft: hsl(var(--brand) / 0.1);
+
+  /* 暗色悬浮提示底：antd 暗色 colorBgSpotlight 实测为不透明 #424242（getSolidColor
+     26%），非亮色的半透明方案——深底上再叠 85% 黑会糊成一块，故暗色走实底。 */
+  --tooltip-bg: 0 0% 26%;
 }
 
 /* ==========================================================================
@@ -275,6 +290,7 @@
   --color-brand: hsl(var(--brand));
 
   --color-border: hsl(var(--border));
+  --color-divider: hsl(var(--divider));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
@@ -667,6 +683,59 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .capability-popover[data-state='open'],
   .capability-page-in {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   悬浮提示气泡（ui/Tooltip）进出场动效 —— unify-tooltip-antd：
+   对齐 antd Tooltip zoom-big-fast 观感（~0.1s 缩放+淡入淡出，scale 0.8⇄1）。
+   与 capability-* 同一纪律：局部 className、prefers-reduced-motion 静止。
+   keyframes 动画的是 **CSS 独立属性 scale/opacity**（非 transform）——Radix 把
+   浮动定位写在该元素的 inline transform 上，动 transform 的 keyframes 会整体
+   接管	transform、吞掉定位 translate，气泡必跳位；scale 属性与 inline
+   transform 合成（translate→scale），定位不受影响。
+   退出动画类 .tooltip-anim-exit 由共享组件层的「锚点存活性探测」决定是否渲染
+   （Tooltip.tsx）：锚点消失/归零场景不挂该类 → presence 读到 animation:none
+   同步卸载，保住孤儿气泡修复（卡片渐隐瞬间不重定位）。
+   ========================================================================== */
+@keyframes tooltip-pop-in {
+  from {
+    opacity: 0;
+    scale: 0.8;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+@keyframes tooltip-pop-out {
+  from {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+
+/* Radix Tooltip 的 open 态 data-state 有两种细分值（delayed-open/instant-open），
+   按 hover 或 focus 开启各有标记；进场均播进入动画。 */
+.tooltip-anim[data-state='delayed-open'],
+.tooltip-anim[data-state='instant-open'],
+.tooltip-anim[data-state='open'] {
+  animation: tooltip-pop-in 100ms ease-out;
+}
+.tooltip-anim-exit[data-state='closed'] {
+  animation: tooltip-pop-out 100ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltip-anim[data-state='delayed-open'],
+  .tooltip-anim[data-state='instant-open'],
+  .tooltip-anim[data-state='open'],
+  .tooltip-anim-exit[data-state='closed'] {
     animation: none;
   }
 }

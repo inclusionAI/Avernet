@@ -103,6 +103,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - BotOwnershipSyncProtocol
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
@@ -135,6 +136,9 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.runtime_binding.models # Trusted target for Engine session-file operations
   - agentclaw.community.plugin_api.device_adapter_transport # Streaming response contract
+  - agentclaw.community.core.bot_public_risk.service_protocol
+  - agentclaw.community.kernel.knowledge_content
+  - agentclaw.community.kernel.knowledge  # BotKnowledgeScope used by the conversation knowledge contract
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge
@@ -145,6 +149,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.file_count_service_protocol
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync  # submit-only DTOs (SyncReason / SubmissionResult / SpaceChange) — typed in bot_manager_sync.py
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
@@ -193,6 +198,7 @@ internal_dependencies:
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
+  - agentclaw.community.core.task.task_config.task_config_service_protocol  # TaskConfigServiceProtocol — re-exported by api/task/task_config_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
   - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
@@ -226,6 +232,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.render_screen_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_overview.bot_overview_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -343,3 +350,21 @@ missing data or directory failure grants nothing. Path segments are case-sensiti
 subject to explicit legacy unique-collation write conflicts (409). No public rule
 listing is exposed. The real DI provider supplies repository plus staff directory.
 The signature gate and real SQLite/HTTP behavior tests cover this contract.
+
+## Ownership sync Service API v1
+
+`api.bot_ownership_sync.BotOwnershipSyncProtocol` is an additive, transport-free
+notification contract, separate from the unchanged managers-only v1 API:
+
+```python
+request_ownership_sync(*, bot_pk: int, env: str, avernet_tenant: str,
+                       reason: SyncReason) -> SubmissionResult
+```
+
+It performs only memory admission (`QUEUED`, `COALESCED`, `DISABLED`, `REJECTED`),
+not database reads, HTTP delivery, or confirmation. Owner handoff and the
+ownership notification/repair helpers consume it. The composition root binds
+both sync APIs to the same `BotManagerSyncDispatcher` when enabled. The current
+contract is defined here rather than re-exported from Core; its specific Core
+consumer edges must be declared, not generalized into permission to import
+HTTP adapters. `reason` is diagnostic only, never a work-kind selector.

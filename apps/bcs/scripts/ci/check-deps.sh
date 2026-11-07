@@ -21,6 +21,10 @@ if ! bash "$(dirname "${BASH_SOURCE[0]}")/check-observability-deps.sh"; then
   fail=1
 fi
 
+if ! bash "$(dirname "${BASH_SOURCE[0]}")/check-caller-identity-deps.sh"; then
+  fail=1
+fi
+
 # ─── 工具函数：列出 crate 的 bcs-* 依赖 ───
 bcs_deps_of() {
   local crate=$1
@@ -33,7 +37,7 @@ assert_only_allows() {
   local allowed="$* "
   for d in $(bcs_deps_of "$crate"); do
     if [[ " $allowed " != *" $d "* ]]; then
-      log FAIL "$id" "$crate 依赖 $d（不在允许列表 [${allowed% }] 中）"
+      log FAIL "$id" "$crate 依赖 ${d}（不在允许列表 [${allowed% }] 中）"
       fail=1
     fi
   done
@@ -68,6 +72,20 @@ for p in $plugin_crates; do
     fi
   done
 done
+
+# ─── 迁移库存在性与依赖限制（code-build-footprint 任务 3）───
+count=$(echo "$metadata" | jq '[.packages[] | select(.name == "bcs-db-migrations")] | length')
+if [[ "$count" != 1 ]]; then
+  log FAIL migration "bcs-db-migrations must exist exactly once"
+  fail=1
+fi
+while IFS= read -r dep; do
+  if [[ "$dep" != bcs-db-api ]]; then
+    log FAIL migration "bcs-db-migrations has forbidden runtime/build path dependency: $dep"
+    fail=1
+  fi
+done < <(echo "$metadata" | jq -r '.packages[] | select(.name == "bcs-db-migrations") |
+  .dependencies[] | select(.kind != "dev" and .path != null) | .name')
 
 # ─── DEP-8: 声明但未使用 ───
 if command -v cargo-machete >/dev/null; then

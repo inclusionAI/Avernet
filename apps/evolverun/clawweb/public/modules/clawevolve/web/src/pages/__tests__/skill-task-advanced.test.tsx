@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({ evolve: { capabilities: vi.fn(),
   stageCatalog: vi.fn(), listStageSkills: vi.fn(), createTask: vi.fn(), createDiagnosis: vi.fn(),
 }, bots: { list: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
+const materials = vi.hoisted(() => ({ options: vi.fn(), upload: vi.fn() }))
+vi.mock('../../api/reference-materials', () => ({ referenceMaterialsApi: materials }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ authState: 'ready', user: { userId: 'viewer' } }) }))
 vi.mock('../../hooks/useEvolveModelConfig', () => ({
   useEvolveModelConfig: () => ({ defaultModel: 'GLM-5.2', models: ['GLM-5.1', 'GLM-5.2'] }),
@@ -36,6 +38,9 @@ async function ready(type = 'diagnose') { await waitFor(() => expect(submit(type
 beforeEach(() => {
   vi.stubGlobal('React', React)
   vi.resetAllMocks()
+  materials.options.mockResolvedValue({ available: true, maxFiles: 500, maxFileBytes: 20 * 1024 * 1024,
+    maxTotalBytes: 100 * 1024 * 1024, maxArchiveBytes: 110 * 1024 * 1024, maxPathBytes: 1024, maxPathComponentBytes: 255, maxDepth: 20 })
+  materials.upload.mockResolvedValue({ materialId: 'advanced-material', expiresAt: Date.now() + 60_000, files: [], totalBytes: 3 })
   api.evolve.capabilities.mockResolvedValue({ skillManagement: true, stageCustomization: true })
   api.evolve.getSkillAsset.mockResolvedValue(asset)
   api.evolve.getSkillTaskDefaults.mockResolvedValue(defaults)
@@ -230,4 +235,24 @@ describe('fixed Skill advanced task form', () => {
     expect((screen.getByRole('textbox', { name: '用户空间 user_id' }) as HTMLInputElement).value).toBe('viewer')
     expect(api.evolve.getSkillTaskDefaults).not.toHaveBeenCalled()
   })
+})
+
+it.each(['diagnose_goal', 'direct_goal'])('uploads Skill optimization materials from the advanced %s form', async mode => {
+  open('full')
+  await ready('full')
+  if (mode === 'direct_goal') fireEvent.click(screen.getByRole('button', { name: /按目标进化/ }))
+  fireEvent.click(await screen.findByRole('button', { name: '添加参考材料' }))
+  await screen.findByRole('button', { name: '添加文件' })
+  const file = new File(['abc'], 'rules.md')
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode('abc').buffer })
+  fireEvent.change(screen.getByLabelText('选择参考文件'), { target: { files: [file] } })
+  expect(submit('full').disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '上传材料' }))
+  await screen.findByRole('button', { name: '上传完成' })
+  fireEvent.click(submit('full'))
+  await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledOnce())
+  expect(api.evolve.createTask.mock.calls[0][0]).toMatchObject({ taskType: 'full', inputMode: mode,
+    targetSkillAssetId: asset.assetId, referenceMaterialsUploadId: 'advanced-material',
+    userId: 'original-owner', botId: asset.botId })
+  expect(api.evolve.createTask.mock.calls[0][1]).toBeUndefined()
 })

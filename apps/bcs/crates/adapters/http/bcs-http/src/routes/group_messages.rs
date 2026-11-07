@@ -143,10 +143,49 @@ pub async fn group_chat(
 ) -> Result<Json<Value>, LegacyGroupError> {
     ensure_group_message_group_exists(&state, &group_id).await?;
     let caller = resolve_group_chat_caller(&state, &headers, &uri).await?;
+    // Strict same-authentication caller material (spec §10.1.1/§7.5.1),
+    // same policy as session_chat: attach only when the concrete extractor
+    // is configured and the chain yields a Human with a trusted session
+    // window; extraction failure never fails the ordinary request.
+    // Human speaker: absent `from` resolves to the authenticated Human.
+    // A request explicitly speaking as an owned Bot is ordinary Bot speech
+    // and must not carry the Human's execution identity.
+    let human_is_effective_sender = match &caller {
+        GroupChatCaller::Human(human) => req
+            .from
+            .as_deref()
+            .map(|from| from == human.actor_id)
+            .unwrap_or(true),
+        GroupChatCaller::Bot { .. } => false,
+    };
+    let caller_ingress = if human_is_effective_sender {
+        match &state.caller_ingress_source {
+            Some(source) => match source.extract_caller_request(&headers, now_epoch_ms()).await {
+                Ok(request) => Some(request.ingress),
+                Err(error) => {
+                    // The ordinary chat path continues (the flow keeps the
+                    // fail-closed judgment), but a silent skip here also
+                    // starves the session relay capture — surface the
+                    // closed refusal kind so the gap is diagnosable.
+                    tracing::warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        group_id = %group_id,
+                        reason = ?error,
+                        "caller ingress extraction failed; the session relay capture stays closed for this message"
+                    );
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
     let outcome = state
         .services
         .message_flow
         .handle_group_chat(GroupChatCommand {
+            caller_ingress,
             caller: group_chat_caller_context(&caller),
             group_id: group_id.clone(),
             requested_sender_id: req.from,
@@ -372,4 +411,11 @@ fn delivery_slug(delivery_type: DeliveryType) -> &'static str {
         DeliveryType::Send => "send",
         DeliveryType::Inject => "inject",
     }
+}
+
+fn now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
 }

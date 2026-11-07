@@ -20,6 +20,7 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.bot_address import resolve_bot_entity
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
@@ -125,8 +126,9 @@ async def list_bot_clis(
 ) -> Envelope[list[BotCliItem]]:
     """The CLIs installed in the runtime, as its container reports them, plus the
     bot's defaults. `409` when the runtime has no running container."""
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     items = await service.list_bot_clis(
-        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, stage=_stage(stage)
+        bot_id=bot_id, entity_id=entity_id, actor_id=user_id, stage=_stage(stage)
     )
     return envelope(
         [
@@ -161,9 +163,10 @@ async def add_bot_cli(
     `409` with the operation in progress when another add or remove is running
     in this runtime.
     """
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     outcome = await service.add(
         bot_id=bot_id,
-        entity_id=owner_id,
+        entity_id=entity_id,
         actor_id=user_id,
         cli_code=body.cli_code,
         lock_epoch=await _lock_epoch(locks, bot_id=bot_id, owner_id=owner_id, user_id=user_id),
@@ -194,9 +197,10 @@ async def remove_bot_cli(
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Deleted] | JSONResponse:
     """Uninstall the CLI from the runtime. Its grant is kept. Default CLIs cannot be removed."""
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     outcome = await service.remove(
         bot_id=bot_id,
-        entity_id=owner_id,
+        entity_id=entity_id,
         actor_id=user_id,
         cli_code=cli_code,
         lock_epoch=await _lock_epoch(locks, bot_id=bot_id, owner_id=owner_id, user_id=user_id),
@@ -213,9 +217,10 @@ async def _cancel(
     owner_id: str, stage: RuntimeStage | None, run_async: bool,
     service: AcliCliServiceProtocol, locks: CollaboratorLockServiceProtocol,
 ) -> Envelope[AcliCliOperation] | JSONResponse:
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     outcome = await service.cancel(
         bot_id=bot_id,
-        entity_id=owner_id,
+        entity_id=entity_id,
         actor_id=user_id,
         cli_code=cli_code,
         action=action,
@@ -287,8 +292,9 @@ async def get_live_cli_operation(
     A cancel in progress shows as the operation's `cancelling` step; the cancel
     itself reads back at `…/cli-operations/{operation_id}`.
     """
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     op = await service.live_operation(
-        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, stage=_stage(stage)
+        bot_id=bot_id, entity_id=entity_id, actor_id=user_id, stage=_stage(stage)
     )
     return envelope(_operation(op) if op is not None else None, request)
 
@@ -307,8 +313,9 @@ async def get_cli_operation(
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
 ) -> Envelope[AcliCliOperation]:
     """One add, remove or cancel of this bot, running or ended."""
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     op = await service.get_operation(
-        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, operation_id=operation_id
+        bot_id=bot_id, entity_id=entity_id, actor_id=user_id, operation_id=operation_id
     )
     return envelope(_operation(op), request)
 

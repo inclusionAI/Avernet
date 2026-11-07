@@ -419,6 +419,17 @@ impl GroupManagement {
             }
         };
 
+        // P3 prewarm intent (spec §7 group-entry): with no trusted subject
+        // for the new members, BCS only records the non-sensitive intent —
+        // group, human count and bot count. No ensure, no container, no
+        // identity; per-message admission establishes per-target identity.
+        tracing::info!(
+            group_id = %group.id,
+            human_members = group.participants.iter().filter(|p| p.actor_kind == ActorKind::Human).count(),
+            bot_members = group.participants.iter().filter(|p| p.is_bot()).count(),
+            "caller prewarm intent recorded (no identity, no ensure)"
+        );
+
         let mut detail = group_to_detail_with_context(group, context_injected);
         detail.latest_running_session_id = initial_session_id;
         detail.initial_run = initial_run;

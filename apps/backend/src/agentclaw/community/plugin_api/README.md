@@ -12,17 +12,22 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
+  - BcsOwnershipPlugin
+  - BcsOwnershipError
   - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
   - "LocalSkillSecurityProviderProtocol V1"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
+  - "BcsManagersPlugin + BcsManagersError — full-replace delivery of a Bot's BCS manager set"
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync    # manager sync delivery DTOs
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -137,6 +142,15 @@ implementation selects the existing Claude Code Engine source layout. The
 factory's existing locator/device-I/O adapters remain responsible for address
 translation, including enterprise host addresses and Teclaw namespaces.
 
+`BcsManagersPlugin` is the outbound transport boundary for manager projection.
+`replace_managers` sends one full `ManagerSnapshot` under an explicit deadline;
+failures expose `BcsManagersError(kind, code)` without raw response bodies.
+NOT_SENT and UNKNOWN are eligible for the consumer's bounded best-effort retry;
+REJECTED ends the round. UNKNOWN does not prove whether BCS applied the write.
+There is no coordination plugin or persistent block. Consumer conformance lives
+in `tests/community/contracts/test_bcs_managers.py`, exercising the real
+`BotManagerSyncService` through the `world` fixture and asserting plugin calls.
+
 
 ## Token scope V2 and staff-directory errors
 
@@ -151,3 +165,19 @@ DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
 contract. The old HTTP errors module re-exports the same class identity for
 compatibility; core consumers do not import HTTP exceptions. No-department still
 returns StaffDeptInfo with null fields, and infrastructure failure remains distinct.
+
+## Ownership delivery Plugin API v1
+
+`BcsOwnershipPlugin.replace_ownership(snapshot: OwnershipSnapshot, *,
+timeout_seconds: float) -> OwnershipChange` is async and sends once. Async
+`aclose() -> None` releases owned resources on the shared delivery loop.
+`BcsOwnershipError(kind, code)` exposes only `NOT_SENT`, `UNKNOWN`, or `REJECTED`
+delivery classifications and stable codes; Core owns retries and interprets
+confirmation against the snapshot. A missing-Bot 200 no-op is not alignment.
+
+The v1 consumer is `BotOwnershipSyncService`; implementations are
+`HttpBcsOwnershipPlugin` in `plugins/community/bcs_ownership.py` and
+`RecordingBcsOwnershipPlugin` in `plugins/local/bcs_ownership.py`. The
+`tests/community/contracts/test_bcs_ownership.py` consumer suite obtains the
+service through `world`, checks success/failure and actual plugin calls; no
+protocol waiver is required. Existing `BcsManagersPlugin` remains managers-only.

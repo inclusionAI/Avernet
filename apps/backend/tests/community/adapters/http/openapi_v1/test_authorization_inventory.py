@@ -1054,6 +1054,10 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     assert "_require_view_access" in resolve_source
 
     source = inspect.getsource(query_service.SkillQueryService._require_view_access)
+    assert "_authorize_view_access" in source, (
+        "_require_view_access must reach the resolved Bot authorization check"
+    )
+    source = inspect.getsource(query_service.SkillQueryService._authorize_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
         "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
@@ -1105,6 +1109,10 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     for name, source in guarded.items():
         assert "_require_view_access" in source, f"{name} must reach the shared ACL"
         source = inspect.getsource(asset_service.SkillQueryService._require_view_access)
+        assert "_authorize_view_access" in source, (
+            f"{name} must reach the resolved Bot authorization check"
+        )
+        source = inspect.getsource(asset_service.SkillQueryService._authorize_view_access)
         assert "check_collaborator_permission" in source, (
             f"{name} no longer performs a collaborator check. The seven "
             "{skill_id} rows are fine — the seam adjudicates them — but the "

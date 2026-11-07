@@ -17,6 +17,14 @@ pub struct TaskEntry {
     pub target_bot: String,
     pub target_bot_name: Option<String>,
     pub created_at_ms: u64,
+    pub running_at_ms: Option<u64>,
+    pub last_activity_at_ms: Option<u64>,
+    pub terminal_at_ms: Option<u64>,
+    pub cancel_started: bool,
+    pub cancel_rejected: bool,
+    pub stopped_confirmed: bool,
+    pub cancel_reason: Option<String>,
+    pub timeout_s: Option<u64>,
     pub response_mode: ChatResponseMode,
     pub status: TaskLedgerStatus,
     /// Durable delivery owns deadlines and status for managed tasks.
@@ -193,11 +201,12 @@ impl TaskStore {
         bot_id: &str,
     ) -> Option<bool> {
         {
-            let tasks = self.tasks.read().await;
-            let entry = tasks.get(task_id)?;
-            if entry.status != TaskLedgerStatus::Dispatched || entry.target_bot != bot_id {
-                return Some(false);
-            }
+            let mut tasks = self.tasks.write().await;
+            let entry = tasks.get_mut(task_id)?;
+            if entry.status != TaskLedgerStatus::Dispatched || entry.target_bot != bot_id { return Some(false); }
+            let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+            entry.running_at_ms.get_or_insert(now);
+            entry.last_activity_at_ms.get_or_insert(now);
         }
         let mut aliases = self.aliases.write().await;
         aliases.insert(run_id.to_string(), task_id.to_string());
@@ -215,6 +224,50 @@ impl TaskStore {
         self.resolve_task_id(run_id).await.is_some()
     }
 
+    pub(crate) async fn known_legacy_intents(&self, prefix: &str) -> Vec<String> {
+        self.tasks.read().await.values().filter(|task| !task.managed)
+            .filter_map(|task| task.assignment_intent_id.as_deref()?.strip_prefix("bcs_intent_"))
+            .filter(|id| id.starts_with(prefix)).map(str::to_owned).collect()
+    }
+
+    pub(crate) async fn matching_handles(&self, prefix: &str, cutoff: u64) -> Vec<TaskEntry> {
+        self.tasks.read().await.values().filter(|entry| {
+            !entry.managed && entry.terminal_at_ms.is_none_or(|time| time >= cutoff)
+                && (entry.task_id.replace('-', "").to_ascii_lowercase().starts_with(prefix)
+                    || entry.assignment_intent_id.as_deref().unwrap_or("").trim_start_matches("bcs_intent_").to_ascii_lowercase().starts_with(prefix))
+        }).take(2).cloned().collect()
+    }
+
+    pub(crate) async fn record_activity(&self, run_id: &str, bot_id: &str) {
+        let Some(id) = self.resolve_task_id(run_id).await else { return; };
+        let mut tasks = self.tasks.write().await;
+        if let Some(entry) = tasks.get_mut(&id) {
+            if entry.target_bot != bot_id { return; }
+            let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+            entry.running_at_ms.get_or_insert(now);
+            entry.last_activity_at_ms = Some(now);
+        }
+    }
+
+    pub(crate) async fn begin_cancel(&self, id: &str, reason: &str) -> bool {
+        let mut tasks = self.tasks.write().await;
+        let Some(entry) = tasks.get_mut(id) else { return false; };
+        if entry.cancel_started || !matches!(entry.status, TaskLedgerStatus::Dispatched | TaskLedgerStatus::Queued) { return false; }
+        entry.cancel_started = true;
+        entry.cancel_reason = Some(reason.into());
+        true
+    }
+
+    pub(crate) async fn record_stopped(&self, id: &str) {
+        if let Some(task) = self.tasks.write().await.get_mut(id) {
+            if matches!(task.status, TaskLedgerStatus::Dispatched | TaskLedgerStatus::Queued) { task.stopped_confirmed = true; }
+        }
+    }
+
+    pub(crate) async fn cancel_rejected(&self, id: &str) {
+        if let Some(task) = self.tasks.write().await.get_mut(id) { task.cancel_rejected = true; }
+    }
+
     pub async fn get(&self, task_id: &str) -> Option<TaskEntry> {
         self.tasks.read().await.get(task_id).cloned()
     }
@@ -225,6 +278,9 @@ impl TaskStore {
             return;
         };
         entry.status = status;
+        if !matches!(status, TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched) {
+            entry.terminal_at_ms = Some(chrono::Utc::now().timestamp_millis().max(0) as u64);
+        }
     }
 
     pub async fn mark_replied(&self, task_id: &str) {
@@ -366,6 +422,14 @@ pub fn new_task_entry(
         target_bot,
         target_bot_name,
         created_at_ms,
+        running_at_ms: None,
+        last_activity_at_ms: None,
+        terminal_at_ms: None,
+        cancel_started: false,
+        cancel_rejected: false,
+        stopped_confirmed: false,
+        cancel_reason: None,
+        timeout_s: None,
         response_mode,
         status: TaskLedgerStatus::Dispatched,
         managed: false,
@@ -387,8 +451,9 @@ fn target_name(entry: &TaskEntry) -> String {
 }
 
 fn status_at(entry: &TaskEntry, now_ms: u64) -> TaskLedgerStatus {
+    let timeout_ms = entry.timeout_s.map(|seconds| seconds.saturating_mul(1000)).unwrap_or(TASK_TTL_MS);
     if !entry.managed && entry.status == TaskLedgerStatus::Dispatched
-        && now_ms.saturating_sub(entry.created_at_ms) > TASK_TTL_MS
+        && now_ms.saturating_sub(entry.created_at_ms) > timeout_ms
     {
         return TaskLedgerStatus::TimedOut;
     }
@@ -495,6 +560,25 @@ mod status_tests {
             .pending_targets_at("g1", Some("s1"), TASK_TTL_MS + 1)
             .await
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_completion_guard_uses_each_tasks_custom_timeout() {
+        for timeout_s in [60, 4 * 60 * 60] {
+            let store = TaskStore::new();
+            let mut entry = sample_entry("custom");
+            entry.session_id = Some("s1".into());
+            entry.timeout_s = Some(timeout_s);
+            entry.created_at_ms = 1234;
+            store.register(entry).await;
+            let deadline = 1234 + timeout_s * 1000;
+            let pending = store.pending_targets_at("g1", Some("s1"), deadline).await;
+            assert_eq!(pending, vec!["worker-1".to_string()]);
+            assert!(store.ledger_summary_at("g1", Some("s1"), deadline).await.timed_out.is_empty());
+            assert!(store.pending_targets_at("g1", Some("s1"), deadline + 1).await.is_empty());
+            assert_eq!(store.ledger_summary_at("g1", Some("s1"), deadline + 1).await.timed_out,
+                vec!["worker-1".to_string()]);
+        }
     }
 
     #[tokio::test]

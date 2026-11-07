@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.caller_identity.caller_identity_service_protocol import (
     CALLER_IDENTITY_CAPABILITY,
+    CallerBcsSyncError,
     CallerCallTypeInvalidError,
     CallerCliNotFoundError,
     CallerCliSyncError,
@@ -32,9 +33,14 @@ from agentclaw.community.core.caller_identity.caller_identity_service_protocol i
     McpCallTypeUpdateResult,
     CliCallTypeUpdateResult,
 )
+from agentclaw.community.core.caller_identity.protocols import (
+    BcsCallerConfigSyncProtocol,
+)
 
 __all__ = [
+    "BcsCallerConfigSyncProtocol",
     "CALLER_IDENTITY_CAPABILITY",
+    "CallerBcsSyncError",
     "CallerCallTypeInvalidError",
     "CallerCliNotFoundError",
     "CallerCliSyncError",

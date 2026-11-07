@@ -63,9 +63,10 @@ export const managedViewOf = (
   scope: ConversationSessionScope,
   prev: ManagedBotConversationView | undefined,
   sessions: ConversationSessionListState,
+  origin: ConversationOrigin = 'mine',
 ): ManagedBotConversationView => ({
   botId,
-  origin: 'mine',
+  origin,
   scope,
   sessions,
   friendDirectory: prev?.friendDirectory ?? { items: [], loading: false, error: null },
@@ -78,10 +79,11 @@ export const writeSessionState = (
   section: ConversationBotSection,
   scope: ConversationSessionScope,
   state: ConversationSessionListState,
+  origin: ConversationOrigin = 'mine',
 ): void => {
   const store = useConversationStore.getState();
   if (isManagedConversationSection(section))
-    store.setManagedBotCache(botId, managedViewOf(botId, scope, store.sessionsByBotId[botId], state));
+    store.setManagedBotCache(botId, managedViewOf(botId, scope, store.sessionsByBotId[botId], state, origin));
   else store.setFriendBotSessions(botId, state);
 };
 

@@ -1,3 +1,4 @@
+import { recoveryMessagePending } from "./result.js";
 import { validateRecoveryAction } from "./action-scope.js";
 import { createHash } from "node:crypto";
 import { containsSecret, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
@@ -23,14 +24,19 @@ export function validateRecoveryEvidenceReferences(state: RecoveryTaskState, ids
 }
 
 /** Observation timeout preserves the business phase; it never authorizes an environment repair. */
-export function observeRecovery(state: RecoveryTaskState, judgment: RecoveryJudgment, now: number): RecoveryTaskState {
+export function observeRecovery(state: RecoveryTaskState & Partial<Pick<RecoveryStoredTask, "timeline">>, judgment: RecoveryJudgment, now: number): RecoveryTaskState {
   active(state);
   if (!["observe", "verify"].includes(state.phase)) conflict("当前阶段不能提交效果判断");
+  if (state.ownerRequest?.status === "confirmed" && state.requiresFreshObservation) conflict("Owner 反馈后尚未读取最新现场，不能提交恢复结论");
   validateRecoveryEvidenceReferences(state, judgment.evidence_ids);
   if (judgment.effect !== "unknown" && !judgment.evidence_ids.length) invalid("确定效果结论必须有证据");
   if (state.level === "debug") conflict("Debug 应回报未实际干预，不能回报真实效果");
   if (judgment.effect === "not_intervened") conflict("实际干预任务不能以 Debug 结论收口");
-  if (judgment.effect === "recovered") return next(state, { status: "completed", judgment });
+  if (judgment.effect === "recovered") {
+    const awaitingDelivery = judgment.delivery !== "confirmed" && recoveryMessagePending(state)
+      && state.observationDeadlineAt !== null && now < state.observationDeadlineAt;
+    return next(state, { judgment, ...(awaitingDelivery ? {} : { status: "completed" as const }) });
+  }
   if (judgment.effect === "not_recovered") {
     return next(state, state.phase === "verify"
       ? { status: "failed", judgment } : { phase: "plan", judgment, observationDeadlineAt: null });

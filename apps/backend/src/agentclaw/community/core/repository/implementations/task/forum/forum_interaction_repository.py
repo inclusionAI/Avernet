@@ -1,16 +1,16 @@
-"""Persistence and aggregate queries for BBS interaction events."""
+"""Persistence and aggregate queries for BBS interaction states."""
 
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
 
 from injector import inject
-from sqlalchemy import and_, func, or_, tuple_
+from sqlalchemy import and_, desc, func, or_, tuple_
 
 from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
     _helpful_from_post_config,
 )
+from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.repository.protocols.task.forum_interaction import (
     ForumInteractionRepositoryProtocol,
 )
@@ -24,6 +24,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumStatsRecord,
     ForumTargetRef,
 )
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
     ForumPostModel,
@@ -42,7 +43,7 @@ _ACTION_TO_FIELD = {
 }
 
 
-def _stats_from_event_counts(
+def _stats_from_action_counts(
     rows: list[tuple[str, int]], *, actor_scope: bool = False
 ) -> ForumStatsRecord:
     stats = ForumStatsRecord()
@@ -68,6 +69,23 @@ def _actor_ref(actor_type: str, actor_id: str) -> ForumActorRef:
 
 def _target_ref(target_type: str, target_id: str) -> ForumTargetRef:
     return ForumTargetRef(type=ForumInteractionTargetType(target_type), id=target_id)
+
+
+def _latest_interaction_ids(db, *filters):
+    """Return a subquery selecting the newest row for each action-state key."""
+    return (
+        db.query(func.max(ForumInteractionModel.id).label("id"))
+        .filter(*filters)
+        .group_by(
+            ForumInteractionModel.env,
+            ForumInteractionModel.actor_type,
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.action_type,
+            ForumInteractionModel.target_type,
+            ForumInteractionModel.target_id,
+        )
+        .subquery()
+    )
 
 
 def _topic_projection_counts(
@@ -110,7 +128,7 @@ def _topic_projection_counts(
 
 
 class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
-    """Store events and calculate immediate aggregates without counters."""
+    """Store accumulated action amounts and calculate aggregates without counters."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -124,21 +142,50 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: int,
     ) -> ForumInteractionRecord:
-        now = datetime.now(timezone.utc)
-        row = ForumInteractionModel(
-            actor_type=actor_type,
-            actor_id=actor_id,
-            action_type=action_type,
-            target_type=target_type,
-            target_id=target_id,
-            env=get_current_env(),
-            gmt_create=now,
-            gmt_modified=now,
+        """Insert the first +1 state or add a +1/-1 delta to the latest row."""
+        if not isinstance(active, int) or isinstance(active, bool) or active not in (1, -1):
+            raise ValidationError("active must be 1 or -1")
+        now = storage_now()
+        env = get_current_env()
+        filters = (
+            ForumInteractionModel.env == env,
+            ForumInteractionModel.actor_type == actor_type,
+            ForumInteractionModel.actor_id == actor_id,
+            ForumInteractionModel.action_type == action_type,
+            ForumInteractionModel.target_type == target_type,
+            ForumInteractionModel.target_id == target_id,
         )
         with self._db.orm_session() as db:
-            db.add(row)
-            db.flush()
+            row = db.query(ForumInteractionModel).filter(*filters).order_by(
+                desc(ForumInteractionModel.id)
+            ).first()
+            if row is None:
+                if active != 1:
+                    raise ValidationError(
+                        "first interaction must be recorded with active=1"
+                    )
+                row = ForumInteractionModel(
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    action_type=action_type,
+                    target_type=target_type,
+                    target_id=target_id,
+                    env=env,
+                    active=1,
+                    gmt_create=now,
+                    gmt_modified=now,
+                )
+                db.add(row)
+                db.flush()
+            else:
+                next_active = row.active + active
+                if next_active < 0:
+                    raise ValidationError("interaction active amount cannot be negative")
+                row.active = next_active
+                row.gmt_modified = now
+                db.flush()
             return row.to_record()
 
     def get_summary(
@@ -169,32 +216,42 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         if not unique_refs:
             return result
         with self._db.orm_session() as db:
+            latest_ids = _latest_interaction_ids(
+                db,
+                ForumInteractionModel.env == get_current_env(),
+                tuple_(
+                    ForumInteractionModel.target_type,
+                    ForumInteractionModel.target_id,
+                ).in_((ref.type.value, ref.id) for ref in unique_refs),
+            )
             rows = (
                 db.query(
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
-                    func.count().label("event_count"),
+                    ForumInteractionModel.action_type,
+                    func.sum(ForumInteractionModel.active).label("state_count"),
+                )
+                .join(
+                    latest_ids,
+                    ForumInteractionModel.id == latest_ids.c.id,
                 )
                 .filter(
-                    ForumInteractionModel.env == get_current_env(),
-                    tuple_(
-                        ForumInteractionModel.target_type,
-                        ForumInteractionModel.target_id,
-                    ).in_((ref.type.value, ref.id) for ref in unique_refs),
+                    ForumInteractionModel.active > 0,
                     ForumInteractionModel.action_type
                     == ForumInteractionActionType.FOLLOW,
                 )
                 .group_by(
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
+                    ForumInteractionModel.action_type,
                 )
                 .all()
             )
-        for actor_type, actor_id, count in rows:
-            ref = _actor_ref(actor_type, actor_id)
+        for target_type, target_id, _action, count in rows:
+            ref = _actor_ref(target_type, target_id)
             if ref not in result:
                 continue
-            result[ref] = _stats_from_event_counts(
+            result[ref] = _stats_from_action_counts(
                 [(ForumInteractionActionType.FOLLOW, count)], actor_scope=True
             )
         return result
@@ -207,20 +264,26 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         if not unique_refs:
             return result
         with self._db.orm_session() as db:
+            latest_ids = _latest_interaction_ids(
+                db,
+                ForumInteractionModel.env == get_current_env(),
+                tuple_(
+                    ForumInteractionModel.target_type,
+                    ForumInteractionModel.target_id,
+                ).in_((ref.type.value, ref.id) for ref in unique_refs),
+            )
             rows = (
                 db.query(
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
                     ForumInteractionModel.action_type,
-                    func.count().label("event_count"),
+                    func.sum(ForumInteractionModel.active).label("state_count"),
                 )
-                .filter(
-                    ForumInteractionModel.env == get_current_env(),
-                    tuple_(
-                        ForumInteractionModel.target_type,
-                        ForumInteractionModel.target_id,
-                    ).in_((ref.type.value, ref.id) for ref in unique_refs),
+                .join(
+                    latest_ids,
+                    ForumInteractionModel.id == latest_ids.c.id,
                 )
+                .filter(ForumInteractionModel.active > 0)
                 .group_by(
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
@@ -245,7 +308,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 (action, int(count))
             )
         for ref, action_rows in grouped_counts.items():
-            stats = _stats_from_event_counts(action_rows)
+            stats = _stats_from_action_counts(action_rows)
             if ref.type is ForumInteractionTargetType.TOPIC:
                 participant_count, helpful_count = projections.get(ref.id, (0, 0))
                 stats = replace(
@@ -264,6 +327,23 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         if not unique_pairs:
             return result
         with self._db.orm_session() as db:
+            latest_ids = _latest_interaction_ids(
+                db,
+                ForumInteractionModel.env == get_current_env(),
+                or_(
+                    *(
+                        and_(
+                            ForumInteractionModel.actor_type
+                            == pair.actor.type.value,
+                            ForumInteractionModel.actor_id == pair.actor.id,
+                            ForumInteractionModel.target_type
+                            == pair.target.type.value,
+                            ForumInteractionModel.target_id == pair.target.id,
+                        )
+                        for pair in unique_pairs
+                    )
+                ),
+            )
             rows = (
                 db.query(
                     ForumInteractionModel.actor_type,
@@ -271,24 +351,13 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
                     ForumInteractionModel.action_type,
-                    func.count().label("event_count"),
+                    func.sum(ForumInteractionModel.active).label("state_count"),
                 )
-                .filter(
-                    ForumInteractionModel.env == get_current_env(),
-                    or_(
-                        *(
-                            and_(
-                                ForumInteractionModel.actor_type
-                                == pair.actor.type.value,
-                                ForumInteractionModel.actor_id == pair.actor.id,
-                                ForumInteractionModel.target_type
-                                == pair.target.type.value,
-                                ForumInteractionModel.target_id == pair.target.id,
-                            )
-                            for pair in unique_pairs
-                        )
-                    ),
+                .join(
+                    latest_ids,
+                    ForumInteractionModel.id == latest_ids.c.id,
                 )
+                .filter(ForumInteractionModel.active > 0)
                 .group_by(
                     ForumInteractionModel.actor_type,
                     ForumInteractionModel.actor_id,
@@ -308,5 +377,5 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
             if pair in grouped_rows:
                 grouped_rows[pair].append((action, int(count)))
         for pair, action_rows in grouped_rows.items():
-            result[pair] = _stats_from_event_counts(action_rows)
+            result[pair] = _stats_from_action_counts(action_rows)
         return result

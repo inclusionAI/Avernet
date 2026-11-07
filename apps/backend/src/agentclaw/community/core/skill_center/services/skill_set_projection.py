@@ -184,7 +184,7 @@ class SkillSetRuntimeProjection:
             ctx = await asyncio.to_thread(
                 self._resolver.resolve_for_bot,
                 self.bot_id,
-                self.entity_id or self.user_id or "",
+                self._device_owner_id or self.user_id or self.entity_id or "",
             )
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
         except Exception:
@@ -333,7 +333,7 @@ class SkillSetRuntimeProjection:
                 ctx = await asyncio.to_thread(
                     self._resolver.resolve_for_bot,
                     self.bot_id,
-                    self.entity_id or self.user_id or "",
+                    self._device_owner_id or self.user_id or self.entity_id or "",
                 )
                 device_sync = self._device_sync_dispatcher.dispatch(ctx)
             logger.info(

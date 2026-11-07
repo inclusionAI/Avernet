@@ -19,10 +19,21 @@ jest.mock('@/components/CollaborationSquare/SquareIdentityPicker', () => ({
   SquareIdentityPicker: () => <div data-testid="square-identity-picker" />,
 }));
 
+const bots = [
+  {
+    id: 'bot-a:900003',
+    name: 'Bot A',
+    ownerName: '示例用户',
+    description: '描述',
+    capabilities: [],
+    relationshipStatus: 'none' as const,
+  },
+];
+
 function buildVm(overrides: Partial<BotCatalogViewModel> = {}): BotCatalogViewModel {
   return {
-    activeActor: null,
-    bots: [],
+    activeActor: { type: 'human', id: '900003' },
+    bots,
     busyKeys: [],
     query: '',
     mode: 'name',
@@ -47,26 +58,24 @@ function buildVm(overrides: Partial<BotCatalogViewModel> = {}): BotCatalogViewMo
   };
 }
 
-describe('PublicBotCatalogPanel identity picker', () => {
-  it('嵌入模块级身份选择器，替代原全局身份提示卡', () => {
+describe('PublicBotCatalogPanel 纯内容网格', () => {
+  it('不再内嵌搜索栏与身份选择器（工具栏已上移协作广场页头）', () => {
     render(<PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />);
 
-    expect(screen.getByTestId('square-identity-picker')).toBeInTheDocument();
-    expect(screen.getByTestId('square-search')).toBeInTheDocument();
+    expect(screen.queryByTestId('square-search')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('square-identity-picker')).not.toBeInTheDocument();
     expect(screen.queryByText(/当前工作身份/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/左上角工作身份切换/)).not.toBeInTheDocument();
   });
 
-  it('身份选择器位于搜索栏右侧，窄屏时自然换行', () => {
-    const { container } = render(<PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />);
-
-    const picker = screen.getByTestId('square-identity-picker');
-    const search = screen.getByTestId('square-search');
-    expect(container.contains(picker)).toBe(true);
-    expect(picker.parentElement).toHaveClass('max-w-[280px]', 'md:w-[280px]');
-    expect(picker.parentElement?.parentElement).toHaveClass('md:flex-row', 'flex-col', 'md:items-center', 'md:justify-end');
-    expect(search.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
+  it('按 dmore 网格渲染 Bot 卡片：16px 间距、三列断点', () => {
+    const { container } = render(
+      <PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />,
     );
+
+    const cards = screen.getAllByTestId('bot-card');
+    expect(cards).toHaveLength(bots.length);
+    const grid = cards[0].parentElement;
+    expect(grid).toHaveClass('grid', 'gap-4', 'md:grid-cols-2', 'xl:grid-cols-3');
+    expect(container.contains(cards[0])).toBe(true);
   });
 });

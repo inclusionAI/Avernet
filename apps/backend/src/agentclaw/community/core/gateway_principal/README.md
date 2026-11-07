@@ -45,6 +45,7 @@ provides:
   - decode_principal_token
   - caller_from_claims
   - resign_principal_token
+  - mint_service_app_principal
   - key_fingerprint
   - is_weak_signing_key
   - MIN_SIGNING_KEY_BYTES
@@ -107,3 +108,10 @@ notice changes to the DTOs unless `VerifiedCaller.user_id` or `.tenant` changes
 meaning. Those two properties are the load-bearing surface: `user_id` scopes data
 to the caller and `tenant` scopes it to their tenant, and getting either wrong is
 a cross-tenant data leak rather than a bug.
+
+**Added 2026-10-28 — service self-identity.** `service_principal.py` mints only
+this Backend service's fixed App identity for direct BCS manager sync. It does
+not accept inbound principals or re-address user identity. The composition root
+resolves the existing shared key; the envelope is `iss=backend`, `aud=bcs`,
+`kid=bare`, with a 60-second lifetime and the authoritative Bot tenant. BCS
+still verifies the signature and requires a matching trusted-App action rule.

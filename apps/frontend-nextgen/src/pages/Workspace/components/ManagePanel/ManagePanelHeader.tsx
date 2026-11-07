@@ -12,7 +12,7 @@ export interface ManagePanelHeaderProps {
 /** 群/会话管理右侧栏头部：沿用 PRD 侧边栏的装饰与状态徽标样式；固定 h-16 与会话区顶栏平齐。 */
 export function ManagePanelHeader({ title, description, subtitle, statusLabel, onClose }: ManagePanelHeaderProps) {
   return (
-    <div className="relative flex h-16 items-center overflow-hidden border-b border-border px-4">
+    <div className="relative flex h-16 items-center overflow-hidden border-b border-divider px-4">
       <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
 
       <div className="relative flex min-w-0 flex-1 items-center justify-between gap-3">

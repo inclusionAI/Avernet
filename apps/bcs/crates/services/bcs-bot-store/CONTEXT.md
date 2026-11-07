@@ -120,3 +120,217 @@ Memory checks it under the shared authority write lock. This API does not delete
 Humans, so registration/transfer cannot race it into orphaning an owner. No new
 Human lifecycle API, query, migration or owner scan is introduced. Authority
 role/fallback reads accept only physical Bot targets (scalar and batch).
+
+
+## Bot profile existing-only writes and avatar reads
+
+Memory avatar reads exclude live Human actor kinds before opening any local
+record, including records created by ordinary profile/token APIs. When no live
+registry row exists (restart or deletion), the reserved `human_` namespace is
+excluded just as in the existing Agent Bot disk scan; legacy local files have
+no actor-kind column. A retained ordinary Bot record still supplies its avatar.
+
+Memory/file record rewrites share the existing repository write mutex, acquired
+before authority/bot/token guards and held from snapshot read through durable
+replacement and memory publication. Profile/avatar, capabilities, control-plane,
+token, creator and visibility writes therefore cannot replay stale file snapshots
+over each other. Creation and retirement use the same guard. This serializes local
+record writes within one repository instance; it is not cross-process coordination.
+Each rewrite prepares and syncs a private temporary file on a blocking worker,
+then atomically replaces `bot.json` in the guarded caller. Readers see complete
+records, and failed or cancelled preparation cannot truncate or later overwrite
+the live file. No extra DB queries, schema changes or avatar caches are introduced.
+`tests/memory_profile_concurrency.rs` exercises competing writes and concurrent
+readers against real files.
+
+`BotRepoPort::update_profile_existing` / `update_avatar_existing` /
+`read_avatar_batch` (bot-avatar plan) store the Bot display profile on the
+existing record only: one guarded `UPDATE bcs_bots ... WHERE bot_uuid = ?
+AND env = ? AND COALESCE(is_deleted,0)=0` (plus the dedicated `avatar_url`
+column from SQLite/MySQL 040) — no INSERT and no upsert, so a missing or
+tombstoned identity is `ProfileWrite::Missing` with nothing written. The
+lifetime of one write is one short DB transaction that first confirms
+(and on MySQL locks with `SELECT ... FOR UPDATE`) the live row: MySQL
+reports zero changed rows for a value that already matches the request,
+so classification comes from the confirmed row, never from affected rows.
+Profile fields reuse the same JSON-key derivation (`bot_info_json_set`)
+through a profile-only projection (`project_profile_columns`); the
+`agent_code` column and the `$.agent_code`/`$.agent_token` bot_info keys
+never appear in the statement, because the runtime AgentPass identity is
+registry-owned — a profile write that wrote an identity-less capabilities
+snapshot would wipe an online Bot's credentials and silently skip its
+outbound security interceptor chain. Cache publication is field-wise for
+the same reason: profile fields publish wholesale after the durable write
+like the legacy save path, while the live entry's current
+`agent_code`/`agent_token` are preserved (Memory: the record file keeps
+them with live-entry precedence, file fallback). `AvatarChange::Keep` never
+appears in the SET clause, and token/owner/audit fields are never part of
+the statement. The committed profile write refreshes the process-local
+binding-channel reverse index through the same `sync_binding_channel_index`
+helper as the ordinary save path (a `Missing` target or failed write leaves
+it untouched); avatar-only writes never touch the index. The batched read is one parameterized `IN` query over ≤256
+deduplicated ids (more is `InvalidOperation`, empty input reads nothing),
+keeps environment isolation, retains terminal Bot rows for tombstone
+display and excludes Human actors. The Memory store keeps the same
+semantics on its persisted record file: the avatar is a sibling field of
+the record (`StoredBotProfile` flattening the legacy snapshot, compatible
+with old files that lack the field), ordinary record rewrites (capability
+save, token save, control-plane attributes) preserve it, the fallible file
+write happens before any registry publication, and the per-id read source
+is the same record (tombstoned records still display). Ordinary capability
+saves also re-read the record through the same profile path: an
+unreadable/malformed record file — or one carrying another identity —
+fails the save closed instead of overwriting it. Conformance:
+`tests/conformance_bot_profile.rs` (Memory + real SQLite over the full
+migration chain, plus failure/isolation/restart/race cases), the shared
+`tests/support/bot_profile_contract.rs` (also mounted by the bcs-admin
+full MySQL chain gate).
+
+## Caller configuration storage seam
+
+`PersistentBotRepo` implements the P1.1 caller-configuration read/sync on the
+existing `bcs_bots.bot_info` JSON column — no schema migration. Reads treat a
+missing `$.caller` as "never configured" and surface `caller:null`, non-object
+roots and malformed snapshots as a closed sanitized storage error, never as a
+disable. Sync resolves the §10.7.2 revision matrix in storage order
+(Apply/Unchanged/Stale/Conflict), writes with a binary CAS over the original
+`bot_info` text (CAST on MySQL, binary TEXT compare on SQLite), preserves all
+sibling fields, and after a lost CAS re-reads exactly once — a still-writable
+decision becomes Conflict, never a blind overwrite. `MemoryBotRepo` keeps the
+port's explicit fail-closed defaults. Conformance:
+`tests/conformance_caller_configuration.rs` (real SQLite + contended fake).
+
+## Provider caller capabilities read
+
+`DbProviderStore` implements the P1.4 authoritative caller-capability read on
+`bcs_providers.config.$.caller_capabilities` as a direct, cache-bypassing
+SQLite/MySQL query: missing provider is `ProviderNotFound`, a disabled
+provider is a closed "unavailable" error (never "undeclared"), a missing or
+empty config is a legacy never-declared row, and `caller_capabilities:null`,
+non-object roots and malformed declarations are closed sanitized errors that
+never echo raw config. Conformance:
+`tests/provider_caller_capabilities_contract.rs` (real SQLite).
+
+The caller-configuration seam is also provider-scoped: the read JOINs the
+canonical `bcs_provider_bot_bindings` (non-deleted bot, enabled binding,
+exact provider) and the conditional write re-asserts the same ownership
+inside its WHERE clause, so Bots of other providers, unbound Bots and
+disabled bindings are out of scope without ever being reported
+"unconfigured".
+
+## A2A Card storage
+
+`DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
+nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
+SQLite 039. One explicit read returns one Card. A short transaction updates the Card and
+synchronized Bot name and reads its committed snapshot.
+It also updates the generic Bot audit time. Writes fence environment, Provider/ref,
+active Gateway mode and revision; failures propagate. Routes and credential
+references are derived, never duplicated in this store.
+Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not
+one ID query plus per-Card lookups. Availability projects interfaces and security declarations for at
+most 256 IDs. No persistent refresh/error state or additional cache exists.
+See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
+
+Full Card queries select only Bot identity and Card payload in batches of 256.
+Discovery matches the synchronized BCS name/ID as well as Card
+names/descriptions and skill IDs/names/descriptions/tags
+in SQL before selecting matching payloads. A nonmatching A2A identity remains
+distinguishable from a legacy Bot, preventing stale capability fallback. Search
+count and pagination share the same predicate. Name matches do not enable
+legacy skill/summary matching; explicit skill selectors still require Card skills.
+The name predicate uses the existing SQL queries and pagination/batch bounds.
+Offline Gateway discovery also matches the name in the Provider binding selector;
+organization candidate counts/pages use the same name rule. A live registry
+entry is not required to discover an enabled Gateway Bot. SQL flavor is explicitly injected;
+SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
+character and bound values. See the
+[MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
+Provider database implementations and tests are separated into provider_db.rs
+and provider_tests.rs; the existing Provider behavior remains covered by its suite.
+
+
+A2A strict registration extends the existing ownership composite with a checked
+Card UPDATE inside the same transaction, after the new Bot/binding and before
+ownership/profile/audit steps. Identity, credential scope and initial revision
+are checked before writing. It adds the Card update inside the existing transaction,
+with no network access. Failure of Card or a later ownership step rolls back every lifecycle row.
+
+
+Provider-admin A2A admission uses the separate
+`create_provider_admin_a2a_bot_with_ownership` operation. Its ownership builder
+requires a Provider actor exactly matching the Bot's Provider; the old Human
+registration operations still reject Provider actors. Both paths reuse the
+same SQL transaction/guard statements, differing only in verified audit identity.
+No credential reaches audit rows; no post-commit owner/profile/Card write is
+introduced. A rollback includes Bot, binding, Card, Human/owner and default profile.
+
+The mandatory bcs-admin full MySQL migration-chain gate also runs the shared A2A
+Card/Run/Task/context store cases from tests/support/a2a_mysql_cases.rs, using the
+same already-migrated disposable schema. The isolated a2a_mysql test reuses those
+cases. Failure injection uses temporary CHECK constraints, without requiring
+privileged trigger creation. JSON search, CAS, rollback of Task/context association,
+shared Task references and all audit fields are exercised on native MySQL.
+
+
+Provider Bot registration performs a fresh name preflight across active Bots in
+(env, provider_id), including non-A2A Bots. It adds one SELECT returning at most
+one identifier before writes; a name collision returns Conflict without side effects.
+Memory registration checks the corresponding instance-local records. No name cache,
+extra table, generated column, length change or migration 040 is required.
+The preflight does not prevent cross-process concurrent inserts or legacy renames;
+a database unique index is deferred until duplicate production rows are corrected.
+Without a name index, the read may scan the Provider's rows (LIMIT bounds results,
+not rows examined). A2A Card writes also preflight names; Card/name changes remain
+atomic and explicit replacement returns its own committed revision. Name lookup
+returns at most two rows and rejects ambiguous legacy names, including non-A2A
+collisions. Rename and soft deletion release names; there is no historical reservation.
+Lifecycle capability writes preserve Card.name atomically even when an earlier
+registry read supplied stale capabilities. Direct control-plane name patches
+reject a different A2A name and retain the Card-owned value during concurrent
+updates. The name-patch precheck reads one indexed name row; the UPDATE preserves
+the synchronized name without parsing Card JSON. Full Card projection remains
+authoritative for query responses.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## A2A source identity writes
+
+Source identity uses the original Card JSON, with no new columns or migrations.
+MySQL source registration/update transactions lock the existing environment-scoped
+Provider row before reading source conflicts and writing a Bot. SQLite uses its
+transactional writer serialization. Source queries return one scalar EXISTS value,
+filter by env/Provider/active Bot and compare IDs and URIs byte-exactly. They may
+scan that Provider's active Cards; there is no source index in this phase. This is
+registration/configuration work, never per-token or per-message work.
+
+Card writes add one current-Card read for immutable-ID validation, one conflict
+preflight when a source is present, then a transaction with a Provider lock (or
+constant query), a conflict query, conditional Card/name write and snapshot read.
+The revision fence protects the immutable-ID check even for legacy unconditional
+replacement; local replacement retries at most three times. Registration adds
+source preflight and two transaction reads to the existing ownership composite.
+All failures roll back or propagate; network fetches happen before transactions.
+A source conflict is distinct from the deferred name-index preflight guarantee.
+
+A successful Card write invalidates same-process registry metadata through the
+shared live registry wired at bootstrap. It does not evict connections, tokens or
+heartbeat state. Invalidated Bots use durable metadata for single and batched
+registry reads for the remaining process lifetime; delayed lifecycle writes cannot
+repopulate stale names. Single reads add one indexed row lookup; batches retain
+100-ID chunks rather than per-Bot queries. Card writes add no DB queries for
+invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
+not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
+Card-owned name even when a caller carries an older capabilities snapshot.

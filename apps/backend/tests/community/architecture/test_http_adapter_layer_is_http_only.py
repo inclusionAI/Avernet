@@ -72,6 +72,9 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
     "authorization_rules_genome.py",
+    # Catalog policy rows are declarative HTTP infrastructure, like the tables
+    # above. Concrete-service imports are still checked across all files.
+    "authorization_rules_catalog.py",
     "__init__.py",
 })
 
@@ -263,13 +266,14 @@ _CORE_SERVICE_MODULE_EXEMPT_SUFFIX: tuple[str, ...] = (
 #   * Helpers — pure functions used to resolve / probe / generate.
 _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Errors raised by services that the router translates to HTTP:
+    "UpgradeDraftRestartError",
     "FileTooLargeError",
     "InvalidIdentityEntityTypeError", "InvalidIdentityFileTypeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
     "BotOperationNotAllowedError",
     "DefaultBotTeclawNotAllowedError",
-    "DeviceAllocationError", "DeviceLimitError",
+    "DeviceAllocationError", "DeviceLimitError", "TemplateFactoryError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
     # translated to HTTP by the devices router (§1/§2/§3):
     "BindingNotFoundError", "BotPublishNotFoundError",

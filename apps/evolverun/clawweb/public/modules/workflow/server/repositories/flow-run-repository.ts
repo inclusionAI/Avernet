@@ -1,3 +1,4 @@
+import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
@@ -6,6 +7,7 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { FanoutStateRepository } from "./fanout-state-repository.js";
 
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -129,7 +131,15 @@ export type FindWorkflowTypesPageResult = {
 };
 
 export class FlowRunRepository {
-  constructor(private db: IDatabase) {}
+  readonly fanoutState: FanoutStateRepository;
+  readonly ordinaryRequests: OrdinaryRunRequestService;
+
+  constructor(private db: IDatabase) {
+    this.fanoutState = new FanoutStateRepository(db);
+    this.ordinaryRequests = new OrdinaryRunRequestService(db, async (tx, run) => {
+      if (!await new FlowRunRepository(tx).insert(run)) throw new Error("Run persistence failed");
+    });
+  }
 
   insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
     return registerRunRequest(this.db, body, async tx => {
@@ -181,7 +191,12 @@ export class FlowRunRepository {
         "SELECT * FROM flow_runs WHERE flow_id = ?",
         [flowId],
       );
-      return rows[0] ?? null;
+      if (!rows[0]) return null;
+      // SELECT * must retain legacy fields, but internal incarnation markers
+      // are never part of a flow-run response or a repository caller's data.
+      const { ordinary_run_marker: _ordinaryMarker, parent_run_marker: _parentMarker,
+        child_run_marker: _childMarker, ...run } = rows[0] as FlowRunRow & Record<string, unknown>;
+      return run as FlowRunRow;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.findFullByFlowId failed: ${msg}`);
@@ -549,17 +564,7 @@ export class FlowRunRepository {
    * the DB maintains it (manual assignment was rejected on pre).
    */
   async updateStateJson(flowId: string, stateJson: string): Promise<boolean> {
-    try {
-      const result = await this.db.exec(
-        "UPDATE flow_runs SET state_json = ? WHERE flow_id = ?",
-        [stateJson, flowId],
-      );
-      return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateStateJson failed: ${msg} (dbType=${this.db.dbType}, flowId=${flowId}, bytes=${stateJson.length})`);
-      return false;
-    }
+    return this.fanoutState.updateMirror(flowId, stateJson);
   }
 
   /** Read back the mirrored TaskFlow stateJson, or null when absent. */

@@ -34,6 +34,7 @@ from agentclaw.community.core.apply_engine.managed_files import (
     ManagedFilesComposeReader,
     ManagedFilesStore,
 )
+from agentclaw.community.core.apply_engine.managed_files.store import CATEGORY_RESOURCES, ManagedFileScope
 from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
     PlatformResource,
@@ -49,6 +50,7 @@ from agentclaw.community.core.apply_engine.run.service import (
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
+from tests.community.core.apply_engine._empty_cli_tools import EmptyCliTools
 from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
@@ -144,8 +146,11 @@ class _Db:
 
 
 class _Manifests:
+    def __init__(self, document: str) -> None:
+        self.document = document
+
     def get(self, *, entity_id, bot_id):
-        return type("R", (), {"document": _DOCUMENT})()
+        return type("R", (), {"document": self.document})()
 
     def validate(self, *, document, active_engine, bot_type):
         import yaml
@@ -188,7 +193,7 @@ def world(monkeypatch):
     return _Db(engine)
 
 
-def _build(db):
+def _build(db, document: str = _DOCUMENT):
     store = ManagedFilesStore(object_storage=FakeObjectStorage(), store_base=lambda: _BASE)
     skills = FakeSkillRepository()
     activation = FakeActivationService()
@@ -217,15 +222,18 @@ def _build(db):
             content=content,
             resource_service=PlatformResource(store),
             resource_rows=resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=EmptyCliTools(),
+            shared_skills=object(),
         )
 
     queue = _InlineQueue()
+    manifests = _Manifests(document)
     applies = ApplyRunService(
-        capabilities=_Manifests(),
+        capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        compilers=manifest_compilers(manifests=manifests, content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
         # The platform-managed deployment, assembled the way the composition
@@ -246,7 +254,7 @@ def _build(db):
     # binds; a DEVICE one binds ``EngineOwnedComposeReader`` instead and owns
     # no compose at all.
     reader = ManagedFilesComposeReader(
-        store=store, declared_state_provider=_Manifests
+        store=store, declared_state_provider=lambda: manifests
     )
     skill_set_service = MagicMock()
     skill_set_service.get_active_skills.side_effect = lambda **_kw: [
@@ -303,7 +311,7 @@ def test_the_first_artifact_carries_the_manifest(world):
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.apply_id == accepted.apply_id
     assert report.status is ApplyStatus.SUCCEEDED, report
-    assert sorted(c.construct.value for c in report.categories) == ["identity", "resources", "skills"]
+    assert sorted(c.construct.value for c in report.categories) == ["cli_tools", "identity", "mcp", "resources", "skills"]
 
     # Then provisioning: the artifact the container is created with.
     result = provisioner.provision(bot=dict(_RECORD), owner_id=_OWNER)
@@ -333,3 +341,29 @@ def test_the_first_artifact_carries_the_manifest(world):
     for ref in [*artifact["identity_files"], *artifact["resources"]]:
         assert store._oss.get_object(f"{_BASE}/{ref['path']}") is not None  # noqa: SLF001
     assert artifact["engine_type"] == "teclaw"
+
+
+
+def test_omitted_resources_clear_the_managed_store_before_the_first_artifact(world):
+    applies, provisioner, baas, store = _build(world, "schema_version: 1\n")
+    scope = ManagedFileScope(entity_type="staff", entity_id=_ENTITY, bot_id=_BOT)
+    store.put(
+        scope, category=CATEGORY_RESOURCES, name="data/old.txt",
+        rel_path="workspace/data/old.txt", content=b"old",
+    )
+
+    applies.start_apply(
+        entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER,
+        actor_id=_OWNER, state=MANIFEST_STATE, trigger=CREATE_PRE_CONTAINER_TRIGGER,
+        phase=ApplyPhase.PRE_CONTAINER,
+    )
+    report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
+    assert report.status is ApplyStatus.SUCCEEDED
+    resources = next(item for item in report.categories if item.construct.value == "resources")
+    assert resources.removals == ("data/old.txt",)
+    assert store.list(scope, category=CATEGORY_RESOURCES) == []
+
+    provisioner.provision(bot=dict(_RECORD), owner_id=_OWNER)
+    artifact = baas.create_teclaw_bot.call_args.kwargs["config_artifact"]
+    assert artifact["ownership"]["resources"] == "platform"
+    assert artifact["resources"] == []

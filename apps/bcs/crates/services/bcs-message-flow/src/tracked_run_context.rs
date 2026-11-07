@@ -50,6 +50,12 @@ impl BotRunContextPort for TrackedBotRunContext {
         self.inner.put_alias_context(context).await;
     }
 
+    async fn reschedule_deadline(&self, scope: &BotRunScope, run: &str, expected: u64, deadline: u64) -> ServiceResult<bool> {
+        if self.tracker.output_binding(run).await.is_none() { return Ok(false); }
+        if !self.inner.reschedule_deadline(scope, run, expected, deadline).await? { return Ok(false); }
+        Ok(self.tracker.reschedule_output_deadline(run, expected, deadline).await)
+    }
+
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
         self.inner.get_context(run_id).await
     }

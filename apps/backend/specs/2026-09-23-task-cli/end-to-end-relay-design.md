@@ -126,7 +126,7 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
 
 | 对象/值 | 核心字段 | 产生者 → 消费者 | 是否持久化 |
 | --- | --- | --- | --- |
-| `TaskContext` | `task_id`、`node_id`、当前 `attempt`、根/当前规格、仅前序 `all_done_output`、S3 运行期 `actual_goal/capability_failure_reason`、可选本棒 `accepted_execution_patch/accepted_plan_report` | Task Module 节点级投影 → 当前棒 Bot S1–S5.5 与恢复 | 对象不另存；从图谱事实与上报接纳记录投影 |
+| `TaskContext` | `task_id`、`node_id`、当前 `attempt`、根/当前规格、仅前序 `all_done_output`、S3 运行期 `actual_goal/capability_failure_reason`、接力链路已用 Bot 快照 `used_executor_ids`、可选本棒 `accepted_execution_patch/accepted_plan_report` | Task Module 节点级投影 → 当前棒 Bot S1–S5.5 与恢复 | 对象不另存；从图谱事实与上报接纳记录投影 |
 | `BotCapability` | `identity`、`activated_skills`、`available_tools` | Bot Runtime 的真实能力快照 → S3 | 不写 TaskGraph |
 | `task_gaps: list[str]` | 根任务尚未满足的验收缺口 | S2/S5.1 Skill 推理 → S3/S5.2 | 仅本棒本地；不写 `TaskContext` 或图谱 |
 | `TaskNodePatch` | `actual_goal`、`output_patch`、`local_acceptance_result`、`execution_decision`、异常原因 | S4a → S4b；Backend 接纳后写当前节点 `run_info` | 接纳后持久化节点事实 |
@@ -198,6 +198,7 @@ POST /api/v1/collaboration/tasks/start       # 目标；当前等价入口为 /e
 GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context
   data: TaskContext {task_id, node_id, attempt, root_task_spec,
                      current_task_spec, all_done_output,
+                     used_executor_ids,
                      accepted_execution_patch?, accepted_plan_report?}
 
 POST /api/v1/collaboration/tasks/search
@@ -246,7 +247,7 @@ POST /api/v1/collaboration/tasks/dispatch
 | S5.1 更新缺口 | `task_context: TaskContext`、`node_patch: TaskNodePatch` | 根规格 + 历史事实 + 本棒事实重算；缺口为空时做根任务验收 | `task_gaps: list[str]`、`task_acceptance_result: AcceptanceResult \| None` | 无 |
 | S5.2 规划下一棒 | `task_context: TaskContext`、`task_gaps: list[str]`、`node_patch: TaskNodePatch` | 有缺口时初始化未落图 `TaskNode`，填 `task_spec`；无缺口返回 `None` | `next_node: TaskNode \| None` | 无 |
 | S5.3 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `project_candidate_query(next_node.task_spec.goal)` 本地投影出的候选查询搜索；`task_context.node_id` 只标记当前棒搜索轨迹，不选人、不创建节点 | `candidates: list[BotCandidate]` | `POST /search` |
-| S5.4 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地选择单 Bot/协作群或 MISS，并填充同一未落图节点的 `run_info` | 已填执行者的 `next_node: TaskNode` | 无 |
+| S5.4 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]`、`TaskContext.used_executor_ids` | Skill 本地排除当前执行者和所有已经派发过的历史执行者，然后再选择单 Bot/协作群或 MISS，并填充同一未落图节点的 `run_info` | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 统一上报 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | 直接调用 `TaskService.report(command)`，一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写执行者决策 | `planning_report: TaskReportResult` | `POST /callback/report` |
 | S6 真正交接 | 当前棒 `task_id/origin_node_id/relay_token` 与后继棒 `planning_report.target_node_id`，Backend 读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并调用 `TaskDispatcher.dispatch(next_node)`；接力策略内部调用 Runner。后台消费者恢复未投递后继意图 | `{ok: true, node_id}`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
 
@@ -461,7 +462,7 @@ class TaskGraphService:
 ```
 
 - `initialize_graph`：创建唯一根节点；按已冻结 `execution_config.initial_target` 设置根节点 `run_mode/assignee` 和 `relay_token`。Relay 根节点不写 delivery intent，创建响应根据权威节点生成当前会话首棒指令。Task Module 对根节点状态/执行者的写入仍由图谱写口完成。
-- `get_node_context`：`root_task_spec = 根 TaskNode.task_spec`，`current_task_spec = 指定 TaskNode.task_spec`，`all_done_output = 沿 Relay 前驱链严格早于指定节点的已接纳 DoneOutput[]`；新执行代次投影 `actual_goal/capability_failure_reason` 为空，恢复已接纳执行时从当前节点运行事实投影二者；本棒已接纳的执行 patch 和规划结果分别投影为 `accepted_execution_patch/accepted_plan_report`。不读取或返回任务级 `gaps`，不把前一棒的内存 `TaskContext` 复制给下一棒，也不持久化 `TaskContext` 对象。
+- `get_node_context`：`root_task_spec = 根 TaskNode.task_spec`，`current_task_spec = 指定 TaskNode.task_spec`，`all_done_output = 沿 Relay 前驱链严格早于指定节点的已接纳 DoneOutput[]`；`used_executor_ids = 本接力链路已派发过的 Bot ID 快照`；新执行代次投影 `actual_goal/capability_failure_reason` 为空，恢复已接纳执行时从当前节点运行事实投影二者；本棒已接纳的执行 patch 和规划结果分别投影为 `accepted_execution_patch/accepted_plan_report`。不读取或返回任务级 `gaps`，不把前一棒的内存 `TaskContext` 复制给下一棒，也不持久化 `TaskContext` 对象。
 - `get_node`：供 Backend S6 根据投递意图读取已落图的权威节点；不接受 Bot 传来的完整 `TaskNode` 作为投递事实。
 - `update_task_node_info`：复用现有 patch 写口，S4b 将 `TaskNodePatch` 的 `output_patch`、`local_acceptance_result` 等写入当前节点 `run_info`；Bot 不直接改图。
 - `apply_relay_plan_result`：`next_node=None` 且有任务验收时收口；`next_node=None` 且有非空规划失败原因时 HUNG；非空时校验仅 Bot 可写字段，Backend 生成 ID、状态、图谱引用，在同一图谱迁移中结束当前棒、创建**唯一**下一棒并写入执行者决策。`run_mode=bbs` 时持久化可恢复的发布意图；命中执行者时原子登记 `(task_id,target_node_id)` 唯一的 `PENDING` 投递意图。图谱类不签发令牌、不返回 HTTP DTO。
@@ -470,7 +471,7 @@ class TaskGraphService:
 
 ### 10.3 `TaskPlanner` 与 `TaskDispatcher`：规划和派发边界
 
-`TaskPlanner` 仅供中心化模式调用。Relay S5.2 由 Bot Skill 初始化未落图 `TaskNode`，S5.4 在 Bot 本地选人，S5.5 才一次落图；统一 `TaskDispatcher` 在 Relay S6 不重复这些决策。Relay 首版 S5.4 只接受 `HIT_SINGLE`、`HIT_MULTI_BOTS`、`MISS`；`search_bots` 只返回 Bot 候选，故不支持 `HIT_GROUP`，意外得到该决策时显式拒绝，不伪造已检索的 Group 候选。`HIT_MULTI_BOTS` 仅允许可确定唯一协调 Bot 的 `manager_worker` 组群。用户发起任务时显式指定已有 Group 是根节点目标解析，仍受支持。S5.5 的图谱迁移从冻结运行配置读取 Relay `max_rounds` 并原子校验，超限则 HUNG，不创建后继；Bot 不传这个控制值。
+`TaskPlanner` 仅供中心化模式调用。Relay S5.2 由 Bot Skill 初始化未落图 `TaskNode`，S5.4 在 Bot 本地选人，S5.5 才一次落图；统一 `TaskDispatcher` 在 Relay S6 不重复这些决策。Relay 首版 S5.4 只接受 `HIT_SINGLE`、`HIT_MULTI_BOTS`、`MISS`，且只能从服务端下发指令携带的 `runtime_profile.allowed_run_modes` 白名单中选择；`search_bots` 只返回 Bot 候选，故不支持 `HIT_GROUP`，意外得到该决策时显式拒绝，不伪造已检索的 Group 候选。BBS 被白名单禁用且无候选时，S5.4 按规划失败上报 `bbs_disabled_and_no_candidate`，不得转 BBS。`HIT_MULTI_BOTS` 仅允许可确定唯一协调 Bot 的 `manager_worker` 组群。用户发起任务时显式指定已有 Group 是根节点目标解析，仍受支持。S5.5 的图谱迁移从冻结运行配置读取 Relay `max_rounds` 并原子校验，超限则 HUNG，不创建后继；Bot 不传这个控制值。
 
 ```python
 class TaskPlanner:

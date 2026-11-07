@@ -1,587 +1,407 @@
-/**
- * AutoHeal save + deploy service tests.
- *
- * Uses an in-memory SQLite DB and mocks git operations to verify:
- *   1. Save: permission checks, validation, git commit/branch, DB upsert.
- *   2. Deploy: deploy_number computation, git tag, deploy_history insert,
- *      setActive, version sync, and auto-run trigger.
- */
+// @vitest-environment node
+/** Real SQLite without an operation journal and local Git: DB saves are drafts, deploys publish history. */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { parse, stringify } from "yaml";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
+import { SqliteDatabase } from "@avernet/clawweb-shared/server/db/sqlite-database";
 import { WorkflowSpecRepository } from "../../repositories/workflow-spec-repository.js";
 import { WorkflowDeployHistoryRepository } from "../../repositories/workflow-deploy-history-repository.js";
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { AutoHealSaveService } from "../auto-heal-save-service.js";
 import { AutoHealDeployService } from "../auto-heal-deploy-service.js";
 import * as gitClient from "../clawflows-git-client.js";
+import * as deployGit from "../auto-heal-deploy-git.js";
+import { runGit } from "./clawflows-git-client-fixture.js";
 import type { WorkflowSpec } from "../../workflow.js";
 
-// Capture the real implementation before any beforeEach mocks it.
-const realCreateTempRepo = gitClient.createTempRepo;
-
 const TEST_SPEC: WorkflowSpec = {
-  id: "wf-test",
-  title: "Test Workflow",
-  nodes: [
-    {
-      id: "start",
-      type: "start",
-      title: "Start",
-      config: {},
-      executor: { type: "start" },
-      dependsOn: [],
-    },
-    {
-      id: "end",
-      type: "end",
-      title: "End",
-      config: {},
-      executor: { type: "end" },
-      dependsOn: ["start"],
-    },
+  id: "wf-test", version: "1.0.0", title: "Test Workflow", nodes: [
+    { id: "start", type: "start", title: "Start", config: {}, executor: { type: "start" }, dependsOn: [] },
+    { id: "end", type: "end", title: "End", config: {}, executor: { type: "end" }, dependsOn: ["start"] },
   ],
 };
+const gitAuthor = { name: "Fixture", email: "fixture@example.invalid" };
+const git = (dir: string, ...args: string[]) => runGit(dir, args);
 
 function createTestDb() {
   const raw = new Database(":memory:");
   raw.exec(`
     CREATE TABLE workflow_specs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      workflow_id VARCHAR(128) NOT NULL UNIQUE,
-      pack_id VARCHAR(128),
-      spec_json TEXT NOT NULL,
-      gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
-      gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()),
-      title VARCHAR(256),
-      version INTEGER,
-      owner_id VARCHAR(64)
+      id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id TEXT NOT NULL UNIQUE, pack_id TEXT,
+      spec_json TEXT NOT NULL, title TEXT, version INTEGER, owner_id TEXT,
+      gmt_create INTEGER NOT NULL DEFAULT 0, gmt_modified INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE workflow_deploy_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      pack_id VARCHAR(128) NOT NULL,
-      workflow_id VARCHAR(128) NOT NULL,
-      deploy_number INTEGER NOT NULL,
-      version INTEGER NOT NULL,
-      tag_name VARCHAR(256),
-      action VARCHAR(32) NOT NULL,
-      from_deploy_number INTEGER,
-      spec_json TEXT,
-      bot_id VARCHAR(64),
-      owner_id VARCHAR(64),
-      is_active INTEGER DEFAULT 0,
-      note TEXT,
-      gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
-      gmt_modified INTEGER NOT NULL DEFAULT (unixepoch())
+      id INTEGER PRIMARY KEY AUTOINCREMENT, pack_id TEXT NOT NULL, workflow_id TEXT NOT NULL,
+      deploy_number INTEGER NOT NULL, version INTEGER NOT NULL, tag_name TEXT, action TEXT NOT NULL,
+      from_deploy_number INTEGER, spec_json TEXT, bot_id TEXT, owner_id TEXT, is_active INTEGER DEFAULT 0,
+      note TEXT, gmt_create INTEGER NOT NULL DEFAULT 0, gmt_modified INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE facade_bindings (command TEXT PRIMARY KEY, workflow_id TEXT, pack_id TEXT, remark TEXT, gmt_create INTEGER, gmt_modified INTEGER);
     CREATE TABLE bot_workflow_permissions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bot_id VARCHAR(128),
-      bot_owner_id VARCHAR(128) NOT NULL,
-      workflow_id VARCHAR(128) NOT NULL,
-      can_view INTEGER DEFAULT 0,
-      can_execute INTEGER DEFAULT 0,
-      can_edit INTEGER DEFAULT 0,
-      env VARCHAR(32) NOT NULL DEFAULT 'test',
-      gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
-      gmt_modified INTEGER NOT NULL DEFAULT (unixepoch())
+      id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, bot_owner_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL, can_view INTEGER DEFAULT 0, can_execute INTEGER DEFAULT 0,
+      can_edit INTEGER DEFAULT 0, env TEXT NOT NULL DEFAULT 'test',
+      gmt_create INTEGER NOT NULL DEFAULT 0, gmt_modified INTEGER NOT NULL DEFAULT 0
     );
   `);
-
-  const db = {
-    dbType: "sqlite" as const,
-    dialect: sqliteDialect,
-    query: <T,>(sql: string, params: unknown[] = []) => {
-      const stmt = raw.prepare(sql);
-      return (params.length ? stmt.all(...(params as never[])) : stmt.all()) as T[];
-    },
-    exec: async (sql: string, params: unknown[] = []) => {
-      const stmt = raw.prepare(sql);
-      const r = params.length ? stmt.run(...(params as never[])) : stmt.run();
-      return { affectedRows: r.changes, insertId: r.lastInsertRowid as number };
-    },
-    transaction: async <T,>(fn: (tx: typeof db) => Promise<T>) => fn(db),
-    close: async () => raw.close(),
-  };
-  return { db: db as never };
+  return { db: new SqliteDatabase(raw), raw };
 }
 
-const gitConfig = {
-  remoteUrl: "https://git.example.com/clawflows.git",
-  username: "test",
-  email: "test@example.com",
-  token: "token",
-};
+function createRemote(_saved: boolean) {
+  const root = mkdtempSync(path.join(tmpdir(), "autoheal-no-journal-"));
+  const remote = path.join(root, "remote.git"), work = path.join(root, "work");
+  git(root, "init", "--bare", "--initial-branch=main", remote);
+  git(root, "init", "--initial-branch=main", work);
+  git(work, "config", "user.name", gitAuthor.name); git(work, "config", "user.email", gitAuthor.email);
+  mkdirSync(path.join(work, "workflows")); mkdirSync(path.join(work, "scripts"));
+  writeFileSync(path.join(work, "workflow.pack.yaml"), stringify({
+    id: "pack-1", version: "1.0.0", workflows: [{ id: "wf-test", file: "workflows/wf-test.yaml" }],
+  }));
+  writeFileSync(path.join(work, "workflows/wf-test.yaml"), stringify(TEST_SPEC));
+  writeFileSync(path.join(work, "scripts/run.sh"), "saved script\n");
+  writeFileSync(path.join(work, "asset.txt"), "saved asset\n");
+  git(work, "add", "."); git(work, "commit", "-m", "initial pack");
+  const candidateCommit = git(work, "rev-parse", "HEAD");
+  git(work, "remote", "add", "origin", remote);
+  git(work, "push", "origin", "HEAD:refs/heads/main", `HEAD:refs/heads/wf/wf-test`);
+  return { root, remote, work, candidateCommit,
+    config: { remoteUrl: remote, username: gitAuthor.name, email: gitAuthor.email, token: "" } };
+}
 
-const gitAuthor = { name: "Test", email: "test@example.com" };
+async function repositories(ctx: ReturnType<typeof createTestDb>) {
+  const history = new WorkflowDeployHistoryRepository(ctx.db);
+  const specs = new WorkflowSpecRepository(ctx.db, history);
+  const permissions = new BotWorkflowPermissionRepository(ctx.db);
+  await specs.upsert("wf-test", "pack-1", JSON.stringify(TEST_SPEC), "user-1");
+  await permissions.upsert({ bot_id: null, bot_owner_id: "user-1", workflow_id: "wf-test",
+    can_view: 1, can_execute: 1, can_edit: 1 });
+  return { history, specs, permissions };
+}
 
 describe("AutoHealSaveService", () => {
-  let ctx: ReturnType<typeof createTestDb>;
-  let specRepo: WorkflowSpecRepository;
-  let deployHistoryRepo: WorkflowDeployHistoryRepository;
-  let botPermRepo: BotWorkflowPermissionRepository;
+  let ctx: ReturnType<typeof createTestDb>, remote: ReturnType<typeof createRemote>;
+  let repos: Awaited<ReturnType<typeof repositories>>;
+  const service = () => new AutoHealSaveService(ctx.db, repos.specs, repos.history, repos.permissions, remote.config, gitAuthor);
+  const input = { workflowId: "wf-test", actorId: "user-1", packId: "pack-1",
+    requestId: "save-request-001", spec: { ...TEST_SPEC, title: "Edited workflow" } };
+  const remoteGit = (...args: string[]) => git(remote.root, "--git-dir", remote.remote, ...args);
+  beforeEach(async () => { ctx = createTestDb(); repos = await repositories(ctx); remote = createRemote(false); });
+  afterEach(async () => { vi.restoreAllMocks(); await ctx.db.close(); rmSync(remote.root, { recursive: true, force: true }); });
 
-  beforeEach(() => {
-    ctx = createTestDb();
-    deployHistoryRepo = new WorkflowDeployHistoryRepository(ctx.db as never);
-    specRepo = new WorkflowSpecRepository(ctx.db as never, deployHistoryRepo);
-    botPermRepo = new BotWorkflowPermissionRepository(ctx.db as never);
-    vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
-    vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
-    vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
-    vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "commitAndPushSaved").mockResolvedValue({ branch: "saved/wf-test", commit: "abc123" });
-    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
-    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
+  it("denies save without edit permission before changing DB or invoking Git", async () => {
+    const before = await repos.specs.findByWorkflowId("wf-test");
+    const clone = vi.spyOn(gitClient, "initClawflowsReadRepo");
+    await expect(service().save({ ...input, actorId: "viewer" })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    expect(await repos.specs.findByWorkflowId("wf-test")).toEqual(before);
+    expect(clone).not.toHaveBeenCalled();
+    expect(ctx.raw.prepare("SELECT * FROM workflow_deploy_history").all()).toEqual([]);
   });
 
-  it("denies save when the actor lacks edit permission", async () => {
-    const service = new AutoHealSaveService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-    );
-    await expect(service.save({
-      workflowId: "wf-test",
-      spec: TEST_SPEC,
-      actorId: "user-1",
-    })).rejects.toThrow("No edit permission");
+  it("saves the database draft and wf without creating release history", async () => {
+    const saved = await service().save(input);
+    expect(saved).toEqual({ ok: true, saved: true, workflowId: "wf-test", packId: "pack-1",
+      branch: "wf/wf-test", commit: expect.stringMatching(/^[a-f0-9]{40}$/) });
+    expect(remoteGit("branch", "--list", "saved/wf-test")).toBe("");
+    const savedHead = remoteGit("rev-parse", "refs/heads/wf/wf-test");
+    expect(savedHead).toBe(saved.commit);
+    expect(savedHead).not.toBe(remote.candidateCommit);
+    expect(parse(remoteGit("show", `${savedHead}:workflows/wf-test.yaml`)).title).toBe(input.spec.title);
+    expect(remoteGit("tag", "-l")).toBe("");
+    const row = await repos.specs.findByWorkflowId("wf-test");
+    expect(row).toMatchObject({ pack_id: "pack-1", owner_id: "user-1" });
+    expect(JSON.parse(row!.spec_json).title).toBe(input.spec.title);
+    expect(ctx.raw.prepare("SELECT * FROM workflow_deploy_history").all()).toEqual([]);
   });
 
-  it("saves a valid spec and returns git branch/commit", async () => {
-    await botPermRepo.upsert({
-      bot_id: null,
-      bot_owner_id: "user-1",
-      workflow_id: "wf-test",
-      can_view: 1,
-      can_execute: 1,
-      can_edit: 1,
-    });
+  it("rejects Git preconditions and duplicate create-only identity without writing", async () => {
+    const before = await repos.specs.findByWorkflowId("wf-test");
+    await expect(service().save({ ...input, sourceCommit: remote.candidateCommit })).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_PRECONDITION" });
+    await expect(service().save({ ...input, createOnly: true })).rejects.toMatchObject({ code: "WORKFLOW_ALREADY_EXISTS" });
+    expect(await repos.specs.findByWorkflowId("wf-test")).toEqual(before);
+    expect(remoteGit("tag", "-l")).toBe("");
+  });
 
-    const service = new AutoHealSaveService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-    );
+  it("rejects a workflow ID mismatch before saving", async () => {
+    const before = await repos.specs.findByWorkflowId("wf-test");
+    await expect(service().save({ ...input, spec: { ...input.spec, id: "another-workflow" } }))
+      .rejects.toMatchObject({ status: 400, code: "WORKFLOW_ID_MISMATCH" });
+    expect(await repos.specs.findByWorkflowId("wf-test")).toEqual(before);
+    expect(remoteGit("tag", "-l")).toBe("");
+  });
 
-    const result = await service.save({
-      workflowId: "wf-test",
-      spec: TEST_SPEC,
-      packId: "pack-1",
-      actorId: "user-1",
-    });
-
-    expect(result.saved).toBe(true);
-    expect(result.workflowId).toBe("wf-test");
-    expect(result.packId).toBe("pack-1");
-    expect(result.branch).toBe("saved/wf-test");
-    expect(result.commit).toBe("abc123");
-    // The snapshot must be based on the previous save/deploy content (scripts
-    // inheritance) — never on a fresh default-branch base.
-    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "saved/wf-test", "wf/wf-test");
-    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
-
-    const row = await specRepo.findByWorkflowId("wf-test");
-    expect(row).not.toBeNull();
-    expect(row?.pack_id).toBe("pack-1");
-    expect(row?.owner_id).toBe("user-1");
+  it("reports an ignored draft write and leaves the database and Git unchanged", async () => {
+    const before = await repos.specs.findByWorkflowId("wf-test");
+    ctx.raw.exec("CREATE TRIGGER ignore_draft BEFORE UPDATE ON workflow_specs BEGIN SELECT RAISE(IGNORE); END");
+    await expect(service().save(input)).rejects.toThrow("Workflow update failed");
+    expect(await repos.specs.findByWorkflowId("wf-test")).toEqual(before);
+    expect(remoteGit("branch", "--list", "saved/wf-test")).toBe("");
+    expect(ctx.raw.prepare("SELECT * FROM workflow_deploy_history").all()).toEqual([]);
   });
 });
 
 describe("AutoHealDeployService", () => {
-  let ctx: ReturnType<typeof createTestDb>;
-  let specRepo: WorkflowSpecRepository;
-  let deployHistoryRepo: WorkflowDeployHistoryRepository;
-  let botPermRepo: BotWorkflowPermissionRepository;
-  let triggerRun: ReturnType<typeof vi.fn>;
-
+  let ctx: ReturnType<typeof createTestDb>, remote: ReturnType<typeof createRemote>;
+  let repos: Awaited<ReturnType<typeof repositories>>, triggerRun: ReturnType<typeof vi.fn>;
+  const service = () => new AutoHealDeployService(ctx.db, repos.specs, repos.history, repos.permissions, remote.config, gitAuthor, triggerRun);
+  const input = () => ({ workflowId: "wf-test", candidateCommit: remote.candidateCommit, actorId: "user-1" });
+  const remoteGit = (...args: string[]) => git(remote.root, "--git-dir", remote.remote, ...args);
+  const historyRows = () => ctx.raw.prepare("SELECT deploy_number, action, is_active, version FROM workflow_deploy_history ORDER BY deploy_number").all();
+  const addExternalTag = () => {
+    git(remote.work, "tag", "-a", "deploy/wf-test/#5", "-m", "external deployment");
+    git(remote.work, "push", "origin", "refs/tags/deploy/wf-test/#5");
+  };
+  const activateProduction = async (deployNumber: number, version = 1) => {
+    const tagName = `deploy/wf-test/#${deployNumber}`;
+    git(remote.work, "tag", "-a", tagName, remote.candidateCommit, "-m", "production baseline");
+    git(remote.work, "push", "origin", `refs/tags/${tagName}`);
+    await repos.history.insert({ packId: "pack-1", workflowId: "wf-test", deployNumber, version,
+      tagName, action: "deploy", specJson: JSON.stringify(TEST_SPEC), isActive: true });
+  };
   beforeEach(async () => {
-    ctx = createTestDb();
-    deployHistoryRepo = new WorkflowDeployHistoryRepository(ctx.db as never);
-    specRepo = new WorkflowSpecRepository(ctx.db as never, deployHistoryRepo);
-    botPermRepo = new BotWorkflowPermissionRepository(ctx.db as never);
+    ctx = createTestDb(); repos = await repositories(ctx); remote = createRemote(true);
     triggerRun = vi.fn().mockResolvedValue("message-123");
-
-    vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
-    vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
-    vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
-    vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
-    vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValue({
-      branch: "wf/wf-test",
-      tagName: "deploy/wf-test/#1",
-      commit: "def456",
-      deployNumber: 1,
-    });
-    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
-    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
-
-    await botPermRepo.upsert({
-      bot_id: null,
-      bot_owner_id: "user-1",
-      workflow_id: "wf-test",
-      can_view: 1,
-      can_execute: 1,
-      can_edit: 1,
-    });
-
-    await specRepo.upsert("wf-test", "pack-1", JSON.stringify({
-      content: "id: wf-test\ntitle: Test Workflow\nnodes:\n  - id: start\n    type: start\n    config: {}\n    executor:\n      type: start\n    dependsOn: []\n  - id: end\n    type: end\n    config: {}\n    executor:\n      type: end\n    dependsOn: [start]\n",
-      ...TEST_SPEC,
-    }), "user-1");
   });
+  afterEach(async () => { vi.restoreAllMocks(); await ctx.db.close(); rmSync(remote.root, { recursive: true, force: true }); });
 
-  it("deploys the active spec and triggers rerun by default", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    const result = await service.deploy({
-      workflowId: "wf-test",
-      packId: "pack-1",
-      actorId: "user-1",
-    });
-
-    expect(result.deployed).toBe(true);
-    expect(result.deployNumber).toBe(1);
-    expect(result.version).toBe(1);
-    expect(result.tagName).toBe("deploy/wf-test/#1");
-    expect(result.messageId).toBe("message-123");
-
-    const history = await deployHistoryRepo.listHistory("wf-test", 10);
-    expect(history.length).toBe(1);
-    expect(history[0].action).toBe("deploy");
-    expect(history[0].deploy_number).toBe(1);
-    expect(history[0].is_active).toBe(1);
-    expect(history[0].tag_name).toBe("deploy/wf-test/#1");
-    // The deploy must be based on the previous deploy content (scripts
-    // inheritance) — never on a fresh default-branch base.
-    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "wf/wf-test");
-    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
-
-    const row = await specRepo.findByWorkflowId("wf-test");
-    expect(row?.version).toBe(1);
-    // No source run supplied, so the re-run cannot resolve a target Bot.
-    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1", null);
-  });
-
-  it("forwards the source run so the re-run targets its own Bot", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    await service.deploy({
-      workflowId: "wf-test",
-      packId: "pack-1",
-      sourceFlowId: "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
-      actorId: "user-1",
-    });
-
-    // The re-run must reach the Bot that ran the source, never the diagnosis Bot.
-    expect(triggerRun).toHaveBeenCalledWith(
-      "wf-test",
-      "user-1",
-      "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
-    );
-  });
-
-  it("allows deploy with execute permission (no edit)", async () => {
-    await botPermRepo.upsert({
-      bot_id: null,
-      bot_owner_id: "user-2",
-      workflow_id: "wf-test",
-      can_view: 1,
-      can_execute: 1,
-      can_edit: 0,
-    });
-
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    const result = await service.deploy({
-      workflowId: "wf-test",
-      actorId: "user-2",
-    });
-
-    expect(result.deployed).toBe(true);
-  });
-
-  it("denies deploy when actor lacks execute and edit permission", async () => {
-    await botPermRepo.upsert({
-      bot_id: null,
-      bot_owner_id: "user-3",
-      workflow_id: "wf-test",
-      can_view: 1,
-      can_execute: 0,
-      can_edit: 0,
-    });
-
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    await expect(service.deploy({
-      workflowId: "wf-test",
-      actorId: "user-3",
-    })).rejects.toThrow("No execute permission");
-  });
-
-  it("skips rerun when autoRun=false", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    await service.deploy({
-      workflowId: "wf-test",
-      packId: "pack-1",
-      autoRun: false,
-      actorId: "user-1",
-    });
-
+  it("requires its own wf save baseline and rejects an unproven candidate", async () => {
+    git(remote.work, "push", "origin", "HEAD:refs/heads/saved/wf-test", ":refs/heads/wf/wf-test");
+    await expect(service().deploy({ workflowId: "wf-test", actorId: "user-1" })).rejects.toMatchObject({ status: 409, code: "SAVE_REQUIRED" });
+    git(remote.work, "push", "origin", "HEAD:refs/heads/wf/wf-test");
+    await expect(service().deploy({ ...input(), candidateCommit: "a".repeat(40) })).rejects.toMatchObject({ status: 409, code: "CANDIDATE_NOT_SAVED" });
+    expect(historyRows()).toEqual([]); expect(remoteGit("tag", "-l")).toBe("");
     expect(triggerRun).not.toHaveBeenCalled();
   });
 
-  it("increments deploy number across multiple deploys", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    vi.spyOn(gitClient, "commitAndPushDeploy")
-      .mockResolvedValueOnce({ branch: "wf/wf-test", tagName: "deploy/wf-test/#1", commit: "def456", deployNumber: 1 })
-      .mockResolvedValueOnce({ branch: "wf/wf-test", tagName: "deploy/wf-test/#2", commit: "ghi789", deployNumber: 2 });
-
-    const first = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-    expect(first.deployNumber).toBe(1);
-
-    const second = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-    expect(second.deployNumber).toBe(2);
-
-    const history = await deployHistoryRepo.listHistory("wf-test", 10);
-    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 2]);
+  it("rejects a mismatched Pack before publishing", async () => {
+    await expect(service().deploy({ ...input(), packId: "other-pack" })).rejects.toMatchObject({ status: 409, code: "PACK_ID_MISMATCH" });
+    expect(historyRows()).toEqual([]); expect(remoteGit("tag", "-l")).toBe("");
+    expect(triggerRun).not.toHaveBeenCalled();
   });
 
-  it("leaves an inactive placeholder when git claims a higher deploy number", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
-    vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValueOnce({
-      branch: "wf/wf-test",
-      tagName: "deploy/wf-test/#6",
-      commit: "def456",
-      deployNumber: 6,
+  it("deploys the saved Pack exactly and triggers rerun only after publication", async () => {
+    const saver = new AutoHealSaveService(ctx.db, repos.specs, repos.history, repos.permissions, remote.config, gitAuthor);
+    await saver.save({ workflowId: "wf-test", actorId: "user-1", spec: { ...TEST_SPEC, title: "DB draft" } });
+    const savedHead = remoteGit("rev-parse", "refs/heads/wf/wf-test");
+    triggerRun.mockImplementationOnce(async () => {
+      expect((await repos.history.findActiveByWorkflowId("wf-test"))?.deploy_number).toBe(1);
+      expect((await repos.specs.findByWorkflowId("wf-test"))?.version).toBe(1);
+      expect(remoteGit("rev-parse", "refs/tags/deploy/wf-test/#1^{commit}")).toBe(remoteGit("rev-parse", "refs/heads/wf/wf-test"));
+      return "message-123";
     });
-
-    const result = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-    expect(result.deployNumber).toBe(6);
-
-    const history = await deployHistoryRepo.listHistory("wf-test", 10);
-    const placeholder = history.find((h) => h.deploy_number === 1);
-    const real = history.find((h) => h.deploy_number === 6);
-    expect(placeholder?.is_active).toBe(0);
-    // The reserve step must never write a null tag_name: managed MySQL declares
-    // the column NOT NULL and the v65 relaxation never ran there, so a null
-    // would abort the deploy with "Column 'tag_name' cannot be null".
-    expect(placeholder?.tag_name).toBe("deploy/wf-test/#1");
-    expect(real?.is_active).toBe(1);
-    expect(real?.tag_name).toBe("deploy/wf-test/#6");
+    const result = await service().deploy({ ...input(), candidateCommit: savedHead, packId: "pack-1" });
+    expect(result).toMatchObject({ deployed: true, candidateCommit: savedHead, commit: savedHead, deployNumber: 1, version: 1, tagName: "deploy/wf-test/#1", messageId: "message-123" });
+    expect(historyRows()).toEqual([{ deploy_number: 1, action: "deploy", is_active: 1, version: 1 }]);
+    expect(remoteGit("rev-parse", "refs/heads/wf/wf-test")).toBe(savedHead);
+    expect(parse(remoteGit("show", `${result.commit}:workflows/wf-test.yaml`)).title).toBe("DB draft");
+    expect(remoteGit("show", `${result.commit}:scripts/run.sh`)).toBe("saved script");
+    expect(remoteGit("show", `${result.commit}:asset.txt`)).toBe("saved asset");
+    expect(parse(JSON.parse((await repos.history.findByVersion("wf-test", 1))!.spec_json).content).title).toBe("DB draft");
+    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1", null);
   });
 
-  it("reserves a non-null tag name before the git push reveals the real tag", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
+  it("uses its existing wf save baseline without consulting saved refs", async () => {
+    const result = await service().deploy({ workflowId: "wf-test", actorId: "user-1", autoRun: false });
+    expect(result.candidateCommit).toBe(remote.candidateCommit);
+    expect(remoteGit("show", `${result.commit}:scripts/run.sh`)).toBe("saved script");
+    expect(remoteGit("branch", "--list", "saved/wf-test")).toBe("");
+    expect(triggerRun).not.toHaveBeenCalled();
+  });
 
-    // Capture the row as it exists between reserve and activation.
-    let reservedTagName: string | null | undefined;
-    let reservedIsActive: number | undefined;
-    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(async () => {
-      const rows = await ctx.db.query<{ tag_name: string; is_active: number }>(
-        "SELECT tag_name, is_active FROM workflow_deploy_history WHERE workflow_id = ? AND deploy_number = ?",
-        ["wf-test", 1],
-      );
-      reservedTagName = rows[0]?.tag_name;
-      reservedIsActive = rows[0]?.is_active;
-      return { branch: "wf/wf-test", tagName: "deploy/wf-test/#1", commit: "abc123", deployNumber: 1 };
+  it("reports uncertain push without recording formal history or invoking rerun", async () => {
+    await activateProduction(9);
+    vi.spyOn(deployGit, "pushPreparedDeployment").mockRejectedValueOnce(new Error("git push failed"));
+    await expect(service().deploy({ ...input(), requestId: "deploy-unknown-01" }))
+      .rejects.toMatchObject({ status: 503, code: "DEPLOY_OUTCOME_UNKNOWN", requestId: "deploy-unknown-01" });
+    expect(historyRows()).toEqual([{ deploy_number: 9, action: "deploy", is_active: 1, version: 1 }]);
+    expect((await repos.history.findActiveByWorkflowId("wf-test"))?.deploy_number).toBe(9);
+    expect(remoteGit("tag", "-l")).toBe("deploy/wf-test/#9"); expect(triggerRun).not.toHaveBeenCalled();
+  });
+
+  it("exposes lost push acknowledgment without blindly retrying", async () => {
+    const realPush = deployGit.pushPreparedDeployment;
+    vi.spyOn(deployGit, "pushPreparedDeployment").mockImplementationOnce(async (...args) => {
+      await realPush(...args);
+      throw new Error("push acknowledgment lost");
     });
-
-    await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-
-    expect(reservedTagName).toBe("deploy/wf-test/#1");
-    expect(reservedIsActive).toBe(0);
+    const request = { ...input(), requestId: "lost-acknowledgment" };
+    await expect(service().deploy(request)).rejects.toMatchObject({ status: 503, code: "DEPLOY_OUTCOME_UNKNOWN" });
+    expect(remoteGit("tag", "-l")).toBe("deploy/wf-test/#1");
+    expect(historyRows()).toEqual([]); expect(triggerRun).not.toHaveBeenCalled();
+    expect(remoteGit("rev-parse", "refs/tags/deploy/wf-test/#1^{commit}")).toBe(remote.candidateCommit);
+    expect(remoteGit("rev-parse", "refs/heads/wf/wf-test")).toBe(remote.candidateCommit);
+    expect(triggerRun).not.toHaveBeenCalled();
   });
 
-  it("reuses the reserved deploy number per deploy instead of skipping ahead", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
-
-    // Echo the number the service computed, as the real commitAndPushDeploy does
-    // (it tags with the passed number and returns it). The old fixed-return mocks
-    // never saw the computed value, which is how the double increment slipped by.
-    const echoPush = vi.fn(async (_repoDir: string, _workflowId: string, deployNumber: number) => ({
-      branch: "wf/wf-test",
-      tagName: `deploy/wf-test/#${deployNumber}`,
-      commit: "def456",
-      deployNumber,
-    }));
-    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(echoPush);
-
-    const first = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-    expect(first.deployNumber).toBe(1);
-    const second = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
-    expect(second.deployNumber).toBe(2);
-    expect(second.tagName).toBe("deploy/wf-test/#2");
-
-    // Reserved number = dbMax + 1; a git max that is not ahead must NOT bump the
-    // tag past it: one history row per deploy, no inactive placeholders, no gaps.
-    expect(echoPush.mock.calls.map((call) => call[2])).toEqual([1, 2]);
-    const history = await deployHistoryRepo.listHistory("wf-test", 10);
-    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 2]);
-    const firstRow = history.find((h) => h.deploy_number === 1);
-    const secondRow = history.find((h) => h.deploy_number === 2);
-    expect(firstRow?.is_active).toBe(0);
-    expect(secondRow?.is_active).toBe(1);
-    expect(secondRow?.tag_name).toBe("deploy/wf-test/#2");
+  it.each(["history", "spec"])("reports ignored %s completion write after Git push and rolls back DB publication", async target => {
+    await activateProduction(1);
+    const before = await repos.specs.findByWorkflowId("wf-test");
+    const trigger = target === "history" ? "BEFORE UPDATE ON workflow_deploy_history WHEN NEW.is_active = 1" : "BEFORE UPDATE ON workflow_specs";
+    ctx.raw.exec(`CREATE TRIGGER ignore_write ${trigger} BEGIN SELECT RAISE(IGNORE); END`);
+    await expect(service().deploy({ ...input(), requestId: "deploy-db-failure" }))
+      .rejects.toMatchObject({ status: 503, code: "DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN", requestId: "deploy-db-failure" });
+    expect(historyRows()).toEqual([{ deploy_number: 1, action: "deploy", is_active: 1, version: 1 }]);
+    expect(await repos.specs.findByWorkflowId("wf-test")).toEqual(before);
+    expect(remoteGit("rev-parse", "refs/tags/deploy/wf-test/#2^{commit}")).toBe(remoteGit("rev-parse", "refs/heads/wf/wf-test"));
+    expect(triggerRun).not.toHaveBeenCalled();
   });
 
-  it("numbers the git tag gitMax+1 when external tags are ahead of the DB", async () => {
-    const service = new AutoHealDeployService(
-      ctx.db as never,
-      specRepo,
-      deployHistoryRepo,
-      botPermRepo,
-      gitConfig,
-      gitAuthor,
-      triggerRun,
-    );
+  it("does not overwrite a concurrent DB draft after Git publication", async () => {
+    const realPush = deployGit.pushPreparedDeployment;
+    vi.spyOn(deployGit, "pushPreparedDeployment").mockImplementationOnce(async (...args) => {
+      await realPush(...args);
+      ctx.raw.prepare("UPDATE workflow_specs SET spec_json = ? WHERE workflow_id = ?").run(JSON.stringify({ ...TEST_SPEC, title: "Concurrent draft" }), "wf-test");
+    });
+    await expect(service().deploy(input())).rejects.toMatchObject({ code: "DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN", cause: { code: "BASELINE_STALE" } });
+    expect(JSON.parse((await repos.specs.findByWorkflowId("wf-test"))!.spec_json).title).toBe("Concurrent draft");
+    expect(historyRows()).toEqual([]); expect(remoteGit("tag", "-l")).toBe("deploy/wf-test/#1");
+    expect(triggerRun).not.toHaveBeenCalled();
+  });
 
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
-    let pushedDeployNumber = 0;
-    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(
-      async (_repoDir: string, _workflowId: string, deployNumber: number) => {
-        pushedDeployNumber = deployNumber;
-        return { branch: "wf/wf-test", tagName: `deploy/wf-test/#${deployNumber}`, commit: "def456", deployNumber };
-      },
-    );
+  it("rolls back when setActive's write is ignored", async () => {
+    await repos.history.insert({ packId: "pack-1", workflowId: "wf-test", deployNumber: 1, version: 1, tagName: "one", action: "deploy", specJson: "{}", isActive: true });
+    await repos.history.insert({ packId: "pack-1", workflowId: "wf-test", deployNumber: 2, version: 2, tagName: "two", action: "deploy", specJson: "{}" });
+    ctx.raw.exec("CREATE TRIGGER ignore_activation BEFORE UPDATE ON workflow_deploy_history WHEN NEW.is_active = 1 BEGIN SELECT RAISE(IGNORE); END");
+    await expect(repos.history.setActive("wf-test", 2)).rejects.toThrow();
+    expect((await repos.history.findActiveByWorkflowId("wf-test"))?.deploy_number).toBe(1);
+  });
 
-    const result = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+  it("forwards the source run so the rerun targets its own Bot", async () => {
+    await service().deploy({ ...input(), sourceFlowId: "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6" });
+    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1", "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6");
+  });
 
-    // dbMax=0 → reserved=1; external tags already reach #5 → the tag must be
-    // gitMax + 1 (#6), keeping the reserved #1 as an inactive placeholder.
-    expect(pushedDeployNumber).toBe(6);
-    expect(result.deployNumber).toBe(6);
-    expect(result.tagName).toBe("deploy/wf-test/#6");
+  it.each([{ can_execute: 1, can_edit: 0 }, { can_execute: 0, can_edit: 1 }])("allows deploy with either execute or edit permission: %j", async permissions => {
+    await repos.permissions.upsert({ bot_id: null, bot_owner_id: "user-2", workflow_id: "wf-test", can_view: 1, ...permissions });
+    expect((await service().deploy({ ...input(), actorId: "user-2" })).deployed).toBe(true);
+  });
 
-    const history = await deployHistoryRepo.listHistory("wf-test", 10);
-    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 6]);
-    const placeholder = history.find((h) => h.deploy_number === 1);
-    const real = history.find((h) => h.deploy_number === 6);
-    expect(placeholder?.is_active).toBe(0);
-    expect(real?.is_active).toBe(1);
-    expect(real?.tag_name).toBe("deploy/wf-test/#6");
+  it("denies deploy when actor lacks execute and edit permission before Git", async () => {
+    await repos.permissions.upsert({ bot_id: null, bot_owner_id: "user-3", workflow_id: "wf-test", can_view: 1, can_execute: 0, can_edit: 0 });
+    const clone = vi.spyOn(gitClient, "initClawflowsReadRepo");
+    await expect(service().deploy({ ...input(), actorId: "user-3" })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    expect(clone).not.toHaveBeenCalled(); expect(historyRows()).toEqual([]);
+    expect(triggerRun).not.toHaveBeenCalled();
+  });
+
+  it("does not undo a successful release if the optional rerun fails", async () => {
+    triggerRun.mockRejectedValueOnce(new Error("bot unavailable"));
+    expect(await service().deploy(input())).toMatchObject({ deployed: true, messageId: null });
+    expect(historyRows()).toEqual([{ deploy_number: 1, action: "deploy", is_active: 1, version: 1 }]);
+  });
+
+  it("does not deduplicate a repeated request ID without a journal", async () => {
+    const push = vi.spyOn(deployGit, "pushPreparedDeployment");
+    const request = { ...input(), requestId: "deploy-repeated" };
+    const first = await service().deploy(request), second = await service().deploy(request);
+    expect([first.deployNumber, second.deployNumber]).toEqual([1, 2]);
+    expect(first.commit).toBe(second.commit);
+    expect(push).toHaveBeenCalledTimes(2); expect(triggerRun).toHaveBeenCalledTimes(2);
+    expect(historyRows()).toEqual([
+      { deploy_number: 1, action: "deploy", is_active: 0, version: 1 },
+      { deploy_number: 2, action: "deploy", is_active: 1, version: 2 },
+    ]);
+  });
+
+  it("numbers the Git tag above external tags without adding placeholder history", async () => {
+    addExternalTag();
+    const prepare = vi.spyOn(deployGit, "prepareDeployCandidate"), push = vi.spyOn(deployGit, "pushPreparedDeployment");
+    const result = await service().deploy(input());
+    expect(prepare).toHaveBeenCalledWith(expect.any(String), "wf-test", expect.stringMatching(/^[a-f0-9]{40}$/), "", 6, 1, gitAuthor);
+    expect(push).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ deployNumber: 6, tagName: "deploy/wf-test/#6" }));
+    expect(result).toMatchObject({ deployNumber: 6, tagName: "deploy/wf-test/#6" });
+    expect(historyRows()).toEqual([{ deploy_number: 6, action: "deploy", is_active: 1, version: 1 }]);
+    expect(await repos.history.setActive("wf-test", result.version)).toBe(true);
+  });
+
+  it("publishes the frozen candidate without overwriting a concurrently saved wf", async () => {
+    writeFileSync(path.join(remote.work, "scripts/run.sh"), "newer saved script\n");
+    git(remote.work, "add", "."); git(remote.work, "commit", "-m", "concurrent wf save");
+    const newer = git(remote.work, "rev-parse", "HEAD");
+    const realPush = deployGit.pushPreparedDeployment;
+    vi.spyOn(deployGit, "pushPreparedDeployment").mockImplementationOnce(async (...args) => {
+      git(remote.work, "push", "origin", `${newer}:refs/heads/wf/wf-test`);
+      return realPush(...args);
+    });
+    expect(await service().deploy(input())).toMatchObject({ deployed: true, commit: remote.candidateCommit });
+    expect(remoteGit("rev-parse", "refs/heads/wf/wf-test")).toBe(newer);
+    expect(remoteGit("rev-parse", "refs/tags/deploy/wf-test/#1^{commit}")).toBe(remote.candidateCommit);
+    expect(historyRows()).toEqual([{ deploy_number: 1, action: "deploy", is_active: 1, version: 1 }]);
+    expect(triggerRun).toHaveBeenCalledTimes(1);
+  });
+
+});
+
+describe("WorkflowDeployHistoryRepository.setActive contract", () => {
+  let ctx: ReturnType<typeof createTestDb>, history: WorkflowDeployHistoryRepository;
+  beforeEach(() => { ctx = createTestDb(); history = new WorkflowDeployHistoryRepository(ctx.db); });
+  afterEach(async () => { vi.restoreAllMocks(); await ctx.db.close(); });
+  const rows = () => ctx.raw.prepare("SELECT * FROM workflow_deploy_history ORDER BY id").all();
+
+  it("rolls back all deactivations when one previous active row ignores the write", async () => {
+    for (const deployNumber of [1, 2, 3]) await history.insert({
+      packId: "pack-1", workflowId: "wf-test", deployNumber, version: deployNumber,
+      tagName: `deploy/wf-test/#${deployNumber}`, action: "deploy", specJson: "{}", isActive: deployNumber < 3,
+    });
+    const before = rows();
+    ctx.raw.exec(`CREATE TRIGGER ignore_deactivation BEFORE UPDATE ON workflow_deploy_history
+      WHEN OLD.deploy_number = 2 AND NEW.is_active = 0 BEGIN SELECT RAISE(IGNORE); END`);
+    await expect(history.setActive("wf-test", 3)).rejects.toThrow("Deployment deactivation failed");
+    expect(rows()).toEqual(before);
+    expect(await history.findActiveByWorkflowId("wf-test")).toMatchObject({ deploy_number: 2 });
+  });
+
+  it("selects one latest deployment by number then id, preserving existing action and workflow scope", async () => {
+    await history.insert({ packId: "pack-1", workflowId: "wf-test", deployNumber: 1, version: 1,
+      tagName: "previous", action: "deploy", specJson: "{}", isActive: true });
+    for (const item of [
+      { packId: "pack-1", deployNumber: 5, action: "deploy" },
+      { packId: "pack-1", deployNumber: 7, action: "rollback" },
+      { packId: "pack-2", deployNumber: 7, action: "edit" },
+      { packId: "pack-1", deployNumber: 6, action: "pull" },
+    ] as const) await history.insert({ ...item, workflowId: "wf-test", version: 3, tagName: "existing-action", specJson: "{}" });
+    await history.insert({ packId: "pack-1", workflowId: "another-workflow", deployNumber: 99, version: 3,
+      tagName: "unrelated", action: "migration", specJson: "{}", isActive: true });
+    const before = rows() as Array<{ id: number; workflow_id: string; action: string; is_active: number }>;
+    const expected = before.map(row => ({ ...row, is_active: row.workflow_id === "wf-test" ? Number(row.action === "edit") : row.is_active }));
+    expect(await history.setActive("wf-test", 3)).toBe(true);
+    expect(rows()).toEqual(expected);
+    // Re-selecting the already-active version must still succeed without adding history.
+    expect(await history.setActive("wf-test", 3)).toBe(true);
+    expect(rows()).toEqual(expected);
+  });
+
+  it("returns false for a missing target version or workflow without changing active history", async () => {
+    await history.insert({ packId: "pack-1", workflowId: "wf-test", deployNumber: 1, version: 1,
+      tagName: "existing", action: "deploy", specJson: "{}", isActive: true });
+    const before = rows();
+    const write = vi.spyOn(SqliteDatabase.prototype, "exec");
+    expect(await history.setActive("wf-test", 999)).toBe(false);
+    expect(await history.setActive("missing-workflow", 1)).toBe(false);
+    expect(write).not.toHaveBeenCalled(); expect(rows()).toEqual(before);
   });
 });
 
 describe("createTempRepo", () => {
-  let originalClawwebTemp: string | undefined;
-  let tempDir: string | undefined;
-
-  beforeEach(() => {
-    originalClawwebTemp = process.env.CLAWWEB_TEMP_DIR;
-    tempDir = mkdtempSync(path.join(tmpdir(), "cw-autoheal-test-"));
-    process.env.CLAWWEB_TEMP_DIR = tempDir;
-    // Restore the real implementation for these tests.
-    vi.spyOn(gitClient, "createTempRepo").mockImplementation(realCreateTempRepo);
-  });
-
-  afterEach(() => {
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-    if (originalClawwebTemp === undefined) {
-      delete process.env.CLAWWEB_TEMP_DIR;
-    } else {
-      process.env.CLAWWEB_TEMP_DIR = originalClawwebTemp;
-    }
-  });
-
+  let tempDir: string;
+  beforeEach(() => { tempDir = mkdtempSync(path.join(tmpdir(), "cw-autoheal-test-")); vi.stubEnv("CLAWWEB_TEMP_DIR", tempDir); });
+  afterEach(() => { vi.unstubAllEnvs(); rmSync(tempDir, { recursive: true, force: true }); });
   it("creates a temp directory under CLAWWEB_TEMP_DIR", async () => {
     const repo = await gitClient.createTempRepo();
-    expect(repo.startsWith(tempDir!)).toBe(true);
-    expect(statSync(repo).isDirectory()).toBe(true);
+    expect(repo.startsWith(tempDir)).toBe(true); expect(statSync(repo).isDirectory()).toBe(true);
     rmSync(repo, { recursive: true, force: true });
   });
-
+  it("falls back to TMPDIR when CLAWWEB_TEMP_DIR is absent", async () => {
+    vi.unstubAllEnvs(); vi.stubEnv("TMPDIR", tempDir);
+    const repo = await gitClient.createTempRepo();
+    expect(repo.startsWith(tempDir)).toBe(true);
+    rmSync(repo, { recursive: true, force: true });
+  });
   it("throws a clear error when the configured temp dir parent is missing", async () => {
-    process.env.CLAWWEB_TEMP_DIR = path.join(tempDir!, "missing", "deep");
-    await expect(gitClient.createTempRepo()).rejects.toThrow("临时 git 目录的父路径不存在");
+    vi.stubEnv("CLAWWEB_TEMP_DIR", path.join(tempDir, "missing", "deep"));
+    await expect(gitClient.createTempRepo()).rejects.toThrow("临时目录不可用或配置无效");
   });
 });

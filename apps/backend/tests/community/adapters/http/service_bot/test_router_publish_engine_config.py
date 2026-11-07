@@ -145,8 +145,10 @@ def _engine_config_service(*, returns=None, raises=None) -> MagicMock:
 
 def _bot_repo(engine: str = "openclaw") -> MagicMock:
     repo = MagicMock()
-    repo.get_by_id_and_owner.return_value = {"active_engine": engine}
-    repo.get_by_id.return_value = {"active_engine": engine}
+    repo.get_by_pk.return_value = {
+        "id": 1, "bot_id": "bot-1", "owner_id": "owner-1", "entity_id": "entity-1",
+        "active_engine": engine,
+    }
     return repo
 
 

@@ -2,7 +2,7 @@ import type { DeliveryStatusView } from '@/domain/collaboration/types';
 import type { SessionMessageData } from '@/services/backendApi/collaboration/sessionController';
 import type { Block, ChatMessage, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
 import { imageAttachmentsToBlocks } from './messageBlockBuilder';
-import { extractMessageContent, isToolError, normalizeTimestamp, type ToolResultMeta } from './messageMapperHelpers';
+import { extractMessageContent, isToolError, normalizeTimestamp, stringifyToolValue, type ToolResultMeta } from './messageMapperHelpers';
 import { sessionFileService } from './sessionFileService';
 
 /**
@@ -64,7 +64,7 @@ export function toolResultToToolStep(dto: GroupHistoryDto): ToolStep | null {
       meta.arguments === undefined && (dto.metadata as MessageMetadata | undefined)?.tool_args === undefined
         ? undefined
         : JSON.stringify(meta.arguments ?? (dto.metadata as MessageMetadata | undefined)?.tool_args),
-    output: extractMessageContent(meta.result ?? dto.content) || undefined,
+    output: extractMessageContent(meta.result ?? dto.content) || stringifyToolValue(meta.result) || undefined,
   };
 }
 
@@ -204,6 +204,7 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
     if (roundId) extra.conversationRoundId = roundId;
     if (roundId) extra.runId = roundId;
     if (role === 'assistant' && dto.sender !== undefined) extra.botUuid = dto.sender;
+    if (dto.metadata) extra.metadata = dto.metadata;
     if (isPending) {
       extra.bcsPending = true;
       extra.metadata = dto.metadata;

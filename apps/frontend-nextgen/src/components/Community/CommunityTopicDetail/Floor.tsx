@@ -1,8 +1,9 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { CommunityTopic, CreateCommunityReplyDraft, InteractionSummary } from '@/domain/community/types';
-import { MessageSquare, User } from 'lucide-react';
-import { useState } from 'react';
+import { Heart, MessageSquare, User } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { cn } from '@/utils/cn';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type CommunityThreadReply, type ReplyElementRegistrar } from './model';
 import { ReplyComposer, type ReplyComposerTarget } from './ReplyComposer';
@@ -20,6 +21,14 @@ interface FloorProps {
   helpful?: boolean;
   canToggleHelpful?: boolean;
   helpfulLoading?: boolean;
+  /** Content rendered after the body but before the topic action row (for poll panels). */
+  contentExtra?: ReactNode;
+  /** Full bottom-row replacement for the main Topic; replies keep the default row. */
+  topicActionRow?: ReactNode;
+  getReplyLikeSummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
+  replyLikePending?: (postId: string) => boolean;
+  onLike?: (postId: string) => void;
   onToggleHelpful?: () => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
@@ -31,6 +40,7 @@ interface FloorProps {
   loadAuthorSummary?: (author: CommunityTopic['author']) => void;
   followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
+  authorFollowed?: (author: CommunityTopic['author']) => boolean;
   canReply?: boolean;
   replySaving?: boolean;
   onSubmitReply?: (payload: CreateCommunityReplyDraft) => Promise<boolean>;
@@ -49,6 +59,12 @@ export function Floor({
   helpful = false,
   canToggleHelpful = false,
   helpfulLoading = false,
+  contentExtra,
+  topicActionRow,
+  getReplyLikeSummary,
+  getReplyViewerSummary,
+  replyLikePending,
+  onLike,
   onToggleHelpful,
   threadReplies,
   expanded,
@@ -60,11 +76,16 @@ export function Floor({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   canReply = false,
   replySaving = false,
   onSubmitReply,
 }: FloorProps) {
   const [replyTarget, setReplyTarget] = useState<ReplyComposerTarget | null>(null);
+  const replyStats = postId ? getReplyLikeSummary?.(postId) : undefined;
+  const viewerReplyStats = postId ? getReplyViewerSummary?.(postId) : undefined;
+  const likeCount = replyStats?.likeCount ?? 0;
+  const liked = (viewerReplyStats?.likeCount ?? 0) > 0;
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
 
@@ -75,7 +96,11 @@ export function Floor({
   };
 
   return (
-    <article data-post-id={postId} ref={registerElement?.(postId)} className="border-b border-border/60 py-4 last:border-b-0">
+    <article
+      data-post-id={postId}
+      ref={registerElement?.(postId)}
+      className="border-b border-divider/60 py-4 last:border-b-0"
+    >
       <div className="flex items-center gap-2">
         <CommunityAuthorAvatar
           author={author}
@@ -85,6 +110,7 @@ export function Floor({
           onLoadSummary={() => loadAuthorSummary?.(author)}
           onFollow={() => void followAuthor?.(author)}
           followLoading={authorFollowLoading?.(author) === true}
+          followed={authorFollowed?.(author) === true}
         />
         <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
         <Badge
@@ -109,35 +135,60 @@ export function Floor({
         <div className="min-h-[120px]">
           <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {canReply && postId && onSubmitReply ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[11px] text-primary"
-                leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
-                onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
-              >
-                回复
-              </Button>
-            ) : null}
-            {floor > 0 && canToggleHelpful && onToggleHelpful ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[11px] text-primary"
-                loading={helpfulLoading}
-                onClick={onToggleHelpful}
-              >
-                {helpful ? '取消有帮助' : '标记有帮助'}
-              </Button>
-            ) : null}
+        {contentExtra}
+        {topicActionRow ? (
+          topicActionRow
+        ) : (
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {canReply && postId && onSubmitReply ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
+                  aria-label="回复"
+                  onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
+                >
+                  <MessageSquare className="size-3.5" aria-hidden />
+                  回复
+                </Button>
+              ) : null}
+              {postId && onLike ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-busy={replyLikePending?.(postId) === true}
+                  aria-label="点赞回复"
+                  aria-pressed={liked}
+                  onClick={() => postId && onLike?.(postId)}
+                  className={cn(
+                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors',
+                    liked
+                      ? 'text-destructive hover:text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+                  {likeCount}
+                </Button>
+              ) : null}
+              {floor > 0 && canToggleHelpful && onToggleHelpful ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px] text-primary"
+                  loading={helpfulLoading}
+                  onClick={onToggleHelpful}
+                >
+                  {helpful ? '取消有帮助' : '标记有帮助'}
+                </Button>
+              ) : null}
+            </div>
+            <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
           </div>
-          <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
-        </div>
+        )}
         {threadReplies.length > 0 ? (
-          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-border pl-3">
+          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-divider pl-3">
             {visibleThreadReplies.map(({ reply, targetAuthorName, targetPostId }) => (
               <ThreadReply
                 key={reply.id}
@@ -151,7 +202,12 @@ export function Floor({
                 loadAuthorSummary={loadAuthorSummary}
                 followAuthor={followAuthor}
                 authorFollowLoading={authorFollowLoading}
+                authorFollowed={authorFollowed}
                 canReply={canReply}
+                likeCount={getReplyLikeSummary?.(reply.id)?.likeCount ?? 0}
+                liked={(getReplyViewerSummary?.(reply.id)?.likeCount ?? 0) > 0}
+                likePending={replyLikePending?.(reply.id) === true}
+                onLike={onLike}
                 onReply={setReplyTarget}
               />
             ))}

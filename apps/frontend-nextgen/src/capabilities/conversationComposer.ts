@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 export interface ConversationComposerContext {
   botId: string;
   ownerId: string;
+  /** Source Bot Owner for read-only knowledge queries; not native chat addressing. */
+  knowledgeOwnerId?: string;
   sessionId: string;
   spaceId?: string;
   botType?: string;

@@ -179,6 +179,16 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         ):
             await asyncio.sleep(1.0)
             run = self.get_run(run_id, req.tenant)
+        # The loop's last read happens *inside* the body, after its sleep. A
+        # wait that expired during that sleep therefore exits with the
+        # pre-sleep ``run`` still in hand — possibly RUNNING, possibly a row
+        # that was deleted in the meantime. Re-read once at expiry so the
+        # verdict below is current: without this, a run deleted during the
+        # final second is returned as live instead of raised as gone.
+        if time.monotonic() >= deadline and (
+            run is None or run.status is RunStatus.RUNNING
+        ):
+            run = self.get_run(run_id, req.tenant)
         if run is None:
             # The wait expired without a terminal state and the run row
             # is gone (deleted/purged mid-wait): never fabricate a Run —

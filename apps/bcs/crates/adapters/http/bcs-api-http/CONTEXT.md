@@ -127,3 +127,34 @@ derives authentication mode from the Provider configuration and validates the
 parent/slug split. No separate request slug or expected auth mode is consumed.
 Gateway Principal checks retain the signed Bot UUID and reject a mismatching
 Actor; bootstrap additionally injects current persisted-state validation.
+
+Scoped A2A registration also accepts an optional JSON body containing inline
+agent_card or agent_card_url. Query/body duplicates and mixed sources are rejected.
+An omitted A2A display name is passed to the application for Card.name defaults;
+legacy registrations still require names. See minimal-card-registration-v1.md.
+
+
+## Authentication display data
+
+`VerifiedRequestIdentity` carries an optional avatar alongside the unchanged
+business caller and pinned authentication context. It is verified-source
+display data only, never authorization input. OAuth bootstrap copies it from
+the existing strict-session snapshot, and `/openapi/v1/auth/user` forwards it
+without another credential-chain run or database query. Sources constructed
+with `pin` keep a null avatar unless they explicitly supply one.
+
+## Compatibility current-user selection
+
+Bootstrap may inject `ApiState.auth_user_verifier` for the legacy-configured
+OAuth facade when `[api.auth]` is absent. Only `GET /openapi/v1/auth/user`
+uses it; protected V1 routes retain `principal_verifier`. The adapter selects
+one verifier before authentication, never retries another source on failure.
+Explicit chains do not install this override.
+
+## Invite-code issuance
+
+The internal init route forwards the verified caller in `InitInviteCodes` rather
+than discarding it. Application enforces the configured issuer-user allowlist;
+being under `/api/v1` or passing the Cookie Origin check is not authorization.
+The request body remains count-only, and authorization denial maps to 403 with
+no authentication-source fallback.

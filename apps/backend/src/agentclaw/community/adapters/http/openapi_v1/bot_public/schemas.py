@@ -10,6 +10,8 @@ RuntimeState = Literal["draft", "verify", "online"]
 class PublicBot(BaseModel):
     """The allowlisted public projection of a catalog Bot."""
 
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
+
     bot_id: str = Field(description="Stable public Bot identifier.")
     bot_uuid: str | None = Field(
         default=None,
@@ -45,6 +47,30 @@ class PublicBot(BaseModel):
     )
     engine: str = Field(description="Engine that runs the Bot.")
     status: str = Field(description="Public Bot lifecycle status.")
+
+
+class PublicBotCapability(BaseModel):
+    """One published MCP capability of a public Bot profile."""
+
+    capability_id: str = Field(description="Stable capability identifier.")
+    display_name: str = Field(description="Public capability display name.")
+
+
+class PublicBotProfile(BaseModel):
+    """Public catalog Bot profile shown before requesting friendship."""
+
+    bot_id: str = Field(description="Stable public Bot identifier.")
+    bot_uuid: str = Field(description="Catalog Bot UUID used by the square entry.")
+    bot_name: str = Field(description="Public Bot display name.")
+    owner_name: str | None = Field(
+        default=None, description="Optional public owner display name."
+    )
+    description: str = Field(description="Public Bot description.")
+    engine_name: str = Field(description="Engine that runs the Bot.")
+    capabilities: list[PublicBotCapability] = Field(
+        default_factory=list,
+        description="Published MCP capabilities of the Bot.",
+    )
 
 
 class Recommendation(BaseModel):

@@ -3,6 +3,9 @@
 
 use super::*;
 
+#[path = "human_notify_tracing_tests.rs"]
+mod tracing_tests;
+
 fn overlay_entry(
     bot_uuid: &str,
     bot_name: Option<&str>,

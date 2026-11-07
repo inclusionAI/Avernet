@@ -62,8 +62,15 @@ from agentclaw.community.core.service_bot.types import PublishStage
 pytestmark = pytest.mark.asyncio
 
 
-def _request() -> Request:
-    request = Request({"type": "http", "method": "POST", "path": "/"})
+def _request(entity_id: str = "owner") -> Request:
+    repository = Mock()
+    repository.list_matches_by_legacy_locator.side_effect = lambda bot_id, locator: [{
+        "id": 1, "bot_id": bot_id, "entity_id": entity_id, "owner_id": locator,
+    }]
+    app = FastAPI()
+    app.state.injector = SimpleNamespace(get=lambda _contract: repository)
+    request = Request({"type": "http", "method": "POST", "path": "/",
+                       "app": app, "query_string": b""})
     request.state.trace_id = "trace-acli"
     return request
 

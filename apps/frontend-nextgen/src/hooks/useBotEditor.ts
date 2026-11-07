@@ -13,6 +13,7 @@ import { useBotEditorCandidates } from '@/hooks/useBotEditorCandidates';
 import { useBotEngineConfig } from '@/hooks/useBotEngineConfig';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { useResourcePathClipboard } from '@/hooks/useResourcePathClipboard';
+import { useRoutineActivation } from '@/hooks/useRoutineActivation';
 import { useSkillSetActivation } from '@/hooks/useSkillSetActivation';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
@@ -34,11 +35,13 @@ export function useBotEditor(
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
   const skillSetActivation = useSkillSetActivation(botId, setSkillSets);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
+  const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
   const candidates = useBotEditorCandidates(botId, spaceId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
   const [routines, setRoutines] = useState<BotEditorRoutine[]>([]);
+  const routineActivation = useRoutineActivation(botId, ownerId, setRoutines);
   const engineConfig = useBotEngineConfig(botId, ownerId, isOwner);
   const [engineStatus, setEngineStatus] = useState<BotEditorEngineStatus>();
   const [mcpCallTypes, setMcpCallTypes] = useState<Record<string, 'caller' | 'owner'>>({});
@@ -54,6 +57,7 @@ export function useBotEditor(
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
+      setCapabilityLoadError(data.capabilityLoadError);
       setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
@@ -94,6 +98,7 @@ export function useBotEditor(
     skillSets,
     pendingSkillSetToggle: skillSetActivation.pendingSkillSetToggle,
     mcps,
+    capabilityLoadError,
     ...candidates,
     resources,
     screens,
@@ -219,17 +224,8 @@ export function useBotEditor(
         id ? '定时任务已更新' : '定时任务已创建',
       ),
     loadRoutineModels: () => botEditorService.listRoutineModels(botId!, ownerId),
-    toggleRoutine: (routine: BotEditorRoutine) =>
-      act(
-        () =>
-          botEditorService.updateRoutine(
-            botId!,
-            routine.id,
-            { ...routine, enabled: !routine.enabled, timeoutSecs: routine.timeoutSecs ?? 86400 },
-            ownerId,
-          ),
-        routine.enabled ? '定时任务已停用' : '定时任务已启用',
-      ),
+    toggleRoutine: routineActivation.toggleRoutine,
+    pendingRoutineToggle: routineActivation.pendingRoutineToggle,
     deleteRoutine: (id: string) => act(() => botEditorService.deleteRoutine(botId!, id, ownerId), '定时任务已删除'),
     saveEngineConfig: engineConfig.save,
     restoreDefaultEngineConfig: engineConfig.restoreDefaults,

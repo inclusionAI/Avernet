@@ -66,6 +66,7 @@ pub(crate) async fn human_controls_bot(
 }
 
 pub struct BcsMessageFlow {
+    pub(crate) native_tasks: crate::native_task::NativeTaskCorrelation,
     pub execution_cache: Option<Arc<dyn bcs_cache_api::CachePlugin>>,
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
@@ -109,12 +110,47 @@ pub struct BcsMessageFlow {
     pub group_delivery_limits: BTreeMap<String, u32>,
     pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
     pub delivery_queue_ttl_ms: Option<i64>,
+    /// Speaking-lease idle window for workbench submissions (§15.99,
+    /// `[speaking_lease] idle_timeout_ms`): both the submission check and
+    /// the post-acceptance renewal use this exact configured value.
+    pub speaking_lease_idle_timeout_ms: i64,
     pub queue_persistable_headers: Vec<String>,
     /// Retained policy for replies from already-admitted Group runs during drain.
     pub group_reply_delivery_limits: BTreeMap<String, u32>,
     pub delivery_shutdown: OnceLock<(tokio::sync::watch::Sender<bool>, tokio::sync::watch::Receiver<bool>)>,
     pub(crate) delivery_event_locks: tokio::sync::Mutex<BTreeMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
-    terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
+    /// Caller admission seam dependencies (spec §7.5.1). `None` keeps the
+    /// ordinary web_send behavior untouched; the composition root opts in.
+    pub caller_admission: Option<Arc<crate::caller_admission::CallerAdmissionDeps>>,
+    /// Speaking-lease store (spec §6.3, P3): injected only where the
+    /// composition provides one. `None` keeps ordinary groups untouched;
+    /// a caller group without a store fails closed instead of un-limiting
+    /// Human concurrency.
+    pub speaking_leases: Option<
+        Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+    >,
+    /// Caller root-lineage registry (spec §8.3, L243-A): runtime-only, the
+    /// accepted protected dispatch is the single trusted producer; the
+    /// coordination derivation gate is the single reader. `None` keeps the
+    /// composition without caller derivations entirely.
+    pub caller_root_lineage: Option<Arc<crate::caller_lineage::RootLineageIndex>>,
+    /// Shared observe assembly (spec §6.4, L243③ wire): the runtime-only
+    /// observe index plus the composition's injector factory — the reply
+    /// sync's collaborators. Set by the caller wiring epoch together with
+    /// the runtime pipeline; `None` keeps reply syncs off.
+    pub caller_observe: Option<Arc<crate::caller_dispatch_pipeline::ObserveSyncAssembly>>,
+    /// §15.83 S3/S4 (review-VI P1): the protected dispatch pipeline this
+    /// composition built — the composition root hands the SAME instance to
+    /// other application services (the collaboration runtime's orchestration
+    /// node dispatch + instance registrar). Absent in test/dev compositions.
+    pub caller_dispatch_pipeline: Option<Arc<crate::caller_dispatch_pipeline::CallerDispatchPipeline>>,
+    /// Owner→caller identity relay (spec L62 direction, opt-in): the ledger
+    /// captures the session's current human ingress at admission and the
+    /// trusted task-assign edge redeems it onto an allowlisted caller
+    /// target's handoff scope. None of it travels through the middle bot;
+    /// `None` keeps every session fail-closed to today's behavior.
+    pub caller_relay: Option<crate::caller_relay::CallerRelayState>,
+    pub(crate) terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
     terminal_slots: Arc<tokio::sync::Semaphore>,
     system_queue: Arc<crate::queued_system::QueuedSystemAdmission>,
 }
@@ -128,6 +164,7 @@ impl BcsMessageFlow {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         Self {
+            native_tasks: Default::default(),
             execution_cache: None,
             direct_chat: None,
             group,
@@ -158,6 +195,7 @@ impl BcsMessageFlow {
             group_delivery_limits: BTreeMap::new(),
             delivery_policy: None,
             delivery_queue_ttl_ms: None,
+            speaking_lease_idle_timeout_ms: 60_000,
             group_reply_delivery_limits: BTreeMap::new(),
             queue_persistable_headers: Vec::new(),
             delivery_shutdown: OnceLock::new(),
@@ -165,7 +203,18 @@ impl BcsMessageFlow {
             terminal_owner: OnceLock::new(),
             terminal_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             system_queue: Arc::new(crate::queued_system::QueuedSystemAdmission::default()),
+            caller_admission: None,
+            speaking_leases: None,
+            caller_root_lineage: None,
+            caller_observe: None,
+            caller_dispatch_pipeline: None,
+            caller_relay: None,
         }
+    }
+
+    pub fn with_caller_relay(mut self, relay: crate::caller_relay::CallerRelayState) -> Self {
+        self.caller_relay = Some(relay);
+        self
     }
 
     pub fn with_execution_cache(mut self, cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Self {
@@ -232,6 +281,39 @@ impl BcsMessageFlow {
 
     pub fn with_managed_deliveries(mut self, service: Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>) -> Self {
         self.managed_deliveries = Some(service);
+        self
+    }
+
+    pub fn with_speaking_leases(
+        mut self,
+        leases: Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+    ) -> Self {
+        self.speaking_leases = Some(leases);
+        self
+    }
+
+    /// Attach the caller derivation collaborators (spec §8.3/§7.2, L243-A):
+    /// both must be present — the runtime-only lineage registry the accepted
+    /// protected dispatch produces, and the durable child repo the
+    /// coordination edge registers derived children under. Partial
+    /// assemblies stay absent entirely (fail-closed, no phantom store).
+    /// Attach the shared observe assembly for the reply-side sync
+    /// (spec §6.4 Bot 共享回复同步): the same index the accepted dispatch
+    /// seeds, plus the injector factory for the replying bot's own
+    /// Provider target.
+    pub fn with_caller_observe(
+        mut self,
+        observe: Arc<crate::caller_dispatch_pipeline::ObserveSyncAssembly>,
+    ) -> Self {
+        self.caller_observe = Some(observe);
+        self
+    }
+
+    pub fn with_caller_derivation(
+        mut self,
+        root_lineage: Arc<crate::caller_lineage::RootLineageIndex>,
+    ) -> Self {
+        self.caller_root_lineage = Some(root_lineage);
         self
     }
 
@@ -367,7 +449,10 @@ impl BcsMessageFlow {
         if delivery_type != DeliveryType::Send {
             return Ok(());
         }
-        let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
+        let timeout_ms = self.task_store.get(run_id).await.and_then(|task| task.timeout_s)
+            .map(|seconds| seconds.saturating_mul(1000).saturating_add(300_000).max(self.provider_chat_run_timeout_ms))
+            .unwrap_or(self.provider_chat_run_timeout_ms);
+        let deadline_ms = now_ms().saturating_add(timeout_ms);
         if let Some(run_context) = &self.bot_run_context {
             let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
@@ -380,22 +465,8 @@ impl BcsMessageFlow {
                     terminal: false,
                 })
                 .await;
-            let (transport_owner, provider_bypass_headers) = match delivery_target {
-                BotDeliveryTarget::WebSocket { .. } => {
-                    (BotRunTransportOwner::WebSocket, Vec::new())
-                }
-                BotDeliveryTarget::HttpProvider {
-                    provider_id,
-                    provider_bot_ref,
-                    ..
-                } => (
-                    BotRunTransportOwner::HttpProvider {
-                        provider_id: provider_id.clone(),
-                        provider_bot_ref: provider_bot_ref.clone(),
-                    },
-                    provider_bypass_headers.to_vec(),
-                ),
-            };
+            let transport_owner = BotRunTransportOwner::from_target(delivery_target);
+            let provider_bypass_headers = if delivery_target.is_http_provider() { provider_bypass_headers.to_vec() } else { Vec::new() };
             run_context
                 .register_active_run(ActiveBotRunContext {
                     canonical_run_id: run_id.to_string(),
@@ -516,6 +587,12 @@ impl MessageFlowService for BcsMessageFlow {
         }
         Ok(None)
     }
+    async fn task_status(&self, refs: Vec<String>) -> ServiceResult<Vec<bcs_service_api::TaskHandleView>> {
+        crate::task_handle::status(self, refs).await
+    }
+    async fn cancel_task(&self, task_ref: String, reason: String) -> ServiceResult<bcs_service_api::TaskHandleView> {
+        crate::task_handle::cancel(self, task_ref, reason).await
+    }
     async fn query_message_deliveries(&self, query: bcs_service_api::application::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
         crate::delivery_control::query(self, query).await
     }
@@ -574,12 +651,12 @@ impl MessageFlowService for BcsMessageFlow {
             // of spawning an unbounded terminal retry queue.
             let permit = self.terminal_slots.clone().acquire_owned().await
                 .map_err(|_| ServiceError::InternalError("terminal processing unavailable".into()))?;
-            return tokio::spawn(async move {
+            return tokio::spawn(bcs_tracing_api::in_current_context(async move {
                 let _permit = permit;
                 let result = crate::bot_event::handle_bot_event(&owner, cmd).await;
                 if result.is_err() { tracing::warn!("retained terminal processing failed; delivery state remains authoritative"); }
                 result
-            }.in_current_span()).await.map_err(|error| ServiceError::InternalError(format!("terminal processing task failed: {error}")))?;
+            }.in_current_span())).await.map_err(|error| ServiceError::InternalError(format!("terminal processing task failed: {error}")))?;
         }
         crate::bot_event::handle_bot_event(self, cmd).await
     }
@@ -688,6 +765,12 @@ impl MessageFlowService for BcsMessageFlow {
         cmd: TaskDispatchCommand,
     ) -> ServiceResult<TaskDispatchOutcome> {
         crate::task_flow::handle_task_dispatch(self, cmd).await
+    }
+
+    async fn handle_native_task_dispatch(
+        &self, request_id: &str, cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        crate::native_task::dispatch(self, request_id, cmd).await
     }
 
     async fn handle_task_message(

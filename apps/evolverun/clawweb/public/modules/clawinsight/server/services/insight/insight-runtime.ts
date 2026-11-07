@@ -24,7 +24,7 @@ export type InsightRuntime = {
   providerMode: string;
   providerDescription: string;
   dingTalkNotificationEnabled: boolean;
-  notificationSender?: Pick<DingTalkSender, "sendNotification"> | null;
+  notificationSender?: Pick<DingTalkSender, "sendNotification"> & Partial<Pick<DingTalkSender, "sendCard" | "updateCard">> | null;
   evidenceAccessEnabled: boolean;
   ruleProvider: GovernanceRuleProvider | null;
 };

@@ -33,10 +33,10 @@ export function ChannelConfigPanel({
   const showPluginStage = serviceBot && bindingMode === 'plugin';
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
-        <div>
-          <h2 className="m-0 text-lg font-semibold tracking-tight">渠道管理</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">渠道管理</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
         </div>
         <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
           新建配置
@@ -79,7 +79,7 @@ export function ChannelConfigPanel({
         </div>
         {visibleChannels.length ? (
           <div className="overflow-x-auto rounded-lg border border-border">
-            <div className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] gap-3 border-b border-border bg-muted px-4 py-2 text-xs font-medium text-muted-foreground">
+            <div className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] gap-3 border-b border-divider bg-muted px-4 py-2 text-xs font-medium text-muted-foreground">
               <span>场景描述</span>
               <span>{showPluginStage ? '生效环境' : '绑定环境'}</span>
               <span>{bindingMode === 'plugin' ? '机器人 ID' : 'Robot Code'}</span>
@@ -90,7 +90,7 @@ export function ChannelConfigPanel({
             {visibleChannels.map((channel) => (
               <div
                 key={channel.id}
-                className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] items-center gap-3 border-b border-border px-4 py-3 text-xs last:border-b-0"
+                className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] items-center gap-3 border-b border-divider px-4 py-3 text-xs last:border-b-0"
               >
                 <div className="min-w-0">
                   <p className="m-0 truncate font-medium">{channel.description || '未命名场景'}</p>

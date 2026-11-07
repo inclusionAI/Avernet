@@ -21,6 +21,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     CompletionRequest, CompletionResponse, FinishReason, LlmCallKind,
     ModelId, TokenUsage,
 )
+from agentclaw.community.plugins.local.agentswarm import llm_openai
 from agentclaw.community.plugins.local.agentswarm.llm_openai import OpenAICompatibleClient
 from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 
@@ -258,6 +259,104 @@ class TestNonRetryableFailures:
             await client._client.aclose()
 
             assert len(server.requests) == 1
+
+        asyncio.run(main())
+
+
+class _RecordingSleep:
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
+class TestThrottlePolicy:
+    def test_429_honors_retry_after_header(self, monkeypatch):
+        sleep = _RecordingSleep()
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(429, headers={"Retry-After": "30"},
+                              json={"error": "slow down"}),
+                httpx.Response(200, json=_ok_body("after window")),
+            ])
+            client = _make_client(server, max_retries=3)
+            resp = await client.complete(_req())
+            await client._client.aclose()
+
+            assert resp.text == "after window"
+            assert sleep.calls == [30.0]
+
+        asyncio.run(main())
+
+    def test_429_retry_after_capped_at_max_sleep(self, monkeypatch):
+        # A hostile Retry-After must not park a worker slice for minutes.
+        sleep = _RecordingSleep()
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(429, headers={"Retry-After": "9999"},
+                              json={"error": "hostile"}),
+                httpx.Response(200, json=_ok_body("after cap")),
+            ])
+            client = _make_client(server, max_retries=3)
+            resp = await client.complete(_req())
+            await client._client.aclose()
+
+            assert resp.text == "after cap"
+            assert sleep.calls == [llm_openai._THROTTLE_MAX_SLEEP]
+
+        asyncio.run(main())
+
+    def test_429_without_header_backs_off_in_steps_then_exhausts_own_budget(
+            self, monkeypatch):
+        # No header → ~20s steps (quota windows are tens of seconds); the
+        # throttle budget is its own — generic max_retries does not cap it.
+        sleep = _RecordingSleep()
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(429, json={"error": "rate limited"})
+                for _ in range(llm_openai._THROTTLE_MAX_ATTEMPTS + 1)
+            ])
+            client = _make_client(server, max_retries=1)
+            with pytest.raises(RuntimeError, match="throttled \\(429\\)"):
+                await client.complete(_req())
+            await client._client.aclose()
+
+            attempted = len(server.requests)
+            # wire calls = budget + 1 (the generic ladder's max_retries+1
+            # convention; the 9th arrival is the exhausting one)
+            assert attempted == llm_openai._THROTTLE_MAX_ATTEMPTS + 1
+            assert sleep.calls[:3] == [20.0, 40.0, 60.0]
+
+        asyncio.run(main())
+
+    def test_transport_wrap_exception_retries_then_succeeds(self, monkeypatch):
+        # Corp deployments wrap every transport failure in the ant_baselib
+        # tracer's HttpxCallingException; the retry ladder must survive the
+        # wrapper, not just the bare httpx exception classes.
+        class Wrapped(Exception):
+            pass
+
+        monkeypatch.setattr(llm_openai, "_TRANSPORT_WRAP_EXCS", (Wrapped,))
+        _skip_retry_waits(monkeypatch)
+
+        async def main():
+            server = FakeOpenAIServer([
+                Wrapped("Error in httpx send hook"),
+                httpx.Response(200, json=_ok_body("after wrapper")),
+            ])
+            client = _make_client(server, max_retries=3)
+            resp = await client.complete(_req())
+            await client._client.aclose()
+
+            assert resp.text == "after wrapper"
+            assert len(server.requests) == 2
 
         asyncio.run(main())
 

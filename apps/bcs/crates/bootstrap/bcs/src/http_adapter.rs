@@ -93,7 +93,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .filter_map(|name| HeaderName::try_from(name.trim()).ok())
         .collect();
 
-    HttpAppState::new(services_with_secret)
+    let http_state = HttpAppState::new(services_with_secret)
         .with_group_application(group_application)
         .with_session_application(session_application)
         .with_register_application(state.openapi_v1.register_service.clone())
@@ -158,7 +158,12 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_user_identity(Arc::new(
             ChainUserIdentityPort::new(state.auth_chain.clone()),
         ))
-        .with_internal_bot_attributes_service(internal_bot_attributes_service)
+        .with_caller_ingress_source(Arc::new(
+            ChainUserIdentityPort::new(state.auth_chain.clone()),
+        ))
+        .with_internal_bot_attributes_service(internal_bot_attributes_service);
+
+    http_state
 }
 
 async fn build_secret_service(config: &crate::config::BcsConfig) -> crate::Result<Arc<dyn SecretService>> {
@@ -753,6 +758,7 @@ mod tests {
         Arc::new(BcsServerState {
             config,
             services: Services::noop(),
+            speaking_leases: None,
             run_channels: Arc::new(RunChannelManager::new()),
             bot_connections: Arc::new(BotConnectionRegistry::new()),
             frontend_connections: http_frontend_connections.clone(),
@@ -777,6 +783,7 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            explicit_api_auth: None,
             bot_ws_admission,
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),
@@ -784,6 +791,7 @@ mod tests {
             internal_bot_attributes_service: v1_state.internal_bot_attributes_service.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
+            auth_session_identity: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
             connect_service: Arc::new(bcs_test_support::NoopConnectService),

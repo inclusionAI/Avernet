@@ -51,7 +51,8 @@ function EvolutionFactoryContent() {
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full p-5 sm:p-6">
         <PageHeader title="智能进化" description="围绕 Bot 的真实运行数据完成「诊断 → 优化 → 验证」的进化闭环" />
-        <section className="mt-5 rounded-xl border border-border/60 bg-card p-4 sm:p-6">
+        {/* 白卡不描边，与 Bot 管理首页验收一致（靠白/灰底色差自明）。 */}
+        <section className="mt-5 rounded-xl bg-card p-4 sm:p-6">
           <EvolutionTabs tab={tab} className="mb-4" />
           {tab === 'tasks' ? (
             <TaskList onCreate={() => setOpen(true)} />

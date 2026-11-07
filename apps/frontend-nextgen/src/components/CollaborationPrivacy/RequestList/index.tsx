@@ -14,7 +14,7 @@ interface RequestListProps {
 export function RequestList({ config, disabled, disabledReason, onEdit, onViewScope }: RequestListProps) {
   const exemptScopeCount = config.exemptOrganizationPaths.length || config.exemptDepartmentNos?.length || 0;
   return (
-    <section className="flex flex-wrap items-start justify-between gap-3">
+    <section className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="m-0 text-sm font-medium text-foreground">好友审批策略</p>

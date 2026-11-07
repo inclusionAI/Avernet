@@ -24,10 +24,10 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash apps/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash apps/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
-#                                                    # gate line >=41%, method >=36%
+#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 54 --bcs-method-min 48
+#                                                    # gate line >=54%, method >=48%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
-#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 50]
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 65]
 #                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -243,6 +243,8 @@ bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 # Exercise channel plugins through a separate real server without enabling a
 # test ingress on the shared production-composition Singlebox instance.
 bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
+# Real OAuth login/session journeys against isolated local HTTPS provider stubs.
+bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi
@@ -335,8 +337,8 @@ if [[ "$no_stop" -eq 0 ]]; then
   #     its exit code is combined with e2e's below — no more swallowed gate
   #     (the old `[[ e2e eq 0 ]] && exit` skipped coverage failure when e2e
   #     itself failed, so coverage thresholds appeared not to take effect).
-  # A threshold of 0 is report-only. Pre-push/CI gate line >=41% and method
-  # >=36%; --bcs-min remains available to set both to one value.
+  # A threshold of 0 is report-only. Pre-push/CI gate line >=54% and method
+  # >=48%; --bcs-min remains available to set both to one value.
   # With a base ref, also measure changed-line coverage from cobertura.xml.
   # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
   # then, including when no base ref was given).
@@ -352,14 +354,33 @@ if [[ "$no_stop" -eq 0 ]]; then
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
     bcs-bot-store/src/memory_authority.rs
+    bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
+    # The bot-avatar plan reorganized this store: T1 (4fb7a510cf) moved the
+    # memory identity/runtime operations out of memory_bot_repo_port.rs, and
+    # T3 (b5d99b3109) added memory_profile.rs (avatar persistence). The three
+    # split files showed 0 E2E hits in the 2026-11-03 singlebox measurement
+    # (337+296+219 instrumentable lines), same as their already-listed parent
+    # file: the SQLite E2E stack selects the persistent repo, never this one.
+    bcs-bot-store/src/memory_identity_ops.rs
+    bcs-bot-store/src/memory_runtime_ops.rs
+    bcs-bot-store/src/memory_profile.rs
     bcs-bot-store/src/memory_control_plane.rs
     bcs-bot-store/src/memory_controllable.rs
     bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
     bcs-bot-store/src/memory_registration_ownership.rs
     bcs-bot-store/src/memory_retirement.rs
+    # The collaboration-store split introduced memory_* module files; the four
+    # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11
+    # instrumentable lines). memory_events.rs is deliberately NOT listed: its
+    # shared state_machine_transition_events helper is executed via the SQL path
+    # (11 E2E hits), so the warn-and-re-include rule would fire on it.
+    bcs-collaboration-store/src/memory_binding.rs
+    bcs-collaboration-store/src/memory_definition.rs
+    bcs-collaboration-store/src/memory_runs.rs
+    bcs-collaboration-store/src/memory_transition.rs
     bcs-event-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs
@@ -373,8 +394,9 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-file-store/src/memory.rs
     bcs-session-store/src/memory.rs
     bcs-session-store/src/memory_operations/
-    bcs-user-identity/src/memory.rs
   )
+  # Caller delegate stages are exercised by caller_delegation_chain_story.py;
+  # only structurally unreachable memory repositories belong in this list.
   changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"

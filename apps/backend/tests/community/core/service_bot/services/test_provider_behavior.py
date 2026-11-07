@@ -144,7 +144,7 @@ async def test_teclaw_stage_build_files_merges_refs():
     )
 
     await teclaw.stage_build_files(
-        artifact=artifact, bot={"entity_type": "staff", "entity_id": "u"},
+        artifact=artifact, bot={"entity_type": "staff", "entity_id": "staff_u", "owner_id": "new-owner"},
         bot_id="b", owner_id="u", publish_id=5,
     )
 
@@ -159,7 +159,9 @@ async def test_teclaw_stage_build_files_merges_refs():
     assert kwargs["publish_id"] == 5
     assert kwargs["stage"] == "verify"
     assert kwargs["device_fs"] is dispatcher.dispatch.return_value
-    resolver.resolve_for_bot.assert_called_once_with("b", "u")
+    resolver.resolve_for_bot.assert_called_once_with("b", "new-owner")
+    assert kwargs["entity_id"] == "staff_u"
+    assert kwargs["entity_type"] == "staff"
 
 
 @pytest.mark.asyncio

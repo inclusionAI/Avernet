@@ -1,8 +1,12 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useId } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import { parseRunSnapshot } from './runSnapshot'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useFlowRun, useDbWorkflow, useEvolveDiagnoses, useEvolveSuggestions, useAnalyzeRun, useResetAnalysisRun, useAnalysisProgress, useRunEvolutionAnalysis } from '../api/hooks'
 import RunSummaryHeader from '../components/RunSummaryHeader'
 import NodeExecutionList from '../components/NodeExecutionList'
+import SubworkflowLinks, { SubworkflowProvider, UnattributedSubworkflowLinks } from '../components/SubworkflowLinks'
 import RunDagView from '../components/RunDagView'
 import ErrorState from '../components/ErrorState'
 import SimpleRunLogsPanel from '../components/SimpleRunLogsPanel'
@@ -12,13 +16,14 @@ import AnalyzeRunBotModal from '../components/AnalyzeRunBotModal'
 import RunEvolutionAnalysis from '../components/evolution/RunEvolutionAnalysis'
 import AggregationProgress from '../components/workflow-workspace/AggregationProgress'
 import type { RunEvolutionAnalysisResponse, WorkflowAnalysisProgressResponse } from '@avernet/clawweb-shared/web/api/client'
-import type { FlowRun, NodeExecution } from '@avernet/clawweb-shared/web/types'
+import type { FlowRun, NodeExecution, WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import RunArchivePanel from '../components/RunArchivePanel'
 import AutoHealPanel from '../components/AutoHealPanel'
 import ApprovalPanel from '../components/ApprovalPanel'
 import ApprovalSlidePanel from '../components/ApprovalSlidePanel'
 import { useFlowApprovals } from '@avernet/clawweb-shared/web/api/hooks'
 import type { ApprovalCardSummary } from '@avernet/clawweb-shared/web/api/client'
+import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 
 type TabId = 'nodes' | 'logs' | 'dag' | 'archive'
 
@@ -45,6 +50,33 @@ function formatAnalysisElapsed(elapsedMs: number): string {
 export default function RunDetail() {
   const { flowId } = useParams<{ flowId: string }>()
   const [searchParams] = useSearchParams()
+  return <RunDetailContent key={flowId} flowId={flowId ?? ''} searchParams={searchParams} ancestors={flowId ? [flowId] : []} />
+}
+
+type RunDetailProps = { flowId: string; searchParams: URLSearchParams; ancestors: string[] }
+type HistoricalSnapshot = { nodes: WorkflowNode[] | undefined; isError: boolean; flowId: string }
+
+function ChildRunDetailContent(props: RunDetailProps) {
+  const observerId = useId()
+  const client = useQueryClient()
+  const queryKey = ['child-run-workflow-snapshot', observerId, props.flowId] as const
+  useEffect(() => () => {
+    void client.cancelQueries({ queryKey, exact: true })
+    client.removeQueries({ queryKey, exact: true })
+  }, [client, observerId, props.flowId])
+  const query = useQuery({
+    queryKey,
+    enabled: !!props.flowId,
+    queryFn: async ({ signal }) => parseRunSnapshot(await fetchJson<unknown>(
+      `/api/runs/${encodeURIComponent(props.flowId)}/workflow-snapshot`, { signal },
+    )),
+    retry: false,
+    gcTime: 60_000,
+  })
+  return <RunDetailContent {...props} readOnly historicalSnapshot={{ nodes: query.isFetching ? undefined : query.data, isError: query.isError, flowId: props.flowId }} />
+}
+
+function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, historicalSnapshot }: RunDetailProps & { readOnly?: boolean; historicalSnapshot?: HistoricalSnapshot }) {
   const fromWorkspace = searchParams.get('from') === 'workspace'
   const workspaceView = searchParams.get('workspaceView')
   const [activeTab, setActiveTab] = useState<TabId>('nodes')
@@ -140,10 +172,11 @@ export default function RunDetail() {
     return { succeeded, failed, total }
   }, [nodes, run?.node_count])
 
-  // Fetch workflow spec for DAG: all nodes + dependency edges
-  const workflowQuery = useDbWorkflow(run?.workflow_id ?? '')
-
-  const specNodes = useMemo(() => workflowQuery.data?.nodes ?? [], [workflowQuery.data])
+  // Keep the main run's existing behavior; child views must never use the mutable spec.
+  const workflowQuery = useDbWorkflow(readOnly ? '' : run?.workflow_id ?? '')
+  const snapshotError = historicalSnapshot?.flowId !== flowId || !!historicalSnapshot?.isError
+  const workflowSpec = readOnly ? undefined : workflowQuery.data
+  const specNodes = readOnly ? (snapshotError ? undefined : historicalSnapshot?.nodes) : workflowSpec?.nodes
 
   const nodeStatusMap = useMemo(() => {
     const map: Record<string, { status: string; executorType?: string; progressMessage?: string | null }> = {}
@@ -171,7 +204,7 @@ export default function RunDetail() {
 
   return (
     <div className="mx-auto max-w-[1440px] px-5 py-5 lg:px-8">
-      <Link
+      {!readOnly && <Link
         to={
           fromWorkspace && run?.workflow_id
             ? workspaceReturnUrl
@@ -185,7 +218,7 @@ export default function RunDetail() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
         {fromWorkspace ? '返回任务护航' : '返回工作流'}
-      </Link>
+      </Link>}
 
       {runLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -193,22 +226,23 @@ export default function RunDetail() {
         </div>
       ) : run ? (
         <>
-          <RunSummaryHeader run={run} nodeCount={nodeProgress.total} succeededCount={nodeProgress.succeeded} failedCount={nodeProgress.failed} onAutoHeal={(selected) => setAutoHealRun(selected)} onApproval={() => setApprovalCard(pendingApprovals[0] ?? approvalCards[0])} pendingApprovalCount={pendingApprovals.length} />
+          <RunSummaryHeader readOnly={readOnly} run={run} nodeCount={nodeProgress.total} succeededCount={nodeProgress.succeeded} failedCount={nodeProgress.failed} onAutoHeal={(selected) => setAutoHealRun(selected)} onApproval={() => setApprovalCard(pendingApprovals[0] ?? approvalCards[0])} pendingApprovalCount={pendingApprovals.length} />
 
-          <div className="mt-4">
+          {!readOnly && <div className="mt-4">
             <InterventionPanel
               flowId={flowId ?? ''}
               runStatus={run.status}
               nodes={nodes}
             />
-          </div>
+          </div>}
 
           <div className="mt-4">
-            <ApprovalPanel flowId={flowId ?? ''} />
+            <ApprovalPanel flowId={flowId ?? ''} readOnly={readOnly} />
           </div>
 
           <div className="mt-4">
             <EvolutionAnalysisPanel
+              readOnly={readOnly}
               workflowId={run.workflow_id ?? ''}
               flowId={flowId ?? ''}
               run={run}
@@ -230,7 +264,7 @@ export default function RunDetail() {
             />
           </div>
 
-          {run && (
+          {!readOnly && run && (
             <AnalyzeRunBotModal
               flowId={run.flow_id}
               workflowId={run.workflow_id}
@@ -240,14 +274,14 @@ export default function RunDetail() {
               onClose={() => setAnalyzeModalOpen(false)}
             />
           )}
-          {autoHealRun && (
+          {!readOnly && autoHealRun && (
             <AutoHealPanel
               run={autoHealRun}
               onClose={() => setAutoHealRun(null)}
               onRerunComplete={() => void refetchRun()}
             />
           )}
-          {approvalCard && run && (
+          {!readOnly && approvalCard && run && (
             <ApprovalSlidePanel
               card={approvalCard}
               run={run}
@@ -267,18 +301,32 @@ export default function RunDetail() {
           <div className="mt-4">
             {activeTab === 'nodes' && (
               <div className="space-y-4">
+                <SubworkflowProvider flowId={flowId}>
                 <NodeExecutionList
+                  readOnly={readOnly}
+                  flowId={flowId}
+                  subworkflowGroups={(run as FlowRun & { subworkflowGroups?: SubworkflowGroupRef[] }).subworkflowGroups}
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}
                   selectedNodeId={selectedNodeId ?? undefined}
-                  workflowSpec={workflowQuery.data}
+                  workflowSpec={workflowSpec}
                   onAnalyze={handleAnalyze}
                   onApproval={(node) => {
                     const card = pendingApprovals.find((c) => c.nodeId === node.node_id)
                     if (card) setApprovalCard(card)
                   }}
                   approvalNodeIds={pendingApprovalNodeIds}
+                  renderSubworkflowLinks={(node) => <SubworkflowLinks
+                    nodeId={node.node_id} ancestors={ancestors}
+                    renderRun={(childFlowId) => <ChildRunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} />}
+                  />}
                 />
+                <UnattributedSubworkflowLinks
+                  nodeIds={nodes.filter(node => node.executor_type === 'subworkflow').map(node => node.node_id)}
+                  ancestors={ancestors}
+                  renderRun={(childFlowId) => <ChildRunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} />}
+                />
+                </SubworkflowProvider>
               </div>
             )}
 
@@ -286,15 +334,24 @@ export default function RunDetail() {
               <SimpleRunLogsPanel flowId={flowId ?? ''} nodes={nodes.map((n) => ({ node_id: n.node_id, node_title: n.node_title }))} />
             )}
 
-            {activeTab === 'dag' && (
-              <RunDagView
-                specNodes={specNodes}
-                nodeStatusMap={nodeStatusMap}
-                onNodeClick={(nodeId) => {
-                  setSelectedNodeId(nodeId)
-                  setActiveTab('nodes')
-                }}
-              />
+            {activeTab === 'dag' && readOnly && snapshotError && (
+              <p role="status" className="text-sm text-muted-foreground">无法确认本次运行的历史 DAG：可信运行快照不可用或无权访问。</p>
+            )}
+            {activeTab === 'dag' && readOnly && !snapshotError && !specNodes && (
+              <p role="status" className="text-sm text-muted-foreground">正在加载本次运行的静态 DAG 快照…</p>
+            )}
+            {activeTab === 'dag' && (!readOnly || (!snapshotError && !!specNodes)) && (
+              <>
+                {readOnly && <p className="mb-2 text-xs text-muted-foreground">静态 DAG，来自运行登记时绑定的快照，不含动态节点；尚未验证其与引擎实际执行配置一致。</p>}
+                <RunDagView
+                  specNodes={specNodes ?? []}
+                  nodeStatusMap={nodeStatusMap}
+                  onNodeClick={(nodeId) => {
+                    setSelectedNodeId(nodeId)
+                    setActiveTab('nodes')
+                  }}
+                />
+              </>
             )}
 
             {activeTab === 'archive' && (
@@ -310,7 +367,7 @@ export default function RunDetail() {
           message={`未找到ID为: ${flowId}`}
         />
       )}
-      {analyzingNode && (
+      {!readOnly && analyzingNode && (
         <AnalysisModal node={analyzingNode} onClose={handleCloseAnalysis} />
       )}
     </div>
@@ -319,6 +376,7 @@ export default function RunDetail() {
 
 
 function EvolutionAnalysisPanel({
+  readOnly,
   flowId,
   workflowId,
   run,
@@ -338,6 +396,7 @@ function EvolutionAnalysisPanel({
   analysisError,
   onRetryAnalysisResult,
 }: {
+  readOnly: boolean
   flowId: string
   workflowId: string
   run: Parameters<typeof RunSummaryHeader>[0]['run']
@@ -388,7 +447,7 @@ function EvolutionAnalysisPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {analyzing && (
+          {!readOnly && analyzing && (
             <button
               type="button"
               onClick={onReset}
@@ -398,20 +457,20 @@ function EvolutionAnalysisPanel({
               {resetting ? '取消中...' : '取消分析'}
             </button>
           )}
-          <button
+          {!readOnly && <button
             type="button"
             onClick={onReanalyze}
             disabled={analyzing}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 ${flowSuggestions.length > 0 ? 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
           >
             {analyzing ? '分析中...' : hasAnalyzed ? '重新分析' : '分析'}
-          </button>
+          </button>}
           {(run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error && !analyzing && (
             <span className="max-w-[260px] truncate text-[10px] text-red-600" title={String((run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error)}>
               {String((run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error)}
             </span>
           )}
-          {flowSuggestions.length > 0 && !analysis && (
+          {!readOnly && flowSuggestions.length > 0 && !analysis && (
             <Link
               to={evolutionUrl()}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
@@ -472,10 +531,10 @@ function EvolutionAnalysisPanel({
 
       {!analyzing && analysis?.status === 'completed' && (
         <div className="mt-3">
-          <AggregationProgress workflowId={workflowId} flowId={flowId} />
+          <AggregationProgress workflowId={workflowId} flowId={flowId} readOnly={readOnly} />
           <RunEvolutionAnalysis
             analysis={analysis}
-            renderOptimizeLink={(diagnosis) => diagnosis.proposal ? (
+            renderOptimizeLink={(diagnosis) => !readOnly && diagnosis.proposal ? (
               <Link
                 to={evolutionUrl(diagnosis)}
                 className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
@@ -488,7 +547,7 @@ function EvolutionAnalysisPanel({
       )}
 
       {!analyzing && !analysisLoading && !analysis && !analysisError && !diagnosesLoading && !suggestionsLoading && flowDiagnoses.length === 0 && flowSuggestions.length === 0 && (
-        <p className="mt-3 text-xs text-slate-500">点击“分析”开始诊断。</p>
+        <p className="mt-3 text-xs text-slate-500">{readOnly ? '暂无分析结果。' : '点击“分析”开始诊断。'}</p>
       )}
     </section>
   )

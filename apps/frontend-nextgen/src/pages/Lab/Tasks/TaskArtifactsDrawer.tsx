@@ -26,7 +26,7 @@ export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifa
         bodyClassName="flex flex-col p-0"
         closeLabel="关闭任务产物抽屉"
       >
-        <header className="shrink-0 border-b border-border px-5 py-4 pr-14">
+        <header className="shrink-0 border-b border-divider px-5 py-4 pr-14">
           <DrawerTitle className="text-base font-semibold text-foreground">任务产物</DrawerTitle>
           <DrawerDescription className="mt-1 break-all font-mono text-xs text-muted-foreground">
             {taskId ? `任务 ID：${taskId}` : '请选择任务'}

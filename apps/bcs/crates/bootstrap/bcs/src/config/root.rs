@@ -7,10 +7,10 @@ use secrecy::Secret;
 use serde::{Deserialize, Serialize};
 
 use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, BcsFuseConfig, CacheConfig, ChannelConfigSection,
-    DatabaseConfig, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
-    HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LoggingConfig, ManifestConfig,
-    SecretConfig, SecurityConfig, UserDirectoryConfig,
+    ApiConfig, AuthChainConfig, AuthSdkConfig, BcsFuseConfig, CacheConfig,
+    ChannelConfigSection, DatabaseConfig, DingTalkAccountConfig, EventingConfig,
+    FusionProviderConfig, HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LoggingConfig,
+    ManifestConfig, SecretConfig, SecurityConfig, UserDirectoryConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 
@@ -35,6 +35,15 @@ pub struct BcsConfig {
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]
     pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
+    /// Optional caller identity service section (spec §10.13.7): absent =
+    /// no caller capability assembled and the anti-downgrade guard stays
+    /// closed; present = full validation at startup, fail closed.
+    #[serde(default)]
+    pub caller_identity: Option<bcs_config_api::CallerIdentityServiceConfig>,
+    /// Speaking-lease idle window (spec §10.13.9, §15.99): defaults to the
+    /// frozen 60s constant; absent section changes nothing.
+    #[serde(default)]
+    pub speaking_lease: bcs_config_api::SpeakingLeaseConfig,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -126,6 +135,18 @@ pub struct BcsConfig {
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
+
+    /// Legacy scoped-token registration opt-in. Public v0.1 management accepts
+    /// anonymous Cards by contract; delivery of admitted Cards needs no opt-in.
+    #[serde(default)]
+    pub a2a_allow_anonymous:bool,
+    /// Human approval waits pause execution but remain bounded by these caps.
+    #[serde(default)]
+    pub a2a_input:super::a2a_input::A2aInputConfig,
+
+    /// Explicit deployment-owned routes through a local MOSN gRPC sidecar.
+    #[serde(default)]
+    pub a2a_grpc:Option<bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -233,6 +254,14 @@ pub struct BcsConfig {
     /// default (`bcs_auth_api::AuthConfig::default`).
     #[serde(default)]
     pub auth: AuthChainConfig,
+
+    /// Independent V1 API authentication configuration (`[api]` section).
+    /// Absent keeps compatibility semantics; a present `[api.auth]` is
+    /// structurally parsed (reserved public fields + plugin tables) and
+    /// validated against the registered sources at startup by the
+    /// api.auth registry.
+    #[serde(default)]
+    pub api: ApiConfig,
 
     /// CORS configuration for browser clients.
     #[serde(default)]
@@ -431,6 +460,8 @@ impl Default for BcsConfig {
     fn default() -> Self {
         Self {
             collaboration_drafts: None,
+            caller_identity: None,
+            speaking_lease: Default::default(),
             state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),
@@ -452,6 +483,9 @@ impl Default for BcsConfig {
             human_notify: HumanNotifyConfig::default(),
             message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
+            a2a_allow_anonymous:false,
+            a2a_input:super::a2a_input::A2aInputConfig::default(),
+            a2a_grpc:None,
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
@@ -474,6 +508,7 @@ impl Default for BcsConfig {
             auth_sdk: AuthSdkConfig::default(),
             user_directory: UserDirectoryConfig::default(),
             auth: AuthChainConfig::default(),
+            api: ApiConfig::default(),
             cors: CorsConfig::default(),
             group_logger: None,
             provider_chat_run_timeout_ms: default_provider_chat_run_timeout_ms(),

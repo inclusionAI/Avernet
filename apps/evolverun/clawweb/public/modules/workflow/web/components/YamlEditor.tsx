@@ -19,7 +19,7 @@ interface NormalizationReview {
 const serialize = (spec: WorkflowSpec | null) => spec ? stringify(spec, { lineWidth: 0 }) : ''
 
 export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
-  const { setPendingEdit, sessionId } = useEditorStore()
+  const { setPendingEdit, sessionId, spec: liveSpec, _databaseSpec } = useEditorStore()
   const [restored] = useState(() => {
     const draft = readDraft(sessionId, 'yaml')
     let error: string | null = null
@@ -36,7 +36,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
   const [localInvalid, setLocalInvalid] = useState(!!restored.error)
   const [validating, setValidating] = useState(false)
   const [issues, setIssues] = useState<WorkflowValidationIssue[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
+  const [appliedCount, setAppliedCount] = useState<number | null>(null)
   const [review, setReview] = useState<NormalizationReview | null>(null)
   const dirtyRef = useRef(!!restored.draft)
   const revision = useRef(0)
@@ -67,7 +67,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
       setLocalInvalid(false)
       setValidating(false)
       setIssues([])
-      setNotice(null)
+      setAppliedCount(null)
     } else if (dirtyRef.current) {
       setConflict(true)
       revision.current++
@@ -83,6 +83,12 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     setReview(null)
   }, [spec, sessionId])
 
+  // The immediate Apply acknowledgement is retained, but its save suffix follows
+  // the confirmed DB draft rather than inferring persistence from the Apply call.
+  const savedToDatabase = !!liveSpec && !!_databaseSpec && normalizationChanges(liveSpec, _databaseSpec).length === 0
+  const notice = appliedCount === null || !liveSpec ? null
+    : `已应用 ${appliedCount} 个节点的配置。${savedToDatabase ? '已保存到数据库。' : '尚未保存到服务器。'}`
+
   const changeText = useCallback((value: string) => {
     if (session.current !== useEditorStore.getState().sessionId) return
     revision.current++
@@ -90,7 +96,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     writeDraft(session.current, 'yaml', { text: value, baseline: baseline.current, owner: owner.current })
     setText(value)
     setDirty(true)
-    setNotice(null)
+    setAppliedCount(null)
     setIssues([])
     setReview(null)
     setValidating(false)
@@ -122,7 +128,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     owner.current = value.id
     baseline.current = serialize(value)
     setText(baseline.current)
-    setNotice(`已应用 ${value.nodes.length} 个节点的配置。尚未保存到服务器。`)
+    setAppliedCount(value.nodes.length)
   }, [onImport, setPendingEdit])
 
   const apply = useCallback(async () => {
@@ -143,7 +149,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
       && requestSession === useEditorStore.getState().sessionId && currentSpec.current?.id === requestOwner
     setValidating(true)
     setIssues([])
-    setNotice(null)
+    setAppliedCount(null)
     setReview(null)
     try {
       const result = await api.workflows.validate(parsed)
@@ -180,7 +186,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     setConflict(false)
     setError(null)
     setIssues([])
-    setNotice(null)
+    setAppliedCount(null)
     setReview(null)
     owner.current = spec?.id ?? null
     baseline.current = serialize(spec)

@@ -37,8 +37,8 @@ jobs:
       OCB_SKIP_GIT_HOOKS: "1"
       SINGLEBOX_MODEL_CONFIG_MODE: mock
       SINGLEBOX_COVERAGE_MODE: real
-      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "41"
-      SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"
+      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "54"
+      SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "48"
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
@@ -46,10 +46,10 @@ jobs:
       # push/dispatch: compare against dev (repo default branch) instead.
       SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
       # Same base for BCS E2E changed-line coverage, which e2e_coverage.sh
-      # reads from these variables: > 50% once a change has >= 20
+      # reads from these variables: > 65% once a change has >= 20
       # instrumentable lines in the e2e scope.
       BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
-      BCS_E2E_CHANGED_LINE_MIN: "50"
+      BCS_E2E_CHANGED_LINE_MIN: "65"
 
     defaults:
       run:
@@ -239,8 +239,8 @@ jobs:
         run: |
           python3 singlebox/ci/verify_singlebox_coverage_artifacts.py \
             --reports-dir singlebox/.dependencies/coverage/singlebox/reports \
-            --bcs-line-min 41 \
-            --bcs-method-min 36 \
+            --bcs-line-min 54 \
+            --bcs-method-min 48 \
             --bcs-router-min 100 \
             --bcs-cli-min 100
 

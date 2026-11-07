@@ -1,5 +1,6 @@
 """Public entry point for isolated service-Bot evaluation deployments."""
 
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -10,6 +11,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope, envelope_errors
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
+from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.core.service_bot.errors import (
@@ -37,11 +39,18 @@ async def publish_eval_env(
     request: Request,
     operator: Annotated[str, Query(min_length=1, description="Caller-supplied business operator; not an authenticated identity.")],
     owner_id: Annotated[str, Query(min_length=1, description="Bot owner locator used for resource lookup; not caller authorization.")],
-    biz_id: Annotated[str, Query(description="Business correlation identifier.")] = "",
     service: PublishFlowServiceProtocol = Injected(PublishFlowServiceProtocol),
     bots: BotServiceProtocol = Injected(BotServiceProtocol),
     publications: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+    quality_tasks: QualityTaskServiceProtocol = Injected(QualityTaskServiceProtocol),
     *,
+    device_count: Annotated[
+        int,
+        Query(
+            ge=1,
+            description="BaaS deployment instance count for this eval environment; provider-defined upper limit.",
+        ),
+    ] = 1,
     cpu: Annotated[int | None, Query(gt=0, description="CPU cores; requires memory.")] = None,
     memory: Annotated[int | None, Query(gt=0, description="Memory in GiB; requires cpu.")] = None,
     disk: Annotated[int | None, Query(gt=0, description="Disk capacity passed to the provider; units and support are provider-defined. Requires cpu and memory.")] = None,
@@ -53,10 +62,14 @@ async def publish_eval_env(
     将 `BASE_URL` 设置为实际 API 服务入口，并按部署要求附带身份凭据。
     以下 ID 均为占位示例，请替换为实际值；无需 JSON 请求体。
 
-        curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&biz_id=task-1"
+        curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1"
+
+        curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&device_count=3"
 
     - `bot-1`：源 Bot ID；`7`：Backend 发布记录 ID。
-    - `owner_id`、`operator` 必填；`biz_id` 可省略，默认空字符串。
+    - `owner_id`、`operator` 必填。
+    - `device_count` 可选，默认 1，表示本次评估环境要创建的实例数量。
+      只接受正整数；超出提供方上限时由 BaaS 直接返回错误。
     - 可选资源覆盖示例：在上述 URL 后追加 `&cpu=4&memory=8&disk=200`。
       `cpu`、`memory` 必须同时提供且为正整数；`disk` 可选且为正整数，不能单独传。
       CPU 为核数，内存为 GiB；磁盘值按底层提供方约定透传，不保证单位或支持情况。
@@ -65,6 +78,9 @@ async def publish_eval_env(
     - `operator` 是调用方传入的业务字段，不作为身份凭据。
     - HTTP 202 表示提交成功，不代表环境已就绪。保存响应 `data` 中的
       `baas_publish_id` 用于查询进度，`bot_uuid` 用于释放环境。
+      成功后创建一条 Quality Task，记录返回的 `publish_id`、`bot_uuid` 与
+      `baas_publish_id`。服务端内部生成一个业务 ID，并把它作为任务 UUID；
+      可以通过响应中的 `quality_task_uuid` 关联这条任务。
     """
     resource_spec = None
     if cpu is not None or memory is not None or disk is not None:
@@ -76,10 +92,35 @@ async def publish_eval_env(
             }])
         resource_spec = ResourceSpecification(cpu=cpu, memory=memory, disk=disk)
     _validate_publication_address(bot_id, publication_id, owner_id, bots, publications)
+    biz_id = uuid.uuid4().hex
     deployment = await service.eval_publish(
-        publish_id=publication_id, operator=operator, biz_id=biz_id, resource_spec=resource_spec,
+        publish_id=publication_id,
+        operator=operator,
+        biz_id=biz_id,
+        device_count=device_count,
+        resource_spec=resource_spec,
     )
-    return accepted(EvalEnvPublishResult.model_validate(deployment), request)
+    quality_task = quality_tasks.create_task(
+        task_type="eval",
+        biz_type="service_bot_single",
+        bot_id=bot_id,
+        owner_id=owner_id,
+        ext={
+            "publish_id": deployment["publish_id"],
+            "bot_uuid": deployment["bot_uuid"],
+            "baas_publish_id": deployment["baas_publish_id"],
+            "operator": operator,
+        },
+        operator_id=operator,
+        uuid=biz_id,
+    )
+    return accepted(
+        EvalEnvPublishResult.model_validate({
+            **deployment, "quality_task_id": quality_task.id,
+            "quality_task_uuid": quality_task.uuid,
+        }),
+        request,
+    )
 
 
 def _validate_publication_address(
@@ -105,7 +146,7 @@ def _validate_publication_address(
 
 
 @router.get(
-    "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress",
+    "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress",
     response_model=Envelope[dict[str, Any]],
 )
 @envelope_errors
@@ -121,21 +162,21 @@ async def get_env_publish_progress(
     将 `BASE_URL` 设置为实际 API 服务入口，并按部署要求附带身份凭据。
     用发布响应 `data.baas_publish_id` 的实际值替换示例中的 `42`。
 
-        curl "${BASE_URL}/openapi/v1/service-envs/env-publish/42/progress"
+        curl "${BASE_URL}/openapi/v1/bots/service-envs/env-publish/42/progress"
 
     只需 `baas_publish_id`，无需 Bot ID、owner_id 或请求体。
-    HTTP 200 的 `data` 为 BaaS 进度信息；检查 `data.status` 判断结果：
+    HTTP 200 的 `data` 为 BaaS 进度信息，并包含设备详情与失败设备（若 BaaS 返回）；检查 `data.status` 判断结果：
     `SUCCESS` 表示成功，`FAILED` 表示失败，其他状态可能仍在处理中。
     此查询不推进 Quality 任务状态。
     """
     progress = service.get_baas_publish_progress(
-        baas_publish_id=baas_publish_id, include_devices=False,
+        baas_publish_id=baas_publish_id, include_devices=True,
     )
     return envelope(progress, request)
 
 
 @router.post(
-    "/openapi/v1/service-envs/{bot_uuid}/env-teardown",
+    "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown",
     status_code=202,
     response_model=Envelope[EvalEnvTeardownResult],
 )
@@ -155,7 +196,7 @@ async def teardown_eval_env(
     用发布响应 `data.bot_uuid` 替换 `eval-bot-1`，用原 Backend 发布记录 ID
     替换 `publish_id=7`；不要将 BaaS 工作流 ID 当作 publish_id。
 
-        curl -X POST "${BASE_URL}/openapi/v1/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
+        curl -X POST "${BASE_URL}/openapi/v1/bots/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
 
     无需请求体。`operator` 默认 `system`；`publish_id` 默认 `0`，建议传入
     原发布记录 ID，使主动释放和 TTL 自动释放使用同一操作记录。

@@ -30,6 +30,7 @@ pub struct ProviderRegistrationCore {
     env: String,
     self_service_providers: Vec<String>,
     url_guard: OutboundUrlGuard,
+    a2a_allow_anonymous:bool,
 }
 
 impl ProviderRegistrationCore {
@@ -55,8 +56,11 @@ impl ProviderRegistrationCore {
             env,
             self_service_providers,
             url_guard,
+            a2a_allow_anonymous:false,
         }
     }
+
+    pub fn with_a2a_anonymous(mut self,allow:bool)->Self {self.a2a_allow_anonymous=allow;self}
 
     async fn authorized_provider(
         &self,
@@ -177,9 +181,40 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         command: RegisterProviderBot,
         initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
     ) -> ServiceResult<ProviderRegistrationResult> {
+        self.register_validated(command, initialization, None).await
+    }
+
+    async fn authorize_a2a_registration(&self, provider_id: &str, owner: &str) -> ServiceResult<()> {
+        let provider = self.authorized_provider(provider_id, owner).await?;
+        if !is_provider_manager(&provider, owner)? {
+            return Err(ServiceError::Forbidden("A2A remote binding requires Provider management authority".into()));
+        }
+        let downlink = parse_downlink_config(&provider.config)?;
+        if !downlink.enabled {return Err(invalid("A2A requires enabled downlink"));}
+        Ok(())
+    }
+
+    async fn register_a2a_with_ownership(
+        &self, command: RegisterProviderBot,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+        card: bcs_service_api::types::a2a_bot::A2aRegistrationCard,
+    ) -> ServiceResult<ProviderRegistrationResult> {
+        self.register_validated(command, initialization, Some(card)).await
+    }
+}
+
+impl ProviderRegistrationCore {
+    async fn register_validated(
+        &self, command: RegisterProviderBot,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+        card: Option<bcs_service_api::types::a2a_bot::A2aRegistrationCard>,
+    ) -> ServiceResult<ProviderRegistrationResult> {
         let provider = self
             .authorized_provider(&command.provider_id, &command.owner)
             .await?;
+        if card.is_some() && !is_provider_manager(&provider, &command.owner)? {
+            return Err(ServiceError::Forbidden("A2A remote binding requires Provider management authority".into()));
+        }
         validate_id("provider_bot_ref", &command.provider_bot_ref)?;
         if !(2..=64).contains(&command.bot_name.chars().count())
             || command.bot_name != command.bot_name.trim()
@@ -193,7 +228,24 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             return Err(invalid("registration token auth_mode no longer matches Provider; obtain a new token"));
         }
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref).map_err(invalid)?;
-        let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
+        let effective_webhook_url = if let Some(card) = &card {
+            if command.mode != ProviderRegistrationMode::Gateway || command.webhook_url.is_some()
+                || !card.agent_card.is_object()
+                || card.interface.protocol_version != "1.0" || !downlink.enabled {
+                return Err(invalid("invalid A2A registration declaration or scope"));
+            }
+            self.url_guard.validate_configured_http_url(&card.interface.url)
+                .map_err(|_|invalid("A2A interface is not an allowed HTTP(S) endpoint"))?;
+            let credential = self.credentials
+                .get_credential_by_kind(&provider.provider_id, "downlink_bcs_to_provider").await?;
+            let ready=credential.is_some_and(|value|!value.disabled && !value.secret_value.trim().is_empty());
+            bcs_service_api::types::a2a_auth::select_authentication(&card.agent_card,self.a2a_allow_anonymous,ready)
+                .map_err(invalid)?;
+            if bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(invalid)?!=command.bot_name {
+                return Err(invalid("Bot name must match AgentCard.name"));
+            }
+            None
+        } else { self.endpoint(&provider, &downlink, &command).await? };
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.
         if self.bindings.get_binding_by_provider_ref(&command.provider_id, &command.provider_bot_ref).await?.is_some() {
@@ -209,18 +261,30 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         // in the SAME store transaction it is created by
         // (spec §10.2); nothing is written when any step
         // fails, so no token is returned on failure.
-        self.registrations
-            .create_provider_bot_with_ownership(BotProviderRecord {
+        let provider_bot = BotProviderRecord {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
                 provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
                 webhook_url: record.webhook_url.clone(), is_deleted: false,
-            }, BotCapabilities {
+            };
+        let capabilities = BotCapabilities {
                 name: Some(record.bot_name.clone()), visibility: "protected".into(),
                 // Match Provider-admin registration for both connection modes:
                 // AgentPass identifies this Bot by its Provider's external ref.
                 agent_code: identity.agent_code.clone(),
                 ..BotCapabilities::default()
-            }, &record.owner, &record.bot_token, initialization).await?;
+            };
+        if let Some(card) = card {
+            let card = bcs_service_api::port::repo::a2a_bot::A2aBotRecord {
+                bot_uuid:record.bot_uuid.clone(),provider_id:record.provider_id.clone(),
+                provider_bot_ref:record.provider_bot_ref.clone(),agent_card_url:card.agent_card_url,
+                agent_card:card.agent_card,revision:1,
+            };
+            self.registrations.create_a2a_provider_bot_with_ownership(provider_bot, capabilities,
+                &record.owner, &record.bot_token, initialization, card).await?;
+        } else {
+            self.registrations.create_provider_bot_with_ownership(provider_bot, capabilities,
+                &record.owner, &record.bot_token, initialization).await?;
+        }
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,

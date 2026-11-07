@@ -51,11 +51,14 @@ export function sanitizeMarkdownHtml(html: string): string {
   });
 }
 
-/** 富文本发布说明的白名单净化：保留常见排版与链接/图片属性，移除脚本、事件和样式注入面。 */
+/**
+ * 富文本发布说明的白名单净化：保留常见排版与链接/图片属性，移除脚本与事件注入面。
+ * style 属性经 DOMPurify 透传后，由 SafeHtml richText 模式做二道裁决（颜色/字号取值白名单），双道防线。
+ */
 export function sanitizeRichHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [...MARKDOWN_HTML_ALLOWED_TAGS, 'b', 'i', 'u', 's', 'small', 'mark', 'figure', 'figcaption'],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title'],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'style'],
     ALLOW_DATA_ATTR: false,
   });
 }

@@ -47,7 +47,7 @@ describe('BotSubpageShell 子页壳', () => {
       </BotSubpageShell>,
     );
     const header = screen.getByRole('button', { name: '返回 Bot 管理' }).closest('header');
-    expect(Array.from(header?.classList ?? [])).toEqual(expect.arrayContaining(['bg-card', 'border-b', 'border-border']));
+    expect(Array.from(header?.classList ?? [])).toEqual(expect.arrayContaining(['bg-card', 'border-b', 'border-divider']));
     const canvas = header?.nextElementSibling;
     expect(Array.from(canvas?.classList ?? [])).toEqual(expect.arrayContaining(['bg-page-canvas']));
   });

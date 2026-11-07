@@ -46,8 +46,8 @@ from agentclaw.community.core.repository.implementations.skill_center.direct_ins
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
-from agentclaw.community.core.repository.implementations.skill_center.manifest_direct_claim_commands import (
-    ManifestDirectClaimCommands,
+from agentclaw.community.core.repository.implementations.skill_center.apply_claim_commands import (
+    ApplyClaimCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
     set_skill_mcp_dependency_codes,
@@ -78,16 +78,25 @@ class CapabilityDesiredStateRepository(
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,
-    ManifestDirectClaimCommands,
+    ApplyClaimCommands,
     LegacySkillSetScopeQueries,
     McpSkillSetControlPlaneCommands,
     CapabilityDesiredStateRepositoryProtocol,
 ):
-    """Desired-state UoW for SkillSet Membership and Installations."""
+    """SkillSet Membership and Installation UoW; lifecycle edits preserve overrides."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    @staticmethod
+    def normalize_mcp_config_address(session, *, bot_id: str, owner_id: str, env: str) -> None:
+        """Participate in handoff's transaction without opening a second Session.
+
+        The capability UoW remains the owner of configuration table commands;
+        handoff coordinates this normalization before switching Bot ownership.
+        """
+        bot_mcp_configs.normalize(session, bot_id=bot_id, owner_id=owner_id, env=env)
 
     def purge_bot_installations(
         self, *, bot_id: str, owner_id: str, env: str
@@ -638,13 +647,6 @@ class CapabilityDesiredStateRepository(
                     env=get_current_env(),
                     server_codes=direct_mcp_codes,
                 )
-                bot_mcp_configs.delete(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    env=get_current_env(),
-                    server_codes=direct_mcp_codes,
-                )
             session.flush()
             # The projection needs the Set's direct and Skill-derived MCP
             # candidates. Resolve them under this transaction's row locks so
@@ -754,24 +756,9 @@ class CapabilityDesiredStateRepository(
             mcp_installations.uninstall_all(
                 session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
             )
-            # Compensation restores the prior installed set. Keep overrides for
-            # codes that are about to be restored, but remove orphan rows for
-            # codes the restored desired state no longer owns.
-            existing_override_codes = set(
-                bot_mcp_configs.get_all(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    env=get_current_env(),
-                )
-            )
-            bot_mcp_configs.delete(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                server_codes=existing_override_codes - set(state.mcp_installations),
-            )
+            # Capability compensation restores supply, not Bot configuration.
+            # Overrides can remain dormant or have been explicitly edited since
+            # this snapshot; neither case is an orphan or a value to roll back.
             for server_code in sorted(state.mcp_installations):
                 mcp_installations.install(
                     session,

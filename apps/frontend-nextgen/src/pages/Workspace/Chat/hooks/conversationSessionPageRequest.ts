@@ -5,6 +5,7 @@ import { getCapabilities } from '@/capabilities';
 import type {
   ConversationBotSection,
   ConversationBotView,
+  ConversationOrigin,
   ConversationSessionRequestRange,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
@@ -38,10 +39,14 @@ export function createSessionRequestContext(userId: string | null): Conversation
 }
 
 /** 管理会话写回时读取上下文(origin/scope)须仍一致,不一致即丢弃。 */
-export function stillMineOrigin(botId: string, scope: ConversationSessionScope): boolean {
+export function stillMineOrigin(
+  botId: string,
+  scope: ConversationSessionScope,
+  origin: ConversationOrigin = 'mine',
+): boolean {
   const store = useConversationStore.getState();
   return (
-    (store.originByManagedBotId[botId] ?? 'mine') === 'mine' &&
+    (store.originByManagedBotId[botId] ?? 'mine') === origin &&
     (store.effectiveScopeByManagedBotId[botId] ?? 'all') === scope
   );
 }
@@ -67,6 +72,9 @@ export function loadSessionPage(
   const requestRangeArgs: [] | [ConversationSessionRequestRange] = requestRange ? [requestRange] : [];
   // 请求快照:从最新 Store 读取生效过滤(mine 范围/好友范围/sessionKey/代次)。
   const store = useConversationStore.getState();
+  const origin: ConversationOrigin = isManagedConversationSection(sectionOf)
+    ? store.originByManagedBotId[botId] ?? 'mine'
+    : 'mine';
   const scope = isManagedConversationSection(sectionOf)
     ? store.effectiveScopeByManagedBotId[botId] ?? 'all'
     : friendScopeOf(botId, store);
@@ -76,15 +84,14 @@ export function loadSessionPage(
   const state = isManagedConversationSection(sectionOf)
     ? managedCache?.sessions
     : store.friendBotSessionsByBotId[botId];
-  const requestKey = requestKeyOf(botId, sectionOf, 'mine', scope, sessionKey, revision, more);
+  const requestKey = requestKeyOf(botId, sectionOf, origin, scope, sessionKey, revision, more);
   if (ctx.inFlight.has(requestKey)) return;
   if (more && (!state || !state.hasMore || state.loading || state.isLoadingMore)) return;
   const cachedHit = isManagedConversationSection(sectionOf)
-    ? managedCache?.origin === 'mine' && managedCache?.scope === scope && !managedCache?.sessions.error
+    ? managedCache?.origin === origin && managedCache?.scope === scope && !managedCache?.sessions.error
     : Boolean(state && !state.error);
   if (!more && cachedHit && !(state?.hasMore && state.items.length === 0)) return;
-  if (!more && isManagedConversationSection(sectionOf) && (store.originByManagedBotId[botId] ?? 'mine') !== 'mine')
-    return;
+  if (!more && isManagedConversationSection(sectionOf) && origin === 'others' && !view.bot.isAgentCodingBot) return;
   ctx.inFlight.add(requestKey);
   const generation = ctx.generation.current;
   const page = sessionRequestPage(state, scope, more);
@@ -92,24 +99,39 @@ export function loadSessionPage(
   // 结果当成新列表展示;搜索/好友范围变化已由 Store 删除缓存(条件天然一致)。
   const criteriaMatch =
     more ||
-    (isManagedConversationSection(sectionOf)
-      ? managedCache?.origin === 'mine' && managedCache?.scope === scope
-      : true);
-  writeSessionState(botId, sectionOf, scope, {
-    ...(criteriaMatch ? state ?? firstPageOf([], 0) : firstPageOf([], 0)),
-    ...(more ? { isLoadingMore: true, loadMoreError: null } : { loading: true, error: null }),
-  });
+    (isManagedConversationSection(sectionOf) ? managedCache?.origin === origin && managedCache?.scope === scope : true);
+  writeSessionState(
+    botId,
+    sectionOf,
+    scope,
+    {
+      ...(criteriaMatch ? state ?? firstPageOf([], 0) : firstPageOf([], 0)),
+      ...(more ? { isLoadingMore: true, loadMoreError: null } : { loading: true, error: null }),
+    },
+    origin,
+  );
   void (
     isManagedConversationSection(sectionOf)
-      ? conversationService.listManagedSessions(
-          view.bot,
-          userIdNow,
-          scope,
-          page,
-          BOT_SESSION_PAGE_SIZE,
-          sessionKey,
-          ...requestRangeArgs,
-        )
+      ? origin === 'mine'
+        ? conversationService.listManagedSessions(
+            view.bot,
+            userIdNow,
+            scope,
+            page,
+            BOT_SESSION_PAGE_SIZE,
+            sessionKey,
+            ...requestRangeArgs,
+          )
+        : conversationService.listManagedSessions(
+            view.bot,
+            userIdNow,
+            scope,
+            page,
+            BOT_SESSION_PAGE_SIZE,
+            sessionKey,
+            requestRange,
+            origin,
+          )
       : conversationService.listFriendBotSessions(
           view.bot,
           userIdNow,
@@ -125,22 +147,28 @@ export function loadSessionPage(
     const latestStore = useConversationStore.getState();
     // 过滤代次变化(范围/归属/搜索,含 A→B→A)即丢弃:旧响应不得写回或复原已清除的过滤。
     if (filterRevisionOf(botId, latestStore) !== revision) return;
-    if (isManagedConversationSection(sectionOf) && !stillMineOrigin(botId, scope)) return;
+    if (isManagedConversationSection(sectionOf) && !stillMineOrigin(botId, scope, origin)) return;
     const latest = isManagedConversationSection(sectionOf)
       ? latestStore.sessionsByBotId[botId]?.sessions
       : latestStore.friendBotSessionsByBotId[botId];
     if (!result.ok) {
       if (!more) {
-        writeSessionState(botId, sectionOf, scope, { ...firstPageOf([], 0), error: result.error.friendlyMessage });
+        writeSessionState(
+          botId,
+          sectionOf,
+          scope,
+          { ...firstPageOf([], 0), error: result.error.friendlyMessage },
+          origin,
+        );
       } else if (latest) {
-        writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page));
+        writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page), origin);
       }
       return;
     }
     if (!more) {
-      writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total));
+      writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total), origin);
       return;
     }
-    if (latest) writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page));
+    if (latest) writeSessionState(botId, sectionOf, scope, nextPageOf(latest, result, page), origin);
   });
 }

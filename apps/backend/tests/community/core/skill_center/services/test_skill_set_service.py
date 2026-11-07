@@ -329,7 +329,7 @@ class TestCollectBotActiveMcps:
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
             snapshot = BotCapabilitySnapshot(
-                "default", "user1",
+                "default", "entity1",
                 (RegisteredSkillAsset(
                     skill_id=1, name="center", git_path="center://public-code",
                     skill_uuid="00000000-0000-4000-8000-000000000001",
@@ -849,7 +849,7 @@ class TestSyncMcpDesiredState:
             claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
         )
         assert events == ["details", "declare"]
-        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "staff_user1")
+        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "user1")
         svc._device_sync_dispatcher.dispatch.assert_called_once()
 
     @pytest.mark.asyncio

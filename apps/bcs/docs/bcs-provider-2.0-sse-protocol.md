@@ -5,6 +5,7 @@
 
 状态说明：
 
+- 下行 `chat.inject`、`chat.history` 已弃用（deprecated），新接入无需实现；旧兼容代码的保留不代表它们仍是接入要求。BCS 自身的会话历史查询 API 不受此弃用影响。
 - `agent`、`chat`、`ping`：线上已实现。
 - 顶层 `interaction`、BCN 内存状态机、Frontend WebSocket
   `interaction.resolve`、BCN 到 Provider 的 resolve HTTP：本分支已实现。

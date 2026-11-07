@@ -16,6 +16,7 @@ export const lifecycleLabel: Record<BotDomain['lifecycle'], string> = {
 };
 
 export const actionLabel: Record<BotCardManagementAction, string> = {
+  activate: '激活 Bot',
   open_folder: '打开本地目录',
   delete: '删除',
   restart: '重启 Bot',
@@ -25,6 +26,7 @@ export const actionLabel: Record<BotCardManagementAction, string> = {
 };
 
 export const actionIcon: Record<BotCardManagementAction, ReactNode> = {
+  activate: <Power className="size-4" />,
   open_folder: <FolderOpen className="size-4" />,
   delete: <Trash2 className="size-4" />,
   restart: <RefreshCw className="size-4" />,

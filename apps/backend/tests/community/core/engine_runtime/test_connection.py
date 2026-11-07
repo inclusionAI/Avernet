@@ -44,6 +44,9 @@ class _Bots:
         self.public = public
         self.calls = []
 
+    def get_bot_by_address(self, bot_id, user_id):
+        return self.get_bot(bot_id, user_id)
+
     def get_bot(self, bot_id, user_id):
         self.calls.append((bot_id, user_id))
         if (bot_id, user_id) != (BOT, OWNER):

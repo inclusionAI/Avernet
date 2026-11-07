@@ -304,6 +304,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         actor_id: "bot-1".into(),
         actor_kind: ActorKind::Bot,
         name: Some("Zhang San".into()),
+        avatar_url: None,
         role: bcs_service_api::application::v1::ParticipantRole::Driver,
         tags: vec!["tenant-a".into()],
         mode: ParticipantMode::Auto,
@@ -317,11 +318,15 @@ fn session_participant_serializes_bot_and_human_actors() {
     assert_eq!(bot_json["tags"], serde_json::json!(["tenant-a"]));
     assert_eq!(bot_json["mode"], "auto");
     assert_eq!(bot_json["joined_at"], 42);
+    // Bot display avatar column (bot-avatar plan design §5.1): always
+    // serialized, null when the participant has none.
+    assert_eq!(bot_json["avatar_url"], serde_json::Value::Null);
 
     let human = SessionParticipant {
         actor_id: "human_staff-1".into(),
         actor_kind: ActorKind::Human,
         name: Some("Alice".into()),
+        avatar_url: None,
         role: bcs_service_api::application::v1::ParticipantRole::Consultant,
         tags: Vec::new(),
         mode: ParticipantMode::Present,
@@ -333,6 +338,7 @@ fn session_participant_serializes_bot_and_human_actors() {
     assert_eq!(human_json["actor_kind"], "human");
     assert_eq!(human_json["role"], "consultant");
     assert_eq!(human_json["mode"], "present");
+    assert_eq!(human_json["avatar_url"], serde_json::Value::Null);
     assert!(human_json.get("joined_at").is_none());
 }
 

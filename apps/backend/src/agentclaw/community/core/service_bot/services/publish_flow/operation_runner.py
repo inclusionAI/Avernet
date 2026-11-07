@@ -183,10 +183,15 @@ async def acquire_deploy_workflow(
     bot_uuid: Optional[str] = None,
     params: Optional[Dict[str, Any]] = None,
     bot_gone_reason: str = "BOT_NOT_FOUND",
+    acquire: Callable[..., Awaitable[PublishOperationRecord]] | None = None,
 ) -> PublishOperationRecord:
     """The deploy atom: open the ledger op → acquire its BaaS workflow →
     validate the recorded ids. The shared crash-safe core of every deploy-shaped
     operation (first release, upgrade, restart, and the restart-recreate leg).
+
+    ``acquire`` optionally delegates acquisition to a caller strategy; it must
+    preserve the runner's operation identity and adoption-before-issue ordering.
+    Other deploy callers use the original runner directly.
 
     ``issue`` performs the BaaS mutation and returns its result dict. A result
     of ``{success: False, error_code: <bot-gone code>}`` (see
@@ -227,7 +232,8 @@ async def acquire_deploy_workflow(
         return result
 
     try:
-        op = await runner.acquire_workflow(op, _issue_classified)
+        acquire_workflow = acquire if acquire is not None else runner.acquire_workflow
+        op = await acquire_workflow(op, _issue_classified)
     except TargetBotGoneError:
         runner.abandon_operation(op, bot_gone_reason)
         raise

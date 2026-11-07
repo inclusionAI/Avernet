@@ -24,7 +24,8 @@ pub fn protected_router() -> Router<ApiState> {
             .merge(routes::register::router())
             .merge(routes::friendship::router())
             .merge(routes::friend_connection::router())
-            .merge(routes::channel::router()),
+            .merge(routes::channel::router())
+            .merge(routes::worker_task::router()),
     )
 }
 

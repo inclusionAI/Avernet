@@ -35,11 +35,14 @@ def binding_args(provider):
 @pytest.mark.parametrize("provider", ["arca", "baas"])
 def test_di_envelope_resolves_only_selected_provider(engine, provider):
     runtime = create_autospec(BaasService, instance=True)
-    execute = Mock(return_value=response("not_mounted"))
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, detection_command
+    def result(cmd):
+        return detection('skip_no_fastdisk') if cmd == detection_command() else response('not_mounted')
+    execute = Mock(side_effect=lambda **kw: result(kw['shell_cmd']))
     runtime.list_devices_by_bot_uuid.return_value = [
         {"provider_device_id": "physical", "status": "ACTIVE"},
     ]
-    runtime.post_bots_api.return_value = response("not_mounted")
+    runtime.post_bots_api.side_effect = lambda **kw: result(kw['payload']['cmd'])
     transport = ArcaRestartTransport(execute)
     injector = Mock()
     injector.get.side_effect = {BaasService: runtime, ArcaRestartTransport: transport}.__getitem__
@@ -51,13 +54,13 @@ def test_di_envelope_resolves_only_selected_provider(engine, provider):
     verify()
     injector.get.assert_called_once_with(ArcaRestartTransport if provider == "arca" else BaasService)
     if provider == "arca":
-        assert execute.call_count == 2
+        assert execute.call_count == 3
         assert all(call.kwargs["device"].device_props == {"sandbox_id": "old-sandbox@8"}
                    for call in execute.call_args_list)
         assert not runtime.mock_calls
     else:
         assert runtime.list_devices_by_bot_uuid.call_count == 2
-        assert runtime.post_bots_api.call_count == 2
+        assert runtime.post_bots_api.call_count == 3
         execute.assert_not_called()
 
 

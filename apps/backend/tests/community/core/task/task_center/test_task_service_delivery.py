@@ -26,6 +26,11 @@ class _Intents:
 
     def __init__(self) -> None:
         self.marks: list[tuple] = []
+        self.settled: list[tuple[str, str, str]] = []
+
+    def settle_delivery_intent(self, task_id, node_id, relay_token):
+        self.settled.append((task_id, node_id, relay_token))
+        return True
 
     def claim_delivery_intent(self, task_id, node_id, relay_token, *, lease_ms=None):
         return ("CLAIMED", f"intent:{node_id}")
@@ -86,6 +91,37 @@ class _Service(TaskServiceDeliveryMixin):
         self._relay_adapter = SimpleNamespace(
             dispatcher=SimpleNamespace(dispatch=_dispatch)
         )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_node_settles_stale_terminal_single_bot_intent() -> None:
+    node = _make_node(status=Status.HUNG)
+    service = _Service(node)
+
+    result = await service.dispatch_node("task-1", "node-1")
+
+    assert result is node
+    assert service._delivery_intents.settled == [
+        ("task-1", "node-1", "gen-1"),
+    ]
+    assert not service._delivery_intents.marks
+
+
+@pytest.mark.asyncio
+async def test_dispatch_node_settles_invalid_single_bot_intent_and_fails() -> None:
+    node = _make_node()
+    node.run_info.assignee = "NOT_DECIDED"
+    service = _Service(node)
+
+    with pytest.raises(
+        Exception, match="relay delivery target has an invalid assignee"
+    ):
+        await service.dispatch_node("task-1", "node-1")
+
+    assert service._delivery_intents.settled == [
+        ("task-1", "node-1", "gen-1"),
+    ]
+    assert not service._delivery_intents.marks
 
 
 @pytest.mark.asyncio

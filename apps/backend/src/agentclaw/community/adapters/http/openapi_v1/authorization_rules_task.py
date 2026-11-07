@@ -28,6 +28,12 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"
     ),
+    # task_config match: a typed config probe, not a bot resource — any
+    # authenticated principal may read (returns only a bool, never the stored
+    # value). Mirrors execute/dashboard/list NoCheck; admission is OPEN.
+    ("POST", "/openapi/v1/collaboration/tasks/config/match"): NoCheck(
+        "a config match probe, not a bot; read-only, returns only matched: bool"
+    ),
 }
 
 #: BBS, Browse-Loop, feedback, and trajectory rows.
@@ -41,6 +47,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "tenant-wide BBS reply read; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): NoCheck(
+        "tenant-wide BBS reply location read; no addressed bot"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "public BBS write; author declared in the body, no addressed bot"

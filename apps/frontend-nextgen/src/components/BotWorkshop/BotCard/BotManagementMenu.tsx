@@ -2,15 +2,16 @@ import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import { ClipboardList, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
+import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
+import { ClipboardList, Copy, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
 import { useState } from 'react';
 import { BotEngineVersionMenuItems } from './BotEngineVersionMenuItems';
 import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
 import { BotManagementRuntimeItems } from './BotManagementRuntimeItems';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 interface BotManagementMenuProps {
   bot: BotDomain;
   open?: boolean;
@@ -29,6 +30,9 @@ interface BotManagementMenuProps {
   canGeneralConfig?: boolean;
   generalConfigDisabledReason?: string;
   onGeneralConfig?: (bot: BotDomain) => void;
+  /** 复制 Bot 入口可用性;visible=false 时不渲染该项。 */
+  copyAvailability?: { visible: boolean; enabled: boolean; disabledReason?: string };
+  onCopy?: (bot: BotDomain) => void;
   engineVersionUpdateAvailability?: EngineVersionUpdateAvailability;
   onOpenEngineInfo?: (bot: BotDomain) => void;
   onUpdateEngineVersion?: (bot: BotDomain) => void;
@@ -36,6 +40,8 @@ interface BotManagementMenuProps {
 export function BotManagementMenu(props: BotManagementMenuProps) {
   const {
     bot,
+    copyAvailability,
+    onCopy,
     collaborationMode,
     lockedByOther,
     onAction,
@@ -58,6 +64,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const setOpen = props.onOpenChange ?? setUncontrolledOpen;
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const dormant = isDormantPersonalBot(bot);
   if (bot.lifecycle === 'deploying') return null;
   return (
     <>
@@ -71,149 +78,175 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             leftIcon={<MoreVertical className="size-4" />}
           />
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-52 space-y-1 p-2">
+        {/* dmore 复核：宽 w-52→w-48 收窄；分割线缺少稳定分组逻辑先移除；sm 按钮默认 text-xs 提级为 text-sm。 */}
+        <PopoverContent align="end" className="w-48 space-y-1 rounded-lg p-1.5 [&_button]:text-sm">
           {/* 配置类：Bot 的配置与形态变更操作（验收修正：配置类同组置顶） */}
-          <MenuSection>
-            {onGeneralConfig ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ShieldCheck className="size-4" />}
-                disabled={!canGeneralConfig}
-                onClick={() => {
-                  setOpen(false);
-                  onGeneralConfig(bot);
-                }}
-              >
-                {canGeneralConfig ? (
-                  '通用配置'
-                ) : (
-                  <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
-                )}
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start"
-              leftIcon={<MapPin className="size-4" />}
-              disabled={lockedByOther}
-              onClick={() => {
-                setOpen(false);
-                onChangeSpace?.(bot);
-              }}
-            >
-              变更归属空间
-            </Button>
-            {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' && bot.canUpgradeToService ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.upgrade}
-                disabled={lockedByOther}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('upgrade');
-                }}
-              >
-                {actionLabel.upgrade}
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 日常操作（协作与查看） */}
-          <MenuSection divider>
-            {collaborationMode && onAuthorize ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<Users className="size-4" />}
-                onClick={() => {
-                  setOpen(false);
-                  onAuthorize(bot);
-                }}
-              >
-                {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
-              </Button>
-            ) : null}
-            {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ClipboardList className="size-4" />}
-                aria-label={`查看 ${bot.name} 任务实例`}
-                onClick={() => {
-                  Tracert.click(Points.botWorkshop.viewTaskInstance, { bot_id: bot.id });
-                  setOpen(false);
-                  onOpenTaskInstances(bot);
-                }}
-              >
-                任务实例
-              </Button>
-            ) : null}
-            {healthCheckAvailability?.visible && onHealthCheck ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<HeartPulse className="size-4" />}
-                aria-label={`${bot.name} 健康检查`}
-                disabled={lockedByOther || !healthCheckAvailability.enabled}
-                onClick={() => {
-                  Tracert.click(Points.botWorkshop.runHealthCheck, { bot_id: bot.id });
-                  setOpen(false);
-                  onHealthCheck(bot);
-                }}
-              >
-                <ActionHelp
-                  description={
-                    lockedByOther
-                      ? '该 Bot 正被他人编辑，请先抢锁'
-                      : healthCheckAvailability.disabledReason ?? '对该 Bot 的引擎与协作链路执行一次集成健康检查。'
-                  }
+          {!dormant ? (
+            <>
+              <MenuSection>
+                {copyAvailability?.visible && onCopy ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={<Copy className="size-4" />}
+                    disabled={!copyAvailability.enabled}
+                    onClick={() => {
+                      if (!copyAvailability.enabled) return;
+                      setOpen(false);
+                      onCopy(bot);
+                    }}
+                  >
+                    {copyAvailability.enabled ? (
+                      '复制 Bot'
+                    ) : (
+                      <ActionHelp description={copyAvailability.disabledReason ?? '当前不可复制'}>复制 Bot</ActionHelp>
+                    )}
+                  </Button>
+                ) : null}
+                {onGeneralConfig ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={<ShieldCheck className="size-4" />}
+                    disabled={!canGeneralConfig}
+                    onClick={() => {
+                      setOpen(false);
+                      onGeneralConfig(bot);
+                    }}
+                  >
+                    {canGeneralConfig ? (
+                      '通用配置'
+                    ) : (
+                      <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
+                    )}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  leftIcon={<MapPin className="size-4" />}
+                  disabled={lockedByOther}
+                  onClick={() => {
+                    setOpen(false);
+                    onChangeSpace?.(bot);
+                  }}
                 >
-                  健康检查
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  void onAction('open_folder', bot);
-                }}
-              >
-                打开本地目录
-              </Button>
-            ) : null}
-          </MenuSection>
-          <BotEngineVersionMenuItems
-            bot={bot}
-            availability={engineVersionUpdateAvailability}
-            onOpenInfo={
-              onOpenEngineInfo
-                ? (selected) => {
-                    setOpen(false);
-                    onOpenEngineInfo(selected);
-                  }
-                : undefined
-            }
-            onUpdate={
-              onUpdateEngineVersion
-                ? (selected) => {
-                    setOpen(false);
-                    onUpdateEngineVersion(selected);
-                  }
-                : undefined
-            }
-          />
-          {/* 发布与运行态操作：按相同的权限和实例规则集中处理。 */}
+                  变更归属空间
+                </Button>
+                {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' && bot.canUpgradeToService ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={actionIcon.upgrade}
+                    disabled={lockedByOther}
+                    onClick={() => {
+                      setOpen(false);
+                      setConfirmAction('upgrade');
+                    }}
+                  >
+                    {actionLabel.upgrade}
+                  </Button>
+                ) : null}
+              </MenuSection>
+              {/* 日常操作（协作与查看） */}
+              <MenuSection>
+                {collaborationMode && onAuthorize ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={<Users className="size-4" />}
+                    onClick={() => {
+                      setOpen(false);
+                      onAuthorize(bot);
+                    }}
+                  >
+                    {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
+                  </Button>
+                ) : null}
+                {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={<ClipboardList className="size-4" />}
+                    aria-label={`查看 ${bot.name} 任务实例`}
+                    onClick={() => {
+                      Tracert.click(Points.botWorkshop.viewTaskInstance, { bot_id: bot.id });
+                      setOpen(false);
+                      onOpenTaskInstances(bot);
+                    }}
+                  >
+                    任务实例
+                  </Button>
+                ) : null}
+                {healthCheckAvailability?.visible && onHealthCheck ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={<HeartPulse className="size-4" />}
+                    aria-label={`${bot.name} 健康检查`}
+                    disabled={lockedByOther || !healthCheckAvailability.enabled}
+                    onClick={() => {
+                      Tracert.click(Points.botWorkshop.runHealthCheck, { bot_id: bot.id });
+                      setOpen(false);
+                      onHealthCheck(bot);
+                    }}
+                  >
+                    <ActionHelp
+                      description={
+                        lockedByOther
+                          ? '该 Bot 正被他人编辑，请先抢锁'
+                          : healthCheckAvailability.disabledReason ?? '对该 Bot 的引擎与协作链路执行一次集成健康检查。'
+                      }
+                    >
+                      健康检查
+                    </ActionHelp>
+                  </Button>
+                ) : null}
+                {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    leftIcon={actionIcon.open_folder}
+                    onClick={() => {
+                      setOpen(false);
+                      void onAction('open_folder', bot);
+                    }}
+                  >
+                    打开本地目录
+                  </Button>
+                ) : null}
+              </MenuSection>
+              <BotEngineVersionMenuItems
+                bot={bot}
+                availability={engineVersionUpdateAvailability}
+                onOpenInfo={
+                  onOpenEngineInfo
+                    ? (selected) => {
+                        setOpen(false);
+                        onOpenEngineInfo(selected);
+                      }
+                    : undefined
+                }
+                onUpdate={
+                  onUpdateEngineVersion
+                    ? (selected) => {
+                        setOpen(false);
+                        onUpdateEngineVersion(selected);
+                      }
+                    : undefined
+                }
+              />
+              {/* 发布与运行态操作：按相同的权限和实例规则集中处理。 */}
+            </>
+          ) : null}
           <BotManagementRuntimeItems
             bot={bot}
             lockedByOther={lockedByOther}

@@ -178,7 +178,7 @@ class PersonaFile:
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
 class SkillOrigin(StrEnum):
-    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    CENTER = "center"                # a governed skill from Skill Center, by name: not copied, not version-pinned
     LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
                                      # by a patch); where they were fetched from is not part of the revision (§4.2)
 
@@ -187,7 +187,9 @@ class SkillEntry:
     name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
     digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
-    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
+    repo_path: str | None = None     # REPO only: the path after git:// on the skill row, e.g. "team/weather"
+    # A CENTER entry is its name alone: the bot runs whatever version the Center publishes (ADR 0002),
+    # so a newer Center version is not drift; apply finds the Center asset by this name.
 ```
 
 Curated memory:
@@ -314,7 +316,7 @@ replaces them before the revision feature goes live.
   ],
   "skills": [                                     // sorted by name
     {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
-    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
+    {"name": "refund-policy", "origin": "center"}     // a Center skill, by name: not copied, no version
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
@@ -1250,10 +1252,11 @@ class EngineMemoryProjection(Protocol):
 
 The Manifest stays revision-unaware (§1, §5.5), and its grammar gains **no
 new source kinds**: a compiled revision is delivered **directly** into the
-apply engine's materialisers (RSI-04), with no Manifest document in between.
-The Registry leaves a `RevisionApplier` seam for that; until it lands, a
-promotion moves no ref and is refused as `not_appliable` (RSI-03). What the
-Manifest side still gains, all backward compatible with schema v1 documents:
+apply engine's materialisers (RSI-04), with no Manifest document in between:
+the Registry's `RevisionApplier` seam is bound to `DirectApplier`, which
+starts an apply run whose state reference names the promotion (08-promotion.md
+§7.1). What the Manifest side still gains, all backward compatible with schema
+v1 documents:
 
 1. **Direct delivery of a compiled revision.** The apply engine takes one
    typed desired state (§2.7) from either of two compilers — the Manifest's
@@ -1261,9 +1264,10 @@ Manifest side still gains, all backward compatible with schema v1 documents:
    state reference an apply carries (`StateRef("manifest")`, or a
    `StateRef("genome", promotion_id)` naming a promotion). The materialisers read bytes from
    the content store and resolve Center and repo skills from the typed
-   entries; a compiled revision is fully reproducible. The compilers and
-   the engine are in place; RSI-04 binds the promotion's applier to an
-   apply run and resolves Center and repo skills (P1; RSI-04).
+   entries (a Center skill by name, a repo skill by path, through the Skill
+   Center's own visibility rule); a compiled revision is reproducible up to
+   the Center version and repo commit, which bots track (ADR 0002). Done
+   (RSI-04).
 2. **`engine_config` applies.** The category already exists in the
    Manifest schema (`schema/validator.py` validates an
    `engine_config.config` mapping), but nothing applies it today: it was
@@ -1533,12 +1537,12 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
 class GenomePromotionServiceProtocol(Protocol):   # core/bot_genome/promotion/promotion_service_protocol.py
     async def promote(self, bot: BotRef, *, revision: str, ref: str, expected_revision: RevisionId | None,
                       actor: Provenance, reason: str) -> Promotion:
-        """Move `ref` (`active`) by compare-and-swap, record the promotion (the moved refs and the seam's
-        answer; nothing of the state), hand the revision's desired state to the RevisionApplier seam.
-        The seam's preflight runs before any ref moves; a delivery that fails to start after the move is
-        recorded as apply_failed.
+        """File the promotion `pending` and start the apply run that delivers the revision (the
+        RevisionApplier seam; `applying` with its apply id). `ref` (`active`) moves by compare-and-swap
+        only when that apply ends: `applied`, `applied_partial` (active labelled `partial`), or
+        `apply_failed` (nothing moves). The seam's preflight runs before anything is written.
         Raises RevisionNotFound, NotPromotable, Drifted (automated actors only), NotAppliable,
-        PromotionUnsupported, RefConflict."""
+        PromotionUnsupported, RefConflict, ApplyBusy (another apply holds the bot's lock)."""
 
     def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion: ...
     def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
@@ -1841,8 +1845,8 @@ Errors: 413 over the Manifest file size limit.
 an earlier revision), `GET …/genome/promotions` and
 `GET …/genome/promotions/{promotion_id}` read the promotion records. They
 live under the genome path but are specified in
-[08-promotion.md](08-promotion.md). Until direct delivery lands (RSI-04),
-every promotion is refused with `422 not_appliable` before any ref moves.
+[08-promotion.md](08-promotion.md). A promotion answers `applying`; `active`
+moves once the apply that delivers the revision ends (RSI-04).
 
 ### Internal
 
@@ -1918,18 +1922,21 @@ bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5"
 state = registry.compile(bot, "sha256:7c1e…")          # the typed desired state (§2.7)
 if actor.kind is not ProvenanceKind.USER and await registry.drift(bot):   # automated actors may not promote
     raise Drifted(...)                                 # over a bot that has moved by hand; an owner may
-applier.preflight(bot, state)                          # the delivery seam refuses here, before any ref moves
-promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
-                                                       # active <- r42 (CAS), r42 promoted, the promotion row
-await applier.start(bot, state, actor=actor, reason=reason)   # direct delivery (RSI-04): an apply run whose state
-                                                       # reference is StateRef("genome", promotion_id); the genome
-                                                       # compiler resolves it back to r42 while the promotion is current
+applier.preflight(bot, state)                          # the delivery seam refuses here, before anything is written
+row = promotions.insert(pending_row)                   # filed `pending`; no ref has moved
+apply_id = applier.start(bot, promotion_id=row.promotion_id, principal_id=..., audit_actor=...)
+                                                       # DirectApplier: an apply run whose state reference is
+                                                       # StateRef("genome", promotion_id), under the apply lock
+promotions.mark_applying(..., apply_id=apply_id)
+# ... the apply worker compiles the promotion back to r42 and applies it; when it ends the apply engine
+# publishes the outcome and PromotionSettler, in one transaction, moves active <- r42 (CAS against the
+# promotion's from_revision) and previous, marks r42 promoted and settles the row.
 # The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```
 
-The ordering, failure handling, and service-bot publish path are owned by
-[08-promotion.md](08-promotion.md); the only applier bound today refuses
-everything as `not_appliable` naming RSI-04.
+The ordering and failure handling are owned by [08-promotion.md](08-promotion.md);
+promoting a service bot's verify or online stage through the publish pipeline
+is [#3212](https://github.com/inclusionAI/Avernet/issues/3212).
 
 ## 14. Interactions
 

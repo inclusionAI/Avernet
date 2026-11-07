@@ -1,21 +1,26 @@
-"""Materialise the desired skills as the bot's complete Skill and Bot-owned Local snapshot.
+"""Materialise the desired skills as the bot's complete Direct Skill and Bot-owned Local snapshot.
+
+The declaration speaks only for Direct skills: a runtime name the bot's skill
+sets supply (an active ordinary set, the Default less its exclusions) is
+outside it — never counted as current, never removed. Declaring such a name is
+a conflict (``set_conflicts``), which refuses the whole apply before anything
+is written, so a claim never has to touch a set.
 
 Every declared local package is validated and fully written through the normal
-Local package road, then converted to a Direct claim. Ordinary SkillSet
-memberships with the same runtime name are detached; Default supply is
-excluded. Existing effective names report ``updated`` and inactive or absent
-names report ``created``—package equality is deliberately not probed.
+Local package road, then claimed Direct. Existing Direct names report
+``updated`` and absent names report ``created``—package equality is
+deliberately not probed.
 
-A declared Skill Center or shared-repository skill is **skipped** for now
-(inclusionAI/Avernet#3103 tracks its delivery): it is logged at warning,
-written nowhere, counted as declared so nothing of that name is removed, and
-reported ``skipped`` with the reason, so the apply's summary still says that
-not everything declared was delivered. Rewriting it as a local package would
-copy a governed asset into bot-owned storage, so that road is not taken.
+A declared Skill Center skill (by its runtime name) or shared-repository
+skill (by its path) is found through ``SharedSkillPort`` — the Skill Center's
+own visibility rule, for the bot and the apply's principal — and the shared
+asset itself becomes the Direct claim; it is never copied into bot-owned
+storage. None found, or several Center skills of one name, fails that entry
+with the reason, which aborts the category the way any resolve failure does.
 
-When the section is present, every omitted effective Skill is removed and every
-omitted Bot-owned Local asset is additionally unreferenced, physically deleted,
-and removed from the catalog. Shared Repo/Center assets are never physically
+When the section is present, every omitted Direct Skill is removed and every
+omitted Bot-owned Local asset no set references (an inactive set included) is
+additionally physically deleted and removed from the catalog. Shared Repo/Center assets are never physically
 deleted. The complete Local catalog, not only active Installations, makes failed
 cleanup discoverable on a later Apply.
 """
@@ -28,7 +33,7 @@ from typing import Any, Sequence
 from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.apply_engine.skill_validation import PackageRefusal, validate_package
 from agentclaw.community.core.apply_engine.context import ApplyContext
-from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage, SkillOrigin
+from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage, RepoSkillPath
 from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.apply_engine.outcomes import (
@@ -37,8 +42,10 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
+    ChecksSetSupply,
     Materialiser,
     PlannedEntry,
     ResolveFailure,
@@ -48,6 +55,11 @@ from agentclaw.community.core.apply_engine.capabilities import (
     Category,
 )
 from agentclaw.community.core.ports.activation_port import ActivationPort
+from agentclaw.community.core.ports.shared_skill_port import (
+    SharedSkillAmbiguous,
+    SharedSkillNotFound,
+    SharedSkillPort,
+)
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -55,7 +67,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
@@ -68,17 +80,10 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 @dataclass(frozen=True)
-class _NotDelivered:
-    """The intent of a skill this build does not deliver: carried through the plan so its name counts as declared."""
+class _SharedSkill:
+    """A shared Center or repository asset the bot may use, found by the lookup: the intent's value."""
 
-    origin: SkillOrigin
-
-    @property
-    def reason(self) -> str:
-        return (
-            f"not delivered: a {self.origin.value} skill is skipped by this build (inclusionAI/Avernet#3103); "
-            "nothing was written or removed"
-        )
+    skill_id: str
 
 
 class _SkillPackage:
@@ -111,7 +116,12 @@ class _SkillPackage:
         self.note = note
 
 
-class SkillsMaterialiser(Materialiser):
+def _without(assets: dict[str, Any], supplied: frozenset[str]) -> dict[str, Any]:
+    """The assets by name, less the names a skill set supplies: the Direct ones."""
+    return {name: asset for name, asset in assets.items() if name not in supplied}
+
+
+class SkillsMaterialiser(Materialiser, ChecksSetSupply):
     """Converges the bot's active skills toward the declared package set.
 
     ``identity`` is the entry's ``name``, e.g. ``"quality-check"``, and
@@ -124,8 +134,11 @@ class SkillsMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),),
                        removals=("retired-skill",))
-        write   -> (EntryResult(Category.SKILLS, "quality-check",
-                                EntryOutcome.CREATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.SKILLS, "quality-check",
+                                EntryOutcome.CREATED),),
+            removals=("retired-skill",),
+        )
     """
 
     construct = Category.SKILLS
@@ -137,12 +150,14 @@ class SkillsMaterialiser(Materialiser):
         capability_reader: BotCapabilityStateReaderProtocol,
         validator: SkillPackageValidator,
         content: ContentReader,
+        shared_skills: SharedSkillPort,
     ) -> None:
         self._uploads = upload_service
         self._activation = activation_service
         self._reader = capability_reader
         self._validator = validator
         self._content = content
+        self._shared = shared_skills
 
     async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> ResolveResult:
         """Desired entries → validated packages, every refusal up front.
@@ -150,23 +165,24 @@ class SkillsMaterialiser(Materialiser):
         A local package's stored tree goes through ``validate_directory`` —
         the same validator the manual upload service runs, so limits and
         layout stay one rule — and its canonical zip is what the upload takes.
-        A Skill Center or shared-repository skill is skipped (see the module
-        docstring): a warning, a placeholder intent, and the rest of the
-        category proceeds.
+        A Skill Center or shared-repository skill resolves to the shared
+        asset's id (see the module docstring), or to a failure naming why not.
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         for entry in entries:
             name = entry.name
             if not isinstance(entry.source, LocalSkillPackage):
-                logger.warning(
-                    "[apply] skill %r is a %s skill, which this build does not deliver; skipped for bot %s "
-                    "(nothing written or removed; inclusionAI/Avernet#3103)",
-                    name,
-                    entry.origin.value,
-                    ctx.bot_id,
-                )
-                intents.append(Intent(name, _NotDelivered(entry.origin)))
+                who = dict(bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id)
+                try:
+                    if isinstance(entry.source, RepoSkillPath):
+                        skill_id = self._shared.find_repo_skill(**who, name=name, path=entry.source.path)
+                    else:
+                        skill_id = self._shared.find_center_skill(**who, name=name)
+                except (SharedSkillNotFound, SharedSkillAmbiguous) as exc:
+                    failures.append(ResolveFailure(name, str(exc)))
+                    continue
+                intents.append(Intent(name, _SharedSkill(skill_id)))
                 continue
             try:
                 tree = await asyncio.to_thread(self._content.read, entry.source.tree.digest)
@@ -200,24 +216,28 @@ class SkillsMaterialiser(Materialiser):
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Classify against effective names and include inactive Local cleanup."""
-        area = self._area(ctx)
-        local_assets = self._local_assets(ctx)
+        """Classify against Direct names and include inactive Local cleanup."""
+        supplied = self._set_supplied(ctx)
+        whole_area = self._area(ctx)
+        area = _without(whole_area, supplied)
+        # A package a set references — an inactive set's too — is that set's to keep: never cleaned up here.
+        referenced = self._set_referenced_ids(ctx)
+        local_assets = {
+            name: asset
+            for name, asset in _without(self._local_assets(ctx), supplied).items()
+            if int(asset.skill_id) not in referenced
+        }
         declared = {intent.identity for intent in intents}
 
         planned = [
-            (
-                PlannedEntry(intent, EntryOutcome.SKIPPED.value, reason=intent.value.reason)
-                if isinstance(intent.value, _NotDelivered)
-                else PlannedEntry(
-                    intent,
-                    (
-                        EntryOutcome.UPDATED.value
-                        if intent.identity in area
-                        else EntryOutcome.CREATED.value
-                    ),
-                    requires_write=True,
-                )
+            PlannedEntry(
+                intent,
+                (
+                    EntryOutcome.UPDATED.value
+                    if intent.identity in area
+                    else EntryOutcome.CREATED.value
+                ),
+                requires_write=True,
             )
             for intent in intents
         ]
@@ -230,71 +250,85 @@ class SkillsMaterialiser(Materialiser):
         retained_local = [
             local_assets[name] for name in declared if name in local_assets
         ]
+        # A declared shared skill already active as the same asset keeps its row, dependencies included.
+        retained_shared = [
+            area[intent.identity]
+            for intent in intents
+            if isinstance(intent.value, _SharedSkill)
+            and intent.identity in area
+            and str(area[intent.identity].skill_id) == str(intent.value.skill_id)
+        ]
+        # Set-supplied skills are never touched here, so their dependencies survive the apply too.
+        retained_set = [asset for name, asset in whole_area.items() if name in supplied]
         ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
-            retained_local
+            retained_local + retained_shared + retained_set
         )
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
         confirmed_write = False
         try:
             for planned in plan.entries:
                 package = planned.intent.value
-                if isinstance(package, _NotDelivered):
-                    results.append(
-                        EntryResult(
-                            self.construct, planned.intent.identity, EntryOutcome.SKIPPED, reason=package.reason
-                        )
+                if isinstance(package, _SharedSkill):
+                    # The shared asset itself is claimed; nothing is uploaded or copied.
+                    skill_id, note = package.skill_id, None
+                else:
+                    uploaded = await self._uploads.upload_local_skill(
+                        bot_id=ctx.bot_id,
+                        owner_id=ctx.entity_id,
+                        actor_id=ctx.actor_id,
+                        package=package.canonical_zip,
                     )
-                    continue
-                uploaded = await self._uploads.upload_local_skill(
-                    bot_id=ctx.bot_id,
-                    owner_id=ctx.entity_id,
-                    actor_id=ctx.actor_id,
-                    package=package.canonical_zip,
-                )
-                # A returned upload means the complete Local package and row
-                # have committed, even if the following Direct claim fails.
-                confirmed_write = True
-                skill_id = str(uploaded["skill"]["id"])
-                await self._activation.claim_manifest_skill(
+                    # A returned upload means the complete Local package and row
+                    # have committed, even if the following Direct claim fails.
+                    confirmed_write = True
+                    skill_id, note = str(uploaded["skill"]["id"]), package.note
+                await self._activation.claim_apply_skill(
                     skill_id=skill_id,
                     bot_id=ctx.bot_id,
                     owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
                 )
+                # A returned claim is a committed write too, a shared asset's included.
+                confirmed_write = True
                 results.append(
                     EntryResult(
                         self.construct,
                         planned.intent.identity,
                         EntryOutcome(planned.outcome),
-                        note=package.note,
+                        note=note,
                     )
                 )
 
             # Re-read identities for removals; the plan deliberately carries
             # names rather than persistence ids.
-            area = self._assets_for_removal(ctx)
+            supplied = self._set_supplied(ctx)
+            active = _without(self._area(ctx), supplied)
+            local = _without(self._local_assets(ctx), supplied)
+            referenced = self._set_referenced_ids(ctx)
             for name in plan.removals:
-                asset = area.get(name)
-                if asset is None:
-                    continue
-                is_local = str(asset.git_path or "").startswith("local://")
-                await self._activation.remove_manifest_skill(
-                    skill_id=str(asset.skill_id),
-                    bot_id=ctx.bot_id,
-                    owner_id=ctx.entity_id,
-                    actor_id=ctx.actor_id,
-                    apply_id=ctx.apply_id,
-                    remove_inactive_memberships=is_local,
-                )
-                confirmed_write = True
-                if is_local:
+                # A name can be both an active skill and a separate Local package — a shared skill that replaced
+                # the bot's own package of the same name: each is removed, the active one first.
+                assets = {int(asset.skill_id): asset for asset in (active.get(name), local.get(name)) if asset}
+                for asset in assets.values():
+                    await self._activation.remove_apply_skill(
+                        skill_id=str(asset.skill_id),
+                        bot_id=ctx.bot_id,
+                        owner_id=ctx.entity_id,
+                        actor_id=ctx.actor_id,
+                        apply_id=ctx.apply_id,
+                    )
+                    confirmed_write = True
+                    # Its Direct installation is gone; a package a set still references is not deleted.
+                    is_local = str(asset.git_path or "").startswith("local://")
+                    if not is_local or int(asset.skill_id) in referenced:
+                        continue
                     try:
                         await self._uploads.delete_local_skill(
                             skill_id=str(asset.skill_id),
@@ -312,14 +346,14 @@ class SkillsMaterialiser(Materialiser):
             if isinstance(exc, ConfirmedPartialWriteError):
                 raise
             if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
+                exc, ApplyDesiredStateCommittedError
             ):
                 raise ConfirmedPartialWriteError(
                     "Skill replacement stopped after a durable write"
                 ) from None
             raise
         self._refresh_actual_dependency_codes(ctx)
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
     def _area(self, ctx: ApplyContext) -> dict[str, Any]:
         """The active set by name — the reader's flush-then-read for this bot."""
@@ -338,8 +372,30 @@ class SkillsMaterialiser(Materialiser):
             )
         }
 
-    def _assets_for_removal(self, ctx: ApplyContext) -> dict[str, Any]:
-        return {**self._area(ctx), **self._local_assets(ctx)}
+    def _set_supplied(self, ctx: ApplyContext) -> frozenset[str]:
+        """The runtime names the bot's skill sets supply; outside the declaration, whatever it says."""
+        names, _mcps = self._activation.set_supplied_capabilities(
+            bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id
+        )
+        return frozenset(names)
+
+    def _set_referenced_ids(self, ctx: ApplyContext) -> frozenset[int]:
+        """The skill ids any of the bot's sets holds, an inactive set's included; none before the bot exists."""
+        if ctx.bot is None:
+            return frozenset()
+        return frozenset(int(skill_id) for skill_id in self._reader.member_skill_ids(bot=ctx.bot))
+
+    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> tuple[ResolveFailure, ...]:
+        supplied = self._set_supplied(ctx)
+        return tuple(
+            ResolveFailure(
+                entry.name,
+                "a skill of this name is supplied by one of the bot's skill sets; declare it there or remove it "
+                "from the set",
+            )
+            for entry in entries
+            if entry.name in supplied
+        )
 
     def _refresh_actual_dependency_codes(self, ctx: ApplyContext) -> None:
         """Never let a failed write leave the Dry-run projection in context."""

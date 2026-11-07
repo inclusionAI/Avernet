@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-// TaskOverviewV2(L1):双视图节点卡/下钻入口隐藏/边语义渲染/产物区/折叠任务信息(PRD #1/2/3/4/9)。
+// TaskOverviewV2(L1):节点视图/下钻入口隐藏/产物区(PRD #1/2/3/4/9)。DAG 视图入口当前隐藏。
 import {
   artifactDescriptorCode,
   artifactDescriptorText,
@@ -9,7 +9,7 @@ import type { TaskNodeView, TaskView } from '@/assets/TaskPanel/types';
 import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution';
 import { TaskOverviewV2, type TaskOverviewV2Props } from '@/assets/TaskPanel/v2/TaskOverviewV2';
 import type { TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from '@jest/globals';
 
 const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
@@ -89,6 +89,7 @@ const task = {
           url: 'https://yuque.example/doc1',
           linkRef: { url: 'https://yuque.example/doc1', type: 'dima需求' },
           owner: 'group-902',
+          isFinalArtifact: true,
           updatedAt: '2026-10-20T08:53:20.000Z',
         },
         {
@@ -154,8 +155,8 @@ const props = (overrides?: Partial<TaskOverviewV2Props>): TaskOverviewV2Props =>
 describe('TaskOverviewV2(L1)', () => {
   it('节点视图默认:卡片渲染执行体 pill/返工徽章/HITL 徽章/完成划线', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('需求澄清与规划')).toBeTruthy();
-    expect(screen.getByText('并行调研执行')).toBeTruthy();
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.getByText('第2棒 并行调研执行')).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
     expect(screen.getByText('点击查看会话')).toBeTruthy();
     // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
@@ -164,7 +165,7 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('第 0 次返工')).toBeNull();
     expect(screen.getByText('人工处理')).toBeTruthy();
     // demo 语义:完成态(present done/merged)节点标题划线
-    const doneTitle = screen.getByText('需求澄清与规划');
+    const doneTitle = screen.getByText('第1棒 需求澄清与规划');
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
@@ -172,12 +173,12 @@ describe('TaskOverviewV2(L1)', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
-    fireEvent.click(screen.getByText('需求澄清与规划'));
+    fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
     expect(nav.calls.root).toEqual(['n-solo']);
     expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
-    fireEvent.click(screen.getByText('并行调研执行'));
+    fireEvent.click(screen.getByText('第2棒 并行调研执行'));
     expect(nav.calls.select).toHaveLength(1);
     expect(nav.calls.select[0][0]).toBe('n-group');
     expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
@@ -190,26 +191,12 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByLabelText('下钻 并行调研执行')).toBeNull();
   });
 
-  it('视图切换:切到 DAG 视图后 rework 边为 warning 虚线并带 reason title,下钻热区隐藏', () => {
-    const nav = makeNav();
-    render(<TaskOverviewV2 {...props({ nav })} />);
-    fireEvent.click(screen.getByTitle('切换到 DAG 视图'));
-
-    const dashed = document.querySelectorAll('path[stroke-dasharray="4 3"]');
-    expect(dashed.length).toBeGreaterThanOrEqual(1);
-    expect(nav.calls.drill).toHaveLength(0);
-    expect(screen.queryByLabelText('下钻节点副屏')).toBeNull();
-  });
-
-  it('DAG 视图点击根节点同样只恢复宿主会话', () => {
-    const nav = makeNav();
-    render(<TaskOverviewV2 {...props({ nav })} />);
-    fireEvent.click(screen.getByTitle('切换到 DAG 视图'));
-
-    fireEvent.keyDown(screen.getByLabelText('查看节点 需求澄清与规划'), { key: 'Enter' });
-
-    expect(nav.calls.root).toEqual(['n-solo']);
-    expect(nav.calls.select).toHaveLength(0);
+  it('DAG 视图入口隐藏,总览始终展示节点视图', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'DAG视图' })).toBeNull();
+    expect(screen.queryByTitle('切换到 DAG 视图')).toBeNull();
+    expect(screen.queryByTitle('当前为 DAG 视图')).toBeNull();
   });
 
   it('产物区:任务级聚合(根 legacy + 节点产物)去重计数,kind 徽章与链接', () => {
@@ -218,6 +205,18 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByTitle('产物计数').textContent).toBe('4 项');
     expect(screen.getByText('需求说明书')).toBeTruthy();
     expect(screen.getByText('任务根产物')).toBeTruthy();
+    // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
+    // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
+    const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
+    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
+    const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
+    expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
+    expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
+    const finalArtifact = within(finalArtifactRow);
+    const stageLabelElement = finalArtifact.getByTestId('artifact-stage');
+    expect(finalArtifact.getByText('链接').compareDocumentPosition(stageLabelElement)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     // kind 徽章
     expect(screen.getByText('链接')).toBeTruthy();
     expect(screen.getByText('代码')).toBeTruthy();
@@ -248,21 +247,18 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByTestId('task-artifact-code-details')).toBeNull();
   });
 
-  it('纯文本产物可预览，并在下载时提示不支持', async () => {
+  it('纯文本产物保留预览入口，但不提供下载入口', async () => {
     render(<TaskOverviewV2 {...props()} />);
 
     expect(screen.getByRole('button', { name: '预览产物 阶段结论' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '下载产物 阶段结论' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载产物 阶段结论' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '预览产物 阶段结论' }));
     expect((await screen.findByTestId('task-artifact-plain-text')).textContent).toContain('一段纯文本结论');
-
-    fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('纯文本类型的产物不支持下载。');
+    expect(screen.queryByRole('button', { name: '下载文件' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    fireEvent.click(screen.getByRole('button', { name: '下载产物 阶段结论' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('纯文本类型的产物不支持下载。');
   });
 
   it('session_file 产物可在 TaskPanel 内预览，并可关闭抽屉', async () => {
@@ -303,16 +299,5 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('任务产出')).toBeNull();
     expect(screen.queryByText('任务信息')).toBeNull();
     expect(screen.queryByText('任务背景描述')).toBeNull();
-  });
-});
-
-describe('useOverviewView 本地视图偏好(套件自洽回归)', () => {
-  it('默认节点视图;DAG 视图切换后再次切回节点视图', () => {
-    render(<TaskOverviewV2 {...props()} />);
-    expect(screen.queryByTitle('切换到节点视图')).toBeNull(); // 已在节点视图
-    fireEvent.click(screen.getByTitle('切换到 DAG 视图'));
-    expect(screen.getByTitle('切换到节点视图')).toBeTruthy();
-    fireEvent.click(screen.getByTitle('切换到节点视图'));
-    expect(screen.getByTitle('切换到 DAG 视图')).toBeTruthy();
   });
 });

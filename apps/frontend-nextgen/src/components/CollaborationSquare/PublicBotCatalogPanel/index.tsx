@@ -1,12 +1,9 @@
-import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
-import SquareBotCard from '@/components/CollaborationSquare/BotCard';
+import SquareBotCard, { SquareBotCardSkeleton } from '@/components/CollaborationSquare/BotCard';
+import { FriendRequestDialog } from '@/components/CollaborationSquare/FriendRequestDialog';
 import { BotProfileModal } from '@/components/CollaborationSquare/BotProfileModal';
-import { SquareIdentityPicker } from '@/components/CollaborationSquare/SquareIdentityPicker';
-import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
-import { Skeleton } from '@/components/ui/Skeleton';
 import type { BotCatalogViewModel, PublicBot } from '@/domain/collaborationSquare/types';
 import { getPublicBotActionKey, getPublicBotTargetId, resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
 import { useSquareHighlightStore } from '@/stores/squareHighlightStore';
@@ -29,19 +26,18 @@ export interface PublicBotCatalogPanelProps {
 
 function BotLoadingState() {
   return (
-    <div aria-label="正在加载公开 Bot" className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      {[0, 1, 2].map((item) => (
-        <Card key={item}>
-          <Skeleton.Card />
-        </Card>
+    <div aria-label="正在加载公开 Bot" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {[0, 1, 2, 3, 4, 5].map((item) => (
+        <SquareBotCardSkeleton key={item} />
       ))}
     </div>
   );
 }
 
 /**
- * 公开 Bot 面板公共展示组件：搜索栏 + 加载/错误/空/智能空提示态 + 卡片网格 + 无限滚动 + 画像弹层。
- * 由协作广场页（`SquarePageShell` bot 分支）使用，数据由调用方以 {@link BotCatalogViewModel} 形式注入。
+ * 公开 Bot 面板公共展示组件：加载/错误/空/智能空提示态 + 卡片网格 + 无限滚动 + 画像弹层。
+ * 搜索栏与身份选择器已上移至页头（`SquarePageShell` → `SquareNavigation` actions），
+ * 数据由调用方以 {@link BotCatalogViewModel} 形式注入。
  */
 export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: PublicBotCatalogPanelProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -73,9 +69,20 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
       isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
     }) === 'request_friendship');
   const requestTarget = pendingBot && canRequest(pendingBot) ? pendingBot : null;
+  // 申请弹窗详情（引擎 chip 与已公开能力）与画像弹窗共用 store 状态；按 selectedBotId 对齐后才可用。
+  const requestProfile = requestTarget && vm.selectedBotId === requestTarget.id ? vm.botProfile : null;
+  const closeRequestDialog = () => {
+    setPending(null);
+    vm.closeProfile();
+  };
   const handlePrimaryAction = (bot: PublicBot) => {
-    if (canRequest(bot)) setPending({ bot, actorKey });
-    else vm.primaryAction(bot);
+    if (canRequest(bot)) {
+      setPending({ bot, actorKey });
+      // Catalog 摘要不含引擎与已公开能力，弹窗展示所需的详情由画像接口补齐。
+      vm.openProfile(bot);
+    } else {
+      vm.primaryAction(bot);
+    }
   };
   const smartEmpty = Boolean(smartEmptyHint) && vm.mode === 'smart' && !vm.query.trim();
   const showGrid = Boolean(activeActor) && !loading && !error && !smartEmpty && vm.bots.length > 0;
@@ -97,19 +104,6 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
 
   return (
     <>
-      <div className="flex flex-col items-end gap-3 md:flex-row md:items-center md:justify-end">
-        <SquareSearchBar
-          resource="bot"
-          query={vm.query}
-          mode={vm.mode}
-          onQueryChange={vm.setQuery}
-          onModeChange={vm.setMode}
-          className="w-full md:max-w-md"
-        />
-        <div className="w-full max-w-[280px] md:w-[280px] md:shrink-0">
-          <SquareIdentityPicker />
-        </div>
-      </div>
       {loading && <BotLoadingState />}
       {!loading && error && (
         <Card>
@@ -143,7 +137,8 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         </Card>
       )}
       {showGrid && activeActor && (
-        <div ref={gridRef} className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        // dmore：3 列卡片网格，16px 间距（页头下 16px 起）。
+        <div ref={gridRef} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {vm.bots.map((bot) => (
             <SquareBotCard
               key={getPublicBotTargetId(bot)}
@@ -174,20 +169,22 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
           </Button>
         </Card>
       )}
+      {/* 申请好友权限弹窗（dmore artboard-003 无能力 / artboard-007 有能力）：
+          无能力版按钮沉底、有能力版按钮挂头部右端并展示「已公开能力」清单。 */}
       {requestTarget && activeActor && (
-        <FriendRequestConfirmModal
+        <FriendRequestDialog
           bot={requestTarget}
-          actor={activeActor}
-          actorName={vm.activeActorName || activeActor.id}
-          onClose={() => setPending(null)}
-          onConfirm={() => {
-            setPending(null);
+          profile={requestProfile}
+          loading={vm.detailLoading}
+          onClose={closeRequestDialog}
+          onSendRequest={() => {
+            closeRequestDialog();
             vm.primaryAction(requestTarget);
           }}
         />
       )}
       <BotProfileModal
-        open={Boolean(vm.selectedBotId)}
+        open={Boolean(vm.selectedBotId) && !requestTarget}
         profile={vm.botProfile}
         loading={vm.detailLoading}
         onClose={vm.closeProfile}

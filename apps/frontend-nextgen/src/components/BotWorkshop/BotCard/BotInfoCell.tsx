@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { engineVersionTooltip, engineVersionUiState } from '@/domain/botEngineVersion';
 import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
-import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import type { BotDomain } from '@/services/botWorkshop';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
+import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import React from 'react';
 
 export interface BotInfoCellProps {
@@ -27,12 +28,20 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
   engineVersionState,
   onOpenEngineUpdate,
 }) => {
+  const highlighted = useBotWorkshopStore((state) => state.highlightBotId === bot.id);
+  const cell = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (highlighted) cell.current?.scrollIntoView?.({ block: 'center' });
+  }, [highlighted]);
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   const engineUpdatable =
-    engineVersionState?.kind === 'ready' &&
-    engineVersionUiState(engineVersionState.observation) === 'updatable';
+    engineVersionState?.kind === 'ready' && engineVersionUiState(engineVersionState.observation) === 'updatable';
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div
+      ref={cell}
+      className={`flex min-w-0 items-center gap-3 ${highlighted ? 'rounded-md bg-primary/10 ring-2 ring-primary' : ''}`}
+      aria-label={highlighted ? `刚创建的 Bot：${bot.name}` : undefined}
+    >
       <span
         aria-hidden
         className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10"
@@ -69,6 +78,9 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
             <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
           </span>
         </div>
+        {bot.expertOriginName && (
+          <span className="truncate text-xs text-muted-foreground">来自专家市场 · {bot.expertOriginName}</span>
+        )}
         <span className="truncate text-xs text-content-icon">{bot.entityKey}</span>
       </div>
     </div>

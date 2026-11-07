@@ -1,4 +1,4 @@
-//! Ordered native Stop/result/idle evidence for the default Claude 2.1.199 profile.
+//! Ordered native Stop/result/idle evidence for Claude Code >= 2.1.199.
 //! One instance belongs to one spawned process and one BCS run. This never reads
 //! transcripts or counts notification delivery. Missing evidence is not empty.
 use std::collections::HashSet;
@@ -111,7 +111,9 @@ impl Completion {
             if !self.seen_frames.insert(id.to_owned()) { return Err(CONFLICT); }
         }
         if ty == "system" && sub == "init" {
-            if v["claude_code_version"] != "2.1.199" { return Err(CAPABILITY); }
+            let version = v["claude_code_version"].as_str()
+                .and_then(|version| semver::Version::parse(version).ok()).ok_or(CAPABILITY)?;
+            if version < semver::Version::new(2, 1, 199) { return Err(CAPABILITY); }
             let sid = identifier(&v["session_id"])?;
             if self.session.as_ref().is_some_and(|s| s != sid) { return Err(CONFLICT); }
             self.session = Some(sid.to_owned());

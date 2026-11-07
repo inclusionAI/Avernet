@@ -110,7 +110,7 @@ register_avernet_tenant_guard(BotMCPInstallation)
 
 
 class BotMCPConfig(Base):
-    """Bot-scoped MCP connection overrides declared by its Manifest."""
+    """Bot-scoped MCP connection overrides, independent of current supply."""
 
     __tablename__ = "ac_bot_mcp_config"
 

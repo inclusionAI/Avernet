@@ -1,10 +1,16 @@
-import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { PersonalCenterActivity } from '@/domain/community/types';
-import { RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { formatDateTime } from '../CommunityTopicDetail/model';
+import { personalCenterActivityToTopic } from '@/domain/community/mapper';
+import type {
+  CommunityAuthor,
+  CommunityTopic,
+  CommunityTopicOpenTarget,
+  InteractionSummary,
+  PersonalCenterActivity,
+  PersonalCenterTopicContext,
+} from '@/domain/community/types';
+import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { actorLabel } from './model';
 
 export interface ActivityListProps {
@@ -12,13 +18,132 @@ export interface ActivityListProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  onOpenTopic: (topicId: string) => void;
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
 }
 
-export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
+function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopicContext {
+  return {
+    title: item.bodyPreview.trim() || '社区主题',
+    bodyPreview: '',
+    topicType: 'discussion',
+    status: 'open',
+    author: item.actor,
+    authorDisplayName: `${actorLabel(item.actor.actorType)} · ${item.actor.id}`,
+    replyCount: 0,
+    likeCount: 0,
+    viewCount: 0,
+    favoriteCount: 0,
+    isHot: false,
+    createdAt: item.happenedAt,
+  };
+}
+
+function activityTopic(item: PersonalCenterActivity): CommunityTopic | null {
+  const context = item.topicContext ?? fallbackTopicContext(item);
+  const topic = personalCenterActivityToTopic({ ...item, topicContext: context });
+  if (!topic || item.activityType !== 'LIKED') return topic;
+
+  if (item.target.targetType === 'POST') {
+    const replyContent = item.bodyPreview.trim() || context.title;
+    const relatedTopicContent = [context.title, context.bodyPreview]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('，');
+    return { ...topic, title: `回复：${replyContent}`, body: relatedTopicContent };
+  }
+
+  return { ...topic, title: `帖子：${topic.title}` };
+}
+
+function ReplyActivityGroup({
+  items,
+  onOpenTopic,
+}: {
+  items: PersonalCenterActivity[];
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
+}) {
+  const topicId = items[0]?.topicId;
+  const title =
+    items[0]?.topicContext?.title ?? items[0]?.bodyPreview ?? `话题 #${topicId ?? ''}`;
+  const openTarget = (item?: PersonalCenterActivity): CommunityTopicOpenTarget | null => {
+    if (!topicId) return null;
+    return {
+      topicId,
+      ...(item?.postId ? { postId: item.postId } : {}),
+    };
+  };
+
+  return (
+    <div className="w-full rounded-lg border border-border bg-card p-3">
+      {(() => {
+        const target = openTarget();
+        return (
+          <Button
+            variant="outline"
+            className="block h-auto w-full rounded-lg p-0 text-left transition-colors hover:bg-muted/40"
+            onClick={() => target && onOpenTopic(target)}
+          >
+            <span className="block truncate text-sm font-semibold text-foreground">{title}</span>
+          </Button>
+        );
+      })()}
+      <div className="mt-2 space-y-2">
+        {items.map((item) => (
+          <Button
+            key={item.postId ?? `${item.target.targetType}:${item.target.id}`}
+            variant="ghost"
+            className="block h-auto w-full justify-start rounded-md bg-muted/40 p-2.5 text-left"
+            onClick={() => {
+              const target = openTarget(item);
+              if (target) onOpenTopic(target);
+            }}
+          >
+            {item.repliedToPost ? (
+              <span className="mb-1 block truncate text-[11px] text-muted-foreground">
+                回复 @{item.repliedToPost.authorDisplayName}：{item.repliedToPost.bodyPreview}
+              </span>
+            ) : null}
+            <span className="block truncate text-xs leading-relaxed text-foreground/90">
+              {item.bodyPreview}
+            </span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterActivity[][] {
+  const groups = new Map<string, PersonalCenterActivity[]>();
+  items.forEach((item) => {
+    const key = item.topicId ?? item.target.id;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  });
+  return [...groups.values()];
+}
+
+export function ActivityList({
+  items,
+  loading,
+  error,
+  onRetry,
+  onOpenTopic,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
+}: ActivityListProps) {
   if (loading) {
     return (
-      <div className="overflow-hidden rounded-xl border border-border bg-card" aria-label="个人中心活动加载中">
+      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心列表加载中">
         {[1, 2, 3].map((item) => (
           <Skeleton.ListItem key={item} />
         ))}
@@ -27,12 +152,12 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   }
   if (error) {
     return (
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card">
         <Empty
-          title="活动加载失败"
+          title="列表加载失败"
           description={error}
           action={
-            <Button variant="outline" leftIcon={<RefreshCw className="size-4" />} onClick={onRetry}>
+            <Button variant="outline" onClick={onRetry}>
               重试
             </Button>
           }
@@ -42,35 +167,55 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   }
   if (!items.length) {
     return (
-      <div className="rounded-xl border border-border bg-card">
-        <Empty title="暂无活动" description="当前身份还没有对应的社区活动。" />
+      <div className="rounded-lg border border-border bg-card">
+        <Empty title="暂无内容" description="当前身份在这个分类下还没有社区记录。" />
+      </div>
+    );
+  }
+
+  if (items[0]?.activityType === 'REPLIED') {
+    return (
+      <div className="space-y-3" aria-label="我的回贴列表">
+        {groupReplyActivities(items).map((group, index) => (
+          <ReplyActivityGroup
+            key={group[0]?.topicId ?? `reply-group-${index}`}
+            items={group}
+            onOpenTopic={onOpenTopic}
+          />
+        ))}
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      {items.map((item) => (
-        <Button
-          key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
-          variant="ghost"
-          size="md"
-          className="grid w-full grid-cols-[80px_1fr_160px_170px] items-center gap-3 rounded-none border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted"
-          onClick={() => onOpenTopic(item.topicId)}
-        >
-          <Badge tone={item.actor.actorType === 'BOT' ? 'primary' : 'neutral'}>
-            {actorLabel(item.actor.actorType)}
-          </Badge>
-          <span className="min-w-0">
-            <span className="block truncate text-sm text-foreground">{item.bodyPreview || '社区内容'}</span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.actor.id}</span>
-          </span>
-          <span className="truncate text-xs text-muted-foreground">
-            {item.activityType} · {item.target.targetType}
-          </span>
-          <span className="text-right text-xs text-muted-foreground">{formatDateTime(item.happenedAt)}</span>
-        </Button>
-      ))}
+    <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心内容列表">
+      {items.map((item) => {
+        const topic = activityTopic(item);
+        if (!topic) return null;
+        return (
+          <TopicRow
+            key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
+            topic={topic}
+            titleTooltip={
+              item.activityType === 'LIKED' && item.target.targetType === 'POST'
+                ? item.bodyPreview
+                : undefined
+            }
+            onOpen={() =>
+              onOpenTopic({
+                topicId: topic.id,
+                ...(item.postId ?? item.target.targetType === 'POST' ? { postId: item.postId ?? item.target.id } : {}),
+              })
+            }
+            currentUserId={currentUserId}
+            getAuthorSummary={getAuthorSummary}
+            loadAuthorSummary={loadAuthorSummary}
+            followAuthor={followAuthor}
+            authorFollowLoading={authorFollowLoading}
+            authorFollowed={authorFollowed}
+          />
+        );
+      })}
     </div>
   );
 }

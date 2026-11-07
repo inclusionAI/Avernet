@@ -122,8 +122,10 @@ describe('GroupSidebar', () => {
     const onToggleGroupExpanded = jest.fn();
     render(<GroupSidebar {...makeProps({ onSelectGroup, onToggleGroupExpanded })} />);
     fireEvent.click(screen.getByText('主站群'));
-    expect(onSelectGroup).toHaveBeenCalledWith('g1');
+    // 展开/切台解耦（2026-11-02）：点击群行只展开/收起会话列表，
+    // 不再抢占右侧主舞台的选中群。
     expect(onToggleGroupExpanded).toHaveBeenCalledWith('g1');
+    expect(onSelectGroup).not.toHaveBeenCalled();
   });
 
   it('协作群管理菜单的每个操作都使用统一图标', () => {
@@ -161,8 +163,12 @@ describe('GroupSidebar', () => {
     expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
-    fireEvent.click(screen.getByText('参与者视角'));
-    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant');
+    fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+    fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+    fireEvent.click(screen.getByRole('button', { name: '消息视角' }));
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant', 'inject');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
   });
 

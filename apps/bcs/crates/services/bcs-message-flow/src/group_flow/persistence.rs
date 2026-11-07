@@ -28,42 +28,66 @@ pub(crate) async fn try_persist_group_message(
         .as_ref()
         .map(|group| group.group_strategy)
         .unwrap_or(GroupStrategy::ManagerWorker);
-    let strategy_supports_message_event = flow.event_record_factory.is_some()
-        && message_type == "chat"
-        && matches!(
-            group_strategy,
-            GroupStrategy::Chat | GroupStrategy::ManagerWorker
-        );
-    let effective_session_id = if strategy_supports_message_event || message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE {
+    let strategy_has_canonical_session = matches!(
+        group_strategy,
+        GroupStrategy::Chat | GroupStrategy::ManagerWorker
+    );
+    let strategy_supports_message_event =
+        flow.event_record_factory.is_some() && message_type == "chat" && strategy_has_canonical_session;
+    // The persisted message's session is a store-level association, not an
+    // eventing concern: the SQL message store keys the sequence on the
+    // canonical `bcs_group_sessions` row, so a chat message for a
+    // Chat/ManagerWorker group must ride a REAL session even when eventing
+    // is disabled. The empty-session fallback previously reached the store
+    // regardless of strategy and failed the whole write ("references
+    // missing row") instead of resolving the group's running session.
+    let needs_canonical_session = (message_type == "chat" && strategy_has_canonical_session)
+        || message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE;
+    let effective_session_id = if needs_canonical_session {
         match session_id.filter(|session_id| !session_id.is_empty()) {
             Some(session_id) => session_id.to_string(),
-            None => {
-                let session_management = flow.session_management.as_ref().ok_or_else(|| {
-                    ServiceError::InternalError(
-                        "Eventing message persistence requires session management".to_string(),
-                    )
-                })?;
-                session_management
-                    .list_by_group(
-                        group_id,
-                        Some(SessionStatus::Running),
-                        0,
-                        1,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
-                    .into_iter()
-                    .next()
-                    .map(|session| session.id)
-                    .ok_or_else(|| ServiceError::InvalidOperation {
-                        message: format!(
-                            "cannot persist message.created for Group '{group_id}' without a running Session"
-                        ),
-                        request_id: None,
-                    })?
-            }
+            None => match flow.session_management.as_ref() {
+                Some(session_management) => {
+                    let resolved = session_management
+                        .list_by_group(
+                            group_id,
+                            Some(SessionStatus::Running),
+                            0,
+                            1,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                        .into_iter()
+                        .next()
+                        .map(|session| session.id);
+                    match resolved {
+                        Some(session_id) => session_id,
+                        // Eventing contract: a message.created event needs a
+                        // scope to hang on — that write still fails closed.
+                        None if strategy_supports_message_event => {
+                            return Err(ServiceError::InvalidOperation {
+                                message: format!(
+                                    "cannot persist message for Group '{group_id}' without a running Session"
+                                ),
+                                request_id: None,
+                            });
+                        }
+                        // No running session and no eventing requirement:
+                        // the historical empty-session fallback — environments
+                        // without a session store, and the SQL store's own
+                        // row-level invariant, keep their previous behavior.
+                        None => String::new(),
+                    }
+                }
+                None if strategy_supports_message_event => {
+                    return Err(ServiceError::InternalError(
+                        "chat message event persistence requires session management".to_string(),
+                    ));
+                }
+                None => String::new(),
+            },
         }
     } else {
         session_id.unwrap_or_default().to_string()

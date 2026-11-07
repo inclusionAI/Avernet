@@ -14,7 +14,7 @@ imports them so there's exactly one source of truth.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
@@ -261,9 +261,10 @@ class BaasServiceProtocol(Protocol):
         ...
 
     def update_device_outbound_rule(
-        self, paas_device_id: str, outbound_rule: OutBoundOperationRule
+        self, paas_device_id: str, outbound_rule: OutBoundOperationRule,
+        *, mode: Literal["append", "replace"] = "append",
     ) -> bool:
-        """Update PaaS device outbound header rules."""
+        """Upsert outbound rules; Teclaw global rules explicitly use replace."""
         ...
 
     def update_teclaw_outbound_rule_by_bot_uuid(

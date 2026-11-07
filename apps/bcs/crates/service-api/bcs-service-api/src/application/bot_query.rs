@@ -62,6 +62,8 @@ pub struct BotQueryByIdsCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotQueryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub visibility: String,
@@ -176,6 +178,8 @@ pub struct OrganizationMemberSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotDiscoveryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub visibility: String,
@@ -210,6 +214,8 @@ pub struct BotDetailCommand {
 /// Bot detail shape returned by bot detail endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotDetailResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub status: ActorStatus,

@@ -13,7 +13,7 @@ import CollaborationPage from './index';
 function FocusedFrame({ onBack, children }: { onBack: () => void; children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center border-b border-border px-3">
+      <div className="flex h-10 shrink-0 items-center border-b border-divider px-3">
         <Button variant="ghost" size="sm" leftIcon={<ArrowLeft className="h-4 w-4" aria-hidden />} onClick={onBack}>
           返回完整协作区
         </Button>

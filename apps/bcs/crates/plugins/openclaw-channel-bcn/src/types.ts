@@ -395,6 +395,7 @@ export interface TaskDispatchParams {
   target_bot: string;
   message: string;
   response_mode?: 'after-last-tool-call' | 'full';
+  timeout_s?: number;
 }
 
 /** Response payload from task.dispatch. */

@@ -8,6 +8,8 @@ contracts stay together as one concern.
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -99,3 +101,4 @@ class BotCreateSpec:
     # template_type/template_config pair above serves established internal
     # callers and is mutually exclusive with this bag.
     engine_properties: dict[str, Any] = field(default_factory=dict)
+    expert_origin: ExpertOrigin | None = None

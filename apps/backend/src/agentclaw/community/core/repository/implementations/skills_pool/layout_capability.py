@@ -45,7 +45,9 @@ class SkillsPoolCapabilityRepositoryMixin:
             begin_guarded_transaction,
         )
 
-        with self._database.transactional_orm_session() as session:
+        # The explicit guard needs a fresh Session: it selects READ COMMITTED
+        # for corp AUTOCOMMIT engines or starts SQLite BEGIN IMMEDIATE itself.
+        with self._database.orm_session() as session:
             begin_guarded_transaction(
                 session,
                 purpose="Pool layout confirmation",

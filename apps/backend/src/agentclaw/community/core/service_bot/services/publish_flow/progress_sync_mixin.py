@@ -13,6 +13,9 @@ from __future__ import annotations
 import copy
 from typing import Dict, Literal
 
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_published_status_ext, resolve_published_restart_result, observe_published_restart_status,
+)
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishOperationKind,
@@ -171,7 +174,8 @@ class ProgressSyncMixin:
             return
         owner_id = self._get_owner_id(publish_record)
         bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=owner_id
+            bot_id=publish_record.source_bot_id, user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             return
@@ -257,6 +261,7 @@ class ProgressSyncMixin:
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(
@@ -561,6 +566,9 @@ class ProgressSyncMixin:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         current_status = PublishStatus(publish_record.status)
+        engine_result = resolve_published_restart_result(publish_record)
+        if engine_result is not None:
+            return engine_result
 
         # Step 2: Determine the restart stage based on the status
         stage = self._determine_restart_stage(current_status)
@@ -573,6 +581,7 @@ class ProgressSyncMixin:
                 publish_id=publish_id,
                 status=current_status,
                 message=f"Current status {current_status} does not support querying restart progress",
+                ext=resolve_published_status_ext(publish_record),
             )
 
         # Step 3: Get the BaaS-layer restart publish record ID.
@@ -630,7 +639,7 @@ class ProgressSyncMixin:
 
             # If it failed, update the current publish record status to failed
             if baas_status == "FAILED":
-                return self._handle_sync_failure(
+                result = self._handle_sync_failure(
                     publish_id=publish_id,
                     current_status=current_status,
                     ext=ext,
@@ -638,6 +647,11 @@ class ProgressSyncMixin:
                     baas_publish_id=restart_publish_id,
                     error_message=f"Restart publish status: {baas_status}",
                 )
+                observe_published_restart_status(
+                    publish_record, progress=progress, mutate_ext=self._mutate_and_update_ext,
+                )
+                result.ext = resolve_published_status_ext(publish_record, progress=progress)
+                return result
 
             # A restart that RECREATED the target minted a NEW binding as PENDING
             # (the normal in-place upgrade reuses the already-ACTIVE one, and
@@ -684,16 +698,21 @@ class ProgressSyncMixin:
 
                 self._mutate_and_update_ext(publish_id=publish_id, mutator=_clear_restarting_flag)
 
+            observe_published_restart_status(
+                publish_record, progress=progress, mutate_ext=self._mutate_and_update_ext,
+            )
+
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,
                 message=f"Restart publish status: {baas_status}",
                 action="sync_restart",
                 data=progress,
+                ext=resolve_published_status_ext(publish_record, progress=progress),
             )
 
         if baas_status == "SUCCESS":
-            return self._handle_sync_success(
+            result = self._handle_sync_success(
                 publish_id=publish_id,
                 publish_record=publish_record,
                 stage=stage,
@@ -703,7 +722,7 @@ class ProgressSyncMixin:
             )
 
         elif baas_status == "FAILED":
-            return self._handle_sync_failure(
+            result = self._handle_sync_failure(
                 publish_id=publish_id,
                 current_status=current_status,
                 ext=ext,
@@ -720,3 +739,9 @@ class ProgressSyncMixin:
                 action="sync_restart",
                 data=progress,
             )
+
+        observe_published_restart_status(
+            publish_record, progress=progress, mutate_ext=self._mutate_and_update_ext,
+        )
+        result.ext = resolve_published_status_ext(publish_record, progress=progress)
+        return result

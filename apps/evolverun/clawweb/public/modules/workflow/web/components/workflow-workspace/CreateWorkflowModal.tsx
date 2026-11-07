@@ -25,6 +25,7 @@ function buildInitialSpec(workflowId: string, title: string): WorkflowSpec {
       {
         id: `${workflowId}_start`,
         title: '开始',
+        phase: 'execute',
         executor: { type: 'done' },
       },
     ],

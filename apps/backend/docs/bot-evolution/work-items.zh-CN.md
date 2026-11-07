@@ -122,12 +122,25 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   写入（#2162），`script: null` 声明「没有脚本」（#2862）。
 - **留给 RSI-04**：投递本身（个人 Bot）、服务型 Bot 发布、钉住共享仓库技能的
   提交（`origin: repo` 只记录路径），以及在投递时解析 Center 与仓库技能。
+  除服务型 Bot 发布外均已随 RSI-04 落地；钉住提交一项按负责人决定取消（见 RSI-04）。
 - **后续**：捕获会拒绝由平台管理的 teclaw Bot（teclaw 投递模式 `platform`，
   `CaptureRefused`）：它没有可读取的设备，因此捕获它意味着像该投递模式那样，
   从平台自己的数据行组合出它的状态。
 
-### RSI-04 已编译修订版的直接投递（第二阶段）
+### RSI-04 已编译修订版的直接投递（第二阶段）— 已完成
 - **模块**：backend
+- **已交付**（`apps/backend/specs/2026-10-28-rsi-04-direct-delivery/`）：晋升先写入
+  `pending` 行，再启动一次以该晋升为状态引用的 apply 运行（`DirectApplier`，在 apply
+  锁下进行；Bot 正忙时返回 `409 apply_in_progress`）。ref 在该 apply 结束时才移动：
+  apply 引擎把每次 apply 的结束发布给按状态类型注册的订阅者
+  （`core/apply_engine/completion.py`，截止期限情形由任务队列的放弃钩子覆盖），基因组的
+  `PromotionSettler` 据此把晋升结算为 `applied`、`applied_partial`（`active` 带
+  `partial` 标签）或 `apply_failed`。Center 技能按名称投递、仓库技能按路径投递
+  （`SharedSkillPort`；#3103）。修订版不再记录 Center 版本（Bot 跟随最新版，ADR 0002），
+  也不记录仓库提交（负责人决定）。投递保留平台默认 MCP 服务（捕获本就不记录它们）。
+  个人 Bot 与服务型 Bot 的草稿已可投递；服务型 Bot 的验证/线上阶段经发布流水线晋升见
+  [#3212](https://github.com/inclusionAI/Avernet/issues/3212)（开放决策 P-2 在其中已定：
+  该阶段的 ref 在流水线完成后才移动）。
 - **目标**：通过 apply 引擎把已晋升的修订版直接投递到 Bot 运行时，中间不再
   经过 Manifest 文档。引擎、其类型化期望状态和基因组编译器已经存在
   （`core/apply_engine/`、`core/bot_genome/compile.py`；运行服务按 apply 的状态

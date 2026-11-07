@@ -1,5 +1,14 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+Bot public-risk operations use the full `bot_id:entity_id` path identity. They
+reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
+application grant. An app-only caller names its delegating `user_id`; its live
+Bot grant and that user's current collaborator permission are both checked.
+The delegating user remains the risk application's operator and approval actor.
+The request-cached Bot context is shared by authorization and the handler;
+asynchronous input/permission revalidation still runs before publication and on
+approval callbacks.
+
 **English** | [简体中文](README.zh-CN.md)
 
 Bot classification for group creation: `GET /openapi/v1/bots/{bot_id}/classification`
@@ -1213,8 +1222,8 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  connection  engine  identity
-loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 

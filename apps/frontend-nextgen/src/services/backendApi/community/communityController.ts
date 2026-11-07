@@ -35,6 +35,12 @@ export interface CommunityCreatedReplyDto {
   post_id?: string;
 }
 
+export interface CommunityPostLocationDto {
+  post_id?: string;
+  root_post_id?: string;
+  page?: number;
+}
+
 export interface CommunityPostHelpfulDto {
   post_id?: string;
   helpful?: boolean;
@@ -75,6 +81,14 @@ export function listCommunityTopics(query: CommunityTopicQuery = {}, signal?: Ab
   };
   if (query.search?.trim()) params.keyword = query.search.trim();
   if (query.authorId?.trim()) params.author_id = query.authorId.trim();
+  if (query.scope === 'following') {
+    params.following = true;
+    // Public OpenAPI derives the owner from its verified principal and does not
+    // accept the explicit id. The trusted internal mirror does.
+    if (base.startsWith('/api/') && query.followingOwnerId?.trim()) {
+      params.following_owner_id = query.followingOwnerId.trim();
+    }
+  }
   const topicType = backendTopicType(query.topicType);
   if (topicType) params.topic_type = topicType;
   return backendRequest<CommunityEnvelope<CommunityTopicPageDto>>(base, {
@@ -129,7 +143,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: string[];
         deadline_at?: string;
       };
-      help?: { expected_time?: string };
     };
     author_display_name?: string;
     author_avatar_url?: string;
@@ -148,10 +161,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: input.poll.options,
         ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
       },
-    };
-  } else if (topicType === 'help' && input.help) {
-    data.topic_config = {
-      help: input.help.expectedTime ? { expected_time: input.help.expectedTime } : {},
     };
   }
   const displayName = input.authorName?.trim();
@@ -189,6 +198,23 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
   return backendRequest<CommunityEnvelope<CommunityCreatedReplyDto>>(
     `${bbsApiBase()}/${encodeURIComponent(input.topicId)}/posts`,
     { method: 'POST', data, signal },
+  );
+}
+
+export function getCommunityPostLocation(
+  topicId: string,
+  postId: string,
+  pageSize: number,
+  signal?: AbortSignal,
+) {
+  const base = bbsApiBase();
+  return backendRequest<CommunityEnvelope<CommunityPostLocationDto>>(
+    `${base}/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}/location`,
+    {
+      method: 'GET',
+      params: { page_size: Math.max(1, pageSize) },
+      signal,
+    },
   );
 }
 

@@ -45,17 +45,17 @@ class ExecutionEventDTO(BaseModel):
 
 
 class ArtifactReportItemDTO(BaseModel):
-    """一条上报产物 item:恰一个 content 字段(互斥)承载对应分支的 **JSON 对象**。
+    """一条 relay 回调产物 item:恰一个非文件 content 字段承载分支 JSON 对象。
 
-    content 对象不含 kind tag——判别由字段名承载;结构性校验(互斥/交叉校验/上限)
-    在核心 ``parse_artifact_report_item`` 收口,HTTP 层只转协议(Rule 22)。
-    content 对象形态为线上契约(2026-10-22 用户定稿);核心解析对 JSON 字符串
-    仍容忍(手动 API 兼容),但本 DTO(线上口)只收对象。
+    本线上口只承载 text/url_link/code 等非文件交付产物;file 交付产物必须先经
+    object-file 上传接口登记,不得在回调 artifacts 中重复上报。content 对象不含
+    kind tag,``artifact_name`` 必须是业务用户可读标题。结构性校验、互斥、归属/attempt
+    交叉校验和上限仍在核心 ``parse_artifact_report_item`` 收口。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    artifact_name: str | None = None
+    artifact_name: str = Field(min_length=1, max_length=255, description="业务语义名")
     artifact_kind: str
     session_id: str | None = None
     task_id: str
@@ -207,10 +207,14 @@ class TaskReportCommandDTO(BaseModel):
     relay_token: str = Field(min_length=1)
     event_type: TaskReportEventType
     event: dict[str, Any] | None = None
-    # 产物上报(2026-10-22 用户定稿):报文顶层可选列表,与 trace/task_acceptance_result
-    # 平级——产物是"一次执行的结果清单"而非事件内部细节。携带条件:仅
-    # EXECUTION_RESULT 且 execution_decision=ACCEPTED(to_domain 拒绝其余一切组合)。
+    # 产物上报(2026-11-03 定稿):报文顶层可选列表,与 trace/task_acceptance_result
+    # 平级——产物是"一次执行的结果清单"而非事件内部细节。携带条件:
+    # EXECUTION_RESULT+ACCEPTED(节点产物) 或终态 PLAN_RESULT(event=null)(任务最终产物)。
+    # 后继 PLAN_RESULT、DECLINED,以及其它组合携带均被 to_domain 拒绝。
     artifacts: list[ArtifactReportItemDTO] | None = None
+    # 终态 PLAN_RESULT(event=null) 的任务级结论文本;落 TaskExecutionGraph.output,
+    # 仅供轨迹归因与效果分析消费,不是产物。
+    final_conclusion: str | None = None
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
@@ -242,11 +246,43 @@ class TaskReportCommandDTO(BaseModel):
         return self
 
     def to_domain(self) -> TaskReportCommand:
-        # 产物携带条件(报文顶层 artifacts,2026-10-22 用户定稿):仅 EXECUTION_RESULT
-        # 事件允许携带;其余事件类型(如 PLANNED)夹带即整体拒绝。
-        if self.artifacts is not None and self.event_type != TaskReportEventType.EXECUTION_RESULT:
+        # 产物携带条件(2026-11-03 终稿):EXECUTION_RESULT+ACCEPTED 携带节点产物;
+        # 终态 PLAN_RESULT(event=null) 携带最后一棒最终产物。
+        # 带后继计划的 PLAN_RESULT(event=TaskNode)携带即整体拒绝。
+        terminal_plan = (
+            self.event_type == TaskReportEventType.PLAN_RESULT and self.event is None
+        )
+        if self.artifacts is not None and not (
+            self.event_type == TaskReportEventType.EXECUTION_RESULT or terminal_plan
+        ):
             raise TaskStateError(
                 f"{self.event_type.value} events must not carry artifacts"
+            )
+        final_conclusion = self.final_conclusion
+        terminal_artifact_patch = None
+        if terminal_plan:
+            if not isinstance(final_conclusion, str) or not final_conclusion.strip():
+                raise TaskStateError(
+                    "terminal PLAN_RESULT requires final_conclusion for trajectory analysis"
+                )
+            final_conclusion = final_conclusion.strip()
+            terminal_artifact_patch = (
+                parse_artifact_report_items(
+                    [item.model_dump() for item in self.artifacts],
+                    report_task_id=self.task_id,
+                    report_node_id=self.node_id,
+                    allow_file=False,
+                )
+                if self.artifacts is not None
+                else terminal_artifact_patch
+            )
+            if any(item.artifact_kind == "text" for item in terminal_artifact_patch or []):
+                raise TaskStateError(
+                    "terminal PLAN_RESULT final conclusion must not be reported as a text artifact"
+                )
+        elif self.final_conclusion is not None:
+            raise TaskStateError(
+                "final_conclusion is only allowed on terminal PLAN_RESULT events"
             )
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
             if self.event is None:
@@ -264,6 +300,7 @@ class TaskReportCommandDTO(BaseModel):
                     [item.model_dump() for item in self.artifacts],
                     report_task_id=self.task_id,
                     report_node_id=self.node_id,
+                    allow_file=False,
                 )
                 if self.artifacts is not None
                 else None
@@ -342,6 +379,8 @@ class TaskReportCommandDTO(BaseModel):
             )
             if self.trace is not None
             else None,
+            artifact_patch=terminal_artifact_patch,
+            final_conclusion=final_conclusion,
         )
 
 

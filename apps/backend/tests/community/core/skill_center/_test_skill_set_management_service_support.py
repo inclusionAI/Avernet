@@ -769,14 +769,14 @@ class _RuntimePassport:
 
     def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
         self.query_calls.append((bot_id, owner_id))
-        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        assert (bot_id, owner_id) == ("bot-1", "entity-1")
         # This is the effective Default CLI scope after a user removed a
         # static default. A reconcile must preserve it exactly, not revive the
         # engine's static list.
         return [{"cli_code": "kept-cli", "cli_name": "Kept"}]
 
     def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
-        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        assert (bot_id, owner_id) == ("bot-1", "entity-1")
         return {
             "mcps": [],
             "clis": [{"cli_code": "kept-cli", "cli_name": "Kept", "identity_mode": "owner"}],

@@ -21,7 +21,7 @@ class BotServiceProtocol(Protocol):
 
     实现类需提供：
       - list_bots_by_conditions(bot_ids=..., page=..., page_size=...) 按条件分页查 bot，
-        返回形如 ``{"items": [...]}`` 的分页结果（含 ``bot_id`` / ``owner_id`` 字段）。
+        返回形如 ``{"items": [...]}`` 的分页结果（含 ``bot_id`` / ``bot_type`` / ``entity_id`` / 当前 ``owner_id`` / ``ext`` 字段）。
     """
 
     def list_bots_by_conditions(self, *args: Any, **kwargs: Any) -> Any: ...

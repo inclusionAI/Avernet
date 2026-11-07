@@ -58,14 +58,13 @@ export function useManagedBotOthers(options: {
     return () => abortOthersRequests(requestCtx);
   }, [requestCtx, userId]);
 
-  const loadDirectory = useRef(
-    (view: ConversationBotView, force: boolean): void => loadOthersDirectory(requestCtx, view, force),
+  const loadDirectory = useRef((view: ConversationBotView, force: boolean): void =>
+    loadOthersDirectory(requestCtx, view, force),
   ).current;
 
   /** 好友会话首拉;force=true 供 retry 用(作废同 key 旧请求,直接重发)。 */
-  const loadFriendSessions = useRef(
-    (view: ConversationBotView, friendUserId: string, force: boolean): void =>
-      loadOthersFriendSessions(requestCtx, view, friendUserId, force),
+  const loadFriendSessions = useRef((view: ConversationBotView, friendUserId: string, force: boolean): void =>
+    loadOthersFriendSessions(requestCtx, view, friendUserId, force),
   ).current;
 
   // 过滤代次签名:sessionKey/范围等任一实际变化都会刷新;目录与已展开分组按新条件重拉。
@@ -85,6 +84,8 @@ export function useManagedBotOthers(options: {
     for (const botId of Object.keys(expandedBotIds)) {
       const view = botByBotId.get(botId);
       if (!view || (originByManagedBotId[botId] ?? 'mine') !== 'others') continue;
+      // Coding Bot 的 others 直接复用共享实例会话列表并按 sessionId 分流。
+      if (view.bot.isAgentCodingBot) continue;
       loadDirectory(view, false);
       for (const friendUserId of Object.keys(expandedFriendUserIdsByBotId[botId] ?? {})) {
         loadFriendSessions(view, friendUserId, false);
@@ -106,7 +107,8 @@ export function useManagedBotOthers(options: {
     (botId: string): ConversationBotView | null => {
       if (!enabled || !requestCtx.userId.current) return null;
       if ((useConversationStore.getState().originByManagedBotId[botId] ?? 'mine') !== 'others') return null;
-      return botByBotId.get(botId) ?? null;
+      const view = botByBotId.get(botId) ?? null;
+      return view?.bot.isAgentCodingBot ? null : view;
     },
     [botByBotId, enabled, requestCtx],
   );

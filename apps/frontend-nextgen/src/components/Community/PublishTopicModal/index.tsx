@@ -8,9 +8,9 @@ import type {
   CreateCommunityTopicDraft,
 } from '@/domain/community/types';
 import { MAX_COMMUNITY_POLL_OPTIONS } from '@/services/community/communityService';
-import { ArrowLeft, CircleHelp, FileText, MessageSquare, Share2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { TopicTypeIcon } from '../TopicTypeIcon';
 import { useEffect, useState } from 'react';
-import { HelpEditor } from './HelpEditor';
 import { PollEditor } from './PollEditor';
 import type { DraftErrors } from './model';
 
@@ -22,10 +22,10 @@ interface PublishTopicModalProps {
 }
 
 const topicTypeOptions = [
-  { value: 'discussion' as const, label: '讨论', icon: <MessageSquare className="size-3.5" aria-hidden /> },
-  { value: 'share' as const, label: '分享', icon: <Share2 className="size-3.5" aria-hidden /> },
-  { value: 'poll' as const, label: '投票', icon: <FileText className="size-3.5" aria-hidden /> },
-  { value: 'help' as const, label: '求助', icon: <CircleHelp className="size-3.5" aria-hidden /> },
+  { value: 'discussion' as const, label: '讨论', icon: <TopicTypeIcon topicType="discussion" className="size-3.5" /> },
+  { value: 'share' as const, label: '分享', icon: <TopicTypeIcon topicType="share" className="size-3.5" /> },
+  { value: 'poll' as const, label: '投票', icon: <TopicTypeIcon topicType="poll" className="size-3.5" /> },
+  { value: 'help' as const, label: '求助', icon: <TopicTypeIcon topicType="help" className="size-3.5" /> },
 ];
 
 /** 发布讨论、分享、投票和求助主题。 */
@@ -41,7 +41,6 @@ export function PublishTopicModal({
   const [pollSelection, setPollSelection] = useState<CommunityPollSelection>('single');
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
   const [pollDeadline, setPollDeadline] = useState('');
-  const [helpExpectedTime, setHelpExpectedTime] = useState('');
   const [errors, setErrors] = useState<DraftErrors>({});
 
   const resetDraft = () => {
@@ -51,7 +50,6 @@ export function PublishTopicModal({
     setPollSelection('single');
     setPollOptions(['', '']);
     setPollDeadline('');
-    setHelpExpectedTime('');
     setErrors({});
   };
 
@@ -82,10 +80,6 @@ export function PublishTopicModal({
       }
     }
 
-    if (topicType === 'help' && helpExpectedTime.trim().length > 128) {
-      nextErrors.helpExpectedTime = '期望解决时间不能超过 128 个字符';
-    }
-
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     const draft: CreateCommunityTopicDraft = {
@@ -101,9 +95,6 @@ export function PublishTopicModal({
             },
           }
         : {}),
-      ...(topicType === 'help'
-        ? { help: { ...(helpExpectedTime.trim() ? { expectedTime: helpExpectedTime.trim() } : {}) } }
-        : {}),
     };
     if (await onPublish(draft)) onOpenChange(false);
   };
@@ -111,7 +102,7 @@ export function PublishTopicModal({
   if (!open) return null;
   return (
     <section className="app-scrollbar flex h-full flex-col overflow-y-auto" aria-label="发布主题编辑区">
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
+      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-divider bg-background/95 px-6 py-4 backdrop-blur">
         <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} aria-label="返回社区列表">
           <ArrowLeft className="size-4" aria-hidden />
         </Button>
@@ -179,16 +170,6 @@ export function PublishTopicModal({
             onDeadlineChange={setPollDeadline}
             onClearOptionsError={() => clearError('pollOptions')}
             onClearDeadlineError={() => clearError('pollDeadline')}
-          />
-        ) : null}
-        {topicType === 'help' ? (
-          <HelpEditor
-            expectedTime={helpExpectedTime}
-            error={errors.helpExpectedTime}
-            onChange={(value) => {
-              setHelpExpectedTime(value);
-              clearError('helpExpectedTime');
-            }}
           />
         ) : null}
       </div>

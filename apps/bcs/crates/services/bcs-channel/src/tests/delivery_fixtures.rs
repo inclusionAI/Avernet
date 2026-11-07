@@ -316,6 +316,7 @@ impl MessageFlowService for RecordingMessageFlow {
                         run_id: None,
                         wait_reason: None,
                         content_preview: None,
+                        task: None,
                     }]
                 })
                 .unwrap_or_default(),

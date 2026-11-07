@@ -26,8 +26,8 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
-    ("POST", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish",
@@ -58,6 +58,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     # Tenant-wide lookup returns display fields, never ownership or runtime internals.
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
+    # Transitional app-only lookup; its handler enforces the configured app allowlist.
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
+    # Non-user Bot overview; the gateway requires no user credential for it.
+    ("GET", "/openapi/v1/bots/{bot_id}/overview"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
@@ -709,6 +713,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     **TASK_PUBLIC_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
@@ -736,6 +744,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/catalog/profile/{bot_uuid}"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
     # Read and self-service operations resolve an application-only caller to
     # its delegating user and continue enforcing live Space membership or

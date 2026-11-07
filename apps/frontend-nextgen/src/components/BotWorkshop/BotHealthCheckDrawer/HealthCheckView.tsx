@@ -69,7 +69,7 @@ export function HealthCheckView({
           latestAt={formatDateTime(summary.latestAt)}
         />
         {capability.showRadar ? (
-          <div className="flex items-center justify-center border-t border-[var(--color-border)] p-5 lg:border-t-0 lg:border-l">
+          <div className="flex items-center justify-center border-t border-divider p-5 lg:border-t-0 lg:border-l">
             <RadarChart dimensions={summary.dimensions} />
           </div>
         ) : null}

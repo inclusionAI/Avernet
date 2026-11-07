@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -287,6 +288,28 @@ def _execute_and_get_id(c) -> str:
 
 
 class TestTaskExecute:
+    def test_execute_logs_full_request_at_entry(self, client, caplog):
+        c, _ = client
+        request_body = _task_info_dict()
+
+        with caplog.at_level(logging.INFO, logger="start"):
+            response = c.post(
+                "/openapi/v1/collaboration/tasks/execute", json=request_body
+            )
+
+        assert response.status_code == 200, response.text
+        entry_log = next(
+            record.getMessage()
+            for record in caplog.records
+            if "task_execute_openapi" in record.getMessage()
+        )
+        assert "'source_type': 'bot'" in entry_log
+        assert "'metadata': {'title': '存储尽调'" in entry_log
+        assert "'owner_user_id': 'owner_user'" in entry_log
+        assert "'objective': ''" not in entry_log
+        assert "'objective': '产出尽调报告'" in entry_log
+        assert "'MAX_DEPTH': 3" in entry_log
+
     def test_internal_router_does_not_expose_static_template_run_endpoint(self):
         # 单一对外 API:静态模板经 execute + task_type=static_plan 提交,无独立 run-template route。
         routes = {

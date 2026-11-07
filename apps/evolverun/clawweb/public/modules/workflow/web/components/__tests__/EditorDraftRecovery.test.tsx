@@ -1,13 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import { stringify } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
 const mocks = vi.hoisted(() => ({ validate: vi.fn(), history: vi.fn(), saved: vi.fn() }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { validate: mocks.validate, getHistory: mocks.history } } }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: () => new Promise(() => {}), api: { workflows: { validate: mocks.validate, getHistory: mocks.history } } }))
 vi.mock('../../api/hooks', () => ({
-  useDbWorkflow: () => ({ data: undefined, isLoading: false }),
+  useEditorWorkflowDocument: () => ({ data: undefined, isLoading: false }),
   useSaveWorkflowToDb: () => ({ mutateAsync: mocks.saved, isPending: false }),
   useAutoHealSave: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -45,8 +45,13 @@ async function mount() {
   await act(async () => { render(<MemoryRouter initialEntries={['/outside', '/editor']} initialIndex={1}><Navigation /></MemoryRouter>) })
 }
 function leave(kind: 'POP' | 'PUSH') {
+  const before = vi.mocked(window.confirm).mock.calls.length
+  const current = state()
+  const atRisk = current.isDirty || current.isLayoutDirty || Object.keys(current.pendingEdits).length > 0
   if (kind === 'POP') click('Back')
   else fireEvent.click(screen.getByRole('link', { name: 'Top-level outside' }))
+  expect(window.confirm).toHaveBeenCalledTimes(before + (atRisk ? 1 : 0))
+  if (atRisk) expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('可能丢失'))
   expect(screen.getByRole('heading', { name: 'Outside editor' })).toBeVisible()
   expect(screen.queryByLabelText('工作流 YAML')).not.toBeInTheDocument()
 }
@@ -74,6 +79,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); state().reset({ force: true }); vi.restoreAllMocks() })
 
 describe.each(['POP', 'PUSH'] as const)('real Editor draft recovery after %s navigation', kind => {
+  it('retains an unapplied draft and stays mounted when leaving is cancelled', async () => {
+    await mount(); click('YAML'); change('工作流 YAML', yamlDraft)
+    vi.mocked(window.confirm).mockReturnValue(false)
+    if (kind === 'POP') click('Back')
+    else fireEvent.click(screen.getByRole('link', { name: 'Top-level outside' }))
+    expect(window.confirm).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('heading', { name: 'Outside editor' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('工作流 YAML')).toHaveValue(yamlDraft)
+    expect(state().pendingEdits).toHaveProperty('yaml')
+  })
+
   it.each(['valid', 'invalid'] as const)('restores complete %s JSON, opens settings, and permits apply/discard without a pending lock', async validity => {
     await mount(); click('流程设置')
     const text = validity === 'valid' ? jsonDraft : '{\n  "unfinished": '
@@ -107,7 +123,6 @@ describe.each(['POP', 'PUSH'] as const)('real Editor draft recovery after %s nav
     expect(screen.getByLabelText('工作流输入')).toHaveValue(JSON.stringify(state().spec!.input, null, 2))
     expect(screen.getByRole('button', { name: '放弃 工作流输入' })).toBeDisabled()
     expect(state().pendingEdits).toEqual({})
-    expect(window.confirm).not.toHaveBeenCalled()
     expect(Storage.prototype.setItem).not.toHaveBeenCalled()
   })
 
@@ -141,7 +156,6 @@ describe.each(['POP', 'PUSH'] as const)('real Editor draft recovery after %s nav
     expect(screen.getByLabelText('工作流 YAML')).toHaveValue(stringify(state().spec, { lineWidth: 0 }))
     expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: '放弃 YAML 草稿' })).not.toBeInTheDocument()
-    expect(window.confirm).not.toHaveBeenCalled()
     expect(Storage.prototype.setItem).not.toHaveBeenCalled()
   })
 })
@@ -260,7 +274,7 @@ describe('restored baseline and owner metadata', () => {
     await enter('PUSH'); click('YAML')
     expect(screen.getByLabelText('工作流 YAML')).toHaveValue(yamlDraft)
     click('校验并应用')
-    expect(screen.getByRole('alert')).toHaveTextContent('工作流已切换')
+    expect(within(screen.getByRole('region', { name: 'YAML 编辑器' })).getByRole('alert')).toHaveTextContent('工作流已切换')
     expect(mocks.validate).not.toHaveBeenCalled()
     expect(state().pendingEdits).toHaveProperty('yaml')
     expect(state().spec!.id).toBe('different-owner')

@@ -1,0 +1,65 @@
+{
+  "status": "passed_with_documented_limits",
+  "verified_at": "2026-10-30T12:44:26.046518+08:00",
+  "protocol": "A2A 1.0",
+  "binding": "grpc",
+  "path": [
+    "BCS tonic",
+    "local MOSN egress",
+    "registry-discovered MOSN ingress",
+    "Harness SOFARPC Triple",
+    "official Java A2A handler",
+    "Harness engine",
+    "real model"
+  ],
+  "deployment": "one dedicated MOSN process serving both roles on one Mac; real registry publication/subscription; not a two-host deployment",
+  "artifacts": {
+    "bcs_sha256": "46460ce384b88e0280ef272b6a436bf8f9e1573fdac15e30856701773bd0f1fa",
+    "harness_jar_sha256": "881e5fc247cd33ee1c13a9dacb80a18a371d0c7a06c43e24e07d86b962380c0b"
+  },
+  "checks": {
+    "sdk_stream": "passed",
+    "sdk_async_send_then_subscribe": "passed",
+    "bcs_text_and_multi_turn": "passed",
+    "bcs_real_tool_execution_and_history": "passed",
+    "bcs_exact_task_cancel": "passed",
+    "bcs_exec_allow_once_and_deny": "passed",
+    "real_mesh_invalid_bearer_rejection": "passed, gRPC 16",
+    "current_bcs_http_text_tools_cancel_exec_regression": "passed",
+    "original_trial_port_21082_real_model_grpc": "passed",
+    "open_claw_port_8000_proxied_websocket_connect": "passed"
+  },
+  "tests": {
+    "rust_adapter_domain_regression": "171 passed across 20 suites before final Card/scope changes",
+    "rust_current_card_grpc_contracts": "20 passed across four suites after final Card/scope changes",
+    "rust_scope_store_conformance": "6 passed, including a pre-gRPC serialized scope-key fixture",
+    "rust_bootstrap_config_validation": "147 passed",
+    "java_full_reactor_tests": "72 passed",
+    "rust_runtime_build": "passed",
+    "java_package": "passed",
+    "dependency_boundary_gate": "failed on existing bcs-protocol -> bcs-domain and bcs-service-api -> bcs-config-api / bcs-storage-api constraints; not weakened",
+    "forbidden_symbols_gate": "passed",
+    "source_line_counts": "199 Avernet and 73 Harness source files checked; none above 1000 lines",
+    "git_diff_check": "passed in both repositories",
+    "full_workspace_and_singlebox_ci": "not rerun in this phase; targeted adapter/domain/bootstrap tests and live cross-language checks executed; see phase-1 validation for other baseline failures/skips"
+  },
+  "evidence_repository": "harness-bcs-demo",
+  "evidence_files": [
+    "evidence/a2a-grpc-mosn-sdk.json",
+    "evidence/a2a-grpc-bcs-text.json",
+    "evidence/a2a-grpc-bcs-tools.json",
+    "evidence/a2a-grpc-bcs-cancel.json",
+    "evidence/a2a-grpc-bcs-exec.json",
+    "evidence/a2a-grpc-auth.json",
+    "evidence/a2a-grpc-trial.json"
+  ],
+  "limits": [
+    "ask_user remains deferred",
+    "multi-instance ownership and lossless in-flight process-restart recovery remain deferred",
+    "Harness restart was followed by a missing MOSN ingress while health remained UP; recovered by owned sidecar restart and explicit initialization/publication/subscription; listener checks required",
+    "a pre-Task uncertain submission during that restart retained a queue slot and could not be confirmed canceled; failed isolated fixture preserved and reset before current acceptance; automatic recovery not claimed",
+    "the model proxy remained enabled; changing ingress to 51051 worked but does not prove proxy root cause",
+    "native SDK terminal-subscribe behavior is handled by bounded GetTask recovery; no replay cursor claimed"
+  ],
+  "publication_note": "Historical validation of the builds recorded here; not a validation of the rebased PR head or the default in-memory Harness. See pr-validation.json for current merged-head checks. Harness SDK source is excluded from this PR."
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.expert_origin import expert_name_from_ext
+
 import json
 from dataclasses import replace
 from typing import Any, Mapping
@@ -507,6 +509,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 owner_id=owner_id,
                 current_space=current_space,
             ),
+            expert_name=expert_name_from_ext(ext),
             avatar_url=_optional_str(ext.get("avatar_url") or row.get("avatar_url")),
             machine_id=_optional_str(ext.get("machine_id") or row.get("machine_id")),
             mount_path=_optional_str(ext.get("mount_path") or row.get("mount_path")),

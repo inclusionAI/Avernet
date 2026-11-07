@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 use bcs_service_api::application::v1::bot_authority::{
-    BotOwnershipView, ManagerPage, ManagerSetChange, TransferStatus,
-    TransferView, human_user_id_of_actor,
+    BotOwnershipView, ManagerPage, ManagerSetChange, OwnershipChange,
+    TransferStatus, TransferView, human_user_id_of_actor,
 };
 
 /// `PUT /bots/{bot_id}/managers` body (spec §5.2):
@@ -93,6 +93,36 @@ impl From<BotOwnershipView> for BotOwnershipDto {
             bot_id: view.bot_id,
             owner_user_id: view.owner_user_id,
             owner_actor_id: view.owner_actor_id,
+        }
+    }
+}
+
+/// `PUT /bots/{bot_id}/ownership` body (设计 §3.1): one
+/// target owner. The field is REQUIRED: a missing or
+/// null `owner_user_id` fails the whole request — it
+/// must never read as a "clear owner" snapshot.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncOwnershipBody {
+    pub owner_user_id: String,
+}
+
+/// Result of an ownership sync (设计 §3.2).
+#[derive(Debug, Serialize)]
+pub struct OwnershipChangeDto {
+    pub bot_id: String,
+    pub owner_user_id: Option<String>,
+    pub previous_owner_user_id: Option<String>,
+    pub changed: bool,
+}
+
+impl From<OwnershipChange> for OwnershipChangeDto {
+    fn from(change: OwnershipChange) -> Self {
+        Self {
+            bot_id: change.bot_id,
+            owner_user_id: change.owner_user_id,
+            previous_owner_user_id: change.previous_owner_user_id,
+            changed: change.changed,
         }
     }
 }
@@ -423,5 +453,45 @@ mod tests {
                 "{raw} must not parse"
             );
         }
+    }
+
+    #[test]
+    fn sync_ownership_body_requires_the_single_field() {
+        let ok: SyncOwnershipBody = serde_json::from_str(
+            r#"{"owner_user_id":"alice"}"#,
+        )
+        .expect("valid body");
+        assert_eq!(ok.owner_user_id, "alice");
+        assert!(
+            serde_json::from_str::<SyncOwnershipBody>(r#"{}"#).is_err(),
+            "missing field fails"
+        );
+        assert!(
+            serde_json::from_str::<SyncOwnershipBody>(
+                r#"{"owner_user_id":null}"#
+            )
+            .is_err(),
+            "null fails"
+        );
+        assert!(
+            serde_json::from_str::<SyncOwnershipBody>(
+                r#"{"owner_user_id":"a","extra":1}"#
+            )
+            .is_err(),
+            "unknown field fails"
+        );
+    }
+
+    #[test]
+    fn ownership_change_dto_serializes_nulls_for_the_noop() {
+        let dto =
+            OwnershipChangeDto::from(OwnershipChange::unchanged("bot_x"));
+        let value = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(value["owner_user_id"], serde_json::Value::Null);
+        assert_eq!(
+            value["previous_owner_user_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(value["changed"], false);
     }
 }

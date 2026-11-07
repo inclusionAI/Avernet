@@ -93,7 +93,8 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "hitl" in codes
         assert "clawmind" in codes
         assert "mcp.ant.faas.aixjiter.CodeUserMCP" in codes
-        assert len(codes) == 20
+        assert codes.count("mcp.ant.faas.aixjiter.AixArchBotMCP") == 1
+        assert len(codes) == 22
 
     def test_collect_bot_active_mcps_openclaw_returns_openclaw_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -115,7 +116,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "hitl" in codes
         # Must NOT contain aicoding-only servers
         assert "mcp.ant.secaibase.secknowledgemcpserver" not in codes
-        assert len(codes) == 12
+        assert len(codes) == 13
 
     def test_collect_bot_active_mcps_moltis_returns_empty_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -178,7 +179,8 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "clawmind" in codes
         assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
         assert "mcp.ant.faas.aixjiter.CodeUserMCP" in codes
-        assert len(codes) == 20
+        assert codes.count("mcp.ant.faas.aixjiter.AixArchBotMCP") == 1
+        assert len(codes) == 22
 
     def test_collect_bot_mcps_openclaw_returns_openclaw_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -196,7 +198,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "mcp.ant.brwithub.worksummaryserver" in codes
         assert BCS_MCP_SERVER_CODE in codes
         assert "hitl" in codes
-        assert len(codes) == 12
+        assert len(codes) == 13
 
     # ------------------------------------------------------------------
     # get_set_mcp_servers — direct engine_type parameter
@@ -225,8 +227,9 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "hitl" in codes
         assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
         assert "mcp.ant.faas.aixjiter.CodeUserMCP" in codes
+        assert codes.count("mcp.ant.faas.aixjiter.AixArchBotMCP") == 1
         assert "clawmind" in codes
-        assert len(codes) == 20
+        assert len(codes) == 22
 
     def test_get_set_mcp_servers_openclaw_with_default_skill_set(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -247,7 +250,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "mcp.ant.antprocessai.anttaskmcp" in codes
         assert BCS_MCP_SERVER_CODE in codes
         assert "hitl" in codes
-        assert len(codes) == 12
+        assert len(codes) == 13
 
 
 class TestClaudeCodeDefaultMcpNames:

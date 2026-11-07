@@ -26,6 +26,8 @@ pub mod types;
 pub mod workbench_use_cases;
 
 pub use bcs_domain::bot_provider;
+pub use bcs_domain::caller_identity::{BotCallerBlockedReason, BotCallerEffectiveStatus};
+pub use bcs_domain::caller_identity::{CallerIdentityConfig, CallerMinimumIsolation};
 
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
@@ -40,13 +42,17 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::{SystemMessageService, SystemMessageQueueService, SystemQueueAdmissionOutcome};
+pub use application::message_flow::WebSendLeaseClaim;
 pub use application::message_delivery::{
+    CallerExecutionCancelCommand, CallerExecutionCancelOutcome, CallerExecutionControlService,
+    CallerExecutionQuery, CallerExecutionStatus, CallerExecutionStatusView,
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
     DeliveryResolution, ResolveMessageDeliveryCommand,
     DeliveryStatusQuery, DeliveryStatusView, DeliveryTransitionCommand,
     ManagedDeliveryError, ManagedDeliveryPreparationService, ManagedMessageDeliveryService,
     PreparedManagedDelivery,
 };
+pub use application::message_delivery::CallerDispatchContext;
 pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
@@ -170,7 +176,7 @@ pub use message_flow::{
     GroupChatOutcome, GroupFusionCommand, GroupFusionService, MessageDeliveryResult,
     MessageFlowService, ParticipantPerspective, PersistentGroupSendCommand,
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
-    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, CallerDelegationAssignment,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
     ChannelSenderIdentity, WebSendCommand, WebSendOutcome,
 };
@@ -186,6 +192,7 @@ pub use application::{
     ProviderEventIngestService,
     ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
+    SyncProviderBotCallerConfigurationCommand,
     RegisterProviderOutcome, UpdateProviderBotCommand, UpdateProviderBotOutcome,
     UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     CreateOrganizationCommand,
@@ -202,7 +209,9 @@ pub use port::{
     ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
     BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
-    BotControlPlaneRepoPort,
+    BotControlPlaneRepoPort, BotCallerConfiguration, CallerConfigRevisionConflict,
+    CallerConfigRevisionDecision, CallerConfigurationSync, CallerIdentitySnapshot,
+    CallerTokenVisibility, ProviderCallerCapabilities,
     BotRunContextPort, BotRunScope, BotRunTransportOwner, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState,
     CompositeBotTerminalObserver, ProviderRunTransport, ProviderTransportPreference,
@@ -251,7 +260,7 @@ pub use port::{
 pub use workbench_use_cases::{
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService, WorkbenchUseCaseError,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand, WorkbenchUseCaseError,
 };
 
 pub use types::{
@@ -337,9 +346,17 @@ pub use bcs_domain::{
 
 // Note: bcs-bot-connectors has been removed. Bot communication uses the streaming adapter.
 
+// Delivery adapters consume these declared Service API contracts through the
+// public facade; concrete policy implementations stay in services/*.
+pub use application::run_budget::RunBudgetService;
+pub use types::run_budget::{RunBudgetChange,RunBudgetLimits,RunBudgetPhase,RunBudgetState};
+pub use core::message_delivery::DeliveryLifecycleEvent;
+
 pub use port::repo::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 
 pub use port::repo::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};
 pub use port::session_channel_outbound::StateMachineTerminalNotification;
 
 pub use port::repo::{FailStateMachineStartup, StateMachineMissingStartupFact, StateMachineStartupFailure, STATE_MACHINE_PREPARATION_GRACE_MS};
+
+pub use application::task_handle::{TaskHandleStatus, TaskHandleView};

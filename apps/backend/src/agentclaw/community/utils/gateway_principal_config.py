@@ -171,7 +171,7 @@ def init_principal_verifier_config(
         RuntimeError: when ``strict`` and no usable key could be resolved.
     """
     global _config
-    signing_key = _resolve_signing_key(resolver, secret_name)
+    signing_key = resolve_signing_key(resolver, secret_name)
     if not signing_key and strict:
         raise RuntimeError(
             "gateway principal verification has no signing key: "
@@ -249,8 +249,26 @@ def get_bcn_principal_signer_config() -> PrincipalSignerConfig:
     the two can never disagree about which key is installed: there is one
     source, and this is a view onto it.
     """
+    return bcs_service_principal_signer_config(_config.signing_key)
+
+
+def bcs_service_principal_signer_config(signing_key: str) -> PrincipalSignerConfig:
+    """The envelope every token this component addresses to BCS carries.
+
+    One builder for both BCS-bound signers — :func:`resign_principal_token`
+    (re-addressing a verified caller's token, the friend-approval flow) and
+    :func:`mint_service_app_principal` (minting this component's own service
+    identity, the manager-sync delivery) — so the ``iss``/``aud``/``kid``
+    triple a token carries can never differ between the two flows that share
+    one upstream, one verifier and one key.
+
+    ``signing_key`` comes from the caller rather than the installed config
+    because the composition roots that mint service tokens resolve the key
+    themselves, through :func:`resolve_signing_key` below, so the credential a
+    deployment sends with is the one its stack resolved and validated.
+    """
     return PrincipalSignerConfig(
-        signing_key=_config.signing_key,
+        signing_key=signing_key,
         audience=_BCN_AUDIENCE,
         issuer=_BCN_ISSUER,
         key_id=_BCN_KEY_ID,
@@ -278,12 +296,18 @@ def resign_principal_for_bcn(token: str) -> str:
     )
 
 
-def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
+def resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
     """Return the shared key, or ``""`` when this deployment has none.
 
     Logs *what* failed, never *what happens next*: the caller decides that from
     ``strict``, and predicting "will answer 401" here would be wrong in the
     strict case, where the process raises and never serves a request at all.
+
+    Public because a second composition root resolves the same key under the
+    same conventions: the manager-sync stack mints BCS-direct service
+    principals with it (``di/modules/bot_manager_sync_module.py``), and must
+    not grow a parallel resolution path or read the boot-installed global
+    before boot has installed it.
     """
     if not secret_name:
         logger.warning(

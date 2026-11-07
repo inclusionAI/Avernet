@@ -9,6 +9,8 @@ and the bot service are stood in for.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 import pytest
 
 from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
@@ -43,6 +45,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
+from tests.community.core.apply_engine._empty_cli_tools import EmptyCliTools
 from tests.community.core.apply_engine._fakes import (
     resource_rows_for,
     manifest_compilers,
@@ -144,7 +147,8 @@ def _build(db):
             content=content,
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=EmptyCliTools(),
+            shared_skills=object(),
         )
 
     applies = ApplyRunService(
@@ -152,6 +156,7 @@ def _build(db):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=bots,
         # The platform-managed deployment: the store-backed bundle above, and
@@ -166,6 +171,7 @@ def _build(db):
     queue.service = applies
 
     seam = BotCreationManifestSeam(
+        validate_creation_spec=validate_creation_source,
         manifest_service=_Manifests(),
         apply_service=applies,
         script_service_provider=lambda: scripts,
@@ -203,6 +209,7 @@ def _build(db):
             return bots.record
 
     handler = BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
         bot_repository_provider=lambda: bots,

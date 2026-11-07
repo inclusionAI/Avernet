@@ -58,6 +58,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestBindingMismatchError,
     MAX_DOCUMENT_BYTES,
     ManifestNotEncodableError,
     ManifestTooLargeError,
@@ -89,9 +90,13 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
+    BotAccessCheckForbiddenError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_genome import GENOME_ENVELOPE_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
+    GENOME_ENVELOPE_ERROR_CODES,
+    GENOME_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -379,10 +384,11 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
-from agentclaw.community.core.expert_market.models import ExpertNotFoundError
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
 
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ExpertNotFoundError: (404, "Not found"),
+    ExpertCreationError: (422, "Expert cannot be created"),
     EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
     EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
@@ -431,6 +437,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # two have different fixes. The message says nothing about which user was
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
+    BotAccessCheckForbiddenError: (403, "Forbidden"),
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
@@ -682,6 +689,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
+    ManifestBindingMismatchError: (409, "Bound Manifest changed"),
     ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
@@ -757,7 +765,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
-    EngineRuntimeError: (502, "Engine service error"),
+    EngineRuntimeError: (500, "Internal error"),
     # Cron upstream fallback; mapped_error_response preserves the relay's
     # explicit business statuses. The timeout subclass keeps its own mapping.
     CronApiTimeoutError: (504, "Cron relay timed out"),
@@ -860,6 +868,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
     ApplyInProgressError: 409109,
+    ManifestBindingMismatchError: 409112,
+    **GENOME_ENVELOPE_ERROR_CODES,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,

@@ -44,6 +44,7 @@ from .restart_state import (
     task_key,
 )
 
+from .restart_backup import RestartBackupBlocked, log_restart_failure
 from .restart_baas import find_rejection
 
 logger = get_logger()
@@ -61,6 +62,8 @@ def _failure_message(error: Exception, *, fenced: bool) -> str:
     # engine-owned messages cross the persisted/public boundary.
     if fenced:
         return "重启提交结果待确认，请查询实例状态；不会自动重复销毁或创建容器"
+    if isinstance(error, RestartBackupBlocked):
+        return str(error)
     reason = getattr(error, "reason", "")
     if isinstance(error, TimeoutError) or reason == "timeout":
         return "重启备份超时，本次重启已终止，旧容器未销毁"
@@ -156,7 +159,7 @@ class AicodingDurableRestartMixin:
             "operation_id": uuid.uuid4().hex,
             "engine": bot["active_engine"],
             "binding_id": bot.get("binding_id"),
-            "previous_status": "PENDING",  # Admission persists this before enqueue.
+            "previous_status": bot["status"],
             "device_id": binding.get("device_id"),
             "provider": binding.get("device_provider"),
             "nick_name": kwargs.get("nick_name"),
@@ -166,11 +169,6 @@ class AicodingDurableRestartMixin:
             # Physical identity is already on the binding, exactly as release
             # resolves it. No BaaS inventory or sandbox-list request is needed.
             payload["sandbox_id"] = (binding.get("device_props") or {}).get("sandbox_id")
-        if bot["status"] != "PENDING":
-            if services.repository.update_by_owner(
-                bot_id, owner_id, {"status": "PENDING"}
-            ) is None:
-                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         task, _created = services.task_queue.enqueue(
             TASK_TYPE,
             payload,
@@ -182,11 +180,13 @@ class AicodingDurableRestartMixin:
         result = _state(services.repository, task.payload).ensure(task.payload, task.id)
         return self._accepted(result)
 
-    @staticmethod
-    def _accepted(bot):
+    def _accepted(self, bot):
         result = dict(bot)
         result["restart_in_progress"] = journal(bot).get("phase") in IN_PROGRESS
         result["restart_operation_id"] = journal(bot).get("operation_id")
+        result["ext"] = self.project_status_ext(
+            ext=bot.get("ext") or {}, response_ext=bot.get("ext") or {},
+        )
         return result
 
 
@@ -329,16 +329,15 @@ class AicodingRestartHandler:
                 return Reschedule(POLL_SECONDS)
             message = (
                 "重启提交前准备失败；本次重启已终止，旧容器未执行替换"
-                if execution.verify_backup is not None
+                if execution.verify_backup is not None and not isinstance(error, RestartBackupBlocked)
                 else _failure_message(error, fenced=execution.fenced)
             )
-            state.fail(message)
-            logger.error(
-                "coding restart blocked: bot_id=%s operation_id=%s error_type=%s",
-                state.bot_id,
-                state.operation_id,
-                type(error).__name__,
+            log_restart_failure(
+                error, bot_id=state.bot_id, operation_id=state.operation_id, owner_id=state.owner_id,
+                target_id=payload.get("device_id"), sandbox_id=payload.get("sandbox_id"),
+                binding_id=payload.get("binding_id"), phase="task_failed",
             )
+            state.fail(message)
             return Fail(message)
         finally:
             current_restart.reset(context_reset_handle)

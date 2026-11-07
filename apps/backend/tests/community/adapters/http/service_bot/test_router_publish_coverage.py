@@ -38,9 +38,10 @@ _ANON = AuthenticatedUser(id="anonymous", staffId="anonymous", operatorName="ano
 
 
 class DictOnlyResult:
-    def __init__(self, status=PublishStatus.SUCCESS, message="ok"):
+    def __init__(self, status=PublishStatus.SUCCESS, message="ok", *, success=True):
         self.status = status
         self.message = message
+        self.success = success
 
     def dict(self):
         return {"status": str(self.status), "message": self.message}
@@ -52,9 +53,10 @@ class ModelDumpResult(DictOnlyResult):
 
 
 class Record:
-    def __init__(self, *, owner_id="owner", source_bot_id="bot", ext=None):
+    def __init__(self, *, owner_id="owner", source_bot_id="bot", source_bot_pk=1, ext=None):
         self.owner_id = owner_id
         self.source_bot_id = source_bot_id
+        self.source_bot_pk = source_bot_pk
         self.ext = ext
 
     def to_dict(self):
@@ -86,7 +88,7 @@ async def test_extract_from_publish_id_all_paths():
     service.get_publish_by_id.return_value = None
     assert await router_publish.extract_from_publish_id("12", InterceptorContext(injector=injector)) == router_publish.PermissionParams()
 
-    service.get_publish_by_id.return_value = Record(owner_id="owner-1", source_bot_id="bot-1")
+    service.get_publish_by_id.return_value = Record(owner_id="owner-1", source_bot_id="bot-1", source_bot_pk=1)
     params = await router_publish.extract_from_publish_id("12", InterceptorContext(injector=injector))
     assert params.bot_id == "bot-1"
     assert params.owner_id == "owner-1"
@@ -213,12 +215,21 @@ async def test_create_first_publish_success_and_errors():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upgrade_publish_success_and_errors():
+async def test_upgrade_publish_success_and_errors(caplog):
+    sentinel = "credential" + "-sentinel"
     req = UpgradePublishRequest(publish_id=1)
     service = MagicMock()
-    service.upgrade_publish.return_value = Record()
-    resp = await router_publish.upgrade_publish(request=req, user=_USER, publish_service=service)
+    service.upgrade_publish.return_value.to_dict.return_value = {
+        "id": 2, "version": 2, "last_pub_id": 1, "status": "draft",
+        "ext": {"secret": sentinel},
+    }
+    with caplog.at_level("INFO"):
+        resp = await router_publish.upgrade_publish(request=req, user=_USER, publish_service=service)
     assert resp.success is True
+    assert "service_bot.upgrade.request" in caplog.text
+    assert "service_bot.upgrade.response" in caplog.text
+    assert "draft_id=2 draft_status=draft version=2 last_pub_id=1" in caplog.text
+    assert sentinel not in caplog.text
     service.upgrade_publish.assert_called_once_with(publish_id=1, owner_id="u1")
 
     resp = await router_publish.upgrade_publish(request=req, user=_ANON, publish_service=service)
@@ -483,6 +494,18 @@ async def test_restart_status_success_and_errors():
     resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
     assert resp.success is True
     flow.sync_restart_progress.assert_called_once_with(publish_id=1)
+
+    from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+    progress = {"aicoding": {"restart": {"status": "FAILED", "message": "backup veto"}}}
+    flow.sync_restart_progress.return_value = PublishFlowResult(
+        publish_id=1, status="success", success=False, message="backup veto", ext=progress,
+    )
+    resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
+    assert resp.success is False
+    assert resp.data["status"] == "success"
+    assert resp.data["ext"] == progress
+    assert "success" not in resp.data  # Internal operation outcome is not a new wire field.
+    assert "restart" not in resp.data
 
     flow.sync_restart_progress.return_value = DictOnlyResult(status=PublishStatus.FAILED, message="failed")
     resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
@@ -1145,3 +1168,27 @@ async def test_draft_restore_endpoint_error_paths():
             2, user=_USER, publish_service=publish_service
         )
         assert_error(restored, code, message)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upgrade_retains_draft_when_restart_submission_fails(caplog):
+    from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
+
+    draft = MagicMock()
+    draft.to_dict.return_value = {"id": 2, "version": 2, "last_pub_id": 1, "status": "draft"}
+    service = MagicMock()
+    service.upgrade_publish.side_effect = UpgradeDraftRestartError(draft)
+    with caplog.at_level("INFO"):
+        response = await router_publish.upgrade_publish(
+            request=UpgradePublishRequest(publish_id=1), user=_USER,
+            publish_service=service,
+        )
+    assert response.success is False
+    assert response.error_code == 500
+    assert response.data == draft.to_dict()
+    assert "重启触发失败" in response.message
+    assert "service_bot.upgrade.request" in caplog.text
+    assert "service_bot.upgrade.failure" in caplog.text
+    assert "success=False error_code=500 draft_id=2" in caplog.text
+    assert "version=2 last_pub_id=1" in caplog.text

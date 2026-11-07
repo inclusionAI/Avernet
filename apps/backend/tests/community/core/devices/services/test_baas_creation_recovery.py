@@ -20,7 +20,7 @@ from agentclaw.community.core.skills_pool.native_confirmation import SkillsPoolN
 from agentclaw.community.core.skills_pool.repository.models import BotSkillLayoutStateModel
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope, SkillLayoutPhase
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 from tests.community.core.devices.services.test_baas_device_service import (
     _make_binding_record, _make_service, _operator,
 )
@@ -182,7 +182,7 @@ def test_active_pool_recovery_uses_highest_priority_current_startup_identity():
 @pytest.mark.parametrize("entrypoint", ["create_bot", "provision_bot"])
 def test_active_orphan_recovery_callback_commits_real_pool_layout(tmp_path, entrypoint):
     """Replay the missing-link callback, retry linking, then confirm real DB state."""
-    database = CommunityDatabase(f"sqlite:///{tmp_path / 'recovery.db'}", create_schema=False)
+    database = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'recovery.db'}", create_schema=False)
     for model in (EntityDeviceBinding, BotModel, BotSkillLayoutStateModel):
         model.__table__.create(database._engine)
     repo = DeviceRepository(database)

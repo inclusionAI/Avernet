@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -114,6 +115,7 @@ class AsyncChatClientPool:
         uri: str,
         headers: dict[str, str] | None = None,
         session_key: str | None = None,
+        token_minter: Callable[[], Awaitable[str]] | None = None,
     ) -> AsyncChatClient:
         """获取该 sandbox_id 对应的连接（Least-Sessions 选择，On-demand 扩容）
 
@@ -144,6 +146,7 @@ class AsyncChatClientPool:
                     sandbox_id,
                     len(self._clients.get(sandbox_id, [])),
                 )
+                self._refresh_outbound_auth(owner, headers)
                 return owner
         # P1-3：每次 get() 决策点读一次当前灰度模式——复用连接前校验其
         # 建连模式快照与当前配置一致，不一致的停止承接新请求（空闲即时
@@ -164,6 +167,7 @@ class AsyncChatClientPool:
                 sandbox_id,
                 client.active_session_count,
             )
+            self._refresh_outbound_auth(client, headers)
             return client
 
         logger.info(
@@ -188,6 +192,7 @@ class AsyncChatClientPool:
                     sandbox_id,
                     client.active_session_count,
                 )
+                self._refresh_outbound_auth(client, headers)
                 return client
 
             # 清理不健康/重连中的连接
@@ -206,6 +211,7 @@ class AsyncChatClientPool:
                 )
                 best = self._pick_least_sessions(entries, current_mode)
                 if best is not None:
+                    self._refresh_outbound_auth(best, headers)
                     return best
                 # 所有连接都不健康（或模式翻转不匹配）且已被清理，继续创建新的
 
@@ -234,6 +240,7 @@ class AsyncChatClientPool:
                     self._load_sensitive_bypass_keys,
                     self._system_config_service,
                 ),
+                proxypass_token_minter=token_minter,
             )
             await new_client.connect()
 
@@ -418,6 +425,30 @@ class AsyncChatClientPool:
                 sandbox_id,
             )
             asyncio.ensure_future(self._safe_close(entry.client))
+
+    @staticmethod
+    def _refresh_outbound_auth(
+        client: AsyncChatClient | None, headers: dict[str, str] | None
+    ) -> None:
+        """复用路径转发最新 proxypass token（P0：120s JWT 过期正修）。
+
+        调用方每条消息现签 headers；连接构造时的 token 快照存活期远
+        短于池连接寿命，而 A2A HTTP 腿逐请求鉴权——复用不刷即过期
+        401（2026-10-29 预发 62 例风暴根因）。duck-typed：v3 WS 无此
+        转发方法（握手后无请求级鉴权）；空/缺失 token（Local 平台）
+        跳过；刷新失败只告警，不得殃及消息分派。
+        """
+        if client is None or not headers:
+            return
+        if not headers.get("x-proxypass-token"):
+            return
+        refresh = getattr(client, "refresh_outbound_auth", None)
+        if refresh is None:
+            return
+        try:
+            refresh(headers)
+        except Exception:
+            logger.exception("[ChatClientPool] outbound auth refresh failed")
 
     def _find_session_owner(
         self, sandbox_id: str, session_key: str

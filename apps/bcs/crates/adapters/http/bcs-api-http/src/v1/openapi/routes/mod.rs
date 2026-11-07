@@ -9,3 +9,4 @@ pub mod invitation;
 pub mod register;
 pub mod session;
 pub mod invite_code;
+pub mod worker_task;

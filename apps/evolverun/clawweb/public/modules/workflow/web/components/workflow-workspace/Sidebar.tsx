@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
-export type WorkspaceView = 'dashboard' | 'overview' | 'diagnosis' | 'remedies' | 'editor' | 'management'
+export type WorkspaceView = 'dashboard' | 'workbench' | 'overview' | 'diagnosis' | 'remedies' | 'editor' | 'management'
 
-type WorkspaceIcon = 'dashboard' | 'overview' | 'diagnosis' | 'remedies' | 'editor' | 'management'
+type WorkspaceIcon = 'dashboard' | 'workbench' | 'overview' | 'diagnosis' | 'remedies' | 'editor' | 'management'
 type NavItem = { key: WorkspaceView; label: string; icon: WorkspaceIcon; count?: number }
 
 interface SidebarProps {
@@ -17,6 +17,7 @@ interface SidebarProps {
 function NavIcon({ name }: { name: WorkspaceIcon }) {
   const paths: Record<WorkspaceIcon, ReactNode> = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    workbench: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 14h5l2 3h4l2-3h5" /></>,
     overview: <><path d="M4 17V7" /><path d="M4 17h16" /><path d="m7 13 3-3 3 2 5-6" /><path d="M15 6h3v3" /></>,
     diagnosis: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6" /><path d="M12 17h.01" /></>,
     remedies: <><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z" /><path d="m4 12 8 4.5 8-4.5" /><path d="m4 16.5 8 4.5 8-4.5" /></>,
@@ -55,7 +56,7 @@ export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow
       </div>
     </div>
     <div className={`relative min-h-0 flex-1 overflow-y-auto ${compact ? 'px-2' : 'px-3'} py-4`}>
-      {isAdmin && <div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>全局</p><NavButton compact={compact} item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} /></div>}
+      <div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>全局</p>{isAdmin && <NavButton compact={compact} item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} />}<NavButton compact={compact} item={{ key: 'workbench', label: '工作台', icon: 'workbench' }} active={activeView === 'workbench'} onClick={() => onViewChange('workbench')} /></div>
 
       {hasWorkflow && <><div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>分析与改进</p><div className="space-y-0.5">{analysisItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div><div><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>工作流配置</p><div className="space-y-0.5">{configItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div></>}
     </div>

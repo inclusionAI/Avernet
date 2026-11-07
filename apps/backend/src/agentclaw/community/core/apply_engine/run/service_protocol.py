@@ -236,9 +236,12 @@ class ApplyRunServiceProtocol(Protocol):
 
     @abstractmethod
     def last_apply(
-        self, *, entity_id: str, bot_id: str
+        self, *, entity_id: str, bot_id: str, trigger: str | None = None
     ) -> Optional[ApplyReport]:
-        """The newest report for this bot, or ``None`` if it never applied.
+        """The newest report for this bot, optionally restricted to one trigger.
+
+        Omitting ``trigger`` keeps the ordinary latest-report read. Selecting a
+        trigger reads its history independently of later unrelated applies.
 
         ``None``, never an error — the same "absent is not an error" rule the
         manifest's own ``get`` follows.

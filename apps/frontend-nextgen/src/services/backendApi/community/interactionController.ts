@@ -19,6 +19,7 @@ export interface InteractionRecordedDto {
   action_type?: string;
   target_type?: string;
   target_id?: string;
+  active?: number;
   recorded?: boolean;
 }
 
@@ -43,6 +44,7 @@ export function createCommunityInteraction(input: RecordInteractionInput, signal
         action_type: input.actionType,
         target_type: input.target.targetType,
         target_id: input.target.id,
+        active: input.active,
       },
       signal,
     },

@@ -81,16 +81,34 @@ impl GroupSessionConnectionService for RecordingConnectionService {
         self.authorizations.lock().await.push(command);
         self.authorization_request_ids.lock().await.push(bcs_observability::current_request_id());
         Ok(AuthorizedGroupSessionConnection {
-            participants: vec![SessionParticipant {
-                actor_id: "human_user-a".to_string(),
-                actor_kind: ActorKind::Human,
-                name: Some("Test Human".to_string()),
-                role: ParticipantRole::Observer,
-                tags: Vec::new(),
-                mode: ParticipantMode::Present,
-                message_view_scope: MessageViewScope::Full,
-                joined_at: None,
-            }],
+            // The application rows carry avatars (bot-avatar plan), but the
+            // Workbench connect frame projects them through
+            // WorkbenchParticipantView — the frame rows keep the legacy
+            // field set (design §5.1).
+            participants: vec![
+                SessionParticipant {
+                    actor_id: "human_user-a".to_string(),
+                    actor_kind: ActorKind::Human,
+                    name: Some("Test Human".to_string()),
+                    avatar_url: None,
+                    role: ParticipantRole::Observer,
+                    tags: Vec::new(),
+                    mode: ParticipantMode::Present,
+                    message_view_scope: MessageViewScope::Full,
+                    joined_at: None,
+                },
+                SessionParticipant {
+                    actor_id: "ws-avatar-bot".to_string(),
+                    actor_kind: ActorKind::Bot,
+                    name: Some("WS Avatar Bot".to_string()),
+                    avatar_url: Some("https://cdn.example.com/ws-avatar.png".to_string()),
+                    role: ParticipantRole::Driver,
+                    tags: Vec::new(),
+                    mode: ParticipantMode::Auto,
+                    message_view_scope: MessageViewScope::Full,
+                    joined_at: None,
+                },
+            ],
             view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
     }
@@ -111,15 +129,24 @@ fn app_with_registry(service: Arc<RecordingConnectionService>, registry: Arc<Wor
         frontend_connections: registry,
         run_channels: Arc::new(RunChannelManager::new()),
         delivery_admission: Arc::new(support::AllowAllAdmission),
+        // Lease wiring is not under test here: lease commands answer
+        // an explicit error.
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     group_session_websocket_router(
         service,
         dispatch_state.clone(),
         Arc::new(NoopWsLifecycleInstrumentationHook),
+        // Test chain of the local auth plugin family.
+        Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
     ).route("/ws", axum::routing::get(move |ws: axum::extract::ws::WebSocketUpgrade| {
         let state = dispatch_state.clone();
         async move { ws.on_upgrade(move |socket| bcs_ws::web::handle_client_connection(
-            socket, state, bcs_ws::web::WorkbenchConnectionAuth::UserBound { actor_id: None },
+            socket, state, bcs_ws::web::WorkbenchConnectionAuth::UserBound {
+                actor_id: None,
+                caller_ingress: None,
+            },
             Arc::new(NoopWsLifecycleInstrumentationHook),
         )) }
     }))
@@ -227,7 +254,26 @@ async fn valid_token_upgrades_and_connect_uses_the_immutable_verified_binding() 
         panic!("expected text response")
     };
     let response: BcsFrame = serde_json::from_str(&response).expect("BCS response frame");
-    assert!(matches!(response, BcsFrame::Response(response) if response.ok));
+    let BcsFrame::Response(response) = response else {
+        panic!("expected a response frame, got {response:?}")
+    };
+    assert!(response.ok);
+
+    // Bot-avatar plan design §5.1: the session-bound connect frame carries
+    // the legacy WorkbenchParticipantView rows. The application's
+    // avatar-bearing SessionParticipant map is projected row by row, so no
+    // avatar field can reach the WS wire here.
+    let payload = response.payload.expect("connect response payload");
+    let participants = payload["participants"].as_array().expect("frame participant rows");
+    assert_eq!(participants.len(), 2);
+    for row in participants {
+        assert!(
+            row.get("avatar_url").is_none() && row.get("avatar").is_none(),
+            "WS connect frame row must not carry an avatar field: {row}"
+        );
+    }
+    assert_eq!(participants[1]["bot_uuid"], serde_json::json!("ws-avatar-bot"));
+    assert_eq!(participants[1]["type"], serde_json::json!("bot"));
 
     // This authorization runs on a real post-upgrade Axum task, after the HTTP
     // middleware has returned. The production upgrade boundary must carry its ID.

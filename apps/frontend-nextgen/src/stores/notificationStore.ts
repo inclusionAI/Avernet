@@ -8,7 +8,9 @@ export interface NotificationState {
   loadingRecent: boolean;
   lastReadFetchedAt?: number;
   setUnreadCount: (count: number) => void;
-  setRecent: (recent: NotificationSummary[]) => void;
+  setRecent: (
+    recent: NotificationSummary[] | ((previous: NotificationSummary[]) => NotificationSummary[]),
+  ) => void;
   setLoadingUnread: (loading: boolean) => void;
   setLoadingRecent: (loading: boolean) => void;
   reset: () => void;
@@ -21,7 +23,10 @@ export const useNotificationStore = create<NotificationState>((set) => ({
   loadingUnread: false,
   loadingRecent: false,
   setUnreadCount: (unreadCount) => set({ unreadCount, lastReadFetchedAt: Date.now() }),
-  setRecent: (recent) => set({ recent }),
+  setRecent: (recent) =>
+    set((state) => ({
+      recent: typeof recent === 'function' ? recent(state.recent) : recent,
+    })),
   setLoadingUnread: (loadingUnread) => set({ loadingUnread }),
   setLoadingRecent: (loadingRecent) => set({ loadingRecent }),
   reset: () => set({ unreadCount: 0, recent: [], loadingUnread: false, loadingRecent: false }),

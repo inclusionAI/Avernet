@@ -19,10 +19,12 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
 from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
 )
+from agentclaw.community.core.bot_copy.types import BotCopyStateSummary
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -75,8 +77,14 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
+
+    entity_id: str = Field(default="", description="Immutable Bot resource locator.")
+    bcn_bot_id: str = Field(
+        default="", description="Established BCN address; stable across Owner handoff."
+    )
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -114,6 +122,10 @@ class Bot(BaseModel):
         "lifecycle is not managed through this API."
     )
     status: str = Field(description=_BOT_STATUS_DESC)
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+    )
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )
@@ -134,6 +146,13 @@ class Bot(BaseModel):
         default=None,
         description="Business space the bot's record is assigned to (owner view). "
         "Populated on the listing endpoints.",
+    )
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="If this bot is the dst of a copy operation, its live progress "
+        "(operation_id / status / source_bot_id); null for bots not created via "
+        "copy. FE shows the retry button whenever copy_state is non-null and "
+        "status != CONVERGED.",
     )
 
 
@@ -423,7 +442,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
@@ -682,9 +701,7 @@ class ManifestSourceCell(BaseModel):
     it.
     """
 
-    category: str = Field(
-        description="One of the six categories under `manifest`."
-    )
+    category: str = Field(description="One of the six categories under `manifest`.")
     protocol: str = Field(
         description=(
             "How the content travels: `content` (inline in the document), "
@@ -866,6 +883,11 @@ class BusinessSpace(BaseModel):
 class BotInventoryItem(BaseModel):
     """Unified card for a personal cloud, local, or service bot."""
 
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+        json_schema_extra={"readOnly": True},
+    )
     bot_id: str = Field(description="Unique identifier of the bot.")
     card_id: str = Field(
         description="Stable card identity; service cards include the publication id."
@@ -889,6 +911,10 @@ class BotInventoryItem(BaseModel):
     )
     status: str = Field(
         description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
+    )
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="Derive-on-read copy operation state for this bot; null when the bot is not a copy dst or the copy already converged. FE uses it for the copy-progress badge and retry action on inventory cards.",
     )
     publish: InventoryPublication | None = Field(
         default=None,

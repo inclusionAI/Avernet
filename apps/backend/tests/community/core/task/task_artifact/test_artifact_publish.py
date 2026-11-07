@@ -1,4 +1,4 @@
-"""发布 capture 服务:文本双轨派生、patch 逐条、attempt 交叉校验、contextvar 暂存(spec §5.1)。"""
+"""发布 capture 服务:relay 显式 artifacts、可选文本双轨、attempt 校验、contextvar 暂存。"""
 from __future__ import annotations
 
 import json
@@ -150,6 +150,19 @@ class TestTextDualTrack:
             ensure_ascii=False,
             separators=(",", ":"),
         )
+
+    def test_relay_mode_does_not_derive_text_from_output(self):
+        graph = _graph()
+        node = graph.tasks[1]
+        node.run_info.output = {"result": "done"}
+        records = _service().capture_node(
+            graph,
+            node,
+            artifact_patch=None,
+            now_ms=1000,
+            derive_text_from_output=False,
+        )
+        assert records == []
 
     def test_business_dict_output_records_nothing(self):
         graph = _graph()

@@ -43,6 +43,7 @@ export interface TaskRelationDto {
  * content 为 kind-tagged 引用元数据:text→{text};file→{storage_type,storage_id,file_name,file_id,file_type};
  * object_file 用稳定对象 key,预览/下载只走后端原始字节代理接口。
  * url_link→{url,type};code→{code_base_name,code_base_address,pr_link,pr_desc}。
+ * 四个分支的 content 均附带 is_final_artifact("true"|"false"),表示是否最终产物。
  */
 export interface TaskArtifactDescriptorDto {
   artifact_id: string;

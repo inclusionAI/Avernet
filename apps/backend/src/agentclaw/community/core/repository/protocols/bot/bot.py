@@ -114,6 +114,17 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """List at most two live Bots by exact human owner in this tenant/env.
+
+        An entity identifier with the same spelling is not an owner match.
+        Callers must reject multiple matches rather than select arbitrarily.
+        """
+        ...
+
+    @abstractmethod
     def list_matches_by_legacy_locator(
         self, bot_id: str, locator: str
     ) -> List[Dict[str, Any]]:
@@ -420,6 +431,17 @@ class BotRepository(Protocol):
     @abstractmethod
     def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         """Check if the owner has a live Bot of the requested type."""
+        ...
+
+    @abstractmethod
+    def is_soft_deleted(self, bot_id: str, entity_id: str) -> bool:
+        """Whether a soft-deleted Bot already exists for this bot and entity.
+
+        Every ordinary lookup filters ``is_delete == 0``, so a caller that
+        must tell "already deleted" apart from "never landed" cannot use
+        them: both answer ``None``. This is that distinction, scoped to the
+        current env like every other query on the table.
+        """
         ...
 
     @abstractmethod

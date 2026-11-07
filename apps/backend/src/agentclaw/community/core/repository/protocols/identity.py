@@ -74,7 +74,10 @@ class CallerIdentityRepositoryProtocol(Protocol):
         lock_epoch: int | None,
         effective_server_codes: set[str] | None = None,
         effective_cli_codes: set[str] | None = None,
-    ) -> CliCallTypeMutationResult: ...
+        allow_owner_transition: bool = False,
+    ) -> CliCallTypeMutationResult:
+        """Allow a final Owner aggregate only with trusted service authorization."""
+        ...
 
     @abstractmethod
     def compensate_draft_cli_call_type(
@@ -114,7 +117,10 @@ class CallerIdentityRepositoryProtocol(Protocol):
         lock_key: str,
         lock_holder_user_id: str,
         lock_epoch: int | None,
-    ) -> DraftCallTypeMutationResult: ...
+        allow_owner_transition: bool = False,
+    ) -> DraftCallTypeMutationResult:
+        """Persist MCP mode; final Caller-to-Owner defaults to denied."""
+        ...
 
     @abstractmethod
     def compensate_draft_call_type(

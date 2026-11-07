@@ -9,9 +9,13 @@ Self-healing is a ClawInsight business workflow. Every task starts an independen
 - `AgentExecutionService` and the execution monitor serve both Repair and self-healing. Business services keep their own state transitions. Base callbacks use a trusted, injected handler; a fixed execution Step retains its own attachment contract after business stages advance.
 - OCB composes internal dependencies and the existing `DingTalkSender`; business notification content is injected into its shared sender. Public services do not select BaaS versus legacy Arca.
 
+AIS stop requests use `jobId` and the original submission user as `userNumber`, with the configured token. The Step dispatch receipt records `submittedBy`; existing tasks without that receipt retain their original task-level submission identity (recovery target owner, full Repair or analysis creator). The current administrator is not a substitute submission user. Stop failures retain bounded, redacted platform error codes/messages. A successful stop request is not proof of remote termination: lease reconciliation and the existing retry fence still require the old job to be terminal before replacing a recovery execution.
+
 ## State and evidence
 
 Tasks use existing `ce_tasks` and `ce_steps`. Task extension JSON retains current execution identity and bounded state. Business phases use `ce_steps`; phase reports, complete plans, judgments and Owner decisions use the existing object store with immutable digest references. The timeline combines phase reports, tool audit and result-delivery acknowledgments. Full bounded source reads and operation receipts live in the existing tool audit; the timeline and judgments refer to their IDs. The Owner page loads full evidence on demand. Evidence redaction retains diagnostic message text while removing credentials and PII.
+
+After a message attempt has been accepted or remains uncertain, a recovered observation with unconfirmed delivery stays running until delivery is confirmed or the existing observation deadline is reached. Recovery remains `recovered` while waiting. The service enforces this for initial and approved-plan messages using existing send audits; runner polling does not resend advice or reset deadlines. Observation expiry preserves confirmed recovery, while unknown effects keep the existing `waiting_effect` behavior. AIS execution limits, cancellation and user-continuation/Owner exit rules remain effective. TE AIVision traces can arrive late; absent traces do not prove non-delivery or independent recovery.
 
 Task status and recovery effect are separate. A channel accepting a message is not delivery evidence. Only a marked user message in the original session proves delivery. Agent response and recovery require semantic judgment with stored evidence; environmental write success does not prove recovery.
 
@@ -149,12 +153,42 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 ## Owner notification switch and linked task visibility
 
 Owner DingTalk notifications use the independent `ce_app_config` key
-`session_recovery_owner_notifications`. Its existing `enabled` column controls
-sending; `config_json` is `{}`. Missing or disabled configuration skips Owner
-notifications without recording a successful send. Enable the row to resume
-notifications on subsequent notification events; skipped notifications are not
-replayed. This does not affect group webhooks (`session_recovery_notifications`),
-Agent execution, plan approval, or Owner feedback through the task page.
+`session_recovery_owner_notifications`. Its existing `enabled` column is the
+default for Bots without an override: `0` means off and `1` means on.
+`config_json` contains only optional Bot overrides:
+
+```json
+{
+  "bot_overrides": [
+    { "bot_id": "example-bot", "entity_id": "example-owner", "env": "prod", "enabled": true }
+  ]
+}
+```
+
+Overrides match the exact `bot_id + entity_id + env` from the task's frozen
+target. `env` is the target Bot environment, not the ClawWeb control-plane
+environment. A matching override's boolean `enabled` takes precedence over
+the row's default: a positive override can send with `enabled = 0`, and a
+negative override prevents sending with `enabled = 1`. Without a match,
+the row's `enabled` value applies. IDs remain strings, including leading
+zeros; different Owners' `default` Bots do not share overrides.
+
+Use `enabled = 0` with `{}` for all-off, `enabled = 1` with `{}` for all-on,
+`enabled = 0` with positive overrides for selected Bots, or `enabled = 1`
+with negative overrides for exceptions. The existing empty configurations
+retain their previous behavior. To turn off every Bot, set `enabled = 0`
+and clear the overrides; there is no separate master switch.
+
+Missing rows skip sending. Invalid `enabled` values, malformed JSON, invalid
+field types or environments, unknown fields and duplicate target overrides
+disable the whole notification attempt, even if another entry or the default
+grants sending. The existing recovery log records
+`session_recovery_notification / configuration_invalid` without the raw
+configuration. Each notification event reads current policy; disabled or
+filtered notifications are not recorded as successful sends and are not replayed
+when policy changes. This applies to both plan and result Owner notices, and
+does not affect group webhooks (`session_recovery_notifications`), Agent
+execution, plan approval, or Owner feedback through the task page.
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by
@@ -211,3 +245,12 @@ Worker stage reports accept optional top-level `final_summary`, an Agent-authore
 The recovery runner normally receives this field with the last result. Missing/invalid optional prose gets at most one tools-disabled correction in the same Agent session before reporting; the original business result cannot be replaced by the correction. Failure leaves the summary absent and retains all primary artifacts. Existing security rejection of credential-bearing primary output remains unchanged. The service ignores malformed, overlong or credential-bearing optional summary metadata without rejecting a valid business result. Legacy tasks, external cancellation and infrastructure exits may have no summary; consumers show an explicit unavailable state and link to full records, never derive it from `judgment.summary`. The upstream callback schema and statistics are unchanged.
 
 Details expand the persisted summary beneath the overview. Result group notices reuse it (with existing safe formatting), retain independently verified delivery/response/effect and a detail link, and preserve all routing and simulation/no-intervention guards. Pending plans use neutral pending-verification presentation; active observation uses blue; a terminal unrecovered business outcome uses amber. `failed + verify + not_recovered` is presented as processing ended with the original task still blocked; actual execution failures retain a separate red alert. Raw status/effect values do not change. See the [design spec](../../../../../docs/clawweb/specs/clawinsight-session-recovery-final-summary.md).
+
+
+## Recovery before Owner handoff
+
+An evidence-backed, authorized correction, bounded retry or continuation must be pursued while the original task remains blocked. A finished or failed Cron run does not make its session unable to receive recovery guidance. Existing user-continuation, authorization, idempotency and running-OpenClaw-Cron waiting boundaries still apply.
+
+Owner handoff requires a remaining blocker that the available recovery methods cannot safely resolve. Verified recovery completes through ordinary observation; optional optimization advice belongs in the completion summary and existing result notice. Explicit or saved `recovered` effects cannot be terminated as `owner_handoff`, nor silently downgraded to enable it: invalid reports return 422 without state changes or notifications. Older task records remain readable. An accepted/uncertain initial message in assessment must transition into observation before a terminal Owner handoff.
+
+Recovery discovered during planning uses the existing observation report with `phase=plan` and `effect=recovered`; it rejoins `observe`. Pending delivery preserves the last message's original observation deadline. No new task state, report field, configuration or Base change is introduced.

@@ -10,6 +10,7 @@ Actor:
   required:
     - actor_id
     - actor_kind
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -17,6 +18,12 @@ Actor:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the Bot has none. Human
+        actors always resolve null.
 
 # ---- Bot control-plane resources ------------------------------------------
 
@@ -137,6 +144,7 @@ PhysicalBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -159,6 +167,10 @@ PhysicalBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Current Bot display avatar URL, or null when unset.
     visibility:
       $ref: "#/BotVisibility"
     status:
@@ -227,6 +239,7 @@ HumanBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -245,6 +258,10 @@ HumanBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Always null; Human avatars are not stored in BCS.
     visibility:
       $ref: "#/BotVisibility"
     status:
@@ -516,6 +533,7 @@ Participant:
     - role
     - mode
     - message_view_scope
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -523,6 +541,13 @@ Participant:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null; a retained member of a soft-deleted
+        Bot keeps its stored face.
     role:
       type: string
       enum:
@@ -544,6 +569,35 @@ Participant:
         - absent
     message_view_scope:
       $ref: "#/MessageViewScope"
+
+ParticipantSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+    - name
+    - avatar_url
+  description: >-
+    Lightweight participant row of the V1 list summaries: identity plus the
+    two nullable display fields. `name` is the owning Group/Session membership
+    snapshot verbatim (may be null, never backfilled from the registry); the
+    detail-only control fields role, mode, message_view_scope and tags are
+    intentionally absent.
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+      nullable: true
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null.
 
 DeliveryPolicy:
   type: object
@@ -600,6 +654,7 @@ NormalGroupSummary:
     - participant_count
     - driver_bot_uuid
     - strategy
+    - participants
     - human_mention_notify_mode
     - created_at
     - updated_at
@@ -633,6 +688,14 @@ NormalGroupSummary:
         - chat
         - manager_worker
         - state_machine
+    participants:
+      type: array
+      description: >-
+        Lightweight summaries of every stored Group member in stored order.
+        Names are membership snapshots (may be null); avatars come from one
+        batched display-profile read per result page.
+      items:
+        $ref: "#/ParticipantSummary"
     human_mention_notify_mode:
       $ref: "#/HumanMentionNotifyMode"
     created_at:
@@ -653,6 +716,7 @@ DirectMessageGroupSummary:
     - membership
     - originator_actor_id
     - participant_count
+    - participants
     - human_mention_notify_mode
     - created_at
     - updated_at
@@ -679,6 +743,16 @@ DirectMessageGroupSummary:
       const: 2
     peer_actor:
       $ref: "#/Actor"
+    participants:
+      type: array
+      minItems: 2
+      maxItems: 2
+      description: >-
+        Lightweight summaries of the two stored DM members in stored order.
+        Names are membership snapshots (may be null); avatars come from one
+        batched display-profile read per result page.
+      items:
+        $ref: "#/ParticipantSummary"
     human_mention_notify_mode:
       $ref: "#/HumanMentionNotifyMode"
     created_at:
@@ -1140,6 +1214,7 @@ SessionParticipant:
     - role
     - mode
     - message_view_scope
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -1147,6 +1222,13 @@ SessionParticipant:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null; a retained member of a soft-deleted
+        Bot keeps its stored face.
     role:
       type: string
       enum:
@@ -1171,6 +1253,7 @@ SessionSummary:
     - version
     - group_id
     - status
+    - participants
     - created_at
     - updated_at
   properties:
@@ -1187,6 +1270,16 @@ SessionSummary:
     participant_count:
       type: integer
       minimum: 0
+    participants:
+      type: array
+      description: >-
+        Lightweight summaries of every current Session member in stored order,
+        including session-only dynamic members: `name` is this Session's own
+        membership snapshot verbatim (may be null) and `avatar_url` is the
+        current Bot avatar (null when absent or for Human actors). No
+        detail-only control fields are included.
+      items:
+        $ref: "#/ParticipantSummary"
     created_at:
       type: integer
       minimum: 0

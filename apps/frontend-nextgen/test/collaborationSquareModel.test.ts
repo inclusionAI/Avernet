@@ -164,6 +164,15 @@ describe('collaboration square model', () => {
     expect(otherBot).not.toHaveProperty('isOwnedByLoggedInUser');
   });
 
+  test('Bot Catalog 映射生命周期状态供老版分享链接落地反查使用', () => {
+    expect(
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:900004', status: 'ACTIVE' }),
+    ).toEqual(expect.objectContaining({ status: 'ACTIVE' }));
+    expect(
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:900004' })?.status,
+    ).toBeUndefined();
+  });
+
   test('公开 Bot 主操作按当前 actor、关系和 self-target 决定', () => {
     const human = { type: 'human' as const, id: '900003' };
     const botActor = { type: 'bot' as const, id: 'bot-viewer' };

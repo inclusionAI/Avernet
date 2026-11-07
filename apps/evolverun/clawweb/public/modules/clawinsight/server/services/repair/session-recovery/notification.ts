@@ -5,25 +5,137 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import type { RecoveryActionNotifier } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "./task-contracts.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
 
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
+export type RecoveryNotificationSender = Pick<DingTalkNotificationSender, "sendNotification"> & Partial<Pick<DingTalkNotificationSender, "sendCard" | "updateCard">>;
+export function recoveryOwnerCardTrackId(taskId: string, environment: AgentControlPlaneEnvironment): string {
+  return `sr-owner:${environment}:${taskId}`;
+}
+
+function cardConfiguration(value: unknown): Partial<Record<AgentControlPlaneEnvironment, { template_id: string; callback_route_key?: string }>> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid recovery card configuration");
+  for (const [environment, item] of Object.entries(value)) {
+    if (!["pre", "prod"].includes(environment) || !item || typeof item !== "object" || Array.isArray(item)
+      || Object.keys(item).some(key => !["template_id", "callback_route_key"].includes(key))
+      || typeof item.template_id !== "string" || !item.template_id.trim() || item.template_id.length > 256
+      || item.callback_route_key !== undefined && (typeof item.callback_route_key !== "string" || !item.callback_route_key.trim() || item.callback_route_key.length > 256)) throw new Error("Invalid recovery card configuration");
+  }
+  return value;
+}
+
+function ownerNotificationEnabled(raw: string, enabled: number, input: Parameters<RecoveryTaskNotifier["notify"]>[0]): boolean {
+  let value;
+  try { value = JSON.parse(raw); }
+  catch { throw new Error("Invalid recovery owner notification JSON"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some(key => !["bot_overrides", "card"].includes(key))
+    || value.bot_overrides !== undefined && !Array.isArray(value.bot_overrides)) {
+    throw new Error("Invalid recovery owner notification configuration");
+  }
+  cardConfiguration(value.card);
+  const targets = new Set<string>();
+  let matched: boolean | undefined;
+  for (const item of value.bot_overrides ?? []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)
+      || Object.keys(item).some(key => !["bot_id", "entity_id", "env", "enabled"].includes(key))
+      || typeof item.bot_id !== "string" || !item.bot_id.trim() || item.bot_id !== item.bot_id.trim()
+      || typeof item.entity_id !== "string" || !item.entity_id.trim() || item.entity_id !== item.entity_id.trim()
+      || !["pre", "prod"].includes(item.env) || typeof item.enabled !== "boolean") {
+      throw new Error("Invalid recovery owner notification Bot override");
+    }
+    const key = JSON.stringify([item.bot_id, item.entity_id, item.env]);
+    if (targets.has(key)) throw new Error("Duplicate recovery owner notification Bot override");
+    targets.add(key);
+    if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
+  }
+  return matched ?? (enabled === 1);
+}
+
+function cardText(text: string): string {
+  if (Buffer.byteLength(text) <= 1000) return text;
+  let prefix = ""; for (const char of text) { if (Buffer.byteLength(prefix + char) > 900) break; prefix += char; }
+  return `${prefix}\n（完整事项见任务页）`;
+}
+
+// Actionable text is either complete or explicitly delegated to the full Task.
+// Never cut a material list or a permission URL in the middle.
+function ownerCardText(text: string, overflow: string): string {
+  return Buffer.byteLength(text) <= 1024 ? text : overflow;
+}
 
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
-  constructor(private readonly sender: Pick<DingTalkNotificationSender, "sendNotification"> | null | undefined,
-    private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore) {}
+  constructor(private readonly sender: RecoveryNotificationSender | null | undefined,
+    private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore,
+    private readonly controlPlaneEnvironment?: AgentControlPlaneEnvironment) {}
+
+  async notifyOwnerRequest({ task, updateOnly }: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean> {
+    const request = task.ownerRequest, environment = this.controlPlaneEnvironment;
+    if (!request || !environment || resolveTaskControlPlaneEnvironment(task) !== environment) return false;
+    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
+    if (!row) return false;
+    if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+    if (!ownerNotificationEnabled(row.config_json, row.enabled, { ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: request.summary })) return false;
+    const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
+    if (!config?.callback_route_key) return false;
+    if (!this.sender?.sendCard || !this.sender.updateCard) throw new Error("Native card notification unavailable");
+    const url = new URL("/insight", this.publicBaseUrl);
+    url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
+    const terminal = ["completed", "failed", "canceled"].includes(task.status);
+    const canConfirm = !terminal && request.status === "pending";
+    const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
+      bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理权限申请",
+      summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
+      instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
+      status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
+        : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
+        : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
+      confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
+      confirm_label: "已获取权限，继续任务" };
+    const outTrackId = recoveryOwnerCardTrackId(task.taskId, environment);
+    if (updateOnly) await this.sender.updateCard({ outTrackId, cardParamMap });
+    else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
+      templateId: config.template_id, callbackRouteKey: config.callback_route_key });
+    return true;
+  }
 
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
     const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-    if (!row || row.enabled === 0) return false;
-    if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+    if (!row) return false;
+    try {
+      if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+      if (!ownerNotificationEnabled(row.config_json, row.enabled, input)) return false;
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "configuration_invalid", {
+        taskId: input.taskId, botId: input.botId, targetEnvironment: input.targetEnvironment, operation: input.kind, ...repairLogError(error),
+      });
+      return false;
+    }
     if (!this.sender) throw new Error("Notification unavailable");
     const recovered = input.kind === "result" && input.effect === "recovered";
     const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
+    if (input.kind === "result") {
+      const environment = this.controlPlaneEnvironment;
+      if (!environment) return false;
+      const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
+      if (!config) return false;
+      if (!this.sender.sendCard) throw new Error("Native card notification unavailable");
+      await this.sender.sendCard({ recipientUserId: input.ownerId, outTrackId: `sr-owner-handoff:${environment}:${input.taskId}`,
+        templateId: config.template_id,
+        cardParamMap: { task_id: input.taskId, request_id: "", control_plane: environment,
+          bot_id: cardText(input.botId), session_key: cardText(input.sessionKey), title,
+          summary: input.handoff?.summary ?? ownerCardText(input.summary, "处理说明较长，请打开任务详情查看完整内容。"),
+          instructions: input.handoff?.instructions ?? "请查看下方任务详情，按完整处理事项继续。", task_url: url.href,
+          status: recovered ? "本次自愈已结束，后续建议可按需处理" : "本次自愈已结束，已转交 Owner",
+          confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
+      return true;
+    }
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
-      text: `${input.summary}${input.kind === "result" ? recovered ? "\n\n本次自愈已结束，后续建议可按需处理。" : "\n\n本次自愈已结束，后续请自行处理。" : ""}\n\n[${input.kind === "plan" ? "查看完整方案、证据及任务时间线" : "查看处理指引、证据及任务时间线"}](${url.href})` });
+      text: `${input.summary}\n\n[查看完整方案、证据及任务时间线](${url.href})` });
     return true;
   }
 }
@@ -152,7 +264,7 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
-  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}`;
+  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}\n\n**Entity ID**：${clip(task.request.target.entity_id, 150)}`;
   return { title: `会话自愈｜${title}`, text: `## 会话自愈｜${title}\n\n${[context, ...sections].join("\n\n")}\n\n[查看完整任务与处理记录](${url.href})` };
 }
 
@@ -168,7 +280,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
 
   after(input: GroupNotification): void {
     setImmediate(() => {
-      void this.notify(input).catch(() => console.error("[session-recovery] group notification unavailable", input.taskId, input.kind));
+      void this.notify(input).catch(error => logRepairEvent("session-recovery", "session_recovery_notification", "group_unavailable", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) }));
     });
   }
   private async notify(input: GroupNotification): Promise<void> {
@@ -197,8 +310,9 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
       await this.deps.sender.send({ webhook, timeoutSeconds: config.timeout_seconds,
         ...notificationContent(task, source, input.kind, this.deps.publicBaseUrl) });
       sent = true;
-    } catch {
-      console.error("[session-recovery] group notification not confirmed", input.taskId, input.kind);
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "group_unconfirmed", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) });
     }
     await this.deps.tasks.appendNotification(input.taskId, {
       event_id: `${id}-result`, at_ms: Date.now(), kind: "notification", actor: "service",

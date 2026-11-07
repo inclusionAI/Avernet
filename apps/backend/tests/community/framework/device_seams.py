@@ -71,10 +71,12 @@ def install_fake_resolver(
     binding_id: int = 999,
     record_calls_to: list | None = None,
 ) -> None:
-    """Replace ``DeviceContextResolver.resolve_for_bot`` with a fake that
-    fabricates a ``DeviceContext`` for any (bot_id, user_id) — used when the
-    test bot has no real binding (or when the test wants to bypass the
-    binding lookup entirely)。
+    """Replace DeviceContextResolver's Bot and binding connection entry points.
+
+    The Bot entry fabricates a context for any (bot_id, user_id); the binding
+    entry retains its explicitly selected binding and operator identity. This
+    substitutes external connection lookup without bypassing a caller's prior
+    persisted-Bot/binding validation.
 
     If ``record_calls_to`` is provided, each call appends ``(bot_id, user_id)``
     to it so assertions can verify the resolver was hit with the expected args.
@@ -98,7 +100,15 @@ def install_fake_resolver(
     # 赋值 — 后者是 ast.Assign(target=Attribute),会被 test_no_mock_on_world_get
     # scanner 抓到。本 helper 在 tests/framework/ 下,scanner 也不扫这条路径,
     # 双保险。下同。
+    def _fake_resolve_binding(selected_binding_id, operator_id, *, bot_id, **kwargs):
+        ctx = _fake_resolve(bot_id, operator_id)
+        return DeviceContext(
+            provider=ctx.provider, conn_info=ctx.conn_info, binding_id=selected_binding_id,
+            bot_id=ctx.bot_id, user_id=ctx.user_id, bot_type=ctx.bot_type,
+        )
+
     setattr(resolver, "resolve_for_bot", _fake_resolve)  # noqa: B010
+    setattr(resolver, "resolve_for_binding", _fake_resolve_binding)  # noqa: B010
 
 
 def install_fake_sync_dispatcher(

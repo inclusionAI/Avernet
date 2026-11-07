@@ -10,7 +10,7 @@ export function TaskTimeline({ task, onSelect }: { task: Task; onSelect: (stepId
         {task.steps?.map((item, index) => (
           <li key={item.stepId} className="relative flex gap-4 pb-6 last:pb-0">
             {index < (task.steps?.length ?? 0) - 1 && (
-              <span aria-hidden="true" className="absolute left-3.5 top-8 bottom-0 w-px bg-border" />
+              <span aria-hidden="true" className="absolute left-3.5 top-8 bottom-0 w-px bg-divider" />
             )}
             <span
               className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs ${

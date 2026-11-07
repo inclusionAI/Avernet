@@ -11,6 +11,7 @@ from agentclaw.community.core.caller_identity.protocols import (
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
+    CallerBcsSyncError,
     CallerCallTypeInvalidError,
     CallerCliNotFoundError,
     CallerCliSyncError,
@@ -42,7 +43,9 @@ class CallerIdentityServiceProtocol(Protocol):
         actor_id: str,
         lock_epoch: int | None = None,
         entity_id: str | None = None,
-    ) -> CliCallTypeUpdateResult: ...
+    ) -> CliCallTypeUpdateResult:
+        """Edit as Owner or configured super admin under the target entity lock."""
+        ...
 
     def exchange_caller_token(
         self,
@@ -63,7 +66,9 @@ class CallerIdentityServiceProtocol(Protocol):
         actor_id: str,
         lock_epoch: int | None = None,
         entity_id: str | None = None,
-    ) -> McpCallTypeUpdateResult: ...
+    ) -> McpCallTypeUpdateResult:
+        """Edit as Owner or configured super admin; sync using the actual Owner."""
+        ...
 
     def get_context(
         self,
@@ -129,6 +134,7 @@ class CallerIdentityServiceProtocol(Protocol):
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
+    "CallerBcsSyncError",
     "CallerCallTypeInvalidError",
     "CallerCliNotFoundError",
     "CallerCliSyncError",

@@ -20,6 +20,7 @@ from injector import (
     singleton,
 )
 
+from agentclaw.community.api.common_config_service import CommonConfigServiceProtocol
 from agentclaw.community.api.data_proxy_service import DataProxyServiceProtocol
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
 from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
@@ -51,6 +52,9 @@ from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.engines.registry import (
+    configure_restart_common_config,
+)
 
 
 
@@ -73,6 +77,10 @@ class AICodingModule(Module):
             scope=singleton,
         )
         binder.bind(ArchitectRebindService, to=ArchitectRebindService, scope=singleton)
+        # Resolve only when a coding restart reads its switch, after all module
+        # overrides are installed. Capturing this injector avoids a service locator.
+        injector = binder.injector
+        configure_restart_common_config(lambda: injector.get(CommonConfigServiceProtocol))
 
     @singleton
     @provider

@@ -3,7 +3,8 @@ import { BotBasicInfoDialog } from '@/components/BotWorkshop/BotBasicInfoDialog'
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
-import { ArrowLeft, ChevronRight, Pencil, Save, SlidersHorizontal } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { ArrowLeft, ChevronRight, Save, SlidersHorizontal, SquarePen } from 'lucide-react';
 import { useState } from 'react';
 export function DetailHeader({
   bot,
@@ -30,7 +31,13 @@ export function DetailHeader({
   const canEditBasic = editable && isOwner;
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-4 sm:px-6">
+    // 对话区可见(lg+)时补右描边,与下方面板区的 border-r 接成一条竖线。
+    <header
+      className={cn(
+        'flex h-14 shrink-0 items-center gap-2 border-b border-divider bg-card px-4 sm:px-6',
+        debugOpen && 'lg:border-r lg:border-divider',
+      )}
+    >
       <Button
         variant="ghost"
         size="icon"
@@ -48,11 +55,14 @@ export function DetailHeader({
         <h1 className="m-0 truncate text-base font-semibold text-foreground">{bot.name}</h1>
         {canEditBasic ? (
           <Button
-            variant="ghost"
+            variant="secondary"
             size="icon"
-            className="size-7"
+            // artboard-047 (Group 1312321303):名称右侧编辑按钮为独立白底描边规格
+            // 32×32、描边 #E4E4E4(=--border)、圆角 10、阴影 0 1px 2px rgba(0,0,0,0.03)。
+            // 图标为「方框+笔」编辑形(SquarePen,16×16 框内 13.3 矢量)而非纯铅笔,fill #525252(=--content-strong)。
+            className="rounded-[10px] bg-card text-content-strong shadow-[0_1px_2px_0_rgba(0,0,0,0.03)] transition-none hover:bg-card"
             aria-label="编辑 Bot 基础信息"
-            leftIcon={<Pencil className="size-3.5" />}
+            leftIcon={<SquarePen className="size-4" />}
             onClick={() => setBasicInfoOpen(true)}
           />
         ) : null}

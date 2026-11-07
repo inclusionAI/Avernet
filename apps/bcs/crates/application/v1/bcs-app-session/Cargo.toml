@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-jwt = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
@@ -35,6 +36,7 @@ bcs-storage-api = { workspace = true }
 bcs-test-support = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }

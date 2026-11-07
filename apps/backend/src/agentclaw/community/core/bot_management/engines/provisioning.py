@@ -12,14 +12,17 @@ cycle), so everything both sides need lives here.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+from .restart_contract import PublishedRestartServices, RestartAdmission
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -261,6 +264,47 @@ class EngineProvisioningStrategy(ABC):
         through to the original synchronous lifecycle callback.
         """
         return restart(**kwargs)
+
+    @contextmanager
+    def published_restart_scope(
+        self, ctx: BotProvisioningContext, *, services: PublishedRestartServices,
+        publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
+    ) -> Iterator[dict]:
+        """Keep shared orchestration in place; engines own entry/exit policy.
+
+        Yield an empty result to proceed, or a populated result to return before
+        executing the workflow. If a policy consumes a workflow exception, it
+        must populate that same result after any required persistence succeeds.
+        The default performs no I/O and never suppresses exceptions.
+        """
+        yield {}
+
+    def project_status_ext(
+        self, *, ext: dict, response_ext: dict, published: bool = False,
+        progress=None, public: bool = False,
+    ) -> dict:
+        """Project safe engine-owned fields into a response extension envelope.
+
+        The caller supplies existing response fields; implementations preserve
+        them and own their namespace. The default adds no fields or I/O.
+        """
+        return dict(response_ext)
+
+    def published_restart_result(self, *, record):
+        """Optionally answer progress before a provider workflow can be queried."""
+        return None
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        """Persist engine-owned operation progress; default has no I/O."""
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage) -> RestartAdmission:
+        """Admit an engine-owned operation; the default changes nothing."""
+        return RestartAdmission()
+
+    async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
+        """Keep the runner's exact operation identity and crash/adoption contract."""
+        return await runner.acquire_workflow(op, issue)
 
     @abstractmethod
     def apply_restart_extra_configs(

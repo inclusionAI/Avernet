@@ -3,9 +3,11 @@ import type { BackendApiEnvelope } from '../types';
 
 /** 团队 Bot 摘要；entity_id 为实体，owner_id 为拥有者用户，不可混用。 */
 export interface CollaboratingBotDto {
+  avatar_url?: string | null;
   bot_id: string;
   bot_name: string;
   bot_desc: string;
+  bcn_bot_id?: string;
   entity_id: string;
   owner_id: string;
   engine: string;

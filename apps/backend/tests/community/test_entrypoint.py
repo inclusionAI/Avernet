@@ -80,6 +80,7 @@ def test_runtime_config_logging_redacts_literal_runtime_credentials():
         "user_config": {
             "openapi_bot": {
                 "api_key_secret": "secret-baas-key",
+                "api_key_secret_prod": "secret-baas-prod-key",
                 "api_key_prefix": "pref0001",
             },
             "bcs_client": {
@@ -95,6 +96,7 @@ def test_runtime_config_logging_redacts_literal_runtime_credentials():
         "user_config": {
             "openapi_bot": {
                 "api_key_secret": "<redacted>",
+                "api_key_secret_prod": "<redacted>",
                 "api_key_prefix": "pref0001",
             },
             "bcs_client": {
@@ -106,6 +108,7 @@ def test_runtime_config_logging_redacts_literal_runtime_credentials():
     }
     # The logger must receive a copy, not a mutation of the live config dump.
     assert source["user_config"]["openapi_bot"]["api_key_secret"] == "secret-baas-key"
+    assert source["user_config"]["openapi_bot"]["api_key_secret_prod"] == "secret-baas-prod-key"
     assert source["user_config"]["bcs_client"]["token_secret"] == "test-token"
 
 

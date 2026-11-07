@@ -9,6 +9,9 @@ from agentclaw.community.core.bot_collaborator.models import BotCollaboratorMode
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel,
 )
@@ -164,6 +167,7 @@ def native_editor(db, *, personal):
         Mock(),
         Mock(),
         SpaceAccessService(SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())),
+        DisabledBotManagerSync(),
     )
     native.add_editor(
         bot_id="bot",

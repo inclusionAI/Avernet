@@ -7,10 +7,10 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from injector import inject
-from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.errors import Conflict, NotFound
+from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
@@ -24,13 +24,12 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollProjectionCalculator,
     ForumPollProjectionInput,
     ForumPollVoteRecord,
-    ForumTopicAnalysisRecord,
+    ForumPostLocationRecord,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicConfig,
     ForumTopicCreateResult,
-    ForumTopicPage,
     ForumTopicRecord,
     ForumTopicViewerRecord,
 )
@@ -46,6 +45,9 @@ from agentclaw.community.core.repository.implementations.task.forum.analysis_row
 )
 from agentclaw.community.core.repository.implementations.task.forum.browse_repository import (
     BrowseRepositoryMixin,
+)
+from agentclaw.community.core.repository.implementations.task.forum.topic_catalog_repository import (
+    TopicCatalogRepositoryMixin,
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
@@ -157,7 +159,11 @@ def _is_post_request_idempotency_conflict(exc: IntegrityError) -> bool:
     )
 
 
-class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
+class ForumRepository(
+    TopicCatalogRepositoryMixin,
+    BrowseRepositoryMixin,
+    ForumRepositoryProtocol,
+):
     """Create Topics and their replies without persisted floor metadata."""
 
     @inject
@@ -167,92 +173,6 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
     def _transaction(self):
         transactional = getattr(self._db, "transactional_orm_session", None)
         return transactional() if transactional is not None else self._db.orm_session()
-
-    def list_topics(
-        self,
-        *,
-        keyword: str | None,
-        status: str | None,
-        offset: int,
-        limit: int,
-        topic_type: str | None = None,
-        author_id: str | None = None,
-    ) -> ForumTopicPage:
-        with self._db.orm_session() as db:
-            # Per-Topic reply count and latest reply time, joined onto the
-            # Topic row so the catalogue can show reply_count + latest_activity
-            # without an N+1 walk over posts.
-            # ForumPostModel carries no env/avernet_tenant columns; posts are
-            # scoped by Topic id, and the Topic query below already filters by
-            # env/tenant, so this per-Topic aggregate needs no env filter.
-            post_stats = (
-                db.query(
-                    ForumPostModel.topic_id.label("topic_id"),
-                    func.count().label("reply_count"),
-                    func.max(ForumPostModel.gmt_create).label("latest_post_at"),
-                )
-                .group_by(ForumPostModel.topic_id)
-                .subquery()
-            )
-            query = (
-                db.query(
-                    ForumTopicModel,
-                    func.coalesce(post_stats.c.reply_count, 0).label(
-                        "reply_count"
-                    ),
-                    post_stats.c.latest_post_at,
-                )
-                .outerjoin(
-                    post_stats,
-                    ForumTopicModel.topic_id == post_stats.c.topic_id,
-                )
-                .filter(
-                    ForumTopicModel.env == get_current_env(),
-                    ForumTopicModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-            )
-            if status is not None:
-                query = query.filter(ForumTopicModel.status == status)
-            if topic_type is not None:
-                query = query.filter(ForumTopicModel.topic_type == topic_type)
-            if keyword is not None:
-                query = query.filter(
-                    or_(
-                        ForumTopicModel.title.contains(keyword, autoescape=True),
-                        ForumTopicModel.body.contains(keyword, autoescape=True),
-                    )
-                )
-            if author_id is not None:
-                query = query.filter(ForumTopicModel.author_id == author_id)
-            # Catalogue ordering follows user-visible activity, not any
-            # maintenance timestamp. Derived analysis updates must not make a
-            # Topic bubble to the top when nobody replied.
-            latest_activity_at = func.coalesce(
-                post_stats.c.latest_post_at,
-                ForumTopicModel.gmt_create,
-            )
-            total = query.count()
-            rows = (
-                query.order_by(
-                    latest_activity_at.desc(),
-                    ForumTopicModel.id.desc(),
-                )
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-            items = tuple(
-                replace(
-                    row[0].to_record(),
-                    reply_count=int(row[1] or 0),
-                    latest_activity_at=(
-                        row[2] if row[2] is not None else row[0].gmt_create
-                    ),
-                )
-                for row in rows
-            )
-            return ForumTopicPage(total=total, items=items)
 
     def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
         with self._db.orm_session() as db:
@@ -323,6 +243,82 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 for row in visible_rows
             )
             return ForumPostPage(total=total, items=items)
+
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord | None:
+        """Resolve one Post's floor group and page from public display order."""
+
+        if (
+            not isinstance(page_size, int)
+            or isinstance(page_size, bool)
+            or page_size < 1
+        ):
+            raise ValidationError("page_size must be a positive integer")
+
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+
+            rows = (
+                db.query(ForumPostModel)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
+                .all()
+            )
+            rows_by_id = {row.post_id: row for row in rows}
+            target = rows_by_id.get(post_id)
+            if target is None:
+                return None
+
+            root = target
+            visited = {root.post_id}
+            while root.reply_to_post_id is not None:
+                parent_id = root.reply_to_post_id
+                if parent_id in visited:
+                    return None
+                parent = rows_by_id.get(parent_id)
+                if parent is None:
+                    return None
+                root = parent
+                visited.add(root.post_id)
+
+            first_level_rows = tuple(
+                row for row in rows if row.reply_to_post_id is None
+            )
+            if root.post_id not in {row.post_id for row in first_level_rows}:
+                return None
+            display_rows = sorted(
+                first_level_rows,
+                key=lambda row: (
+                    0 if _helpful_from_post_config(row.post_config) else 1,
+                    row.gmt_create,
+                    row.id,
+                ),
+            )
+            root_display_index = next(
+                index
+                for index, row in enumerate(display_rows)
+                if row.post_id == root.post_id
+            )
+            return ForumPostLocationRecord(
+                post_id=target.post_id,
+                root_post_id=root.post_id,
+                page=root_display_index // page_size + 1,
+            )
 
     def get_post(
         self,
@@ -426,10 +422,31 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
             previous_helpful = _helpful_from_post_config(row.post_config)
             if previous_helpful == helpful:
                 return row.to_record()
-            now = datetime.now(timezone.utc)
+            now = storage_now()
             row.post_config = _helpful_post_config_to_row(helpful)
             row.gmt_modified = now
-            if helpful:
+            accept_event = (
+                db.query(ForumInteractionModel)
+                .filter(
+                    ForumInteractionModel.env == get_current_env(),
+                    ForumInteractionModel.actor_type == actor_type,
+                    ForumInteractionModel.actor_id == actor_id,
+                    ForumInteractionModel.action_type == "ACCEPT",
+                    ForumInteractionModel.target_type == "POST",
+                    ForumInteractionModel.target_id == post_id,
+                )
+                .order_by(ForumInteractionModel.id.desc())
+                .first()
+            )
+            if accept_event is not None:
+                next_active = (
+                    accept_event.active + 1 if helpful else accept_event.active - 1
+                )
+                if next_active < 0:
+                    raise ValidationError("interaction active amount cannot be negative")
+                accept_event.active = next_active
+                accept_event.gmt_modified = now
+            elif helpful:
                 db.add(
                     ForumInteractionModel(
                         actor_type=actor_type,
@@ -438,6 +455,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                         target_type="POST",
                         target_id=post_id,
                         env=get_current_env(),
+                        active=1,
                         gmt_create=now,
                         gmt_modified=now,
                     )

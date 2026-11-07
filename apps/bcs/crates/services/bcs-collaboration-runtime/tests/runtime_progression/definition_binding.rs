@@ -76,6 +76,7 @@ async fn fixed_loop_preview_honors_server_limits_and_cannot_start_or_configure_v
         group_id: "group-1".into(), session_id: None, definition_yaml: Some(yaml.into()),
         definition: None, definition_ref: None, participant_bindings: None, opening_message_override: None,
         input: json!({}), caller_id: None, authenticated_human: None,
+        caller_association: None,
     }).await;
     assert!(matches!(started, Err(CollaborationRuntimeError::InvalidDefinition(_))));
     assert!(delivery.commands.lock().await.is_empty());
@@ -127,7 +128,7 @@ async fn start_run_uses_group_default_definition_binding() {
             opening_message_override: None,
             input: json!({"question": "use binding"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -187,6 +188,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect_err("run start must still enforce the active binding");
@@ -458,6 +460,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             input: json!({"question": "use binding without rewriting definition"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -547,6 +550,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
             input: json!({"question": "use participant binding"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -618,6 +622,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
             input: json!({"question": "multi"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect_err("multi bot slot is not supported by the current single-assignee runtime");

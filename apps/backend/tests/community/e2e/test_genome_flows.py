@@ -1,10 +1,10 @@
-"""The RSI-03 story over the real app: capture → patch → diff → move ``draft`` → promote.
+"""The genome story over the real app: capture → patch → diff → move ``draft`` → promote → delivered → back.
 
 Every request goes through the public router with a signed principal and the
 production DI graph on the test profile (SQLite, local device filesystem), so
-the story exercises the same wiring singlebox would. It stops where the spec
-says it stops: the only delivery seam bound today refuses the promotion as
-``not_appliable`` naming RSI-04, before any ref moves.
+the story exercises the same wiring singlebox would. The test profile runs no
+task worker, so the test runs the queued apply task itself, the way a worker
+would; the promotion settles from that apply's end (RSI-04).
 """
 
 from __future__ import annotations
@@ -84,7 +84,26 @@ def _seed_personal_bot(world, bot_id: str) -> None:
 
 
 @pytest.mark.e2e
-def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_testing_modules, world) -> None:
+def _run_queued_apply(world, promotion_id: str) -> None:
+    """Run the apply task the promotion queued, as a worker would (the test profile starts none)."""
+    from agentclaw.community.api.apply_run_service import ApplyRunServiceProtocol
+    from agentclaw.community.core.apply_engine.apply_task import APPLY_TASK_TYPE
+    from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+    from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    queued = world.get(TaskQueueRepositoryProtocol).list_by_status(
+        status=TaskStatus.PENDING, env=get_current_env(), app=DEFAULT_APP
+    )
+    [task] = [
+        t
+        for t in queued
+        if t.task_type == APPLY_TASK_TYPE and (t.payload.get("state") or {}).get("reference") == promotion_id
+    ]
+    world.get(ApplyRunServiceProtocol).run_apply_task(task.payload)
+
+
+def test_capture_patch_diff_draft_promote_deliver_and_go_back(app_with_testing_modules, world) -> None:
     bot_id = f"bot_genome_e2e_{time.time_ns()}"
     _seed_personal_bot(world, bot_id)
     identity = world.get(IdentityService)
@@ -156,13 +175,40 @@ def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_t
     refs_before = client.get(f"{genome}/refs", params=query).json()["data"]["refs"]
     assert [(ref["name"], ref["revision"]) for ref in refs_before] == [("draft", second["id"])]
 
-    # 5. promote: refused at the delivery seam, naming RSI-04, before any ref moves
+    # 5. promote: filed, its delivery started, no ref moved yet
     r = client.post(
         f"{genome}/promotions", params=query, json={"revision": "r2", "expected_revision": None, "reason": "ship it"}
     )
-    assert r.status_code == 422, r.text
-    reasons = r.json()["data"]["reasons"]
-    assert reasons[0]["code"] == "not_appliable" and "RSI-04" in reasons[0]["message"]
+    assert r.status_code == 201, r.text
+    promoted = r.json()["data"]
+    assert (promoted["status"], promoted["settled_at"]) == ("applying", None)
+    assert "apply_kind" not in promoted
     assert client.get(f"{genome}/refs", params=query).json()["data"]["refs"] == refs_before
-    assert client.get(f"{genome}/revisions/r2", params=query).json()["data"]["revision"]["status"] == "draft"
-    assert client.get(f"{genome}/promotions", params=query).json()["data"]["total"] == 0
+
+    # 6. the apply runs: the promotion settles, active moves, and the bot reads as r2. The revision speaks only
+    # for Direct skills and MCP servers, so the platform's default servers are left as they are.
+    _run_queued_apply(world, promoted["id"])
+    settled = client.get(f"{genome}/promotions/{promoted['id']}", params=query).json()["data"]
+    assert settled["status"] == "applied", settled["apply_detail"]
+    refs = {ref["name"]: ref for ref in client.get(f"{genome}/refs", params=query).json()["data"]["refs"]}
+    assert (refs["active"]["revision"], refs["active"]["labels"]) == (second["id"], [])
+    assert client.get(f"{genome}/revisions/r2", params=query).json()["data"]["revision"]["status"] == "promoted"
+    soul = asyncio.run(identity.read_identity_file("staff", _OWNER, bot_id, "SOUL.md", _OWNER, engine_type="openclaw"))
+    assert "Confirm the order id before quoting amounts." in soul, "the patched SOUL.md is on the bot"
+    recaptured = client.post(f"{genome}/revisions:capture", params=query).json()["data"]
+    assert (recaptured["id"], recaptured["created"]) == (second["id"], False), "the bot holds active: no drift"
+
+    # 7. go back: promote r1; the bot holds r1 again
+    r = client.post(
+        f"{genome}/promotions",
+        params=query,
+        json={"revision": "r1", "expected_revision": second["id"], "reason": "r2 misbehaves"},
+    )
+    assert r.status_code == 201, r.text
+    back = r.json()["data"]
+    _run_queued_apply(world, back["id"])
+    assert client.get(f"{genome}/promotions/{back['id']}", params=query).json()["data"]["status"] == "applied"
+    refs = {ref["name"]: ref["revision"] for ref in client.get(f"{genome}/refs", params=query).json()["data"]["refs"]}
+    assert (refs["active"], refs["previous"]) == (first["id"], second["id"])
+    recaptured = client.post(f"{genome}/revisions:capture", params=query).json()["data"]
+    assert (recaptured["id"], recaptured["created"]) == (first["id"], False)

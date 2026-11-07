@@ -7,6 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
@@ -50,11 +53,13 @@ def _space(
     )
 
 
-def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
+def _service(*, bot: dict | None = None, space: SpaceRecord | None = None,
+             manager_sync=None):
     repository = MagicMock()
     repository.get_by_id_and_owner.return_value = bot
+    # A successful repository update returns the full Bot row, including its PK.
     repository.update_space_by_owner.return_value = (
-        {**bot, "space_id": space.id}
+        {"id": 101, **bot, "space_id": space.id}
         if bot is not None and space is not None
         else None
     )
@@ -62,7 +67,13 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
     if space is not None:
         access.require_space_member.return_value = (space, MagicMock())
     quota = MagicMock()
-    return BotSpaceService(repository, access, quota), repository, access, quota
+    service = BotSpaceService(
+        repository,
+        access,
+        quota,
+        manager_sync if manager_sync is not None else DisabledBotManagerSync(),
+    )
+    return service, repository, access, quota
 
 
 @pytest.mark.parametrize("space_type", [SpaceType.PERSONAL, SpaceType.TEAM])
@@ -280,3 +291,50 @@ def test_default_env_falls_back_to_runtime_everywhere():
     repository.update_space_by_owner.assert_called_once_with(
         bot_id="b1", owner_id="u1", space_id=42, env=get_current_env()
     )
+
+
+def test_changed_assignment_submits_bot_space_changed_sync():
+    from agentclaw.community.kernel.bot_manager_sync import SyncReason
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    bot = {"id": 733, "bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    target = _space(space_id=42)
+    manager_sync = MagicMock()
+    service, repository, _, _ = _service(bot=bot, space=target, manager_sync=manager_sync)
+
+    result = service.change_space(bot_id="b1", owner_id="u1", space_id=42, env="prod")
+
+    assert result.bot is repository.update_space_by_owner.return_value
+    assert result.bot["id"] == 733
+    manager_sync.request_sync.assert_called_once_with(
+        bot_pk=result.bot["id"],
+        env="prod",
+        avernet_tenant=get_current_avernet_tenant(),
+        reason=SyncReason.BOT_SPACE_CHANGED,
+    )
+
+
+def test_same_space_assignment_submits_nothing():
+    bot = {"id": 101, "bot_id": "b1", "bot_type": "personal", "space_id": 42}
+    target = _space(space_id=42)
+    manager_sync = MagicMock()
+    service, _, _, _ = _service(bot=bot, space=target, manager_sync=manager_sync)
+
+    result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+
+    assert result.changed is False
+    manager_sync.request_sync.assert_not_called()
+
+
+def test_sync_submit_failure_leaves_the_move_successful():
+    bot = {"id": 101, "bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    target = _space(space_id=42)
+    manager_sync = MagicMock()
+    manager_sync.request_sync.side_effect = RuntimeError("queue closed")
+    service, _, _, _ = _service(bot=bot, space=target, manager_sync=manager_sync)
+
+    result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+
+    assert result.changed is True
+    assert result.bot["space_id"] == 42
+    manager_sync.request_sync.assert_called_once()

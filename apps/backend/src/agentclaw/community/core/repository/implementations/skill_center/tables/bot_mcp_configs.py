@@ -1,21 +1,18 @@
-"""Bot-scoped MCP override rows written inside capability UoW sessions."""
+"""Bot override values at a canonical entity key, with safe legacy compatibility."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Iterable
 
+from agentclaw.community.core.mcp.config_comparison import comparable_config
 from agentclaw.community.core.models.mcp import BotMCPConfig
+from agentclaw.community.core.repository.implementations.bot.mcp_config_reads import (
+    get_all as get_all,
+    _rows,
+    _legacy_rows,
+)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-
-
-def get_all(
-    session, *, bot_id: str, owner_id: str, env: str
-) -> dict[str, dict[str, Any]]:
-    return {
-        str(row.server_code): json.loads(row.config)
-        for row in _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).all()
-    }
 
 
 def replace(
@@ -26,17 +23,32 @@ def replace(
     env: str,
     server_code: str,
     config: dict[str, Any] | None,
+    preserve_equivalent: bool = False,
 ) -> bool:
     row = (
         _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
-        .filter(BotMCPConfig.server_code == server_code)
+        .filter(
+            BotMCPConfig.server_code == server_code,
+        )
         .one_or_none()
     )
+    legacy = _legacy_rows(
+        session, bot_id=bot_id, owner_id=owner_id, env=env, server_codes=(server_code,)
+    )
+    previous = (
+        json.loads(row.config)
+        if row is not None
+        else json.loads(legacy[0].config)
+        if legacy
+        else None
+    )
+    value_changed = comparable_config(previous) != comparable_config(config)
+    for old in legacy:
+        session.delete(old)
     if not config:
-        if row is None:
-            return False
-        session.delete(row)
-        return True
+        if row is not None:
+            session.delete(row)
+        return value_changed if preserve_equivalent else row is not None or bool(legacy)
     encoded = json.dumps(
         config, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
@@ -51,41 +63,50 @@ def replace(
                 avernet_tenant=get_current_avernet_tenant(),
             )
         )
-        return True
-    if row.config == encoded:
-        return False
+        return value_changed if preserve_equivalent else True
+    if row.config == encoded or (
+        preserve_equivalent
+        and comparable_config(json.loads(row.config)) == comparable_config(config)
+    ):
+        return value_changed if preserve_equivalent else bool(legacy)
     row.config = encoded
-    return True
+    return value_changed if preserve_equivalent else True
 
 
 def delete(
-    session,
-    *,
-    bot_id: str,
-    owner_id: str,
-    env: str,
-    server_codes: Iterable[str],
+    session, *, bot_id: str, owner_id: str, env: str, server_codes: Iterable[str]
 ) -> int:
-    codes = sorted({str(code) for code in server_codes})
+    codes = tuple(sorted(set(server_codes)))
     if not codes:
         return 0
-    return (
-        _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
-        .filter(BotMCPConfig.server_code.in_(codes))
-        .delete(synchronize_session=False)
+    legacy = _legacy_rows(
+        session, bot_id=bot_id, owner_id=owner_id, env=env, server_codes=codes
     )
+    for row in legacy:
+        session.delete(row)
+    return len(legacy) + _rows(
+        session, bot_id=bot_id, owner_id=owner_id, env=env
+    ).filter(
+        BotMCPConfig.server_code.in_(codes),
+    ).delete(synchronize_session=False)
 
 
 def delete_all(session, *, bot_id: str, owner_id: str, env: str) -> int:
-    return _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).delete(
-        synchronize_session=False
-    )
+    legacy = _legacy_rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
+    for row in legacy:
+        session.delete(row)
+    return len(legacy) + _rows(
+        session, bot_id=bot_id, owner_id=owner_id, env=env
+    ).delete(synchronize_session=False)
 
 
-def _rows(session, *, bot_id: str, owner_id: str, env: str):
-    return session.query(BotMCPConfig).filter(
-        BotMCPConfig.avernet_tenant == get_current_avernet_tenant(),
-        BotMCPConfig.env == env,
-        BotMCPConfig.owner_id == owner_id,
-        BotMCPConfig.bot_id == bot_id,
-    )
+def normalize(session, *, bot_id: str, owner_id: str, env: str) -> None:
+    """Move safe aliases without replaying an earlier configuration snapshot."""
+    for legacy in _legacy_rows(session, bot_id=bot_id, owner_id=owner_id, env=env):
+        canonical = _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).filter(
+            BotMCPConfig.server_code == legacy.server_code,
+        ).with_for_update().one_or_none()
+        if canonical is not None:
+            session.delete(legacy)
+        else:
+            legacy.owner_id = owner_id

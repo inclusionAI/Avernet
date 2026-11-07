@@ -182,3 +182,34 @@ def put_current_selection_ok():
 )
 def put_current_selection_not_granted():
     """Even the Bot owner cannot enable knowledge absent from platform grants."""
+
+
+# Publication observations resolve the actual configured service and repository.
+def _seed_publication(world: World) -> None:
+    from agentclaw.community.core.service_bot.repository.models import BotPublishModel
+
+    _seed_enabled(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id=_BOT_ID).one()
+        bot.bot_type = "service"
+        session.add(BotPublishModel(
+            id=101, source_bot_pk=bot.id, source_bot_id=bot.bot_id,
+            publish_bot_id="knowledge-pub", name="Knowledge version",
+            owner_id="old-owner", permission_owner=_OWNER_ID,
+            env=get_current_env(), version=1, status="building",
+        ))
+
+
+def _seed_recorded_publication(world: World) -> None:
+    from agentclaw.community.api.bot_knowledge_service import BotKnowledgePublicationSelectionProtocol
+
+    _seed_publication(world)
+    assert world.get(BotKnowledgePublicationSelectionProtocol).record_build_selection(publication_id=101)
+
+
+def _seed_missing_observation_table(world: World) -> None:
+    from agentclaw.community.plugin_api.models import BotCommonConfig
+
+    _seed_publication(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        BotCommonConfig.__table__.drop(session.get_bind())

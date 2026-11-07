@@ -178,7 +178,10 @@ from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .bots.classification import router as classification_router
+from .bots.overview import router as bot_overview_router
+from .bot_access_check import router as bot_access_check_router
 from .collaboration_bots import public_router as collaboration_public_router
+from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
@@ -189,6 +192,7 @@ from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.copy import router as bot_copy_router
 from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -310,6 +314,10 @@ _MIXED_GROUPS = [
 # precede `bots`.
 _OPEN_SUBGROUPS = [
     classification_router,
+    # Transitional, undocumented (include_in_schema=False) app-only access check.
+    bot_access_check_router,
+    # Non-user Bot overview: app-admissible, no user_id, tenant-identical.
+    bot_overview_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
@@ -668,6 +676,13 @@ def build_public_router() -> APIRouter:
     from .dws_hosting.router import router as dws_hosting_router
     public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
 
+    # bot-copy routes (`POST /copy`, `POST /copy/{operation_id}/retry`):
+    # top-level literals under `/openapi/v1/bots`, mounted before the `bots`
+    # `/{bot_id}` wildcard for the same reason `with-manifest` is — otherwise
+    # `/{bot_id}` would capture "copy" as a bot id.
+    public.include_router(
+        bot_copy_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
@@ -683,6 +698,7 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    public.include_router(risk_openapi_router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not

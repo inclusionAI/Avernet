@@ -35,6 +35,14 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Task detail live updates', () => {
+  it.each([true, false])('uses server task permission for a non-owner viewer: canManage=%s', async canManage => {
+    api.evolve.getTask.mockResolvedValue({ ...task('waiting_acceptance', true), canManage })
+    open(); await tick()
+    expect(Boolean(screen.queryByRole('button', { name: '分享' }))).toBe(canManage)
+    expect(Boolean(screen.queryByRole('button', { name: '获取日志' }))).toBe(canManage)
+    expect(Boolean(screen.queryByRole('button', { name: '接受并应用' }))).toBe(canManage)
+  })
+
   it('keeps the StageTest HTML form and errors while withholding waiting HITL output as deliverables', async () => {
     const question = { format: 'html', tag: 'scope', content: '<form><input name="scope"><input type="hidden" name="payload" value="HIDDEN_PAYLOAD_SENTINEL"><button>提交</button></form>' }
     const waiting = { ...task('waiting_human'), task_type: 'stage_test', user_id: 'viewer',

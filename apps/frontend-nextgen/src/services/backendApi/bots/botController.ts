@@ -13,8 +13,46 @@ import type {
 export type BotDto = BackendUnknownRecord;
 export type MutateBotRequest = BackendUnknownRecord;
 
+/**
+ * `POST /openapi/v1/bots/copy` 请求体(后端 `BotCopyRequest` `extra="forbid"`)。
+ * `request_detail` 承载未来 copy 参数(当前仅 `excludes`);**禁止**在顶层塞
+ * `avatar_url`/`excludes` —— 后端会 422。
+ */
+export interface BotCopyRequestBody {
+  source_bot_id: string;
+  bot_name: string;
+  bot_desc?: string;
+  request_detail?: { excludes?: string[]; [key: string]: unknown };
+}
+
+/**
+ * `POST /openapi/v1/bots/copy` 响应体(后端 `BotCopyResponse`)。
+ * - `success` —— 复制已提交,dst bot 由 create_job 异步创建;响应只携带 bot_id,
+ *   **不含 BotDto**。
+ * - `auth_required` —— 内网 AgentPass 授权闸 pending,携带 iframe/redirect_url。
+ */
+export interface BotCopyResponseDto {
+  type: 'success' | 'auth_required';
+  operation_id: string;
+  bot_id: string;
+  iframe_url?: string;
+  redirect_url?: string;
+}
+
+/** `POST /openapi/v1/bots/copy/{bot_id}/retry` 响应的 result 枚举(后端 `RetryResult`)。 */
+export type BotCopyRetryResult = 're_enqueued' | 'still_running' | 'terminal';
+
+/** `POST /openapi/v1/bots/copy/{bot_id}/retry` 响应体(后端 `RetryResponse`)。 */
+export interface BotCopyRetryResponseDto {
+  operation_id: string;
+  result: BotCopyRetryResult;
+}
+
 /** GET /openapi/v1/bots 单条返回结构。 */
 export interface OwnedBotDto {
+  entity_id?: string;
+  bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   bot_name: string;
   bot_desc?: string;
@@ -50,6 +88,8 @@ export interface BotMetadataQueryBody {
 
 /** POST /openapi/v1/bots/metadata/queries 单条返回结构。 */
 export interface BotMetadataDto {
+  bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   owner_id: string;
   bot_name: string;
@@ -107,6 +147,8 @@ export const BOT_ENDPOINTS = {
   restartLocal: (bot_id: string) => `/openapi/v1/bots/${bot_id}/local/restart`,
   space: (bot_id: string) => `/openapi/v1/bots/${bot_id}/space`,
   authStatus: (bot_id: string) => `/openapi/v1/bots/${bot_id}/auth-status`,
+  copy: '/openapi/v1/bots/copy',
+  copyRetry: (bot_id: string) => `/openapi/v1/bots/copy/${bot_id}/retry`,
 };
 
 export function changeBotSpace(bot_id: string, space_id: number, user_id?: string) {
@@ -150,6 +192,24 @@ export function createBot(body: MutateBotRequest) {
     method: 'POST',
     params: userScopedParams(),
     data: body,
+  });
+}
+
+// 复制 Bot();响应为 type 判别(success=已提交异步创建 / auth_required=AgentPass 闸),
+// 不再是 BotDto。请求体必须严格匹配 BotCopyRequestBody(extra=forbid,禁止 avatar_url 顶层透传)。
+export function copyBot(body: BotCopyRequestBody) {
+  return backendRequest<BackendApiEnvelope<BotCopyResponseDto>>(BOT_ENDPOINTS.copy, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: body,
+  });
+}
+
+// 重试复制(dst bot_id);后端按 cas_retry 60s 节流,CONVERGED 直接 terminal 拒绝。
+export function retryCopyBot(bot_id: string) {
+  return backendRequest<BackendApiEnvelope<BotCopyRetryResponseDto>>(BOT_ENDPOINTS.copyRetry(bot_id), {
+    method: 'POST',
+    params: userScopedParams(),
   });
 }
 

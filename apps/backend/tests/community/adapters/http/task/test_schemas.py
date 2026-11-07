@@ -126,6 +126,24 @@ def test_node_context_dto_projects_runtime_actual_goal() -> None:
     assert dto.actual_goal.objective == actual_goal.objective
     assert dto.capability_failure_reason is None
 
+def test_node_context_dto_projects_used_executor_ids() -> None:
+    spec = TaskSpec(
+        context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[])
+    )
+    dto = node_context_to_dto(
+        TaskContext(
+            spec=spec,
+            all_done_output=[],
+            gaps=[],
+            task_id="t1",
+            node_id="n1",
+            root_task_spec=spec,
+            current_task_spec=spec,
+            used_executor_ids=["bot-1", "bot-2"],
+        )
+    )
+    assert dto.used_executor_ids == ["bot-1", "bot-2"]
+
 
 
 _TRACE_ACTION_TYPES = {
@@ -199,6 +217,7 @@ def test_report_dto_requires_complete_trace() -> None:
             "relay_token": "generation-1",
             "event_type": "PLAN_RESULT",
             "event": None,
+            "final_conclusion": "业务整体结论：已完成验收事实汇总",
             "task_acceptance_result": {
                 "verdict": "DONE",
                 "done_items": ["acceptance-1"],
@@ -303,6 +322,12 @@ def _command_body() -> dict:
         "relay_token": "generation-1",
         "event_type": "PLAN_RESULT",
         "event": None,
+        "final_conclusion": "业务整体结论：已完成剩余验收并收口",
+        "task_acceptance_result": {
+            "verdict": "DONE",
+            "done_items": ["acceptance-1"],
+            "gap_items": [],
+        },
         "trace": copy.deepcopy(_TRACE),
     }
 

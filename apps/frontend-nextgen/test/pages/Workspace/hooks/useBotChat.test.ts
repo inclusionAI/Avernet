@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { createBotChatProvider } from '@/services/workspace/botChatProvider';
+import { createBotChatProvider, isAicodingConnectionEngine } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -21,6 +21,7 @@ const mockUseChatCalls: any[] = [];
 const mockUseChatBridgeCalls: any[] = [];
 let mockChat: any;
 let mockProvider: any;
+let publishConnectionRuntime: (() => void) | undefined;
 
 jest.mock('@tc-chat/adapters', () => ({
   useChat: (opts: unknown) => {
@@ -37,6 +38,7 @@ jest.mock('sonner');
 jest.mock('@/services/bcs/libraryCdnInjector');
 
 const mockedFactory = createBotChatProvider as unknown as jest.Mock;
+const mockedIsAicodingConnectionEngine = isAicodingConnectionEngine as unknown as jest.Mock;
 const mockedToastError = toast.error as jest.Mock;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cdnModule: any = require('@/services/bcs/libraryCdnInjector');
@@ -45,7 +47,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUseChatCalls.length = 0;
   mockUseChatBridgeCalls.length = 0;
+  publishConnectionRuntime = undefined;
   cdnModule.queryAndRegisterBotLibraryCdn.mockResolvedValue(1);
+  mockedIsAicodingConnectionEngine.mockImplementation((engine?: string | null) => {
+    const normalized = engine?.trim().toLowerCase().replace(/[\s_-]/g, '') || '';
+    return normalized === 'aicoding' || normalized === 'applicationcoding';
+  });
   useWorkspaceStore.getState().resetWorkspace();
   useWorkspaceStore.setState({ activeIdentityId: 'human-1' });
   const fn = () => jest.fn<any>();
@@ -62,6 +69,11 @@ beforeEach(() => {
     abort: fn(),
     subscribeToSupportState: jest.fn<any>(() => jest.fn<any>()),
     subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
+    connectionRuntime: { resolved: false, engine: null },
+    subscribeToConnectionRuntime: jest.fn<any>((listener: () => void) => {
+      publishConnectionRuntime = listener;
+      return jest.fn();
+    }),
   };
   mockedFactory.mockReturnValue(mockProvider);
   mockChat = {
@@ -246,6 +258,35 @@ it('允许业务页面注入 Bot 副屏 CDN 加载器', async () => {
   const loadBotLibraryCdn = jest.fn<(botId: string) => Promise<number>>().mockResolvedValue(1);
   renderHook(() => useBotChat(bot, session, undefined, loadBotLibraryCdn));
   await waitFor(() => expect(loadBotLibraryCdn).toHaveBeenCalledWith('b:1'));
+  expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
+});
+
+it('好友 Bot 在 connection runtime 未决时不加载副屏 CDN，普通 CC 结果返回后再加载', async () => {
+  const friendBot = { ...bot, isFriendBot: true };
+  const { result } = renderHook(() => useBotChat(friendBot, session));
+
+  expect(result.current.connectionRuntime).toEqual({ resolved: false, engine: null });
+  expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
+
+  act(() => {
+    mockProvider.connectionRuntime = { resolved: true, engine: 'claude_code' };
+    publishConnectionRuntime?.();
+  });
+
+  await waitFor(() => expect(result.current.connectionRuntime.engine).toBe('claude_code'));
+  await waitFor(() => expect(cdnModule.queryAndRegisterBotLibraryCdn).toHaveBeenCalledWith('b:1'));
+});
+
+it('好友 Coding Bot 的 connection runtime 确认后仍不加载副屏 CDN', async () => {
+  const friendBot = { ...bot, isFriendBot: true };
+  const { result } = renderHook(() => useBotChat(friendBot, session));
+
+  act(() => {
+    mockProvider.connectionRuntime = { resolved: true, engine: 'aicoding' };
+    publishConnectionRuntime?.();
+  });
+
+  await waitFor(() => expect(result.current.connectionRuntime.engine).toBe('aicoding'));
   expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
 });
 

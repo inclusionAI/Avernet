@@ -191,6 +191,8 @@ class DeviceContextResolver:
         # 发布态 service binding 不挂在 Bot 主记录上，按业务 Bot 和 owner
         # 获取 bot_type 与 active_engine。
         bot = self._bot_repository.get_by_id_and_owner(bot_id, operator_id)
+        if bot is None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, operator_id)
         bot_type = (bot or {}).get("bot_type") or ""
 
         # Desktop 需要完整代理地址；Arca/local 也由各自 builder 生成连接信息。

@@ -1,4 +1,6 @@
 use super::*;
+use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
+use bcs_service_api::GroupKind;
 
 #[tokio::test]
 async fn update_rejects_delivery_policy_for_non_chat_strategy() {
@@ -544,9 +546,27 @@ async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
 }
 #[tokio::test]
 async fn session_only_nonmember_dm_summary_omits_peer_actor() {
-    let fixture = Fixture::new().await;
+    // Avatar seeding writes the persisted bot record, so this fixture uses a
+    // temp base dir (the bcs-app-group crate dir must stay free of runtime
+    // bot.json files).
+    let bots_dir = tempfile::tempdir().expect("temp bots base dir");
+    let fixture =
+        Fixture::new_with_bots(Arc::new(BotCore::with_base_dir(bots_dir.path().to_path_buf()))).await;
     for bot in ["bot-a", "bot-b", "target"] {
         fixture.add_public_bot(bot).await;
+    }
+    for (bot, url) in [
+        ("bot-a", "https://cdn.example.com/bot-a.png"),
+        ("bot-b", "https://cdn.example.com/bot-b.png"),
+    ] {
+        assert_eq!(
+            fixture
+                .bots
+                .update_avatar_existing(bot, AvatarChange::Set(url.into()))
+                .await
+                .expect("seed avatar"),
+            ProfileWrite::Updated
+        );
     }
     let (group, _) = fixture
         .groups
@@ -601,4 +621,67 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
         panic!("expected DM summary");
     };
     assert!(summary.peer_actor.is_none());
+    // Display-shape asymmetry only (design §5.2): the new participants
+    // array still shows BOTH member rows — with their identity, membership
+    // name snapshot and current avatar — to this session-related viewer;
+    // peer_actor omission is a display convention, not a visibility
+    // boundary (this viewer already holds detail-read rights).
+    let value = serde_json::to_value(summary).expect("serialize summary");
+    let rows = value["participants"].as_array().expect("participant rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["actor_id"], serde_json::json!("bot-a"));
+    assert_eq!(rows[0]["avatar_url"], serde_json::json!("https://cdn.example.com/bot-a.png"));
+    assert_eq!(rows[0]["name"], serde_json::json!("bot-a"));
+    assert_eq!(rows[1]["actor_id"], serde_json::json!("bot-b"));
+    assert_eq!(rows[1]["avatar_url"], serde_json::json!("https://cdn.example.com/bot-b.png"));
+}
+#[tokio::test]
+async fn dm_summary_projection_rejects_a_corrupted_three_participant_dm() {
+    let fixture = Fixture::new().await;
+    for bot in ["dm-corrupt-a", "dm-corrupt-b", "dm-corrupt-c"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        "dm-corrupt",
+        "dm-corrupt-a",
+        vec![
+            Participant::bot("dm-corrupt-a", ParticipantRole::Driver),
+            Participant::bot("dm-corrupt-b", ParticipantRole::Consultant),
+            Participant::bot("dm-corrupt-c", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        10,
+    );
+    // Corrupted store state: a DM Group that carries three members. The
+    // domain contract pins DM membership at exactly two, so the summary
+    // projection must refuse to serialize it instead of emitting a
+    // contract-violating 200 page.
+    group.group_kind = GroupKind::Dm;
+    group.dm_pair_key = Some("dm-corrupt-b|dm-corrupt-a".to_string());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store corrupted DM");
+
+    let result = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("dm-corrupt-a"),
+            view_bot_id: Some("dm-corrupt-a".into()),
+            offset: 0,
+            limit: 20,
+            q: None,
+            visibility: None,
+            membership: MembershipFilter::Direct,
+            kind: GroupKindFilter::Dm,
+            strategy: None,
+        })
+        .await;
+    assert!(result.is_err(), "a ≠2-participant DM page must not be served");
+    match result {
+        Ok(page) => panic!("served a corrupted DM summary: {page:?}"),
+        Err(ApplicationError::Internal(_)) => {}
+        Err(other) => panic!("expected an internal projection error, got {other:?}"),
+    }
 }

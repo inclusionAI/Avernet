@@ -481,10 +481,10 @@ _DOC_SECTIONS = {
     "5": ["06-resources-file-and-directory", "07-resources-git-and-archive"],
     "6": ["08-skills"],
     "7": ["09-cli-tools"],
-    "8": ["10-mcp"],
+    "8": ["10-mcp", "12-mcp-preserve-and-clear"],
     "9": ["11-script"],
 }
-_YAML_BLOCKS_PER_SECTION = {"1.2": 1, "2": 1, "3": 1, "4": 1, "5": 2, "6": 1, "7": 1, "8": 1, "9": 1}
+_YAML_BLOCKS_PER_SECTION = {"1.2": 1, "2": 1, "3": 1, "4": 1, "5": 2, "6": 1, "7": 1, "8": 2, "9": 1}
 
 
 def _yaml_blocks_by_section(text: str) -> dict[str, int]:
@@ -627,7 +627,9 @@ def _record(document: dict[str, Any]) -> dict[str, Any]:
         config = dict(entry.get("config") or {})
         if "transport_protocol" in config:
             config["transport_protocol"] = config["transport_protocol"].upper()
-        mcp.append({"server_code": entry["server_code"], **({"config": config} if "config" in entry else {})})
+        # A cleared override is absent from the captured snapshot, even though
+        # the Manifest declared the explicit clear action with config: {}.
+        mcp.append({"server_code": entry["server_code"], **({"config": config} if config else {})})
     script = None
     if document.get("script"):
         body = document["script"]["body"]

@@ -19,6 +19,7 @@ import asyncio
 from typing import Any, Callable, Optional
 
 from agentclaw.community.core.apply_engine.context import ApplyContext
+from agentclaw.community.core.apply_engine.cli_tools.context import CliToolContext
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -56,7 +57,8 @@ class TeclawRedeliver:
     sync service answered ``{"success": False, ...}``.
 
     Created by: the composition root, bound under :data:`~...delivery.Redeliver`.
-    Consumed by: ``TeclawPlatformDelivery.finish``.
+    Consumed by: ``TeclawPlatformDelivery.finish`` and the management
+    ``TeclawCliToolPort``.
 
     "Re-deliver" because the container already received an artifact when it
     was provisioned, and on every runtime edit since; after a manifest apply
@@ -76,7 +78,7 @@ class TeclawRedeliver:
         self._dispatch = dispatch
         self._not_bound = not_bound
 
-    async def __call__(self, ctx: ApplyContext) -> Optional[str]:
+    async def __call__(self, ctx: ApplyContext | CliToolContext) -> Optional[str]:
         try:
             device = await asyncio.to_thread(self._resolve, ctx.bot_id, ctx.owner_id)
         except self._not_bound:

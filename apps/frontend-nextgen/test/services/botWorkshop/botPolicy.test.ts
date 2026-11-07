@@ -1,11 +1,15 @@
+import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import {
+  buildDraftOrPrestableServiceCodingBotChatHref,
+  canEnterBotDetail,
+  canOpenDraftOrPrestableServiceCodingBot,
   getBotActionAvailability,
   getBotCollaborationMode,
   getBotEntryAvailability,
   getGeneralConfigAvailability,
   getInventoryActionAvailability,
-  canEnterBotDetail,
+  isDraftOrPrestableServiceCodingBot,
 } from '@/services/botWorkshop/botPolicy';
 
 describe('botPolicy', () => {
@@ -98,6 +102,115 @@ describe('botPolicy', () => {
 
     expect(actions.find((action) => action.action === 'edit')?.enabled).toBe(false);
     expect(actions.find((action) => action.action === 'edit')?.disabledReason).toContain('引擎未识别');
+  });
+});
+
+describe('服务化 Coding Bot 的发布 ID 映射', () => {
+  test('预发 Inventory 卡片的数字 publication_id 映射为 botPublishId', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-coding-bot',
+      bot_name: '服务化 Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      owner_entity_id: 'owner-1',
+      status: 'ACTIVE',
+      display_state: 'service_prestable',
+      internal_status: 'VALIDATING',
+      publication_id: 42,
+      publication_version: 3,
+    }).item;
+
+    expect(bot.lifecycle).toBe('prestable');
+    expect(bot.harnessContext?.botPublishId).toBe('42');
+    expect(
+      buildDraftOrPrestableServiceCodingBotChatHref({
+        ...bot,
+        runtime: { ...bot.runtime, isAgentCodingBot: true },
+      }),
+    ).toBe(`/coding/coding-chat?botId=service-coding-bot&ownerId=owner-1&publishId=42&stage=verify`);
+  });
+
+  test('嵌套 publish.id 为数字时同样映射为 botPublishId', () => {
+    const bot = mapBotDto({
+      bot_id: 'legacy-service-coding-bot',
+      bot_name: '历史服务化 Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      owner_entity_id: 'owner-1',
+      publish: { id: 43, status: 'VALIDATING', version: 2 },
+    }).item;
+
+    expect(bot.harnessContext?.botPublishId).toBe('43');
+  });
+});
+
+describe('服务化 Coding Bot 的草稿/预发独立入口', () => {
+  const base = {
+    id: 'coding-service-bot',
+    ownerId: 'owner-1',
+    serviceMode: 'service',
+    lifecycle: 'draft' as BotDomain['lifecycle'],
+    runtime: { isAgentCodingBot: true },
+    actions: ['view'],
+  } as unknown as BotDomain;
+
+  test('仅服务化 Coding Bot 的草稿/预发状态命中独立入口', () => {
+    expect(isDraftOrPrestableServiceCodingBot(base)).toBe(true);
+    expect(isDraftOrPrestableServiceCodingBot({ ...base, lifecycle: 'prestable' })).toBe(true);
+    expect(isDraftOrPrestableServiceCodingBot({ ...base, lifecycle: 'running' })).toBe(false);
+    expect(isDraftOrPrestableServiceCodingBot({ ...base, serviceMode: 'non-service' })).toBe(false);
+    expect(
+      isDraftOrPrestableServiceCodingBot({
+        ...base,
+        runtime: { ...base.runtime, isAgentCodingBot: false },
+      }),
+    ).toBe(false);
+  });
+
+  test('独立入口只对 Owner、协作编辑者或预发验证者开放', () => {
+    expect(canOpenDraftOrPrestableServiceCodingBot(base, 'owner-1')).toBe(true);
+    expect(canOpenDraftOrPrestableServiceCodingBot({ ...base, actions: ['view', 'edit'] }, 'u-visitor')).toBe(true);
+    expect(canOpenDraftOrPrestableServiceCodingBot(base, 'u-visitor')).toBe(false);
+
+    const verifyOperator = {
+      ...base,
+      lifecycle: 'prestable' as const,
+      actions: ['view', 'publish_online'],
+    };
+    expect(canOpenDraftOrPrestableServiceCodingBot(verifyOperator, 'u-visitor')).toBe(true);
+  });
+
+  test('草稿跳转携带 Bot 与 Owner，不选择发布版本', () => {
+    expect(
+      buildDraftOrPrestableServiceCodingBotChatHref({
+        ...base,
+        id: 'coding bot',
+        harnessContext: { entityType: 'staff', entityId: 'e1', botPublishId: '9' },
+      }),
+    ).toBe('/coding/coding-chat?botId=coding+bot&ownerId=owner-1');
+  });
+
+  test('预发跳转映射为 verify，并携带有效发布 ID', () => {
+    expect(
+      buildDraftOrPrestableServiceCodingBotChatHref({
+        ...base,
+        lifecycle: 'prestable',
+        harnessContext: { entityType: 'staff', entityId: 'e1', botPublishId: '42' },
+      }),
+    ).toBe('/coding/coding-chat?botId=coding-service-bot&ownerId=owner-1&publishId=42&stage=verify');
+  });
+
+  test('预发缺少有效发布 ID 时保持直连参数，不伪造 verify 选择', () => {
+    const href = buildDraftOrPrestableServiceCodingBotChatHref({
+      ...base,
+      lifecycle: 'prestable',
+      harnessContext: { entityType: 'staff', entityId: 'e1', botPublishId: 'not-a-number' },
+    });
+    expect(href).toBe('/coding/coding-chat?botId=coding-service-bot&ownerId=owner-1');
   });
 });
 

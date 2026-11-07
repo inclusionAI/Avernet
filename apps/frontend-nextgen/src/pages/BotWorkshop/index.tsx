@@ -6,6 +6,7 @@ import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton'
 import { BotManagementTabs, type BotManagementTab } from '@/components/BotWorkshop/BotManagementTabs';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInstancesModal';
+import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
@@ -16,9 +17,9 @@ import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
-import React, { useState } from 'react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
+import React, { useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
@@ -29,6 +30,17 @@ const BotWorkshopPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<BotManagementTab>('tc');
   const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   const effectiveTab = workshop.currentSpaceKind === 'personal' ? activeTab : 'tc';
+  // 复制 Modal 第 2 步只读展示源 Bot 归属空间名;不复制时不渲染。
+  const copySourceSpaces = workshop.copyBot
+    ? [
+        {
+          id: workshop.copyBot.spaceId ?? '',
+          name: workshop.copyBot.spaceName ?? workshop.copyBot.spaceId ?? '当前空间',
+          ownership: workshop.copyBot.ownership,
+          canCreate: false,
+        },
+      ]
+    : [];
   const handleView = (bot: BotDomain) => {
     Tracert.click(Points.botWorkshop.openDetail, { bot_id: bot.id });
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
@@ -41,8 +53,9 @@ const BotWorkshopPage: React.FC = () => {
         {/*
           dmore 稿（10/19 Bot管理首页）：灰底画布（#F8F8F8 = bg-page-canvas）+ 单张白色 r12 卡片，
           卡内自上而下为 Tabs → 筛选行 → 结果面板 → 分页。
+          验收（bot-list 复核）：白色卡片不描边，靠白/灰底色差自明；页面内已无 border-border/60。
         */}
-        <section className="mt-5 rounded-xl border border-border/60 bg-card p-4 sm:p-6">
+        <section className="mt-5 rounded-xl bg-card p-4 sm:p-6">
           {workshop.currentSpaceKind === 'personal' ? (
             <BotManagementTabs value={activeTab} onChange={setActiveTab} className="mb-4" />
           ) : null}
@@ -71,9 +84,10 @@ const BotWorkshopPage: React.FC = () => {
                   }}
                 />
               </div>
-              {/* 结果面板：数据视图为白底 + 灰蓝表头条；空态/错误态为 2% 灰底的居中留白面板。 */}
+              {/* 结果面板：数据视图为白底 + 灰蓝表头条（白底上不再描边，靠表头/行分割线自明）；
+                  空态/错误态为 2% 灰底的居中留白面板。 */}
               {workshop.loading ? (
-                <div className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+                <div className="overflow-hidden rounded-[10px] bg-card">
                   <BotTableSkeleton showOwner={workshop.currentSpaceKind === 'team'} />
                 </div>
               ) : workshop.error ? (
@@ -102,10 +116,7 @@ const BotWorkshopPage: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div
-                    data-testid="bot-workshop-table"
-                    className="overflow-hidden rounded-[10px] border border-border/60 bg-card"
-                  >
+                  <div data-testid="bot-workshop-table" className="overflow-hidden rounded-[10px] bg-card">
                     <BotTable
                       bots={workshop.items}
                       onView={handleView}
@@ -136,6 +147,9 @@ const BotWorkshopPage: React.FC = () => {
                       onGeneralConfig={setGeneralConfigBot}
                       onManagePublication={setPublicationBot}
                       onAction={workshop.runAction}
+                      onCopy={workshop.openCopy}
+                      getCopyAvailability={workshop.getCopyAvailability}
+                      onRetryCopy={(bot) => void workshop.retryCopy(bot.id)}
                       onClaimLock={workshop.claimLock}
                       onReleaseLock={workshop.releaseLock}
                       getInventoryActions={(bot) => ({
@@ -168,6 +182,15 @@ const BotWorkshopPage: React.FC = () => {
           authorization={workshop.createAuthorization}
           onClose={workshop.closeCreate}
           onSubmit={workshop.submitCreate}
+          onExpertCreated={() => void workshop.retry()}
+        />
+        <CopyBotModal
+          sourceBot={workshop.copyBot}
+          spaces={copySourceSpaces}
+          copying={workshop.copying}
+          authorization={workshop.copyAuthorization}
+          onClose={workshop.closeCopy}
+          onSubmit={workshop.submitCopy}
         />
         <BotAccessModal
           mode={workshop.access.mode}

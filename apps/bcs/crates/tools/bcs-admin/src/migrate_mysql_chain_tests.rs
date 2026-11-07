@@ -1,10 +1,22 @@
 #[cfg(test)]
+#[path = "migrate_task_handle_contract.rs"]
+mod task_handle_contract;
+
+#[cfg(test)]
 #[path = "migrate_group_notify_contract.rs"]
 mod group_notify_contract;
 
 #[cfg(test)]
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-mod migration_chain_migrations;
+use bcs_db_migrations as migration_chain_migrations;
+
+#[path = "../../../services/bcs-bot-store/tests/support/a2a_mysql_cases.rs"]
+mod a2a_store_contract;
+
+// The shared existing-only bot profile/avatar store contract
+// (bot-avatar plan Task 3): the ignored full-chain MySQL gate and the
+// bot-store SQLite conformance run the same verification body.
+#[path = "../../../services/bcs-bot-store/tests/support/bot_profile_contract.rs"]
+mod avatar_store_contract;
 
 use super::*;
 use std::sync::Arc;
@@ -18,6 +30,32 @@ fn chain_args() -> MigrateArgs {
         sqlite_path: None, emit_sql: false, check_files: false, check_db: false, apply: true,
         yes: true, only: vec![], from: None, to: None,
     }
+}
+
+#[test]
+fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
+    // Exercise the real planner and apply-report formatter without a MySQL
+    // server, so migration-tail additions cannot hide behind an ignored test.
+    let plans = load_selected_migrations(&chain_args())?
+        .iter().map(mysql_migration_plan).collect::<Vec<_>>();
+    let records = plans.iter().map(|plan| AppliedMysqlMigration {
+        version: i64::from(plan.version), name: plan.name.clone(),
+        dialect: "mysql".into(), checksum: plan.checksum.clone(),
+    }).collect::<Vec<_>>();
+    let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
+    let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
+    assert_eq!(before.current_version, Some(20));
+    assert_eq!(before.target_version, Some(42));
+    assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
+        (21..=42).collect::<Vec<_>>());
+
+    let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
+    let report = format_mysql_apply_report(&after, &before.pending_versions);
+    assert!(report.contains("applied_versions=22\npending_versions=0"), "{report}");
+    assert!(report.contains("- 042 auth_session_version checksum="), "{report}");
+    let repeated = format_mysql_apply_report(&after, &[]);
+    assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
+    Ok(())
 }
 
 #[test]
@@ -110,6 +148,7 @@ async fn sqlite_migration_chain_backs_the_group_notify_contract() -> Result<()> 
     migration_chain_migrations::run_sqlite_migrations(db.as_ref())
         .await
         .context("apply the sqlite migration chain")?;
+    task_handle_contract::verify(db.clone(), true).await?;
     group_notify_contract::verify(Arc::clone(&db), |db, env| {
         ChainMySqlGroupStore::sqlite(Arc::clone(db), env.to_string())
     })
@@ -130,19 +169,20 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=36\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=42\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=36).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=42).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
+        task_handle_contract::verify(migrated_db.clone(), false).await?;
         history_window_tests::verify_history_windows(global).await?;
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
         assert!(report.contains("applied_versions=0\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?, records);
 
-        println!("[phase 2/3] Group Store human-notify contract on the migrated chain");
+        println!("[phase 2/3] Group, Provider and A2A repository contracts on the migrated chain");
         group_notify_contract::verify(migrated_db.clone(), |db, env| {
             bcs_group_store::MySqlGroupStore::new(Arc::clone(db), env.to_string())
         })
@@ -150,6 +190,22 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         bcs_test_support::contract::provider_slug::provider_repo_port_contract_tests(
             &bcs_bot_store::provider::DbProviderStore::mysql(migrated_db.clone()),
         ).await;
+
+        a2a_store_contract::verify(migrated_db.clone()).await;
+
+        // The SAME existing-only bot profile/avatar contract the Memory and
+        // SQLite conformance runs use, on the fully migrated MySQL schema
+        // (this exercises the real MySQL affected_rows=0 unchanged-write
+        // classification, SQLite's BEGIN IMMEDIATE locking and the
+        // `SELECT ... FOR UPDATE` confirm differ on this dialect).
+        avatar_store_contract::avatar_contract(
+            &bcs_bot_store::PersistentBotRepo::with_sql_flavor(
+                migrated_db.clone(),
+                bcs_db_api::DbSqlFlavor::Mysql,
+            ),
+        )
+        .await;
+        println!("Bot profile: existing-only avatar/profile MySQL contract passed (unchanged-value writes classify by the confirmed live row)");
 
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;
@@ -177,8 +233,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
             assert_eq!(updated.affected_rows, 1);
         }
         let records = chain_history(db).await?;
+        let expected_applied = load_selected_migrations(&args)?.len() - records.len();
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=16\npending_versions=0"), "{report}");
+        assert!(report.contains(&format!("applied_versions={expected_applied}\npending_versions=0")), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);
@@ -234,6 +291,7 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
         ("bcs_providers", vec!["env", "provider_id", "slug"]),
+        ("bcs_group_agent_cards", vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template"]),
         ("bcs_collaboration_drafts", vec!["draft_id", "owner_bot_id", "head_revision", "created_at", "deleted"]),
         ("bcs_collaboration_draft_revisions", vec!["draft_id", "revision", "payload_json", "revoked"]),
         ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
@@ -242,13 +300,16 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
         ("bcs_groups", vec!["human_mention_notify_mode", "service_spec"]),
-        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version"]),
+        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version", "avatar_url"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "activation_count", "completed_at", "callback_status", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),
     ] {
-        let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
+        let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
+        if table == "bcs_group_agent_cards" {
+            assert_eq!(actual, columns, "{table} column order");
+        }
         for column in columns { assert!(actual.iter().any(|actual| actual == column), "missing {table}.{column}"); }
         if table.starts_with("bcs_collaboration_draft") {
             assert!(!actual.iter().any(|column| column == "deployment_id"), "obsolete {table}.deployment_id");
@@ -289,6 +350,7 @@ async fn assert_history_lookup_plans(db: &dyn DbPlugin) -> Result<()> {
 async fn assert_direct_queue_indexes(db: &dyn DbPlugin) -> Result<()> {
     for (table, index, non_unique, columns) in [
         ("bcs_providers", "uk_bcs_providers_env_slug", 0, vec!["env", "slug"]),
+        ("bcs_group_agent_cards", "uk_group_agent_card", 0, vec!["env", "group_id"]),
         ("bcs_session_registry", "uk_session_registry", 0, vec!["env", "session_id"]),
         ("bcs_messages", "uk_session_seq", 0, vec!["env", "session_id", "session_seq"]),
         ("bcs_chat_runs", "idx_env_delivery", 1, vec!["env", "delivery_id"]),

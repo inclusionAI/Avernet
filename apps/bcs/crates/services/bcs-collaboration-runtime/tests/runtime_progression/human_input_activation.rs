@@ -67,6 +67,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_untrusted".to_string()),
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect_err("HumanInput must require a Present Human session participant");
@@ -127,6 +128,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("existing Present Human should allow service invocation");
@@ -186,6 +188,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
             }),
+            caller_association: None,
         })
         .await
         .expect("authenticated Human should be materialized into session");
@@ -240,6 +243,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
                 actor_id: "human_2002".to_string(),
                 display_name: Some("Returning Reviewer".to_string()),
             }),
+            caller_association: None,
         })
         .await
         .expect("authenticated Human should be restored to Present");
@@ -295,6 +299,7 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
             }),
+            caller_association: None,
         })
         .await
         .expect("start frontend HumanInput run");
@@ -378,7 +383,7 @@ async fn im_human_input_rejects_a_different_present_human() {
             opening_message_override: None,
             input: json!({"proposal": "assigned review"}),
             caller_id: Some("bot_driver".to_string()),
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start assigned IM HumanInput run");

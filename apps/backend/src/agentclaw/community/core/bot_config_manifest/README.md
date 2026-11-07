@@ -305,9 +305,11 @@ bot); the receipt it files is the platform's record of what the bot was served,
 true whether the apply proceeds.
 
 **The two fetching categories and their areas** (§3.2). `identity` overwrites
-the file set minus the reserved names — `MEMORY.md` and `IDENTITY.md` are
-refused in `resolve` and subtracted from the removals, both halves, so the
-guarantee holds for documents that never met the validator — writing through
+the file set with protected runtime memory and profile omission: `MEMORY.md`
+is refused in `resolve` and excluded from removals. `IDENTITY.md` may be explicitly
+written on engines that accept it, including an empty write, but is excluded from
+omission cleanup (including `identity: []`). Other identity files retain Replace
+semantics. The same rules hold for documents that never met the validator, writing through
 `IdentityService` with the router's own coordinates
 (`identity_coords_from_record`, resolved in core for exactly this consumer);
 "removal" is an empty write because the domain's own contract is that absent
@@ -593,6 +595,7 @@ consumed_by:
   - "core.apply_engine — the run service looks the ManifestCompiler up by MANIFEST_STATE's kind and compiles through it; di/modules/manifest_fetch_module.py builds the compiler beside the fetch pipeline (the content store root and the fetch_transport_allowlist via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
+  - agentclaw.community.core.ports.mcp_config  # an absent config and an explicit empty object both compile to clear
   - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (the validator and the compiler refuse them)
   - agentclaw.community.core.apply_engine  # the engine the Manifest compiles for: the construct vocabulary and capabilities, DesiredState and the compiler contract, the apply run the creation flow starts, the fetch caps (unpack) and identity vocabulary
   - agentclaw.community.core.base
@@ -626,8 +629,14 @@ Two things are close to authorization boundaries already:
   because the document is stored as written, read back verbatim by `GET`, and
   recorded as provenance by the platform's own materialisation. Redaction cannot
   un-store what three other places already hold.
-- **The reserved identity files (`MEMORY.md`, `IDENTITY.md`) are refused at
-  write time**, not skipped at apply time. They are engine-generated runtime
-  state that apply is guaranteed never to write or remove, so a document
-  declaring one would be accepted and then never converge. Refusing it is what
-  keeps "accepted" and "appliable" the same set.
+- **Runtime memory (`MEMORY.md`) is refused at write time**, not skipped at
+  apply time, and is never removed. `IDENTITY.md` is explicitly writable within
+  the engine's existing filename whitelist, but remains protected when omitted.
+  Claude Code still accepts only `CLAUDE.md`; expert identity adaptation does not
+  expand this native whitelist.
+
+Creation-spec policy is supplied by the composition root as a required
+`validate_creation_spec` callable to the creation seam and worker. They invoke
+it before worker side effects, without importing the
+policy owner or inspecting its business fields. Manifest scope/document
+binding checks remain local to the Manifest compiler and creation seam.

@@ -89,11 +89,13 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
                local_mcp_registry=None, managed_files_reader=None,
                cli_tool_repository=None):
     center_store = _ready_center_store()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_entity.return_value = {"bot_type": "service"}
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
         mcp_config_service=mcp_config_service or MagicMock(),
         resource_repository=resource_repository or MagicMock(),
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         path_factory=MagicMock(),
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),
@@ -1262,9 +1264,9 @@ def test_engine_overrides_active_channel_maps_neutral_account():
     repo = _repo_returning([_channel_record()])
     out = _collector(channel_repo=repo).engine_overrides(_req())
 
-    # Lookup keyed on (type, [user_id, aideskdingding], bind_bot_id).
+    # Channel resources follow the immutable entity, independently of the actor.
     repo.get_by_type_and_identity_ids.assert_called_once_with(
-        type="dingding", identity_ids=["u1", "aideskdingding"], bind_bot_id="bot1"
+        type="dingding", identity_ids=["staff_u1", "aideskdingding"], bind_bot_id="bot1"
     )
     dingding = out["channels"]["dingding"]
     assert dingding["enabled"] is True

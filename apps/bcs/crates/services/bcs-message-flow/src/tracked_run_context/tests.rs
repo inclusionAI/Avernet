@@ -91,3 +91,23 @@ async fn restoring_terminal_context_does_not_register_a_live_producer() {
     tracked.cleanup_expired(60_001, 60_000).await;
     assert_eq!(tracked.tracker.output_binding("expired").await, None);
 }
+
+#[tokio::test]
+async fn paused_deadline_preserves_existing_output_lineage_without_minting_retired_producers() {
+    let tracked=TrackedBotRunContext::new(Arc::new(MemoryBotRunContextStore::new()));
+    let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let old=now+60_000;let next=now+600_000;let run="budget-lineage";
+    tracked.put_context(context(run,old)).await;
+    tracked.register_active_run(ActiveBotRunContext {canonical_run_id:run.into(),downstream_run_id:run.into(),downstream_session_key:None,scope:scope(),
+        transport_owner:bcs_service_api::BotRunTransportOwner::A2a {provider_id:"provider".into(),provider_bot_ref:"remote".into()},
+        provider_bypass_headers:vec![],deadline_ms:old}).await.unwrap();
+    assert!(tracked.begin_provider_transport(run,old).await);
+    assert!(tracked.bind_provider_transport(run,ProviderRunTransport::A2a {binding:bcs_domain::a2a::A2aBinding::HttpJson,update_mode:bcs_domain::a2a::A2aUpdateMode::Stream}).await);
+    assert!(tracked.reschedule_deadline(&scope(),run,old,next).await.unwrap());
+    tracked.cleanup_expired(old+1,0).await;
+    assert_eq!(tracked.tracker.output_binding(run).await,Some(None));
+    assert!(tracked.get_context(run).await.is_some());
+    tracked.tracker.cleanup_output_run(run).await;
+    assert!(!tracked.reschedule_deadline(&scope(),run,next,next+1).await.unwrap());
+    assert_eq!(tracked.tracker.output_binding(run).await,None);
+}

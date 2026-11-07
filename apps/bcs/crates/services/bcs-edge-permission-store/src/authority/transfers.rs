@@ -241,7 +241,7 @@ impl DbBotAuthorityStore {
     /// Human ACTOR registry (identical to the manager paths'
     /// Human guard): the `bcs_bots` row must be a live Human in
     /// the bound env (`actor_kind = 'human'`, not tombstoned).
-    async fn live_human_count(&self, actor_id: &str) -> ServiceResult<u64> {
+    pub(super) async fn live_human_count(&self, actor_id: &str) -> ServiceResult<u64> {
         let user_id = human_user_id_of_actor(actor_id)
             .expect("human actor shape validated upstream");
         let rows = self
@@ -414,7 +414,7 @@ impl DbBotAuthorityStore {
     /// Pre-read owner/manager-edge row states of one
     /// actor for the accept edge writes:
     /// (approved_count, revoked_count, other_count).
-    async fn pre_read_edge_state(
+    pub(super) async fn pre_read_edge_state(
         &self,
         bot_id: &str,
         actor_id: &str,
@@ -576,7 +576,7 @@ impl DbBotAuthorityStore {
 
     /// One transfer audit write of this mutation
     /// (before/after NULL preserved exactly).
-    fn push_transfer_audit(
+    pub(super) fn push_transfer_audit(
         &self,
         builder: &mut TransferTxBuilder,
         bot_id: &str,

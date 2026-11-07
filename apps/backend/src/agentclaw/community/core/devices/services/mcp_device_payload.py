@@ -131,7 +131,18 @@ def convert_to_device_format(
         url = None
         transport = "sse"
 
-        if endpoints:
+        if not endpoints and url_override is None:
+            raise Exception(f"MCP服务器 {server_code} 没有可用的{endpoint_env}环境端点(OFFICE/INTERNET网络)，请检查MCP Center配置")
+
+        if url_override:
+            # The Center endpoint may be stale or absent; never let that prevent
+            # the Bot from using its explicit endpoint.  Without a Center
+            # endpoint there is no Center protocol to read, so preserve the
+            # configured/default transport semantics.
+            url = url_override
+            if transport_protocol:
+                transport = "http" if transport_protocol == "STREAMABLE_HTTP" else "sse"
+        elif endpoints:
             valid_endpoints = [
                 ep for ep in endpoints
                 if ep.get("networkType") in ("OFFICE", "INTERNET") and ep.get("env") == endpoint_env

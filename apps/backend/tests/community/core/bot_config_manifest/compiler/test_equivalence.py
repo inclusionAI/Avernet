@@ -1,4 +1,4 @@
-"""The two compilers agree: a Manifest document and the revision it records compile to the same desired state.
+"""The two compilers agree on the resulting Bot, including distinct MCP configuration actions.
 
 ``api-contracts/genome/v1/examples/manifest-v1/`` holds, per case, the
 document (M) and the revision apply-then-capture yields from it. The
@@ -6,7 +6,8 @@ round-trip the contract promises (``manifest-v1-compatibility.md``) is that
 delivering the revision gives the bot that applying M gave. Both roads now
 end in one ``DesiredState``, so the promise is a comparison: the Manifest
 compiler's state for M, over the fixture sources, must equal the genome
-compiler's state for the revision, construct by construct.
+compiler's state for the revision, construct by construct, except for MCP:
+its preserve and clear actions are compared through actual apply/capture/restore.
 
 The reading of the two totality rules is the comparison's own: a category M
 leaves out is undeclared on the Manifest side (apply leaves the bot's state)
@@ -49,6 +50,7 @@ from tests.community.core.apply_engine._fakes import (
     real_validator,
 )
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir
+from tests.community.core.apply_engine.test_mcp_genome_round_trip import assert_mcp_compilers_restore_the_same_result
 
 CASES_DIR = EXAMPLES / "manifest-v1"
 SOURCES = CASES_DIR / "sources"
@@ -138,6 +140,9 @@ def test_the_manifest_and_its_revision_compile_to_the_same_desired_state(case: P
     from_revision = compile_spec(GenomeSpec.from_json(revision["spec"]), BlobDir())
 
     for construct in COMPARED:
+        if construct is Category.MCP:
+            asyncio.run(assert_mcp_compilers_restore_the_same_result(from_manifest, from_revision))
+            continue
         manifest_side = _comparable(from_manifest.declaration(construct))
         genome_side = _comparable(from_revision.declaration(construct))
         assert genome_side is not None, f"{construct.value}: a revision declares every category"

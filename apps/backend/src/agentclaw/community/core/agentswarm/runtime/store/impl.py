@@ -407,6 +407,13 @@ class SliceStore:
     async def apply_run_retention(self, run_id: RunId, tenant: TenantId) -> None:
         await run_blocking(self.apply_run_retention_blocking, run_id, tenant)
 
+    @staticmethod
+    def _ref_matches(ref: str, name: str) -> bool:
+        # The handler mints spawn-local composite names
+        # ("<envelope-name>_<12hex>"), so a decision waiting on the bare
+        # name it spawned must still bind to the composite row.
+        return name == ref or name.startswith(ref + "_")
+
     async def unsatisfied_refs(self, run_id: RunId, tenant: TenantId,
                                 refs: tuple[str, ...]) -> tuple[str, ...]:
         result_names = set()
@@ -416,7 +423,10 @@ class SliceStore:
                 run_id, agent.agent_id, tenant,
             ) is not None:
                 result_names.add(agent.name)
-        return tuple(ref for ref in refs if ref not in result_names)
+        return tuple(
+            ref for ref in refs
+            if not any(self._ref_matches(ref, done) for done in result_names)
+        )
 
     async def first_failed_wait_ref(self, run_id: RunId, tenant: TenantId,
                                     refs: tuple[str, ...]) -> dict[str, Any] | None:
@@ -445,7 +455,7 @@ class SliceStore:
         wanted = set(refs)
         for agent in await run_blocking(
                 self._agent_repo.list_by_run, run_id, tenant):
-            if (agent.name not in wanted
+            if (not any(self._ref_matches(w, agent.name) for w in wanted)
                     or agent.status is not AgentStatus.FAILED):
                 continue
             if agent.error == _SLICE_LOST_ERROR:
@@ -487,7 +497,7 @@ class SliceStore:
         wanted = set(refs)
         for agent in await run_blocking(
                 self._agent_repo.list_by_run, run_id, tenant):
-            if (agent.name not in wanted
+            if (not any(self._ref_matches(w, agent.name) for w in wanted)
                     or agent.status is not AgentStatus.FAILED
                     or agent.error != _SLICE_LOST_ERROR):
                 continue
@@ -511,11 +521,14 @@ class SliceStore:
         Not failed, not lost: a pure deferral the next turn resolves."""
         if not refs:
             return ()
-        known = {
+        known = [
             a.name for a in await run_blocking(
                 self._agent_repo.list_by_run, run_id, tenant)
-        }
-        return tuple(r for r in refs if r not in known)
+        ]
+        return tuple(
+            r for r in refs
+            if not any(self._ref_matches(r, name) for name in known)
+        )
 
     def get_results(self, run_id: RunId, tenant: TenantId) -> list[dict[str, Any]]:
         # Sync path: the orchestrator invokes result_getter as a sync
@@ -541,6 +554,15 @@ class SliceStore:
         state.total_agents_spawned = len(agents)
         state.routed_result_count = len(
             await run_blocking(self._result_repo.list_by_run, run.run_id, run.tenant)
+        )
+        # Width census: FAILED/KILLED agents stay terminal without ever
+        # routing a result — they must not hold in-flight width capacity
+        # (a 33-char persona name failure wedged a 10-agent run at
+        # WALL_CLOCK exactly this way). COMPLETED agents are counted by
+        # routed_result_count instead.
+        state.terminal_without_result = sum(
+            1 for a in agents
+            if a.status in (AgentStatus.FAILED, AgentStatus.KILLED)
         )
 
         done_pairs: set[tuple[str, str]] = set()

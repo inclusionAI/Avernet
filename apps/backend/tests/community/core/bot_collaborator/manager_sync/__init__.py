@@ -1,0 +1,1 @@
+"""Tests for the bot manager sync projector package."""

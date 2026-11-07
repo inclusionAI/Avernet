@@ -1,4 +1,4 @@
-import { Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import { Avatar, Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { Check, ChevronDown } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -8,6 +8,7 @@ export interface GroupLeaderOption {
   name: string;
   current?: boolean;
   description?: string;
+  avatarUrl?: string;
 }
 
 export interface GroupLeaderSelectProps {
@@ -32,8 +33,8 @@ export function GroupLeaderSelect({
   const selected = useMemo(() => options.find((option) => option.id === value), [options, value]);
 
   return (
-    <div>
-      <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor={id}>
+    <div className="min-w-0">
+      <label className="mb-2 block text-sm font-medium text-foreground" htmlFor={id}>
         {label}
       </label>
       <Popover open={open} onOpenChange={setOpen}>
@@ -43,18 +44,19 @@ export function GroupLeaderSelect({
             type="button"
             variant="secondary"
             aria-label={label}
-            className="h-9 w-full justify-between rounded-md border-border bg-background px-3 text-left"
+            className="h-10 w-full min-w-0 justify-between rounded-lg border-input bg-background px-3 text-left"
           >
             <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-muted-foreground')}>
               {selected ? (
                 <>
-                  <span className="max-w-44 truncate text-xs text-foreground">{selected.name}</span>
+                  {selected.avatarUrl && <Avatar name={selected.name} src={selected.avatarUrl} size={20} />}
+                  <span className="min-w-0 truncate text-sm font-normal text-foreground">{selected.name}</span>
                   {selected.current && (
                     <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                   )}
                 </>
               ) : (
-                <span className="truncate text-xs">{placeholder}</span>
+                <span className="truncate text-sm font-normal">{placeholder}</span>
               )}
             </span>
             <ChevronDown
@@ -86,6 +88,7 @@ export function GroupLeaderSelect({
                       setOpen(false);
                     }}
                   >
+                    {option.avatarUrl && <Avatar name={option.name} src={option.avatarUrl} size={24} />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs">{option.name}</span>
                       {option.description ? (

@@ -13,7 +13,7 @@
 
 ### 参数 id 约束（重点）
 
-- **`--session-id`**：必须使用**全局唯一的 session key**（格式 `{group_id}:{8_hex}`，例如 `grp-001:1a2b3c4d`），用 `bcs session get <session_id>` 确认。不要使用群内短 id 或自行拼接。
+- **`--session-id`**：必须使用**全局唯一的 session key**（格式 `{group_id}:{8_hex}`，例如 `grp-001:1a2b3c4d`），用 `bcs-cli session get <session_id>` 确认。不要使用群内短 id 或自行拼接。
 - **`--round-id`**：必须**以 `{sessionId}:` 开头**，后接非空后缀，并保证全局唯一；不能为空，不能包含空格/回车等空白或控制字符。
 - `--group-id`：group 作用域必填；session/round 作用域选填（服务端从 Session 反解 parent Group）。
 
@@ -38,7 +38,7 @@
 **最小可用示例（默认仅创建者 owner 可写）：**
 
 ```bash
-bcs group-context add \
+bcs-cli group-context add \
   --group-id "<group_id>" \
   --name "<name>" \
   --scope-level group \
@@ -48,7 +48,7 @@ bcs group-context add \
 **需要其他 bot 一起维护时，显式授予写权：**
 
 ```bash
-bcs group-context add \
+bcs-cli group-context add \
   --group-id "<group_id>" \
   --name "<name>" \
   --scope-level group \
@@ -69,17 +69,17 @@ bcs group-context add \
 
 ```bash
 # group 级（本群共享规则）
-bcs group-context add --group-id "grp-001" --name "game_rules" \
+bcs-cli group-context add --group-id "grp-001" --name "game_rules" \
   --scope-level group --content "谁是卧底：所有人轮流发言" \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # session 级（当前会话状态）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_status" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_status" \
   --scope-level session --content '{"alive":["player_1","player_2","player_3"],"voted_out":[]}' \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # round 级（某一轮）
-bcs group-context add --round-id "grp-001:1a2b3c4d:r1" --name "round_result" \
+bcs-cli group-context add --round-id "grp-001:1a2b3c4d:r1" --name "round_result" \
   --scope-level round --content "3号玩家出局" \
   --collect-from '{"userIds":["judge_bot"]}'
 ```
@@ -88,13 +88,13 @@ bcs group-context add --round-id "grp-001:1a2b3c4d:r1" --name "round_result" \
 
 ```bash
 # 裁判写入平民词：只对平民玩家可见（卧底玩家看不到）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_1" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_1" \
   --scope-level session --content "苹果" \
   --visible-to '{"userIds":["player_1","player_2","player_3"]}' \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # 裁判写入卧底词：只对卧底玩家可见（平民玩家看不到）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_2" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_2" \
   --scope-level session --content "香蕉" \
   --visible-to '{"userIds":["player_w"]}' \
   --collect-from '{"userIds":["judge_bot"]}'
@@ -108,7 +108,7 @@ bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_2" \
 
 ```bash
 # 某玩家被投票出局，更新存活状态
-bcs group-context update \
+bcs-cli group-context update \
   --name "player_status" \
   --scope-level session \
   --session-id "grp-001:1a2b3c4d" \
@@ -124,7 +124,7 @@ bcs group-context update \
 
 ```bash
 # owner 更新并移交 owner
-bcs group-context update --name "game_rules" --scope-level group \
+bcs-cli group-context update --name "game_rules" --scope-level group \
   --group-id "grp-001" --owners '{"userIds":["judge_bot","referee_bot"]}' \
   --change-reason "增加裁判为共同 owner"
 ```
@@ -134,7 +134,7 @@ bcs group-context update --name "game_rules" --scope-level group \
 ## group-context list - 列出 context
 
 ```bash
-bcs group-context list --group-id "grp-001" [--scope-level group] [--scope-level session]
+bcs-cli group-context list --group-id "grp-001" [--scope-level group] [--scope-level session]
 ```
 
 - 列表查询范围由传入的 id + `--scope-level` 决定：
@@ -144,10 +144,10 @@ bcs group-context list --group-id "grp-001" [--scope-level group] [--scope-level
 
 ```bash
 # 查看本群 group 级所有共享规则
-bcs group-context list --group-id "grp-001" --scope-level group
+bcs-cli group-context list --group-id "grp-001" --scope-level group
 
 # 查看某个会话下所有 context（自动推断为 session 层）
-bcs group-context list --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context list --session-id "grp-001:1a2b3c4d"
 ```
 
 ---
@@ -155,7 +155,7 @@ bcs group-context list --session-id "grp-001:1a2b3c4d"
 ## group-context get - 获取 context 内容
 
 ```bash
-bcs group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
 ```
 
 - 返回匹配 `--name` 的 active context 内容，按 **round → session → group** 从细到粗排序。
@@ -163,13 +163,13 @@ bcs group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
 
 ```bash
 # 读取当前会话存活状态
-bcs group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
 
 # 玩家读取自己的词：能看到自己词的前提是调用者在对应 visible_to 列表内
-bcs group-context get --name "player_word_1" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_word_1" --session-id "grp-001:1a2b3c4d"
 
 # 读取某轮结果（round 优先于 session/group 同名项）
-bcs group-context get --name "round_result" --round-id "grp-001:1a2b3c4d:r1"
+bcs-cli group-context get --name "round_result" --round-id "grp-001:1a2b3c4d:r1"
 ```
 
 ---
@@ -180,7 +180,7 @@ bcs group-context get --name "round_result" --round-id "grp-001:1a2b3c4d:r1"
 |------|------|------|
 | `permission_denied` | 非当前 Session 参与者 / 非 Group 成员 / 非 owner 改管理字段 | 确认目标资源成员；改管理字段(visible_to/collect_from/owners)需 owner 身份 |
 | `param groupId is required when scope_level=group` | 解析到 group 层但没传 `--group-id` | add/get/list 时显式传 `--group-id` |
-| `param sessionId is required when scope_level=session` | 选 `session` 但没传 `--session-id` | 用 `bcs session get` 拿到完整 session key 传入 |
+| `param sessionId is required when scope_level=session` | 选 `session` 但没传 `--session-id` | 用 `bcs-cli session get` 拿到完整 session key 传入 |
 | `param roundId ... must start with "{sessionId}:" ...` | round-id 没以 `{sessionId}:` 开头或后缀为空 | 改为 `{session_id}:后缀`，见「参数 id 约束」 |
 | `param roundId must not contain whitespace or control characters` | round-id 含空格/换行等特殊字符 | 只用中英文、数字、`-`、`_`、`:` |
 | `collect_from.userIds must not be empty` | update 显式传入空 `collect_from` | add 不传 `--collect-from` 即表示仅 owner 可写；update 如需沿用策略不要显式传空列表 |
@@ -192,47 +192,47 @@ bcs group-context get --name "round_result" --round-id "grp-001:1a2b3c4d:r1"
 
 ```bash
 # 1. 保存本群共享规则（group 作用域，所有玩家可见；默认仅创建者可写）
-bcs group-context add --group-id "grp-001" --name "game_rules" \
+bcs-cli group-context add --group-id "grp-001" --name "game_rules" \
   --scope-level group --content "谁是卧底：每人轮流发言，票数最多者出局" \
   --visible-to '{"userIds":["judge_bot","player_bot_1","player_bot_2","player_bot_3"]}'
 
 # 2. 裁判写入平民词：只对平民玩家可见（卧底玩家不在 visible_to 列表，看不到）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_1" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_1" \
   --scope-level session --content "苹果" \
   --visible-to '{"userIds":["player_bot_1","player_bot_2","player_bot_3"]}' \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # 3. 裁判写入卧底词：只对卧底玩家可见（平民玩家不在列表，看不到）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_2" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_word_2" \
   --scope-level session --content "香蕉" \
   --visible-to '{"userIds":["player_w"]}' \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # 4. 保存当前会话存活状态（session 作用域，所有人可见以便核对在场情况）
-bcs group-context add --session-id "grp-001:1a2b3c4d" --name "player_status" \
+bcs-cli group-context add --session-id "grp-001:1a2b3c4d" --name "player_status" \
   --scope-level session --content '{"alive":["player_bot_1","player_bot_2","player_bot_3","player_w"],"voted_out":[]}' \
   --visible-to '{"userIds":[]}' \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # 5. 某轮结束时记录结果（round 作用域）
-bcs group-context add --round-id "grp-001:1a2b3c4d:r2" --name "round_result" \
+bcs-cli group-context add --round-id "grp-001:1a2b3c4d:r2" --name "round_result" \
   --scope-level round --content "玩家3出局" \
   --collect-from '{"userIds":["judge_bot"]}'
 
 # 6. 更新存活状态（只改 content，其余字段沿用；生效时间会在未显式传入时重置为 now）
-bcs group-context update --name "player_status" --scope-level session \
+bcs-cli group-context update --name "player_status" --scope-level session \
   --session-id "grp-001:1a2b3c4d" \
   --content '{"alive":["player_bot_1","player_bot_2","player_w"],"voted_out":["player_bot_3"]}' \
   --change-reason "玩家3被投票出局"
 
 # 7. 读取当前存活状态
-bcs group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_status" --session-id "grp-001:1a2b3c4d"
 
 # 8. 玩家各自读取自己的词（能否看到取决于调用者是否在对应 visible_to 内）
-bcs group-context get --name "player_word_1" --session-id "grp-001:1a2b3c4d"
-bcs group-context get --name "player_word_2" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_word_1" --session-id "grp-001:1a2b3c4d"
+bcs-cli group-context get --name "player_word_2" --session-id "grp-001:1a2b3c4d"
 
 # 9. 复盘时查看本群全部 context 归属与权限（分别查 group 层和本次会话层）
-bcs group-context list --group-id "grp-001" --scope-level group
-bcs group-context list --session-id "grp-001:1a2b3c4d" --scope-level session
+bcs-cli group-context list --group-id "grp-001" --scope-level group
+bcs-cli group-context list --session-id "grp-001:1a2b3c4d" --scope-level session
 ```

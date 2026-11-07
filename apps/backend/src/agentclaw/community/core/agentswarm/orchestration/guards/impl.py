@@ -54,6 +54,37 @@ class GuardService:
             )
         return None
 
+    def check_name(self, state: RunState, envelope) -> GuardEvent | None:
+        """A spawn name must be catalog-derived: exact match, or the
+        spec's name as a prefix (composite spawn names carry the spec
+        first, e.g. "coder_rust" from catalog "coder"). Anything else is
+        a malformed intent for a run whose execution surface — kind,
+        engine, identity, config manifest — is defined per catalog spec:
+        executing it under a silent fallback mints agents the run never
+        promised. The guard drops the intent and hands the orchestrator
+        the legal-name rule so the next decision replans with it."""
+        name = getattr(envelope, "name", "")
+        catalog = getattr(state.run, "agent_catalog", None) or ()
+        for spec in catalog:
+            if name == spec.name or name.startswith(spec.name):
+                return None
+        legal = ", ".join(spec.name for spec in catalog) or "(catalog empty)"
+        return GuardEvent(
+            id=EventId(_gen_id()),
+            run_id=state.run.run_id,
+            tenant=state.run.tenant,
+            agent_id=None,
+            kind=GuardKind.NAME_UNRESOLVED,
+            details={
+                "name": name,
+                "catalog": [spec.name for spec in catalog],
+                "rule": "spawn names must be a catalog agent name, "
+                        "or start with one (spec first, qualifier after)",
+                "hint": f"unknown agent name {name!r}; catalog agents: {legal}",
+            },
+            created_at=EpochMillis(_now_ms()),
+        )
+
     def check_depth(self, state: RunState, depth: int) -> GuardEvent | None:
         """Depth guards lineage: ``depth`` is the spawn's lineage level
         (``ac_agent_swarm_agent.depth`` + ``parent_agent_id``). The swarm is

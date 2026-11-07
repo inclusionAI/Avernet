@@ -98,7 +98,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["bot_id"] for item in result.candidates], ["B_KEYWORD"])
         self.assertFalse(result.failed_keywords)
 
-    async def test_non_executable_semantic_hit_falls_back(self) -> None:
+    async def test_semantic_hit_with_empty_agent_code_is_kept(self) -> None:
         semantic = _FakeSemantic(
             [
                 {
@@ -115,7 +115,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         )
         result = await search_candidates(discover, "存储行业")
 
-        self.assertEqual([item["bot_id"] for item in result.candidates], ["B_KEYWORD"])
+        self.assertEqual([item["bot_id"] for item in result.candidates], ["B_NO_CODE"])
 
     async def test_semantic_search_returns_at_most_top_five_candidates(self) -> None:
         semantic = _FakeSemantic(

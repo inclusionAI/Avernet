@@ -309,6 +309,9 @@ pub(super) fn build_task_result_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
+    let text = if group.is_some_and(|g| g.group_strategy == GroupStrategy::ManagerWorker) {
+        response_text.to_string()
+    } else { format!("[from:{}] {}", target_bot_name, response_text) };
     let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
@@ -316,7 +319,7 @@ pub(super) fn build_task_result_frame(
         "task_id": task_id,
         "message": {
             "role": "user",
-            "content": [{"type": "text", "text": format!("[from:{}] {}", target_bot_name, response_text)}],
+            "content": [{"type": "text", "text": text}],
             "timestamp": now_ms() / 1000,
         },
         "channel": {
@@ -370,7 +373,7 @@ pub(super) fn request_id(frame: &BcsFrame) -> Option<String> {
 }
 
 pub(super) fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
-    if target.is_http_provider() {
+    if target.is_gateway() {
         protocol_version.max(3)
     } else {
         protocol_version

@@ -116,3 +116,46 @@ def test_bcs_bot_token_provider_degrades_to_none_on_db_error(monkeypatch):
 
     provider = module.TaskRunnerIntegrationModule().bcs_bot_token_provider(db=db)
     assert provider.get_token("dr:U4") is None
+
+
+# ── openapi_bot api_key env selection (api_key_secret_prod vs api_key_secret) ──
+def _openapi_cfg(**kw):
+    return module.OpenApiBotConfig(
+        base_url=kw.get("base_url", "https://baas.example"),
+        base_url_pre=kw.get("base_url_pre", ""),
+        api_key_secret=kw.get("api_key_secret", "pre-key"),
+        api_key_secret_prod=kw.get("api_key_secret_prod", "prod-key"),
+        api_key_prefix=kw.get("api_key_prefix", ""),
+    )
+
+
+def test_env_api_key_selects_prod_key_in_prod_env(monkeypatch):
+    monkeypatch.setattr(module, "get_current_env", lambda: "prod")
+    assert module._env_api_key(_openapi_cfg()) == "prod-key"
+
+
+def test_env_api_key_falls_back_to_pre_key_outside_prod(monkeypatch):
+    for env in ("pre", "dev"):
+        monkeypatch.setattr(module, "get_current_env", lambda env=env: env)
+        assert module._env_api_key(_openapi_cfg()) == "pre-key"
+
+
+def test_openapi_bot_provider_reads_api_key_secret_prod_from_block(monkeypatch):
+    block = {
+        "base_url": "https://baas.example",
+        "api_key_secret": "pre-key",
+        "api_key_secret_prod": "prod-key",
+        "api_key_prefix": "pref",
+    }
+    monkeypatch.setattr(module, "_block", lambda name: block if name == "openapi_bot" else {})
+    cfg = module.TaskRunnerIntegrationModule().openapi_bot()
+    assert cfg.api_key_secret == "pre-key"
+    assert cfg.api_key_secret_prod == "prod-key"
+    assert cfg.api_key_prefix == "pref"
+
+
+def test_openapi_bot_port_fail_closed_when_prod_key_missing_in_prod(monkeypatch):
+    """prod env: 只有非 prod key 时,所选 prod key 空 → port None(fail-closed)。"""
+    monkeypatch.setattr(module, "get_current_env", lambda: "prod")
+    cfg = _openapi_cfg(api_key_secret="pre-key", api_key_secret_prod="", base_url="https://baas.example")
+    assert module.TaskRunnerIntegrationModule().openapi_bot_port(cfg=cfg) is None

@@ -113,7 +113,8 @@ async def test_real_llm_task_http_contract(monkeypatch, mode):
         body = json.loads(request.content)
         assert body["tool"] == "llm-task"
         assert body["args"]["thinking"] == "off"
-        assert body["args"]["maxTokens"] == 2048
+        assert body["args"]["maxTokens"] == 10240
+        assert body["args"]["timeoutMs"] == 60000
         assert "sessionKey" not in body
         assert body["args"]["schema"]["additionalProperties"] is False
         value = {"decision": "ignore", "reason_code": "outside_rule"}
@@ -138,6 +139,7 @@ async def test_real_llm_task_http_contract(monkeypatch, mode):
         )
 
     def client(**kwargs):
+        assert kwargs["timeout"] == 65
         assert kwargs["trust_env"] is False and kwargs["follow_redirects"] is False
         return original(transport=httpx.MockTransport(handle), **kwargs)
 

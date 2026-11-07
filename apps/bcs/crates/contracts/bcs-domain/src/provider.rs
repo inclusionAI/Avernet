@@ -286,6 +286,16 @@ pub enum BotDeliveryTarget {
     WebSocket {
         bot_id: String,
     },
+    A2a {
+        bot_id: String,
+        provider_id: String,
+        provider_bot_ref: String,
+        interface: crate::a2a::A2aInterface,
+        credential_kind: String,
+        bearer: RedactedToken,
+        card_revision: u64,
+        extensions: Vec<crate::a2a::A2aExtensionDeclaration>,
+    },
     HttpProvider {
         bot_id: String,
         provider_id: String,
@@ -300,8 +310,12 @@ impl BotDeliveryTarget {
     pub fn bot_id(&self) -> &str {
         match self {
             Self::WebSocket { bot_id } => bot_id,
-            Self::HttpProvider { bot_id, .. } => bot_id,
+            Self::HttpProvider { bot_id, .. } | Self::A2a { bot_id, .. } => bot_id,
         }
+    }
+
+    pub fn is_gateway(&self) -> bool {
+        matches!(self, Self::HttpProvider { .. } | Self::A2a { .. })
     }
 
     pub fn is_http_provider(&self) -> bool {

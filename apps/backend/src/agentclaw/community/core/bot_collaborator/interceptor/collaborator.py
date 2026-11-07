@@ -10,6 +10,7 @@ import inspect
 import json
 from typing import Callable
 
+from agentclaw.community.core.access import admin_scopes
 from agentclaw.community.core.bot_collaborator.interceptor.base import (
     InterceptedResponse,
     InterceptorContext,
@@ -99,6 +100,7 @@ class CollaboratorPermissionInterceptor:
         # 编辑/操作域：权限必须立足于显式协作者行或所有权，空间成员
         # 身份合成的 MEMBER 不算
         explicit: bool = False,
+        allow_super_admin: bool = False,
     ):
         """初始化拦截器。
 
@@ -114,6 +116,8 @@ class CollaboratorPermissionInterceptor:
             audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
+            allow_super_admin: 仅显式启用的运维路由允许 super_admin 白名单跨 Bot
+                操作，无需编辑锁；仍检查 Bot 交接维护状态并保留真实操作者审计。
             explicit: 编辑/操作域置 True —— 权限判定走显式阶梯，只认所
                 有权与显式协作者行（迭代11 编辑权限申请审批策略 §3.1），
                 Space 身份合成的 MEMBER 在该域没有发言权。读类面保持默认。
@@ -127,6 +131,7 @@ class CollaboratorPermissionInterceptor:
         self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
         self.explicit = explicit
+        self.allow_super_admin = allow_super_admin
         self.resolver = ExpressionResolver()
 
         # 简单模式的提取器
@@ -194,12 +199,26 @@ class CollaboratorPermissionInterceptor:
 
                 repository = ctx.injector.get(BotRepository)
                 try:
-                    addressed = await asyncio.to_thread(
-                        BotAddressResolver(repository).resolve,
-                        bot_id=params.bot_id,
-                        legacy_owner_id=params.owner_id or user_id,
-                    )
+                    address_resolver = BotAddressResolver(repository)
+                    if params.source_bot_pk is not None:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve_publish_source,
+                            source_bot_pk=params.source_bot_pk,
+                            source_bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
+                    else:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve,
+                            bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
                 except BotAddressNotFoundError:
+                    if params.source_bot_pk is not None:
+                        ctx.response = InterceptedResponse(
+                            success=False, message="发布记录关联的 Bot 不存在", error_code=404,
+                        )
+                        return None
                     pass  # The existing route retains its missing-Bot behavior.
                 else:
                     try:
@@ -234,6 +253,22 @@ class CollaboratorPermissionInterceptor:
                 ctx.metadata["_log_trace_id"] = str(scope.span.context.trace_id)
         except Exception:
             pass
+
+        # Opt-in operations permission: do not turn platform admins into Bot
+        # collaborators globally. Resolution and the handoff write fence above
+        # still apply; the after hook retains the actual actor's audit record.
+        if (
+            self.allow_super_admin
+            and user_id != "anonymous"
+            and user_id in admin_scopes.super_admin()
+        ):
+            ctx.metadata["permission_level"] = PermissionLevel.ADMIN.name
+            ctx.metadata["platform_admin"] = True
+            logger.info(
+                "[before] platform admin operation: user_id=%s bot_id=%s owner_id=%s",
+                user_id, params.bot_id, params.owner_id,
+            )
+            return ctx
 
         # 没有 owner_id 时尝试主动解析 Bot 归属，而非直接放行
         # 修复：省略 owner_id 不应绕过鉴权（水平越权漏洞）

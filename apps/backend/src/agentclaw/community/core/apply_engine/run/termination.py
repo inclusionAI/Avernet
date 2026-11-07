@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Optional
 
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef, state_ref_from_payload
+from agentclaw.community.core.apply_engine.completion import CompletionPublisher
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -55,7 +56,7 @@ def record_engine_failure(report: ApplyReport, exc: Exception) -> None:
     )
 
 
-def _state_of(payload: dict) -> StateRef:
+def state_of_payload(payload: dict) -> StateRef:
     """The payload's state reference, or ``LEGACY_STATE`` when the payload cannot say.
 
     This runs on the path that terminates an apply whose rebuild failed —
@@ -73,12 +74,17 @@ def terminate_unstartable(
     locks: BotConfigManifestApplyLockRepositoryProtocol,
     payload: dict,
     exc: Exception,
-) -> None:
-    """Record a FAILED report and release the lock for an apply that cannot run.
+    *,
+    publisher: CompletionPublisher,
+) -> Exception | None:
+    """Record a FAILED report, publish it, and release the lock for an apply that cannot run.
 
     Both halves matter. Without the report the row polls ``RUNNING`` until
     its lock goes stale; without the release the bot is locked against every
-    future apply for the whole TTL.
+    future apply for the whole TTL. ``publish`` tells the state's producer
+    (``CompletionPublisher``) between the two; what it raised is answered, for the
+    caller to re-raise, and the lock stays held until the queue's re-run has
+    published (see ``ApplyRunService._run``).
     """
     env = str(payload["env"])
     entity_id = str(payload["entity_id"])
@@ -92,9 +98,10 @@ def terminate_unstartable(
         started_at=parse_started_at(payload.get("started_at")),
         finished_at=datetime.now(),
         categories=(),
-        state=_state_of(payload),
+        state=state_of_payload(payload),
     )
     record_engine_failure(report, exc)
+    heard = False
     try:
         applies.finish(
             env=env,
@@ -104,13 +111,20 @@ def terminate_unstartable(
             status=report.status.value,
             report=json.dumps(report.as_payload()),
         )
-    finally:
-        locks.release(
-            env=env,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            lock_token=str(payload["lock_token"]),
+        publish_error = publisher.publish(
+            env=env, entity_id=entity_id, bot_id=bot_id, state=report.state, report=report
         )
+        heard = publish_error is None
+        return publish_error
+    finally:
+        # Unlocked only once the FAILED report is stored and published; otherwise the queue's re-run does both.
+        if heard:
+            locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=str(payload["lock_token"]),
+            )
 
 
 def terminate_on_launch_failure(
@@ -184,6 +198,7 @@ def terminate_on_launch_failure(
 __all__ = [
     "parse_started_at",
     "record_engine_failure",
+    "state_of_payload",
     "terminate_on_launch_failure",
     "terminate_unstartable",
 ]

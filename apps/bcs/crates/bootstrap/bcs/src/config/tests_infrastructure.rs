@@ -583,6 +583,7 @@ base_url = "https://directory.example.com"
 fn invite_public_claim_is_nested_and_disabled_by_default() {
     let default_config = BcsConfig::default();
     assert!(!default_config.invite.public_claim_enabled);
+    assert!(default_config.invite.issuer_user_ids.is_empty());
     assert_eq!(default_config.invite.public_claim_max_count, 1_000);
 
     let config: BcsConfig = toml::from_str(
@@ -592,12 +593,14 @@ fn invite_public_claim_is_nested_and_disabled_by_default() {
         [invite]
         public_claim_enabled = true
         public_claim_max_count = 200
+        issuer_user_ids = ["issuer-1"]
         "#,
     )
     .expect("parse invite public claim config");
 
     assert!(config.invite.public_claim_enabled);
     assert_eq!(config.invite.public_claim_max_count, 200);
+    assert_eq!(config.invite.issuer_user_ids, ["issuer-1"]);
 }
 
 #[test]
@@ -701,6 +704,10 @@ fn checked_in_configs_parse_with_array_issuers_and_reject_legacy_scalar() {
             .unwrap_or_else(|e| panic!("read {label} config {path}: {e}"));
         let mut value = crate::config_loader::parse_config_content("toml", &source, path).unwrap();
         crate::config_loader::expand_env_vars(&mut value).unwrap();
+        let gateway_principal = value
+            .get("gateway_principal")
+            .cloned()
+            .unwrap_or_else(|| panic!("{label} config {path} is missing the gateway_principal table"));
         let config: BcsConfig = serde_json::from_value(value)
             .unwrap_or_else(|e| panic!("parse {label} config {path}: {e}"));
         assert_eq!(
@@ -708,9 +715,18 @@ fn checked_in_configs_parse_with_array_issuers_and_reject_legacy_scalar() {
             vec!["gateway".to_string(), "backend".to_string()],
             "{label} config gateway_principal.issuers must accept both issuers"
         );
+        // Regression guard targets gateway_principal only: the caller
+        // identity JWT section legitimately carries its own `issuer` field
+        // (bcs_config_api::CallerIdentityJwtConfig), so the raw-source scan
+        // must be scoped to the gateway_principal table rather than the
+        // whole file — the whole-file substring check false-positives on
+        // the caller JWT section that rebase brought back.
         assert!(
-            !source.contains("issuer = "),
-            "{label} config {path} still carries the legacy scalar `issuer` key",
+            !gateway_principal
+                .as_object()
+                .expect("gateway_principal must be a table")
+                .contains_key("issuer"),
+            "{label} config {path} still carries the legacy scalar `issuer` key inside gateway_principal",
         );
     }
 }
@@ -743,7 +759,7 @@ fn bot_authority_trusted_apps_parse_and_resolve() {
         [[bot_authority.trusted_apps]]
         app = "backend"
         tenant = "tenant-a"
-        actions = ["managers:sync"]
+        actions = ["managers:sync", "ownership:sync"]
 
         [[bot_authority.trusted_apps]]
         app = "backend-b"

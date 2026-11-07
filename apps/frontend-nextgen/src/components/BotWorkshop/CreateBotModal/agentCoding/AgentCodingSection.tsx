@@ -162,7 +162,7 @@ export function AgentCodingSection({
         </div>
       </div>
       {selected && value ? (
-        <div className="relative mt-4 overflow-visible border-t border-border pt-3">
+        <div className="relative mt-4 overflow-visible border-t border-divider pt-3">
           <div className="mb-2.5 flex items-center gap-2 text-xs font-semibold text-foreground">
             <span className="size-1.5 rounded-full bg-primary" />
             Bot 配置

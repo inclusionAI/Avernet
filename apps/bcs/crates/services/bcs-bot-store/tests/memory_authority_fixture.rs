@@ -15,11 +15,11 @@ use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityActorKind, AuthorityMutation, BotAccessRelation,
-    ManagerEdit, ManagerEditAction, ManagerSync,
+    ManagerEdit, ManagerEditAction, ManagerSync, TransferStatus,
     human_user_id_of_actor,
 };
 use bcs_test_support::contract::bot_authority_contract::{
-    BotAuthorityContractFixture, HarnessAuditRow,
+    BotAuthorityContractFixture, HarnessAuditRow, HarnessTransferDecision,
 };
 use bcs_test_support::contract::bot_transfer_contract::{
     BotTransferContractFixture, HarnessTransferSeed,
@@ -185,6 +185,72 @@ impl BotAuthorityContractFixture for MemoryAuthorityFixture {
                 after_state: Some(row.after_state.clone()),
             })
             .collect()
+    }
+
+    async fn ownership_version(&self, env: &str, bot_id: &str) -> u64 {
+        self.state_read()
+            .await
+            .ownership_versions
+            .get(&(env.to_string(), bot_id.to_string()))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    async fn seed_pending_transfer(
+        &self,
+        env: &str,
+        bot_id: &str,
+        from_owner_actor: &str,
+        target_actor: &str,
+        expected_version: u64,
+    ) {
+        let now = ms_now();
+        self.state_write()
+            .await
+            .transfers
+            .insert(
+                (
+                    env.to_string(),
+                    bot_id.to_string(),
+                    target_actor.to_string(),
+                ),
+                bcs_bot_store::memory_authority::MemoryTransferRow {
+                    bot_id: bot_id.to_string(),
+                    target_owner_actor_id: target_actor.to_string(),
+                    from_owner_actor_id: from_owner_actor.to_string(),
+                    expected_ownership_version: expected_version,
+                    status: TransferStatus::Pending,
+                    requested_at: now,
+                    expires_at: now + 7 * 24 * 3600 * 1_000,
+                    updated_at: now,
+                    decided_at: None,
+                    decided_by_kind: None,
+                    decided_by_id: None,
+                    reason: None,
+                    result_ownership_version: None,
+                    bot_name_snapshot: None,
+                },
+            );
+    }
+
+    async fn transfer_decision_state(
+        &self,
+        env: &str,
+        bot_id: &str,
+        target_actor: &str,
+    ) -> Option<HarnessTransferDecision> {
+        self.state_read()
+            .await
+            .transfers
+            .get(&(env.to_string(), bot_id.to_string(), target_actor.to_string()))
+            .map(|row| HarnessTransferDecision {
+                status: row.status.as_str().to_string(),
+                decided_by_kind: row
+                    .decided_by_kind
+                    .map(|kind| kind.as_str().to_string()),
+                decided_by_id: row.decided_by_id.clone(),
+                reason: row.reason.clone(),
+            })
     }
 }
 

@@ -241,8 +241,9 @@ function readTemplateName(dto: OwnedBotDto, templateType?: string): string | und
 }
 
 function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
-  const botId = dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`;
-  const { realBotId, ownerId } = splitBotId(botId);
+  const botId = dto.bcn_bot_id || (dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`);
+  const { realBotId, ownerId: legacyLocator } = splitBotId(botId);
+  const ownerId = dto.entity_id || legacyLocator;
   const templateType = readTemplateType(dto);
   const templateName = readTemplateName(dto, templateType);
   const permissions = mapBotActionPermissions(dto.actions, dto.disabled_actions);
@@ -257,7 +258,9 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     botId,
     realBotId,
     ownerId,
+    engineOwnerId: dto.owner_entity_id,
     displayName: dto.bot_name || dto.bot_id,
+    avatarUrl: dto.avatar_url?.trim() || undefined,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: dto.status,
     reachability: 'reachable',

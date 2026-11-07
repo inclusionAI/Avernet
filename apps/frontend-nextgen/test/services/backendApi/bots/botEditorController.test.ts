@@ -306,3 +306,20 @@ test('LOCAL Skill 请求携带当前用户、Bot owner 与分页参数', async (
     fetchSpy.mockRestore();
   }
 });
+
+test('MCP read addresses the Bot owner separately from the acting user', async () => {
+  const configuredUser = Object.getOwnPropertyDescriptor(globalThis, 'TEAMCLAW_OPENAPI_USER_ID');
+  Object.defineProperty(globalThis, 'TEAMCLAW_OPENAPI_USER_ID', { configurable: true, value: '001' });
+  const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+  try {
+    await botEditorController.listBotMcps('shared-bot', 'owner-77');
+    const url = new URL(String(fetchSpy.mock.calls[0][0]), 'http://localhost');
+    expect(url.pathname).toBe('/openapi/v1/bots/shared-bot/mcps');
+    expect(url.searchParams.get('user_id')).toBe('001');
+    expect(url.searchParams.get('owner_id')).toBe('owner-77');
+  } finally {
+    fetchSpy.mockRestore();
+    if (configuredUser) Object.defineProperty(globalThis, 'TEAMCLAW_OPENAPI_USER_ID', configuredUser);
+    else Reflect.deleteProperty(globalThis, 'TEAMCLAW_OPENAPI_USER_ID');
+  }
+});

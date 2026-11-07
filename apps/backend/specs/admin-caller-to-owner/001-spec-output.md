@@ -1,0 +1,16 @@
+# Admin-authorized Caller to Owner transition
+
+## Accepted scope (2026-10-29)
+Reuse the existing MCP/CLI call-type endpoints. When changing the last effective Caller resource to Owner, allow the aggregate Caller-to-Owner transition only if the authenticated editing actor belongs to the configured super_admin scope. Keep existing edit ownership, active service-bot, engine and collaboration-lock checks. Cross-owner admin editing is out of scope. No hardcoded employee IDs, new HTTP bypass fields, correction endpoint, schema migration, publish snapshots, instance cleanup or permission_owner changes. Successful updates take effect through the current configuration flow, not a deferred publication model. This supersedes the earlier draft-only correction design in the parent workspace.
+
+## Existing chain and allowed changes
+HTTP caller_identity router -> CallerIdentityService -> identity repository transaction -> Passport synchronization -> conditional compensation. Both MCP and CLI repository methods reject Caller-to-Owner under the Bot row lock today. Read server-side admin membership in the application service, pass default-deny internal transition authorization to the repository, and keep the aggregate decision under the row lock. Resource synchronization uses the actual owner. Preserve explicit Owner intent and current rollback behavior. Restrict changes to these contracts/implementations, directly necessary scope synchronization, module boundary declarations and focused tests.
+
+## Review criteria
+No privilege from body/query/path; ordinary users and operator-only users remain denied. A super admin must still satisfy existing edit authorization and locks. Default-deny repository callers. Both resource types use the same rule; other Caller resources keep the Bot Caller. Update protocol signatures and all production implementors/callers that require it. Do not weaken existing rollback revision/lock/engine safeguards. Keep non-sensitive diagnostics showing actor, bot, resource, aggregate and authorization outcome; no credentials. Scope synchronization failure must not return success or leave a false local Owner aggregate. Explain each changed file and avoid formatting-only changes.
+
+## Test criteria
+TDD proof before implementation, then pass affected suites: ordinary final MCP/CLI rejection; configured super-admin final MCP/CLI success; configured admin who is not owner rejection; operator-only rejection; mixed MCP/CLI aggregation; missing/stale/other-holder locks; actual repository defaults and authorized writes; explicit owner Passport scope and sync failure compensation; spoofed HTTP flags rejected; log fields/no token output. Run static/architecture checks and the backend test command, record exact failures and coverage with denominators rather than claiming unrun checks pass.
+
+## PR delivery
+New isolated worktree. Base is GitHub inclusionAI/Avernet REL20261029; replay only task commits above refreshed base. Push a topic branch with --no-verify as required by tc-pr. Create an English PR with Problem/Solution/Validation and monitor actual current-head checks and comments; fix relevant failures. Do not merge/deploy. Only update the OCB gitlink after the source SHA is verifiably in its configured mirror; use a separate OCB PR against REL20261029 if available.

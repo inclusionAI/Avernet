@@ -89,7 +89,7 @@ async def auto_execute_task_internal(
     task_request = task_info_request_from_dto(body)
     execution_config = dict(task_request.execution_config)
     execution_config["main_session_id"] = main_session_id
-    execution_config.setdefault("lifecycle_stage", "draft")
+    execution_config.setdefault("lifecycle_stage", "online")
     task_request = replace(task_request, execution_config=execution_config)
 
     result = await service.execute(task_request)
@@ -172,7 +172,7 @@ async def auto_execute_task_internal(
 
     # ---- Step 3: bot_port.send_message 发到入参 main_session_id 会话 ----
     bot_options = {
-        "lifecycle_stage": task_request.execution_config.get("lifecycle_stage", "draft"),
+        "lifecycle_stage": task_request.execution_config.get("lifecycle_stage", "online"),
     }
     metadata = {
         "benchmark": False,

@@ -16,7 +16,7 @@ from agentclaw.community.core.spaces.repository.models import (
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthenticatedIdentity
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def missing_knowledge_graph(tmp_path, monkeypatch):
         },
     )
     import_all_models()
-    db = CommunityDatabase(f"sqlite:///{tmp_path / 'legacy.db'}", create_schema=False)
+    db = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'legacy.db'}", create_schema=False)
     tables = [
         t for t in Base.metadata.sorted_tables if t.name != "ac_space_knowledge_sync"
     ]

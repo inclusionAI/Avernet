@@ -66,10 +66,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   };
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-base font-semibold">能力集管理</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">能力集管理</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
           variant="outline"
@@ -83,17 +83,18 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
       </div>
       <div className="app-scrollbar flex-1 overflow-y-auto">
         {sets.length ? (
-          <div className="w-full space-y-3 px-5 py-4 lg:px-6">
+          // 稿面(artboard-047/061/062):能力集容器不带边框底色、与 header 同列对齐(px-8 lg:px-10)，
+          // 仅靠组间距分组；标题行左侧零内边距，使能力集标题与「能力集管理」文字严格左对齐。
+          <div className="w-full space-y-4 px-8 py-5 lg:px-10">
             {sets.map((set) => {
               const open = expanded.includes(set.id);
               const displayName = set.isDefault ? '默认能力集' : set.name;
               return (
-                <section key={set.id} className="overflow-hidden rounded-lg border border-border bg-card">
-                  <div className="group flex min-h-16 items-center gap-2 px-5 py-2">
+                <section key={set.id}>
+                  <div className="group flex items-center gap-2">
                     <Button
                       variant="ghost"
-                      className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left"
-                      leftIcon={open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                      className="h-auto min-w-0 flex-1 items-start justify-start px-0 py-0 text-left"
                       onClick={() =>
                         setExpanded((current) => (open ? current.filter((id) => id !== set.id) : [...current, set.id]))
                       }
@@ -103,6 +104,12 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                           <span className="truncate text-sm font-semibold">{displayName}</span>
                           {!set.active ? <Badge>已禁用</Badge> : null}
                           {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
+                          {/* 展开收起图标跟在标题右侧(稿面 12×12 箭标)，不再占据行首。 */}
+                          {open ? (
+                            <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          ) : (
+                            <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          )}
                         </span>
                         <span className="mt-1 block text-xs font-normal text-muted-foreground">
                           {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
@@ -157,11 +164,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     ) : null}
                   </div>
                   {open ? (
-                    <div className="space-y-5 border-t border-border bg-background px-5 py-5">
+                    <div className="mt-5 space-y-5">
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}
-                        compact={props.compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
                         editable={editable}
                         onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
@@ -170,7 +176,6 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="mcp"
                         items={set.mcps}
-                        compact={props.compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
                         editable={editable}
                         identities={props.mcpCallTypes}
@@ -182,7 +187,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         onRemove={(id) => onMcp(set.id, id, false)}
                       />
                       {set.clis.length ? (
-                        <CapabilityMembers kind="cli" items={set.clis} compact={props.compact} editable={false} />
+                        <CapabilityMembers kind="cli" items={set.clis} editable={false} />
                       ) : null}
                     </div>
                   ) : null}

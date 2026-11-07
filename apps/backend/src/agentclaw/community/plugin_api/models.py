@@ -123,6 +123,18 @@ class BotModel(Base):
     # needs, whose own key is (avernet_tenant, sha256(env|entity_id|bot_id)).
     # If prod's index turns out to be global, tighten this to match.
     __table_args__ = (
+        # Equality scope before the seek key keeps candidate pagination local
+        # to active Bots in this tenant/environment/space. Existing databases
+        # require the knowledge_management/sql migration; create_all only
+        # creates this index on new tables.
+        Index(
+            "idx_bot_knowledge_candidates",
+            "avernet_tenant",
+            "env",
+            "space_id",
+            "is_delete",
+            "id",
+        ),
         UniqueConstraint(
             "bot_id",
             "entity_id",

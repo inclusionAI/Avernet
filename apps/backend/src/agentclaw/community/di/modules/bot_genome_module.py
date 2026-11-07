@@ -6,9 +6,11 @@ reader reaches the device dispatcher graph, and resolving it at boot would
 close the same import cycle ``apply_engine_module`` documents. The
 registry is handed a thunk and builds the reader on first use.
 
-The seam: ``revision_applier`` binds :class:`PendingDeliveryApplier`, which
-refuses every promotion before any ref moves. RSI-04 rebinds this one
-provider to its direct-delivery applier; nothing else changes.
+The seam: ``revision_applier`` binds :class:`DirectApplier`, which starts the
+apply run that delivers a promotion's revision (RSI-04). The genome also
+contributes two rows to the apply run service's maps: its compiler under the
+``genome`` kind, and its completion subscriber (the promotion settler), which
+moves ``active`` when that apply ends.
 """
 
 from __future__ import annotations
@@ -17,19 +19,23 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, multiprovider, provider, singleton
 
+from agentclaw.community.api.apply_run_service import ApplyRunServiceProtocol
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
+from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.apply_engine.delivery_mode import TeclawDeliveryMode
 from agentclaw.community.core.bot_genome.capture import BotStateReader
 from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotStateReader
 from agentclaw.community.core.bot_genome.promotion import (
     GenomePromotionService,
-    PendingDeliveryApplier,
     RevisionApplier,
 )
 from agentclaw.community.core.bot_genome.compile import GENOME_STATE_KIND, GenomeCompiler
+from agentclaw.community.core.bot_genome.promotion.direct_applier import DirectApplier
+from agentclaw.community.core.bot_genome.promotion.service import PROMOTABLE
+from agentclaw.community.core.bot_genome.promotion.settle import GenomeCompletionHandler, PromotionSettler
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_genome.spec_checks import SpecChecks
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
@@ -45,6 +51,7 @@ from agentclaw.community.core.repository.implementations.bot.genome import (
     GenomeRefRepository,
     GenomeRevisionRepository,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -140,23 +147,32 @@ class BotGenomeModule(Module):
         self,
         registry: GenomeRegistryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
-        refs: GenomeRefRepositoryProtocol,
     ) -> GenomeCompiler:
-        """The genome's ``DesiredStateCompiler``: a current promotion's id → its revision's desired state."""
-        return GenomeCompiler(registry=registry, promotions=promotions, refs=refs)
+        """The genome's ``DesiredStateCompiler``: a promotion's id → its revision's desired state."""
+        return GenomeCompiler(registry=registry, promotions=promotions)
 
     @singleton
     @multiprovider
     @inject
     def genome_state_compiler(self, compiler: GenomeCompiler) -> StateCompilers:
-        """The genome row of the run service's compiler map; RSI-04 is its first caller."""
+        """The genome row of the run service's compiler map."""
         return {GENOME_STATE_KIND: compiler}
 
     @singleton
+    @multiprovider
+    @inject
+    def genome_completion_handler(self, promotions: GenomePromotionRepositoryProtocol) -> StateCompletionHandlers:
+        """The genome row of the run service's completion map: a delivery apply's end settles its promotion."""
+        promotable = tuple(sorted(s.value for s in PROMOTABLE))
+        settler = PromotionSettler(promotions=promotions, promotable=promotable)
+        return {GENOME_STATE_KIND: GenomeCompletionHandler(settler)}
+
+    @singleton
     @provider
-    def revision_applier(self) -> RevisionApplier:
-        """The delivery seam. RSI-04 rebinds this provider; nothing else on the promotion path changes."""
-        return PendingDeliveryApplier()
+    @inject
+    def revision_applier(self, applies: ApplyRunServiceProtocol, bots: BotRepository) -> RevisionApplier:
+        """The delivery seam: a promotion's revision delivered as an apply run (RSI-04)."""
+        return DirectApplier(applies=applies, bots=bots)
 
     @singleton
     @provider
@@ -164,14 +180,11 @@ class BotGenomeModule(Module):
     def genome_promotion(
         self,
         registry: GenomeRegistryProtocol,
-        revisions: GenomeRevisionRepositoryProtocol,
         refs: GenomeRefRepositoryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
         applier: RevisionApplier,
     ) -> GenomePromotionServiceProtocol:
-        return GenomePromotionService(
-            registry=registry, revisions=revisions, refs=refs, promotions=promotions, applier=applier
-        )
+        return GenomePromotionService(registry=registry, refs=refs, promotions=promotions, applier=applier)
 
 
 class _Lazy:

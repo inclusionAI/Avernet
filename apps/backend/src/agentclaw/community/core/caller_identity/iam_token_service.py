@@ -144,6 +144,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             else:
                 targets = await asyncio.to_thread(
                     self._resolve_refresh_targets,
+                    entity_id=context.entity_id,
                     bot_id=bot_id,
                     owner_id=context.owner_id,
                     actor_user_id=identity.staffId,
@@ -247,13 +248,14 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
     def _resolve_refresh_targets(
         self,
         *,
+        entity_id: str,
         bot_id: str,
         owner_id: str,
         actor_user_id: str,
         stage: CallerIdentityStage,
     ) -> list[ResolvedRuntimeBinding]:
         targets: list[ResolvedRuntimeBinding] = []
-        lock = self._lock_repository.get_by_key(f"{bot_id}:{owner_id}")
+        lock = self._lock_repository.get_by_key(f"{bot_id}:{entity_id}")
         service_allowed = lock is None and actor_user_id == owner_id
         service_allowed = service_allowed or (
             lock is not None and lock.holder_user_id == actor_user_id

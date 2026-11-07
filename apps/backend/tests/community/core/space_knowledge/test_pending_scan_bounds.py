@@ -16,13 +16,13 @@ from agentclaw.community.core.space_knowledge.repository.models import (
     SpaceKnowledgeSyncModel as Snapshot,
 )
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSnapshot
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
 
 
 @pytest.fixture
 def store(tmp_path):
-    db = CommunityDatabase(f"sqlite:///{tmp_path / 'scan.db'}", create_schema=False)
+    db = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'scan.db'}", create_schema=False)
     Snapshot.__table__.create(db._engine)
     repo = SpaceKnowledgeSyncRepository(db, enabled_capture(db))
     # Exclude the one-time lifecycle schema validation from recurring work.

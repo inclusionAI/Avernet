@@ -342,7 +342,7 @@ class TestPerAttemptIdentity:
             spawn_digest,
         )
         assert sub.executor_name == (
-            f"scout-{spawn_digest('run-42', 'agent-1', 1, 8)}")
+            f"scout_{spawn_digest('run-42', 'agent-1', 1, 12)}")
 
 
 class TestRunTask:

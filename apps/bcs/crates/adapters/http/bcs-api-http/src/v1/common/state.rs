@@ -11,17 +11,31 @@ use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
-use super::{InviteCodeGateState, PrincipalVerifier};
+use super::{InviteCodeGateState, PrincipalVerifier, TrustedBrowserOrigins};
 
 pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
+
+    /// Trusted browser origins for the per-actual-source CSRF gate
+    /// (spec §7.4). Composed by bootstrap whenever any cookie-kind source
+    /// is registered; `None` fails closed for cookie-authenticated unsafe
+    /// writes. Defaulted for narrow test/local states that never register
+    /// a cookie source.
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        None
+    }
 }
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub worker_task_service: Option<Arc<dyn bcs_service_api::application::TaskHandleService>>,
     pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,
+    /// Optional compatibility selection for GET /auth/user only. None uses
+    /// the ordinary V1 verifier. This is selected before verification,
+    /// never retried after a credential fails.
+    pub auth_user_verifier: Option<Arc<dyn PrincipalVerifier>>,
     pub bot_service: Option<Arc<dyn BotService>>,
     pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
     pub group_service: Arc<dyn GroupService>,
@@ -50,6 +64,11 @@ pub struct ApiState {
     pub manifest: ManifestConfig,
     pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
+    /// Trusted browser origins for the per-actual-source CSRF gate. Set by
+    /// the composition root (Task 12 assembles real cookie sources and
+    /// passes the `trusted_browser_origins` of `[api.auth]` through the
+    /// `TrustedBrowserOrigins` constructor).
+    pub trusted_browser_origins: Option<TrustedBrowserOrigins>,
 }
 
 impl ApiState {
@@ -63,8 +82,10 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            worker_task_service: None,
             bot_self_service: None,
             auth_service: None,
+            auth_user_verifier: None,
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
             event_subscription_service: None,
@@ -89,7 +110,15 @@ impl ApiState {
             manifest: ManifestConfig::default(),
             manifest_env: "local".to_string(),
             principal_verifier,
+            trusted_browser_origins: None,
         }
+    }
+
+    /// Attach the trusted browser origins used by the per-actual-source
+    /// CSRF gate for cookie-authenticated unsafe writes.
+    pub fn with_trusted_browser_origins(mut self, origins: TrustedBrowserOrigins) -> Self {
+        self.trusted_browser_origins = Some(origins);
+        self
     }
 
     pub fn with_auth_service(
@@ -241,5 +270,9 @@ impl InviteCodeGateState for ApiState {
 impl PrincipalVerificationState for ApiState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }

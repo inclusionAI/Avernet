@@ -13,9 +13,9 @@ Five properties the shape of this module guarantees:
   subprocess, so a refused scheme looks like W2's ``FetchRefusedError``, the
   class ``keep_last`` may not answer.
 * **Read-only by construction** — ``fetch`` never evaluates server-controlled
-  input: no hooks run on a fetch, no filters are requested, and the tree that
-  comes back is enumerated *before* it is read, so a symlink or submodule
-  member is refused before any platform code could follow it.
+  input: no hooks run on a fetch and no filters are requested. The Git tree is
+  enumerated before checkout and each selected path is checked for symlinks
+  and submodules before its bytes are read.
 * **Report-safe failure text** — the carrier of a git failure into the apply
   report is ``FetchFailedError``'s message, and that message carries only the
   git step and its exit status. stderr is dropped everywhere: git prints the
@@ -70,10 +70,10 @@ logger = get_logger()
 #: A full commit id, exactly as ``rev-parse FETCH_HEAD`` answers it.
 _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 
-#: The index modes a checkout may contain: plain files only. ``120000`` is a
-#: symlink (``payload -> /etc`` is exactly the W2 hazard), ``160000`` is a
-#: gitlink/submodule — both refused before any byte is read.
+#: Plain files may be delivered; links and gitlinks may exist in the fetched
+#: tree but are refused when selected or when they are a selected path's ancestor.
 _ALLOWED_MODES = frozenset({"100644", "100755"})
+_LINK_MODES = frozenset({"120000", "160000"})
 
 #: The hermetic git knobs every invocation owns. Applied on top of a base env
 #: with every ambient ``GIT_*`` key already dropped, so a user-authored
@@ -108,8 +108,7 @@ def _is_plain_name(name: str) -> bool:
 
 def _under_subpath(member: str, subpath: Optional[str]) -> Optional[str]:
     """The member's path relative to ``subpath`` (segment-boundary matched),
-    or ``None`` when outside it — the skills materialiser's own arithmetic,
-    on members the enumeration already proved plain."""
+    or ``None`` when outside it — the skills materialiser's own arithmetic."""
     _require_safe("subpath", subpath)
     if subpath is None or subpath == "":
         return member
@@ -238,12 +237,11 @@ def _real_run_git(
 
 @dataclass
 class GitCheckout:
-    """One fetched commit's tree, on disk, already proven safe to read.
+    """One fetched commit's tree, on disk, validated at each selected path.
 
     ``members`` is the tree enumerated by ``git ls-tree -r -l`` at fetch time
-    — every member a plain file, with its declared size — and the readers
-    below walk **only** those paths, so nothing outside the enumeration is
-    ever touched. ``subpath`` is the spec's own, remembered so a reader called
+    — each member's mode and declared size — and the readers below refuse
+    selected links and walk **only** those paths. ``subpath`` is the spec's own, remembered so a reader called
     bare re-uses what the document declared instead of silently meaning "the
     whole tree".
     """
@@ -267,9 +265,26 @@ class GitCheckout:
     # ── the readers ─────────────────────────────────────────────────────────
     #
     # Only enumerated members are read, only from this checkout's own root,
-    # and only inside the limits: the enumeration proved every member a plain
-    # file at fetch time, so a reader cannot be walked out of the temp dir by
-    # anything the repository author left in the tree.
+    # and only inside the limits: each selected member and its ancestors are
+    # checked against Git metadata before a checkout path is read.
+
+    def _refuse_selected_links(self, subpath: Optional[str]) -> None:
+        """Reject selected links and link ancestors using Git tree metadata."""
+        _require_safe("subpath", subpath)
+        selected = "/".join(part for part in (subpath or "").replace("\\", "/").split("/") if part)
+        for mode, name, _ in self.members:
+            if mode not in _LINK_MODES:
+                continue
+            if (
+                not selected
+                or name == selected
+                or name.startswith(selected + "/")
+                or selected.startswith(name + "/")
+            ):
+                raise FetchRefusedError(
+                    f"git source contains a forbidden member {name!r}: "
+                    "symlinks and submodules are refused"
+                )
 
     def files(
         self,
@@ -286,6 +301,7 @@ class GitCheckout:
         """
         if subpath is None:
             subpath = self.subpath
+        self._refuse_selected_links(subpath)
         limit = GIT_SINGLE_FILE_LIMIT if file_limit is None else file_limit
         selected = [
             (mode, _under_subpath(name, subpath), name, size)
@@ -327,6 +343,7 @@ class GitCheckout:
             raise FetchRefusedError(
                 "the source's 'subpath' must name a single file"
             )
+        self._refuse_selected_links(subpath)
         hit = [
             (mode, name, size)
             for mode, name, size in self.members
@@ -562,16 +579,21 @@ class SubprocessGitClient(GitSourceClient):
             parts = meta.split()
             if len(parts) != 4 or not name:
                 raise FetchFailedError("git tree listing was malformed")
-            mode, _type, _sha, size_text = parts
-            if mode not in _ALLOWED_MODES:
+            mode, obj_type, _sha, size_text = parts
+            if mode not in _ALLOWED_MODES | _LINK_MODES:
                 # The quoted form is pure ASCII — safe to name in the reason.
                 raise FetchRefusedError(
                     f"git source contains a forbidden member {name!r}: "
                     "symlinks and submodules are refused"
                 )
-            if not size_text.isdigit():
+            if mode == "160000":
+                if obj_type != "commit" or size_text != "-":
+                    raise FetchFailedError("git tree listing was malformed")
+                size = 0
+            elif obj_type != "blob" or not size_text.isdigit():
                 raise FetchFailedError("git tree listing was malformed")
-            size = int(size_text)
+            else:
+                size = int(size_text)
             member = _unquote_ls_tree_name(name)
             members.append((mode, member, size))
             total += size

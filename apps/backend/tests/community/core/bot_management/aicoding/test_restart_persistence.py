@@ -109,7 +109,7 @@ def test_admission_persists_status_and_journal_using_existing_repository(persist
     )
     bot = p.repo.get_by_id_and_owner("bot", "owner")
     task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner"))
-    assert result["status"] == bot["status"] == "PENDING"
+    assert result["status"] == bot["status"] == "ACTIVE"
     assert bot["binding_id"] == 7
     assert bot["ext"]["unrelated"] == 1
     assert bot["ext"][KEY]["operation_id"] == task.payload["operation_id"]
@@ -126,7 +126,7 @@ def test_real_database_deduplicates_concurrent_submissions(persisted):
     with ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(submit, range(12)))
     assert len({result["restart_operation_id"] for result in results}) == 1
-    assert p.repo.get_by_id_and_owner("bot", "owner")["status"] == "PENDING"
+    assert p.repo.get_by_id_and_owner("bot", "owner")["status"] == "ACTIVE"
 
 
 def test_stale_cas_cannot_clobber_ext_or_status(persisted):
@@ -169,9 +169,9 @@ def test_failure_persists_bot_status_and_existing_error_fields(persisted):
     state = RestartState(p.repo, "bot", "owner", accepted["restart_operation_id"])
     state.fail("容器最终备份失败，旧容器未销毁")
     bot = p.repo.get_by_id_and_owner("bot", "owner")
-    assert bot["status"] == "FAILED"
-    assert bot["ext"]["start_status"] == "FAILED"
-    assert bot["ext"]["start_message"] == "容器最终备份失败，旧容器未销毁"
+    assert bot["status"] == "ACTIVE"
+    assert "start_status" not in bot["ext"]
+    assert bot["ext"][KEY]["error_message"] == "容器最终备份失败，旧容器未销毁"
     assert bot["binding_id"] == 7
     assert bot["ext"]["unrelated"] == 1
 
@@ -180,7 +180,7 @@ def test_admission_status_write_failure_prevents_enqueue_and_retry_succeeds(pers
     from unittest.mock import patch
 
     p = persisted
-    with patch.object(p.repo, "update_by_owner", side_effect=RuntimeError("write failed")):
+    with patch.object(p.repo, "compare_and_set_ext", side_effect=RuntimeError("write failed")):
         with pytest.raises(RuntimeError, match="write failed"):
             p.strategy._submit_restart(
                 p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
@@ -188,11 +188,11 @@ def test_admission_status_write_failure_prevents_enqueue_and_retry_succeeds(pers
     bot = p.repo.get_by_id_and_owner("bot", "owner")
     assert bot["status"] == "ACTIVE"
     assert KEY not in bot["ext"]
-    assert p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner")) is None
+    assert p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner")) is not None
     result = p.strategy._submit_restart(
         p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
     )
-    assert result["status"] == "PENDING"
+    assert result["status"] == "ACTIVE"
     assert result["restart_operation_id"]
 
 
@@ -206,6 +206,8 @@ def test_failure_status_write_failure_propagates_and_worker_can_repair(persisted
     p.strategy._submit_restart(p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"})
     task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner"))
     state = RestartState(p.repo, "bot", "owner", task.payload["operation_id"])
+    state.update({'QUEUED'}, phase='WAITING_READY')
+    p.repo.update_by_owner('bot', 'owner', {'status': 'PENDING'})
     with patch.object(p.repo, "update_by_owner", side_effect=RuntimeError("write failed")):
         with pytest.raises(RuntimeError, match="write failed"):
             state.fail("backup failed")
@@ -230,8 +232,31 @@ def test_status_only_write_does_not_overwrite_concurrent_ext(persisted):
         return original(bot_id, owner_id, changes)
 
     with patch.object(p.repo, "update_by_owner", side_effect=concurrent_write):
-        p.strategy._submit_restart(p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"})
+        accepted = p.strategy._submit_restart(p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"})
+        from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartState, RestartExecution
+        task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key('bot', 'owner'))
+        state = RestartState(p.repo, 'bot', 'owner', accepted['restart_operation_id'])
+        state.update({'QUEUED'}, phase='BACKING_UP')
+        RestartExecution(state, task.payload).fence_mutation()
     bot = p.repo.get_by_id_and_owner("bot", "owner")
     assert bot["status"] == "PENDING"
     assert bot["ext"]["callback"] == "keep"
-    assert bot["ext"][KEY]["phase"] == "QUEUED"
+    assert bot["ext"][KEY]["phase"] == "RESTARTING"
+
+
+def test_positive_fastdisk_targets_merge_across_concurrent_cas(persisted):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartState, journal
+
+    p = persisted
+    p.strategy._submit_restart(p.ctx, p.services, {'bot_id': 'bot', 'user_id': 'owner'})
+    task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key('bot', 'owner'))
+    state = RestartState(p.repo, 'bot', 'owner', task.payload['operation_id'])
+    state.update({'QUEUED'}, phase='BACKING_UP')
+
+    def confirm(target):
+        state.update({'BACKING_UP'}, fastdisk_targets=[target])
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(confirm, ['p1', 'p2', 'p1', 'p3']))
+    assert journal(state.read())['fastdisk_targets'] == ['p1', 'p2', 'p3']
+    assert state.read()['ext']['unrelated'] == 1

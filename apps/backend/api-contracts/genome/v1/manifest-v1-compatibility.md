@@ -18,18 +18,20 @@ capture).
 
 ## Round-trip
 
-Apply a Manifest document **M**, capture the bot as a revision, then compile
-the revision. Both compile into the same thing: the apply engine's typed
-**desired state** (`core/apply_engine/desired_state.py`), one declaration per
-construct, every entry naming its bytes in the content store by digest. The
-round-trip holds when **the revision's desired state equals the state M
-compiles to** — the engine then converges the bot to either and reaches the
-same place. In the tables below, "M′" is the revision's compiled state.
+Apply a Manifest document **M** to a given initial Bot, capture the result as
+a revision, then compile and restore that revision. Both compilers emit the
+apply engine's typed **desired state** (`core/apply_engine/desired_state.py`).
+The round-trip holds when restoring the revision reaches **the state observed
+after applying M**. MCP configuration actions need not be structurally equal:
+an absent Manifest `config` preserves the Bot's current value, while an absent
+revision `config` explicitly declares no override. In the tables below, "M′"
+is the revision's compiled state.
 
 The revision's compiler is `compile_spec` (`core/bot_genome/compile.py`); the
 document's is `ManifestCompiler` (`core/bot_config_manifest/compiler/`). The
 contract tests compile every case both ways over the fixture sources and
-compare construct by construct
+compare construct by construct (MCP by the resulting state, the other shared
+constructs by their existing structural comparison)
 (`tests/community/core/bot_config_manifest/compiler/test_equivalence.py`),
 check that every case's M is accepted by the real Manifest validator (or
 refused, where stated), and that its revision validates against the schema
@@ -93,8 +95,8 @@ are typed sources in the state, not Manifest grammar, and never reach
 | a skill whose files are not a valid package | refused (*recording only*) | Missing or invalid `SKILL.md` front matter, a metadata name different from the entry name, or over the package limits (README §4.2); apply would refuse it too |
 | the skill's files (git directory or unpacked OSS zip) | resolved | `origin: local`, `digest` of the `acm-tree-v1` tree of the files `SkillPackageValidator` keeps (wrapper directory stripped, ignored paths dropped; README §4.2); M′: a `LocalSkillPackage` over that stored tree, from which apply builds the skill package zip |
 | `unpack` | resolved | |
-| a Skill Center skill | maps | `origin: center`, `center_version`. Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: a `CenterSkillVersion` source |
-| a shared-repository skill (`git://` row) | maps | `origin: repo`, `repo_path`. Manifest v1 cannot declare one either; captured from the bot. M′: a `RepoSkillPath` source. The repository commit is not pinned yet (RSI-04) |
+| a Skill Center skill | maps | `origin: center`, by name only (no version: the bot runs what the Center publishes). Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: a `CenterSkillByName` source |
+| a shared-repository skill (`git://` row) | maps | `origin: repo`, `repo_path`. Manifest v1 cannot declare one either; captured from the bot. M′: a `RepoSkillPath` source. No repository commit is recorded |
 
 ## `manifest.resources`
 
@@ -117,7 +119,8 @@ are typed sources in the state, not Manifest grammar, and never reach
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `server_code` | maps | `spec.tools.mcp[].server_code` (the key) |
-| `config` absent | maps | No `config`: no bot override |
+| `config` absent | observed | Preserve the Bot's saved override when applying the Manifest; capture records that actual value if present. A revision's absent `config` still declares no override and clears a later value on restore |
+| `config: {}` | maps | Explicitly clear the complete Bot override; capture omits `config` |
 | `config.url` | normalized | Scheme lower-cased |
 | `config.url` with userinfo (`https://user:token@host/…`) | refused (*recording only*) | The revision is never deleted, so a credential in the URL would be stored for good; the Manifest refuses userinfo in source URLs but not here |
 | `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the stored spelling is what reaches the device, and not every apply-time merge compares names case-insensitively |
@@ -169,6 +172,7 @@ are typed sources in the state, not Manifest grammar, and never reach
 | [`09-cli-tools`](examples/manifest-v1/09-cli-tools/) | §7 | ignored (empty bot) |
 | [`10-mcp`](examples/manifest-v1/10-mcp/) | §8 | round-trips |
 | [`11-script`](examples/manifest-v1/11-script/) | §9 | round-trips |
+| [`12-mcp-preserve-and-clear`](examples/manifest-v1/12-mcp-preserve-and-clear/) | §8, second block | round-trips; absent `config` preserves, `{}` clears; capture records both without overrides on the initially empty bot |
 
 Each case directory holds `manifest.yaml` (M), `notes.md`, and either
 `revision.json` (whose compiled state the tests compare with M's) or

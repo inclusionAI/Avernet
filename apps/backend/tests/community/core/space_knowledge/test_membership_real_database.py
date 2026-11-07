@@ -9,6 +9,7 @@ from threading import Barrier
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.base import Base
@@ -51,12 +52,12 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderNotificationModel,
 )
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 
 
 @pytest.fixture
 def database(tmp_path):
-    db = CommunityDatabase(f"sqlite:///{tmp_path / 'membership.db'}")
+    db = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'membership.db'}")
     Base.metadata.create_all(db._engine)
     yield db
     db._engine.dispose()
@@ -267,17 +268,18 @@ def test_overlimit_approval_rolls_back_members_order_approver_and_notices(
     assert len(history(database, space_id)) == 1
 
 
-def test_two_real_connections_can_activate_same_space(database, monkeypatch):
+def test_two_real_connections_can_activate_same_space(database):
     space_id, _ = create_space(database)
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     barrier = Barrier(2)
-    lock_space = knowledge_sync.lock_space
 
-    def racing_lock(*args, **kwargs):
-        barrier.wait(timeout=5)
-        return lock_space(*args, **kwargs)
+    def racing_lock(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("BEGIN IMMEDIATE"):
+            barrier.wait(timeout=5)
 
-    monkeypatch.setattr(knowledge_sync, "lock_space", racing_lock)
+    # Race before either UoW takes the write reservation.
+    for plugin in (database, other):
+        event.listen(plugin._engine, "before_cursor_execute", racing_lock)
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [
@@ -292,6 +294,8 @@ def test_two_real_connections_can_activate_same_space(database, monkeypatch):
             for future in futures:
                 future.result(timeout=10)
     finally:
+        for plugin in (database, other):
+            event.remove(plugin._engine, "before_cursor_execute", racing_lock)
         other._engine.dispose()
     assert len(history(database, space_id)) == 1
     assert SpaceKnowledgeSyncRepository(database, enabled_capture(database)).progress(
@@ -390,7 +394,7 @@ def test_concurrent_new_spaces_skip_retired_scope_across_connections(database):
     SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     barrier = Barrier(2)
 
     def create(db, owner, personal):
@@ -500,20 +504,21 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
         import sys
         import time
         from agentclaw.community.core.repository.implementations.spaces import knowledge_sync
-        from agentclaw.community.plugins.community.database import CommunityDatabase
+        from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
+        from sqlalchemy import event
 
-        database = CommunityDatabase(sys.argv[1])
+        database = CommunitySqliteDatabase(sys.argv[1])
         barrier = Path(sys.argv[3])
-        lock_space = knowledge_sync.lock_space
-        def race(*args, **kwargs):
+        @event.listens_for(database._engine, "before_cursor_execute")
+        def race(_conn, _cursor, statement, _parameters, _context, _many):
+            if not statement.lstrip().upper().startswith("BEGIN IMMEDIATE"):
+                return
             (barrier / str(os.getpid())).touch()
             deadline = time.monotonic() + 10
             while len(list(barrier.iterdir())) != 2:
                 if time.monotonic() >= deadline:
                     raise RuntimeError("second activation did not reach source guard")
                 time.sleep(0.01)
-            return lock_space(*args, **kwargs)
-        knowledge_sync.lock_space = race
         try:
             knowledge_sync.SpaceKnowledgeSyncRepository(database, enabled_capture(database)).activate(
                 space_id=int(sys.argv[2]), environment="pre", app="agentclaw"

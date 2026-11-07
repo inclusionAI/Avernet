@@ -33,7 +33,9 @@ class TaskArtifactAddRequestDTO(BaseModel):
     node_id: str = Field(..., description="产出节点 ID")
     attempt: int = Field(..., ge=0, description="归属 attempt(须与图上 harness_retries 快照一致)")
     text_content: dict | str | None = Field(
-        None, description="text 分支内容对象(或 JSON 字符串,下同),如 {\"text\": \"...\"};四个 content 字段互斥"
+        None,
+        description="text 分支内容对象(或 JSON 字符串,下同),如 {\"text\": \"...\"};"
+        "四个 content 字段互斥,所有分支均支持 is_final_artifact=\"true\"|\"false\"(缺省 false)",
     )
     file_content: dict | str | None = Field(
         None,
@@ -56,8 +58,9 @@ class TaskArtifactDescriptorDTO(BaseModel):
     """产物读侧 Descriptor:只含安全字段(spec §7)。
 
     content 为 kind-tagged 引用元数据 wire 形(File 分支 storage_type/storage_id/
-    file_name/file_id/file_type;UrlLink 分支 url/type;Code 分支四字段)——不含任何
-    临时下载凭证/字节 handle,前端自行基于既有读口拼链接。
+    file_name/file_id/file_type;UrlLink 分支 url/type;Code 分支四字段),所有分支
+    携带 is_final_artifact=\"true\"|\"false\"——不含任何临时下载凭证/字节 handle,
+    前端自行基于既有读口拼链接。
     """
 
     artifact_id: str = Field(..., description="产物ID")

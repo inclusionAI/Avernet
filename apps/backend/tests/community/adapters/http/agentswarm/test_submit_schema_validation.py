@@ -146,6 +146,70 @@ class TestIdempotencyKeyCap:
         assert dto.idempotency_key == "k" * IDEMPOTENCY_KEY_MAX
 
 
+class TestRunOptionCaps:
+
+    def _options(self, **overrides):
+        opts = {"model_name": "DeepSeek-V4.1-Flash"}
+        opts.update(overrides)
+        return opts
+
+    def test_max_turns_999_accepted(self):
+        dto = SubmitRunDTO(**_body(options=self._options(max_turns=999)))
+        assert dto.options.max_turns == 999
+
+    def test_max_turns_over_999_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(max_turns=1000)))
+        assert ("options", "max_turns") in [e["loc"] for e in exc.value.errors()]
+
+    def test_max_turns_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(options=self._options(max_turns=0)))
+
+    def test_max_total_agents_at_256_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(options=self._options(max_total_agents=256)))
+        assert dto.options.max_total_agents == 256
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(max_total_agents=257)))
+        assert ("options", "max_total_agents") in [e["loc"] for e in exc.value.errors()]
+
+    def test_per_attempt_timeout_at_1800_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(
+            options=self._options(per_attempt_timeout_seconds=1800.0)))
+        assert dto.options.per_attempt_timeout_seconds == 1800.0
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(
+                options=self._options(per_attempt_timeout_seconds=1800.5)))
+
+    def test_bot_chat_timeout_at_3600_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(
+            options=self._options(bot_chat_timeout_seconds=3600.0)))
+        assert dto.options.bot_chat_timeout_seconds == 3600.0
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(
+                options=self._options(bot_chat_timeout_seconds=3600.5)))
+
+    def test_resolve_caps_and_wire_caps_share_one_source(self):
+        # The stale-metadata re-clamps must equal the submit bounds:
+        # they now import the same RunOptions constants (the 64/256
+        # divergence class this replaces could silently shrink valid
+        # requests between the two layers).
+        from agentclaw.community.core.agentswarm.domain.models import (
+            WIRE_MAX_TOTAL_AGENTS_CAP as A, WIRE_MAX_TURNS_CAP as T,
+            WIRE_BOT_CHAT_TIMEOUT_CAP as C,
+        )
+        dto = SubmitRunDTO(**_body(options=self._options(
+            max_turns=T, max_total_agents=A, bot_chat_timeout_seconds=C)))
+        assert dto.options.max_turns == T
+        assert dto.options.max_total_agents == A
+        assert dto.options.bot_chat_timeout_seconds == C
+
+    def test_unknown_option_field_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(bogus=1)))
+        assert "extra_forbidden" in _error_types(exc)
+
+
 class TestAgentSpecCaps:
 
     def test_over_length_name_rejected(self):

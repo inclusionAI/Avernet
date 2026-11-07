@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import type { NodeExecution, NodeStatus, WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import { formatTimeShort, formatDuration } from '@avernet/workflow/web/utils/time'
@@ -9,6 +10,8 @@ import NodeInputPanel from './NodeInputPanel'
 import RenderedNodeHero from './RenderedNodeHero'
 import NodeStepTracePanel from './NodeStepTracePanel'
 import AnalysisModal from './AnalysisModal'
+import type { SubworkflowGroupRef } from '../api/run-subworkflows'
+import SubworkflowPanel from './subworkflows/SubworkflowPanel'
 
 const EXECUTOR_LABELS: Record<string, string> = {
   'embedded-agent': '代理',
@@ -66,6 +69,8 @@ interface BaasPollResult {
 }
 
 interface NodeExecutionListProps {
+  flowId?: string
+  subworkflowGroups?: SubworkflowGroupRef[]
   nodes: NodeExecution[]
   onSelectNode: (nodeId: string) => void
   selectedNodeId?: string
@@ -73,9 +78,11 @@ interface NodeExecutionListProps {
   onAnalyze: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
   approvalNodeIds?: Set<string>
+  renderSubworkflowLinks?: (node: NodeExecution) => ReactNode
+  readOnly?: boolean
 }
 
-export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds }: NodeExecutionListProps) {
+export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, flowId, subworkflowGroups, renderSubworkflowLinks, readOnly = false }: NodeExecutionListProps) {
   if (nodes.length === 0) {
     return <p className="py-8 text-center text-gray-400 text-sm">暂无节点执行记录</p>
   }
@@ -126,7 +133,10 @@ export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId,
               onApproval={onApproval}
               hasApproval={approvalNodeIds?.has(node.node_id) ?? false}
               nodes={nodes}
-              flowId={node.flow_id}
+              flowId={flowId || node.flow_id}
+              groupExecutionId={subworkflowGroups?.find(group => group.nodeId === node.node_id)?.groupExecutionId}
+              readOnly={readOnly}
+              subworkflowLinks={node.executor_type === 'subworkflow' ? renderSubworkflowLinks?.(node) : null}
             />
           ))}
         </tbody>
@@ -145,6 +155,9 @@ function NodeRow({
   hasApproval,
   nodes,
   flowId,
+  groupExecutionId,
+  subworkflowLinks,
+  readOnly,
 }: {
   node: NodeExecution
   isSelected: boolean
@@ -155,6 +168,9 @@ function NodeRow({
   hasApproval: boolean
   nodes: NodeExecution[]
   flowId: string
+  groupExecutionId?: string
+  subworkflowLinks?: ReactNode
+  readOnly: boolean
 }) {
   const tokenUsage = parseTokenUsage(node.token_usage_json)
   const hasError = node.status === 'failed' && node.error_text
@@ -198,6 +214,7 @@ function NodeRow({
         <td className="px-4 py-3">
           <div className="font-medium text-gray-900 text-sm">{node.node_title || node.node_id}</div>
           <div className="font-mono text-gray-400 text-xs">{node.node_id}</div>
+          {subworkflowLinks}
           {node.progress_message && (
             <div className="mt-0.5 text-gray-400 text-xs">{node.progress_message}</div>
           )}
@@ -216,7 +233,7 @@ function NodeRow({
                 {warnings.length}条警告
               </span>
             )}
-            {isBaasRunning && (
+            {!readOnly && isBaasRunning && (
               <button
                 onClick={handlePollBaas}
                 disabled={baasResult?.loading}
@@ -234,7 +251,7 @@ function NodeRow({
                 ) : '刷新状态'}
               </button>
             )}
-            {hasApproval && onApproval && (
+            {!readOnly && hasApproval && onApproval && (
               <button
                 onClick={(e) => { e.stopPropagation(); onApproval(node) }}
                 className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
@@ -286,7 +303,9 @@ function NodeRow({
               nodes={nodes}
               workflowSpec={workflowSpec}
               flowId={flowId}
+              groupExecutionId={groupExecutionId}
               onAnalyze={onAnalyze}
+              readOnly={readOnly}
             />
           </td>
         </tr>
@@ -395,14 +414,19 @@ function NodeDetailPanel({
   nodes,
   workflowSpec,
   flowId,
+  groupExecutionId,
   onAnalyze,
+  readOnly,
 }: {
   node: NodeExecution
   nodes: NodeExecution[]
   workflowSpec?: WorkflowSpec
   flowId: string
+  groupExecutionId?: string
   onAnalyze: (node: NodeExecution) => void
+  readOnly: boolean
 }) {
+  const hasFanoutSpec = Boolean((workflowSpec?.nodes.find(item => item.id === node.node_id)?.executor as Record<string, unknown> | undefined)?.fanout)
   const [analyzing, setAnalyzing] = useState(false)
   const isWarning = node.error_text ? isWarningsErrorText(node.error_text) : false
   const warnings = isWarning ? parseWarningsErrorText(node.error_text) : []
@@ -421,7 +445,7 @@ function NodeDetailPanel({
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">节点详情</span>
         <div className="flex items-center gap-2">
-          {(node.embedded_session_key || node.session_id) && (
+          {!readOnly && (node.embedded_session_key || node.session_id) && (
             <button
               onClick={() => {
                 setAnalyzing(true)
@@ -432,10 +456,16 @@ function NodeDetailPanel({
               节点分析
             </button>
           )}
-          {analyzing && <AnalysisModal node={node} onClose={() => setAnalyzing(false)} />}
+          {!readOnly && analyzing && <AnalysisModal node={node} onClose={() => setAnalyzing(false)} />}
         </div>
       </div>
 
+      {groupExecutionId && <SubworkflowPanel key={`${flowId}:${node.node_id}:${groupExecutionId}`}
+        flowId={flowId} nodeId={node.node_id} groupExecutionId={groupExecutionId} />}
+      {!groupExecutionId && hasFanoutSpec && <section aria-label="子工作流组" className="rounded-lg border border-input bg-card p-4 text-sm text-muted-foreground">
+        <h3 className="font-semibold text-foreground">子工作流组</h3>
+        <p>暂无持久化数据，等待父运行快照；此入口不会启动子运行。</p>
+      </section>}
       <RenderedNodeHero node={node} workflowSpec={workflowSpec} nodes={nodes} />
       <NodeInputPanel nodeId={node.node_id} inputJson={node.input_json} nodes={nodes} />
       <NodeOutputViewer

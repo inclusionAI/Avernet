@@ -346,6 +346,57 @@ pub struct ManagerSync {
     pub mutation: AuthorityMutation,
 }
 
+/// Trusted owner replace (ownership sync; 2026-10-29 design §3.1).
+/// `owner_user_id` is the target User ID at application level; the
+/// Core maps it to the persisted Human actor id before the Repo
+/// port (same level convention as [`ManagerSync::user_ids`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipSync {
+    pub bot_id: String,
+    /// Target User ID (Application maps verified users; persisted
+    /// implementation receives the Human actor id).
+    pub owner_user_id: String,
+    pub mutation: AuthorityMutation,
+}
+
+/// Result of one ownership sync (设计 §3.2). `changed=false` covers
+/// both the idempotent same-owner replay and the missing-bot no-op;
+/// the two are distinguished by `owner_user_id` being `None` only
+/// when the target bot does not exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipChange {
+    pub bot_id: String,
+    /// Post-command effective owner (User id); `None` for the
+    /// missing-bot no-op.
+    pub owner_user_id: Option<String>,
+    /// Pre-command owner (User id); `Some` only when `changed`.
+    pub previous_owner_user_id: Option<String>,
+    pub changed: bool,
+}
+
+impl OwnershipChange {
+    /// Missing-target-bot no-op (设计 §2: 缺失 Bot 空操作).
+    pub fn unchanged(bot_id: &str) -> Self {
+        Self {
+            bot_id: bot_id.to_string(),
+            owner_user_id: None,
+            previous_owner_user_id: None,
+            changed: false,
+        }
+    }
+
+    /// Idempotent same-owner replay: the effective owner is
+    /// unchanged, nothing was written.
+    pub fn unchanged_with_owner(bot_id: &str, owner_user_id: &str) -> Self {
+        Self {
+            bot_id: bot_id.to_string(),
+            owner_user_id: Some(owner_user_id.to_string()),
+            previous_owner_user_id: None,
+            changed: false,
+        }
+    }
+}
+
 /// Transfer action on the transfer key (spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferAction {
@@ -476,5 +527,17 @@ mod tests {
         assert_eq!(human_user_id_of_actor("bot_x"), None);
         // Byte-exact: distinct principals stay distinct (spec §3.2.6).
         assert_ne!(human_actor_id("Alice"), human_actor_id("alice"));
+    }
+
+    #[test]
+    fn ownership_change_constructors_pin_the_noop_shapes() {
+        let missing = OwnershipChange::unchanged("bot_x");
+        assert_eq!(missing.owner_user_id, None);
+        assert_eq!(missing.previous_owner_user_id, None);
+        assert!(!missing.changed);
+        let replay = OwnershipChange::unchanged_with_owner("bot_x", "alice");
+        assert_eq!(replay.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(replay.previous_owner_user_id, None);
+        assert!(!replay.changed);
     }
 }

@@ -168,6 +168,13 @@ address lookup. The publish record, resource paths and runtime legacy locator
 keep entity identity. New approvals use the current Owner and leave history
 unchanged. Deletion checks current ownership and protection rules before any
 version teardown, then cleans service-Bot resources under entity. Legacy scale
-and direct status mutations now require the same ADMIN/Owner authorization as
-other publication writes. Frontend payloads, schema and personal/default deletion
-policies are unchanged.
+and direct status mutations require Bot ADMIN/Owner authorization, with an
+explicit operations exception: `POST /api/service-bot/publish/{publish_id}/status`
+and `POST /api/service-bot/publish/{publish_id}/scale` also admit the existing
+`user_config.admin.super_admin` allow-list without requiring a Bot edit lock.
+The interceptor resolves the source Bot and enforces the handoff write fence
+before this exception; it retains the actual administrator as audit operator.
+This exception is opt-in on these two routes only, not a global collaborator
+permission. Missing/empty admin configuration grants nothing. Other explicit
+admin `*-for-others` routes retain their existing whitelist checks. Frontend
+payloads, schema and personal/default deletion policies are unchanged.

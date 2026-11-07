@@ -89,6 +89,11 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
   const presentTone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
   const groupEmbedEnabled = node.drillable === true && !!bcsBaseUrl;
   const goal = node.taskSpec?.instruction || node.taskSpec?.target || '';
+  const stage = task.nodes.findIndex((taskNode) => taskNode.id === node.id) + 1;
+  const stagedArtifacts = node.artifacts.map((artifact) => ({
+    ...artifact,
+    stage,
+  }));
 
   return (
     <div data-testid="task-node-panel-v2">
@@ -109,7 +114,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
               lineHeight: '18px',
             }}
           >
-            {node.assigneeName || node.executor || '—'}
+            {node.executorLabel || node.assigneeName || node.groupName || node.executor || '—'}
           </span>
           <span style={{ ...badgeStyle(presentTone.color), display: 'inline-flex' }}>{presentTone.label}</span>
           {/* 返工次数 = attemptCount-1(attempt 从 1 起算,首发不亮徽章) */}
@@ -169,7 +174,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
 
       {/* ③ 节点产物(nodes[].artifacts 已按节点圈定,无需过滤) */}
       <ArtifactsSection
-        artifacts={node.artifacts}
+        artifacts={stagedArtifacts}
         apiBaseUrl={apiBaseUrl}
         context={{ taskId: task.id, ownerBotId: task.ownerBotId, ownerUserId: task.ownerUserId }}
       />

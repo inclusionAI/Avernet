@@ -412,7 +412,8 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
     };
     assert!(message_for(manager_id).contains("mcporter call bcs.bcs_assign_task"));
     assert!(!message_for(manager_id).contains("bcs_task_complete"));
-    assert!(message_for(mcporter_worker_id).contains("mcporter call bcs.bcs_send_task_message"));
+    assert!(!message_for(mcporter_worker_id).contains("bcs_send_task_message"));
+    assert!(message_for(mcporter_worker_id).contains("然后结束本轮"));
     for bot_id in [manager_id, mcporter_worker_id] {
         assert!(message_for(bot_id).contains(
             "每个 `mcporter call` 必须单独使用一次 shell/exec 工具调用"
@@ -428,9 +429,9 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             "禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理"
         ));
     }
-    assert!(message_for(native_mcp_worker_id).contains("MCP server `bcs`"));
-    assert!(message_for(native_mcp_worker_id).contains("`bcs_send_task_message`"));
-    assert!(message_for(native_tool_worker_id).contains("原生工具 `bcs_send_task_message`"));
+    assert!(message_for(native_mcp_worker_id).contains("原生提供 BCS MCP 工具"));
+    assert!(!message_for(native_mcp_worker_id).contains("bcs_send_task_message"));
+    assert!(!message_for(native_tool_worker_id).contains("bcs_send_task_message"));
     assert!(!message_for(native_tool_worker_id).contains("MCP server `bcs`"));
     assert!(!message_for(legacy_worker_id).contains("mcporter call"));
     assert!(!message_for(legacy_worker_id).contains("MCP server `bcs`"));
@@ -508,7 +509,7 @@ async fn manager_worker_worker_context_omits_optional_send_message_tool_when_dis
 
     let worker_message = message_for(worker_id);
     assert!(worker_message.contains("本群为任务群，你是子 Bot。"));
-    assert!(worker_message.contains("收到 manager 派发的任务后直接处理。"));
+    assert!(worker_message.contains("收到 manager 派发的任务后直接处理并正常回复"));
     assert!(!worker_message.contains("bcs_send_task_message"));
 }
 
@@ -522,9 +523,9 @@ async fn manager_worker_worker_reminder_lists_only_worker_tool() {
         .expect("worker receives context");
 
     assert_eq!(worker_message.persist, bcs_domain::PersistMode::PerRecipient);
-    assert!(worker_message.message.contains("bcs_send_task_message"));
+    assert!(!worker_message.message.contains("bcs_send_task_message"));
     assert!(worker_message.message.contains(
-        "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复"
+        "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并正常回复"
     ));
     assert!(worker_message.message.contains("不要用引擎自带的发送工具向群里发消息。"));
     assert!(!worker_message.message.contains("bcs_assign_task"));
@@ -693,10 +694,7 @@ async fn driver_delivery_override_injects_to_driver_in_chat_group() {
 }
 
 #[tokio::test]
-async fn manager_worker_ignores_driver_delivery_override() {
-    // ManagerWorker groups intentionally ignore driver_delivery: the manager
-    // must actively pick up and dispatch the task, so its context is always
-    // delivered via chat.send even when the override asks for inject.
+async fn manager_worker_honors_driver_delivery_override() {
     let manager_id = "20260416_a5clr6ig:12345678";
     let worker_id = "20260528_vobmrqo6:12345678";
     let mut manager = Participant::bot(manager_id, ParticipantRole::Manager);
@@ -705,31 +703,43 @@ async fn manager_worker_ignores_driver_delivery_override() {
     worker.bot_name = Some(worker_id.to_string());
     let mut group = Group::new("group-mw-override", manager_id, vec![manager, worker]);
     group.group_strategy = GroupStrategy::ManagerWorker;
-    let event = SystemMessageEvent::SessionContext {
-        group_id: group.id.clone(),
-        session_id: format!("{}:7c18e4be", group.id),
-        reason: "协作任务".to_string(),
-        session_input: Some(serde_json::json!("执行慢查询审计")),
-        task_ledger: None,
-        driver_delivery: Some(DeliveryType::Inject),
-    };
-    let (messages, _) = SessionContextMessageProducer
-        .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
-        .await;
+    for (override_delivery, expected) in [
+        (None, DeliveryType::Send),
+        (Some(DeliveryType::Send), DeliveryType::Send),
+        (Some(DeliveryType::Inject), DeliveryType::Inject),
+    ] {
+        let event = SystemMessageEvent::SessionContext {
+            group_id: group.id.clone(),
+            session_id: format!("{}:7c18e4be", group.id),
+            reason: "协作任务".to_string(),
+            session_input: Some(serde_json::json!("执行慢查询审计")),
+            task_ledger: None,
+            driver_delivery: override_delivery,
+        };
+        let (messages, _) = SessionContextMessageProducer
+            .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
+            .await;
 
-    let manager_message = messages
-        .iter()
-        .find(|m| m.recipients == vec![manager_id.to_string()])
-        .expect("manager receives context");
-    assert_eq!(
-        manager_message.delivery_type,
-        DeliveryType::Send,
-        "ManagerWorker manager always receives chat.send regardless of driver_delivery"
-    );
+        let manager_message = messages
+            .iter()
+            .find(|m| m.recipients == vec![manager_id.to_string()])
+            .expect("manager receives context");
+        assert_eq!(
+            manager_message.delivery_type,
+            expected,
+            "ManagerWorker manager honors explicit context delivery and defaults to send"
+        );
 
-    let worker_message = messages
-        .iter()
-        .find(|m| m.recipients == vec![worker_id.to_string()])
-        .expect("worker receives context");
-    assert_eq!(worker_message.delivery_type, DeliveryType::Inject);
+        assert!(manager_message.message.contains("你是主 Bot"));
+        assert!(!manager_message.message.contains("你是子 Bot"));
+        assert!(manager_message.message.contains("bcs_assign_task"));
+        assert!(manager_message.message.contains("执行慢查询审计"));
+
+        let worker_message = messages
+            .iter()
+            .find(|m| m.recipients == vec![worker_id.to_string()])
+            .expect("worker receives context");
+        assert_eq!(worker_message.delivery_type, DeliveryType::Inject);
+        assert!(worker_message.message.contains("你是子 Bot"));
+    }
 }

@@ -96,6 +96,9 @@ ACCOUNT_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # it there, exactly as one they consented to by hand.
     ("POST", "/openapi/v1/bots"): AdmissionMode.USER_DELEGATED,
     ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.USER_DELEGATED,
+    ("POST", "/openapi/v1/bots/copy"): AdmissionMode.USER_DELEGATED,
+    ("POST", "/openapi/v1/bots/copy/{bot_id}/retry"): AdmissionMode.USER_DELEGATED,
+    ("POST", "/openapi/v1/experts/{expert_id}/bots"): AdmissionMode.USER_DELEGATED,
     ("POST", "/openapi/v1/bots/local"): AdmissionMode.USER_DELEGATED,
     # The creations' polls. Each completes or observes a creation the
     # application was granted at submission, so each resolves the bot as the

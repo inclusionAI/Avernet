@@ -87,3 +87,27 @@ intervals when absent. Explicit values must be at least the base and at most
 60,000 ms. Equal ceilings disable backoff; larger values trade cold-event latency
 for fewer idle database calls. Eventing and logging definitions have private
 modules with existing root type re-exports preserved.
+
+## V1 API authentication configuration (`[api.auth]`)
+
+`api_auth.rs` declares the INDEPENDENT V1 API auth chain schema — kept
+deliberately separate from `auth.rs` (the frozen legacy `[auth]`
+contract). `ApiConfig` carries only `auth` today; an ABSENT `[api.auth]`
+subsection is valid (compatibility assembly), a PRESENT one must be
+complete: `chain` is required, ordered, unique, non-empty, and every
+name must pass `is_valid_api_source_name` (lowercase-start, then
+lowercase letters/digits/underscores). Reserved public fields
+(`RESERVED_API_AUTH_FIELD_NAMES`) are typed struct fields; every other
+key under `[api.auth]` is a plugin parameter table retained verbatim in
+`ApiAuthConfig::plugins` for the bootstrap registry phase — unknown
+tables and unknown fields are rejected THERE (registry `validate`),
+because serde `deny_unknown_fields` cannot be combined with `flatten`.
+`validate_idle_timeout_minutes` converts the positive
+`session_idle_timeout_minutes` to seconds ONCE with checked
+multiplication (default 30 → 1800s); downstream consumers receive the
+normalized result and never re-convert. Value-domain enforcement
+(no floats/datetimes/nulls in the `api.auth` subtree) lives in the shared
+bootstrap config-parse entry, not here. The wire-level deployment
+contract, the three configuration shapes (gateway-only, OAuth-only,
+mixed), and the "a present provider table is not enablement" rule are
+pinned in `apps/bcs/api-contracts/v1/authentication/contract.md`.

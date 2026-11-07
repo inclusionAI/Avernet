@@ -1,0 +1,99 @@
+use async_trait::async_trait;
+use crate::{ServiceResult, port::repo::a2a_bot::A2aBotRecord};
+
+#[derive(Clone)]
+pub struct ConfigureA2aBotCommand {
+    pub provider_id: String,
+    pub provider_admin_token: String,
+    pub bot_uuid: String,
+    pub source: crate::types::a2a_bot::A2aCardSource,
+    /// Optional legacy compare-and-set; omission performs an atomic last-write-wins replacement.
+    pub expected_revision: Option<u64>,
+    pub now_ms: i64,
+}
+
+#[derive(Clone,Debug)]
+pub struct NamedA2aCard {
+    pub provider_name:String,
+    pub bot_name:String,
+    pub agent_card_url:Option<String>,
+    pub agent_card:serde_json::Value,
+}
+#[derive(Clone)]
+pub struct RegisterNamedA2aBotCommand {
+    pub provider_name:String,
+    pub provider_admin_token:String,
+    pub owners:Vec<String>,
+    pub summary:Option<String>,
+    pub source:crate::types::a2a_bot::A2aCardSource,
+    pub now_ms:i64,
+}
+pub struct NamedA2aRegistration {pub card:NamedA2aCard,pub bot_runtime_token:Option<String>}
+
+/// Public v0.1 management view, deliberately excludes runtime credentials.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ManagedA2aCard {
+    pub provider_name:String, pub agent_name:String, pub bot_id:String,
+    pub agent_card_url:Option<String>, pub agent_card:serde_json::Value,
+}
+#[derive(Clone)]
+pub struct RegisterAgentCommand {
+    pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
+    pub provider_admin_token:String, pub owners:Vec<String>, pub summary:Option<String>,
+    pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
+}
+
+#[async_trait]
+pub trait A2aBotManagementService: Send + Sync {
+    async fn register_agent(&self,_command:RegisterAgentCommand)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    async fn get_agent(&self,_token:&str,_name:&str)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    async fn update_agent(&self,_token:&str,_name:&str,_source:crate::types::a2a_bot::A2aCardSource)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<crate::types::a2a_bot::A2aCardSource>,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
+        if visibility.is_none() { if let Some(source)=source { return self.update_agent(token,name,source).await; } }
+        Err(crate::ServiceError::InternalError("visibility update unavailable".into()))
+    }
+    async fn refresh_agent(&self,_token:&str,_name:&str)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+
+    /// Resolve a target for the existing chat admission use case. This does not
+    /// grant permission to call it; the caller must still pass chat authorization.
+    async fn resolve_named_target(&self,_provider:&str,_bot:&str)->ServiceResult<String> {
+        Err(crate::ServiceError::InternalError("named A2A resolution is not configured".into()))
+    }
+    async fn register_named(&self,_command:RegisterNamedA2aBotCommand)->ServiceResult<NamedA2aRegistration> {
+        Err(crate::ServiceError::InternalError("named A2A registration is not configured".into()))
+    }
+    async fn get_named(&self,_provider:&str,_token:&str,_bot:&str)->ServiceResult<NamedA2aCard> {
+        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
+    }
+    async fn configure_named(&self,_provider:&str,_token:&str,_bot:&str,_source:crate::types::a2a_bot::A2aCardSource,_now_ms:i64)->ServiceResult<NamedA2aCard> {
+        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
+    }
+    async fn refresh_named(&self,_provider:&str,_token:&str,_bot:&str,_now_ms:i64)->ServiceResult<NamedA2aCard> {
+        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
+    }
+    /// Provider-admin admission: fetch before the atomic Bot/ownership/Card
+    /// create. Existing Provider/ref conflicts; this never updates a Bot.
+    async fn register_provider_bot(
+        &self, _command: crate::RegisterProviderBotCommand, _source: crate::types::a2a_bot::A2aCardSource, _now_ms: i64,
+    ) -> ServiceResult<crate::RegisterProviderBotOutcome> {
+        Err(crate::ServiceError::InvalidOperation {
+            message: "A2A Provider registration is not configured".into(), request_id: None,
+        })
+    }
+    async fn get(&self, provider_id: &str, admin_token: &str, bot_uuid: &str) -> ServiceResult<Option<A2aBotRecord>>;
+    async fn configure(&self, command: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord>;
+    /// Re-read the saved source URL. Inline Cards require explicit configure.
+    async fn refresh(&self, provider_id: &str, admin_token: &str, bot_uuid: &str, now_ms: i64)
+        -> ServiceResult<A2aBotRecord>;
+    /// Trusted background maintenance only; never expose without authorization
+    /// as an HTTP endpoint. Reuses saved URLs and cannot configure new routes.
+    async fn refresh_due(&self, now_ms: i64) -> ServiceResult<usize>;
+}

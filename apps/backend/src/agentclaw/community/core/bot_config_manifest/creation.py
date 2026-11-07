@@ -25,6 +25,9 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.bot_config_manifest.binding import (
+    bound_manifest_state,
+)
 from agentclaw.community.core.apply_engine.triggers import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -215,6 +218,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
     def __init__(
         self,
         *,
+        validate_creation_spec: Callable[[dict[str, Any]], None],
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: ApplyRunServiceProtocol,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
@@ -225,6 +229,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         purge_managed_files: Optional[Callable[[str, str], int]] = None,
         creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
+        self._validate_creation_spec = validate_creation_spec
         self._manifests = manifest_service
         self._applies = apply_service
         self._script_service_provider = script_service_provider
@@ -310,6 +315,12 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         )
         return entity_id
 
+    def verify_binding(self, *, entity_id: str, bot_id: str, manifest_digest: str) -> None:
+        from agentclaw.community.core.bot_config_manifest.binding import verify_bound_document
+
+        record = self._manifests.get(entity_id=entity_id, bot_id=bot_id)
+        verify_bound_document(record.document if record else None, manifest_digest)
+
     def apply_pre_container(
         self,
         *,
@@ -320,6 +331,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         engine_type: Optional[str],
         bot_type: Optional[str],
         bot: Optional[dict[str, Any]] = None,
+        expected_manifest_digest: str | None = None,
     ) -> Optional[str]:
         """Apply the pre-container phase. Returns its ``apply_id``.
 
@@ -349,7 +361,8 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
-                state=MANIFEST_STATE,
+                state=(bound_manifest_state(expected_manifest_digest)
+                       if expected_manifest_digest is not None else MANIFEST_STATE),
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
                 phase=ApplyPhase.PRE_CONTAINER,
                 engine_type=engine_type,

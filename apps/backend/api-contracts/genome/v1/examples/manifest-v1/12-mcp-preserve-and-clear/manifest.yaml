@@ -1,0 +1,7 @@
+schema_version: 1
+
+manifest:
+  mcp:
+    - server_code: mcp.ant.homistudio.meetmcp  # Preserve the current Bot override.
+    - server_code: mcp.example.reset
+      config: {}                            # Clear the override and inherit.

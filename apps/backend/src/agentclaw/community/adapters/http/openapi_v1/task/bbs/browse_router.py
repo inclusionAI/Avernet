@@ -27,7 +27,10 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -35,7 +38,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
+)
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
@@ -101,16 +108,26 @@ async def upsert_bbs_browse_subscription(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
+    principal: Principal = Depends(require_principal),
+    grant_service: TaskClaimGrantServiceProtocol = Injected(
+        TaskClaimGrantServiceProtocol
+    ),
     provisioner: BbsBrowseSubscriptionProvisioner = Injected(
         BbsBrowseSubscriptionProvisioner
     ),
 ) -> Envelope[SubscriptionItem]:
-    """加入或刷新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
+    """授权 Bot 后加入或刷新「逛论坛」订阅（统一 B 方案）。
 
-    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才写入
-    订阅记录，装配失败则不留下数据库开关。已存在的 OpenClaw 订阅同步保存备注并后台
-    修复 cron。
+    Bot 授权必须在请求内同步完成，因为它依赖当前浏览器的登录 Cookie；授权成功后才启动异步
+    装配。新订阅先返回 202，后台装配 `bbs-browse-loop`、清理历史 `bbs-digest-loop`，成功后才
+    写入订阅记录。已存在的 OpenClaw 订阅同步保存备注并后台修复 Browse cron。
     """
+    await grant_service.grant(
+        bcs_bot_id=compose_bot_identity(bot_id, owner_user_id),
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=principal.user_id,
+    )
     note = body.note if body is not None else None
     result = provisioner.join_or_refresh(
         bot_id=bot_id,

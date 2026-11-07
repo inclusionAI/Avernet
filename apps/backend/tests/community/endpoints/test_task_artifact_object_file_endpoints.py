@@ -121,6 +121,7 @@ def _seed_download_row(world) -> None:
             "task_id": _TASK_ID,
             "node_id": _TASK_ID,
             "attempt": 0,
+            "is_final_artifact": "true",
         },
         files=[("file", ("analysis-report.pdf", _UPLOAD_PAYLOAD, "application/pdf"))],
     ),
@@ -132,7 +133,11 @@ def _seed_download_row(world) -> None:
                 "artifact_name": "analysis-report.pdf",
                 "kind": "file",
                 "attempt": 0,
-                "content": {"kind": "file", "storage_type": "object_file"},
+                "content": {
+                    "kind": "file",
+                    "storage_type": "object_file",
+                    "is_final_artifact": "true",
+                },
             },
         },
     ),
@@ -192,6 +197,27 @@ def upload_object_file_attempt_mismatch():
 def _assert_download_payload(response, world):
     assert response.content == _UPLOAD_PAYLOAD
     assert "attachment" in response.headers.get("content-disposition", "")
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/object-file",
+    scenario="err_invalid_final_artifact",
+    seed=_seed_artifact_graph,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        form_data={
+            "task_id": _TASK_ID,
+            "node_id": _TASK_ID,
+            "attempt": 0,
+            "is_final_artifact": "TRUE",
+        },
+        files=[("file", ("a.pdf", b"bytes"))],
+    ),
+    expect=ExpectError(status=422),
+)
+def upload_object_file_invalid_final_artifact():
+    pass
 
 
 @endpoint_test(
@@ -273,7 +299,12 @@ def _seed_relay_unclaimed(world) -> None:
     input=CaseInput(
         # cookie 与 token 双带:钉分支只看 token,creator 记 assignee 而非 staff id。
         headers={"X-Relay-Token": "gen-1", "cookie": "staff_id=user-endpoint-1"},
-        form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
+        form_data={
+            "task_id": _TASK_ID,
+            "node_id": _TASK_ID,
+            "attempt": 0,
+            "is_final_artifact": "true",
+        },
         files=[("file", ("relay.pdf", _UPLOAD_PAYLOAD, "application/pdf"))],
     ),
     expect=ExpectSuccess(
@@ -284,7 +315,11 @@ def _seed_relay_unclaimed(world) -> None:
                 "creator": _RELAY_BOT,
                 "kind": "file",
                 "attempt": 0,
-                "content": {"kind": "file", "storage_type": "object_file"},
+                "content": {
+                    "kind": "file",
+                    "storage_type": "object_file",
+                    "is_final_artifact": "true",
+                },
             },
         },
     ),

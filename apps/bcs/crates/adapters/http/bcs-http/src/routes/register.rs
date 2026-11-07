@@ -88,13 +88,37 @@ pub struct RegisterQuery {
     pub token: Option<String>,
     #[serde(alias = "bot-name")]
     pub bot_name: Option<String>,
+    pub agent_card_url: Option<String>,
+}
+
+#[derive(Default,serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegisterBody {
+    agent_card:Option<serde_json::Value>,
+    agent_card_url:Option<String>,
+    #[serde(alias="bot-name")]
+    bot_name:Option<String>,
 }
 
 pub async fn register_bot(
     State(state): State<HttpAppState>,
     uri: Uri,
     Query(query): Query<RegisterQuery>,
+    body:axum::body::Bytes,
 ) -> Response {
+    let body=if body.is_empty() {RegisterBody::default()} else {
+        match serde_json::from_slice::<RegisterBody>(&body) {
+            Ok(body)=>body,
+            Err(_)=>return scoped::error_response(ApplicationError::invalid("invalid_request","invalid registration JSON body")),
+        }
+    };
+    if (query.agent_card_url.is_some() && body.agent_card_url.is_some()) || (query.bot_name.is_some() && body.bot_name.is_some()) {
+        return scoped::error_response(ApplicationError::invalid("invalid_request","duplicate registration fields in query and body"));
+    }
+    let source=match bcs_service_api::types::a2a_bot::A2aCardSource::from_parts(query.agent_card_url.clone().or(body.agent_card_url),body.agent_card) {
+        Ok(source)=>source,Err(error)=>return scoped::error_response(ApplicationError::invalid("invalid_request",error.to_string())),
+    };
+    let supplied_name=query.bot_name.clone().or(body.bot_name);
     // 1. Validate required params
     let token_str = match query.token.as_deref().filter(|s| !s.is_empty()) {
         Some(t) => t,
@@ -106,8 +130,9 @@ pub async fn register_bot(
         }
     };
 
-    let bot_name = match query.bot_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let bot_name = match supplied_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
+        None if source.is_some() && supplied_name.is_none()=>String::new(),
         None => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -118,7 +143,7 @@ pub async fn register_bot(
 
     // 2. Validate bot-name length
     let name_len = bot_name.chars().count();
-    if name_len < 2 || name_len > 64 {
+    if (!bot_name.is_empty() || source.is_none()) && (name_len < 2 || name_len > 64) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -136,7 +161,7 @@ pub async fn register_bot(
                 token_str, &state.invite_token_secret,
             ).is_ok() =>
         {
-            return scoped::register_bot(&state, &uri, token_str.to_string(), bot_name).await;
+            return scoped::register_bot(&state, &uri, token_str.to_string(), bot_name,source).await;
         }
         Err(e) => {
             let message = match &e {
@@ -153,6 +178,12 @@ pub async fn register_bot(
             ).into_response();
         }
     };
+
+    if source.is_some() {
+        return scoped::error_response(ApplicationError::invalid(
+            "invalid_request", "A2A registration requires a Provider-scoped v2 token",
+        ));
+    }
 
     // 4. Delegate the v1 trusted registration to the shared
     //    facade. The legacy adapter strips the historically

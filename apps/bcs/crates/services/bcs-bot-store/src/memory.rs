@@ -23,6 +23,9 @@ mod controllable;
 // the SQL Store's suite.
 #[path = "memory_authority.rs"]
 pub mod authority;
+/// Memory ownership sync command (2026-10-29 design §5.1).
+#[path = "memory_ownership_sync.rs"]
+pub mod ownership_sync;
 /// Shared runtime permission-profile state + the
 /// `PermissionProfileRepoPort` (same Arc, Task 4.3a).
 #[path = "memory_permission_profile.rs"]
@@ -34,6 +37,20 @@ pub(super) mod registration_ownership;
 /// (Task 4, spec §7.1) on the SAME shared state.
 #[path = "memory_retirement.rs"]
 mod retirement;
+/// Streaming connection and request-response bodies for the memory
+/// store (bot-avatar plan Task 1 file-size split; the `BotRepoPort`
+/// impl keeps explicit delegations to these `*_impl` inherent methods).
+#[path = "memory_runtime_ops.rs"]
+mod runtime_ops;
+/// Registration and credential identity bodies for the memory store
+/// (mirrors the persistent store's actor/identity helpers).
+#[path = "memory_identity_ops.rs"]
+mod identity_ops;
+/// Bot profile (capabilities + avatar) persistence bodies for the memory
+/// store (bot-avatar plan Task 3): the avatar is a stored sibling field of
+/// the persisted record, outside `BotCapabilities`.
+#[path = "memory_profile.rs"]
+mod profile;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,10 +61,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, RwLock, oneshot};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_service_api::port::repo::BotRepoPort;
+use bcs_service_api::types::bot_profile::AvatarChange;
 use bcs_service_api::{
     BindingChannels,
     BotCapabilities, BotMetricCount,
@@ -112,8 +130,9 @@ pub struct BotConnection {
 #[derive(Debug)]
 pub struct MemoryBotRepo {
     bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
-    /// Serializes control-plane snapshot merges through persistence and memory.
-    control_plane_patch_lock: Mutex<()>,
+    /// Serializes local record read-modify-write operations through persistence
+    /// and memory publication. Acquire before the authority/bot/token locks.
+    record_write_lock: Mutex<()>,
     /// Audit timestamps for the local control-plane projection.
     control_plane_audit: RwLock<HashMap<String, (u64, u64)>>,
     /// Token to bot_uuid mapping for authentication.
@@ -146,6 +165,10 @@ pub struct MemoryBotRepo {
     /// `bot_authority.legacy_created_by_fallback`); only the
     /// authority role/roles_for facade consults it.
     legacy_created_by_fallback: AtomicBool,
+    /// Per-Bot caller-identity configuration snapshots keyed by
+    /// (bot_id, env) (spec §10.7.2). Mirrors the `$.caller` sub-object
+    /// the SQL repository keeps inside `bcs_bots.bot_info`.
+    caller_configurations: RwLock<HashMap<(String, String), bcs_service_api::port::repo::CallerIdentitySnapshot>>,
 }
 
 /// Persisted capabilities format.
@@ -306,7 +329,7 @@ impl MemoryBotRepo {
     pub fn with_base_dir(bots_base_dir: PathBuf) -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
-            control_plane_patch_lock: Mutex::new(()),
+            record_write_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
@@ -318,6 +341,7 @@ impl MemoryBotRepo {
             authority: RwLock::new(authority::MemoryAuthorityState::default()),
             profiles: RwLock::new(permission_profile::MemoryProfileState::default()),
             legacy_created_by_fallback: AtomicBool::new(false),
+            caller_configurations: RwLock::new(HashMap::new()),
         }
     }
 
@@ -372,75 +396,16 @@ impl MemoryBotRepo {
         }
     }
 
-    /// Save capabilities to disk for a bot.
+    /// Save capabilities to disk for a bot. Delegates to the profile
+    /// persistence body (bot-avatar plan Task 3) so the ordinary save keeps
+    /// the record's stored avatar (`AvatarChange::Keep`).
     async fn save_capabilities_to_disk(
         &self,
         bot_id: &str,
         caps: &BotCapabilities,
     ) -> ServiceResult<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        // Preserve existing token if any
-        let existing_token = self.load_token(bot_id).await;
-
-        // Preserve created_by from memory
-        let created_by = {
-            let bots = self.bots.read().await;
-            bots.get(bot_id).and_then(|b| b.created_by.clone())
-        };
-        let internal_attributes = {
-            let bots = self.bots.read().await;
-            bots.get(bot_id)
-                .map(|bot| {
-                    (
-                        bot.user_visibility,
-                        bot.friend_ext.clone(),
-                        bot.friend_check_in_strategy,
-                    )
-                })
-                .unwrap_or_default()
-        };
-
-        let persisted = PersistedCapabilities {
-            bot_id: bot_id.to_string(),
-            name: caps.name.clone(),
-            summary: caps.summary.clone(),
-            domains: caps.domains.clone(),
-            skills: caps.skills.clone(),
-            scopes: caps.scopes.clone(),
-            binding_channels: caps.binding_channels.clone(),
-            token: existing_token,
-            registered_at: now,
-            hidden: false,
-            created_by,
-            visibility: if caps.visibility.is_empty() {
-                None
-            } else {
-                Some(caps.visibility.clone())
-            },
-            agent_code: caps.agent_code.clone(),
-            agent_token: caps.agent_token.clone(),
-            user_visibility: internal_attributes.0,
-            friend_ext: internal_attributes.1,
-            friend_check_in_strategy: internal_attributes.2,
-        };
-
-        let path = self.bot_info_path(bot_id);
-        let dir = path.parent().ok_or_else(|| {
-            ServiceError::InternalError(format!("Invalid path for bot: {}", bot_id))
-        })?;
-
-        // Create directory if it doesn't exist
-        fs::create_dir_all(dir).await?;
-
-        let content = serde_json::to_string_pretty(&persisted)?;
-        fs::write(&path, content).await?;
-
-        info!(bot_id = %bot_id, path = ?path, "Saved capabilities to disk");
-        Ok(())
+        self.save_profile_to_disk(bot_id, caps, &AvatarChange::Keep)
+            .await
     }
 }
 
@@ -459,7 +424,7 @@ impl Default for MemoryBotRepo {
     fn default() -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
-            control_plane_patch_lock: Mutex::new(()),
+            record_write_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
@@ -471,6 +436,7 @@ impl Default for MemoryBotRepo {
             authority: RwLock::new(authority::MemoryAuthorityState::default()),
             profiles: RwLock::new(permission_profile::MemoryProfileState::default()),
             legacy_created_by_fallback: AtomicBool::new(false),
+            caller_configurations: RwLock::new(HashMap::new()),
         }
     }
 }

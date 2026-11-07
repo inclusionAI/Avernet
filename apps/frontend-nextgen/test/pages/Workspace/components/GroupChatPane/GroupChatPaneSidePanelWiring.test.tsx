@@ -1,15 +1,20 @@
 /** @jest-environment jsdom */
 // 协作群 SDK 副屏接线回归（最小聚焦）：只验证 GroupChatPane → ChatLayoutPanelSlot 的
-// 传参契约（宽 480 / 点外不收起），不复制主测试文件的全量夹具；插槽以捕获桩替换，
-// 空会话路径不触发 Sender/消息列表等 SDK 渲染，故无 SDK 渲染桩。
+// 传参契约（宽 480 / 点外不收起）与 ChatLayout 对单聊同款 1px 分隔线样式的挂载类，
+// 不复制主测试文件的全量夹具；插槽以捕获桩替换，空会话路径不触发 Sender/消息列表等 SDK 渲染。
 import { GroupChatPane } from '@/pages/Workspace/components/GroupChatPane';
 import type { GroupView } from '@/domain/collaboration';
 import type { UseChatResult } from '@tc-chat/adapters';
 import { render } from '@testing-library/react';
+import '@testing-library/jest-dom/jest-globals';
 import type { PanelHandle } from '@tc-chat/core';
 import { createRef } from 'react';
 
 let mockSlotProps: Array<Record<string, unknown>> = [];
+const mockHeaderProps: Array<Record<string, unknown>> = [];
+jest.mock('@/pages/Workspace/components/GroupHeader', () => ({
+  GroupHeader: (props: Record<string, unknown>) => { mockHeaderProps.push(props); return null; },
+}));
 jest.mock('@/components/Workspace/ChatLayoutPanelSlot', () => {
   const { forwardRef } = jest.requireActual('react');
   return {
@@ -49,9 +54,10 @@ const chat = {
   reconnect: noop,
 } as never as UseChatResult<unknown>;
 
-it('副屏插槽接线：SDK 副屏宽 480，且不随外部点击收起（仅经顶栏副屏钮/悬浮收起钮关闭）', () => {
+it('副屏插槽接线：宽 480、点外不收起，并复用单聊 1px 分隔线样式', () => {
   mockSlotProps.length = 0;
-  render(
+  const locateSession = jest.fn();
+  const { container } = render(
     <GroupChatPane
       group={group}
       session={null}
@@ -68,6 +74,7 @@ it('副屏插槽接线：SDK 副屏宽 480，且不随外部点击收起（仅�
       canManageGroup={{ allowed: false }}
       activePanel="none"
       onTogglePanel={noop}
+      onLocateSession={locateSession}
       favorites={{ favorite: false, disabled: false, onToggle: noop }}
       sidePaneOpen={false}
       onToggleSidePane={noop}
@@ -78,7 +85,9 @@ it('副屏插槽接线：SDK 副屏宽 480，且不随外部点击收起（仅�
     />,
   );
 
+  expect(container.querySelector('.workspace-chat-panel-layout')).toBeInTheDocument();
   const slotProps = mockSlotProps.at(-1) as { panelWidth?: number; dismissOnOutside?: boolean };
   expect(slotProps?.panelWidth).toBe(480);
   expect(slotProps?.dismissOnOutside).toBe(false);
+  expect(mockHeaderProps.at(-1)?.onLocateSession).toBe(locateSession);
 });

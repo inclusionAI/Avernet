@@ -21,7 +21,7 @@ export function GroupMembersPanelSlot({ open, group, session, canManage, onClose
       ariaLabel="群成员面板"
       onDismiss={onClose}
       {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-      className="border-l border-border bg-card"
+      className="border-l border-divider bg-card"
     >
       <MembersPanel
         group={group}

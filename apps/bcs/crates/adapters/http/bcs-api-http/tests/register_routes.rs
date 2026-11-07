@@ -50,6 +50,21 @@ impl RegisterService for FakeRegisterService {
         })
     }
 
+    async fn register_a2a_card(&self, command:RegisterBot, source:bcs_service_api::types::a2a_bot::A2aCardSource)->Result<BotRegistration,ApplicationError> {
+        match source {
+            bcs_service_api::types::a2a_bot::A2aCardSource::Url(url)=>self.register_a2a_bot(command,url).await,
+            bcs_service_api::types::a2a_bot::A2aCardSource::Inline(card)=>{
+                assert_eq!(card["name"],"Inline Agent");assert!(command.bot_name.is_empty());
+                self.register_bot(command).await
+            }
+        }
+    }
+
+    async fn register_a2a_bot(&self, command:RegisterBot, url:String) -> Result<BotRegistration,ApplicationError> {
+        assert_eq!(url,"https://example.org/agent-card.json");
+        self.register_bot(command).await
+    }
+
     async fn register_bot(
         &self,
         command: RegisterBot,
@@ -235,4 +250,32 @@ async fn actual_registration_preserves_complete_ref() {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].provider_bot_ref.as_deref(), Some("parent:a"));
     }
+}
+
+
+#[tokio::test]
+async fn a2a_card_registration_dispatches_through_the_explicit_use_case() {
+    let service=fake_service(false);
+    let response=test_router(service.clone()).oneshot(bare_request("POST",
+        concat!("/openapi/v1/collaboration/register?token=test-token", "&bot-name=A2A+Bot&mode=gateway&provider_bot_ref=order&agent_card_url=https%3A%2F%2Fexample.org%2Fagent-card.json"))).await.unwrap();
+    assert_eq!(response.status(),StatusCode::CREATED);
+    assert_eq!(response.headers()["cache-control"],"no-store");
+    assert_eq!(service.registered.lock().unwrap().len(),1);
+}
+
+#[tokio::test]
+async fn inline_card_body_allows_omitted_name_and_rejects_mixed_sources() {
+    let service=fake_service(false);
+    let app=test_router(service.clone());
+    for (body,expected) in [
+        (serde_json::json!({"agent_card":{"name":"Inline Agent","unknown":42}}),StatusCode::CREATED),
+        (serde_json::json!({"agent_card":{"name":"Inline Agent"},"agent_card_url":"https://example.org/card"}),StatusCode::BAD_REQUEST),
+        (serde_json::json!({"agent_card":[]}),StatusCode::BAD_REQUEST),
+    ] {
+        let response=app.clone().oneshot(Request::builder().method("POST")
+            .uri(concat!("/openapi/v1/collaboration/register?token=test-token", "&mode=gateway&provider_bot_ref=remote"))
+            .header("content-type","application/json").body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(),expected);
+    }
+    assert_eq!(service.registered.lock().unwrap().len(),1);
 }

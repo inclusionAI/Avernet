@@ -24,6 +24,7 @@ from agentclaw.community.adapters.http.task.trajectory_html import render_trajec
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
+from agentclaw.community.adapters.http.task.schemas_execute_diagnostics import task_info_request_params_to_dict
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
@@ -31,7 +32,8 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
     graph_to_dto, op_result_to_dto,
-    task_info_request_from_dto, trajectory_to_dto,
+    task_info_request_from_dto,
+    trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
@@ -45,6 +47,9 @@ from agentclaw.community.adapters.http.task.benchmark_routes import router as be
 from agentclaw.community.adapters.http.task.auto_routes import router as auto_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
+from agentclaw.community.adapters.http.task.task_config_router import (
+    router as task_config_router,
+)
 from agentclaw.community.adapters.http.task.task_read_routes import (
     router as task_read_api_router,
 )
@@ -92,6 +97,7 @@ router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
 router.include_router(task_read_api_router)
+router.include_router(task_config_router)
 router.include_router(artifact_api_router)
 router.include_router(artifact_object_file_router)
 router.include_router(result_writeback_api_router)
@@ -110,6 +116,10 @@ async def execute_task_internal(
     """提交执行任务(内部副本)。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
+    logger.info(
+        "[task_execute_internal] request params=%s",
+        task_info_request_params_to_dict(body),
+    )
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)

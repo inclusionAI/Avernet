@@ -148,6 +148,9 @@ pub async fn select(
 
 fn transition(row: &PersistedMessageDelivery, event: Event, now: i64) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event,

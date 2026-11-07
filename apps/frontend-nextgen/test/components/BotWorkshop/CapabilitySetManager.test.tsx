@@ -192,7 +192,7 @@ test('非默认能力集仍展示 Skill 和 MCP 的添加入口', () => {
   expect(screen.getAllByRole('button', { name: '添加' })).toHaveLength(2);
 });
 
-test('成员卡片按设计稿展示来源标签与紧凑三列样式', () => {
+test('成员卡片按设计稿展示来源标签与通栏单列样式', () => {
   render(
     <CapabilitySetManager
       sets={[{

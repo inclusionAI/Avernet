@@ -1,6 +1,5 @@
 //! Extracted verbatim from `server.rs`: BcsServer infrastructure assembly (storage/leader/plugins).
 use super::*;
-
 impl BcsServer {
     /// Create a new BCS server with storage (async).
     ///
@@ -14,7 +13,6 @@ impl BcsServer {
         )
         .await
     }
-
     /// Create a new BCS server with externally supplied infrastructure plugins.
     pub async fn new_with_infrastructure(
         config: BcsConfig,
@@ -22,20 +20,11 @@ impl BcsServer {
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
-
-        let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
-            &config.gateway_principal,
-            group_session_secret_access.clone(),
-        )
-        .await?;
-        info!(
-            issuers = ?config.gateway_principal.issuers,
-            audience = %config.gateway_principal.audience,
-            key_id = %config.gateway_principal.key_id,
-            "Gateway Principal verifier initialized"
-        );
+        let GatewayPrincipalAuthResources {
+            group_session_secret_access,
+            invite_token_secret,
+            gateway_principal_verifier,
+        } = super::auth_resources::build_gateway_principal_auth_resources(&config).await?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -49,7 +38,6 @@ impl BcsServer {
             db_adapter_ready = infrastructure_plugins.db().is_some(),
             "Selected infrastructure plugins"
         );
-
         // Run SQLite DDL initialization when local SQLite is selected.
         if infrastructure_plugins.db_kind() == DbPluginKind::LocalSqlite {
             if let Some(db) = infrastructure_plugins.db() {
@@ -67,7 +55,6 @@ impl BcsServer {
                 );
             }
         }
-
         let db_plugin = infrastructure_plugins.db().ok_or_else(|| {
             crate::BcsError::StorageInitError(
                 "LocalSqlite storage selected but DbPlugin handle is unavailable".to_string(),
@@ -77,7 +64,6 @@ impl BcsServer {
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);
         let provider_repos = db_provider_repos(db_plugin.clone(), &db_kind, config.provider_http.downlink_detection_source);
-
         let cache_plugin = infrastructure_plugins
             .cache()
             .unwrap_or_else(|| Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
@@ -89,12 +75,8 @@ impl BcsServer {
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
-        let bot_core_arc = Arc::new(BotCore::with_provider_repos(
-            bot_repo,
-            provider_repos.provider_repo.clone(),
-            provider_repos.provider_credentials.clone(),
-            provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+        let bot_core_arc=super::a2a_wiring::build_bot_core(
+            bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone());
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -166,6 +148,7 @@ impl BcsServer {
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_svc.clone(),
@@ -175,6 +158,10 @@ impl BcsServer {
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config),
             );
+        let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
+            db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
+            provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+        )?;
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
             &db_kind,
@@ -395,11 +382,18 @@ impl BcsServer {
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
+        let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
+            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref())?;
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
-            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
+            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()).with_a2a(a2a_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
+        let bot_delivery: Arc<dyn BotDeliveryPort> =
+            Arc::new(bcs_bot::application::CallerConfigurationDeliveryGate::new(
+                bot_delivery,
+                provider_control_plane.clone(),
+            ));
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
             Arc::new(WorkbenchFrontendDelivery::new(
                 frontend_connections.clone(),
@@ -616,6 +610,7 @@ impl BcsServer {
             message_flow_builder.system_queue_port(),
             bot_registry.clone(),
             bot_core_arc.clone(),
+            Some(a2a_card_queries),
             organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
@@ -642,7 +637,22 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
+        let (wired_message_flow, lease_store) = super::infrastructure_helpers::wire_caller_flow(
+            &config, db_plugin.clone(), db_flavor, message_flow_builder,
+            leader_election.clone(), provider_core.clone(), provider_control_plane.clone(),
+            provider_transport.clone(),
+        ).await?;
+        let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
+        let caller_relay_redeemer = wired_message_flow.caller_relay.as_ref().map(|relay| {
+            std::sync::Arc::new(
+                bcs_message_flow::caller_relay::CallerRelaySubmissionRedeemer::new(
+                    relay.ledger.clone(),
+                ),
+            ) as std::sync::Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>
+        });
+        let a2a_deliveries = wired_message_flow.managed_deliveries.clone().ok_or_else(|| crate::BcsError::InvalidConfig("A2A delivery budgets unavailable".into()))?;
+        let message_flow: Arc<dyn MessageFlowService> = wired_message_flow;
+        let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -668,8 +678,7 @@ impl BcsServer {
                     )
                 }
             };
-            Arc::new(
-                CollaborationRuntime::new(
+            let collaboration_runtime_builder = CollaborationRuntime::new(
                     collaboration_store.clone(),
                     collaboration_store.clone(),
                     collaboration_store.clone(),
@@ -688,6 +697,28 @@ impl BcsServer {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
+                .with_caller_orchestration(
+                    Some(provider_control_plane.clone()),
+                    caller_orchestration_pipeline
+                        .clone()
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationCallerDispatchPort,
+                        >),
+                    caller_orchestration_pipeline
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationInstanceRegistrar,
+                        >),
+                );
+            // Owner→caller relay (design 2026-10-30): attach the redeemer
+            // AFTER the full-shape assembly so a relay capture can never
+            // register into a runtime that could not consume it; absent
+            // relay state keeps every bot submission caller-closed.
+            let collaboration_runtime = if let Some(redeemer) = caller_relay_redeemer.clone() {
+                collaboration_runtime_builder.with_caller_relay_redeemer(redeemer)
+            } else {
+                collaboration_runtime_builder
+            };
+            let collaboration_runtime = collaboration_runtime
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
@@ -696,8 +727,8 @@ impl BcsServer {
                 .with_frontend_delivery(frontend_delivery.clone())
                 .with_event_record_factory(
                     crate::eventing_wiring::event_record_factory(&config, event_repo.clone()),
-                ),
-            )
+                );
+            Arc::new(collaboration_runtime)
         };
         state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
@@ -747,6 +778,18 @@ impl BcsServer {
             eventing_runtime.lifecycle.as_ref(),
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
+        // The FULL V1 authentication selection (legacy chain + explicit
+        // `[api.auth]` assembly or the compat Gateway verifier), built
+        // before the OpenAPI state pins its principal verifier.
+        let authentication = super::auth_resources::build_authentication_selection(
+            &config,
+            &infrastructure_plugins,
+            &extensions,
+            &bot_registry,
+            group_session_secret_access.clone(),
+            gateway_principal_verifier.clone(),
+        )
+        .await?;
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -771,7 +814,7 @@ impl BcsServer {
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
-            gateway_principal_verifier.clone(),
+            authentication.principal_verifier.clone(),
             connect_service.clone(),
             frontend_connections.clone(),
             eventing_runtime.service,
@@ -783,13 +826,15 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
-        let interactions = create_interaction_service(
+        let interactions = create_interaction_service_with_a2a(
             provider_transport.clone(),
             bot_connections.clone(),
             use_cases.interaction_authorization.clone(),
             frontend_delivery.clone(),
             config.async_chat_run_retention_ms,
+            Some(a2a_transport.clone()),
         );
+        super::a2a_wiring::bind_input(&a2a_transport,interactions.clone(),a2a_deliveries,bot_run_context.clone(),&config)?;
         interaction_terminal_observer.set_service(interactions.clone());
         let channel_repos = if channel_bridge_enabled(&config) {
             channel_repos_with_storage(&infrastructure_plugins).await?
@@ -821,6 +866,9 @@ impl BcsServer {
         } else {
             openapi_v1
         };
+        // Per-actual-source CSRF origins composed by the explicit-chain
+        // assembly attach to the SAME ApiState the verifier lives in.
+        let openapi_v1 = authentication.apply_origins(openapi_v1);
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
@@ -834,28 +882,11 @@ impl BcsServer {
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
+        a2a_transport.set_ingest(provider_event_ingest.clone(), bot_run_context.clone())?;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
-        let group_context_repo: Arc<dyn bcs_group_context_store::GroupContextRepo> = match db_kind {
-            DbPluginKind::LocalSqlite => {
-                Arc::new(bcs_group_context_store::SqlGroupContextStore::sqlite(db_plugin.clone()))
-            }
-            DbPluginKind::Mysql => {
-                Arc::new(bcs_group_context_store::SqlGroupContextStore::oceanbase(db_plugin.clone()))
-            }
-            DbPluginKind::External(provider) => {
-                panic!(
-                    "external database plugin '{provider}' has no group-context store wiring"
-                )
-            }
-        };
-        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
-            Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
-                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                    group_context_repo,
-                )),
-                sessions.clone(),
-                session_repo.clone(),
-            ));
+        let group_context_service = super::infrastructure_helpers::group_context_service(
+            db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+        );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .bot_authority(bot_authority.service.clone())
@@ -888,6 +919,7 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
+            .a2a_bot_management(a2a_bot_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(group_management)
@@ -906,26 +938,6 @@ impl BcsServer {
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
-        let auth_config = crate::auth_wiring::resolve_auth_config(
-            &config.auth,
-            crate::config_loader::Environment::resolve().as_str(),
-        );
-        let user_identity_port = match infrastructure_plugins.db() {
-            Some(db) => Some(crate::identity_wiring::db_user_identity_port(
-                infrastructure_plugins.db_kind(),
-                db,
-            )),
-            None => Some(crate::identity_wiring::memory_user_identity_port()),
-        };
-        let auth_chain = Arc::new(
-            crate::auth_wiring::try_build_auth_chain_with_factories(
-                &auth_config,
-                bot_registry.clone(),
-                user_identity_port.clone(),
-                &extensions.auth_plugin_factories,
-            )
-            .map_err(crate::BcsError::InvalidConfig)?,
-        );
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
@@ -935,6 +947,7 @@ impl BcsServer {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,
@@ -947,15 +960,17 @@ impl BcsServer {
             bot_metrics_snapshot,
             direct_chat_run_snapshot,
             metrics,
-            auth_chain,
-            auth_config,
+            auth_chain: authentication.auth_chain.clone(),
+            auth_config: authentication.auth_config.clone(),
+            explicit_api_auth: authentication.explicit_api_auth,
             bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
             group_session_secret_access,
-            user_identity_port,
+            user_identity_port: authentication.user_identity_port.clone(),
+            auth_session_identity: authentication.auth_session_identity.clone(),
             outbound_url_guard,
             admin_invocation_runs,
             connect_service,

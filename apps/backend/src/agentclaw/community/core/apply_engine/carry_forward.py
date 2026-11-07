@@ -139,6 +139,7 @@ def carry_forward(
         status=derive_status(categories),
         started_at=report.started_at,
         finished_at=report.finished_at,
+        state=report.state,
         categories=categories,
         # Deduped, unlike the two lists around it: a category is one phase's
         # work and belongs to whichever phase did it, but a source both phases

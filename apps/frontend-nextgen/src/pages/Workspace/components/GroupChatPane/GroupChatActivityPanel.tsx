@@ -32,7 +32,7 @@ export function GroupChatActivityPanel({
       aria-label="群聊处理列表"
       data-layout={isBotList ? 'bot-list' : items.length === 2 ? 'columns' : 'single'}
     >
-      <div className="flex items-center justify-between border-b border-border px-4 py-2">
+      <div className="flex items-center justify-between border-b border-divider px-4 py-2">
         <h3 className="text-sm font-medium">处理列表</h3>
         <Button variant="ghost" size="icon" className="size-7" aria-label="收起处理列表" onClick={onClose}>
           <X className="size-4" aria-hidden />
@@ -41,7 +41,7 @@ export function GroupChatActivityPanel({
       <div className="max-h-[min(24rem,calc(var(--radix-popover-content-available-height)-3.5rem))] overflow-y-auto p-4">
         {isBotList ? (
           <div className="grid min-w-0 gap-4 @min-[36rem]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)]">
-            <ul aria-label="活动 Bot" className="min-w-0 divide-y divide-border">
+            <ul aria-label="活动 Bot" className="min-w-0 divide-y divide-divider">
               {items.map((bot) => (
                 <li
                   key={bot.botId}
@@ -65,7 +65,7 @@ export function GroupChatActivityPanel({
                 </li>
               ))}
             </ul>
-            <div className="min-w-0 border-t border-border pt-3 @min-[36rem]:border-l @min-[36rem]:border-t-0 @min-[36rem]:pl-4 @min-[36rem]:pt-0">
+            <div className="min-w-0 border-t border-divider pt-3 @min-[36rem]:border-l @min-[36rem]:border-t-0 @min-[36rem]:pl-4 @min-[36rem]:pt-0">
               <h4 className="mb-2 text-sm font-medium">{selectedBot.botName} · 待处理消息</h4>
               <BotDeliveryQueue bot={selectedBot} {...actions} />
             </div>
@@ -75,7 +75,7 @@ export function GroupChatActivityPanel({
             {items.map((bot) => (
               <div key={bot.botId} className="min-w-0">
                 <BotActivityHeader bot={bot} {...actions} />
-                <div className="border-t border-border">
+                <div className="border-t border-divider">
                   <BotDeliveryQueue bot={bot} {...actions} />
                 </div>
               </div>

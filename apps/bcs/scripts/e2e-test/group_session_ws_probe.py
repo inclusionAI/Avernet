@@ -23,6 +23,18 @@ def _base64url(payload: bytes) -> str:
     return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
 
 
+def _sign_jwt(*, header: dict, claims: dict, signing_key: str) -> str:
+    encoded_header = _base64url(
+        json.dumps(header, separators=(",", ":"), sort_keys=True).encode()
+    )
+    encoded_claims = _base64url(
+        json.dumps(claims, separators=(",", ":"), sort_keys=True).encode()
+    )
+    signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
+    signature = hmac.new(signing_key.encode(), signing_input, hashlib.sha256).digest()
+    return f"{signing_input.decode('ascii')}.{_base64url(signature)}"
+
+
 def _gateway_principal_token(
     *, user_id: str, username: str, tenant: str, signing_key: str, issuer: str
 ) -> str:
@@ -47,15 +59,34 @@ def _gateway_principal_token(
             }
         ],
     }
-    encoded_header = _base64url(
-        json.dumps(header, separators=(",", ":"), sort_keys=True).encode()
-    )
-    encoded_claims = _base64url(
-        json.dumps(claims, separators=(",", ":"), sort_keys=True).encode()
-    )
-    signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
-    signature = hmac.new(signing_key.encode(), signing_input, hashlib.sha256).digest()
-    return f"{signing_input.decode('ascii')}.{_base64url(signature)}"
+    return _sign_jwt(header=header, claims=claims, signing_key=signing_key)
+
+
+def _app_principal_token(
+    *, app_id: int, app_name: str, tenant: str, signing_key: str, issuer: str
+) -> str:
+    now = int(time.time())
+    header = {"alg": "HS256", "kid": "bare", "typ": "JWT"}
+    claims = {
+        "iss": issuer,
+        "aud": "bcs",
+        "iat": now,
+        "exp": now + 60,
+        "principals": [
+            {
+                "type": "app",
+                "tenant": tenant,
+                "app": {
+                    "app_id": app_id,
+                    "app_name": app_name,
+                    "owners": "owner",
+                    "tenant": tenant,
+                    "app_type": "THIRD_PARTY",
+                },
+            }
+        ],
+    }
+    return _sign_jwt(header=header, claims=claims, signing_key=signing_key)
 
 
 def _read_upgrade_response(connection: socket.socket) -> bytes:
@@ -147,6 +178,18 @@ def _parser() -> argparse.ArgumentParser:
         "--issuer", default="gateway", choices=["gateway", "backend"]
     )
 
+    # The trusted-App identity shape the Bot-authority sync commands
+    # consume (mirrors `named_app_principal` in the Rust e2e chain,
+    # `crates/bootstrap/bcs/tests/e2e_bot_authority.rs`).
+    app_principal = commands.add_parser("app-principal")
+    app_principal.add_argument("--app-id", type=int, required=True)
+    app_principal.add_argument("--app-name", required=True)
+    app_principal.add_argument("--tenant", required=True)
+    app_principal.add_argument("--signing-key", required=True)
+    app_principal.add_argument(
+        "--issuer", default="gateway", choices=["gateway", "backend"]
+    )
+
     websocket = commands.add_parser("websocket")
     websocket.add_argument("--url", required=True)
     return parser
@@ -160,6 +203,16 @@ def main() -> int:
                 _gateway_principal_token(
                     user_id=args.user_id,
                     username=args.username,
+                    tenant=args.tenant,
+                    signing_key=args.signing_key,
+                    issuer=args.issuer,
+                )
+            )
+        elif args.command == "app-principal":
+            print(
+                _app_principal_token(
+                    app_id=args.app_id,
+                    app_name=args.app_name,
                     tenant=args.tenant,
                     signing_key=args.signing_key,
                     issuer=args.issuer,

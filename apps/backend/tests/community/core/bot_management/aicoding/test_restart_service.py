@@ -127,7 +127,7 @@ def lifecycle():
 async def test_real_baas_restart_observes_existing_intent_after_platform_call(lifecycle):
     s = lifecycle
     accepted = await s.service.restart_bot_async(bot_id="b", user_id="o")
-    assert accepted["status"] == "PENDING"
+    assert accepted["status"] == "ACTIVE"
     s.platform.post_bots_api.assert_not_called()
 
     def upgrade(**kwargs):
@@ -175,7 +175,7 @@ async def test_real_backup_failure_never_reaches_platform(lifecycle):
     s.platform.post_bots_api.assert_not_called()
     assert not s.queue.provider_tasks
     assert s.repo.bot["binding_id"] == 7
-    assert s.service.get_bot("b", "o")["status"] == "FAILED"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -316,10 +316,10 @@ async def test_backup_success_then_preparation_failure_is_terminal(lifecycle):
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
         assert isinstance(s.handler.handle(task.payload), Fail)
-    assert s.repo.bot["status"] == "FAILED"
+    assert s.repo.bot["status"] == "ACTIVE"
     assert journal(s.repo.bot)["phase"] == "FAILED"
-    assert "提交前准备失败" in s.repo.bot["ext"]["start_message"]
-    assert "private provider output" not in s.repo.bot["ext"]["start_message"]
+    assert "提交前准备失败" in journal(s.repo.bot)["error_message"]
+    assert "private provider output" not in journal(s.repo.bot)["error_message"]
     s.platform.post_bots_api.assert_not_called()
     assert isinstance(s.handler.handle(task.payload), Fail)
     s.platform.post_bots_api.assert_not_called()
@@ -360,7 +360,7 @@ async def test_final_identity_change_clears_intent_without_remote_submit(lifecyc
     receipt = Mock(side_effect=[None, RestartBackupError("instance_changed", "changed")])
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=receipt):
         assert isinstance(s.handler.handle(task.payload), Fail)
-    assert s.repo.bot["status"] == "FAILED"
+    assert s.repo.bot["status"] == "ACTIVE"
     assert s.binding["device_props"].get("restart_request_id") is None
     s.platform.post_bots_api.assert_not_called()
 
@@ -383,7 +383,7 @@ async def test_persisting_provider_intent_failure_ends_without_waiting(lifecycle
     s.service._device_binding_repo.update_device_props.side_effect = fail_first
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
         assert isinstance(s.handler.handle(task.payload), Fail)
-    assert s.repo.bot["status"] == "FAILED"
+    assert s.repo.bot["status"] == "ACTIVE"
     s.platform.post_bots_api.assert_not_called()
 
 
@@ -397,7 +397,7 @@ async def test_request_body_build_failure_is_not_ambiguous_submission(lifecycle)
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert journal(s.repo.bot)["phase"] == "FAILED"
     assert s.binding["device_props"].get("restart_request_id") is None
-    assert "提交前准备失败" in s.repo.bot["ext"]["start_message"]
+    assert "提交前准备失败" in journal(s.repo.bot)["error_message"]
 
 
 @pytest.mark.asyncio
@@ -618,7 +618,7 @@ async def test_degraded_backup_real_worker_submission_boundary(lifecycle, outcom
     if outcome == 'prepare_failed':
         assert isinstance(result, Fail)
         assert not mutations
-        message = s.repo.bot['ext']['start_message']
+        message = journal(s.repo.bot)['error_message']
         assert '提交前准备失败' in message
         assert '备份已完成' not in message and 'private' not in message
     else:

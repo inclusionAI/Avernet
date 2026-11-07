@@ -9,11 +9,17 @@ import time
 import uuid
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+import httpx
+
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNode,
     TaskNodePatch,
+    TaskRuntimeProfile,
     task_spec_instruction,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -25,6 +31,9 @@ from agentclaw.community.core.task.task_runner.modal_executor.group_identity imp
 from agentclaw.community.core.task.task_context.task_context_service import build_task_runner_execution_event_kwargs
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+    BcsRateLimitError,
+    BcsServerError,
+    BcsTimeoutError,
     BcsCreateGroupRequest,
 )
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
@@ -56,6 +65,14 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_owne
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
+_BCS_CREATE_GROUP_RETRYABLE_ERRORS = (
+    BcsServerError,
+    BcsRateLimitError,
+    BcsTimeoutError,
+    httpx.TransportError,
+)
+_CREATE_GROUP_MAX_ATTEMPTS = 3
+_CREATE_GROUP_RETRY_BASE_DELAY_SECONDS = 0.5
 
 # 人类观察者以 observer 角色入群但不发言，终产通过 inject_observers 投递。
 _HUMAN_OBSERVER_ROUTING_POLICY: dict[str, Any] = {"default_bot_final_delivery": "inject_observers"}
@@ -245,6 +262,10 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
         已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
         assignee = node.run_info.assignee
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise TaskStateError(
+                "single_bot dispatch requires a real bot assignee"
+            )
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
         skill_report = self._node_skill_report_enabled(node)
@@ -271,19 +292,11 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                 _bcs_wired, self._graph is not None, _flag, _bypass,
             )
             if _bypass:
-                try:
-                    return await self._dispatch_single_bot_2_group(
-                        node, openapi_bot_id, assignee_owner_id, loop_task_id
-                    )
-                except Exception as exc:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
-                    logger.exception(
-                        "[task][task-executor] singlebot_2_group 旁路失败 → 回退老链路 task=%s node=%s",
-                        node.task_id, node.node_id,
-                    )
-                    self._record_execution_trajectory(
-                        node, "single_bot", "single_bot_group_fallback", exception=exc,
-                        phase="single_bot_2_group", details={"fallback": True},
-                    )
+                # 建群失败不得回退到 API Key 单 bot 直发：那条链路的鉴权和执行形态
+                # 均不同，会掩盖真实的建群/身份解析错误。
+                return await self._dispatch_single_bot_2_group(
+                    node, openapi_bot_id, assignee_owner_id, loop_task_id
+                )
             logger.info(
                 "[task][task-executor] single_bot 走老链路(send_message) task=%s node=%s bot=%s",
                 node.task_id, node.node_id, openapi_bot_id,
@@ -374,13 +387,16 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                 ],
                 "upstream_outputs": ctx.get("sibling_outputs") or {},
                 "relay_token": node.run_info.extend_props.get("relay_token"),
+                "allowed_run_modes": list(
+                    TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+                ),
             },
         )
         task_owner_id = self._resolve_owner_user_id(gf)
         gf.extend_props["owner_user_id"] = task_owner_id
 
         logger.info(
-            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat task_owner=%s",
+            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=manager_worker task_owner=%s",
             node.task_id, node.node_id, openapi_bot_id, task_owner_id,
         )
 
@@ -546,6 +562,37 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep
             )
         )
+
+    async def _create_group_with_retry(
+        self, req: BcsCreateGroupRequest, *, mode: str,
+    ):
+        """Retry transient BCS create-group failures with bounded exponential backoff.
+
+        4xx request failures and identity resolution failures are deliberately outside
+        this retry class: retrying them cannot fix the underlying contract/auth problem
+        and would hide the real dispatch error.
+        """
+        for attempt in range(1, _CREATE_GROUP_MAX_ATTEMPTS + 1):
+            try:
+                return await self._bcs.create_group(req)
+            except _BCS_CREATE_GROUP_RETRYABLE_ERRORS as exc:
+                if attempt == _CREATE_GROUP_MAX_ATTEMPTS:
+                    raise
+                delay = _CREATE_GROUP_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "[task][task_executor] form_coop_group create_group failed collab=%s "
+                    "driver_bot=%s attempt=%s/%s retry_in=%.1fs error_type=%s error=%s "
+                    "idempotency=%s",
+                    mode,
+                    req.driver_bot,
+                    attempt,
+                    _CREATE_GROUP_MAX_ATTEMPTS,
+                    delay,
+                    type(exc).__name__,
+                    str(exc)[:500],
+                    bool(req.idempotency_key),
+                )
+                await asyncio.sleep(delay)
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         if self._identity_resolver is None:
@@ -781,6 +828,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                     relay_execution=bool(gf.extend_props.get("relay_execution")),
                     relay_blackboard=gf.extend_props.get("relay_blackboard"),
                     relay_token=gf.extend_props.get("relay_token"),
+                    allowed_run_modes=gf.extend_props.get("allowed_run_modes"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走
@@ -877,9 +925,14 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
             else:
                 logger.info("[task][task_executor] form_coop_group 无 owner_user_id → 不拉人类观察者 mode=%s", mode)
 
-        if gf.extend_props.get("relay_execution") and _loop_task_id:
+        if _loop_task_id:
+            key_kind = (
+                "avernet-relay-group"
+                if gf.extend_props.get("relay_execution")
+                else "avernet-task-node-group"
+            )
             req_kwargs["idempotency_key"] = str(uuid.uuid5(
-                uuid.NAMESPACE_URL, f"avernet-relay-group:{_loop_task_id}",
+                uuid.NAMESPACE_URL, f"{key_kind}:{_loop_task_id}",
             ))
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
@@ -893,7 +946,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
         )
         try:
             logger.info("[task][task_executor] form_coop_group create_group request=%s", req)
-            res = await self._bcs.create_group(req)
+            res = await self._create_group_with_retry(req, mode=mode)
         except Exception:
             logger.exception(
                 "[task][task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",

@@ -6,9 +6,9 @@ import { cn } from '@/utils/cn';
 import { labelOf, statusLabel } from '@/domain/evolution/types';
 import type { ReactElement, ReactNode } from 'react';
 
-/** 结果面板容器：数据视图 = 白底 + 细边框 r10（与 Bot 管理列表面板同规范）。 */
+/** 结果面板容器：数据视图 = 白底 r10，不描边（与 Bot 管理列表面板同规范）。 */
 export function TablePanel({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('overflow-hidden rounded-[10px] border border-border/60 bg-card', className)}>{children}</div>;
+  return <div className={cn('overflow-hidden rounded-[10px] bg-card', className)}>{children}</div>;
 }
 /** 结果面板容器：空态 / 错误态 = 40% 灰底留白面板，居中引导（同规范）。 */
 export function PlaceholderPanel({ children, className }: { children: ReactNode; className?: string }) {
@@ -39,7 +39,7 @@ export function ListSkeleton({
         </thead>
         <tbody>
           {Array.from({ length: rows }, (_, rowIndex) => (
-            <tr key={rowIndex} className="h-18 border-b border-border/60">
+            <tr key={rowIndex} className="h-18 border-b border-divider/60">
               {widths.map((width, columnIndex) => (
                 <td key={columnIndex} className={cn('px-4 align-middle', width)}>
                   {columnIndex === 0 ? (

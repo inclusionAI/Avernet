@@ -173,12 +173,26 @@ pub(crate) fn plan_admission(
             Status::Queued
         };
         let run_id = (target.kind == DeliveryType::Send).then(|| {
-            if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a { command.message.run_id.clone() }
-            // A caller-preassigned canonical run id is honoured
-            // verbatim: the producer already installed this run's
-            // operation binding and frozen facts before the durable
-            // admission committed (spec §8.2).
-            else { target.run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()) }
+            // Replies and results across every flow arrive carrying a
+            // NON-empty message.run_id (the correlation chat run) that must
+            // NOT become the delivery row's identity. A caller-preassigned
+            // canonical run id (target.run_id, spec §8.2) is honoured
+            // verbatim for every flow — the producer already installed this
+            // run's operation binding and frozen facts before the durable
+            // admission committed. The message-run honor is the Task
+            // DISPATCH leg alone (message_type == chat): the caller-derived
+            // task dispatch (L243-B) binds the registered child run
+            // identity there as the trusted producer, and the admission's
+            // run-id uniqueness check still refuses collisions closed.
+            // Task result legs ("run_reply") and every group reply keep the
+            // minted identity.
+            if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a
+                || (command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task
+                    && command.message.message_type == "chat"
+                    && !command.message.run_id.trim().is_empty())
+            {
+                command.message.run_id.clone()
+            } else { target.run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()) }
         });
         let row = PersistedMessageDelivery {
             delivery_id: if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {

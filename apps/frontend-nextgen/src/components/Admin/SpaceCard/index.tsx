@@ -96,7 +96,7 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
         </div>
 
         {/* 统计块：成员 / 更新时间 / 创建者（直接展示花名，无类型条件） */}
-        <div className="flex items-center divide-x divide-border py-1">
+        <div className="flex items-center divide-x divide-divider py-1">
           <Stat label="成员" value={space.memberCount} />
           <Stat label="更新时间" value={formatRelativeTime(space.gmtModified)} />
           <Stat label="创建者" value={space.creatorUserName ?? ''} />

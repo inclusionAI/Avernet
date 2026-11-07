@@ -106,7 +106,23 @@ describe('Skill candidate diff polling', () => {
 
 
 describe('Skill candidate acceptance entry', () => {
-  const waiting = { ...task({ ref: 'candidate.zip', sha256: 'sha' }), status: 'waiting_acceptance' } as EvolveTask
+  const waiting = { ...task({ ref: 'candidate.zip', sha256: 'sha' }), status: 'waiting_acceptance', canApplySkill: true } as EvolveTask
+
+  it.each([false, undefined])('disables application without Bot rights (%s), while keeping rejection available', async (canApplySkill) => {
+    api.evolve.getTaskSkillDiff.mockResolvedValue(readyDiff)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<SkillTaskRuntimePanel task={{ ...waiting, canApplySkill }} canOperate onUpdated={async () => {}} />)
+    const apply = screen.getByRole('button', { name: '接受并应用' }) as HTMLButtonElement
+    expect(apply.disabled).toBe(true)
+    expect(apply.title).toBe('仅源 Bot 的 Owner 或协作者可应用候选版本')
+    expect(screen.getByText('仅源 Bot 的 Owner 或协作者可应用候选版本')).toBeTruthy()
+    fireEvent.click(apply)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(api.evolve.decideSkillVersion).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '拒绝' }))
+    expect(confirm).toHaveBeenCalled()
+    confirm.mockRestore()
+  })
 
   it('keeps acceptance visible with collapsed diff and preserves explicit confirmation', async () => {
     api.evolve.getTaskSkillDiff.mockResolvedValue(readyDiff)

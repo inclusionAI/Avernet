@@ -40,15 +40,17 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
   const rootNodeId = task.nodes[0]?.id;
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {task.nodes.map((node) => {
+      {task.nodes.map((node, stageIndex) => {
         const present = node.present ?? node.status;
         const tone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
         const isDone = present === 'done' || present === 'merged';
         const isGroup = node.runMode === 'coop_group' || node.runMode === 'bbs' || node.drillable === true;
-        const executorName = node.assigneeName || node.executor || '—';
+        const executorName =
+          node.executorLabel || node.assigneeName || (isGroup ? node.groupName : null) || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
         const isRootNode = node.id === rootNodeId;
+        const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
           if (isRootNode) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
@@ -58,7 +60,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
             key={node.id}
             role="button"
             tabIndex={0}
-            aria-label={`选中节点 ${node.name}`}
+            aria-label={`选中节点 ${stageName}`}
             onClick={selectForConversation}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -103,7 +105,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   whiteSpace: 'nowrap',
                 }}
               >
-                {node.name}
+                {stageName}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                 <span

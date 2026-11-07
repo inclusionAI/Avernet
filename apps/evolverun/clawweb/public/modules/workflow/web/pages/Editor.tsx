@@ -1,22 +1,47 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import DeploySnapshotReview, { type DeployReview } from '../components/DeploySnapshotReview'
+import WorkflowSnapshotReconciliation from '../components/WorkflowSnapshotReconciliation'
+import { assertWorkflowReconciliation } from '../api/workflowSnapshotReconciliation'
+import type { ReconciliationApproval } from '../api/workflowSnapshotReconciliation'
+import { useEditorMergeReview } from './useEditorMergeReview'
+import { bindEditorDeploymentWriteEpoch, isDeployPrePushConflict, isEditorDeploymentNotSent } from '../api/autoHealWrites'
+import { assertDeploymentAvailable, clearEditorConfirmedDeployment, clearEditorReconciledDeployment, clearRejectedDeployment, editorDeploymentMarkerMatches, finishEditorDeployment, isEditorDeploymentPending, markEditorDeploymentPending, readEditorDeploymentMarker, subscribeWorkflowDeploymentPending, workflowDeploymentPendingRevision } from '../editor/deploymentGuard'
+import { editorWorkflowSourceIsCurrent, readEditorWorkflowSource } from '../api/editorWorkflowSource'
+import { editorDraftDocument, readEditorDraftCas } from '../api/editorDraftCas'
+import { useState, useCallback, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { stringify as stringifyYaml } from 'yaml'
-import { useDbWorkflow, useSaveWorkflowToDb, useFacadeBindings, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
-import { useEditorStore } from '../editor/store'
-import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
+import { UNSAFE_LocationContext } from 'react-router-dom'
+import { useEditorWorkflowDocument, useAutoHealDeploy } from '../api/hooks'
+import { QueryClientContext } from '@tanstack/react-query'
+import { createWorkflowPack } from '../editor/newWorkflowSave'
+import { useEditorStore, type EditorState } from '../editor/store'
 import WorkflowPackSidebar from '../components/WorkflowPackSidebar'
+import DeploymentRecoveryDialog from '../components/DeploymentRecoveryDialog'
 import EditorCanvas from '../components/EditorCanvas'
 import NodePalette from '../components/NodePalette'
 import NodePropertyPanel from '../components/NodePropertyPanel'
 import WorkflowSettingsPanel from '../components/editor/WorkflowSettingsPanel'
-import { parseWorkflowYaml } from '../editor/yamlDraft'
+import { normalizationChanges, parseWorkflowYaml } from '../editor/yamlDraft'
 import { confirmDiscardEditor } from '../editor/navigation'
+import { beginWorkflowTransition, commitWorkflowTransition } from '../editor/workflowTransition'
 import YamlEditor from '../components/YamlEditor'
+import ScriptFilesTab from '../components/ScriptFilesTab'
+import { hasPackVersionRisk, hasPackVersionEditRisk, hasPackVersionUpload, sessionFor, validateSnapshot, packVersionsRevision, subscribePackVersions, diff, publish } from '../editor/packVersionSession'
+import { WorkspacePopPendingContext, isWorkflowPopOwned, subscribeWorkflowPopOwnership, usePackNavigationGuard, workflowPopOwnershipSnapshot } from '../editor/usePackNavigationGuard'
+import { packWorkflow, sameExecutionSpec } from '../editor/packCanvas'
+import { PackCanvasPartialSaveError, usePackCanvasSession } from '../editor/usePackCanvasSession'
+import { WorkflowDocumentAcknowledgedError } from '../editor/workflowDocumentSave'
+import { assertEditorWorkflowReadable, editorWorkflowReadIsCurrent } from '../editor/workflowWriteGuard'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
-import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
-import { api } from '@avernet/clawweb-shared/web/api/client'
-import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot, AutoHealSaveResult } from '@avernet/clawweb-shared/web/types'
+import { formatCurrentSpecForDiff, formatSpecForDiff, historyComparisonUncertain, specsEqual } from '../components/WorkflowVersionDiff'
+import { api, fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 
 type ViewMode = 'visual' | 'yaml' | 'split'
+type SaveMessage = { type: 'success' | 'error'; text: string } | null
+// Bind a workflow operation to the marker it created, across Editor remounts.
+const deploymentTokens = new WeakMap<object, string>()
+
+
 
 /** Extract a human-readable message from fetchJson ApiError strings ("API NNN: {json}"). */
 function extractApiErrorMessage(err: unknown): string {
@@ -31,109 +56,165 @@ function extractApiErrorMessage(err: unknown): string {
   return msg
 }
 
+function hasUnsafePackEdits(id: string): boolean {
+  const versions = sessionFor(id).state.versions
+  return hasPackVersionEditRisk(id) || Object.values(versions).some(version => !version.snapshot && version.files.length > 0)
+}
+
 interface EditorProps {
   /** Embedded inside another page (e.g. 任务护航 workspace): hides the workflow sidebar and fills parent height. */
   embedded?: boolean
   /** Workflow to open — controlled by the parent in embedded mode. */
   initialWorkflowId?: string | null
+  /** Workspace owns browser POP transitions and commits the editor session. */
+  workspaceManagedPop?: boolean
 }
 
-export default function Editor({ embedded = false, initialWorkflowId }: EditorProps) {
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId ?? null)
+export default function Editor({ embedded = false, initialWorkflowId, workspaceManagedPop = false }: EditorProps) {
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(() => {
+    const live = useEditorStore.getState()
+    return live.spec && live._savedSpec === null ? null : live.spec?.id ?? initialWorkflowId ?? null
+  })
   const [showYamlImport, setShowYamlImport] = useState(false)
   const [yamlInput, setYamlInput] = useState('')
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [newId, setNewId] = useState('')
   const [newTitle, setNewTitle] = useState('')
-  const [showSaveDialog, setShowSaveDialog] = useState(false)
-  const [saveId, setSaveId] = useState('')
-  const [saveTitle, setSaveTitle] = useState('')
-  const [saveCommand, setSaveCommand] = useState('')
-  const [saveRemark, setSaveRemark] = useState('')
-  const [commandError, setCommandError] = useState<string | null>(null)
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [showMore, setShowMore] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('visual')
+  const [workspaceTab, setWorkspaceTab] = useState<'workflow' | 'scripts'>('workflow')
+  const [saveMessage, setSaveMessage] = useState<SaveMessage>(null)
+  const [workflowSaving, setWorkflowSaving] = useState(false)
+  const workflowSaveInFlight = useRef(false)
   const [showHistory, setShowHistory] = useState(false)
-  const [showDeployGuide, setShowDeployGuide] = useState(false)
-  const [deployCommandCopied, setDeployCommandCopied] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
-  const [baselineIsActive, setBaselineIsActive] = useState(false)
+  const [deploymentBaselineStatus, setDeploymentBaselineStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
-  const [showDeploymentDiff, setShowDeploymentDiff] = useState(false)
+  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions'] } | null>(null)
+  const candidateRequest = useRef(0)
+  const switchRequest = useRef(0)
+  // Invalidate before passive effects or pending promises can apply an obsolete
+  // controlled target, including when the new target is current, null or undefined.
+  useLayoutEffect(() => { switchRequest.current++ }, [initialWorkflowId])
+  useEffect(() => () => { switchRequest.current++ }, [])
+  const selectedWorkflowRef = useRef(selectedWorkflowId)
+  selectedWorkflowRef.current = selectedWorkflowId
+  const navigationType = useContext(UNSAFE_LocationContext)?.navigationType
   const [deploymentBaselineRevision, setDeploymentBaselineRevision] = useState(0)
   const [showDeployConfirm, setShowDeployConfirm] = useState(false)
+  const [deployReviewed, setDeployReviewed] = useState(false)
+  const [deploymentRecovery, setDeploymentRecovery] = useState<{ workflowId: string; sessionId: number; message: string } | null>(null)
+  const [deploymentRecoveryError, setDeploymentRecoveryError] = useState<string | null>(null)
+  const [deploymentRecoveryOpen, setDeploymentRecoveryOpen] = useState(false)
+  const recoveryTarget = useRef<{ workflowId: string; token: string; requestId: string | undefined } | null>(null)
   const [showWorkflowSettings, setShowWorkflowSettings] = useState(() =>
     Object.keys(useEditorStore.getState().pendingEdits ?? {}).some(key => key.startsWith('workflow:')))
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
-  const saveInFlight = useRef(false)
 
-  const { spec, isDirty, selectedNodeId, validationErrors, loadSpec, createNew, importYaml, selectNode,
-    pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
+
+  const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
+    sessionId: editorSessionId, _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
+  const creation = spec ? sessionFor(spec.id).state.creation : undefined
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
+  const packRevision = useSyncExternalStore(subscribePackVersions, packVersionsRevision, packVersionsRevision)
+  const pendingRevision = useSyncExternalStore(subscribeWorkflowDeploymentPending, workflowDeploymentPendingRevision, workflowDeploymentPendingRevision)
+  const workspacePopPending = useContext(WorkspacePopPendingContext)
+  const workflowPopOwned = useSyncExternalStore(subscribeWorkflowPopOwnership, workflowPopOwnershipSnapshot, () => false)
+  const packRisk = hasPackVersionRisk(selectedWorkflowId)
+  const packUploading = hasPackVersionUpload(selectedWorkflowId)
+  usePackNavigationGuard(!workspaceManagedPop)
 
-  const { data: workflowSpec, isLoading: workflowLoading } = useDbWorkflow(selectedWorkflowId ?? '')
+  const { data: workflowSpec, databaseSpec: workflowDatabaseSpec, activeDeployNumber: workflowActiveDeployNumber, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '', editorSessionId)
 
-  const saveToDbMutation = useSaveWorkflowToDb()
-  // Git snapshot + server-side deploy share the same auto-heal services as AutoHealPanel.
-  const gitSaveMutation = useAutoHealSave()
-  const deployMutation = useAutoHealDeploy()
+  const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowDatabaseSpec)
+  const { mergeAdapter, visibleMerge, mergeCurrent, wantsReview, preparing, openMergeReview, cancelMergeReview, clearMergeReview } = useEditorMergeReview(selectedWorkflowId, editorSessionId, packCanvas, workflowSaveInFlight, setWorkflowSaving, setSaveMessage, extractApiErrorMessage)
+  // The combined-save message may add DB partial-success context to the same
+  // Pack error. Show that richer message once, without hiding unrelated errors.
+  const packErrors = [...new Set([packCanvas.error, packCanvas.versionError])].filter((error): error is string =>
+    !!error && !(saveMessage?.type === 'error' && saveMessage.text.includes(error)))
+  const deployment = selectedWorkflowId ? sessionFor(selectedWorkflowId).state.deployment : null
+  const visibleDeployment = deployment
+  const deploymentPending = !!selectedWorkflowId && isEditorDeploymentPending(selectedWorkflowId)
+  const visibleRecovery = deploymentRecovery?.sessionId === editorSessionId ? deploymentRecovery : null
+  useEffect(() => {
+    if (!selectedWorkflowId || isEditorDeploymentPending(selectedWorkflowId)) { setDeploymentRecovery(null); return }
+    // A workflow-level deployment has its own status and recovery control.
+    if (sessionFor(selectedWorkflowId).state.deployment) return
+    try { assertDeploymentAvailable(selectedWorkflowId); setDeploymentRecovery(null) }
+    catch (error) { setDeploymentRecovery({ workflowId: selectedWorkflowId, sessionId: editorSessionId, message: extractApiErrorMessage(error) }) }
+  }, [selectedWorkflowId, editorSessionId, packRevision, pendingRevision])
+  const queryClient = useContext(QueryClientContext)
+  const deployMutation = useAutoHealDeploy({ editorGuard: true })
   const deployInFlight = useRef(false)
-  const { data: facadeBindings } = useFacadeBindings()
 
-  const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
-
-  const handleSelectWorkflow = useCallback(
-    (workflowId: string) => {
-      if (workflowId === selectedWorkflowId || !confirmDiscardEditor()) return
+  const handleSelectWorkflow = useCallback(async (workflowId: string) => {
+    if (workflowId === selectedWorkflowId) return
+    const request = ++switchRequest.current
+    const approval = beginWorkflowTransition()
+    if (!approval) return
+    try {
+      const { spec: target, databaseSpec, activeDeployNumber } = await readEditorWorkflowSource(workflowId)
+      if (request !== switchRequest.current) return
+      if (!commitWorkflowTransition(approval, target, workflowId, false, databaseSpec, activeDeployNumber)) {
+        setSaveMessage({ type: 'error', text: '工作流切换未完成：目标无效或确认后编辑内容已变化；原草稿仍保留。' })
+        return
+      }
       setShowWorkflowSettings(false)
       setSelectedWorkflowId(workflowId)
-      selectNode(null)
-    },
-    [selectNode, selectedWorkflowId],
-  )
-
-  // In embedded mode the parent (workspace sidebar) controls which workflow is open
-  useEffect(() => {
-    if (initialWorkflowId !== undefined && initialWorkflowId !== selectedWorkflowId) {
-      if (!confirmDiscardEditor()) return
-      setShowWorkflowSettings(false)
-      setSelectedWorkflowId(initialWorkflowId)
-      selectNode(null)
+      setSaveMessage(null)
+    } catch (error) {
+      if (request === switchRequest.current) setSaveMessage({ type: 'error', text: `工作流读取失败，原草稿仍保留：${extractApiErrorMessage(error)}` })
     }
-  }, [initialWorkflowId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedWorkflowId, setSaveMessage])
 
-  // Load workflow spec when fetched
+  // A controlled target is an intention until its source is read and committed.
+  // Workspace may already have committed the same target as part of its transaction.
+  useEffect(() => {
+    if (initialWorkflowId === undefined || initialWorkflowId === selectedWorkflowId) return
+    if (!initialWorkflowId) { setSaveMessage({ type: 'error', text: '目标工作流不可用；原草稿仍保留。' }); return }
+    // A browser POP is handled by WorkflowWorkspace, which reads and commits
+    // the target Pack transactionally. Do not start a second controlled-editor
+    // transition after React Router has already rendered the POP target. Once
+    // the workspace commits, the store identity matches and the branch above
+    // synchronizes the local selection.
+    if (useEditorStore.getState().spec?.id === initialWorkflowId) {
+      setSelectedWorkflowId(initialWorkflowId)
+      setSaveMessage(null)
+      setShowWorkflowSettings(false)
+      return
+    }
+    if (workspacePopPending || workflowPopOwned || isWorkflowPopOwned()) return
+    void handleSelectWorkflow(initialWorkflowId)
+  }, [initialWorkflowId, navigationType, workflowPopOwned, workspaceManagedPop, workspacePopPending]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Only the committed selection may supply the initial loaded document.
   const currentSpecId = spec?.id
   useEffect(() => {
-    if (workflowSpec && workflowSpec.id !== currentSpecId) {
-      if (currentSpecId && !confirmDiscardEditor()) return
-      loadSpec(workflowSpec)
-    }
-  }, [workflowSpec, currentSpecId, loadSpec])
+    if (workflowSpec && workflowSpec.id === selectedWorkflowId && editorWorkflowSourceIsCurrent(workflowSpec, selectedWorkflowId) && !currentSpecId && !useEditorStore.getState().spec) loadSpec(workflowSpec, workflowDatabaseSpec, workflowActiveDeployNumber)
+  }, [workflowSpec, workflowDatabaseSpec, workflowActiveDeployNumber, currentSpecId, selectedWorkflowId, loadSpec])
 
   // Fetch the latest deploy history row to show the current effective version.
   useEffect(() => {
     if (!selectedWorkflowId) {
       setLatestDeploy(null)
-      setBaselineIsActive(false)
+      setDeploymentBaselineStatus('ready')
       return
     }
     setLatestDeploy(null)
-    setBaselineIsActive(false)
+    setDeploymentBaselineStatus('loading')
     let cancelled = false
     api.workflows
       .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
         if (cancelled) return
         const active = r.active ?? null
-        setLatestDeploy(active ?? r.history?.find((item) => item.action !== 'edit') ?? null)
-        setBaselineIsActive(Boolean(active))
+        setLatestDeploy(active)
+        setDeploymentBaselineStatus('ready')
       })
       .catch(() => {
         if (!cancelled) {
           setLatestDeploy(null)
-          setBaselineIsActive(false)
+          setDeploymentBaselineStatus('error')
         }
       })
     return () => {
@@ -171,107 +252,97 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   }, [selectedWorkflowId, latestDeploy])
 
   const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
-  const savedSpecText = workflowSpec ? formatCurrentSpecForDiff(workflowSpec) : ''
-  const hasUndeployedChanges = Boolean(activeSnapshot && workflowSpec && !specsEqual(deployedSpecText, savedSpecText))
-  const deploymentBaselineLabel = baselineIsActive ? '生效' : '最新发布'
-  const deploymentDiffLines = useMemo(
-    () => hasUndeployedChanges ? compactDiff(unifiedDiff(deployedSpecText, savedSpecText)) : [],
-    [deployedSpecText, hasUndeployedChanges, savedSpecText],
-  )
+  const savedSpecText = databaseBaseline ? formatCurrentSpecForDiff(databaseBaseline) : ''
+  const comparisonUncertain = Boolean(activeSnapshot && databaseBaseline && historyComparisonUncertain(activeSnapshot.specJson))
+  const hasUndeployedChanges = Boolean(activeSnapshot && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
+  const deploymentBaselineLabel = '生效'
 
-  const handleOpenSaveDialog = useCallback(() => {
-    if (!spec || saveInFlight.current) return
-    if (hasPendingEdits) {
-      setSaveMessage({ type: 'error', text: '请先应用或放弃未完成的配置草稿，再保存。' })
-      return
-    }
-    const errors = validationErrors
-    if (errors.length > 0) {
-      setSaveMessage({ type: 'error', text: `保存前请修复验证错误: ${errors[0].message}` })
-      return
-    }
-    setSaveId(spec.id)
-    setSaveTitle(spec.title)
-    setSaveCommand(spec.facade?.command ?? '')
-    setSaveRemark(spec.facade?.remark ?? '')
-    setCommandError(null)
-    setShowSaveDialog(true)
-  }, [spec, validationErrors, hasPendingEdits])
-
-  const handleSave = useCallback(async () => {
-    if (!spec || saveInFlight.current) return
-    if (Object.keys(useEditorStore.getState().pendingEdits ?? {}).length) {
-      setSaveMessage({ type: 'error', text: '请先应用或放弃配置草稿，再保存。' })
-      return
-    }
-    const currentErrors = useEditorStore.getState().validationErrors ?? []
-    if (currentErrors.length) { setSaveMessage({ type: 'error', text: `保存前请修复验证错误: ${currentErrors[0].message}` }); return }
-    const id = saveId.trim()
-    const title = saveTitle.trim()
-    const command = saveCommand.trim()
-    if (!id) return
-    if (command && !COMMAND_PATTERN.test(command)) {
-      setCommandError('命令必须为 kebab-case 或 snake-case（小写字母、数字、连字符、下划线）')
-      return
-    }
-    if (commandError) return
-    const saveSessionId = useEditorStore.getState().sessionId
-    const specAtRequest = useEditorStore.getState().spec
-    if (!specAtRequest) return
-    saveInFlight.current = true
+  const handleOpenSaveDialog = useCallback(async () => {
+    if (!useEditorStore.getState().spec) return
+    const sessionId = useEditorStore.getState().sessionId
+    const workflowId = selectedWorkflowId
+    if (workflowSaveInFlight.current) return
+    workflowSaveInFlight.current = true; setWorkflowSaving(true)
+    setSaveMessage(null)
     try {
-      const facade = command ? { command, remark: saveRemark.trim() || undefined } : undefined
-      const nextFacade = { ...spec.facade }
-      if (command) { nextFacade.command = command; nextFacade.remark = saveRemark.trim() || undefined }
-      else { delete nextFacade.command; delete nextFacade.remark }
-      const specToSave: WorkflowSpec = { ...spec, id, title: title || id, facade: Object.keys(nextFacade).length ? nextFacade : undefined }
-      const user = getClientUser()
-      if (!user?.userId) {
-        setSaveMessage({ type: 'error', text: '无法获取用户信息，请重新登录。' })
+      if (!workflowId) {
+        const live = useEditorStore.getState()
+        if (!live.spec) return
+        if (Object.keys(live.pendingEdits ?? {}).length) throw new Error('请先应用或放弃未完成的配置草稿。')
+        if (live.validationErrors.length) throw new Error(`保存前请修复验证错误：${live.validationErrors[0].message}`)
+        const submitted = structuredClone(live.spec)
+        assertEditorWorkflowReadable(submitted.id)
+        const created = await createWorkflowPack(submitted)
+        for (const key of [['workflow-types'], ['editor-workflow-document', submitted.id], ['db-workflows'], ['db-workflow', submitted.id], ['facade-bindings']]) {
+          void queryClient?.invalidateQueries({ queryKey: key })
+        }
+        const current = useEditorStore.getState()
+        if (selectedWorkflowRef.current !== null || current.sessionId !== sessionId || current.spec?.id !== submitted.id) {
+          setSaveMessage({ type: 'success', text: `工作流 ${submitted.id} 已创建；当前编辑会话未被替换。` })
+          return
+        }
+        if (!created.databaseSpec || !current.completeSave(created.requestedSpec, created.requestedSpec, sessionId, created.databaseSpec)) throw new Error('创建成功，但编辑器会话无法更新；草稿仍保留。')
+        setSelectedWorkflowId(submitted.id)
+        setSaveMessage({ type: 'success', text: `已创建并保存为保存版本 commit ${created.result.commit}，尚未部署。保存期间的后续修改仍保留。` })
         return
       }
-      const originalId = selectedWorkflowId && selectedWorkflowId !== id ? selectedWorkflowId : undefined
-      // Step 1: DB upsert + ID cascade + facade binding + creation grants (unchanged).
-      await saveToDbMutation.mutateAsync({
-        workflowId: id,
-        spec: specToSave,
-        facade,
-        originalWorkflowId: originalId,
-        botOwnerId: user.userId,
-        // The editor writes no deploy_history row here; deploy rows come from the
-        // server-side deploy below (auto-heal deploy service), same as AutoHealPanel.
-        skipDeployHistory: true,
-      })
-      // Step 2: git snapshot on saved/{workflowId} via the same service the auto-heal
-      // panel uses, so an editor save matches AutoHealPanel's saved state exactly.
-      let gitResult: AutoHealSaveResult | null = null
-      let gitError: string | null = null
-      try {
-        gitResult = await gitSaveMutation.mutateAsync({ workflowId: id, spec: specToSave, note: 'editor save' })
-      } catch (gitErr) {
-        gitError = extractApiErrorMessage(gitErr)
+      assertEditorWorkflowReadable(workflowId)
+      const result = await packCanvas.save()
+      // Direct document save bypasses useAutoHealSave, so keep its cache
+      // contract: a persisted draft must invalidate editor/list sources.
+      if (result?.dbSaved) {
+        for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) {
+          void queryClient?.invalidateQueries({ queryKey: key })
+        }
       }
-      // Merge the authorized save identity with any edits made while DB/Git were
-      // in flight. completeSave owns baseline history and refuses normalized loss.
-      if (!useEditorStore.getState().completeSave(specToSave, specAtRequest, saveSessionId)) return
-      setSelectedWorkflowId(id)
-      setShowSaveDialog(false)
-      if (gitResult) {
-        const shortCommit = gitResult.commit ? gitResult.commit.slice(0, 8) : ''
-        setSaveMessage({ type: 'success', text: `工作流已保存（git ${gitResult.branch}${shortCommit ? ` · ${shortCommit}` : ''}）` })
-        setTimeout(() => setSaveMessage(null), 3000)
-      } else {
-        // Degraded: DB saved, git snapshot failed. Keep the warning visible (no
-        // auto-dismiss) like other error paths; save is idempotent — retry recovers.
-        setSaveMessage({ type: 'error', text: `数据库已保存，但 git 快照失败：${gitError}。重试保存可恢复。` })
+      if (selectedWorkflowRef.current !== workflowId || useEditorStore.getState().sessionId !== sessionId) return
+      clearMergeReview()
+      if (result) setSaveMessage({ type: 'success', text: result.mode === 'unified'
+        ? `数据库和草稿(wf)分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。保存期间的新改动仍需再次保存；节点位置仅在当前会话保留。`
+        : !result.dbSaved && !result.gitSaved && !result.remainingFileChanges
+          ? '没有需要保存的更改。'
+        : `${result.dbSaved ? '工作流已保存到数据库。' : '本次未更新数据库工作流。'}${result.gitSaved ? `部分文件已保存为保存版本 commit ${result.commit}。` : '本次未更新 Git 文件。'}本次未将数据库中的工作流编排写入 Git 工作流 YAML；旧路径未更新 Git 工作流 YAML。${result.remainingFileChanges ? '仍有文件修改未保存，关闭或刷新页面会丢失；请先导出或处理。' : ''}尚未部署。保存期间的后续修改仍需再次保存。` })
+      else if (workflowId) {
+        const state = sessionFor(workflowId).state
+        const error = state.versions[state.version].error
+        if (error && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: error })
       }
-    } catch (err) {
-      if (useEditorStore.getState().sessionId !== saveSessionId) return
-      setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' })
+    } catch (cause) {
+      // A verified or possibly committed write makes even an in-flight old read
+      // unsafe. Isolate it before invalidating, including after navigation.
+      if (workflowId && (cause instanceof PackCanvasPartialSaveError || cause instanceof WorkflowDocumentAcknowledgedError) && cause.workflowId === workflowId) {
+        for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) {
+          void queryClient?.invalidateQueries({ queryKey: key })
+        }
+      }
+      if (!workflowId || (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId)) {
+        setSaveMessage({ type: 'error', text: cause instanceof Error ? cause.message : '保存未完成，本地草稿仍保留。' })
+      }
     } finally {
-      saveInFlight.current = false
+      workflowSaveInFlight.current = false; setWorkflowSaving(false)
     }
-  }, [spec, saveId, saveTitle, saveCommand, saveRemark, commandError, saveToDbMutation, gitSaveMutation, COMMAND_PATTERN, selectedWorkflowId])
+  }, [selectedWorkflowId, packCanvas, queryClient, setSaveMessage, clearMergeReview])
+
+  const confirmMergeReview = async (approval: ReconciliationApproval) => {
+    if (!visibleMerge || !mergeAdapter || workflowSaveInFlight.current) return
+    const { workflowId, sessionId, review } = visibleMerge
+    workflowSaveInFlight.current = true; setWorkflowSaving(true)
+    try {
+      if (selectedWorkflowRef.current !== workflowId || useEditorStore.getState().sessionId !== sessionId) throw new Error('编辑会话已变化；未发送保存。')
+      assertWorkflowReconciliation(approval, mergeAdapter.currentReconciliation(review), approval.specJson)
+      const result = await mergeAdapter.saveReconciled(approval)
+      if (result.mode !== 'unified' || !result.dbSaved || !result.gitSaved) throw new Error('审阅结果未通过统一保存；请核对数据库与 Git。')
+      if (result.dbSaved) for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) void queryClient?.invalidateQueries({ queryKey: key })
+      if (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId) {
+        setSaveMessage({ type: 'success', text: `数据库和草稿(wf)分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。` })
+      }
+      clearMergeReview()
+    } catch (cause) {
+      if (cause instanceof PackCanvasPartialSaveError && cause.workflowId === workflowId) for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) void queryClient?.invalidateQueries({ queryKey: key })
+      if (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: extractApiErrorMessage(cause) })
+      clearMergeReview()
+    } finally { workflowSaveInFlight.current = false; setWorkflowSaving(false) }
+  }
 
   const applyYamlToEditor = useCallback((incoming: WorkflowSpec) => {
     const previousId = useEditorStore.getState().spec?.id
@@ -294,7 +365,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     } catch (err) {
       setSaveMessage({ type: 'error', text: `YAML parse error: ${err instanceof Error ? err.message : 'Invalid YAML'}` })
     }
-  }, [yamlInput, importYaml])
+  }, [yamlInput, importYaml, setSaveMessage])
 
   const handleImportFile = useCallback(() => {
     const input = document.createElement('input')
@@ -328,87 +399,241 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    setSaveMessage({ type: 'success', text: `Exported as ${filename}` })
+    setSaveMessage({ type: 'success', text: `已请求下载 ${filename}；请检查浏览器下载结果。该文件只包含已应用的画布工作流 spec，不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置。` })
     setTimeout(() => setSaveMessage(null), 2000)
-  }, [spec, hasPendingEdits])
+  }, [spec, hasPendingEdits, setSaveMessage])
 
   const handleCreateNew = useCallback(() => {
-    if (!newId.trim() || !newTitle.trim() || !confirmDiscardEditor()) return
-    createNew(newId.trim(), newTitle.trim())
+    const id = newId.trim(), title = newTitle.trim()
+    if (!id || !title) return
+    switchRequest.current++
+    const approval = beginWorkflowTransition()
+    if (!approval) return
+    const target: WorkflowSpec = { id, title, version: '1.0.0', nodes: [{ id: `${id}_start`, title: '开始', phase: 'execute', executor: { type: 'done' } }] }
+    if (!commitWorkflowTransition(approval, target, id, true)) {
+      setSaveMessage({ type: 'error', text: '新建未完成：目标无效或确认后编辑内容已变化；原草稿仍保留。' })
+      return
+    }
     setShowNewDialog(false)
     setNewId('')
     setNewTitle('')
     setSelectedWorkflowId(null)
-  }, [newId, newTitle, createNew])
+    setSaveMessage(null)
+  }, [newId, newTitle, setSaveMessage])
 
-  const handleCopyDeployCommand = useCallback(async () => {
-    if (!selectedWorkflowId) return
-    try {
-      await navigator.clipboard.writeText(`/workflow deploy ${selectedWorkflowId}`)
-      setDeployCommandCopied(true)
-      setTimeout(() => setDeployCommandCopied(false), 2000)
-    } catch {
-      setSaveMessage({ type: 'error', text: '复制发布命令失败，请手动复制。' })
-    }
-  }, [selectedWorkflowId])
-
-  // Server-side deploy via the same service the auto-heal panel uses: reserve deploy
-  // number → git tag + push wf/{workflowId} → activate deploy history. autoRun stays
-  // off because the editor has no source-run context (AutoHealPanel does the same).
+  // Deploy the explicitly confirmed saved tree without rewriting its workflow YAML.
   const runDeploy = useCallback(async () => {
-    if (!selectedWorkflowId || deployInFlight.current) return
+    if (!selectedWorkflowId || !deployCandidate || !deployReviewed || deployInFlight.current) return
+    const id = selectedWorkflowId, candidate = deployCandidate, session = sessionFor(id)
     const live = useEditorStore.getState()
-    if (live.isDirty || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length
-      || (live.spec && live.spec.id !== selectedWorkflowId)) {
-      setSaveMessage({ type: 'error', text: '确认期间编辑内容已变化，请先应用并保存，再重新确认部署。' })
-      return
+    const isOriginalSession = () => selectedWorkflowRef.current === id && useEditorStore.getState().sessionId === candidate.sessionId
+    if (session.state.deployment || hasUnsafePackEdits(id) || candidate.packRevision !== packVersionsRevision()
+      || candidate.workflowId !== id || live.sessionId !== candidate.sessionId || live.isDirty || normalizationChanges(candidate.positions, live.positions).length > 0
+      || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length || !live._savedSpec) {
+      setSaveMessage({ type: 'error', text: '确认期间编辑内容已变化，请先保存并重新确认部署。' }); return
     }
     deployInFlight.current = true
-    setSaveMessage(null)
     try {
-      const result = await deployMutation.mutateAsync({
-        workflowId: selectedWorkflowId,
-        note: 'editor deploy',
-        autoRun: false,
-      })
-      setSaveMessage({ type: 'success', text: `部署成功：deploy #${result.deployNumber} · v${result.version} · ${result.tagName}` })
-      setTimeout(() => setSaveMessage(null), 5000)
-      // Refresh the comparison baseline so the「待部署」badge clears immediately.
-      setDeploymentBaselineRevision((revision) => revision + 1)
+      if (!editorWorkflowReadIsCurrent(id, candidate.writeEpoch)) throw new Error('数据库写入状态已变化，请先核对并重新确认部署。')
+      const receipt = await readEditorDraftCas(id)
+      if (!editorWorkflowReadIsCurrent(id, candidate.writeEpoch)) throw new Error('数据库写入状态已变化，请先核对并重新确认部署。')
+      const db = editorDraftDocument(receipt.specJson, id)
+      if (receipt.draftToken !== candidate.draftToken || (receipt.packId ?? id) !== candidate.packId) throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
+      const now = useEditorStore.getState()
+      if (selectedWorkflowRef.current !== id || now.sessionId !== candidate.sessionId || now.isDirty || normalizationChanges(candidate.positions, now.positions).length > 0
+        || Object.keys(now.pendingEdits ?? {}).length || hasUnsafePackEdits(id)
+        || candidate.packRevision !== packVersionsRevision() || !now._savedSpec || !sameExecutionSpec(db, now._savedSpec)) {
+        throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
+      }
+      const input = { workflowId: id, packId: candidate.packId, candidateCommit: candidate.commit, expectedActiveCommit: candidate.expectedActiveCommit, expectedDraftToken: candidate.draftToken,
+        requestId: crypto.randomUUID(), note: 'editor deploy', autoRun: false, snapshotProtocol: 'saved-tree-v2' as const, confirmedFileDiff: true as const }
+      bindEditorDeploymentWriteEpoch(input, candidate.writeEpoch)
+      const pendingToken = markEditorDeploymentPending(id)
+      deploymentTokens.set(input, pendingToken)
+      publish(session, { ...session.state, deployment: { input, pending: true, error: null } })
+      const ownsAttempt = () => session.state.deployment?.input.requestId === input.requestId && editorDeploymentMarkerMatches(id, pendingToken)
+      try {
+        const result = await deployMutation.mutateAsync(input)
+        if (!result || result.ok !== true || result.deployed !== true || result.workflowId !== id || result.packId !== candidate.packId
+          || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
+          || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()
+          || !('snapshotProtocol' in result) || result.snapshotProtocol !== 'saved-tree-v2' || !('candidateCommit' in result) || result.candidateCommit !== candidate.commit || !('expectedActiveCommit' in result) || result.expectedActiveCommit !== candidate.expectedActiveCommit) throw new Error('部署响应无法验证')
+        if (!ownsAttempt()) return
+        try { clearEditorConfirmedDeployment(id, pendingToken) } catch (err) {
+          const markerClearFailure = extractApiErrorMessage(err)
+          if (ownsAttempt()) publish(session, { ...session.state, deployment: { input, pending: false, error: markerClearFailure } })
+          if (isOriginalSession()) setDeploymentRecovery({ workflowId: id, sessionId: candidate.sessionId, message: markerClearFailure })
+          return
+        }
+        publish(session, { ...session.state, deployment: null })
+        if (isOriginalSession()) {
+          setSaveMessage({ type: 'success', text: `部署成功：deploy #${result.deployNumber} · v${result.version} · ${result.tagName}` })
+          setDeploymentBaselineRevision(revision => revision + 1)
+        }
+      } catch (err) {
+        if (!ownsAttempt()) return
+        if (isDeployPrePushConflict(err, input) || isEditorDeploymentNotSent(err, input)) {
+          try {
+            if (session.state.deployment?.input.requestId !== input.requestId) throw new Error('部署标记已变化')
+            clearRejectedDeployment(id, pendingToken)
+            publish(session, { ...session.state, deployment: null })
+            if (isOriginalSession()) {
+              setDeploymentRecovery(current => current?.workflowId === id && current.sessionId === candidate.sessionId ? null : current)
+              setSaveMessage({ type: 'error', text: extractApiErrorMessage(err) })
+            }
+            return
+          } catch (clearError) {
+            const message = extractApiErrorMessage(clearError)
+            if (ownsAttempt()) publish(session, { ...session.state, deployment: { input, pending: false, error: message } })
+            if (isOriginalSession()) setDeploymentRecovery({ workflowId: id, sessionId: candidate.sessionId, message })
+            return
+          }
+        }
+        const failureMessage = `部署失败或结果未知：${extractApiErrorMessage(err)}。请人工核对 Git 和数据库；没有日志恢复或安全自动重试。`
+        publish(session, { ...session.state, deployment: { input, pending: false, error: failureMessage } })
+        if (isOriginalSession()) setDeploymentRecovery({ workflowId: id, sessionId: candidate.sessionId, message: failureMessage })
+      } finally {
+        finishEditorDeployment(id, pendingToken)
+        // If ownership was lost, surface the still-blocked state as unknown,
+        // without overwriting the request or marker now owned by another attempt.
+        publish(session, { ...session.state })
+      }
     } catch (err) {
-      const detail = extractApiErrorMessage(err)
-      setSaveMessage({ type: 'error', text: `部署失败：${detail}。兜底：在 Bot 对话执行 /workflow deploy ${selectedWorkflowId}` })
-    } finally {
-      deployInFlight.current = false
-    }
-  }, [selectedWorkflowId, deployMutation])
+      if (isOriginalSession()) {
+        setSaveMessage({ type: 'error', text: `部署已阻止：${extractApiErrorMessage(err)}` })
+      }
+    } finally { deployInFlight.current = false }
+  }, [selectedWorkflowId, deployCandidate, deployReviewed, deployMutation, setSaveMessage])
 
-  const handleDeployClick = useCallback(() => {
-    if (!selectedWorkflowId) return
-    if (validationErrors.length) { setSaveMessage({ type: 'error', text: `部署前请修复验证错误: ${validationErrors[0].message}` }); return }
-    // Block deploying unsaved canvas edits — deploy always publishes the saved DB spec.
-    if (isDirty || hasPendingEdits) {
-      setSaveMessage({ type: 'error', text: hasPendingEdits ? '存在未应用的配置草稿，请先应用并保存再部署。' : '画布有未保存改动，请先保存再部署。' })
+  const openDeploymentRecovery = useCallback(() => {
+    if (!selectedWorkflowId || isEditorDeploymentPending(selectedWorkflowId)) return
+    try {
+      const marker = readEditorDeploymentMarker(selectedWorkflowId)
+      if (!marker) throw new Error('核对标记不存在或无法读取，请重新检查。')
+      const current = sessionFor(selectedWorkflowId).state.deployment
+      if (current && deploymentTokens.get(current.input) !== marker) throw new Error('部署请求与核对标记不匹配，请人工核对最新请求；不能清除此标记。')
+      const requestId = current?.input.requestId
+      recoveryTarget.current = { workflowId: selectedWorkflowId, token: marker, requestId }
+      setDeploymentRecovery({ workflowId: selectedWorkflowId, sessionId: useEditorStore.getState().sessionId, message: '请先人工核对 Git 和数据库。' })
+      setDeploymentRecoveryError(null); setSaveMessage(null); setDeploymentRecoveryOpen(true)
+    } catch (error) { setSaveMessage({ type: 'error', text: extractApiErrorMessage(error) }) }
+  }, [selectedWorkflowId])
+
+  const handleDeploymentRecoveryConfirm = useCallback(() => {
+    const target = recoveryTarget.current
+    if (!visibleRecovery || !target || target.workflowId !== visibleRecovery.workflowId) return
+    setDeploymentRecoveryError(null)
+    try {
+      const session = sessionFor(target.workflowId)
+      if (isEditorDeploymentPending(target.workflowId)) throw new Error('部署操作正在进行，不能清除核对标记。')
+      if (session.state.deployment?.input.requestId !== target.requestId) throw new Error('部署状态已变化，请重新核对。')
+      clearEditorReconciledDeployment(target.workflowId, target.token)
+      if (session.state.deployment) publish(session, { ...session.state, deployment: null })
+    } catch (error) {
+      setDeploymentRecoveryError(extractApiErrorMessage(error)); return
+    }
+    recoveryTarget.current = null
+    setDeploymentRecovery(null); setDeploymentRecoveryOpen(false)
+    setSaveMessage({ type: 'success', text: `已清除工作流 ${target.workflowId} 的浏览器核对标记。请基于已核对的 Git 和数据库状态重新确认部署。` })
+  }, [visibleRecovery, setSaveMessage])
+
+  const handleDeployClick = useCallback(async () => {
+    if (!selectedWorkflowId || deployInFlight.current) return
+    if (isEditorDeploymentPending(selectedWorkflowId)) { setSaveMessage({ type: 'error', text: '部署操作正在进行，不能重复部署。' }); return }
+    try { assertDeploymentAvailable(selectedWorkflowId) } catch (err) {
+      setDeploymentRecovery({ workflowId: selectedWorkflowId, sessionId: useEditorStore.getState().sessionId, message: extractApiErrorMessage(err) })
+      setSaveMessage(null)
       return
     }
-    if (hasUndeployedChanges) {
-      // Diff preview doubles as the deploy confirmation (Q5).
-      setShowDeploymentDiff(true)
-    } else {
-      setShowDeployConfirm(true)
+    if (sessionFor(selectedWorkflowId).state.deployment) { setSaveMessage({ type: 'error', text: '上次部署结果未知，请人工核对 Git 与数据库。' }); return }
+    if (hasUnsafePackEdits(selectedWorkflowId)) { setSaveMessage({ type: 'error', text: '版本文件存在未保存更改或保存状态不确定，请先处理后再部署。' }); return }
+    if (validationErrors.length) { setSaveMessage({ type: 'error', text: `部署前请修复验证错误: ${validationErrors[0].message}` }); return }
+    if (isDirty || hasPendingEdits) {
+      setSaveMessage({ type: 'error', text: hasPendingEdits ? '存在未应用的配置草稿，无法部署；请先应用并保存。' : '画布有未保存改动，无法部署；请先保存。' }); return
     }
-  }, [selectedWorkflowId, isDirty, hasPendingEdits, hasUndeployedChanges, validationErrors])
+    if (useEditorStore.getState()._databaseSpec === null) { setSaveMessage({ type: 'error', text: '尚无数据库暂存稿，请先保存当前编排，再确认部署。' }); return }
+    const requestSequence = ++candidateRequest.current
+    const { sessionId, positions: currentPositions } = useEditorStore.getState()
+    const positions = structuredClone(currentPositions)
+    const candidatePackRevision = packVersionsRevision()
+    setDeployCandidate(null); setDeployReviewed(false); setSaveMessage(null)
+    try {
+      const writeEpoch = assertEditorWorkflowReadable(selectedWorkflowId)
+      const endpoint = `/api/workflows/${encodeURIComponent(selectedWorkflowId)}/pack-version`
+      const [raw, currentResult, receipt, proof] = await Promise.all([fetchJson<unknown>(`${endpoint}?version=draft`),
+        fetchJson<unknown>(`${endpoint}?version=current`).then(value => ({ ok: true as const, value }), () => ({ ok: false as const })),
+        readEditorDraftCas(selectedWorkflowId), fetchJson<unknown>(`/api/auto-heal/editor-deploy/snapshot-v2/state?workflowId=${encodeURIComponent(selectedWorkflowId)}`)])
+      const snapshot = validateSnapshot(raw, selectedWorkflowId, 'draft')
+      const packPath = (raw as { packPath?: unknown }).packPath
+      if (!proof || typeof proof !== 'object' || Array.isArray(proof)) throw new Error('部署能力不可验证')
+      const state = proof as Record<string, unknown>
+      if (state.protocol !== 'editor-deployment-state-v1' || state.workflowId !== selectedWorkflowId || state.packId !== snapshot.packId
+        || snapshot.baseRef !== `origin/wf/${selectedWorkflowId}` || snapshot.draftHead !== snapshot.baseCommit
+        || state.canDeploy !== true || state.savedCommit !== snapshot.baseCommit || typeof packPath !== 'string') {
+        throw new Error('部署能力未获授权或草稿(wf) Pack 基线已变化')
+      }
+      let active: ReturnType<typeof validateSnapshot> | null = null
+      if (currentResult.ok) {
+        active = validateSnapshot(currentResult.value, selectedWorkflowId, 'current')
+        if (packPath !== (currentResult.value as { packPath?: unknown }).packPath || active.packId !== snapshot.packId || state.activeCommit !== active.baseCommit) {
+          throw new Error('生效版和草稿(wf) Pack 范围或基线不一致，无法完整核对。')
+        }
+      } else if (state.activeCommit !== null) {
+        throw new Error('无法证明当前生效版本不存在')
+      }
+      const priorFiles = active?.versionFiles ?? []
+      const prior = new Map(priorFiles.map(file => [file.path, file]))
+      const changes: DeployReview[] = diff(priorFiles, snapshot.versionFiles).map(change => ({
+        path: change.path, operation: change.operation === 'delete' ? '删除' : change.operation === 'create' ? '新增' : '更新',
+        before: prior.get(change.path) ?? null, after: change.operation === 'delete' ? null : change,
+      }))
+      const reviewSize = changes.reduce((n, change) => n + (change.before?.contentBase64.length ?? 0) + (change.after?.contentBase64.length ?? 0), 0)
+      if (reviewSize > 512 * 1024) throw new Error('差异内容过大，无法完整展示并核对；请人工处理后再部署。')
+      const source = 'draft' as const
+      if (!editorWorkflowReadIsCurrent(selectedWorkflowId, writeEpoch)) throw new Error('数据库写入状态已变化，请先核对并重新确认部署。')
+      const db = editorDraftDocument(receipt.specJson, selectedWorkflowId)
+      if (requestSequence !== candidateRequest.current || selectedWorkflowRef.current !== selectedWorkflowId) return
+      const live = useEditorStore.getState()
+      if ((receipt.packId ?? selectedWorkflowId) !== snapshot.packId) throw new Error('数据库草稿的 Pack 与 Git 文件快照不一致，请先核对后再部署。')
+      if (hasUnsafePackEdits(selectedWorkflowId) || packVersionsRevision() !== candidatePackRevision || live.sessionId !== sessionId || live.isDirty
+        || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length || !live._savedSpec || !sameExecutionSpec(db, live._savedSpec)) {
+        throw new Error('读取期间编辑内容或数据库草稿已变化，请保存并重新读取')
+      }
+      const versions = sessionFor(selectedWorkflowId).state.versions
+      const candidates = [versions.current.snapshot, versions.draft.snapshot]
+      const baseline = candidates.find(item => item
+        && item.baseCommit === snapshot.baseCommit && item.packId === snapshot.packId && diff(item.versionFiles, snapshot.versionFiles).length === 0)
+      // Layout is session-only: existing moves do not invalidate a fresh Git
+      // baseline, but new moves during this deployment decision do.
+      if (normalizationChanges(positions, live.positions).length > 0) {
+        throw new Error('读取期间画布布局已变化，请重新确认部署；当前布局仍保留。')
+      }
+      // First explicit deployment may be the first Git read (saved or current).
+      // A fresh read is safe only with no local baseline, orphaned files or load;
+      // revision/session checks still reject concurrent changes at confirmation.
+      const freshBaseline = !versions.current.loading && !versions.draft.loading && !versions.current.snapshot && !versions.draft.snapshot
+        && versions.current.files.length === 0 && versions.draft.files.length === 0
+      if (!baseline && !freshBaseline) throw new Error(`草稿文件快照与已读取基线不一致；请先核对版本`)
+      packWorkflow(snapshot.versionFiles, selectedWorkflowId, snapshot.packId)
+      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions })
+      setShowDeployConfirm(true)
+    } catch (err) {
+      if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和草稿文件，已阻止部署：${extractApiErrorMessage(err)}。` })
+    }
+  }, [selectedWorkflowId, isDirty, hasPendingEdits, validationErrors, setSaveMessage])
+
+  const saving = workflowSaving || packCanvas.saving
 
   // Keyboard shortcut: Ctrl/Cmd+S saves the current workflow.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (spec) handleOpenSaveDialog()
+        if (spec && !saving) handleOpenSaveDialog()
       }
-      if (showSaveDialog || showDeployConfirm || showDeploymentDiff || showHistory || showNewDialog || showYamlImport) return
+      if (showDeployConfirm || showHistory || showNewDialog || showYamlImport) return
       const target = e.target as HTMLElement | null
-      if (target?.closest('input, textarea, select, [contenteditable=true]')) return
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable=true]')) return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) redo?.(); else undo?.()
@@ -416,24 +641,33 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [spec, handleOpenSaveDialog, undo, redo, showSaveDialog, showDeployConfirm, showDeploymentDiff, showHistory, showNewDialog, showYamlImport])
+  }, [spec, saving, handleOpenSaveDialog, undo, redo, showDeployConfirm, showHistory, showNewDialog, showYamlImport])
 
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty && !hasPendingEdits) return
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', beforeUnload)
-    return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [isDirty, hasPendingEdits])
 
   const cycleError = validationErrors.find((e) => e.type === 'cycle')
 
   return (
     <div className={embedded ? 'flex h-full min-h-0 flex-col' : 'flex h-[calc(100vh-49px)] flex-col'}>
+      <div role="tablist" aria-label="编辑器工作区" className="flex shrink-0 gap-4 border-b border-border bg-card px-4">
+        {([['workflow', '工作流编排'], ['scripts', '脚本文件']] as const).map(([tab, label]) => <button
+          key={tab} id={`editor-tab-${tab}`} type="button" role="tab" aria-selected={workspaceTab === tab}
+          aria-controls={`editor-panel-${tab}`} tabIndex={workspaceTab === tab ? 0 : -1}
+          onClick={() => { if (!hasPackVersionUpload(selectedWorkflowId) || tab === workspaceTab) setWorkspaceTab(tab) }}
+          aria-disabled={packUploading && tab !== workspaceTab}
+          onKeyDown={event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            const next = tab === 'workflow' ? 'scripts' : 'workflow'
+            if (hasPackVersionUpload(selectedWorkflowId)) return
+            setWorkspaceTab(next)
+            document.getElementById(`editor-tab-${next}`)?.focus()
+          }}
+          className={`border-b-2 px-1 py-2.5 text-xs font-medium ${workspaceTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}
+        >{label}</button>)}
+      </div>
+      {workspaceTab === 'scripts' && packRisk && <p role="status" className="px-4 py-2 text-sm">版本文件有未保存更改或保存状态不确定；切换标签后仍保留在本页面会话中。请先处理，不能部署旧草稿。</p>}
       {/* Toolbar */}
-      <div className="flex min-h-12 items-center justify-between gap-4 border-b border-border bg-card px-4 py-2">
+      <div className="flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-border bg-card px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-mono text-xs font-medium text-slate-700">
             {spec ? `${spec.id}${spec.version !== undefined ? ` v${spec.version}` : ''}` : '未加载工作流'}
@@ -446,20 +680,21 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
                 {deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
               </span>
             ) : (
-              <span className="hidden text-[10px] text-slate-400 2xl:inline">仅本地草稿</span>
+              <span className="hidden text-[10px] text-slate-400 2xl:inline">{deploymentBaselineStatus === 'ready' ? '未发布 · 数据库暂存稿' : '生效状态未确认'}</span>
             ))}
+          {comparisonUncertain && latestDeploy && (
+            <span role="status" className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+              无法判断数据库内容与{deploymentBaselineLabel} v{latestDeploy.version} 是否有差异：历史内容来源不确定或无法无损解析
+            </span>
+          )}
           {hasUndeployedChanges && latestDeploy && (
-            <button
-              type="button"
-              onClick={() => setShowDeploymentDiff(true)}
-              className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-200"
-            >
-              与{deploymentBaselineLabel} v{latestDeploy.version} 有差异 · 待部署
-            </button>
+            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+              数据库内容与{deploymentBaselineLabel} v{latestDeploy.version} 有差异
+            </span>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5" aria-label="编辑器视图">
+          <div hidden={workspaceTab !== 'workflow'} className={workspaceTab === 'workflow' ? 'flex rounded-lg bg-slate-100 p-0.5' : 'hidden'} aria-label="编辑器视图">
             <button
               onClick={() => setViewMode('visual')}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'visual' ? 'bg-card text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
@@ -479,12 +714,12 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               YAML
             </button>
           </div>
-          <button type="button" onClick={() => {
+          {workspaceTab === 'workflow' && <><button type="button" onClick={() => {
             if (hasPendingEdits) { setActionError?.('请先应用或放弃未完成的配置草稿'); return }
             setShowWorkflowSettings(open => !open)
           }} disabled={!spec} className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-40">流程设置</button>
           <button type="button" onClick={() => undo?.()} disabled={!canUndo || hasPendingEdits} aria-label="撤销" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↶</button>
-          <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button>
+          <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button></>}
           <button
             type="button"
             onClick={() => setShowHistory(true)}
@@ -500,15 +735,14 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               <button role="menuitem" onClick={() => { setShowYamlImport(true); setYamlInput(''); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">粘贴 YAML</button>
               <button role="menuitem" onClick={() => { handleImportFile(); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">导入 YAML 文件</button>
               <button role="menuitem" onClick={() => { handleYamlExport(); setShowMore(false) }} disabled={!spec} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">导出 YAML</button>
-              <button role="menuitem" onClick={() => { setShowDeployGuide(true); setShowMore(false) }} disabled={!selectedWorkflowId} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">Bot 命令部署（复制命令兜底）</button>
             </div></>}
           </div>}
           <button
             onClick={handleOpenSaveDialog}
-            disabled={!spec}
+            disabled={!spec || saving || creation?.pending}
             className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
           >
-            {saveToDbMutation.isPending ? '保存中…' : '保存'}
+            {saving || creation?.pending ? '正在保存…' : '保存'}
           </button>
           <button
             type="button"
@@ -528,19 +762,76 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         </div>
       )}
 
-      {/* Save message */}
+      {spec && workspaceTab === 'workflow' && <div className="border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground">
+        <p>编排优先读取数据库暂存稿，无暂存稿时读取生效版本。应用仅更新编辑器；保存分别确认数据库编排和 Git 文件，不承诺跨存储原子提交；部署需另行确认。</p>
+        <p>未应用内容、未保存的编排及节点位置仅在当前页面会话中保留，刷新、关闭或放弃更改可能丢失。导出仅包含已应用的画布工作流 spec，不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置。未应用内容请在原编辑区域复制备份。</p>
+        <button type="button" onClick={handleYamlExport} className="mt-1 rounded border border-input px-2 py-1 text-xs">导出工作流 YAML 备份</button>
+      </div>}
+      {workspaceTab === 'workflow' && workflowReadError && <p role="alert" className="px-4 py-2 text-sm text-destructive">工作流读取失败，草稿仍保留：{extractApiErrorMessage(workflowReadError)}</p>}
+      {workspaceTab === 'workflow' && deploymentBaselineStatus === 'error' && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">生效版本状态读取失败，暂无法比较；当前编排草稿仍保留。</p>}
+      {workspaceTab === 'scripts' && packErrors.map(error => <div key={error} role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{error}</div>)}
+      {visibleRecovery?.workflowId === selectedWorkflowId && !visibleDeployment && !deploymentPending && (
+        <section role="alert" aria-label="部署人工核对标记" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          <p>{visibleRecovery.message}</p>
+          <button
+            type="button"
+            onClick={openDeploymentRecovery}
+            className="mt-2 rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-foreground"
+          >
+            我已人工核对，清除当前工作流标记…
+          </button>
+        </section>
+      )}
+      {deploymentPending && !visibleDeployment && <section role="status" aria-label="部署操作" className="border-b border-border bg-muted px-4 py-2 text-sm">部署操作正在进行，不能清除核对标记或重复部署。</section>}
+      {visibleDeployment && (
+        <section
+          role={deploymentPending ? 'status' : 'alert'}
+          aria-label="部署操作"
+          className={`border-b border-border px-4 py-2 text-sm ${deploymentPending ? 'bg-muted text-muted-foreground' : 'bg-destructive/10 text-destructive'}`}
+        >
+          <p>{deploymentPending ? '部署操作正在进行，不能清除核对标记或重复部署。' : visibleDeployment.pending ? '部署结果未知，请人工核对 Git 和数据库。' : visibleDeployment.error}</p>
+          <p className="break-all">requestId：{visibleDeployment.input.requestId} · 保存版本 commit：{visibleDeployment.input.candidateCommit}</p>
+          {!deploymentPending && (
+            <button
+              type="button"
+              onClick={openDeploymentRecovery}
+              className="mt-2 rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-foreground"
+            >
+              我已人工核对，清除当前工作流标记…
+            </button>
+          )}
+        </section>
+      )}
+
       {saveMessage && (
-        <div className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div role={saveMessage.type === 'error' ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
           {saveMessage.text}
         </div>
       )}
 
+      {(wantsReview || (saveMessage?.type === 'error' && /Git 工作流 YAML 与数据库基线不一致或不可比较/.test(saveMessage.text))) && !visibleMerge && (
+        mergeAdapter ? <button type="button" disabled={workflowSaving} onClick={openMergeReview} className="mx-4 my-2 rounded border border-input px-3 py-2 text-sm">核对数据库和 Git 差异…</button>
+          : <p role="status" className="px-4 py-2 text-sm">差异审阅保存能力尚不可用；未发送写入，请保留草稿。</p>
+      )}
+      {preparing && <div role="status" aria-label="差异审阅准备状态">正在核对数据库和 Git 差异</div>}
+      {visibleMerge && mergeAdapter && (mergeCurrent
+        ? <WorkflowSnapshotReconciliation review={visibleMerge.review} current={mergeCurrent} busy={workflowSaving}
+            onConfirm={confirmMergeReview} onCancel={cancelMergeReview} />
+        : <section role="alert">审阅基线不可用或已变化；请取消后重新核对。<button type="button" onClick={cancelMergeReview}>取消</button></section>)}
       {actionError && <div role="alert" className="flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError?.(null)} aria-label="关闭编辑提示">×</button></div>}
-      {recoveredDrafts && hasPendingEdits && <p role="status" className="border-b border-border bg-muted px-4 py-2 text-xs text-muted-foreground">已保留当前会话中未应用的草稿。请在 YAML 视图或右侧配置区域继续编辑，应用或放弃后再保存。</p>}
+      {visibleRecovery && deploymentRecoveryOpen && !deploymentPending && (
+        <DeploymentRecoveryDialog
+          workflowId={visibleRecovery.workflowId}
+          errorMessage={deploymentRecoveryError}
+          onCancel={() => setDeploymentRecoveryOpen(false)}
+          onConfirm={handleDeploymentRecoveryConfirm}
+        />
+      )}
+      {recoveredDrafts && hasPendingEdits && <p role="status" className="border-b border-border bg-muted px-4 py-2 text-xs text-muted-foreground">已保留当前会话中未应用的草稿。请在 YAML 视图或右侧配置区域继续编辑并复制备份，应用后可保存完整版本。</p>}
       {hasPendingEdits && <div role="status" className="bg-warning/10 px-4 py-2 text-xs text-warning-foreground">有 {Object.keys(pendingEdits).length} 项未应用的配置。请在原编辑区域应用或放弃；画布修改、保存和部署已保护。</div>}
 
       {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
+      <div id="editor-panel-workflow" role="tabpanel" aria-labelledby="editor-tab-workflow" hidden={workspaceTab !== 'workflow'} className={workspaceTab === 'workflow' ? 'flex min-h-0 flex-1 overflow-hidden' : 'hidden'}>
         {!embedded && (
           <WorkflowPackSidebar
             onSelectWorkflow={handleSelectWorkflow}
@@ -572,6 +863,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             <button type="button" onClick={() => setShowWorkflowSettings(true)} disabled={!spec || hasPendingEdits} className="mt-5 rounded-lg border border-input px-3 py-2 text-xs text-muted-foreground disabled:opacity-40">查看流程设置</button>
           </aside>}
 
+      </div>
+
+      <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} showSaveError={false} showSaveButton={false} />}
       </div>
 
       {/* YAML Import Modal */}
@@ -622,9 +917,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">标题</label>
+                <label htmlFor="workflow-new-title" className="mb-1 block text-sm font-medium text-gray-700">标题</label>
                 <input
                   type="text"
+                  id="workflow-new-title"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -650,105 +946,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           </div>
         </div>
       )}
-    {/* Save Dialog */}
-      {showSaveDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
-            <h3 className="mb-3 text-lg font-semibold text-gray-900">保存工作流</h3>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="workflow-save-id" className="mb-1 block text-sm font-medium text-gray-700">标识</label>
-                <input
-                  id="workflow-save-id"
-                  type="text"
-                  value={saveId}
-                  onChange={(e) => setSaveId(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="我的工作流"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">标题</label>
-                <input
-                  type="text"
-                  value={saveTitle}
-                  onChange={(e) => setSaveTitle(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="我的工作流"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  外观命令 <span className="font-normal text-gray-400">(可选)</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-sm text-gray-400">/</span>
-                  <input
-                    type="text"
-                    value={saveCommand}
-                    onChange={(e) => {
-                      setSaveCommand(e.target.value)
-                      setCommandError(null)
-                    }}
-                    onBlur={() => {
-                      const cmd = saveCommand.trim()
-                      if (!cmd) { setCommandError(null); return }
-                      if (!COMMAND_PATTERN.test(cmd)) {
-                        setCommandError('命令必须为 kebab-case 或 snake-case（小写字母、数字、连字符、下划线）')
-                        return
-                      }
-                      const existing = facadeBindings?.find((b) => b.command === cmd)
-                      if (existing && existing.workflowId !== spec?.id) {
-                        setCommandError(`Command "/${cmd}" 已绑定到工作流 "${existing.workflowId}"`)
-                      }
-                    }}
-                    className={`w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 ${
-                      commandError
-                        ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
-                        : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'
-                    }`}
-                    placeholder="code-review"
-                  />
-                </div>
-                {commandError && <p className="mt-1 text-xs text-red-600">{commandError}</p>}
-                {!commandError && <p className="mt-1 text-xs text-gray-400">用户可通过 /{saveCommand || '命令'}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  备注 <span className="font-normal text-gray-400">(可选)</span>
-                </label>
-                <input
-                  type="text"
-                  value={saveRemark}
-                  onChange={(e) => setSaveRemark(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="命令的简要描述"
-                />
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowSaveDialog(false)}
-                className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={!saveId.trim() || !!commandError || saveToDbMutation.isPending || gitSaveMutation.isPending}
-                className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-              >
-                {saveToDbMutation.isPending || gitSaveMutation.isPending ? '保存中…' : '保存工作流'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Version History Modal */}
       {showHistory && selectedWorkflowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-card shadow-xl">
+          <div className="flex h-[88vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-lg bg-card shadow-xl">
             <WorkflowHistoryPanel
               workflowId={selectedWorkflowId}
               onActiveVersionChange={() => setDeploymentBaselineRevision((revision) => revision + 1)}
@@ -758,85 +959,24 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         </div>
       )}
 
-      {showDeploymentDiff && activeSnapshot && latestDeploy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-card shadow-xl">
-            <div className="flex items-center justify-between border-b border-border bg-gray-50 px-4 py-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900">部署前差异</h3>
-                <p className="mt-0.5 text-xs text-gray-500">{deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber} → 当前已保存内容</p>
-              </div>
-              <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-card px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50">关闭</button>
-            </div>
-            <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs leading-relaxed">
-              {deploymentDiffLines.map((line, index) => {
-                if (line.type === 'skip') {
-                  return <div key={`skip-${index}`} className="border-y border-gray-700 bg-gray-800 px-3 py-1 text-center text-gray-500">{line.text}</div>
-                }
-                const isAdded = line.type === 'add'
-                const isDeleted = line.type === 'del'
-                const lineNumber = isDeleted ? line.fromLine : line.toLine
-                return (
-                  <div key={index} className={`flex ${isAdded ? 'bg-green-900/30' : isDeleted ? 'bg-red-900/30' : ''}`}>
-                    <span className="w-10 shrink-0 select-none border-r border-gray-700 px-1 text-right text-gray-500">{lineNumber ?? ''}</span>
-                    <span className={`shrink-0 select-none px-1 ${isAdded ? 'text-green-300' : isDeleted ? 'text-red-300' : 'text-gray-300'}`}>{isAdded ? '+' : isDeleted ? '-' : ' '}</span>
-                    <span className={`whitespace-pre px-1 ${isAdded ? 'text-green-300' : isDeleted ? 'text-red-300' : 'text-gray-300'}`}>{line.text}</span>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="flex items-center justify-between gap-2 border-t border-border bg-gray-50 px-4 py-2">
-              <span className="truncate text-xs text-gray-400">Bot 命令兜底：<code className="rounded bg-gray-100 px-1">/workflow deploy {selectedWorkflowId}</code></span>
-              <span className="flex shrink-0 gap-2">
-                <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-card px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">稍后部署</button>
-                <button onClick={() => { setShowDeploymentDiff(false); void runDeploy() }} className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-emerald-700">确认部署</button>
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Lightweight deploy confirmation when the canvas matches the live version (Q5). */}
-      {showDeployConfirm && selectedWorkflowId && (
+      {/* Confirm the entire saved tree, after the server checks its DB projection. */}
+      {showDeployConfirm && selectedWorkflowId && deployCandidate && deployCandidate.workflowId === selectedWorkflowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-3 text-sm text-gray-600">
-              {activeSnapshot
-                ? '当前内容与线上生效版本一致，仍要重新部署吗？将生成新的部署记录（deploy #、git tag）。'
-                : latestDeploy
-                  ? '无法获取线上生效版本的快照，仍要部署当前已保存内容吗？'
-                  : '该工作流尚无线上生效版本，部署后将创建首个生效版本。'}
-            </p>
-            <p className="mt-2 text-xs text-gray-400">
-              Bot 命令兜底：在 Bot 对话执行 <code className="rounded bg-gray-100 px-1">/workflow deploy {selectedWorkflowId}</code>
-            </p>
+            <p className="mt-3 text-sm text-gray-600">即将部署以下草稿(wf)完整快照（含工作流 YAML、脚本与其他文件）；服务端将校验 YAML 与数据库草稿一致。</p>
+            <p className="mt-2 break-all text-xs text-gray-600">Pack：{deployCandidate.packId}<br />保存版本 commit：{deployCandidate.commit}<br />当前生效 tag：{deployCandidate.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{deployCandidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{deployCandidate.fileCount} 个</p>
+            <p className="mt-2 text-xs text-gray-500">部署不会用数据库改写 YAML；未保存的编辑不会部署。Git 与数据库写入不是跨存储原子操作，结果不确定时须人工核对。</p>
+            <DeploySnapshotReview changes={deployCandidate.changes} reviewed={deployReviewed} onReviewedChange={setDeployReviewed} />
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setShowDeployConfirm(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">取消</button>
-              <button onClick={() => { setShowDeployConfirm(false); void runDeploy() }} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-emerald-700">确认部署</button>
+              <button disabled={!deployReviewed} onClick={() => { setShowDeployConfirm(false); void runDeploy() }} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-emerald-700">确认部署</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Fallback entry (Q3): the Bot command guide only opens from the 更多 menu or after a failed direct deploy. */}
-      {showDeployGuide && selectedWorkflowId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-lg rounded-lg bg-card p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <div className="mt-4 rounded-md border border-border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">在对应 Bot 对话中执行</div>
-              <code className="mt-1 block select-all font-mono text-sm text-slate-800">/workflow deploy {selectedWorkflowId}</code>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setShowDeployGuide(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">关闭</button>
-              <button onClick={() => void handleCopyDeployCommand()} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-emerald-700">
-                {deployCommandCopied ? '已复制' : '复制部署命令'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   )
 }

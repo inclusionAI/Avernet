@@ -138,6 +138,8 @@ imports in the finite set of legacy writers. There is no new CI exemption.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - OwnershipSyncReadRepository
+  - SqlOwnershipSyncReadRepository
   - SpacePersistenceEffects
   - SpaceKnowledgeSyncRepository
   - SpaceKnowledgeSyncRepositoryProtocol
@@ -156,6 +158,7 @@ provides:
   - BotAppGrantRepositoryProtocol
   - UserAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
+  - ManagerSyncReadRepository
   - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
   - BotConfigManifestRepositoryProtocol
@@ -293,6 +296,7 @@ provides:
   - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
+  - SqlManagerSyncReadRepository
   # task / forum
   - ForumRepository
   - ForumInteractionRepository
@@ -358,6 +362,10 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
+  - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
+  - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim
+  - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
   - agentclaw.community.core.space_knowledge.capture_guard
@@ -366,6 +374,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.space_membership
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.bot_manager_sync   # SyncKey / SyncFacts / SpaceChange typed in ManagerSyncReadRepositoryProtocol
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models
@@ -425,3 +434,31 @@ rewrites are driven from.
 Changing the Space persistence constructor affects direct library callers and
 corporate composition roots: pass an explicit policy, never an optional fallback.
 See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.
+
+`ManagerSyncReadRepositoryProtocol` is read-only: the bot collaborator manager
+sync projector sources its facts and key pages from it, and the sync path
+persists nothing — no queue table, no retry log, and no task record.
+
+### Bot MCP configuration addresses
+
+The override read API's legacy `owner_id` argument is an explicit stable Bot
+entity coordinate. Scoped account APIs retain human-owner semantics and resolve
+owned Bot records before accessing their canonical rows. Canonical values win
+in full (including `{}`); missing canonical values may read only a uniquely
+attributable current-owner alias, without changing storage. Commands consume
+that alias atomically on replacement/removal, including deletion after the Bot
+has been soft-deleted. Unknown past-owner rows are not guessed from a Bot ID.
+Owner-handoff finish performs this normalization before switching owner in its
+existing transaction; ordinary reads have no handoff-table dependency.
+
+## Ownership facts v1
+
+`OwnershipSyncReadRepository` and `SqlOwnershipSyncReadRepository` independently
+serve `BotOwnershipSyncService` and `OwnershipSyncRepairService`.
+`read_facts(key: SyncKey) -> OwnershipFacts` reads the live Bot in the exact
+explicit tenant/env/PK scope; `page_keys(*, avernet_tenant: str, env: str,
+after_pk: int, limit: int) -> tuple[SyncKey, ...]` walks ascending PKs with an
+exclusive cursor and at most 100 keys. No collaborator presence, roster bound,
+or Space eligibility read is required. These are read-only v1 contracts, with
+no schema, sync-state, or persistence-write change. Missing/deleted rows and
+SQL failures fail closed rather than supplying a replacement Owner.

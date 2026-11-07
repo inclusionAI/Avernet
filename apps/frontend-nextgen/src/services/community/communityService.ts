@@ -39,9 +39,6 @@ export class CommunityService {
       ...input,
       title: input.title.trim(),
       body: input.body.trim(),
-      help: input.help
-        ? { expectedTime: input.help.expectedTime?.trim() || undefined }
-        : undefined,
     };
     if (!normalized.title) throw new Error('请输入主题标题');
     if (!normalized.body) throw new Error('请输入主题正文');
@@ -54,9 +51,6 @@ export class CommunityService {
       if (new Set(options).size !== options.length) throw new Error('投票选项不能重复');
       normalized.poll = { ...normalized.poll, options };
     }
-    if (normalized.topicType === 'help' && (normalized.help?.expectedTime?.length ?? 0) > 128) {
-      throw new Error('期望解决时间不能超过 128 个字符');
-    }
     return this.gateway.createTopic(normalized, signal);
   }
 
@@ -64,6 +58,11 @@ export class CommunityService {
     const normalized = { ...input, body: input.body.trim(), replyToPostId: input.replyToPostId?.trim() || undefined };
     if (!normalized.body) return Promise.reject(new Error('请输入回复内容'));
     return this.gateway.createReply(normalized, signal);
+  }
+
+  getPostLocation(topicId: string, postId: string, pageSize: number, signal?: AbortSignal) {
+    if (!topicId.trim() || !postId.trim()) throw new Error('缺少回复定位参数');
+    return this.gateway.getPostLocation(topicId, postId, pageSize, signal);
   }
 
   setPostHelpful(

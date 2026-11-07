@@ -1,9 +1,17 @@
 //! Port contract harnesses.
 
 pub mod coordination_intent;
+pub mod run_deadline;
+pub mod a2a_delivery;
 pub mod bot_terminal_observer;
 pub mod human_notify;
 pub mod metrics;
+pub mod oauth;
+
+pub use oauth::{
+    o_auth_provider_port_contract_tests, o_auth_session_port_contract_tests,
+    pending_o_auth_login_port_contract_tests,
+};
 
 use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::port::{
@@ -36,6 +44,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
     namespace: &str,
 ) {
     let canonical_run_id = format!("{namespace}-canonical");
+    let deadline_ms=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64+60_000;
     let initial_downstream_run_id = format!("{namespace}-downstream-initial");
     let bound_downstream_run_id = format!("{namespace}-downstream-bound");
     let scope = BotRunScope {
@@ -48,7 +57,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
         bot_id: scope.bot_id.clone(),
         group_id: scope.group_id.clone(),
         bcs_session_id: Some(scope.session_id.clone()),
-        deadline_ms: u64::MAX,
+        deadline_ms,
         terminal: false,
     })
     .await;
@@ -62,7 +71,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
             "x-sandbox-bypass".to_string(),
             format!("{namespace}-route"),
         )],
-        deadline_ms: u64::MAX,
+        deadline_ms,
     })
     .await
     .expect("register active run");
@@ -123,7 +132,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
     let projected_id = format!("{namespace}-direct-alias");
     let direct = BotRunContext {
         run_id: direct_id.clone(), bot_id: scope.bot_id.clone(), group_id: String::new(),
-        bcs_session_id: Some(scope.session_id.clone()), deadline_ms: u64::MAX, terminal: false,
+        bcs_session_id: Some(scope.session_id.clone()), deadline_ms, terminal: false,
     };
     port.put_context(direct.clone()).await;
     port.put_alias_context(BotRunContext { run_id: projected_id.clone(), ..direct }).await;
@@ -161,6 +170,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
             .expect("query removed alias")
             .is_none()
     );
+    run_deadline::a2a_run_deadline_contract(port,namespace).await;
 }
 
 pub async fn event_recorder_port_contract_tests<T: EventRecorderPort + ?Sized>(

@@ -1,68 +1,79 @@
 import { Button } from '@/components/ui/Button';
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
-import { Eye, Heart, Star } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { Bookmark, Eye, Heart } from 'lucide-react';
+import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
   topicId: string;
   topicStats: InteractionStats;
-  likePending: boolean;
-  favoritePending: boolean;
+  publishedAt: string;
+  liked?: boolean;
+  favorited?: boolean;
+  likePending?: boolean;
+  favoritePending?: boolean;
   onLike: (target: ForumTargetRef) => void;
   onFavorite: (target: ForumTargetRef) => void;
 }
 
 /**
- * Interaction controls are event buttons, not state toggles. Counts always come
- * from the latest server-side summary; only the in-flight request is disabled.
+ * Main-topic action row. As in the product design, actions live under the body,
+ * share a row with the published time, and do not introduce an extra divider.
  */
 export function TopicInteractionBar({
   topicId,
   topicStats,
-  likePending,
-  favoritePending,
+  publishedAt,
+  liked = false,
+  favorited = false,
+  likePending = false,
+  favoritePending = false,
   onLike,
   onFavorite,
 }: TopicInteractionBarProps) {
   const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
+
   return (
-    <section
-      aria-label="主题互动"
-      className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
-    >
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Eye className="size-4" aria-hidden />
-        {topicStats.viewCount} 浏览
-      </span>
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Heart className="size-4" aria-hidden />
-        {topicStats.likeCount} 点赞
-      </span>
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Star className="size-4" aria-hidden />
-        {topicStats.favoriteCount} 收藏
-      </span>
-      <span className="ml-auto inline-flex items-center gap-2">
+    <section aria-label="主题互动" className="mt-2 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Eye className="size-3.5" aria-hidden />
+          <span aria-label={`浏览 ${topicStats.viewCount} 次`}>{topicStats.viewCount}</span>
+        </span>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="h-8 px-3 text-xs"
+          aria-busy={likePending}
           aria-label="点赞主题"
-          loading={likePending}
+          aria-pressed={liked}
           onClick={() => onLike(target)}
+          className={cn(
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
+            liked
+              ? 'text-destructive hover:text-destructive'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
         >
-          点赞
+          <Heart className={cn('size-4', liked && 'fill-current')} aria-hidden />
+          <span aria-label={`点赞 ${topicStats.likeCount} 次`}>{topicStats.likeCount}</span>
         </Button>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="h-8 px-3 text-xs"
+          aria-busy={favoritePending}
           aria-label="收藏主题"
-          loading={favoritePending}
+          aria-pressed={favorited}
           onClick={() => onFavorite(target)}
+          className={cn(
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
+            favorited ? 'text-warning hover:text-warning' : 'text-muted-foreground hover:text-foreground',
+          )}
         >
-          收藏
+          <Bookmark className={cn('size-4', favorited && 'fill-current')} aria-hidden />
+          <span>{favorited ? '已收藏' : '收藏'}</span>
         </Button>
-      </span>
+      </div>
+      <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>
     </section>
   );
 }

@@ -181,7 +181,7 @@ export function MemberList({
               <div
                 key={participant.actorId}
                 data-testid={`member-${participant.actorId}`}
-                className="@container flex items-center gap-2 border-b border-border px-1 py-2 last:border-b-0 hover:bg-muted/50 transition-colors"
+                className="@container flex items-center gap-2 border-b border-divider px-1 py-2 last:border-b-0 hover:bg-muted/50 transition-colors"
               >
                 <Avatar participant={{ ...participant, name: displayName }} />
                 {/* 名字可能被徽标挤压截断：hover 显示全称。 */}

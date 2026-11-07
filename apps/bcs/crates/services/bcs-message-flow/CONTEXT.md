@@ -47,6 +47,16 @@ fail-closed: an unavailable or failed policy read logs and skips the external
 notification without failing the message flow, while mode/driver comparison is
 synchronous and injects no extra await after admission.
 
+The helper captures the public network-tracing provider, opaque parent and
+ambient propagation snapshot before spawning notification delivery. The
+request-owned retained terminal-event task captures them too, so Bot final
+events do not lose lineage before reaching the same helper. This adds no DB
+reads, persistence fields or retry behavior; the existing policy read remains
+one per eligible candidate. Explicit capture does not activate native SDK/log
+contexts or join detached notification tasks at shutdown. The tracing test
+drives real WebSend/BotEvent services through HTTP into the work-order backend,
+including delivery after the request scope ends and a disabled provider scope.
+
 IM queue hints are best-effort and appear only after ten seconds of continued
 Queued state. The Channel `/cacel` command (with `/cancel` compatibility alias)
 cancels the authenticated Human's newest still-unsent IM message in the current
@@ -321,3 +331,149 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## Manager-worker task presentation
+
+Task dispatches and results render Bot-only short-reference envelopes at delivery
+preparation (and on the legacy direct path). Canonical result bodies remain pure;
+exact pre-upgrade abnormal metadata prefixes remain readable. Human result
+projections are unchanged. Timeout-unknown System messages retain human text and
+persist separate task metadata for Bot rendering. These changes add no remote
+reads, repository operations, timers or retry policy. See
+`apps/bcs/docs/task-presentation.md` for the display contract.
+
+Task-handle controls additionally use indexed bounded-output repository reads;
+20 selectors share one SQL batch with request-level deduplication. Cancellation
+uses post-commit notifications with a 1s lookup fallback and retains legacy abort
+confirmation processing beyond HTTP wait expiry. Task deadlines add no soft
+reminders. See `apps/bcs/docs/task-presentation.md` for retention, legacy Provider
+exact-cancel limitations, migration order and the compatibility-release gate.
+
+## Caller association ownership
+
+Caller coordination reuses Managed delivery parent/invocation metadata and the
+existing task/run terminal CAS. No independent child repository or result ledger
+consumer remains; Caller wiring no longer initializes a separate repository schema.
+~~Historical migrations and their compatibility schema initialization are unchanged.~~
+(2026-10-20 勘误:The a2a_child table family migrations were later dropped entirely in
+7ea603b8c; current numbered tails are sqlite 032 `session_registry` and mysql
+032 `session_speaking_leases`.)
+Accepted-dispatch lineage and per-session/turn invocation allowances are bounded
+owner-local memory only: 1024 production entries, at most 16 invocation keys per
+turn, depth capped at two. Reserve before ordinary admission; failed/unknown
+admissions keep the allowance. Existing coordination intent/tool-call dedup owns
+replay. Lost identity refuses inheritance; it never blocks existing Worker results.
+This is not a cross-owner durable budget or a parent-terminal/admission transaction.
+Each coordination assignment uses one scoped Managed parent lookup and existing
+run context; no extra child INSERT transaction or child lookup at completion.
+Memory locks are never held across await/network I/O.
+
+Protected Caller dispatch runs in the bounded runtime task set with the existing
+I/O timeout, never inline on the scheduler. In-flight Caller tasks reserve Bot
+capacity conservatively (a persisted active row can also be counted while its
+future is pending). Deadline/cancel control aborts the local future; shutdown
+aborts and drains it before recovery. Timeout before StartSend fails preparation;
+after StartSend it is Unknown, never proof of non-delivery or permission to resend.
+This bounds local futures, not remote execution. Queue TTL does not declare a
+possibly executing dispatch stopped. Stage DEBUG logs carry dispatch IDs only,
+not identity proofs or credentials.
+
+No new queue scan or per-tick per-task lookup is added. Completion/timeout uses
+one scoped delivery lookup and at most one lifecycle CAS; existing bounded control
+(32 rows) and expiry (100 rows) batches remain unchanged. Capacity reservations
+are bounded by max_tasks and use process-local bookkeeping, not another cache.
+
+## Caller identity boundary
+
+Caller dispatch consumes `bcs-caller-identity-api::CallerIdentityPlugin`. Concrete JWT/private adapters are injected by composition roots, never selected by orchestration.
+
+### Caller credential profiles (Plugin API v1.1)
+
+Dispatch authorization (`not_after_ms`, caller context expiry, parent/run/attempt
+ledger checks and container isolation) is independent of identity credential TTL.
+ExecutionBound plugins retain bounded run-attesting proofs. IdentityRelay plugins
+return upstream identity credentials with their actual expiry/reuse semantics;
+they do not attest run/scope/purpose/isolation. Protected send carries both windows
+separately. Cancellation terminates BCS execution, not an upstream identity JWT.
+The material ledger still fences parent run/attempt; plugins never select INITIAL
+as recovery from a failed parent relay. Unsupported purpose-specific issuance
+fails closed. This distinction adds no database access or credential cache.
+
+## Run execution and input-wait budgets
+
+`RunBudgetManagement` implements application `RunBudgetService`, calling the
+pure budget Core then ManagedMessageDeliveryService and BotRunContextPort. The
+outbound A2A adapter no longer calls Core policy or orchestrates managed/cache
+deadlines; it receives the accepted change and persists A2A correlation before
+publishing cards/continuations. The initial unchanged deadline adds no writes.
+Pause/resume/initial cap retain the prior bounded managed CAS + guarded context
+operation cost, with no additional DB reads or token-path writes. Cross-store
+failure is returned explicitly, including partial managed-success/cache-failure;
+no rollback or slot release is fabricated. Shared application conformance runs
+with Memory/SQLite managed stores and live context guards; failure tests prove
+managed failure prevents cache writes and cache errors cannot return success.
+
+`RunBudgetCore` implements the transport-independent `RunBudgetCoreService`.
+It charges execution time before a pause, retains the remaining execution
+budget during input wait, and caps every phase by a fixed total deadline.
+Repeated observations cannot renew an existing wait. Expired, exhausted or
+backwards-clock transitions fail. Bootstrap supplies limits; Core reads no
+environment and performs no I/O.
+
+Managed delivery exposes `reschedule_run_deadline` for an exact canonical
+Bot/Group/Session/Run. Only live Dispatching/Running Send deliveries can change;
+the normal CAS transaction increments their version without changing attempt,
+request, transport, status or occupied slot. Identical updates are idempotent.
+Canonical lookup is bounded to two rows and uses the existing env/run index.
+The normal path adds one lookup and existing delivery reads/CAS; stale-version
+conflicts have at most three attempts, and storage errors propagate immediately.
+
+Memory/Redis Run-context stores expose the separately guarded
+`reschedule_deadline` port operation. It requires an unexpired canonical A2A
+Run, matching expected deadline, active scope and transport ownership, and no
+terminal/terminal-processing claim. A per-Run local gate serializes against
+terminal and owner removal; this is not a distributed lease. Updates retain
+existing aliases/output lineage and cannot create producers after retirement.
+
+Redis performs bounded reads (five lifecycle keys, one scope field, at most two
+aliases), UpdateOnly writes for transport/active/context, and expiry updates.
+With two aliases and scope expiry extension the test asserts eleven cache
+operations, no full hash scan. Canonical context is written last. Redis updates
+are not a cross-store transaction: earlier TTL/index writes can remain after a
+failure. The caller must cancel/fail closed rather than publish an interaction
+until BOTH managed delivery and Run-context updates and correlation persistence
+have succeeded. No per-token budget writes or restart recovery guarantee exists.
+
+The A2A waiting driver now integrates the injected budget policy and persistence
+ports. The last decision resumes charging before transmitting a continuation
+that can execute tools, not after its ACK. Waiting itself holds the Session slot
+but no SSE subscription; partial decisions cannot renew a wait. No A2A SDK or
+wire schema enters this Core/store boundary.
+
+Lost observation uses `mark_run_transport_unknown`, an exact canonical scoped
+lookup followed by the existing CAS transition, bounded to three conflicts.
+Dispatching/Running becomes Unknown; Cancelling becomes CancelUnknown. The
+attempt and occupied execution slot are retained. No token-path writes, scans,
+implicit retries or new task submissions are introduced. A later confirmed
+terminal still settles through normal event ingestion. Memory/SQLite shared
+conformance covers scope/alias rejection, idempotence and terminal non-revival.
+
+Queued and active-scope aborts use the registry's cancellation-only target
+resolver. A failed Card refresh therefore cannot block cancellation of an
+already-submitted A2A Run. Immutable owner checks and canonical scope remain;
+the adapter loads the original endpoint/Task from durable correlation. New send
+preparation still uses normal target resolution and rejects an unavailable Card.
+
+## Native task Caller correlation
+
+`handle_native_task_dispatch` correlates a prior accepted native tool start with
+an authenticated Bot request, then validates exact parent Run/attempt material
+before admitting a Caller Worker. Owner parents use existing delegation-only
+Human-origin lineage, never a synthetic execution token. Caller parents require
+their exact ParentExecutionTokenRef. Native dispatch cannot redeem the latest
+session capture. Ordinary targets and legacy coordination keep their delivery
+paths. Correlation/receipts are bounded owner-local memory, not durable exactly-once
+semantics; missing, reordered or ambiguous starts fail closed. Incremental parent
+reads use canonical scoped LIMIT 2 and existing Run-context/config caches, with no
+new queue scan or schema. See `docs/native-task-caller.md` for costs, retention,
+SDK-ordering prerequisites and conformance coverage.
