@@ -18,6 +18,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileTransferNotDoneError,
     SessionResourceBaasClient,
     SessionFileUpstreamUnavailableError,
 )
@@ -198,7 +199,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 current.resource_id,
                 status,
             )
-            raise ValueError("transfer_not_done")
+            raise SessionFileTransferNotDoneError()
         return self._schedule_materialization(current, allow_ready=False)
 
     def get_status(

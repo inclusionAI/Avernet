@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.services.device_context import DeviceConnectionUnavailableError
 from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileTransferNotDoneError,
     SessionResourceBaasClient,
 )
 from agentclaw.community.core.session_resources.service import SessionResourceService
@@ -118,6 +119,22 @@ class _HttpClient:
         else:
             data = {"transfer_id": "transfer-1", "status": self.complete_status}
         return httpx.Response(200, request=request, json={"code": 0, "data": data})
+
+
+class _ConflictingHttpClient:
+    def post(self, path, **kwargs):
+        del kwargs
+        request = httpx.Request("POST", f"https://baas.example{path}")
+        if path.endswith("upload-url"):
+            data = {
+                "upload_url": "https://oss.example/object?Signature=secret",
+                "transfer_id": "transfer-1",
+                "expires_at": "2026-07-13T00:00:00Z",
+                "type": "SINGLE",
+                "http_method": "PUT",
+            }
+            return httpx.Response(200, request=request, json={"code": 0, "data": data})
+        return httpx.Response(409, request=request, content=b"")
 
 
 class _Resolver:
@@ -232,9 +249,10 @@ def _service(
     default_tenant="configured-tenant",
     bot_repository=None,
     bot_friend_repository=None,
+    http=None,
 ):
     repo = _Repo()
-    http = _HttpClient(complete_status=complete_status)
+    http = http or _HttpClient(complete_status=complete_status)
     service = SessionResourceService(
         repository=repo,
         baas_client=SessionResourceBaasClient(http),
@@ -655,6 +673,27 @@ def test_upload_complete_does_not_dispatch_when_baas_is_not_done():
     intent = _intent(service)
 
     with pytest.raises(ValueError, match="transfer_not_done"):
+        service.complete_upload(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            transfer_id="transfer-1",
+        )
+
+    assert not queue.calls
+    assert repo.value.status is SessionResourceStatus.UPLOAD_URL_ISSUED
+
+
+def test_upload_complete_propagates_baas_conflict_as_not_done():
+    queue = _Queue()
+    service, repo, _ = _service(queue, http=_ConflictingHttpClient())
+    intent = _intent(service)
+
+    with pytest.raises(
+        SessionFileTransferNotDoneError,
+        match="session_file_transfer_not_done",
+    ):
         service.complete_upload(
             owner_id="owner-1",
             bot_id="bot-1",

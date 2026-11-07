@@ -22,6 +22,9 @@ from agentclaw.community.adapters.http.session_resources.schemas import (
     UploadCompleteRequest,
     UploadIntentRequest,
 )
+from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileTransferNotDoneError,
+)
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,
@@ -225,6 +228,32 @@ def test_upload_intent_request_accepts_positive_binding_id_only():
             binding_id=True,
             files=[{"filename": "report.txt"}],
         )
+
+
+class _RaisingService:
+    def complete_upload(self, **kwargs):
+        raise SessionFileTransferNotDoneError()
+
+
+@pytest.mark.asyncio
+async def test_upload_complete_maps_baas_conflict_to_session_409():
+    body = UploadCompleteRequest(
+        bot_id="bot-1",
+        session_key="session-raw",
+        resource_id="sr_001",
+        transfer_id="transfer-1",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await upload_complete(
+            body,
+            user=AuthenticatedUser("id", "owner-1", "owner-1"),
+            service=_RaisingService(),
+            observer=_RecordingObserver(),
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "session_file_transfer_not_done"
 
 
 @pytest.mark.asyncio
