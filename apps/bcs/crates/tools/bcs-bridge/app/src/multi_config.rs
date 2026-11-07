@@ -69,6 +69,10 @@ pub(crate) fn load(path: &Path, credentials: &dyn CredentialSource) -> anyhow::R
 }
 
 pub(crate) fn load_document(document: &Document, path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<Vec<LoadedProvider>> {
+    load_document_with_profile(document, path, credentials, &crate::profile::ExplicitProfile)
+}
+
+pub(crate) fn load_document_with_profile(document: &Document, path: &Path, credentials: &dyn CredentialSource, profile: &dyn crate::profile::DeployProfile) -> anyhow::Result<Vec<LoadedProvider>> {
     if document.groups.is_empty() { bail!("Bridge configuration has no registered Providers"); }
     let mut providers = Vec::new();
     for group in &document.groups {
@@ -84,7 +88,10 @@ pub(crate) fn load_document(document: &Document, path: &Path, credentials: &dyn 
         let token = if group.get("mode").and_then(toml::Value::as_str) == Some("plugin") { None }
             else { Some(credentials.webhook_token(group.get("provider_id").and_then(toml::Value::as_str)
                 .context("Gateway configuration requires provider_id")?)?) };
-        providers.push(LoadedProvider { config: config::runtime(group, path, token.as_deref())?, registrations });
+        let mut config = config::runtime(group, path, token.as_deref())?;
+        if config.api_url.is_none() { config.api_url.clone_from(&defaults.api_url); }
+        config.cli_environment = profile.cli_environment(&config)?;
+        providers.push(LoadedProvider { config, registrations });
     }
     BridgeConfig::new(providers.iter().map(|p| p.config.clone()).collect())?;
     Ok(providers)
@@ -201,3 +208,89 @@ pub(crate) fn read_for_registration(path: &Path, auth: &str, provider: &str, mod
 #[cfg(test)]
 #[path = "multi_config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod cli_environment_tests {
+    use super::*;
+    use std::fs;
+    use std::collections::BTreeMap;
+    use crate::profile::{DeployProfile, ExplicitProfile};
+
+    fn load_runtime_with_settings(path: &Path, credentials: &dyn CredentialSource, profile: &dyn DeployProfile) -> anyhow::Result<(RegistrationSettings, ProviderConfig)> {
+        let document = Document::load(path)?;
+        let mut providers = load_document_with_profile(&document, path, credentials, profile)?;
+        let provider = providers.remove(0);
+        Ok((provider.registrations.into_iter().next().unwrap_or_default(), provider.config))
+    }
+
+    struct TestProfile;
+    impl DeployProfile for TestProfile {
+        fn default_api_url(&self) -> anyhow::Result<String> { unreachable!() }
+        fn default_upstream_url(&self) -> anyhow::Result<String> { unreachable!() }
+        fn cli_environment(&self, config: &ProviderConfig) -> anyhow::Result<BTreeMap<String, String>> {
+            Ok(BTreeMap::from([("BCS_API_BASE_URL".into(), format!("{}/cli", config.api_url.as_deref().unwrap()))]))
+        }
+    }
+    struct NoCredentials;
+    impl CredentialSource for NoCredentials {
+        fn webhook_token(&self, _: &str) -> anyhow::Result<String> { panic!("plugin mode must not request webhook credentials") }
+    }
+
+    #[test]
+    fn registration_settings_supply_a_missing_legacy_runtime_api() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bridge.toml");
+        fs::write(&path, r#"
+provider_id = "p"
+mode = "plugin"
+[plugin]
+url = "wss://transport.example/ws/bot"
+[registration]
+api_url = "https://saved.example"
+[[bot]]
+provider_bot_ref = "worker"
+bot_id = "bot-a"
+token = "test-token"
+engine = "codex"
+cwd = "/tmp"
+"#).unwrap();
+        let (_, cfg) = load_runtime_with_settings(&path, &NoCredentials, &ExplicitProfile).unwrap();
+        assert_eq!(cfg.api_url.as_deref(), Some("https://saved.example"));
+    }
+
+    #[test]
+    fn startup_and_reload_resolve_profile_from_the_current_saved_endpoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bridge.toml");
+        for api in ["https://pre.example", "https://prod.example"] {
+            let text = format!(r#"
+provider_id = "p"
+mode = "plugin"
+api_url = "{api}"
+state_path = "state.sqlite3"
+[plugin]
+url = "wss://transport.example/ws/bot"
+[[bot]]
+provider_bot_ref = "worker"
+bot_id = "bot-a"
+token = "test-token"
+engine = "codex"
+cwd = "/tmp"
+[registration]
+api_url = "{api}"
+"#);
+            fs::write(&path, &text).unwrap();
+            let (settings, cfg) = load_runtime_with_settings(&path, &NoCredentials, &TestProfile).unwrap();
+            let env: BTreeMap<_, _> = cfg.execution_env(&cfg.bots[0]).into_iter().collect();
+            assert_eq!(env["BCS_API_BASE_URL"], format!("{api}/cli"));
+            assert_eq!(env["MOLTIS_BCS_URL"], env["BCS_API_BASE_URL"]);
+            assert_eq!(env["BCN_BOT_TOKEN"], "test-token");
+            assert_eq!(settings.api_url.as_deref(), Some(api));
+            assert_eq!(cfg.api_url.as_deref(), Some(api));
+            assert_eq!(cfg.plugin.as_ref().unwrap().url, "wss://transport.example/ws/bot");
+            assert_eq!(fs::read_to_string(&path).unwrap(), text);
+            let (_, explicit) = load_runtime_with_settings(&path, &NoCredentials, &ExplicitProfile).unwrap();
+            assert_eq!(explicit.execution_env(&explicit.bots[0]).into_iter().collect::<BTreeMap<_, _>>()["BCS_API_BASE_URL"], api);
+        }
+    }
+}

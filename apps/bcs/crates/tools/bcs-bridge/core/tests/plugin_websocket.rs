@@ -543,6 +543,7 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
     ProviderConfig {
         provider_auth: None,
         api_url: None,
+        cli_environment: Default::default(),
         provider_id: "upstream-test".into(),
         mode: ConnectionMode::Plugin,
         listen: None,

@@ -1,5 +1,6 @@
 #![cfg(unix)]
 use std::{path::PathBuf, sync::Arc};
+use bcs_bridge_core::config::ProviderConfig;
 use bcs_bridge_core::engine::{claude_code::ClaudeCodeFactory, Engine, EngineFactory, SessionObserver, TurnRequest};
 
 struct Observer;
@@ -15,7 +16,7 @@ async fn concurrent_engine_processes_receive_their_own_actor() {
     std::fs::write(&bin,r#"#!/bin/sh
 # Consume the initial request before replying so the driver cannot write to a closed pipe.
 IFS= read -r request || exit 1
-printf '{"type":"result","subtype":"success","result":"%s","is_error":false,"session_id":"session"}\n' "$BCN_ACTOR_BOT_ID"
+printf '{"type":"result","subtype":"success","result":"%s","is_error":false,"session_id":"session"}\n' "$BCN_ACTOR_BOT_ID|$BCN_BOT_TOKEN|$BCS_API_BASE_URL|$MOLTIS_BCS_URL"
 "#).unwrap();
     std::fs::set_permissions(&bin,std::fs::Permissions::from_mode(0o755)).unwrap();
     // The shell peer only implements legacy result frames; isolate caller env here.
@@ -23,14 +24,29 @@ printf '{"type":"result","subtype":"success","result":"%s","is_error":false,"ses
     let engine = ClaudeCodeFactory::default().build(bin, &options).unwrap();
     async fn run(engine: Arc<dyn Engine>,cwd:PathBuf,actor:&str)->String {
         let mut req=TurnRequest::new(actor,"hello",cwd,Arc::new(Observer));
-        req.env=vec![("BCN_ACTOR_BOT_ID".into(),actor.into()),("BCN_AUTH_MODE".into(),"agentpass-subbots".into())];
+        let config = ProviderConfig::from_toml(&format!(r#"
+provider_id = "p"
+listen = "127.0.0.1:0"
+bcs_to_provider_token = "webhook"
+api_url = "https://registration.example"
+[[bot]]
+provider_bot_ref = "{actor}"
+bot_id = "{actor}"
+token = "token-{actor}"
+engine = "claude-code"
+cwd = "/tmp"
+"#), std::path::Path::new("/tmp/bridge.toml")).unwrap();
+        let mut config = config;
+        config.cli_environment.insert("BCS_API_BASE_URL".into(), "https://gateway.example/cli".into());
+        req.env=config.execution_env(&config.bots[0]);
         let(tx,mut rx)=tokio::sync::mpsc::channel(64);
         let consumer=tokio::spawn(async move{while rx.recv().await.is_some(){}});
         let outcome=engine.run_turn(req,tx,tokio_util::sync::CancellationToken::new()).await.unwrap();
         consumer.await.unwrap();outcome.final_text.unwrap()
     }
     let (a,b)=tokio::join!(run(engine.clone(),dir.path().into(),"bot_A"),run(engine,dir.path().into(),"bot_B"));
-    assert_eq!(a,"bot_A");assert_eq!(b,"bot_B");
+    assert_eq!(a,"bot_A|token-bot_A|https://gateway.example/cli|https://gateway.example/cli");
+    assert_eq!(b,"bot_B|token-bot_B|https://gateway.example/cli|https://gateway.example/cli");
 }
 
 #[test]

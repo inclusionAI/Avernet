@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr, path::{Path, PathBuf}};
+use std::{collections::{BTreeMap, HashSet}, net::SocketAddr, path::{Path, PathBuf}};
 use serde::Deserialize;
 pub use crate::bridge_config::BridgeConfig;
 
@@ -64,6 +64,10 @@ pub struct ProviderConfig {
     pub provider_id: String,
     pub provider_auth: Option<String>,
     pub api_url: Option<String>,
+    /// Distribution-owned CLI settings resolved at startup, not persisted TOML.
+    /// Per-Bot identity and credentials are supplied separately below.
+    #[serde(skip)]
+    pub cli_environment: BTreeMap<String, String>,
     #[serde(default)]
     pub mode: ConnectionMode,
     pub listen: Option<SocketAddr>,
@@ -97,13 +101,22 @@ pub enum ConfigError {
 impl ProviderConfig {
     /// Applied to each engine subprocess; never mutates the bridge environment.
     pub fn execution_env(&self, bot: &BotConfig) -> Vec<(String, String)> {
-        let mut env = Vec::new();
-        if self.provider_auth.as_deref() == Some("agentpass-subbots") {
-            env.push(("BCN_AUTH_MODE".into(), "agentpass-subbots".into()));
-            env.push(("BCN_ACTOR_BOT_ID".into(), bot.bot_id.clone().unwrap_or_default()));
+        let mut env = self.cli_environment.clone();
+        if let Some(url) = env.get("BCS_API_BASE_URL").or(self.api_url.as_ref()).cloned() {
+            env.insert("BCS_API_BASE_URL".into(), url.clone());
+            // Older CLIs let this alias take precedence over BCS_API_BASE_URL.
+            env.insert("MOLTIS_BCS_URL".into(), url);
         }
-        if let Some(url) = &self.api_url { env.push(("BCS_API_BASE_URL".into(), url.clone())); }
-        env
+        if self.provider_auth.as_deref() == Some("agentpass-subbots") {
+            env.insert("BCN_AUTH_MODE".into(), "agentpass-subbots".into());
+        }
+        if let Some(id) = bot.bot_id.as_ref().filter(|id| !id.trim().is_empty()) {
+            env.insert("BCN_ACTOR_BOT_ID".into(), id.clone());
+        }
+        if let Some(token) = bot.token.as_ref().filter(|token| !token.trim().is_empty()) {
+            env.insert("BCN_BOT_TOKEN".into(), token.clone());
+        }
+        env.into_iter().collect()
     }
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path)?;

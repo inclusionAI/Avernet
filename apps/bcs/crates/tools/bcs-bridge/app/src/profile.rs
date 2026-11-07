@@ -1,10 +1,12 @@
-//! Deploy profile: built-in default endpoints for `register`.
+//! Deploy profile: registration defaults and distribution-owned CLI environment.
 
+use std::collections::BTreeMap;
 use anyhow::{Result, bail};
+use bcs_bridge_core::config::ProviderConfig;
 
-/// Supplies endpoint defaults when they are not configured explicitly.
-/// Each method is called only when its endpoint is actually needed, so a
-/// profile may fail for configurations that do not need a default.
+/// Supplies registration endpoint defaults and runtime CLI settings.
+/// Endpoint default methods are called only when their endpoint is needed.
+/// The CLI environment hook is called when loading a runtime configuration.
 pub trait DeployProfile: Send + Sync {
     /// Registration API prefix, used when neither `--api-url` nor
     /// `[registration] api_url` is set.
@@ -12,6 +14,15 @@ pub trait DeployProfile: Send + Sync {
     /// BCS Bot WebSocket endpoint for plugin mode, used when `--upstream-url`
     /// is not set.
     fn default_upstream_url(&self) -> Result<String>;
+
+    /// Resolve non-secret CLI settings from the saved runtime endpoints.
+    /// Called for each Provider when loading the startup configuration. The default
+    /// leaves the configured API URL in use. Overrides affect owned engine
+    /// children only, never the registration API, plugin WebSocket or process
+    /// environment. Bot identity and tokens belong to ProviderConfig, not here.
+    fn cli_environment(&self, _config: &ProviderConfig) -> Result<BTreeMap<String, String>> {
+        Ok(BTreeMap::new())
+    }
 }
 
 /// No built-in endpoints: every endpoint must be configured explicitly.
