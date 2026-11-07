@@ -73,7 +73,7 @@ function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty, savePending =
   }
 
   return <div className="h-full min-w-0 overflow-auto p-4">
-    <p className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{packVersionWritesEnabled(current.snapshot) ? '可编辑 Pack 版本文件；保存结果受宿主权限和保存模式约束，请以保存回执为准。保存不会部署。' : 'Pack 版本文件写入尚未启用；本界面不能保存或部署。可以临时编辑，但更改仅留在本页面内存中。'}当前版（wf）是 Git 当前分支，不保证与生效 tag 一致。未保存更改在本页面会话中保留，刷新或关闭页面会丢失。</p>
+    {current.snapshot && !current.loading && !current.readFailure && <p className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{packVersionWritesEnabled(current.snapshot) ? '可编辑 Pack 版本文件；保存结果受宿主权限和保存模式约束，请以保存回执为准。保存不会部署。' : 'Pack 版本文件写入尚未启用；本界面不能保存或部署。可以临时编辑，但更改仅留在本页面内存中。'}当前版（wf）是 Git 当前分支，不保证与生效 tag 一致。未保存更改在本页面会话中保留，刷新或关闭页面会丢失。</p>}
     <div className="mb-3 flex flex-wrap items-center gap-3">
       <div role="group" aria-label="脚本版本" className="inline-flex rounded-lg bg-muted/50 p-1 text-[11px]">
         <button type="button" disabled={state.saving || state.uploading} aria-pressed={version === 'current'} onClick={() => switchVersion('current')} className="inline-flex h-[31px] cursor-pointer items-center rounded-[7px] px-3 font-semibold text-muted-foreground transition-colors hover:bg-card hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-sm disabled:cursor-not-allowed disabled:opacity-40">当前版（wf）{dirty(state.versions.current) ? ' *' : ''}</button>
