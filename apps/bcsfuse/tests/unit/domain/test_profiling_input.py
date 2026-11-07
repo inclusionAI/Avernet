@@ -21,7 +21,7 @@ class TestMarkdownDocument:
 
     def test_create_soul_document_success(self):
         """测试创建 SOUL.md 文档"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         content = """
 # Identity
@@ -45,7 +45,7 @@ Role: Researcher
 
     def test_create_rules_document_success(self):
         """测试创建 RULES.md 文档"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         content = """
 # Constraints
@@ -63,7 +63,7 @@ Role: Researcher
 
     def test_create_memory_document_success(self):
         """测试创建 MEMORY.md 文档"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         content = """
 # 2026-03-01
@@ -84,7 +84,7 @@ Role: Researcher
 
     def test_create_document_with_metadata(self):
         """测试创建带元数据的文档"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         doc = MarkdownDocument(
             doc_type=DocType.SOUL,
@@ -100,7 +100,7 @@ Role: Researcher
 
     def test_empty_content_raises_error(self):
         """测试空内容抛出错误"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         with pytest.raises(ValidationError) as exc_info:
             MarkdownDocument(
@@ -112,7 +112,7 @@ Role: Researcher
 
     def test_whitespace_only_content_raises_error(self):
         """测试仅含空白的文档抛出错误"""
-        from src.domain.models.profiling_input import MarkdownDocument, DocType
+        from app.domain.models.profiling_input import MarkdownDocument, DocType
 
         with pytest.raises(ValidationError) as exc_info:
             MarkdownDocument(
@@ -124,7 +124,7 @@ Role: Researcher
 
     def test_invalid_doc_type_raises_error(self):
         """测试无效文档类型抛出错误"""
-        from src.domain.models.profiling_input import MarkdownDocument
+        from app.domain.models.profiling_input import MarkdownDocument
 
         with pytest.raises(ValidationError):
             MarkdownDocument(
@@ -138,7 +138,7 @@ class TestSkillMetadataInput:
 
     def test_create_skill_metadata_success(self):
         """测试创建技能元数据"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             SkillMetadataInput,
             SkillSource,
             TrustLevel,
@@ -162,7 +162,7 @@ class TestSkillMetadataInput:
 
     def test_create_skill_with_minimal_fields(self):
         """测试创建最小字段技能"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             SkillMetadataInput,
             SkillSource,
             TrustLevel,
@@ -181,7 +181,7 @@ class TestSkillMetadataInput:
 
     def test_skill_with_approval_required(self):
         """测试需要审批的技能"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             SkillMetadataInput,
             SkillSource,
             TrustLevel,
@@ -199,7 +199,7 @@ class TestSkillMetadataInput:
 
     def test_skill_empty_name_raises_error(self):
         """测试空技能名抛出错误"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             SkillMetadataInput,
             SkillSource,
             TrustLevel,
@@ -218,7 +218,7 @@ class TestResourceMetadataInput:
 
     def test_create_resource_metadata_success(self):
         """测试创建资源元数据"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ResourceMetadataInput,
             ResourceKind,
             ResourceAccess,
@@ -243,7 +243,7 @@ class TestResourceMetadataInput:
 
     def test_create_resource_with_minimal_fields(self):
         """测试创建最小字段资源"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ResourceMetadataInput,
             ResourceKind,
             ResourceAccess,
@@ -263,7 +263,7 @@ class TestResourceMetadataInput:
 
     def test_resource_invalid_id_format_raises_error(self):
         """测试无效资源 ID 格式抛出错误"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ResourceMetadataInput,
             ResourceKind,
             ResourceAccess,
@@ -281,7 +281,7 @@ class TestResourceMetadataInput:
 
     def test_resource_empty_name_raises_error(self):
         """测试空资源名抛出错误"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ResourceMetadataInput,
             ResourceKind,
             ResourceAccess,
@@ -301,7 +301,7 @@ class TestProfilingInput:
 
     def test_create_profiling_input_with_documents_only(self):
         """测试仅文档的聚合输入"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -328,7 +328,7 @@ class TestProfilingInput:
 
     def test_create_profiling_input_with_all_sources(self):
         """测试包含所有来源的聚合输入"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -369,7 +369,7 @@ class TestProfilingInput:
 
     def test_profiling_input_empty_documents_raises_error(self):
         """测试没有文档的输入抛出错误"""
-        from src.domain.models.profiling_input import ProfilingInput
+        from app.domain.models.profiling_input import ProfilingInput
 
         with pytest.raises(ValidationError) as exc_info:
             ProfilingInput(
@@ -381,7 +381,7 @@ class TestProfilingInput:
 
     def test_profiling_input_empty_worker_id_raises_error(self):
         """Worker ID 必须非空，但不要求应用专用前缀。"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -400,7 +400,7 @@ class TestProfilingInput:
 
     def test_profiling_input_get_documents_by_type(self):
         """测试按类型获取文档"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -433,7 +433,7 @@ class TestProfilingInput:
 
     def test_profiling_input_has_document_type(self):
         """测试检查是否有某类型文档"""
-        from src.domain.models.profiling_input import (
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,

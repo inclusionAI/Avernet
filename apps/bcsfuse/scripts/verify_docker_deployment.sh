@@ -56,7 +56,8 @@ log_skip() {
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$REPO_ROOT"
 
 echo "============================================================"
 echo "BCSFuse Open-Core Docker Deployment Verification"
@@ -70,7 +71,7 @@ echo "============================================================"
 log_info "Building Docker image bcsfuse-opencore:p1-g8..."
 
 BUILD_START=$(date +%s)
-if docker build -t bcsfuse-opencore:p1-g8 . > /tmp/docker_build.log 2>&1; then
+if docker build -f apps/bcsfuse/Dockerfile -t bcsfuse-opencore:p1-g8 . > /tmp/docker_build.log 2>&1; then
     BUILD_END=$(date +%s)
     BUILD_DURATION=$((BUILD_END - BUILD_START))
     IMAGE_ID=$(docker images -q bcsfuse-opencore:p1-g8 | head -n1)
@@ -172,17 +173,8 @@ echo "============================================================"
 
 log_info "Running P0 targeted test suite in container..."
 
-docker exec bcsfuse-opencore-g8 python -m pytest \
-    tests/security/test_opencore_security_boundary.py \
-    tests/integration/test_opencore_app_startup_health_e2e.py \
-    tests/contract/test_opencore_model_service_contract.py \
-    tests/integration/test_opencore_dev_smoke_provider_registry_e2e.py \
-    tests/contract/test_opencore_provider_public_safe_contract.py \
-    tests/integration/test_worker_registry_flow.py \
-    tests/integration/test_opencore_recommend_e2e.py \
-    tests/integration/test_opencore_fusion_verify_e2e.py \
-    tests/integration/test_opencore_middleware_lifespan_e2e.py \
-    -v --tb=short
+docker exec -e PYTHON=python -e PYTHONPATH=src:packages/search-core/src \
+    bcsfuse-opencore-g8 bash scripts/run_targeted_tests.sh --core
 
 TEST_EXIT_CODE=$?
 if [ $TEST_EXIT_CODE -eq 0 ]; then

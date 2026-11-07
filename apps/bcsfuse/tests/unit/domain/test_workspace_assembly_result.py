@@ -12,15 +12,15 @@ from datetime import datetime
 
 import pytest
 
-from src.domain.models.workspace_assembly_result import (
+from app.domain.models.workspace_assembly_result import (
     WorkspaceAssemblyResult,
     AssemblyExplanation,
     AssemblyWarning,
     AssemblyError,
     MountInfo,
 )
-from src.domain.models.workspace import Workspace, WorkspaceStatus
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.workspace import Workspace, WorkspaceStatus
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================

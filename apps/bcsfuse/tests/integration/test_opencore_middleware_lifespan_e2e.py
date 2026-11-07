@@ -31,7 +31,7 @@ def test_client(monkeypatch):
     os.environ["BCSFUSE_AUTH_TOKEN"] = "test_token_for_e2e"
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
         with TestClient(app) as client:
@@ -221,7 +221,7 @@ class TestOpencoreMiddlewareLifespanE2E:
 
     def test_runtime_auth_rejects_missing_token(self, test_client, monkeypatch):
         """Use the real runtime auth provider; dev_smoke bypasses auth by design."""
-        from src.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
+        from app.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
         monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
         test_client.app.state.context.registry.register(
             "auth", SimpleTokenAuthProvider(valid_token="test_token_for_e2e"),

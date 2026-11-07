@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.llm_expert_perspective import (
+from app.domain.models.llm_expert_perspective import (
     LLMExpertPerspective,
     RiskLevelLiteral,
 )

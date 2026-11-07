@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
-from src.infra.public.vectorstores.qdrant_local_vector_store import (
+from app.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+from app.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
+from app.infra.public.vectorstores.qdrant_local_vector_store import (
     QdrantLocalVectorStore,
 )
 

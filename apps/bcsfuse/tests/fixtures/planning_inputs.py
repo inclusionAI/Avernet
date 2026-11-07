@@ -13,8 +13,8 @@ M4: Research & Planning Engine
 
 from __future__ import annotations
 
-from src.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
-from src.domain.models.task_understanding_result import UnderstandingWarning
+from app.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
+from app.domain.models.task_understanding_result import UnderstandingWarning
 
 
 # =============================================================================

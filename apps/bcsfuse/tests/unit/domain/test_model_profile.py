@@ -7,13 +7,13 @@ ModelProfile 领域模型测试
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.model_profile import (
+from app.domain.models.model_profile import (
     ModelProfile,
     ModelTier,
     CostClass,
     LatencyClass,
 )
-from src.domain.models.llm_task_spec import TaskType
+from app.domain.models.llm_task_spec import TaskType
 
 
 class TestModelTier:

@@ -13,7 +13,7 @@ M2: Worker Profiling & Extraction
 
 from __future__ import annotations
 
-from src.domain.models.profiling_input import (
+from app.domain.models.profiling_input import (
     DocType,
     MarkdownDocument,
     SkillMetadataInput,

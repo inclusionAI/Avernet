@@ -51,7 +51,7 @@ class TestQdrantMySQLRebuildE2E:
     @pytest.fixture
     def qdrant_mysql_store(self):
         """Create a QdrantMySQLVectorStore for E2E testing."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -86,7 +86,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify Qdrant can be searched
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors with business IDs (not UUIDs)
         points = [
@@ -127,7 +127,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify Qdrant has correct vectors
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors
         points = [
@@ -167,7 +167,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify search results return business IDs (not UUIDs)
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors with business IDs
         business_ids = [
@@ -216,7 +216,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify payload filters work
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors with different worker_id
         points = [
@@ -262,7 +262,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify search works
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors
         points = [
@@ -290,7 +290,7 @@ class TestQdrantMySQLRebuildE2E:
         os.makedirs(qdrant_path, exist_ok=True)
 
         # Recreate store (Qdrant will be empty)
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
         collection_name = store.collection_name
@@ -326,7 +326,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify vectors are identical before and after rebuild
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors
         points = [
@@ -371,7 +371,7 @@ class TestQdrantMySQLRebuildE2E:
         - Verify records are restored
         """
         store, qdrant_path = qdrant_mysql_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Write vectors
         points = [

@@ -21,7 +21,7 @@ def test_client(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[TestClient]:
     """Create test client for dev_smoke mode."""
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.infra.config.feature_flags import FeatureFlags
 
     runtime_dir = tmp_path_factory.mktemp("bcsfuse-app")
     monkeypatch = pytest.MonkeyPatch()
@@ -31,7 +31,7 @@ def test_client(
         str(runtime_dir / "bcsfuse.db"),
     )
     monkeypatch.setenv(
-        "BCSFUSE_FAISS_SQLITE_PATH",
+        "BCSFUSE_VECTOR_SQLITE_PATH",
         str(runtime_dir / "faiss_index.db"),
     )
     monkeypatch.setenv(
@@ -42,7 +42,7 @@ def test_client(
     FeatureFlags.reset()
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
         with TestClient(app) as client:

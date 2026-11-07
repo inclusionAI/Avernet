@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from threading import Event, Thread
 from uuid import uuid4
 
-from src.domain.models.vector_point import VectorPoint
-from src.domain.services.vector_persistence_backend import VectorChangeSet
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+from app.domain.models.vector_point import VectorPoint
+from app.domain.services.vector_persistence_backend import VectorChangeSet
+from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
 
@@ -145,11 +145,11 @@ def test_text_queries_search_existing_payloads_before_and_after_rebuild(tmp_path
 
 
 def test_profile_identity_payload_and_dense_filters_survive_rebuild(tmp_path, monkeypatch):
-    from src.domain.models.context_fragment import ContextFragment
-    from src.domain.models.worker_profile import WorkerProfile
-    from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-    from src.infra.config.feature_flags import FeatureFlags
-    from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
+    from app.domain.models.context_fragment import ContextFragment
+    from app.domain.models.worker_profile import WorkerProfile
+    from app.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+    from app.infra.config.feature_flags import FeatureFlags
+    from app.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
 
     monkeypatch.setattr(FeatureFlags, "is_profile_embedding_index_enabled", lambda: True)
     backend = FakePersistenceBackend()

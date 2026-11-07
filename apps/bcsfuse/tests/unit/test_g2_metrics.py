@@ -7,7 +7,7 @@ G2 Metrics 单元测试
 import pytest
 import time
 
-from src.infra.observability.g2_metrics import (
+from app.infra.observability.g2_metrics import (
     G2Metrics,
     G2LayerStats,
     get_g2_metrics,

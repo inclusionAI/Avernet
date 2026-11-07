@@ -80,7 +80,7 @@ class TestQdrantMySQLPerformanceSmoke:
     @pytest.fixture
     def perf_store(self, mysql_config, qdrant_config):
         """Create a QdrantMySQLVectorStore for performance testing."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -105,7 +105,7 @@ class TestQdrantMySQLPerformanceSmoke:
         Uses simple pattern for reproducibility.
         Does NOT log raw vectors.
         """
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         points = []
         for i in range(count):

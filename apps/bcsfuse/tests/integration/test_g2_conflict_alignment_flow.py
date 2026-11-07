@@ -12,9 +12,9 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.interfaces.api.fusion_routes import router, set_provider
+from app.domain.models.fusion_result import Perspective
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.adapters.http.fusion_routes import router, set_provider
 from fastapi import FastAPI
 
 
@@ -50,7 +50,7 @@ def client():
     os.environ["ENABLE_EXPLICIT_PARTICIPANT_AVAILABILITY_WARNING"] = "false"
 
     # 重置 FeatureFlags 单例，使其重新读取环境变量
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.infra.config.feature_flags import FeatureFlags
     FeatureFlags.reset()
 
     app = FastAPI()

@@ -4,6 +4,12 @@ BCSFuse has one public source owner for shared business behavior: Avernet. A
 deployment assembles environment-specific providers outside that shared code
 and passes the completed registry into the public application factory.
 
+The package layout and public/enterprise ownership are recorded in
+[search architecture](search-core-boundary.md). TC uses `app`; the shared
+library uses `search_core`. Enterprise-specific
+business extensions remain in their host and reuse the public search contract;
+they do not become part of the TC application factory.
+
 ## Public composition API
 
 The public boundary consists of these Python APIs:
@@ -16,7 +22,7 @@ ApplicationContext(
     registry: ProviderRegistry,
 )
 
-create_bcsfuse_app(context: ApplicationContext) -> FastAPI
+create_bcsfuse_app(context: ApplicationContext, *, search_router=None) -> FastAPI
 ```
 
 `ApplicationContext` is an explicit, already-assembled dependency container.
@@ -27,9 +33,16 @@ or read internal configuration in order to complete the provider graph.
 public deployment. It builds the public provider registry and delegates to
 `create_bcsfuse_app`.
 
+An explicitly supplied `search_router` adds the shared v2 search/recommendation
+API. The host constructs it with `TcSearchApplication`, authentication and an
+owned executor. Omitting it preserves the existing v1 route surface. Existing
+public and internal entrypoints do not opt in automatically. See
+[shared search boundaries](search-core-boundary.md) and the
+[public v2 contract](../../packages/search-core/docs/search-api.md).
+
 ## Runtime business logging
 
-The composed app configures the shared `src` business logger at construction
+The composed app configures the shared `app` business logger at construction
 and reapplies its level after provider startup. The default is `INFO` in every
 environment, including prepub. Set `LOG_LEVEL=DEBUG` explicitly for diagnostics.
 Accepted levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`;
@@ -210,11 +223,11 @@ Worker/Profile business behavior is owned by Avernet application services. A
 deployment may replace persistence, but its providers must implement the typed,
 transport-agnostic Plugin APIs in:
 
-- `src.application.ports.worker_registry_store.WorkerRegistryStore`
-- `src.application.ports.worker_profile_content_store.WorkerProfileContentStore`
-- `src.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
-- `src.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
-- `src.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
+- `app.application.ports.worker_registry_store.WorkerRegistryStore`
+- `app.application.ports.worker_profile_content_store.WorkerProfileContentStore`
+- `app.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
+- `app.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
+- `app.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
 
 The registry and profile ports exchange `Worker`, `WorkerConfig`, and
 `WorkerProfileContent` domain models; internal providers must not substitute
@@ -344,6 +357,13 @@ read. A missing Profile provider returns 503, and
 Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
 than a false success. Worker changes made before such a failure may remain
 committed; repeating the same sync safely completes the Profile step.
+When activation is requested and the configured binding provider raises during
+`bind_profile`, both aliases return 500 `PROFILE_BINDING_FAILED`. They do not
+report `success=true` or proceed to subsequent index refresh and analysis steps.
+Worker and Profile writes before the binding failure may remain committed;
+this is not an atomic rollback. Retrying the same request completes the binding
+once persistence is available. Draft sync (`profile.activate=false`) does not
+write a binding. The existing optional-provider behavior is unchanged.
 SQLite and MySQL Profile stores persist `description` under the reserved
 `__bcsfuse_profile_description_v1__` key in the existing `metadata` JSON
 column. Reads remove that storage key from caller-visible metadata. The key
@@ -468,10 +488,10 @@ exception messages and provider values are not returned to clients.
 ### Retrieval and response compatibility
 
 The `Retriever.retrieve()` Plugin API returns
-`src.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
+`app.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
 required `candidate_bundle` and lists of warnings, errors, and explanations.
 This batch contract is distinct from the unchanged
-`src.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
+`app.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
 (`profile_key`, `score`, provenance). The baseline retriever and its application
 service use the batch type; the single-hit type remains available for compatibility.
 This repairs an incompatible model import without changing HTTP payloads.
@@ -577,3 +597,15 @@ repositories own their concrete providers, internal configuration, composition
 root, container image, and delivery pipeline. Internal code may depend on this
 public composition API; public code must not import internal packages, services,
 domains, credentials, or runtime state.
+
+
+### Shared retrieval and local storage
+
+TC adapter import paths remain available, reexporting vector values and wrapping
+shared model/storage execution. Composition loads TC environment settings and
+retains its diagnostics; shared providers receive explicit configuration. Generic
+sparse retrieval has no Worker-ID priority; the TC keyword adapter enables it.
+`dev` and `dev_smoke` now compose Qdrant Local with SQLite vector persistence and
+startup rebuilding. Existing FAISS files are left untouched and are not automatic
+migration inputs. Re-sync test Workers into a new local dataset; SQLite snapshots
+replace FAISS snapshot artifacts. No online TC database migration is required.

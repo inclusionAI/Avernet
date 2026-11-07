@@ -16,13 +16,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.fusion_request import FusionRequest
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.fusion_simulation_input import FusionSimulationInput
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.fusion_request import FusionRequest
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.fusion_simulation_input import FusionSimulationInput
 
 
 def create_test_profile(
@@ -100,7 +100,7 @@ class TestFusionSimulationService:
 
     def test_simulate_basic(self, sample_profiles, sample_digests):
         """测试基本模拟功能"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -120,7 +120,7 @@ class TestFusionSimulationService:
 
     def test_simulate_g1_mode(self, sample_profiles, sample_digests):
         """测试 G1 (AGENT) 模式"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -138,7 +138,7 @@ class TestFusionSimulationService:
 
     def test_simulate_g2_mode(self, sample_profiles, sample_digests):
         """测试 G2 (CONFLICT_ALIGNMENT) 模式"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -157,7 +157,7 @@ class TestFusionSimulationService:
 
     def test_simulate_g5_mode(self, sample_profiles, sample_digests):
         """测试 G5 (EXPERT_DIAGNOSIS) 模式"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -176,7 +176,7 @@ class TestFusionSimulationService:
 
     def test_simulate_with_max_perspectives(self, sample_profiles, sample_digests):
         """测试 max_perspectives 限制"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -194,7 +194,7 @@ class TestFusionSimulationService:
 
     def test_simulate_generates_group_id(self, sample_profiles, sample_digests):
         """测试生成 group_id"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -212,7 +212,7 @@ class TestFusionSimulationService:
 
     def test_simulate_generates_fusion_id(self, sample_profiles, sample_digests):
         """测试生成 fusion_id"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -230,7 +230,7 @@ class TestFusionSimulationService:
 
     def test_simulate_generates_timing(self, sample_profiles, sample_digests):
         """测试生成 timing 信息"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -250,7 +250,7 @@ class TestFusionSimulationService:
 
     def test_simulate_empty_profiles(self):
         """测试空 profiles 处理"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -268,7 +268,7 @@ class TestFusionSimulationService:
 
     def test_simulate_with_options(self, sample_profiles, sample_digests):
         """测试 options 参数"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -293,7 +293,7 @@ class TestFusionSimulationModes:
 
     def test_g1_prioritizes_relevance(self):
         """测试 G1 优先相关性"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         profiles = [
             create_test_profile("001", skills=["Python"]),
@@ -321,7 +321,7 @@ class TestFusionSimulationModes:
 
     def test_g2_includes_conflict_analysis(self):
         """测试 G2 包含冲突分析"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         profiles = [
             create_test_profile("001", skills=["Python"]),
@@ -349,7 +349,7 @@ class TestFusionSimulationModes:
 
     def test_g5_includes_risk_assessment(self):
         """测试 G5 包含风险评估"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         profiles = [
             create_test_profile("001", skills=["Security"]),
@@ -383,7 +383,7 @@ class TestFusionSimulationFromFusionRequest:
 
     def test_simulate_from_fusion_request_g1(self):
         """测试从 FusionRequest 模拟 G1"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -405,7 +405,7 @@ class TestFusionSimulationFromFusionRequest:
 
     def test_simulate_from_fusion_request_g2(self):
         """测试从 FusionRequest 模拟 G2"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -429,7 +429,7 @@ class TestFusionSimulationFromFusionRequest:
 
     def test_simulate_from_fusion_request_g5(self):
         """测试从 FusionRequest 模拟 G5"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         service = FusionSimulationService()
 
@@ -454,7 +454,7 @@ class TestFusionSimulationPerspectives:
 
     def test_perspectives_match_profiles(self):
         """测试视角与 profiles 匹配"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         profiles = [
             create_test_profile("001", skills=["Python"]),
@@ -482,7 +482,7 @@ class TestFusionSimulationPerspectives:
 
     def test_perspective_has_required_fields(self):
         """测试视角包含必要字段"""
-        from src.domain.services.fusion_simulation_service import FusionSimulationService
+        from app.domain.services.fusion_simulation_service import FusionSimulationService
 
         profiles = [create_test_profile("001", skills=["Python"])]
         digests = [create_test_digest("staff_001:default", RetrievalMode.AGENT, "test")]

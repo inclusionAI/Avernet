@@ -5,15 +5,15 @@ import uuid
 
 import pytest
 
-from src.domain.models.profile_fusion import ConversationTurn, FusedProfileRecord
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
-from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
-from src.infra.public.stores.mysql_worker_profile_binding_store import (
+from app.domain.models.profile_fusion import ConversationTurn, FusedProfileRecord
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+from app.infra.public.stores.mysql_worker_profile_binding_store import (
     MySQLWorkerProfileBindingStore,
 )
-from src.infra.public.stores.mysql_worker_profile_content_store import (
+from app.infra.public.stores.mysql_worker_profile_content_store import (
     MySQLWorkerProfileContentStore,
 )
 from tests.integration import test_mysql_storage_timestamps as mysql_fixtures

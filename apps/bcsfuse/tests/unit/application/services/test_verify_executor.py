@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.application.services.verify_executor import VerifyExecutor
-from src.domain.models.verify_dto import CapabilityProbes, DimensionProbe, DimensionResult
+from app.application.services.verify_executor import VerifyExecutor
+from app.domain.models.verify_dto import CapabilityProbes, DimensionProbe, DimensionResult
 
 
 def _make_probes() -> list[CapabilityProbes]:
@@ -43,7 +43,7 @@ class TestVerifyExecutorExecute:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("src.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
+        with patch("app.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
             results = await executor.execute("w1", _make_probes())
 
         assert len(results) == 3
@@ -68,7 +68,7 @@ class TestVerifyExecutorExecute:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("src.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
+        with patch("app.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
             results = await executor.execute("w1", _make_probes())
 
         assert len(results) == 3
@@ -88,7 +88,7 @@ class TestVerifyExecutorExecute:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
 
-        with patch("src.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
+        with patch("app.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
             results = await executor.execute("w1", _make_probes())
 
         assert len(results) == 3
@@ -160,7 +160,7 @@ class TestVerifyExecutorAuthError:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("src.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
+        with patch("app.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
             results = await executor.execute("w1", _make_probes())
 
         assert len(results) == 3
@@ -185,7 +185,7 @@ class TestVerifyExecutorAuthError:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("src.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
+        with patch("app.application.services.verify_executor.httpx.AsyncClient", return_value=mock_client):
             results = await executor.execute("w1", _make_probes())
 
         assert len(results) == 3

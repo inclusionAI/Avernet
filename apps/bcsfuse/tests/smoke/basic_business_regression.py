@@ -33,7 +33,7 @@ def test_health_endpoint():
     """Test 1: /health returns 200"""
     print("\n[TEST] test_health_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -57,7 +57,7 @@ def test_ready_endpoint():
     """Test 2: /ready returns 200"""
     print("\n[TEST] test_ready_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -79,7 +79,7 @@ def test_providers_endpoint():
     """Test 3: /providers returns 200 with 13 keys (requires auth)"""
     print("\n[TEST] test_providers_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -103,7 +103,7 @@ def test_openapi_includes_basic_business_paths():
     """Test 4: /openapi.json includes basic business paths"""
     print("\n[TEST] test_openapi_includes_basic_business_paths")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -150,7 +150,7 @@ def test_workers_list_endpoint():
     """Test 5: GET /v1/workers returns 200"""
     print("\n[TEST] test_workers_list_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -176,7 +176,7 @@ def test_worker_get_missing_id():
     """Test 6: GET /v1/workers/{missing_id} returns 404"""
     print("\n[TEST] test_worker_get_missing_id")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -198,7 +198,7 @@ def test_search_stats_endpoint():
     """Test 7: GET /v1/search/stats returns 200"""
     print("\n[TEST] test_search_stats_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -220,7 +220,7 @@ def test_search_endpoint_exists():
     """Test 8: POST /v1/search route exists"""
     print("\n[TEST] test_search_endpoint_exists")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -255,7 +255,7 @@ def test_profiles_list_endpoint():
     """Test 8.5: GET /v1/workers/{worker_id}/profiles returns 200"""
     print("\n[TEST] test_profiles_list_endpoint")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")
@@ -283,7 +283,7 @@ def test_no_configs_application_yaml_error():
     print("\n[TEST] test_no_configs_application_yaml_error")
 
     # This test ensures that the startup doesn't fail due to missing configs/application.yaml
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
 
     try:
         app = create_opensource_app(mode="test")
@@ -323,7 +323,7 @@ def test_no_forbidden_internal_imports():
         "qdrant_zdas",
         "faiss_zdas",
         "bcsfuse-internal",
-        "src.interfaces.api",  # Should NOT import from src.interfaces.api.*
+        "app.adapters.http",  # Should NOT import from app.adapters.http.*
     ]
 
     files_to_check = [
@@ -383,7 +383,7 @@ def test_no_external_connections_during_build():
     print("\n[TEST] test_no_external_connections_during_build")
 
     from unittest.mock import patch, MagicMock
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
 
     # Mock all external connections
     with patch('mysql.connector.connect') as mock_mysql, \
@@ -417,7 +417,7 @@ def test_no_external_connections_during_build():
 
 
 def test_route_module_not_in_interfaces_api():
-    """Test 12: Business route module is NOT in src.interfaces.api package"""
+    """Test 12: Business route module is NOT in app.adapters.http package"""
     print("\n[TEST] test_route_module_not_in_interfaces_api")
 
     oss_business_routes_path = Path(__file__).parent.parent / "src" / "bootstrap" / "oss_business_routes.py"
@@ -425,18 +425,18 @@ def test_route_module_not_in_interfaces_api():
 
     assert oss_business_routes_path.exists(), f"oss_business_routes.py not found at {oss_business_routes_path}"
 
-    # Check that oss_business_routes.py is NOT under src/interfaces/api/
+    # Check that oss_business_routes.py is NOT under src/app/adapters/http/
     relative_path = oss_business_routes_path.relative_to(Path(__file__).parent.parent)
     assert "interfaces/api" not in str(relative_path), \
-        f"oss_business_routes.py should NOT be under src/interfaces/api/, found at {relative_path}"
+        f"oss_business_routes.py should NOT be under src/app/adapters/http/, found at {relative_path}"
 
     print(f"✓ oss_business_routes.py is correctly placed at: {relative_path}")
-    print(f"  NOT under src/interfaces/api/")
+    print(f"  NOT under src/app/adapters/http/")
     return True
 
 
 def test_opensource_app_does_not_import_src_interfaces_api():
-    """Test 13: opensource_app.py does NOT import from src.interfaces.api.*"""
+    """Test 13: opensource_app.py does NOT import from app.adapters.http.*"""
     print("\n[TEST] test_opensource_app_does_not_import_src_interfaces_api")
 
     opensource_app_path = Path(__file__).parent.parent / "src" / "bootstrap" / "opensource_app.py"
@@ -450,25 +450,25 @@ def test_opensource_app_does_not_import_src_interfaces_api():
     violations = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if node.module and "src.interfaces.api" in node.module:
+            if node.module and "app.adapters.http" in node.module:
                 violations.append(f"from {node.module} import ...")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if "src.interfaces.api" in alias.name:
+                if "app.adapters.http" in alias.name:
                     violations.append(f"import {alias.name}")
 
     if violations:
-        print("✗ opensource_app.py imports from src.interfaces.api.*:")
+        print("✗ opensource_app.py imports from app.adapters.http.*:")
         for v in violations:
             print(f"    {v}")
-        raise AssertionError("opensource_app.py imports from src.interfaces.api.*")
+        raise AssertionError("opensource_app.py imports from app.adapters.http.*")
 
-    print("✓ opensource_app.py does NOT import from src.interfaces.api.*")
+    print("✓ opensource_app.py does NOT import from app.adapters.http.*")
     return True
 
 
 def test_business_routes_module_no_forbidden_imports():
-    """Test 14: oss_business_routes.py does NOT import from src.interfaces.api.*"""
+    """Test 14: oss_business_routes.py does NOT import from app.adapters.http.*"""
     print("\n[TEST] test_business_routes_module_no_forbidden_imports")
 
     oss_business_routes_path = Path(__file__).parent.parent / "src" / "bootstrap" / "oss_business_routes.py"
@@ -482,20 +482,20 @@ def test_business_routes_module_no_forbidden_imports():
     violations = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if node.module and "src.interfaces.api" in node.module:
+            if node.module and "app.adapters.http" in node.module:
                 violations.append(f"from {node.module} import ...")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if "src.interfaces.api" in alias.name:
+                if "app.adapters.http" in alias.name:
                     violations.append(f"import {alias.name}")
 
     if violations:
-        print("✗ oss_business_routes.py imports from src.interfaces.api.*:")
+        print("✗ oss_business_routes.py imports from app.adapters.http.*:")
         for v in violations:
             print(f"    {v}")
-        raise AssertionError("oss_business_routes.py imports from src.interfaces.api.*")
+        raise AssertionError("oss_business_routes.py imports from app.adapters.http.*")
 
-    print("✓ oss_business_routes.py does NOT import from src.interfaces.api.*")
+    print("✓ oss_business_routes.py does NOT import from app.adapters.http.*")
     return True
 
 
@@ -503,7 +503,7 @@ def test_openapi_path_count():
     """Test 15: OpenAPI has more than 8 paths"""
     print("\n[TEST] test_openapi_path_count")
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     from fastapi.testclient import TestClient
 
     app = create_opensource_app(mode="test")

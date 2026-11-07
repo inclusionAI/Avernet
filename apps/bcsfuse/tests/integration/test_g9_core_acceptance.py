@@ -1,21 +1,18 @@
 """G9 HTTP -> real merge/chat services -> durable stores, with local model doubles.
 
 No live app, model, or group service is contacted. HTTP 200 alone is never the
-success criterion. SQLite and optional disposable MySQL use the same scenarios.
+success criterion. This suite exercises the composed TC runtime and SQLite.
 """
 
 from contextlib import closing, contextmanager
 from uuid import uuid4
 
 import pytest
+from app.domain.models.llm_response import LLMResponse
+from app.domain.models.profile_fusion import GroupConversationSummary
 
-from src.domain.models.llm_response import LLMResponse
-from src.domain.models.profile_fusion import GroupConversationSummary
+from tests.contract.test_tc_catalog import runtime as tc_runtime  # noqa: F401
 from tests.fixtures.runtime_acceptance import acceptance_run
-from tests.integration.test_isolated_runtime_acceptance import (
-    TOKEN,
-    isolated_app_factory,  # noqa: F401 - shared disposable database/app fixture
-)
 
 
 class LocalModels:
@@ -51,26 +48,19 @@ class EmptyGroupContext:
 
 
 @pytest.fixture
-def g9_runtime(isolated_app_factory, monkeypatch, tmp_path):  # noqa: F811 - pytest fixture injection
+def g9_runtime(tc_runtime, monkeypatch, tmp_path):  # noqa: F811 - pytest fixture injection
     @contextmanager
     def open_runtime():
-        from src.application.services.bot_fuse import fusion_expert_chat_service as chat
-        from src.bootstrap.app_factory import _configure_fusion_dependencies
-        from src.infra.config.feature_flags import FeatureFlags
-        from src.interfaces.api.dependencies import fusion_dependencies as dependencies
+        from app.adapters.http.dependencies import fusion_dependencies as dependencies
+        from app.application.services.bot_fuse import fusion_expert_chat_service as chat
+        from app.bootstrap.app_factory import _configure_fusion_dependencies
+        from app.infra.config.feature_flags import FeatureFlags
 
-        with isolated_app_factory() as (client, registry, _embedding):
-            pool = getattr(registry.require("worker_registry_store"), "_pool", None)
-            if pool is not None:
-                from src.infra.public.stores.mysql_fused_profile_store import (
-                    MySQLFusedProfileStore,
-                )
-                repository = MySQLFusedProfileStore(connection_pool=pool)
-            else:
-                from src.infra.adapters.sqlite_fused_profile_store import (
-                    SQLiteFusedProfileStore,
-                )
-                repository = SQLiteFusedProfileStore(str(tmp_path / "fusion.sqlite"))
+        client, registry = tc_runtime
+        from app.infra.adapters.sqlite_fused_profile_store import (
+            SQLiteFusedProfileStore,
+        )
+        with closing(SQLiteFusedProfileStore(str(tmp_path / "fusion.sqlite"))) as repository:
             previous = registry.get("fused_profile_store")
             if previous is not None and hasattr(previous, "close"):
                 previous.close()
@@ -84,12 +74,16 @@ def g9_runtime(isolated_app_factory, monkeypatch, tmp_path):  # noqa: F811 - pyt
             monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
             FeatureFlags.reset()
             try:
-                with acceptance_run(client, TOKEN) as acceptance:
+                with acceptance_run(client, "test-token") as acceptance:
                     participants = []
                     for _ in range(2):
-                        worker_id = acceptance.create_worker()
-                        acceptance.put_profile(worker_id)
-                        acceptance.request("PUT", f"/v1/workers/{worker_id}/profiles/release/activate")
+                        worker_id = f"acceptance_{uuid4().hex}:owner"
+                        acceptance.worker_ids.append(worker_id)
+                        acceptance.request("POST", f"/v1/workers/{worker_id}/sync", json={
+                            "name": "Acceptance specialist", "description": "Database and Python testing",
+                            "availability": "public", "runtime_state": "online",
+                            "profile": {"profile_id": "release", "activate": False},
+                        })
                         acceptance.request("PUT", f"/v1/workers/{worker_id}/config", json={"fusion_enable": True})
                         participants.append(worker_id)
                     path = f"/api/v1/groups/acceptance_{uuid4().hex}/fuse"
@@ -142,6 +136,37 @@ def test_g9_http_result_is_persisted_and_repeat_reuses_profile(g9_runtime):
         assert second["fusion_id"] == first["fusion_id"]
         assert repository.get_conversation(first["fusion_id"])["total_turns"] == 2
         assert sum(r.task_spec.need_structured_output for r in models.requests) == 1
+
+
+def test_g9_current_description_reaches_model_and_update_preserves_history(g9_runtime):
+    with g9_runtime() as (acceptance, path, body, repository, models):
+        worker_id = body["participants"][0]
+        acceptance.request("POST", f"/v1/workers/{worker_id}/sync", json={
+            "name": "Acceptance specialist", "description": "Review transactional schema releases",
+            "profile": {"skill_sets": [{"name": "sql", "description": "Check schema rollback safety"}]},
+        })
+
+        first = acceptance.request("POST", path, json=body)
+        assert_g9_success(first, body["participants"])
+        first_prompt = next(r.user_prompt for r in models.requests if r.task_spec.need_structured_output)
+        assert "Review transactional schema releases" in first_prompt
+        assert "Check schema rollback safety" in first_prompt
+
+        acceptance.request("POST", f"/v1/workers/{worker_id}/sync", json={
+            "name": "Acceptance specialist", "description": "Review online schema rollback and recovery",
+            "profile": {},
+        })
+        second = acceptance.request("POST", path, json=body)
+        assert_g9_success(second, body["participants"])
+        assert second["fusion_id"] != first["fusion_id"]
+        fusion_requests = [r for r in models.requests if r.task_spec.need_structured_output]
+        assert len(fusion_requests) == 2
+        assert "Review online schema rollback and recovery" in fusion_requests[-1].user_prompt
+        with closing(fresh_reader(repository)) as reader:
+            assert reader.find_by_key(first["fusion_id"]) is not None
+            old_turns = reader.get_conversation(first["fusion_id"])
+            assert old_turns["total_turns"] == 1
+            assert old_turns["turns"][0]["question"] == body["question"]
 
 
 def test_g9_disabled_participant_returns_explicit_error(g9_runtime):

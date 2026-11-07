@@ -31,7 +31,7 @@ class TestSourceReference:
 
     def test_create_source_reference_with_section(self):
         """测试创建带 section 的来源引用"""
-        from src.domain.models.profiling_result import SourceReference, DocType
+        from app.domain.models.profiling_result import SourceReference, DocType
 
         ref = SourceReference(
             doc_type=DocType.SOUL,
@@ -50,7 +50,7 @@ class TestSourceReference:
 
     def test_create_source_reference_with_heading(self):
         """测试创建带 heading 的来源引用"""
-        from src.domain.models.profiling_result import SourceReference, DocType
+        from app.domain.models.profiling_result import SourceReference, DocType
 
         ref = SourceReference(
             doc_type=DocType.RULES,
@@ -64,7 +64,7 @@ class TestSourceReference:
 
     def test_create_source_reference_with_line_range(self):
         """测试创建带行范围的来源引用"""
-        from src.domain.models.profiling_result import SourceReference, DocType
+        from app.domain.models.profiling_result import SourceReference, DocType
 
         ref = SourceReference(
             doc_type=DocType.MEMORY,
@@ -79,7 +79,7 @@ class TestSourceReference:
 
     def test_source_reference_requires_at_least_one_location(self):
         """测试来源引用必须至少有一个定位信息"""
-        from src.domain.models.profiling_result import SourceReference, DocType
+        from app.domain.models.profiling_result import SourceReference, DocType
 
         # 无定位信息应该抛出错误
         with pytest.raises(ValidationError) as exc_info:
@@ -92,7 +92,7 @@ class TestSourceReference:
 
     def test_source_reference_string_representation(self):
         """测试来源引用的字符串表示"""
-        from src.domain.models.profiling_result import SourceReference, DocType
+        from app.domain.models.profiling_result import SourceReference, DocType
 
         ref = SourceReference(
             doc_type=DocType.SOUL,
@@ -111,7 +111,7 @@ class TestExtractionWarning:
 
     def test_create_warning_success(self):
         """测试创建警告"""
-        from src.domain.models.profiling_result import ExtractionWarning, DocType
+        from app.domain.models.profiling_result import ExtractionWarning, DocType
 
         warning = ExtractionWarning(
             field="constraints[0].severity",
@@ -128,7 +128,7 @@ class TestExtractionWarning:
 
     def test_create_warning_minimal(self):
         """测试创建最小警告"""
-        from src.domain.models.profiling_result import ExtractionWarning, DocType
+        from app.domain.models.profiling_result import ExtractionWarning, DocType
 
         warning = ExtractionWarning(
             field="capabilities",
@@ -146,7 +146,7 @@ class TestExtractionError:
 
     def test_create_error_success(self):
         """测试创建错误"""
-        from src.domain.models.profiling_result import ExtractionError, DocType
+        from app.domain.models.profiling_result import ExtractionError, DocType
 
         error = ExtractionError(
             field="domains",
@@ -161,7 +161,7 @@ class TestExtractionError:
 
     def test_error_default_severity(self):
         """测试错误默认严重程度"""
-        from src.domain.models.profiling_result import ExtractionError, DocType
+        from app.domain.models.profiling_result import ExtractionError, DocType
 
         error = ExtractionError(
             field="test",
@@ -178,7 +178,7 @@ class TestExtractedCapability:
 
     def test_create_extracted_capability_success(self):
         """测试创建抽取的能力"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedCapability,
             SourceReference,
             DocType,
@@ -206,7 +206,7 @@ class TestExtractedCapability:
 
     def test_confidence_out_of_range_raises_error(self):
         """测试置信度超出范围抛出错误"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedCapability,
             SourceReference,
             DocType,
@@ -234,7 +234,7 @@ class TestExtractedDomain:
 
     def test_create_extracted_domain_success(self):
         """测试创建抽取的领域"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedDomain,
             SourceReference,
             DocType,
@@ -262,7 +262,7 @@ class TestExtractedResponsibility:
 
     def test_create_extracted_responsibility_success(self):
         """测试创建抽取的职责"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedResponsibility,
             SourceReference,
             DocType,
@@ -290,7 +290,7 @@ class TestExtractedConstraint:
 
     def test_create_extracted_constraint_forbidden(self):
         """测试创建禁止类型约束"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedConstraint,
             SourceReference,
             DocType,
@@ -320,7 +320,7 @@ class TestExtractedConstraint:
 
     def test_create_extracted_constraint_approval_required(self):
         """测试创建需审批约束"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedConstraint,
             SourceReference,
             DocType,
@@ -353,7 +353,7 @@ class TestExtractedEscalationTrigger:
 
     def test_create_escalation_trigger_success(self):
         """测试创建上报触发点"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedEscalationTrigger,
             SourceReference,
             DocType,
@@ -382,7 +382,7 @@ class TestExtractedCollaborationStyle:
 
     def test_create_collaboration_style_success(self):
         """测试创建协作风格"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedCollaborationStyle,
             SourceReference,
             DocType,
@@ -411,7 +411,7 @@ class TestExtractedSkill:
 
     def test_create_extracted_skill_from_document(self):
         """测试从文档抽取的技能"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedSkill,
             SourceReference,
             DocType,
@@ -445,7 +445,7 @@ class TestExtractedResource:
 
     def test_create_extracted_resource_success(self):
         """测试创建抽取的资源"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedResource,
             SourceReference,
             DocType,
@@ -479,7 +479,7 @@ class TestExtractedMemoryEpisode:
 
     def test_create_memory_episode_success(self):
         """测试创建记忆片段"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedMemoryEpisode,
             SourceReference,
             DocType,
@@ -508,7 +508,7 @@ class TestExtractedMemoryEpisode:
 
     def test_memory_episode_optional_fields(self):
         """测试记忆片段的可选字段"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             ExtractedMemoryEpisode,
             SourceReference,
             DocType,
@@ -537,7 +537,7 @@ class TestWorkerProfileExtractionResult:
 
     def test_create_extraction_result_success(self):
         """测试创建抽取结果"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractedCapability,
             ExtractedDomain,
@@ -580,7 +580,7 @@ class TestWorkerProfileExtractionResult:
 
     def test_extraction_result_with_warnings_and_errors(self):
         """测试包含警告和错误的抽取结果"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractionWarning,
             ExtractionError,
@@ -615,7 +615,7 @@ class TestWorkerProfileExtractionResult:
 
     def test_extraction_result_is_complete(self):
         """测试判断抽取结果是否完整"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractedCapability,
             ExtractionError,
@@ -665,7 +665,7 @@ class TestWorkerProfileExtractionResult:
 
     def test_extraction_result_summary(self):
         """测试抽取结果的摘要"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractedCapability,
             ExtractedConstraint,
@@ -713,7 +713,7 @@ class TestWorkerProfileExtractionResult:
 
     def test_extraction_result_merge(self):
         """测试合并两个抽取结果"""
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractedCapability,
             ExtractedDomain,

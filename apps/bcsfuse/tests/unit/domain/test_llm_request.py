@@ -7,8 +7,8 @@ LLMRequest 领域模型测试
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.llm_request import LLMRequest, LLMRequestMetadata
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.models.llm_request import LLMRequest, LLMRequestMetadata
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
 
 class TestLLMRequestMetadata:

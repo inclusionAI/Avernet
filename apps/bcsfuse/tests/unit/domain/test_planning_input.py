@@ -20,13 +20,13 @@ class TestPlanningInputBasics:
 
     def test_planning_input_importable(self):
         """测试 PlanningInput 可导入"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
 
         assert PlanningInput is not None
 
     def test_planning_input_constructs_with_required_fields(self):
         """测试使用必需字段构造 PlanningInput"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -37,7 +37,7 @@ class TestPlanningInputBasics:
 
     def test_planning_input_accepts_optional_understanding_warnings(self):
         """测试 PlanningInput 接受可选的 understanding_warnings"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import (
             get_simple_design_task_spec,
             get_understanding_warnings,
@@ -56,8 +56,8 @@ class TestPlanningInputBasics:
 
     def test_planning_input_accepts_optional_understanding_errors(self):
         """测试 PlanningInput 接受可选的 understanding_errors"""
-        from src.domain.models.planning_input import PlanningInput
-        from src.domain.models.task_understanding_result import UnderstandingError
+        from app.domain.models.planning_input import PlanningInput
+        from app.domain.models.task_understanding_result import UnderstandingError
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -78,7 +78,7 @@ class TestPlanningInputBasics:
 
     def test_planning_input_accepts_optional_source_prompt(self):
         """测试 PlanningInput 接受可选的 source_prompt"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -91,7 +91,7 @@ class TestPlanningInputBasics:
 
     def test_planning_input_accepts_optional_planning_hints(self):
         """测试 PlanningInput 接受可选的 planning_hints"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -109,7 +109,7 @@ class TestPlanningInputValidation:
 
     def test_planning_input_requires_task_spec(self):
         """测试 PlanningInput 必需 task_spec"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
@@ -120,7 +120,7 @@ class TestPlanningInputValidation:
 
     def test_planning_input_rejects_extra_fields(self):
         """测试 PlanningInput 拒绝额外字段"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
         from pydantic import ValidationError
 
@@ -138,7 +138,7 @@ class TestPlanningInputDefaults:
 
     def test_understanding_warnings_defaults_to_empty_list(self):
         """测试 understanding_warnings 默认为空列表"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -148,7 +148,7 @@ class TestPlanningInputDefaults:
 
     def test_understanding_errors_defaults_to_empty_list(self):
         """测试 understanding_errors 默认为空列表"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -158,7 +158,7 @@ class TestPlanningInputDefaults:
 
     def test_source_prompt_defaults_to_none(self):
         """测试 source_prompt 默认为 None"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()
@@ -168,7 +168,7 @@ class TestPlanningInputDefaults:
 
     def test_planning_hints_defaults_to_empty_dict(self):
         """测试 planning_hints 默认为空字典"""
-        from src.domain.models.planning_input import PlanningInput
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         task_spec = get_simple_design_task_spec()

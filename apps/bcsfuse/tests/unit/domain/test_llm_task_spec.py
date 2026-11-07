@@ -7,7 +7,7 @@ LLMTaskSpec 领域模型测试
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.llm_task_spec import (
+from app.domain.models.llm_task_spec import (
     LLMTaskSpec,
     TaskType,
     Complexity,

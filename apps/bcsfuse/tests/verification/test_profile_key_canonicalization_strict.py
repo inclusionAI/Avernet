@@ -12,7 +12,7 @@ Profile Key Canonicalization 严格验证测试
 
 import pytest
 from unittest.mock import MagicMock, patch
-from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
 
 class TestProfileKeyFormats:

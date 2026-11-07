@@ -1,7 +1,7 @@
 import asyncio
 import threading
 
-from src.interfaces.api.fusion_parity_routes import _run_fuse
+from app.adapters.http.fusion_parity_routes import _run_fuse
 
 
 class _StubService:

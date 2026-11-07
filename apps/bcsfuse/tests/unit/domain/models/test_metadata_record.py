@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.metadata_record import MetadataRecord
+from app.domain.models.metadata_record import MetadataRecord
 
 
 class TestMetadataRecord:

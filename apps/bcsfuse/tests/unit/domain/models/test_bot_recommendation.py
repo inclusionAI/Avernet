@@ -4,18 +4,18 @@ BotRecommendation 单元测试
 
 import pytest
 
-from src.domain.models.bot_recommendation import (
+from app.domain.models.bot_recommendation import (
     BotRecommendationRequest,
     BotRecommendation,
     BotRecommendationResponse,
     create_bot_recommendation_response,
 )
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
 
 
 class TestBotRecommendationRequest:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.stance_signal import StanceSignal
+from app.domain.models.stance_signal import StanceSignal
 
 
 class TestStanceSignalModel:

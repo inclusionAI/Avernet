@@ -1,7 +1,7 @@
 """Profile descriptions survive on the existing SQLite table layout."""
 
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.infra.public.stores.sqlite_worker_profile_content_store import (
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.infra.public.stores.sqlite_worker_profile_content_store import (
     SQLiteWorkerProfileContentStore,
 )
 

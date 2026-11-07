@@ -28,7 +28,7 @@ def test_client(monkeypatch):
     os.environ["BCSFUSE_AUTH_TOKEN"] = "test_token_for_e2e"
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
         with TestClient(app) as client:
@@ -182,7 +182,7 @@ class TestOpencoreVerifyE2E:
         }
 
         with patch(
-            "src.interfaces.api.dependencies.fusion_dependencies.get_capability_verify_service",
+            "app.adapters.http.dependencies.fusion_dependencies.get_capability_verify_service",
             return_value=None,
         ):
             response = test_client.post(

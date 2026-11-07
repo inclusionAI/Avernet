@@ -39,7 +39,7 @@ class TestQdrantVectorStoreContract:
                 "guard = patch('qdrant_client.QdrantClient', "
                 "side_effect=AssertionError('client created during import')); "
                 "guard.start(); "
-                "import src.infra.public.vectorstores.qdrant_local_vector_store"
+                "import app.infra.public.vectorstores.qdrant_local_vector_store"
             )],
             cwd=Path(__file__).resolve().parents[2],
             capture_output=True,
@@ -50,7 +50,7 @@ class TestQdrantVectorStoreContract:
 
     def test_store_constructs_without_connecting(self):
         """Test that the store can be constructed without Qdrant server connection."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -77,7 +77,7 @@ class TestQdrantVectorStoreContract:
 
     def test_required_methods_exist(self):
         """Test that all required VectorStore methods exist."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -131,7 +131,7 @@ class TestQdrantVectorStoreContract:
             [
                 sys.executable,
                 "-c",
-                "from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore; print('OK')",
+                "from app.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore; print('OK')",
             ],
             cwd=str(open_core_root),
             env=env,
@@ -151,11 +151,11 @@ class TestQdrantVectorStoreContract:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
-            "src.infra.vectorstores.qdrant_zdas_vector_store",
-            "src.infra.vectorstores.faiss_zdas_vector_store",
-            "src.infra.vectorstore_backends.zdas_vector_persistence_backend",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
+            "app.infra.vectorstores.qdrant_zdas_vector_store",
+            "app.infra.vectorstores.faiss_zdas_vector_store",
+            "app.infra.vectorstore_backends.zdas_vector_persistence_backend",
         ]
         for keyword in forbidden:
             assert keyword not in result.stdout.lower()
@@ -163,14 +163,14 @@ class TestQdrantVectorStoreContract:
 
     def test_no_fallback_to_faiss_or_inmemory(self):
         """Test that the store does not fallback to FAISS or InMemory."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
         store = QdrantLocalVectorStore()
 
         # Check module imports
-        import src.infra.public.vectorstores.qdrant_local_vector_store as store_module
+        import app.infra.public.vectorstores.qdrant_local_vector_store as store_module
         module_source = open(store_module.__file__, 'r').read().lower()
 
         # Should not mention FAISS or InMemory fallback
@@ -180,7 +180,7 @@ class TestQdrantVectorStoreContract:
 
     def test_fail_fast_without_qdrant_config(self):
         """Test that methods fail fast with clear Qdrant error when server is not available."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -204,7 +204,7 @@ class TestQdrantVectorStoreContract:
 
     def test_payload_filter_api_shape(self):
         """Test that payload filter API is properly shaped."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -233,7 +233,7 @@ class TestQdrantVectorStoreIntegration:
     @pytest.fixture
     def qdrant_store(self, tmp_path):
         """Create Qdrant store with configuration from environment."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -412,7 +412,7 @@ class TestQdrantVectorStoreIntegration:
         - Identical/directional vectors should rank higher than orthogonal vectors
         - Does NOT validate raw vector equality (Cosine normalizes vectors)
         """
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
         import uuid
@@ -511,7 +511,7 @@ class TestQdrantVectorStoreIntegration:
         - search returns business_id as logical ID
         - delete with business_id succeeds
         """
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
         import uuid
@@ -586,7 +586,7 @@ class TestQdrantVectorStoreIntegration:
         - delete_by_profile succeeds with business ID semantics
         - Vector is correctly deleted
         """
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
         import uuid
@@ -637,7 +637,7 @@ class TestQdrantVectorStoreIntegration:
 
     def test_business_id_search_returns_external_id(self, tmp_path):
         """Test that search returns external business ID, not internal UUID."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
         import uuid
@@ -691,7 +691,7 @@ class TestQdrantVectorStoreIntegration:
 
     def test_uuid_id_still_supported(self, tmp_path):
         """Test that UUID IDs are still supported for backward compatibility."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
         import uuid
@@ -741,7 +741,7 @@ class TestQdrantVectorStoreIntegration:
 
         Same business ID should always map to same Qdrant point ID.
         """
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
             _to_qdrant_point_id,
         )

@@ -36,7 +36,7 @@ def test_opensource_app_creation():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         start = time.time()
         app = create_opensource_app(mode="test")
@@ -67,7 +67,7 @@ def test_health_endpoint():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -104,7 +104,7 @@ def test_ready_endpoint():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -141,7 +141,7 @@ def test_providers_endpoint():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -184,7 +184,7 @@ def test_openapi_endpoint():
     print("\n[TEST] test_openapi_endpoint")
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -218,7 +218,7 @@ def test_openapi_paths_include_business_routes():
     print("\n[TEST] test_openapi_paths_include_business_routes")
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -329,7 +329,7 @@ def test_no_external_connections_during_build():
         print(f"  - S5 verified Qdrant: 0 connections during build")
 
         # Just verify app creation still works without external services
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="test")
         assert app is not None
@@ -351,7 +351,7 @@ def test_business_api_basic_operations():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -384,7 +384,7 @@ def test_business_api_basic_operations():
 
 
 def test_business_route_module_not_in_interfaces_api():
-    """Test 10: Business route module is NOT in src.interfaces.api package (S8)"""
+    """Test 10: Business route module is NOT in app.adapters.http package (S8)"""
     print("\n[TEST] test_business_route_module_not_in_interfaces_api")
 
     try:
@@ -393,16 +393,16 @@ def test_business_route_module_not_in_interfaces_api():
 
         assert oss_business_routes_path.exists(), f"oss_business_routes.py not found at {oss_business_routes_path}"
 
-        # Check that oss_business_routes.py is NOT under src/interfaces/api/
+        # Check that oss_business_routes.py is NOT under src/app/adapters/http/
         relative_path = oss_business_routes_path.relative_to(Path(__file__).parent.parent)
         relative_str = str(relative_path)
 
         if "interfaces" in relative_str and "api" in relative_str:
-            print(f"✗ Business route module is under src/interfaces/api/")
+            print(f"✗ Business route module is under src/app/adapters/http/")
             return False
 
         print(f"✓ Business route module correctly placed at: {relative_path}")
-        print(f"  NOT under src/interfaces/api/")
+        print(f"  NOT under src/app/adapters/http/")
         return True
 
     except Exception as e:
@@ -413,7 +413,7 @@ def test_business_route_module_not_in_interfaces_api():
 
 
 def test_opensource_app_no_src_interfaces_api_import():
-    """Test 11: opensource_app.py does NOT import src.interfaces.api.* (S8)"""
+    """Test 11: opensource_app.py does NOT import app.adapters.http.* (S8)"""
     print("\n[TEST] test_opensource_app_no_src_interfaces_api_import")
 
     try:
@@ -430,20 +430,20 @@ def test_opensource_app_no_src_interfaces_api_import():
         violations = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
-                if node.module and "src.interfaces.api" in node.module:
+                if node.module and "app.adapters.http" in node.module:
                     violations.append(f"from {node.module} import ...")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if "src.interfaces.api" in alias.name:
+                    if "app.adapters.http" in alias.name:
                         violations.append(f"import {alias.name}")
 
         if violations:
-            print(f"✗ opensource_app.py imports from src.interfaces.api.*:")
+            print(f"✗ opensource_app.py imports from app.adapters.http.*:")
             for v in violations:
                 print(f"    {v}")
             return False
 
-        print(f"✓ opensource_app.py does NOT import from src.interfaces.api.*")
+        print(f"✓ opensource_app.py does NOT import from app.adapters.http.*")
         return True
 
     except Exception as e:
@@ -458,7 +458,7 @@ def test_openapi_path_count_gt_8():
     print("\n[TEST] test_openapi_path_count_gt_8")
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -490,7 +490,7 @@ def test_all_basic_business_paths_exist():
     print("\n[TEST] test_all_basic_business_paths_exist")
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")
@@ -538,7 +538,7 @@ def test_no_health_only_fallback():
     print("\n[TEST] test_no_health_only_fallback")
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         from fastapi.testclient import TestClient
 
         app = create_opensource_app(mode="test")

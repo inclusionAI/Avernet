@@ -11,20 +11,20 @@ import uuid
 import mysql.connector
 import pytest
 
-from src.domain.models.worker import Worker, WorkerIdentity, WorkerType
-from src.domain.models.worker_audit_log import WorkerAuditAction, WorkerAuditLog
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
-from src.infra.public.stores.mysql_worker_profile_binding_store import (
+from app.domain.models.worker import Worker, WorkerIdentity, WorkerType
+from app.domain.models.worker_audit_log import WorkerAuditAction, WorkerAuditLog
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
+from app.infra.public.stores.mysql_worker_profile_binding_store import (
     MySQLWorkerProfileBindingStore,
 )
-from src.infra.public.stores.mysql_worker_profile_content_store import (
+from app.infra.public.stores.mysql_worker_profile_content_store import (
     MySQLWorkerProfileContentStore,
 )
-from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
-from src.infra.public.stores.mysql_worker_runtime_state_store import (
+from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+from app.infra.public.stores.mysql_worker_runtime_state_store import (
     MySQLWorkerRuntimeStateStore,
 )
 

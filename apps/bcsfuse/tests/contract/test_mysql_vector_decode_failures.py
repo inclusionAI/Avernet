@@ -3,10 +3,10 @@
 import pickle
 
 import pytest
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
-from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
     MySQLVectorPersistenceBackend,
 )
 

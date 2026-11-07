@@ -13,13 +13,13 @@ import pytest
 from unittest.mock import Mock, patch
 import json
 
-from src.application.services.llm_stance_extractor import (
+from app.application.services.llm_stance_extractor import (
     LLMStanceExtractor,
     STANCE_EXTRACTION_PROMPT,
 )
-from src.domain.models.stance_signal import StanceSignal
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.llm_response import LLMResponse, LLMUsage, FinishReason
+from app.domain.models.stance_signal import StanceSignal
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.llm_response import LLMResponse, LLMUsage, FinishReason
 
 
 # ============================================
@@ -55,7 +55,7 @@ def mock_llm_provider():
 @pytest.fixture(autouse=True)
 def enable_feature_flag():
     """自动启用Feature Flag"""
-    with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+    with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
         yield
 
 
@@ -158,7 +158,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             signals = extractor.extract(
                 question="产品团队希望快速上线，技术团队担忧质量，如何平衡？",
                 perspective=sample_perspective,
@@ -187,7 +187,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             signals = extractor.extract(
                 question="复杂决策场景，涉及多个维度",
                 perspective=sample_perspective,
@@ -212,7 +212,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             signals = extractor.extract(
                 question="测试问题",
                 perspective=sample_perspective,
@@ -249,7 +249,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             result = extractor.extract(
                 question="测试问题",
                 perspective=sample_perspective,
@@ -277,7 +277,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             signals = extractor.extract(
                 question="测试问题",
                 perspective=sample_perspective,
@@ -307,7 +307,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 提取立场
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             signals = extractor.extract(
                 question="测试问题",
                 perspective=perspective,
@@ -350,7 +350,7 @@ class TestLLMStanceExtractor:
         extractor = LLMStanceExtractor(llm_provider=mock_llm_provider)
 
         # When: 批量提取
-        with patch('src.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_stance_extractor.FeatureFlags.is_enabled', return_value=True):
             all_signals = extractor.extract_all(
                 question="测试问题",
                 perspectives=perspectives,
@@ -361,7 +361,7 @@ class TestLLMStanceExtractor:
         # Each perspective should have at least 1 signal
         assert sum(len(s) for s in all_signals.values()) >= 2
 
-    @patch('src.application.services.llm_stance_extractor.FeatureFlags')
+    @patch('app.application.services.llm_stance_extractor.FeatureFlags')
     def test_extract_feature_disabled(self, mock_feature_flags, mock_llm_provider, sample_perspective):
         """测试Feature Flag禁用时跳过提取"""
         mock_feature_flags.is_enabled.return_value = False

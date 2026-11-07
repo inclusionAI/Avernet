@@ -21,12 +21,12 @@ sys.modules["infra.llm.prompts.expert_perspective_prompt"] = mock_expert_perspec
 sys.modules["authn"] = mock_authn
 sys.modules["authn.identity"] = MagicMock()
 
-from src.application.services.profile_analyzer_service import (
+from app.application.services.profile_analyzer_service import (
     ProfileAnalysisResult,
     ProfileAnalyzerService,
 )
-from src.application.utils.drm_config_helper import get_drm_config, set_drm_config
-from src.domain.models.worker_profile_content import WorkerProfileContent
+from app.application.utils.drm_config_helper import get_drm_config, set_drm_config
+from app.domain.models.worker_profile_content import WorkerProfileContent
 
 
 def test_profile_prompt_template_is_read_from_composed_provider_per_request():

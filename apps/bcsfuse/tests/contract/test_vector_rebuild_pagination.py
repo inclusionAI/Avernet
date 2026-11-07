@@ -5,11 +5,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from src.domain.models.vector_point import VectorPoint
-from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+from app.domain.models.vector_point import VectorPoint
+from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
     MySQLVectorPersistenceBackend,
 )
-from src.infra.vectorstore_backends.sqlite_vector_persistence_backend import (
+from app.infra.vectorstore_backends.sqlite_vector_persistence_backend import (
     SQLiteVectorPersistenceBackend,
 )
 
