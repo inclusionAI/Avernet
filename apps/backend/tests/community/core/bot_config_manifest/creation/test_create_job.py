@@ -115,6 +115,50 @@ def test_invalid_binding_stops_without_creating_or_discarding(field, value):
     assert not created and not applies.started and not seam.discards
 
 
+def test_expert_waits_for_adapter_before_starting_bound_apply():
+    payload = _bound_payload()
+    payload["spec"]["expert_origin"] = {
+        "expert_id": "writer", "manifest_digest": "a" * 64,
+        "digest_encoding": "sha256-json-v1",
+    }
+    checks = iter([False, True])
+    handler, applies, _, _ = _handler(
+        bots=_Bots(_ISSUED_BOT), seam=_BoundSeam(),
+        readiness=lambda **_: next(checks),
+    )
+    assert isinstance(handler.handle(payload), Reschedule)
+    assert not applies.started
+    assert isinstance(handler.handle(payload), Complete)
+    assert len(applies.started) == 1
+    assert applies.started[0]["state"].reference.endswith("a" * 64)
+
+
+def test_expert_readiness_timeout_preserves_bot_and_manifest():
+    payload = _bound_payload()
+    payload.update(submitted_at="2000-01-01T00:00:00", window_seconds=600)
+    payload["spec"]["expert_origin"] = {
+        "expert_id": "writer", "manifest_digest": "a" * 64,
+        "digest_encoding": "sha256-json-v1",
+    }
+    handler, applies, seam, created = _handler(
+        bots=_Bots(_ISSUED_BOT), seam=_BoundSeam(), readiness=lambda **_: False,
+    )
+    result = handler.handle(payload)
+    assert isinstance(result, Fail)
+    assert "readiness timed out" in result.error
+    assert not applies.started and not created
+    assert seam.verified
+
+
+def test_ordinary_manifest_creation_does_not_probe_adapter():
+    handler, applies, _, _ = _handler(
+        bots=_Bots(_ISSUED_BOT), seam=_BoundSeam(),
+        readiness=lambda **_: pytest.fail("ordinary creation must not probe"),
+    )
+    assert isinstance(handler.handle(_bound_payload()), Complete)
+    assert len(applies.started) == 1
+
+
 @pytest.mark.parametrize("origin", [{"expert_id": "writer"}, {}, False])
 def test_expert_origin_without_binding_cannot_become_an_ordinary_creation(origin):
     payload = {**_PAYLOAD, "spec": {**_PAYLOAD["spec"], "expert_origin": origin}}
@@ -224,7 +268,7 @@ class _GrantSweep:
 
 def _handler(
     *, passport_status="PENDING", applies=None, bots=None, seam=None,
-    relationships=None, grant_sweep=None,
+    relationships=None, grant_sweep=None, readiness=None,
 ):
     applies = applies or _Applies()
     seam = seam or _Seam(applies)
@@ -243,6 +287,7 @@ def _handler(
         # always passes the delivery strategy's own answer.,
         creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
         grant_sweep_provider=(lambda: grant_sweep) if grant_sweep is not None else None,
+        creation_readiness_probe=lambda **kw: (readiness(**kw) if readiness and kw["spec"].get("expert_origin") is not None else True),
     )
     return handler, applies, seam, created
 
@@ -780,6 +825,7 @@ def _record_first(
         passport_plugin_provider=lambda: _Passport(passport_status),
         bot_service_provider=lambda: service,
         auth_relationship_provider=lambda: _Relationships(),
+        creation_readiness_probe=lambda **_: True,
         creation_sequence=lambda engine: (
             CreationSequence.RECORD_APPLY_PROVISION if engine == "teclaw" else CreationSequence.CREATE_BETWEEN_PHASES
         ),

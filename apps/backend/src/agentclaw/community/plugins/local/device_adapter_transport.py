@@ -246,6 +246,8 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     ) -> str | None:
         """Resolve an adapter URL for an opted-in runtime-state path."""
         should_proxy = (
+            (conn_info.get("probe_runtime_readiness") is True and path in {"/readiness", "/health"})
+            or
             (self._proxy_cron and path.startswith("/api/cron"))
             or (
                 self._proxy_skills
@@ -316,7 +318,11 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             ) from exc
 
         if resp.status_code == 404:
-            raise DeviceAdapterEndpointNotFoundError(resp.text)
+            try:
+                route_missing = resp.json() == {"detail": "Not Found"}
+            except ValueError:
+                route_missing = False
+            raise DeviceAdapterEndpointNotFoundError(resp.text, standard_route_missing=route_missing)
         if resp.status_code >= 400:
             raise DeviceAdapterHTTPStatusError(resp.status_code, resp.text)
 
@@ -339,6 +345,12 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        probe_url = conn_info.get("url")
+        probe_target = conn_info.get("target")
+        if (conn_info.get("probe_runtime_readiness") is True
+                and not (isinstance(probe_target, str) and probe_target)
+                and not (isinstance(probe_url, str) and probe_url.startswith(("http://", "https://")))):
+            raise ValueError("runtime readiness probe has no per-device adapter address")
         proxied_adapter_url = self._proxied_adapter_url(conn_info, path)
         if proxied_adapter_url is not None:
             return await self._proxy(
@@ -350,6 +362,9 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                 params,
                 timeout,
             )
+
+        if conn_info.get("probe_runtime_readiness") is True and path in {"/readiness", "/health"}:
+            raise ValueError("runtime readiness probe has no adapter address")
 
         if path == "/health":
             return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}

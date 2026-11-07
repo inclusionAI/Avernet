@@ -217,6 +217,7 @@ def _build(db):
         passport_plugin_provider=lambda: _IssuedPassport(),
         bot_service_provider=_BotService,
         auth_relationship_provider=_RecordedRelationship,
+        creation_readiness_probe=lambda **_: True,
         creation_sequence=lambda engine: applies.delivery_for_engine(engine).creation_sequence,
     )
     return handler, applies, seam, order, seen_at_provision, store
