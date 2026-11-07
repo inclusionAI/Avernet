@@ -541,6 +541,59 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
         statement: DbStatement::new("UPDATE contract_items SET active = active + 1 WHERE id = 'item-1'"),
         expected_affected_rows: 1,
     }]).await.expect("matched CAS commits");
+
+    // QueryChecked: enough rows → commit all steps.
+    // Use DELETE+INSERT (not ON CONFLICT / ON DUPLICATE KEY) to stay in the
+    // shared SQLite/MySQL subset required by this contract.
+    plugin.execute(DbStatement::new("DELETE FROM contract_items WHERE id = 'qc-enough'")).await.ok();
+    plugin.execute(DbStatement::new(
+        "INSERT INTO contract_items (id, name, active) VALUES ('qc-enough', 'qc', 1)",
+    )).await.expect("qc-enough seed");
+    let qc_ok = plugin.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "UPDATE contract_items SET name = 'qc-ok' WHERE id = 'qc-enough'",
+        )),
+        DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT id FROM contract_items WHERE id = 'qc-enough'"),
+            expected_min_rows: 1,
+        },
+        DbTransactionStep::Execute(DbStatement::new(
+            "UPDATE contract_items SET active = 2 WHERE id = 'qc-enough'",
+        )),
+    ]).await.expect("QueryChecked enough rows");
+    assert_eq!(qc_ok.len(), 3, "all steps executed: write + QueryChecked + write");
+    let qc_after = plugin.query(DbStatement::new(
+        "SELECT name, active FROM contract_items WHERE id = 'qc-enough'",
+    )).await.expect("qc query after enough");
+    assert_eq!(qc_after[0].get_string("name").unwrap(), Some("qc-ok".into()));
+    assert_eq!(qc_after[0].get_bool("active").unwrap(), Some(true)); // active=2 → bool true
+
+    // QueryChecked: zero rows → graceful stop, earlier writes committed, later steps skipped.
+    plugin.execute(DbStatement::new("DELETE FROM contract_items WHERE id = 'qc-stop'")).await.ok();
+    let qc_stop = plugin.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO contract_items (id, name, active) VALUES ('qc-stop', 'before', 1)",
+        )),
+        DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT id FROM contract_items WHERE id = 'qc-missing'"),
+            expected_min_rows: 1,
+        },
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO contract_items (id, name, active) VALUES ('qc-after-stop', 'after', 1)",
+        )),
+    ]).await.expect("QueryChecked stop (not an error)");
+    assert_eq!(qc_stop.len(), 2, "stopped after QueryChecked, later steps skipped");
+    assert!(matches!(&qc_stop[0], DbTransactionStepResult::Executed(_)));
+    assert!(matches!(&qc_stop[1], DbTransactionStepResult::Rows(_)));
+    let qc_committed = plugin.query(DbStatement::new(
+        "SELECT id FROM contract_items WHERE id = 'qc-stop'",
+    )).await.expect("qc-stop query");
+    assert_eq!(qc_committed.len(), 1, "earlier write committed");
+    let qc_not_run = plugin.query(DbStatement::new(
+        "SELECT id FROM contract_items WHERE id = 'qc-after-stop'",
+    )).await.expect("qc-after-stop query");
+    assert!(qc_not_run.is_empty(), "later step not executed");
+
     db_transactions::stop_on_no_rows_contract(plugin).await;
     db_transactions::transaction_deadline_contract(plugin).await;
 }

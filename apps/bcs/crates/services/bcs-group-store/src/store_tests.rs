@@ -138,6 +138,14 @@ impl DbPlugin for RecordingDbPlugin {
                         last_insert_id: None,
                     }));
                 }
+                DbTransactionStep::QueryChecked { statement, .. } => {
+                    self.transaction_statements
+                        .lock()
+                        .expect("transaction statements")
+                        .push(statement.clone());
+                    sql.push(statement.sql().to_string());
+                    results.push(DbTransactionStepResult::Rows(Vec::new()));
+                }
             }
         }
 
@@ -952,3 +960,20 @@ async fn mode_only_patch_propagates_preflight_failures() {
         .expect_err("preflight read failure must propagate the storage error");
     assert!(matches!(error, ServiceError::InternalError(_)), "{error:?}");
 }
+
+#[tokio::test]
+async fn recording_plugin_handles_query_checked_step() {
+    let plugin = RecordingDbPlugin::default();
+    let results = plugin.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new("INSERT INTO t VALUES (1)")),
+        DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT * FROM t"),
+            expected_min_rows: 1,
+        },
+    ]).await.expect("QueryChecked transaction");
+    assert_eq!(results.len(), 2);
+    assert!(matches!(results[0], DbTransactionStepResult::Executed(_)));
+    assert!(matches!(results[1], DbTransactionStepResult::Rows(_)),
+        "QueryChecked must yield Rows, got {:?}", results[1]);
+}
+

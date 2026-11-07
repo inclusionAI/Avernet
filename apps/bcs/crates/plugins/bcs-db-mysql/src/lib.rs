@@ -28,6 +28,15 @@ pub struct MysqlDbPlugin {
     db: String,
 }
 
+/// Returns true when the query returned fewer rows than expected_min_rows,
+/// signalling the transaction should stop after this step.
+fn query_checked_should_stop(row_count: usize, expected_min_rows: u64) -> DbResult<bool> {
+    let count = u64::try_from(row_count).map_err(|_| {
+        DbError::Conversion("query result count exceeds u64".into())
+    })?;
+    Ok(count < expected_min_rows)
+}
+
 impl MysqlDbPlugin {
     pub fn new(mysql: AsyncMysqlDbManager, db: impl Into<String>) -> Self {
         Self {
@@ -112,6 +121,21 @@ impl DbPlugin for MysqlDbPlugin {
                                     .collect::<DbResult<Vec<_>>>()?;
                                 results.push(DbTransactionStepResult::Rows(rows));
                             }
+                            PreparedTransactionStep::QueryChecked(statement, expected_min_rows) => {
+                                let params =
+                                    statement.resolve_transaction_params(&results, step_index)?;
+                                let rows =
+                                    tx.query(statement.sql(), mysql_params(&params)?).await?;
+                                let rows = rows
+                                    .into_iter()
+                                    .map(row_to_db_row)
+                                    .collect::<DbResult<Vec<_>>>()?;
+                                let should_stop = query_checked_should_stop(rows.len(), expected_min_rows)?;
+                                results.push(DbTransactionStepResult::Rows(rows));
+                                if should_stop {
+                                    break;
+                                }
+                            }
                             PreparedTransactionStep::Execute(statement) => {
                                 let params =
                                     statement.resolve_transaction_params(&results, step_index)?;
@@ -181,6 +205,7 @@ enum PreparedTransactionStep {
     Query(DbStatement),
     Execute(DbStatement),
     ExecuteChecked(DbStatement, u64),
+    QueryChecked(DbStatement, u64),
 }
 
 impl From<DbTransactionStep> for PreparedTransactionStep {
@@ -190,6 +215,9 @@ impl From<DbTransactionStep> for PreparedTransactionStep {
             DbTransactionStep::Execute(statement) => Self::Execute(statement),
             DbTransactionStep::ExecuteChecked { statement, expected_affected_rows } => {
                 Self::ExecuteChecked(statement, expected_affected_rows)
+            }
+            DbTransactionStep::QueryChecked { statement, expected_min_rows } => {
+                Self::QueryChecked(statement, expected_min_rows)
             }
         }
     }
@@ -393,6 +421,80 @@ mod tests {
             numeric_text_bytes_to_db_value(b"1.25".to_vec()),
             DbValue::F64(1.25)
         );
+    }
+
+    #[test]
+    fn query_checked_converts_from_db_transaction_step() {
+        let step = DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT 1"),
+            expected_min_rows: 3,
+        };
+        let prepared = PreparedTransactionStep::from(step);
+        assert!(matches!(prepared, PreparedTransactionStep::QueryChecked(_, 3)));
+    }
+
+    #[test]
+    fn query_checked_with_large_expected_min_rows() {
+        let step = DbTransactionStep::QueryChecked {
+            statement: DbStatement::new("SELECT * FROM huge_table"),
+            expected_min_rows: u64::MAX,
+        };
+        let prepared = PreparedTransactionStep::from(step);
+        assert!(matches!(prepared, PreparedTransactionStep::QueryChecked(_, u64::MAX)));
+    }
+
+    #[test]
+    fn all_prepared_variants_convert_losslessly() {
+        let cases: Vec<(DbTransactionStep, &str)> = vec![
+            (DbTransactionStep::Query(DbStatement::new("SELECT 1")), "Query"),
+            (DbTransactionStep::Execute(DbStatement::new("INSERT INTO t VALUES (1)")), "Execute"),
+            (
+                DbTransactionStep::ExecuteChecked {
+                    statement: DbStatement::new("UPDATE t SET x=1 WHERE id=42"),
+                    expected_affected_rows: 1,
+                },
+                "ExecuteChecked",
+            ),
+            (
+                DbTransactionStep::QueryChecked {
+                    statement: DbStatement::new("SELECT * FROM t"),
+                    expected_min_rows: 10,
+                },
+                "QueryChecked",
+            ),
+        ];
+        for (step, expected_variant) in cases {
+            let prepared = PreparedTransactionStep::from(step);
+            let variant_name = match &prepared {
+                PreparedTransactionStep::Query(_) => "Query",
+                PreparedTransactionStep::Execute(_) => "Execute",
+                PreparedTransactionStep::ExecuteChecked(_, _) => "ExecuteChecked",
+                PreparedTransactionStep::QueryChecked(_, _) => "QueryChecked",
+            };
+            assert_eq!(variant_name, expected_variant, "variant mismatch for {expected_variant}");
+        }
+    }
+
+    #[test]
+    fn query_checked_should_stop_when_below_min_rows() {
+        assert!(query_checked_should_stop(0, 1).unwrap());
+        assert!(query_checked_should_stop(2, 5).unwrap());
+        assert!(!query_checked_should_stop(5, 5).unwrap());
+        assert!(!query_checked_should_stop(10, 5).unwrap());
+    }
+
+    #[test]
+    fn query_checked_should_stop_with_zero_min_rows_never_stops() {
+        assert!(!query_checked_should_stop(0, 0).unwrap());
+        assert!(!query_checked_should_stop(100, 0).unwrap());
+    }
+
+    #[test]
+    fn query_checked_should_stop_with_max_rows() {
+        // u64::MAX rows, expected_min_rows=u64::MAX → count == expected → no stop
+        assert!(!query_checked_should_stop(u64::MAX as usize, u64::MAX).unwrap());
+        // 0 rows, expected_min_rows=u64::MAX → count < expected → stop
+        assert!(query_checked_should_stop(0, u64::MAX).unwrap());
     }
 
 }
