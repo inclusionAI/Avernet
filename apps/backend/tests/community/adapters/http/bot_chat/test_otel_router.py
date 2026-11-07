@@ -151,7 +151,7 @@ def test_tool_span_parses_tool_payload_cache_breakdown_and_explicit_cost():
     }
 
 
-def test_otlp_request_log_contains_full_payload(tmp_path, monkeypatch):
+def test_otlp_request_log_excludes_full_payload_keeps_digest(tmp_path, monkeypatch):
     log_file = tmp_path / "backend-agent-logs.log"
     original_handlers = list(otel_router.agent_log_logger.handlers)
     original_level = otel_router.agent_log_logger.level
@@ -201,7 +201,7 @@ def test_otlp_request_log_contains_full_payload(tmp_path, monkeypatch):
     line = log_file.read_text(encoding="utf-8").strip()
     record = json.loads(line.split("INFO ", 1)[1])
     assert record["message"] == "otlp_traces_request"
-    assert record["payload"] == payload
+    assert "payload" not in record, "full payload must not be logged"
     assert record["trace_ids"] == ["trace-log"]
     assert record["payload_digest"].startswith("sha256:")
 
