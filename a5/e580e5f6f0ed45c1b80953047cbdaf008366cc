@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/domain/community/interactionQueries.ts
+  h_059e888e5e4e82 11-28,31,34-35,40,43,52,87-94,126-131
+apps/frontend-nextgen/src/hooks/useCommunityTopicActions.ts
+  h_059e888e5e4e82 98-101,107-109,111-112,120-123,144-147,157-160
+apps/frontend-nextgen/test/domain/community/interactionQueries.test.ts
+  h_059e888e5e4e82 55-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a5e580e5f6f0ed45c1b80953047cbdaf008366cc",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
