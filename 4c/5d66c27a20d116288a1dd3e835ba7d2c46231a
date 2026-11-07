@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/internal/docker/Dockerfile
+  h_5f06d4d8b4bdd5 44
+apps/evolverun/clawweb/scripts/ci/README.md
+  h_5f06d4d8b4bdd5 58-102
+apps/evolverun/clawweb/scripts/ci/test_clawweb_ci.sh
+  h_5f06d4d8b4bdd5 26-27
+apps/evolverun/clawweb/scripts/ci/tests/editor-draft-contract.test.mjs
+  h_5f06d4d8b4bdd5 1-90
+apps/evolverun/clawweb/scripts/ci/tests/fixtures/ocb-77e1151b-pack-scripts.ts.txt
+  h_5f06d4d8b4bdd5 1-133
+apps/evolverun/clawweb/scripts/ci/verify_clawweb_workspace.mjs
+  h_5f06d4d8b4bdd5 5,7-9,100-171
+submodules/avernet
+  h_5f06d4d8b4bdd5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c5d66c27a20d116288a1dd3e835ba7d2c46231a",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
