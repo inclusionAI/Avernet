@@ -1,0 +1,292 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-scripts-read.md
+  h_43af82e14600e4 9,30-36,40,53,57
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  h_43af82e14600e4 3-8,10-15
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  h_43af82e14600e4 1,3-8
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-wf-save-tag-deploy.md
+  h_43af82e14600e4 1-83
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-git-settings.test.ts
+  h_43af82e14600e4 58-60,103-105,155,161,165,169,184,196,203,205-209,211,216,218,238,247-250,261,264,267,272,314-316,319,328-331,342,366,377,383-390
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-local-compatibility.test.ts
+  h_43af82e14600e4 53-60,77,95,98-99,102,104-106,129,143,165-166,168-169,174-177,181,192,197,199-200,217-219,222,225,227-228,230-233,235,237-239,245,249-251,253,256,261
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-save-first-draft.test.ts
+  h_43af82e14600e4 11,22,60,65-68,72-73,125,143,145,235,253
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-unified-deploy-real.test.ts
+  h_43af82e14600e4 40,59,73,79,83,85-86
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-wf-settings.test.ts
+  h_43af82e14600e4 1-40
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-scripts-integration.test.ts
+  h_43af82e14600e4 15-16,38,78,84,88,97,103-104,109,115,118-119,129,131,133,135,144,150-151,154-155,159,168,173,219,223,230
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-scripts.test.ts
+  h_43af82e14600e4 69-73,81-82,91,103
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-active-baseline.test.ts
+  h_43af82e14600e4 28,56,58,61,63,66-67,71,85,93,96,106,110-113,130,134,136-143,146,155,158-160,163,172-173,197,208-209,273
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-git.test.ts
+  h_43af82e14600e4 43,86,102,104,112-113,138,140,142,167,178,189-190,210,212-213,231-236,240,244,246,251,256-257,261-263,276,278-279
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-identity.test.ts
+  h_43af82e14600e4 56,80-81,84,94,126
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version.test.ts
+  h_43af82e14600e4 14-15,65,67,109,115
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-unified-save.test.ts
+  h_43af82e14600e4 216,221,227,230,232,383,408,411
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal.ts
+  h_43af82e14600e4 6,114-115,121-122,184-186
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-scripts.ts
+  h_43af82e14600e4 66,91-96
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  h_43af82e14600e4 69,140-145
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/active-deployment-git.test.ts
+  h_43af82e14600e4 1-66
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-active-token-concurrency.test.ts
+  h_43af82e14600e4 12,23,39-44,61,66
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-create-safe.test.ts
+  h_43af82e14600e4 39-40,43-44,47-48,62,64,66-80,113,122,124,140,142,166,185,197-198,213,215,220,226,236
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-deploy-candidate.test.ts
+  h_43af82e14600e4 3,8,12,14,16,24-29,31,34,38-39,42,46-48,61-64,67-71,73,75-81,83-90,93-98,101-106,110-122,125-131,134,138-145,147-148,151-157,159-162,165-168,171-172,176,178-179,181-182,186-220,223-224,227-228,230-266,269-270,272-273,276-278,282-287
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-deploy-no-journal.test.ts
+  h_43af82e14600e4 4,8,17-19,23-31,33-34,40-44,49,53-58,60-80,82-85,88-90,92,94,96-107,109-117,119-126,128-134,136,138-141,144-155,157-161,164-165,168,171-174,176,179-181,183-188,190-193,195,198-201,215,222
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-legacy-projection.test.ts
+  h_43af82e14600e4 43,48-55,72-73,98,119,130,140
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-pack-binding.test.ts
+  h_43af82e14600e4 8,16,24-30,48,50-52,65,73
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-prepared-save-fixture.ts
+  h_43af82e14600e4 1-31
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db-first-draft.test.ts
+  h_43af82e14600e4 16,28,31,55,60-63,68,83,228,236,444,447,461,512
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db.test.ts
+  h_43af82e14600e4 13,23,25,38-41,48,54-55,89,123
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-deploy.test.ts
+  h_43af82e14600e4 54,70,79,97,104-107,109-112,157-163,170-171,173,185,188,195-196,198,206,215,221,224,234-236,240,284,301,320-323,326,329-333,335
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-snapshot.test.ts
+  h_43af82e14600e4 17,37-38,49-50,54-58,88,90,95,97,104,106,110,132,139,142,145-146,161,163-164,169-172,174,180-182,188,190,194,196,201,209-211
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-unified-save-adapter.test.ts
+  h_43af82e14600e4 44-46,70-71,73-77,82,89,107,118-119,130,146-147
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-wf-save.test.ts
+  h_43af82e14600e4 1-205
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-git-client.test.ts
+  h_43af82e14600e4 192-193,196,231,288,299,384,390-394
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-manifest-git.test.ts
+  h_43af82e14600e4 9-11,29-44,65,69,72,74,118-125,176,208,211,213,220,226-227,271,348,351,353,445,448,450,459,607-608,628,649,662,664-665,669
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-save.test.ts
+  h_43af82e14600e4 49,53-54,65,72,100,105-107,134,140,147-149,209,224,236,251,264,273,275,277-278,453
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-snapshot.test.ts
+  h_43af82e14600e4 13,16,23,76-77,85-86
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-workflow.test.ts
+  h_43af82e14600e4 15,17,57,62,66,71,107,122,148-149,153,156,158
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-git-prepared.test.ts
+  h_43af82e14600e4 13,37,50-52,56,71,77-78,88-89,116-117,139,141,143-174,176-210,213,215,217-218,221,225-226,232,256,272-273,287,289-290,295,297,301,313-314,322,327,330,333,335-341,344,349,376,379,392,405,408,410,413,417,421,426,431,436,438-446,457,498,504,549-550
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-read-service.test.ts
+  h_43af82e14600e4 11,13,29-30,34,37-42,50-51,56-57,62-63,65,72,75,77,83,90-92,94-100,102
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-snapshot.test.ts
+  h_43af82e14600e4 9,14-21,35-36,39,266,275
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-write.test.ts
+  h_43af82e14600e4 201-215
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-spec-save.test.ts
+  h_43af82e14600e4 37-38,40,43,48,50,56,62,65-66,68,79-80,83-84,122-124,126,129-132,137,139-140,144,155,157,166,176,189,191-192
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-git-read.test.ts
+  h_43af82e14600e4 65,67,69-70,76,84-85,98,101,104,119,129,142,182,220,296,335
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-lifecycle.test.ts
+  h_43af82e14600e4 36-37,76-78,80-83,88-89,102,117,124,127-128,135,138,148,159-160,163,171,177
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-no-journal.test.ts
+  h_43af82e14600e4 12-13,16,18-19,21
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-structural-move.test.ts
+  h_43af82e14600e4 41-42,63-64,91
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-wf-tag.test.ts
+  h_43af82e14600e4 1-82
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/tag-only-deploy.test.ts
+  h_43af82e14600e4 1-269
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-save-object-format.test.ts
+  h_43af82e14600e4 1-236
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-saved-ref.test.ts
+  h_43af82e14600e4 1-56
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-snapshot-release-git.test.ts
+  h_43af82e14600e4 13,20,23-24,28,30-31,36-37,40-41,43-48,52-57,59-62,64-67,69-70,73-75,77-83,87-88,90,92-96,98-105,107-108,111,114
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-save-service.test.ts
+  h_43af82e14600e4 19-20,28,104,117,132,145,163,175,185,197,204,233,248,267,287,294-295,304,349,362,371,401,412,428,443,454,471,490,511,528,563,572,604
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-wf-save.test.ts
+  h_43af82e14600e4 1-78
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-wf-only.test.ts
+  h_43af82e14600e4 1-64
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-wf-save-contract.test.ts
+  h_43af82e14600e4 1-173
+apps/evolverun/clawweb/public/modules/workflow/server/services/active-deployment-git.ts
+  h_43af82e14600e4 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-deploy-git.ts
+  h_43af82e14600e4 7,11-12,17,41,43,47,49,62,70,78,95-96,107-115,117-118,126,134-141,144
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-deploy-service.ts
+  h_43af82e14600e4 1,4,6,13,17,20,63-89,116-119,121-125,129-133,172-173,181-184,187-192,194-195,197,199,205-226,230,233-238,245-248
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-save-service.ts
+  h_43af82e14600e4 1,13,44,174,200,220,260-265,267-319
+apps/evolverun/clawweb/public/modules/workflow/server/services/clawflows-git-client.ts
+  h_43af82e14600e4 5-7,9,843,845,847
+apps/evolverun/clawweb/public/modules/workflow/server/services/deploy-tree-guard.ts
+  h_43af82e14600e4 27-28
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-candidate-save.ts
+  h_43af82e14600e4 3,9-10,19,40,63-64,141-142,175,220,226,458-459,463,500,503,506,513,518,522-524,527-528,544,551-552,556-559
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-read-service.ts
+  h_43af82e14600e4 1,5-6,30,35-41
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  h_43af82e14600e4 38,46,59-63,65,68-71,253
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-write.ts
+  h_43af82e14600e4 1,45,76-77,182-183
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-spec-save.ts
+  h_43af82e14600e4 5,7,11,15,18-23,30,32,34,51-53,55-60,71,80-82,88-93,95,113-115,117,122
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-git-read.ts
+  h_43af82e14600e4 20,23,41,43
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  h_43af82e14600e4 14,22-26,37,46,48-52,102-112
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-saved-ref.ts
+  h_43af82e14600e4 1-139
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-snapshot-release-git.ts
+  h_43af82e14600e4 17-19,27,38,49,51-55,57-58,61-64,67-68
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-unified-save-service.ts
+  h_43af82e14600e4 7,184
+apps/evolverun/clawweb/public/modules/workflow/web/SNAPSHOT_CONTRACT.md
+  h_43af82e14600e4 1-27
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealCapability.transport.test.ts
+  h_43af82e14600e4 68
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealUnifiedSave.test.tsx
+  h_43af82e14600e4 20,88,95,227,233,268,284-292
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealWrites.guard.test.tsx
+  h_43af82e14600e4 15
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealWrites.test.tsx
+  h_43af82e14600e4 7-8,18,63-123,170
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.gitDirect.test.ts
+  h_43af82e14600e4 9,52
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.packVersionBoundary.test.ts
+  h_43af82e14600e4 53,61,78,97,104-107,113-116
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/historyPackFixture.ts
+  h_43af82e14600e4 4
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowDocument.test.tsx
+  h_43af82e14600e4 51,114,267
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowUnifiedSave.hook.test.tsx
+  h_43af82e14600e4 68
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealDeploySnapshot.ts
+  h_43af82e14600e4 9,29,45
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealUnifiedBaseline.ts
+  h_43af82e14600e4 24,63,79,86
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealWrites.ts
+  h_43af82e14600e4 18-24,236,239-242,292,314,395
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealDeployConfirm.tsx
+  h_43af82e14600e4 27
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealPanel.tsx
+  h_43af82e14600e4 336
+apps/evolverun/clawweb/public/modules/workflow/web/components/DeploySnapshotReview.tsx
+  h_43af82e14600e4 19,22,24,28-29
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackReconciliationNotice.tsx
+  h_43af82e14600e4 38
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  h_43af82e14600e4 321
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 76,79-80
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowSnapshotReconciliation.tsx
+  h_43af82e14600e4 65
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealPanel.postSaveLock.test.tsx
+  h_43af82e14600e4 40,56,60
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealPanel.test.tsx
+  h_43af82e14600e4 98,141,355,561,588,600,611,623,628,727,743
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  h_43af82e14600e4 40,45-46
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesReconciliationUI.test.tsx
+  h_43af82e14600e4 18,84
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.candidateRecovery.test.tsx
+  h_43af82e14600e4 11,29,42
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.defaultDraft.test.tsx
+  h_43af82e14600e4 12,18,75-84
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.readErrors.test.tsx
+  h_43af82e14600e4 26
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.test.tsx
+  h_43af82e14600e4 29,47,72-73,95,119,121,128,165,190,196,209,212,221,232,256,279,283,298,314,330,334-337,348,361,416,450,472,523,539
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTabWriteDisabled.test.tsx
+  h_43af82e14600e4 8
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  h_43af82e14600e4 36,61,72-74
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/EvolutionIssueFlow.test.tsx
+  h_43af82e14600e4 558-567
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/repair-batch/__tests__/IssueNavigation.test.tsx
+  h_43af82e14600e4 385-391,428
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/repair-batch/__tests__/RepairItems.test.tsx
+  h_43af82e14600e4 54,63
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/canvasNavigationGuard.test.tsx
+  h_43af82e14600e4 106
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/createThenSaveBinding.test.ts
+  h_43af82e14600e4 23,25
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/firstDraftActiveBinding.test.tsx
+  h_43af82e14600e4 53,70
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/firstDraftUnifiedSave.test.tsx
+  h_43af82e14600e4 42
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/newWorkflowSave.test.ts
+  h_43af82e14600e4 15,17,21,52,57,68,106,115,154,169,177,190,197,225,232-247
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packBindingBaseline.test.tsx
+  h_43af82e14600e4 36,71
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packCanvas.test.ts
+  h_43af82e14600e4 12
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packRenameSessionSafety.test.tsx
+  h_43af82e14600e4 57,59,83,98,292,300
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionOperations.test.ts
+  h_43af82e14600e4 18,21,46
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionOriginRejection.test.ts
+  h_43af82e14600e4 30,53,98,101,162,164,233
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionRefContract.test.ts
+  h_43af82e14600e4 1-75
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionTransport.test.ts
+  h_43af82e14600e4 14,42,62
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/postSaveBinding.test.tsx
+  h_43af82e14600e4 59,102,151,165,191,210
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.enabled.test.tsx
+  h_43af82e14600e4 8
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.fileYamlSave.test.tsx
+  h_43af82e14600e4 59
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.moves.test.tsx
+  h_43af82e14600e4 23,35,192,223,227
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.noJournal.test.tsx
+  h_43af82e14600e4 28,45,57,588,626,725
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.trustedRecovery.test.ts
+  h_43af82e14600e4 40
+apps/evolverun/clawweb/public/modules/workflow/web/editor/newWorkflowSave.ts
+  h_43af82e14600e4 17,49,75-76,115-116,139
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSave.ts
+  h_43af82e14600e4 40,50,86,107,174,198
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  h_43af82e14600e4 100,136,189-197,202
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  h_43af82e14600e4 119,140,398,479,488
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 3-5,93,130,286,299,301,304,324,337,339,343,571,573,579,582,616,618,621,793,812,816,819-820,967-968
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNewWorkflow.test.tsx
+  h_43af82e14600e4 52,79
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  h_43af82e14600e4 37,41,51,108-109,259,262,292,303,323,332,362,379,383,603,606
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPackSafety.test.tsx
+  h_43af82e14600e4 34,57,234,239
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPartialSaveCache.test.tsx
+  h_43af82e14600e4 38,94,121
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorReconciliationBridge.test.tsx
+  h_43af82e14600e4 24,27,56-58,61-64,66,83,102-240
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorReconciliationLifecycle.test.tsx
+  h_43af82e14600e4 1-119
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  h_43af82e14600e4 33,103,113,130,138,142,165,195,202,216,232,235,292,298,306,311,316,321,326,331,352,356,446,454,478,499-500,525,552,575,614,642,714,718,736-803
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorUnknownWriteReentry.test.tsx
+  h_43af82e14600e4 78
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowIsolation.test.tsx
+  h_43af82e14600e4 46,133,175,198,217,265,368,418,520,536
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  h_43af82e14600e4 119
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  h_43af82e14600e4 113
+apps/evolverun/clawweb/public/modules/workflow/web/pages/useEditorMergeReview.ts
+  h_43af82e14600e4 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1fca64189b5201fa11db13603b08015e6a7767f6",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
