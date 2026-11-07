@@ -484,14 +484,34 @@ export function resolvePackPaths(
     assertNoGitlink(repoDir, [file], links);
     if (!candidates.includes(file)) candidates.push(file);
   }
+  // A repository-root manifest is authoritative when it identifies this Pack and
+  // declares the workflow. In that case, everything below packs/ is an ordinary
+  // resource and its nested manifests are not parsed or treated as candidates.
+  // If the root does not match, retain the old fail-closed discovery behavior.
   let manifestBytes = 0;
-  const inspected = candidates.map(file => {
+  const inspectedByFile = new Map<string, { file: string; text: string; value: Record<string, unknown>; id: string; size: number }>();
+  const inspect = (file: string) => {
+    const existing = inspectedByFile.get(file);
+    if (existing) return existing;
     const found = readBoundedManifest(repoDir, file);
     manifestBytes += found.size;
     if (manifestBytes > 8 * 1024 * 1024) throw new Error("Pack manifest discovery limit exceeded");
-    return { file, ...found };
-  });
-  const matchingCandidates = inspected.filter(candidate => candidate.id === packId);
+    const candidate = { file, ...found };
+    inspectedByFile.set(file, candidate);
+    return candidate;
+  };
+  const rootPackCandidate = rootExists ? inspect(root) : undefined;
+  const rootDeclaresWorkflow = Array.isArray(rootPackCandidate?.value.workflows)
+    ? (rootPackCandidate!.value.workflows as unknown[]).some(item =>
+      typeof item === "string" ? item === workflowId
+        : !!item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).id === workflowId)
+    : false;
+  const selectedFiles = rootPackCandidate?.id === packId && rootDeclaresWorkflow
+    ? candidates.filter(file => file === root || !path.relative(repoDir, file).startsWith("packs/"))
+    : candidates;
+  for (const file of selectedFiles) inspect(file);
+  const selectedCandidates = selectedFiles.map(file => inspectedByFile.get(file)!);
+  const matchingCandidates = selectedCandidates.filter(candidate => candidate.id === packId);
   if (matchingCandidates.length > 1) throw new Error("Pack manifest conflict");
 
   let filePath: string;
@@ -570,7 +590,7 @@ export function resolvePackPaths(
   }
   // Different identities are independent only when their declared resources
   // do not own the files this operation will change.
-  for (const otherPack of inspected) {
+  for (const otherPack of selectedCandidates) {
     if (otherPack.file === filePath) continue;
     const collision = (otherPack.value.workflows as unknown[]).some(item => {
       const id = typeof item === "string" ? item : (item as Record<string, unknown>).id;

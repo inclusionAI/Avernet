@@ -95,6 +95,17 @@ describe('readPackScriptSnapshot', () => {
     put('packs/pack', 'unrelated file\n'); ref('wf', commit());
     expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).files).toHaveLength(2);
   });
+  it('treats packs/<packId>/workflow.pack.yaml as an ordinary root Pack resource', async () => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
+    put('packs/pack/workflow.pack.yaml', 'id: pack\nworkflows: [flow]\n');
+    put('packs/pack/workflows/flow.yaml', 'id: flow\nversion: 35\n');
+    ref('wf', commit());
+    const snapshot = await readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true });
+    expect(snapshot.packPath).toBe('');
+    expect(snapshot.versionFiles?.map(file => file.path)).toContain('packs/pack/workflow.pack.yaml');
+    expect(snapshot.versionFiles?.map(file => file.path)).toContain('workflows/flow.yaml');
+  });
   it('rejects root manifest conflicts with either nested layout, even if the duplicate is invalid', async () => {
     put('workflow.pack.yaml', 'not a valid manifest'); ref('wf', commit());
     await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/manifest conflict/i);
@@ -287,11 +298,19 @@ describe('full version inventory', () => {
 });
 
 describe('full inventory isolation', () => {
-  it('refuses a root Pack mixed with another Pack rather than exposing its content', async () => {
+  it('returns a root Pack with packs/ as an ordinary directory', async () => {
     git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml'); git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
     put('packs/private/workflow.pack.yaml', 'id: private\nworkflows: [other]\n'); put('packs/private/workflows/other.yaml', 'id: other\nnodes: []\n');
     put('packs/private/secret.txt', 'sensitive'); ref('wf', commit());
-    await expect(readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true })).rejects.toThrow('Mixed Pack layout');
+    const snapshot = await readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true });
+    expect(snapshot.packPath).toBe('');
+    expect(snapshot.versionFiles?.map(file => file.path)).toEqual(expect.arrayContaining([
+      'workflow.pack.yaml',
+      'workflows/flow.yaml',
+      'packs/private/workflow.pack.yaml',
+      'packs/private/workflows/other.yaml',
+      'packs/private/secret.txt',
+    ]));
   });
   it('rejects paths that the writer cannot safely round trip', async () => {
     put('pack/C:notes.txt', 'text'); ref('wf', commit());
