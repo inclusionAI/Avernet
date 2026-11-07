@@ -6,7 +6,7 @@ use opentelemetry::{KeyValue, global};
 use opentelemetry::trace::{Status, TraceContextExt};
 use opentelemetry_http::HeaderExtractor;
 use std::time::Duration;
-use tower_http::trace::{MakeSpan, OnResponse};
+use tower_http::trace::{MakeSpan, OnFailure, OnResponse};
 use tracing::{Span, debug_span, info_span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -178,6 +178,27 @@ impl<B> OnResponse<B> for BcnOnResponse {
         if response.status().is_server_error() {
             span.set_status(Status::error(format!("HTTP {status}")));
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BcnOnFailure;
+
+impl<FailureClass: std::fmt::Display> OnFailure<FailureClass> for BcnOnFailure {
+    fn on_failure(
+        &mut self,
+        failure_class: FailureClass,
+        latency: Duration,
+        span: &Span,
+    ) {
+        span.set_attribute("http.response.status_code", 500i64);
+        tracing::warn!(
+            target: "bcs_http_access",
+            parent: span,
+            latency_ms = latency.as_millis() as i64,
+            classification = %failure_class,
+            "http.request.failed"
+        );
     }
 }
 
