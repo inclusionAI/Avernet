@@ -20,7 +20,7 @@ it("reports unknown writes and explicit business failures without retrying", asy
   const request = vi.fn().mockResolvedValueOnce({ status: 504, body: "timeout" }).mockResolvedValueOnce({ status: 200, body: { success: false } });
   const tool = new BotEngineOperations({ request });
   expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/remove", body: { target_path: "/workspace/obsolete.txt" } }, true)).toMatchObject({ status: "unknown" });
-  expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/read" }, false)).toMatchObject({ status: "failed" });
+  expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/read", body: { file_path: "/workspace/file" } }, false)).toMatchObject({ status: "failed" });
   expect(request).toHaveBeenCalledTimes(2);
 });
 it("rejects TE Shell before contacting the provider", async () => {
@@ -28,6 +28,26 @@ it("rejects TE Shell before contacting the provider", async () => {
   const runtime = new BotRuntimeClient({ providers: { teclaw: { executeShell, request: vi.fn(), sendMessage: vi.fn() } } });
   await expect(runtime.executeShell({ target, command: "cat file" })).rejects.toMatchObject({ code: "unsupported_engine_shell" });
   expect(executeShell).not.toHaveBeenCalled();
+});
+it.each([
+  ["read", { path: "/workspace/file" }],
+  ["list", { path: "/workspace" }],
+  ["read", { file_path: "/home/admin/.teclaw/workspace/file" }],
+  ["list", { dir_path: "/tmp/ais-analysis" }],
+  ["read", { file_path: "/workspace-other/file" }],
+])("rejects an invalid TE file %s contract before dispatch", async (operation, body) => {
+  const request = vi.fn();
+  await expect(new BotEngineOperations({ request }).execute(target,
+    { method: "POST", path: `/api/v1/file/${operation}`, body }, false)).rejects.toMatchObject({
+      status: 422, code: "invalid_engine_file_read",
+    });
+  expect(request).not.toHaveBeenCalled();
+});
+it.each(["/workspace/file", "/identity/SOUL.md", "/config/teclaw.json"])("preserves the supported TE logical path %s", async file_path => {
+  const request = vi.fn().mockResolvedValue({ status: 200, body: "contents" });
+  const operation = { method: "POST" as const, path: "/api/v1/file/read", body: { file_path } };
+  await new BotEngineOperations({ request }).execute(target, operation, false);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining(operation));
 });
 it("uses existing multipart file and target_path contract without JSON content-type", async () => {
   const headers = { "Content-Type": "application/json", "x-proxypass-token": "opaque" };
@@ -67,7 +87,7 @@ it.each(["openclaw", "claude_code", "teclaw"])("keeps MCP/Skill reads and Cron w
   const prefix = te ? "/api/v1" : "/api";
   const current = { ...target, activeEngine };
   expect(BotEngineOperations.capabilities(activeEngine).writes.join(" ")).not.toMatch(/mcp|skills|skill-package|bot\/apply/);
-  for (const file_path of ["/workspace/skills/review/SKILL.md", "/home/admin/.mcporter/mcporter.json"]) {
+  for (const file_path of ["/workspace/skills/review/SKILL.md", te ? "/config/teclaw.json" : "/home/admin/.mcporter/mcporter.json"]) {
     await expect(tool.execute(current, { method: "POST", path: prefix + "/file/read", body: { file_path } }, false)).resolves.toMatchObject({ status: "success" });
   }
   await tool.execute(current, { method: "POST", path: prefix + "/file/list", body: { dir_path: "/workspace/skills" } }, false);
