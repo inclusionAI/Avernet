@@ -85,7 +85,7 @@ async fn manager_worker_unknown_target_emits_public_group_notice() {
     )
     .with_system_message(system_message.clone());
 
-    let error = flow
+    let outcome = flow
         .handle_task_dispatch(TaskDispatchCommand {
             driver_bot_id: "bot-manager".to_string(),
             group_id: "group-1".to_string(),
@@ -98,9 +98,9 @@ async fn manager_worker_unknown_target_emits_public_group_notice() {
             caller_delegation: None,
         })
         .await
-        .expect_err("unknown worker must reject task dispatch");
+        .expect("orphan bot is now skipped instead of rejected");
 
-    assert!(matches!(error, ServiceError::BotNotFound(bot) if bot == "Wrong Worker"));
+    assert_eq!(outcome.status, "skipped");
     assert!(support.bot_delivery.kinds().await.is_empty());
     let notifications = system_message.notifications.lock().await;
     assert_eq!(notifications.len(), 1);

@@ -157,17 +157,12 @@ async fn definite_rejection_is_durable_queryable_and_wakes_manager_once() {
     let mut cmd = dispatch_command();
     cmd.target_bot_id = "missing".into();
     cmd.payload["assignment_intent_id"] = json!("bcs_intent_34567890000000000000000000000000");
-    assert!(f.flow.handle_task_dispatch(cmd.clone()).await.is_err());
-    assert!(f.flow.handle_task_dispatch(cmd).await.is_err());
-    assert_eq!(state(&f, "34567890").await, S::Failed);
-    let rows = f.rows().await;
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].target_bot_id, "bot-driver");
-    assert_eq!(rows[0].flow_kind, DeliveryFlowKind::System);
-    let source = f.repo.get_message_by_id(SESSION, &rows[0].source_message_id).await.unwrap().unwrap();
-    assert!(source.content["text"].as_str().unwrap().starts_with("[任务派发失败] ref=T-34567890"));
-    f.start(&rows[0]).await;
-    assert_eq!(f.support.bot_delivery.frames().await.len(), 1);
+    // Orphan bot is now skipped instead of rejected (fix: session_chat 500).
+    let outcome = f.flow.handle_task_dispatch(cmd.clone()).await.unwrap();
+    assert_eq!(outcome.status, "skipped");
+    let outcome2 = f.flow.handle_task_dispatch(cmd).await.unwrap();
+    assert_eq!(outcome2.status, "skipped");
+    // No rows are produced when the dispatch is skipped.
 }
 
 #[tokio::test]
@@ -223,9 +218,9 @@ async fn rejection_works_with_task_only_policy_and_manager_queue_off() {
     f.flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
     let mut cmd = dispatch_command(); cmd.target_bot_id = "missing".into();
     cmd.payload["assignment_intent_id"] = json!("bcs_intent_67890123000000000000000000000000");
-    assert!(f.flow.handle_task_dispatch(cmd).await.is_err());
-    assert_eq!(state(&f, "67890123").await, S::Failed);
-    assert_eq!(f.rows().await.len(), 1);
+    // Orphan bot is now skipped instead of rejected (fix: session_chat 500).
+    let outcome = f.flow.handle_task_dispatch(cmd).await.unwrap();
+    assert_eq!(outcome.status, "skipped");
 }
 
 #[tokio::test]

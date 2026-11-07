@@ -130,7 +130,16 @@ impl QueuedGroupProjection {
         if command.session_id.as_deref().is_none_or(|s| s.is_empty()) {
             return Err(invalid("queue admission requires a canonical session"));
         }
-        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await?.is_http_provider();
+        // Resolve the delivery target to decide whether to preserve
+        // Provider-only headers. A definitively deleted bot is treated as
+        // non-provider (same as the task-dispatch orphan-skip policy).
+        // Transient registry errors are propagated rather than silently
+        // downgraded, so the caller can retry or route around the failure.
+        let is_provider = match flow.registry.resolve_delivery_target(&target.bot_uuid).await {
+            Ok(dt) => dt.is_http_provider(),
+            Err(ServiceError::BotNotFound(_)) => false,
+            Err(e) => return Err(e),
+        };
         // WS does not consume Provider-only headers. Preserve only explicitly
         // approved routing metadata for a later Bot relay, never credentials.
         let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|

@@ -245,6 +245,7 @@ bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
 # Real OAuth login/session journeys against isolated local HTTPS provider stubs.
 bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
+bash "$bcs_dir/scripts/error_path_coverage.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi

@@ -3,6 +3,7 @@ use tracing::debug;
 
 pub(super) struct CoordinationEchoDispatch {
     task_id: Option<String>,
+    pub(super) skipped: bool,
     pub(super) bot_deliveries: Vec<BotDeliveryResult>,
     pub(super) frontend_deliveries: Vec<FrontendDeliveryResult>,
 }
@@ -119,6 +120,8 @@ async fn claim_and_dispatch(
         resolved.arguments = lease.arguments;
         let dispatched = dispatch_coordination_call(flow, cmd, &resolved, Some(&tool_call_id)).await;
         let result = match &dispatched {
+            Ok(Some(outcome)) if outcome.skipped => CoordinationResult {
+                status: CoordinationStatus::Failed, task_id: None, error_code: Some("task_dispatch_skipped".into()) },
             Ok(Some(outcome)) => CoordinationResult { status: CoordinationStatus::Applied,
                 task_id: outcome.task_id.clone(), error_code: None },
             Err(error) if crate::task_rejection::is_rejected(error) => CoordinationResult {
@@ -331,8 +334,10 @@ pub(super) async fn dispatch_coordination_call(
             .await
             {
                 Ok(outcome) => {
+                    let skipped = outcome.task_id.is_empty();
                     Ok(Some(CoordinationEchoDispatch {
                         task_id: Some(outcome.task_id),
+                        skipped,
                         bot_deliveries: outcome.bot_deliveries,
                         frontend_deliveries: outcome.frontend_deliveries,
                     }))
@@ -389,6 +394,7 @@ pub(super) async fn dispatch_coordination_call(
             {
                 Ok(outcome) => Ok(Some(CoordinationEchoDispatch {
                     task_id: None,
+                    skipped: false,
                     bot_deliveries: outcome.bot_deliveries,
                     frontend_deliveries: outcome.frontend_deliveries,
                 })),
@@ -445,6 +451,7 @@ pub(super) async fn dispatch_coordination_call(
                     }
                     Ok(Some(CoordinationEchoDispatch {
                         task_id: None,
+                        skipped: false,
                         bot_deliveries: Vec::new(),
                         frontend_deliveries: outcome.frontend_deliveries,
                     }))
