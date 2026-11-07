@@ -27,6 +27,10 @@ check.
   research boundary for training, development evaluation, and independent
   acceptance data.
 
+- [`benchmark/environment-reproducibility.md`](benchmark/environment-reproducibility.md):
+  reproducible environment boundaries, actor-visible evidence, and future
+  admission checks without exposing private evaluation material.
+
 The accepted decisions remain authoritative:
 
 - [ADR 0019: Bot Genome is the unit of evolution](../../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)
