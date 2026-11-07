@@ -20,7 +20,7 @@ function setup() {
   const path = `workflows/${id}.yaml`, baseline = btoa(`# Keep exact bytes and comments\n${stringify(spec)}`)
   const files = [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [id] })), mode: '100644' as const },
     { path, contentBase64: baseline, mode: '100644' as const }, { path: 'scripts/test.sh', contentBase64: btoa('old'), mode: '100644' as const }]
-  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
+  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions,
     draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
@@ -32,7 +32,7 @@ function setup() {
     const input = JSON.parse(await blobText(init!.body as Blob))
     if (url.endsWith('/editor-draft')) { expect(input.expectedDraftToken).toBe(token); mocks.read.mockResolvedValue(structuredClone(input.spec)); return row(input.spec, nextToken) }
     if (url === '/api/auto-heal/save') { mocks.read.mockResolvedValue(structuredClone(input.spec)); return { ok: true, saved: true, workflowId: id, packId: 'pack' } }
-    return { branch: `saved/${id}`, commit: B, packId: 'pack', version: 1, requestId: input.requestId }
+    return { branch: `wf/${id}`, commit: B, packId: 'pack', version: 1, requestId: input.requestId }
   })
   return { id, spec, path, baseline, session, hook: renderHook(() => usePackCanvasSession(id, spec)) }
 }
@@ -189,7 +189,7 @@ it('blocks a conflicting rename before either DB or Git is written', async () =>
   act(() => {
     const draft = ctx.session.state.versions.draft
     publish(ctx.session, { ...ctx.session.state, version: 'current', versions: { ...ctx.session.state.versions,
-      current: { ...draft, snapshot: { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}`, draftHead: B }, files: structuredClone(draft.files) } } })
+      current: { ...draft, snapshot: { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1`, draftHead: B }, files: structuredClone(draft.files) } } })
     const current = ctx.session.state.versions.current
     updateVersion(ctx.session, 'current', { files: current.files.map(f => f.path === 'workflow.pack.yaml'
       ? { ...f, contentBase64: btoa(stringify({ id: 'renamed', workflows: [ctx.id] })) } : f) })
@@ -220,11 +220,11 @@ it('preserves unrelated workflows and binary resources when a Pack rename is ref
   expect(ctx.session.state.versions.draft.snapshot!.versionFiles).toContainEqual(asset)
 })
 
-it('blocks a different saved head before writing either DB or Git and keeps both local edits', async () => {
+it('blocks a different 草稿(wf) head before writing either DB or Git and keeps both local edits', async () => {
   const ctx = setup()
   act(() => {
     const draft = ctx.session.state.versions.draft
-    const snapshot = { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}`, draftHead: B }
+    const snapshot = { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1`, draftHead: B }
     const files = draft.files.map(f => f.path === 'scripts/test.sh' ? { ...f, contentBase64: btoa('local current') } : f)
     publish(ctx.session, { ...ctx.session.state, version: 'current', versions: { ...ctx.session.state.versions,
       current: { ...draft, snapshot, files } } })

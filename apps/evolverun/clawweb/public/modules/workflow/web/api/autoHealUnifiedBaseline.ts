@@ -21,7 +21,7 @@ async function boundedRead<T>(operation: Promise<T>): Promise<T> {
 export class AutoHealScopedCapabilityError extends Error {}
 
 export class AutoHealBaselineUnavailableError extends AutoHealScopedCapabilityError {
-  constructor() { super('无法同步数据库与 Git：缺少数据库草稿或 saved/wf 基线。请先恢复工作流资源，再保存；不会创建空 Git 树。') }
+  constructor() { super('无法同步数据库与 Git：缺少数据库草稿或草稿(wf)或生效 tag 基线。请先恢复工作流资源，再保存；不会创建空 Git 树。') }
 }
 
 /** Capability is an explicitly versioned host declaration, never a client grant. */
@@ -60,7 +60,7 @@ export async function readAutoHealUnifiedBaseline(workflowId: string): Promise<A
   const endpoint = `/api/workflows/${encodeURIComponent(workflowId)}/pack-version`
   // Only a real, exact endpoint response is evidence for trying current. A
   // missing manifest can share this code: current must also attest a null
-  // saved head before it can be used as the first saved baseline.
+  // wf target head before it can be used as the first saved baseline.
   const user = getClientUser()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (user) { headers['X-User-Id'] = user.userId; headers['X-User-Name'] = encodeURIComponent(user.nickName) }
@@ -76,14 +76,14 @@ export async function readAutoHealUnifiedBaseline(workflowId: string): Promise<A
         && Object.keys(body).length === 2 && (body as Record<string, unknown>).error === 'Snapshot not found'
         && (body as Record<string, unknown>).code === 'SNAPSHOT_NOT_FOUND') return { absent: true as const }
     }
-    if (status < 200 || status >= 300) throw new Error('无法读取 saved Git 基线；未发送保存。')
+    if (status < 200 || status >= 300) throw new Error('无法读取草稿(wf) Git 基线；未发送保存。')
     return { absent: false as const, value: JSON.parse(text) as unknown }
   })())
   const sourceVersion = draftRead.absent ? 'current' : 'draft'
   const raw = draftRead.absent ? await boundedRead(fetchJson<unknown>(`${endpoint}?version=current`, { cache: 'no-store' })) : draftRead.value
   const snapshot = validateSnapshot(raw, workflowId, sourceVersion)
   if (!editorWorkflowReadIsCurrent(workflowId, epoch) || snapshot.packId !== (draft.packId ?? workflowId)
-    || (sourceVersion === 'draft' ? snapshot.draftHead !== snapshot.baseCommit : snapshot.draftHead !== null)) throw new Error('统一保存基线不一致或读取期间已变化；请求未发送。')
+    || (sourceVersion === 'current' && snapshot.draftHead !== null)) throw new Error('统一保存基线不一致或读取期间已变化；请求未发送。')
   const baseline: AutoHealUnifiedBaseline = Object.freeze({ workflowId, packId: snapshot.packId, sourceVersion,
     sourceCommit: snapshot.baseCommit, expectedSavedHead: snapshot.draftHead, expectedDraftToken: draft.draftToken, originalSpecJson: draft.specJson })
   reads.set(baseline, { workflowId, epoch, serialized: JSON.stringify(baseline) })

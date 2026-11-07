@@ -50,7 +50,7 @@ beforeEach(() => {
     }
     if (url.endsWith('/pack-version')) {
       const body = JSON.parse(await text(init!.body as Blob))
-      return { branch: `saved/${id}`, commit: oid, packId, version: 1, requestId: body.requestId } as never
+      return { branch: `wf/${id}`, commit: oid, packId, version: 1, requestId: body.requestId } as never
     }
     throw new Error(`unexpected ${url}`)
   })
@@ -67,7 +67,7 @@ function setupPack() {
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: btoa('old'), mode: '100644' as const },
   ]
-  const base = { workflowId: id, packId, baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
+  const base = { workflowId: id, packId, baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot: base, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: btoa('new') } : f) })

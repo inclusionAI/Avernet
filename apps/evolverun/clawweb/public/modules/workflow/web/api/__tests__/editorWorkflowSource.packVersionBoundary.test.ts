@@ -50,6 +50,7 @@ async function fixture() {
   runGit(repo, ['commit', '-m', 'deployed'])
   const release = runGit(repo, ['rev-parse', 'HEAD'])
   runGit(repo, ['tag', 'deploy/flow/#3', release])
+  runGit(repo, ['update-ref', 'refs/pack-version/active', 'refs/tags/deploy/flow/#3'])
   runGit(repo, ['update-ref', 'refs/remotes/origin/wf/flow', release])
   db = createAutoHealConfigTestDb()
   await db.exec(`CREATE TABLE workflow_specs (id INTEGER PRIMARY KEY, workflow_id TEXT UNIQUE, pack_id TEXT, spec_json TEXT,
@@ -57,7 +58,7 @@ async function fixture() {
     CREATE TABLE workflow_deploy_history (workflow_id TEXT, pack_id TEXT, deploy_number INTEGER, version INTEGER, is_active INTEGER, spec_json TEXT);`)
   await db.exec('INSERT INTO workflow_deploy_history VALUES (?, ?, ?, ?, ?, ?)', ['flow', 'pack', 3, 7, 1, historyJson])
   const readSnapshot = vi.fn((workflowId: string, packId: string, version: 'current' | 'draft') =>
-    readPackScriptSnapshot(repo, workflowId, packId, version, { includeVersionFiles: true }))
+    readPackScriptSnapshot(repo, workflowId, packId, version, { includeVersionFiles: true, activeTag: 'deploy/flow/#3' }))
   const hasEditPermission = vi.fn(async () => true)
   const app = express()
   app.use('/api/workflows', createPackVersionRouter({
@@ -74,7 +75,7 @@ async function fixture() {
 
 it('returns 404 before reading an existing Git snapshot when the active workflow has no draft row', async () => {
   const f = await fixture()
-  const gitSnapshot = await readPackScriptSnapshot(f.repo, 'flow', 'pack', 'current', { includeVersionFiles: true })
+  const gitSnapshot = await readPackScriptSnapshot(f.repo, 'flow', 'pack', 'current', { includeVersionFiles: true, activeTag: 'deploy/flow/#3' })
   expect(gitSnapshot.baseCommit).toBe(f.release)
   const workflow = gitSnapshot.versionFiles!.find(file => file.path === 'workflows/flow.yaml')!
   expect(Buffer.from(workflow.contentBase64, 'base64').toString('utf8')).toBe(JSON.parse(historyJson).content)
@@ -93,19 +94,24 @@ it('returns 404 before reading an existing Git snapshot when the active workflow
   expect(f.readSnapshot).toHaveBeenCalledTimes(1)
 })
 
-it('cannot infer the active release commit from identical workflow YAML at a changed wf tip', async () => {
+it('reads the active tag rather than a changed wf tip even with identical workflow YAML', async () => {
   const f = await fixture()
   f.put('packs/pack/scripts/run.sh', 'changed after deployment\n')
   runGit(f.repo, ['add', '.'])
   runGit(f.repo, ['commit', '-m', 'manual wf change'])
   const current = runGit(f.repo, ['rev-parse', 'HEAD'])
   runGit(f.repo, ['update-ref', 'refs/remotes/origin/wf/flow', current])
-  const snapshot = await readPackScriptSnapshot(f.repo, 'flow', 'pack', 'current', { includeVersionFiles: true })
-  expect(snapshot.baseCommit).toBe(current)
+  const snapshot = await readPackScriptSnapshot(f.repo, 'flow', 'pack', 'current', { includeVersionFiles: true, activeTag: 'deploy/flow/#3' })
+  expect(snapshot.baseCommit).toBe(f.release)
+  expect(snapshot.baseRef).toBe('refs/tags/deploy/flow/#3')
+  expect(snapshot.draftHead).toBe(current)
   expect(current).not.toBe(f.release)
   expect(runGit(f.repo, ['rev-parse', 'refs/tags/deploy/flow/#3^{commit}'])).toBe(f.release)
   const file = snapshot.versionFiles!.find(item => item.path === 'workflows/flow.yaml')!
   expect(Buffer.from(file.contentBase64, 'base64').toString('utf8')).toBe(JSON.parse(historyJson).content)
   const script = snapshot.versionFiles!.find(item => item.path === 'scripts/run.sh')!
-  expect(Buffer.from(script.contentBase64, 'base64').toString('utf8')).toBe('changed after deployment\n')
+  expect(Buffer.from(script.contentBase64, 'base64').toString('utf8')).toBe('original\n')
+  const draft = await readPackScriptSnapshot(f.repo, 'flow', 'pack', 'draft', { includeVersionFiles: true })
+  expect(draft).toMatchObject({ baseRef: 'origin/wf/flow', baseCommit: current, draftHead: current })
+  expect(Buffer.from(draft.versionFiles!.find(item => item.path === 'scripts/run.sh')!.contentBase64, 'base64').toString('utf8')).toBe('changed after deployment\n')
 })

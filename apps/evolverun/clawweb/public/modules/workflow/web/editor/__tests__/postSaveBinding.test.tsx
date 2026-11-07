@@ -56,7 +56,7 @@ async function setup() {
   const files = [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id, workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: btoa('old'), mode: '100644' as const }]
-  snapshot = { workflowId: id, packId: id, baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
+  snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: btoa('submitted') } : f) })
@@ -99,7 +99,7 @@ it.each(['draft', 'current'] as const)('preserves file edits made during a confi
   const draftFiles = [...draft.files, removed]
   updateVersion(ctx.session, 'draft', { snapshot, files: selected === 'draft' ? draftFiles : structuredClone(snapshot.versionFiles) })
   if (selected === 'current') {
-    const current = { ...snapshot, baseRef: `origin/wf/${ctx.id}` }
+    const current = { ...snapshot, baseRef: `refs/tags/deploy/${ctx.id}/#1` }
     updateVersion(ctx.session, 'current', { snapshot: current, files: draftFiles })
     publish(ctx.session, { ...ctx.session.state, version: 'current' })
   }
@@ -148,7 +148,7 @@ it.each(['draft', 'current'] as const)('preserves file edits made during a confi
 it('keeps current selected and clean when no files changed after dispatch', async () => {
   const ctx = await setup()
   const draft = ctx.session.state.versions.draft
-  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}` }, files: structuredClone(draft.files) })
+  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1` }, files: structuredClone(draft.files) })
   updateVersion(ctx.session, 'draft', { files: structuredClone(draft.snapshot!.versionFiles) })
   publish(ctx.session, { ...ctx.session.state, version: 'current' })
   let saving!: Promise<unknown>
@@ -162,7 +162,7 @@ it('keeps current selected and clean when no files changed after dispatch', asyn
 it('preserves independent draft edits made by a synchronous save completion subscriber', async () => {
   const ctx = await setup()
   const draft = ctx.session.state.versions.draft
-  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}` }, files: structuredClone(draft.files) })
+  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1` }, files: structuredClone(draft.files) })
   updateVersion(ctx.session, 'draft', { files: structuredClone(draft.snapshot!.versionFiles) })
   publish(ctx.session, { ...ctx.session.state, version: 'current' })
   act(() => useEditorStore.getState().updateSpecField('title', 'Submitted'))
@@ -188,7 +188,7 @@ it('preserves independent draft edits made by a synchronous save completion subs
 it('does not overwrite independent draft edits introduced while saving current', async () => {
   const ctx = await setup()
   const draft = ctx.session.state.versions.draft
-  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}` }, files: structuredClone(draft.files) })
+  updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1` }, files: structuredClone(draft.files) })
   updateVersion(ctx.session, 'draft', { files: structuredClone(draft.snapshot!.versionFiles) })
   publish(ctx.session, { ...ctx.session.state, version: 'current' })
   let saving!: Promise<unknown>
@@ -207,7 +207,7 @@ it.each(['draft', 'current'] as const)('retains %s later edits and keeps the wri
   const ctx = await setup()
   if (selected === 'current') {
     const draft = ctx.session.state.versions.draft
-    updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `origin/wf/${ctx.id}` }, files: structuredClone(draft.files) })
+    updateVersion(ctx.session, 'current', { snapshot: { ...draft.snapshot!, baseRef: `refs/tags/deploy/${ctx.id}/#1` }, files: structuredClone(draft.files) })
     updateVersion(ctx.session, 'draft', { files: structuredClone(draft.snapshot!.versionFiles) })
     publish(ctx.session, { ...ctx.session.state, version: 'current' })
   }

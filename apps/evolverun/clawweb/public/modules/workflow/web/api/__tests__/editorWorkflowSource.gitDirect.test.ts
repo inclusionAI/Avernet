@@ -6,7 +6,7 @@ import { originalActiveDraftBaseline, readEditorWorkflowSource } from '../editor
 const doc = { id: 'flow', title: 'Active', nodes: [], content: '用户普通文本', custom: { keep: [false, 0, null] } }
 const hash = (raw: string) => createHash('sha256').update(JSON.stringify(['active-workflow-baseline-v1', 'flow', 'pack', '3', '7', 'deploy/flow/#3', 'deploy', raw])).digest('hex')
 const b64 = (text: string) => Buffer.from(text).toString('base64')
-const pack = (row: Record<string, unknown> = doc, raw = JSON.stringify(doc)) => ({ workflowId: 'flow', packId: 'pack', baseRef: 'origin/wf/flow', baseCommit: 'a'.repeat(40), draftHead: null,
+const pack = (row: Record<string, unknown> = doc, raw = JSON.stringify(doc)) => ({ workflowId: 'flow', packId: 'pack', baseRef: 'refs/tags/deploy/flow/#1', baseCommit: 'a'.repeat(40), draftHead: null,
   activeHistory: { protocol: 'active-history-v1', activeToken: hash(raw) }, versionFiles: [
     { path: 'workflow.pack.yaml', mode: '100644', contentBase64: b64('id: pack\nworkflows: [flow]\n') },
     { path: 'workflows/flow.yaml', mode: '100644', contentBase64: b64(stringify(row)) },
@@ -49,7 +49,7 @@ it.each([
   ['extra proof field', { ...pack(), activeHistory: { protocol: 'active-history-v1', activeToken: hash(JSON.stringify(doc)), other: true } }],
   ['wrong Pack', { ...pack(), packId: 'other' }],
   ['wrong workflow', { ...pack(), workflowId: 'other' }],
-  ['wrong ref', { ...pack(), baseRef: 'origin/saved/flow' }],
+  ['wrong ref', { ...pack(), baseRef: 'origin/wf/flow' }],
   ['different full document', pack({ ...doc, content: 'other content' })],
   ['missing workflow', { ...pack(), versionFiles: pack().versionFiles.slice(0, 1) }],
   ['bad base64', { ...pack(), versionFiles: [pack().versionFiles[0], { ...pack().versionFiles[1], contentBase64: 'bad!' }] }],

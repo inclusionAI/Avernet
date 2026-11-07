@@ -1,12 +1,13 @@
 /** Git-only candidate saving. Authorization and trusted source selection belong to the caller.
  * This does not publish a version or coordinate a database transaction. */
+import { workflowSavedGitRunner, initSavedWorkflowRepo, resolveSavedWorkflowRef, workflowSavedCommitMessage } from './workflow-saved-ref.js';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import { executeGit, withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
-import { cloneClawflows, createTempRepo, removeTempRepo, type ClawFlowsGitConfig } from './clawflows-git-client.js';
-import { createPreparedGitBundle, restorePreparedGitBundle, readPreparedPackMetadata, verifyPreparedPackMetadata, readPreparedRemoteRefs, preparedGitRunner, type PreparedPackMetadata } from './pack-git-prepared.js';
+import { initClawflowsReadRepo, createTempRepo, removeTempRepo, type ClawFlowsGitConfig } from './clawflows-git-client.js';
+import { createPreparedGitBundle, restorePreparedGitBundle, readPreparedPackMetadata, verifyPreparedPackMetadata, type PreparedPackMetadata } from './pack-git-prepared.js';
 
 export type PackCandidateChange =
   | { path: string; operation: 'delete' }
@@ -15,6 +16,7 @@ export type SavePackCandidateInput = {
   workflowId: string;
   sourceVersion: 'current' | 'draft';
   sourceCommit: string;
+  /** Wire name retained: the wf/<id> write lease, NOT the selected read source. */
   expectedSavedHead: string | null;
   config: ClawFlowsGitConfig;
   changes: PackCandidateChange[];
@@ -35,7 +37,7 @@ export type PreparedPackCandidate = PreparedPackMetadata & Readonly<{
   bundleBase64: string;
 }>;
 export class PackCandidateConflictError extends Error {
-  constructor(message = 'Workflow version or saved head changed') { super(message); this.name = 'PackCandidateConflictError'; }
+  constructor(message = 'Workflow source or wf write lease changed') { super(message); this.name = 'PackCandidateConflictError'; }
 }
 
 export class PackWorkflowContentChangedError extends Error {
@@ -58,8 +60,8 @@ const maxPackBytes = 8 * 1024 * 1024;
 const maxPackFiles = 500;
 function rejectCurrentOverDifferentSaved(sourceVersion: 'current' | 'draft' | 'initial',
   sourceCommit: string | null, expectedSavedHead: string | null): void {
-  if (sourceVersion === 'current' && expectedSavedHead !== null && expectedSavedHead !== sourceCommit) {
-    throw new PackCandidateConflictError('Cannot save from current: saved contains a different version; edit saved instead');
+  if (sourceVersion === 'current' && expectedSavedHead !== sourceCommit) {
+    throw new PackCandidateConflictError('Cannot save from current: wf contains a different saved version; edit the saved snapshot instead');
   }
 }
 function idValid(id: unknown): id is string {
@@ -136,10 +138,8 @@ function rejectProtectedTreeAliases(entries: Map<string, Entry>, root: string, m
 /** All fields other than changes must be obtained/validated server-side, not from the request.
  * The caller grants the existing workflow editor authority over the entire selected Pack,
  * including files shared with other workflows. No separate Pack ACL or credential is used.
- * Only saved is compare-and-swapped atomically. Current is checked before construction;
- * it can advance before the saved push, which is not a two-ref transaction. A current
- * save cannot replace a different saved head, even if it was observed. The saved
- * lease prevents overwriting a draft created after the initial check.
+ * Only wf is read and compare-and-swapped. expectedSavedHead is that lease;
+ * sourceCommit must be the observed wf source. No legacy branch is consulted.
  * A successful push is not atomic with any database update or publication. */
 export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput,
   callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>): Promise<T> {
@@ -172,7 +172,7 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
   callback: (prepared: PreparedPackCandidate, push: () => Promise<SavePackCandidateResult>) => Promise<T>,
   workflowYamlSnapshot?: string, protectTreeAliases = false): Promise<T> {
   // Capture every value used by construction and transport before the first
-  // asynchronous boundary. In particular cloneClawflows reads config again
+  // asynchronous boundary. In particular repository initialization reads config again
   // after awaits, so copying just the outer input is not sufficient.
   const { workflowId, sourceVersion, sourceCommit, expectedSavedHead, preserveWorkflowContent,
     config: callerConfig, changes: callerChanges } = callerInput;
@@ -217,23 +217,13 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
     let callbackActive = true;
     let pushPromise: Promise<SavePackCandidateResult> | undefined;
     try {
-      await cloneClawflows(dir, input.config);
+      const savedState = await initSavedWorkflowRepo(dir, input.workflowId, input.config);
       const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
       Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_NO_REPLACE_OBJECTS: '1',
         GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0', GIT_INDEX_FILE: path.join(dir, '.git', 'candidate-index') });
       const git = (args: string[], maxBuffer = 16 * 1024 * 1024) => executeGit(args, { cwd: dir, env, maxBuffer });
       const text = async (args: string[]) => (await git(args)).toString('utf8').trim();
-      const saved = `refs/heads/saved/${input.workflowId}`;
-      const source = `refs/heads/${input.sourceVersion === 'current' ? 'wf' : 'saved'}/${input.workflowId}`;
-      const remoteHead = async (ref: string): Promise<string | null> => {
-        const out = await text(['ls-remote', '--refs', 'origin', ref]);
-        if (!out) return null;
-        const match = out.match(/^([a-f0-9]{40}|[a-f0-9]{64})\t([^\n]+)$/);
-        if (!match || match[2] !== ref) throw new Error('Invalid remote ref');
-        return match[1];
-      };
-      if ((input.sourceVersion === 'draft' && input.expectedSavedHead !== input.sourceCommit)
-        || await remoteHead(source) !== input.sourceCommit || await remoteHead(saved) !== input.expectedSavedHead) {
+      if (savedState.commit !== input.sourceCommit || savedState.wfHead !== input.expectedSavedHead) {
         throw new PackCandidateConflictError();
       }
       const resolved = await text(['rev-parse', '--verify', `${input.sourceCommit}^{commit}`]);
@@ -465,11 +455,12 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
       }
       const treeId = await text(['write-tree']);
       if (protectTreeAliases) rejectProtectedTreeAliases(await readTreeEntries(treeId), pack.root, manifest);
-      const commit = await text(['commit-tree', treeId, '-p', input.sourceCommit, '-m', `Save workflow ${input.workflowId}`]);
+      const message = await workflowSavedCommitMessage(dir, input.workflowId, treeId, { packId: after.id, packPath: after.root, workflowFile: after.workflow });
+      const commit = await text(['commit-tree', treeId, '-p', input.sourceCommit, '-m', message]);
       if (!oidPattern.test(commit)) throw new Error('Invalid candidate commit');
       const metadata = await readPreparedPackMetadata(dir, input.workflowId, commit);
       const prepared: PreparedPackCandidate = Object.freeze({ ...metadata, workflowId: input.workflowId,
-        branch: `saved/${input.workflowId}`, commit, sourceVersion: input.sourceVersion,
+        branch: `wf/${input.workflowId}`, commit, sourceVersion: input.sourceVersion,
         sourceCommit: input.sourceCommit, expectedSavedHead: input.expectedSavedHead,
         bundleBase64: await createPreparedGitBundle(dir, [commit]) });
       // A zero-argument, one-shot capability. The callback must durably register
@@ -506,31 +497,35 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
 
 
 function validatePreparedCandidate(prepared: PreparedPackCandidate) {
-  if (!idValid(prepared.workflowId) || prepared.branch !== `saved/${prepared.workflowId}`
+  if (!idValid(prepared.workflowId) || prepared.branch !== `wf/${prepared.workflowId}`
     || !oidPattern.test(prepared.commit) || (prepared.sourceCommit !== null && !oidPattern.test(prepared.sourceCommit))
     || (prepared.expectedSavedHead !== null && !oidPattern.test(prepared.expectedSavedHead))
+    || [prepared.sourceCommit, prepared.expectedSavedHead].some(oid => oid !== null && oid.length !== prepared.commit.length)
     || !['current', 'draft', 'initial'].includes(prepared.sourceVersion)
     || (prepared.sourceVersion !== 'initial' && prepared.sourceCommit === null)
-    || (prepared.sourceVersion === 'initial' && prepared.expectedSavedHead !== null)
-    || (prepared.sourceVersion === 'draft' && prepared.expectedSavedHead !== prepared.sourceCommit)) {
+    || (prepared.sourceVersion === 'initial' && (prepared.expectedSavedHead !== null || prepared.sourceCommit !== null))) {
     throw new Error('Invalid prepared candidate');
   }
 }
 
 /** Push an already prepared, caller-owned journal entry. After restart restore its
  * bundle first. Authorization/provenance and unknown-outcome reconciliation belong
- * to the caller. Only saved is leased; wf and tags are never written here. */
+ * to the caller. Only wf is read/written/leased; other branches and tags are not consulted. */
 export async function pushPreparedPackCandidate(repoDir: string, input: PreparedPackCandidate): Promise<SavePackCandidateResult> {
   const prepared = Object.freeze({ ...input });
   validatePreparedCandidate(prepared);
   rejectCurrentOverDifferentSaved(prepared.sourceVersion, prepared.sourceCommit, prepared.expectedSavedHead);
-  const { text } = preparedGitRunner(repoDir);
+  const { text } = workflowSavedGitRunner(repoDir);
   if (await text(['rev-parse', '--verify', `${prepared.commit}^{commit}`]) !== prepared.commit
     || await text(['show', '-s', '--format=%P', prepared.commit]) !== (prepared.sourceCommit ?? '')) throw new Error('Invalid prepared candidate commit');
   await verifyPreparedPackMetadata(repoDir, prepared.workflowId, prepared.commit, prepared);
+  const state = await resolveSavedWorkflowRef(repoDir, prepared.workflowId);
+  if (state.wfHead !== prepared.expectedSavedHead
+    || (prepared.sourceVersion !== 'initial' && state.commit !== prepared.sourceCommit)) throw new PackCandidateConflictError();
   const saved = `refs/heads/${prepared.branch}`;
   try {
-    await text(['push', `--force-with-lease=${saved}:${prepared.expectedSavedHead ?? ''}`, 'origin', `${prepared.commit}:${saved}`]);
+    await text(['push', '--no-follow-tags', `--force-with-lease=${saved}:${prepared.expectedSavedHead ?? ''}`, 'origin', `${prepared.commit}:${saved}`]);
+
   } catch {
     // An error or a later ref read cannot prove that the server did not apply it.
     throw new PackCandidateOutcomeUnknownError(prepared.branch, prepared.commit);
@@ -546,20 +541,22 @@ export async function savePackCandidate(input: SavePackCandidateInput): Promise<
 
 
 /** Replay a durable save, never regenerate its commit. Only exact desired or the
- * original expected head is acceptable; a newer saved head is never replaced. */
+ * original expected head is acceptable; a newer wf head is never replaced. */
 export async function resumePreparedPackCandidate(input: PreparedPackCandidate, config: ClawFlowsGitConfig): Promise<SavePackCandidateResult> {
   const prepared = Object.freeze({ ...input });
   validatePreparedCandidate(prepared);
   return withGitOperation({}, async () => {
     const dir = await createTempRepo(); let attempted = false;
     try {
-      await cloneClawflows(dir, config);
-      const ref = `refs/heads/${prepared.branch}`;
-      const heads = await readPreparedRemoteRefs(dir, [ref]);
-      const head = heads.get(ref);
+      await initClawflowsReadRepo(dir, config, prepared.commit.length === 64 ? 'sha256' : 'sha1');
+      const head = (await resolveSavedWorkflowRef(dir, prepared.workflowId)).wfHead;
       if (head === prepared.commit) {
         // The exact objects are already remote: no bundle/re-push is needed, but
         // the projection must still agree with the journal's Git identity.
+        const { text } = workflowSavedGitRunner(dir);
+        if (await text(['show', '-s', '--format=%P', prepared.commit]) !== (prepared.sourceCommit ?? '')) {
+          throw new Error('Invalid prepared candidate commit provenance');
+        }
         await verifyPreparedPackMetadata(dir, prepared.workflowId, prepared.commit, prepared);
         return { branch: prepared.branch, commit: prepared.commit };
       }

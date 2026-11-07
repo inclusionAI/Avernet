@@ -1,6 +1,11 @@
-# ClawWeb workflow and Pack writes
+# Historical dual-branch workflow and Pack writes
 
-## Scope
+> **Superseded on 2026-11-07:** the current implementation follows
+> [wf save / tag deployment](workflow-wf-save-tag-deploy.md). The text below
+> records the former dual-branch contract; its saved-write, wf-production and
+> DB-only AutoHeal behavior must not be used to implement new clients.
+
+## Historical scope
 
 This document describes the current working-tree implementation, including
 uncommitted changes; it is not a claim about a deployed release. Workflow YAML

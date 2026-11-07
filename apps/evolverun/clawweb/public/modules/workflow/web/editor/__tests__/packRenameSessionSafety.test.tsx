@@ -54,9 +54,9 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
   const file = (path: string, text: string) => ({ path, contentBase64: btoa(text), mode: '100644' as const })
   const files = [file('workflow.pack.yaml', stringify({ id: 'pack', workflows: [id] })),
     file(`workflows/${id}.yaml`, stringify(spec)), file('scripts/run.sh', 'original')]
-  const current: Snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`,
+  const current: Snapshot = { workflowId: id, packId: 'pack', baseRef: `refs/tags/deploy/${id}/#1`,
     baseCommit: A, draftHead: B, canWrite: true, versionFiles: files }
-  let draft: Snapshot = { ...current, baseRef: `origin/saved/${id}`, baseCommit: B }
+  let draft: Snapshot = { ...current, baseRef: `origin/wf/${id}`, baseCommit: B }
   const session = sessionFor(id)
   updateVersion(session, 'current', { snapshot: current, files: structuredClone(files) })
   updateVersion(session, 'draft', { snapshot: draft, files: files.map(f => f.path === 'workflow.pack.yaml' && rename
@@ -80,7 +80,7 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
       if (originRejected) return json({ code: 'ORIGIN_NOT_ALLOWED' }, 403)
       const input = await readBody(init)
       draft = { ...draft, packId: databasePackId, versionFiles: structuredClone(session.state.versions.draft.files) }
-      return json({ branch: `saved/${id}`, commit: B, requestId: input.requestId, version: 2, packId: databasePackId })
+      return json({ branch: `wf/${id}`, commit: B, requestId: input.requestId, version: 2, packId: databasePackId })
     }
     if (url === `/api/workflows/${id}/pack-version?version=current`) return json(current)
     if (url === `/api/workflows/${id}/pack-version?version=draft`) return json(draft)
@@ -95,7 +95,7 @@ function setup({ rename = true, failDb = false, originRejected = true } = {}) {
  * This intentionally does not claim that the now-disabled path can create it. */
 function seedHistoricalRename(ctx: ReturnType<typeof setup>, failDb = false) {
   const dbState = failDb ? '已发送，结果未知' : '已确认 Pack ID renamed，文档已核对'
-  const gitState = failDb ? 'Git 保存未发起' : 'Git 保存已发起，结果未确认；请核对 saved 分支和完整候选'
+  const gitState = failDb ? 'Git 保存未发起' : 'Git 保存已发起，结果未确认；请核对 草稿(wf)分支和完整候选'
   const message = `Pack 重命名 pack → renamed 未完整完成：数据库${dbState}；${gitState}。请先人工核对数据库和 Git，不能自动重试。本页会话已锁定；刷新会丢失本地草稿和此锁定状态。`
   const files = structuredClone(ctx.session.state.versions.draft.files)
   ctx.setDatabasePackId(failDb ? 'pack' : 'renamed')
@@ -289,7 +289,7 @@ it('isolates a historical rename guard from a different workflow save', async ()
     { path: `workflows/${otherId}.yaml`, contentBase64: btoa(stringify(otherSpec)), mode: '100644' as const },
     { path: 'scripts/run.sh', contentBase64: btoa('original'), mode: '100644' as const },
   ]
-  const otherSnapshot: Snapshot = { workflowId: otherId, packId: 'other-pack', baseRef: `origin/saved/${otherId}`,
+  const otherSnapshot: Snapshot = { workflowId: otherId, packId: 'other-pack', baseRef: `origin/wf/${otherId}`,
     baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
   const candidate = files.map(file => file.path === 'scripts/run.sh' ? { ...file, contentBase64: btoa('other edit') } : file)
   updateVersion(other, 'draft', { snapshot: otherSnapshot, files: candidate })
@@ -297,7 +297,7 @@ it('isolates a historical rename guard from a different workflow save', async ()
   ctx.fetchMock.mockImplementation(async (url, init) => {
     if (url === `/api/workflows/${otherId}/pack-version` && init?.method === 'PUT') {
       const input = await readBody(init)
-      return json({ branch: `saved/${otherId}`, commit: B, requestId: input.requestId, version: 2, packId: 'other-pack' })
+      return json({ branch: `wf/${otherId}`, commit: B, requestId: input.requestId, version: 2, packId: 'other-pack' })
     }
     return original(url, init)
   })

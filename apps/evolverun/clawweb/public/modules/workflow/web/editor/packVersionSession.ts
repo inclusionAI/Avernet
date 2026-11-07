@@ -97,7 +97,7 @@ export function classifySaveFailure(error: unknown, id: string, requestId?: stri
     return { conflict: false, preOperationConflict: false, originRejected: true, reason: 'server', identity: null }
   }
   if (value?.status === 409 && body?.code === 'VERSION_CONFLICT') return { conflict: true, preOperationConflict: false, originRejected: false, reason: 'server', identity: null }
-  if (value?.status === 503 && body?.code === 'SAVE_OUTCOME_UNKNOWN' && body.branch === `saved/${id}` && typeof body.commit === 'string' && oid.test(body.commit)) {
+  if (value?.status === 503 && body?.code === 'SAVE_OUTCOME_UNKNOWN' && body.branch === `wf/${id}` && typeof body.commit === 'string' && oid.test(body.commit)) {
     return { conflict: false, preOperationConflict: false, originRejected: false, reason: 'server', identity: { branch: body.branch, commit: body.commit } }
   }
   return { conflict: false, preOperationConflict: false, originRejected: false, reason: typeof value?.status === 'number' ? 'unverified' : 'no-response', identity: null }
@@ -133,7 +133,7 @@ export async function observeReconciliationHead(session: Session, id: string) {
     const snapshot = validateSnapshot(result, id, 'draft')
     const latest = session.state.reconciliation
     if (session.reconciliationRequest !== request || !latest || latest.token !== attempt.token) return
-    publish(session, { ...session.state, reconciliation: { ...latest, checking: false, observation: { kind: 'head', commit: snapshot.baseCommit }, checkError: false } })
+    publish(session, { ...session.state, reconciliation: { ...latest, checking: false, observation: snapshot.draftHead === null ? { kind: 'snapshot-not-found' } : { kind: 'head', commit: snapshot.draftHead }, checkError: false } })
   } catch (error) {
     const latest = session.state.reconciliation
     if (session.reconciliationRequest !== request || !latest || latest.token !== attempt.token) return
@@ -186,11 +186,20 @@ export function diff(original: PackVersionFile[], files: PackVersionFile[]): Cha
 export function dirty(state: VersionState): boolean {
   return !!state.snapshot && diff(state.snapshot.versionFiles, state.files).length > 0
 }
+/** current is DB-active production; draft is only the writable wf tip. */
+function validSnapshotRef(ref: unknown, id: string, version: Version): boolean {
+  if (typeof ref !== 'string') return false
+  if (version === 'draft') return ref === `origin/wf/${id}`
+  const prefix = `refs/tags/deploy/${id}/#`
+  if (!ref.startsWith(prefix)) return false
+  const number = ref.slice(prefix.length), value = Number(number)
+  return Number.isSafeInteger(value) && value > 0 && String(value) === number
+}
 export function validateSnapshot(value: unknown, id: string, version: Version): Snapshot {
   if (!value || typeof value !== 'object') throw new Error('Invalid response')
   const data = value as Snapshot
   if (data.workflowId !== id || typeof data.packId !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(data.packId) || data.packId.includes('..') || data.packId.endsWith('.') || data.packId.endsWith('.lock') ||
-      data.baseRef !== `origin/${version === 'current' ? 'wf' : 'saved'}/${id}` ||
+      !validSnapshotRef(data.baseRef, id, version) ||
       typeof data.baseCommit !== 'string' || !oid.test(data.baseCommit) ||
       !(data.draftHead === null || (typeof data.draftHead === 'string' && oid.test(data.draftHead))) ||
       (version === 'draft' && data.baseCommit !== data.draftHead) || !Array.isArray(data.versionFiles)) throw new Error('Invalid response')

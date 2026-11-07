@@ -11,7 +11,7 @@ import { readPackScriptSnapshot, type PackScriptVersion } from './pack-script-sn
 import { withPreparedPackCandidate, PackCandidateConflictError, PackWorkflowContentChangedError, type PackCandidateChange } from './pack-candidate-save.js';
 import { PackOperationError, requestIdentity, legacyWorkflowDocument } from './pack-operation-service.js';
 import { editorActiveDeploymentToken, type EditorActiveDeploymentTokenRow } from './editor-active-deployment-token.js';
-import { preparedGitRunner, readPreparedPackMetadata } from './pack-git-prepared.js';
+import { readPreparedPackMetadata } from './pack-git-prepared.js';
 import { projectWorkflowSnapshotJson, WORKFLOW_SNAPSHOT_MAX_BYTES } from './workflow-snapshot-projection.js';
 import { assertNoUnresolvedLegacyPackOperation } from './legacy-pack-operation-guard.js';
 
@@ -19,7 +19,11 @@ type Context = { db: IDatabase; gitConfig: ClawFlowsGitConfig; gitAuthor: GitAut
 export type SavePackVersionInput = Context & { actorId: string; requestId?: string; sourceVersion: PackScriptVersion;
   sourceCommit: string; expectedSavedHead: string | null; changes: PackCandidateChange[] };
 export type SavedPackVersion = { ok: true; saved: true; requestId: string; workflowId: string; packId: string; branch: string; commit: string; version: number };
-export async function readPackVersionFromRemote(input: Context & { packId: string; version: PackScriptVersion; active?: { tag: string; specJson: string; action: 'deploy' | 'rollback' } }) {
+export async function readPackVersionFromRemote(input: Context & { packId: string; version: PackScriptVersion; includeVersionFiles?: boolean; active?: { tag: string; specJson: string; action: 'deploy' | 'rollback' } }) {
+  // Current means the active published tag, never the latest editable wf tip.
+  const observedActive = input.version === 'current' && !input.active ? await readBoundActive(input.db, input.workflowId) : null;
+  if (input.version === 'current' && !input.active && !observedActive) throw new Error('Workflow snapshot not found');
+  if (observedActive) input = { ...input, packId: observedActive.row.pack_id, active: { tag: observedActive.row.tag_name!, specJson: observedActive.row.spec_json, action: observedActive.row.action as 'deploy' | 'rollback' } };
   const { gitConfig } = await packVersionPhase('git_config', () => resolveAutoHealGitSettings(input.db, input.gitConfig, input.gitAuthor));
   return withGitOperation({ workflowId: input.workflowId, operation: 'pack_version_read' }, async () => {
     const dir = await packVersionPhase('git_prepare', async () => {
@@ -30,7 +34,7 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
     try {
       const verifyRefs = await packVersionPhase('git_fetch', () => fetchPackVersionRefs(dir, gitConfig, input.workflowId, input.active?.tag, !!input.active && input.version === 'draft', input.active?.action === 'rollback'));
       try {
-        const snapshot = await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: true }));
+        const snapshot = await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: input.includeVersionFiles !== false, activeTag: input.active?.tag }));
         if (input.active) {
           if (!verifyRefs.activeCommit) throw new Error('Active deployment unavailable');
           const metadata = await readPreparedPackMetadata(dir, input.workflowId, verifyRefs.activeCommit);
@@ -39,15 +43,13 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
           // The inventory reader omits the trailing slash used by prepared metadata.
           // Compare the actual canonical tree paths, not just matching manifest IDs.
           if (snapshot.packId !== input.packId || metadata.packId !== input.packId
-            || !samePackDirectory(snapshot.packPath, metadata.packPath)
+            || (input.includeVersionFiles !== false && !samePackDirectory(snapshot.packPath, metadata.packPath))
             || gitDocument.digest !== projectWorkflowSnapshotJson(input.workflowId, JSON.stringify(dbDocument)).digest) throw new Error('Active deployment snapshot mismatch');
-          // Rollback may leave wf at a different commit. A current snapshot is
-          // safe only when its whole selected Pack tree equals the active tag.
-          if (input.version === 'current' && snapshot.baseCommit !== verifyRefs.activeCommit) {
-            const git = preparedGitRunner(dir);
-            const tree = (commit: string) => metadata.packPath ? `${commit}:${metadata.packPath.slice(0, -1)}` : `${commit}^{tree}`;
-            if (await git.text(['rev-parse', '--verify', tree(snapshot.baseCommit)]) !== await git.text(['rev-parse', '--verify', tree(verifyRefs.activeCommit)])) throw new Error('Active deployment snapshot mismatch');
-          }
+
+        }
+        if (observedActive) {
+          const after = await readBoundActive(input.db, input.workflowId);
+          if (!after || after.activeHash !== observedActive.activeHash) throw Object.assign(new Error('Active baseline changed'), { code: 'PACK_REFS_CHANGED' });
         }
         return snapshot;
       } finally {
@@ -97,6 +99,17 @@ function activeHistoryDocument(workflowId: string, specJson: string, gitDigest: 
 }
 
 type ActiveRow = EditorActiveDeploymentTokenRow & { workflow_id: string; is_active: number };
+async function readBoundActive(db: IDatabase, workflowId: string) {
+  const rows = await db.query<ActiveRow>('SELECT workflow_id, is_active, pack_id, deploy_number, version, tag_name, action, spec_json FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [workflowId]);
+  if (!rows.length) return null;
+  const row = rows[0], prefix = `deploy/${workflowId}/#`;
+  if (rows.length !== 1 || row.workflow_id !== workflowId || Number(row.is_active) !== 1
+    || (row.action !== 'deploy' && row.action !== 'rollback') || typeof row.tag_name !== 'string'
+    || !row.tag_name.startsWith(prefix) || !/^[1-9][0-9]*$/.test(row.tag_name.slice(prefix.length))
+    || !/^[1-9][0-9]*$/.test(String(row.version)) || !/^[1-9][0-9]*$/.test(String(row.deploy_number))
+    || (row.action === 'deploy' && row.tag_name !== `${prefix}${row.deploy_number}`)) throw new Error('Active deployment unavailable');
+  return { row, activeHash: editorActiveDeploymentToken(workflowId, row) };
+}
 /** Read-only fallback for a verified editor without a database draft. The tag and
  * any selected current Pack must agree with the unique active DB row. This is not an atomic view:
  * refs and rows can change after the final checks; writes must revalidate. */

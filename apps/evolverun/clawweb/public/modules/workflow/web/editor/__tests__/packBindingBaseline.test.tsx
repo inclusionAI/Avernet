@@ -33,7 +33,7 @@ beforeEach(() => {
     if (url.endsWith('/editor-draft')) return structuredClone(row) as never
     if (url.endsWith('/pack-version?version=draft') && savedSnapshot) return structuredClone(savedSnapshot) as never
     const body = JSON.parse(await bodyText(init!.body as Blob))
-    return { branch: `saved/${id}`, commit: oid, packId: 'pack-a', requestId: body.requestId, version: 1 } as never
+    return { branch: `wf/${id}`, commit: oid, packId: 'pack-a', requestId: body.requestId, version: 1 } as never
   })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith('/unified-save') && init.method === 'GET') return new Response(JSON.stringify({ protocol: 'workflow-unified-save-v1' }))
@@ -68,7 +68,7 @@ function pack(packId = 'pack-a') {
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: btoa('old'), mode: '100644' as const },
   ]
-  const snapshot = { workflowId: id, packId, baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
+  const snapshot = { workflowId: id, packId, baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: btoa('new') } : f) })

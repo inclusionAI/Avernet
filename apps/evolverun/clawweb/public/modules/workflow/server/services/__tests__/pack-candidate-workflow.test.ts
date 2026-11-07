@@ -12,9 +12,9 @@ let root: string, bare: string, seed: string, current: string;
 const b64 = (s: string) => Buffer.from(s).toString('base64');
 const yaml = 'id: flow\nname: edited\n';
 const show = (commit: string, file: string) => execFileSync('git', ['--git-dir', bare, 'show', `${commit}:${file}`]);
-const ref = () => runGit(root, ['ls-remote', bare, 'refs/heads/saved/flow']);
+const ref = () => runGit(root, ['ls-remote', bare, 'refs/heads/wf/flow']);
 function input(extra: Partial<SavePackCandidateInput> = {}): SavePackCandidateInput {
-  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: null,
+  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: current,
     config: { remoteUrl: bare, username: 'test', email: 'test@example.invalid' }, changes: [], ...extra };
 }
 function prepare(value: SavePackCandidateInput, content = yaml) {
@@ -54,21 +54,21 @@ describe('trusted workflow and file candidate', () => {
     expect(ref()).toContain(result.commit);
   });
   it.each(['id: wrong\n', 'not: [valid\n', '[]\n'])('rejects invalid selected workflow %s', async content => {
-    await expect(prepare(input(), content)).rejects.toThrow(); expect(ref()).toBe('');
+    await expect(prepare(input(), content)).rejects.toThrow(); expect(ref()).toBe(`${current}\trefs/heads/wf/flow`);
   });
   it.each(['id: pack\nworkflows: [flow, missing]\n', 'id: pack\nworkflows: [flow, flow]\n', 'id: pack\nworkflows: [other]\n'])
   ('validates final manifest with trusted workflow content', async manifest => {
     await expect(prepare(input({ changes: [{ path: 'workflow.pack.yaml', operation: 'replace', contentBase64: b64(manifest), mode: '100644' }] }))).rejects.toThrow();
-    expect(ref()).toBe('');
+    expect(ref()).toBe(`${current}\trefs/heads/wf/flow`);
   });
   it('rejects a competing ordinary change to the selected workflow', async () => {
     await expect(prepare(input({ changes: [{ path: 'workflows/flow.yaml', operation: 'replace', contentBase64: b64('id: flow\nname: other\n'), mode: '100644' }] }))).rejects.toThrow();
-    expect(ref()).toBe('');
+    expect(ref()).toBe(`${current}\trefs/heads/wf/flow`);
   });
   it('does not allow legacy file API to opt out of workflow preservation through extra input', async () => {
     const legacy = { ...input({ preserveWorkflowContent: true, changes: [{ path: 'workflows/flow.yaml', operation: 'replace', contentBase64: b64(yaml), mode: '100644' }] }), workflowYaml: yaml };
     await expect(savePackCandidate(legacy)).rejects.toBeInstanceOf(PackWorkflowContentChangedError);
-    expect(ref()).toBe('');
+    expect(ref()).toBe(`${current}\trefs/heads/wf/flow`);
   });
   it('rejects a stale expected saved head without modifying it', async () => {
     const first = await prepare(input());
@@ -104,7 +104,7 @@ describe('trusted workflow and file candidate', () => {
     writeFileSync(path.join(seed, targetPath), content);
     runGit(seed, ['add', '.']); runGit(seed, ['commit', '-m', 'existing target']);
     current = runGit(seed, ['rev-parse', 'HEAD']);
-    runGit(seed, ['push', bare, `${current}:refs/heads/wf/flow`, `${current}:refs/heads/saved/flow`]);
+    runGit(seed, ['push', bare, `${current}:refs/heads/wf/flow`]);
     const beforeRefs = runGit(root, ['--git-dir', bare, 'show-ref']);
     let called = false;
     const manifest = `id: ${rename ? 'renamed' : 'pack'}\nworkflows:\n  - id: flow\n    file: ${target}\n  - other\n`;
@@ -119,7 +119,7 @@ describe('trusted workflow and file candidate', () => {
     expect(show(current, 'packs/pack/workflow.pack.yaml').toString()).toBe('id: pack\nworkflows: [flow, other]\n');
   });
   it.each(['original workflow', 'new occupied target'])('does not restore a deleted %s implicitly', async kind => {
-    runGit(seed, ['push', bare, `${current}:refs/heads/saved/flow`]);
+    runGit(seed, ['push', bare, `${current}:refs/heads/wf/flow`]);
     const beforeRefs = runGit(root, ['--git-dir', bare, 'show-ref']);
     const target = kind === 'original workflow' ? 'workflows/flow.yaml' : 'scripts/untouched.bin';
     const changes: SavePackCandidateInput['changes'] = [{ path: target, operation: 'delete' }];
@@ -145,16 +145,17 @@ describe('trusted workflow and file candidate', () => {
     let preparedCommit = '';
     await expect(withPreparedPackCandidateWithWorkflow(input(), yaml, async (prepared, push) => {
       preparedCommit = prepared.commit;
-      runGit(seed, ['push', bare, `${current}:refs/heads/saved/flow`]);
+      const competing = runGit(seed, ['commit-tree', `${current}^{tree}`, '-p', current, '-m', 'competing wf writer']);
+      runGit(seed, ['push', bare, `${competing}:refs/heads/wf/flow`]);
       return push();
     })).rejects.toBeInstanceOf(PackCandidateOutcomeUnknownError);
     expect(preparedCommit).not.toBe(current);
-    expect(ref()).toContain(current);
+    expect(ref()).not.toContain(current);
     expect(ref()).not.toContain(preparedCommit);
   });
-  it('rejects oversized workflow content before touching the saved branch', async () => {
+  it('rejects oversized workflow content before touching the wf branch', async () => {
     await expect(prepare(input(), 'x'.repeat(1024 * 1024 + 1))).rejects.toThrow('Invalid workflow content');
-    expect(ref()).toBe('');
+    expect(ref()).toBe(`${current}\trefs/heads/wf/flow`);
   });
 
 });

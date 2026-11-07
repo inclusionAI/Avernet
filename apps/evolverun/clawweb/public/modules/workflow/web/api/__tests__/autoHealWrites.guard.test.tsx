@@ -12,7 +12,7 @@ let sequence = 0
 const id = () => `autoheal-guard-${++sequence}`
 const save = (workflowId: string) => ({ workflowId, spec: { id: workflowId, title: 'Test', version: '1', nodes: [] }, note: 'auto-heal save' })
 const deploy = (workflowId: string) => ({ workflowId, packId: 'pack', autoRun: false })
-const receipt = (workflowId: string) => ({ ok: true, saved: true, workflowId, packId: 'pack' })
+const receipt = (workflowId: string) => ({ ok: true, saved: true, workflowId, packId: 'pack', branch: `wf/${workflowId}`, commit: 'a'.repeat(40) })
 const response = (body: unknown) => new Response(JSON.stringify(body))
 function wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}>{children}</QueryClientProvider> }
 beforeEach(() => { client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }); fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })

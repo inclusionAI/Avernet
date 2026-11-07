@@ -62,7 +62,7 @@ function ReviewForm({ review, current, onConfirm, onCancel, busy }: {
     <fieldset disabled={busy}>
     <p>数据库草稿是已持久化的最新真值；当前编辑器候选可能包含之后尚未保存的修改。数据库与 Git 内容可能不同。这里不会自动合并或判断 YAML 是否可无损解析。请对照原文自行决定最终 JSON；服务端会从该 JSON 重新生成 YAML，原 YAML 的注释、格式、锚点、标签等可能丢失或语义不同。无法安全表达的内容请取消，先人工处理。</p>
     <p>工作流：{review.workflowId}；Pack：{review.packId}；路径：{review.workflowPath}</p>
-    <p>Git 版本：{review.sourceVersion}；原 commit：{review.sourceCommit}；预期 saved head：{review.expectedSavedHead ?? '无'}；数据库 token：{review.expectedDraftToken}</p>
+    <p>Git 版本：{review.sourceVersion}；原 commit：{review.sourceCommit}；预期 草稿(wf) head：{review.expectedSavedHead ?? '无'}；数据库 token：{review.expectedDraftToken}</p>
     <div className="grid gap-4 md:grid-cols-2">
       <div><h3>数据库原始文档</h3><pre className="max-h-96 overflow-auto whitespace-pre-wrap">{review.dbSpecJson}</pre></div>
       <div><h3>Git 原始 YAML</h3><pre className="max-h-96 overflow-auto whitespace-pre-wrap">{review.gitYaml}</pre></div>

@@ -1,3 +1,4 @@
+import { resolveSavedWorkflowRef } from './workflow-saved-ref.js';
 import { createConfiguredTemporaryDirectory } from '@avernet/clawweb-shared/server/env';
 import { executeGit, withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import { rm, writeFile } from 'node:fs/promises';
@@ -41,7 +42,7 @@ function validText(text: string): boolean {
 export async function writePackScripts(input: PackScriptWriteInput): Promise<{ commit: string }> {
   const { repoDir, workflowId, packId, baseCommit, targetBranch, basePackPath, changes, author } = input;
   if (!identifier.test(workflowId) || !identifier.test(packId) || !sha.test(baseCommit)
-    || ![`wf/${workflowId}`, `saved/${workflowId}`].includes(targetBranch)
+    || targetBranch !== `wf/${workflowId}`
     || ![packId, `packs/${packId}`].includes(basePackPath)) throw new Error('Invalid pack, workflow, branch, or base');
   if (!author || !author.name || !author.email || /[\r\n\0<>]/.test(author.name + author.email)) throw new Error('Invalid author');
   if (!Array.isArray(changes) || changes.length === 0 || changes.length > MAX_CHANGES) throw new Error('Invalid change count');
@@ -72,6 +73,8 @@ export async function writePackScripts(input: PackScriptWriteInput): Promise<{ c
       const fetchUrls = (await git('remote', 'get-url', '--all', 'origin')).trim().split('\n');
       const pushUrls = (await git('remote', 'get-url', '--push', '--all', 'origin')).trim().split('\n');
       if (fetchUrls.length !== 1 || pushUrls.length !== 1 || !fetchUrls[0] || fetchUrls[0] !== pushUrls[0]) throw new Error('Remote read and write endpoints differ');
+      const state = await resolveSavedWorkflowRef(repoDir, workflowId);
+      if (state.commit !== baseCommit) throw new Error('Workflow source conflict');
       const ref = `refs/heads/${targetBranch}`;
       const remote = (await git('ls-remote', '--refs', 'origin', ref)).trim();
       const fields = remote ? remote.split('\n').map((line) => line.split('\t')) : [];
@@ -176,6 +179,8 @@ export async function writePackScripts(input: PackScriptWriteInput): Promise<{ c
       const tree = (await git('write-tree')).trim();
       const commit = (await git('commit-tree', tree, '-p', baseCommit, '-m', `Update scripts for ${workflowId}`)).trim();
       if (!sha.test(commit) || commit.length !== baseCommit.length) throw new Error('Invalid commit');
+      const latest = await resolveSavedWorkflowRef(repoDir, workflowId);
+      if (latest.wfHead !== state.wfHead) throw new Error('Workflow source conflict');
       // An explicit lease pins the one observed head (or absence) across the entire operation.
       await git('push', '--no-follow-tags', `--force-with-lease=${ref}:${expected}`, 'origin', `${commit}:${ref}`);
       return { commit };

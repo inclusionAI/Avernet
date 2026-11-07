@@ -65,7 +65,7 @@ describe('workflow-scoped host capability', () => {
 it('exposes an explicit missing-baseline state rather than selecting legacy', async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce(json({ autoHealUnifiedSave: 'v1-workflow' })).mockResolvedValueOnce(json({ autoHealUnifiedSave: 'baseline-unavailable' }))
   vi.stubGlobal('fetch', fetchMock)
-  await expect(readAutoHealUnifiedCapability('flow')).rejects.toThrow('缺少数据库草稿或 saved/wf 基线')
+  await expect(readAutoHealUnifiedCapability('flow')).rejects.toThrow('缺少数据库草稿或草稿(wf)或生效 tag 基线')
 })
 
 it('treats a scoped capability timeout as a non-downgradable failure', async () => {

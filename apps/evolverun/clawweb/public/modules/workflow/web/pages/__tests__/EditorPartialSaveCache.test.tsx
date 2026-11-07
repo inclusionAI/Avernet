@@ -35,7 +35,7 @@ async function setup(withClient = true) {
   useEditorStore.getState().loadSpec(spec, mocks.baseline)
   mocks.fetchJson.mockClear(); mocks.get.mockClear()
   const files = [file('workflow.pack.yaml', stringify({ id: 'pack', workflows: [id] })), file(`workflows/${id}.yaml`, stringify(spec)), file('scripts/run', 'original')]
-  const snapshot = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/saved/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: files }
+  const snapshot = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files, loading: false, error: null, blocked: false, notice: null } } })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
@@ -91,7 +91,7 @@ function expectUncertain(id: string, session: Session, client?: QueryClient, can
     expect(invalidated(client, ['workflow-types'])).toBe(true)
     expect(invalidated(client, ['editor-workflow-document', 'other'])).toBe(false)
   }
-  expect(screen.queryByText(/数据库和 saved 分支已确认保存/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/数据库和草稿\(wf\)分支已确认保存/)).not.toBeInTheDocument()
 }
 const confirmed = (input: UnifiedInput) => ({ requestId: input.requestId, outcome: 'confirmed', reconciliationRequired: false,
   evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'e'.repeat(64), commit: 'b'.repeat(40), draftToken: 'b'.repeat(64) } })
@@ -118,7 +118,7 @@ it('probes capability and blocks legacy writes when unified save is unavailable'
   const { id, session, client } = await setup()
   vi.mocked(window.confirm).mockReturnValue(false)
   fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }))
-  expect(await screen.findByText(/统一保存不可用，无法同步 saved 工作流 YAML/)).toBeInTheDocument()
+  expect(await screen.findByText(/统一保存不可用，无法同步草稿\(wf\)工作流 YAML/)).toBeInTheDocument()
   const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/unified-save'))
   expect(calls).toHaveLength(1)
   expect(calls[0][0]).toBe(`/api/workflows/${id}/unified-save`)

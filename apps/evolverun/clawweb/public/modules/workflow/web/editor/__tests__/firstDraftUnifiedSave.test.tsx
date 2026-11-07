@@ -39,7 +39,7 @@ beforeEach(() => {
     { path: 'scripts/a.sh', contentBase64: btoa('old'), mode: '100644' as const },
     { path: 'asset.txt', contentBase64: btoa('unchanged'), mode: '100644' as const },
   ]
-  saved = { workflowId: id, packId, baseRef: `origin/saved/${id}`, baseCommit: originalCommit, draftHead: originalCommit, canWrite: true, versionFiles: files }
+  saved = { workflowId: id, packId, baseRef: `origin/wf/${id}`, baseCommit: originalCommit, draftHead: originalCommit, canWrite: true, versionFiles: files }
   vi.mocked(api.workflows.get).mockImplementation(async () => {
     if (!stored) throw { status: 404, body: JSON.stringify({ code: 'WORKFLOW_NOT_FOUND', workflowId: id }) }
     return structuredClone(stored) as never

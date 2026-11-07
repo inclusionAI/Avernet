@@ -9,13 +9,13 @@ vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: vi.fn() })
 let sequence = 0
 const makeId = () => `default-draft-${++sequence}`
 const snapshot = (id: string, version: 'current' | 'draft') => ({
-  workflowId: id, packId: 'pack', baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${id}`,
+  workflowId: id, packId: 'pack', baseRef: (version === 'current' ? `refs/tags/deploy/${id}/#1` : `origin/wf/${id}`),
   baseCommit: (version === 'current' ? 'a' : 'b').repeat(40), draftHead: 'b'.repeat(40),
   versionFiles: [{ path: 'script.txt', contentBase64: btoa(version), mode: '100644' }],
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
-it('opens a new session on saved without first reading current', async () => {
+it('opens a new session on wf draft without first reading current', async () => {
   const id = makeId()
   vi.mocked(fetchJson).mockResolvedValue(snapshot(id, 'draft'))
   render(<ScriptFilesTab workflowId={id} />)
@@ -71,4 +71,14 @@ it('does not override current when a late draft response arrives', async () => {
   await waitFor(() => expect(sessionFor(id).state.versions.current.snapshot).not.toBeNull())
   await act(async () => { resolveDraft(snapshot(id, 'draft')); await draft })
   expect(sessionFor(id).state.version).toBe('current')
+})
+
+it('rejects a legacy saved source without exposing it as an editable wf draft', async () => {
+  const id = makeId()
+  vi.mocked(fetchJson).mockResolvedValue({ ...snapshot(id, 'draft'), baseRef: `origin/saved/${id}`, draftHead: null, canWrite: false })
+  render(<ScriptFilesTab workflowId={id} />)
+  expect(await screen.findByRole('alert')).toHaveTextContent('无法读取完整版本文件')
+  expect(screen.queryByRole('button', { name: 'script.txt' })).not.toBeInTheDocument()
+  expect(sessionFor(id).state.versions.draft.snapshot).toBeNull()
+  expect(fetchJson).toHaveBeenCalledTimes(1)
 })

@@ -40,11 +40,19 @@ describe('legacy AutoHeal projection', () => {
     writeFileSync(path.join(work, 'workflow.pack.yaml'), stringify({ id: 'pack', version: '1', workflows: [{ id: 'flow', file: 'workflows/flow.yaml' }] }));
     writeFileSync(path.join(work, 'workflows/flow.yaml'), yaml);
     git(work, 'add', '.'); git(work, 'commit', '-m', 'saved'); git(work, 'remote', 'add', 'origin', remote);
-    git(work, 'push', 'origin', 'HEAD:refs/heads/main', 'HEAD:refs/heads/saved/flow');
+    git(work, 'push', 'origin', 'HEAD:refs/heads/main', 'HEAD:refs/heads/wf/flow');
     const config = { remoteUrl: remote, username: author.name, email: author.email, token: '' };
     save = new AutoHealSaveService(db, specs, history, permissions, config, author);
     deploy = new AutoHealDeployService(db, specs, history, permissions, config, author);
   });
+  function syncLegacyProjection(specJson: unknown, content: string): void {
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify(specJson));
+    writeFileSync(path.join(root, 'work', 'workflows/flow.yaml'), content);
+    const work = path.join(root, 'work');
+    git(work, 'add', 'workflows/flow.yaml');
+    if (git(work, 'status', '--short')) git(work, 'commit', '-m', 'sync legacy workflow baseline');
+    git(work, 'push', 'origin', 'HEAD:refs/heads/wf/flow');
+  }
   afterEach(async () => { await db.close(); rmSync(root, { recursive: true, force: true }); });
   it('saves and deploys a legacy false dependency and preserves authored fields', async () => {
     const document = parse(yaml) as WorkflowSpec;
@@ -61,7 +69,8 @@ describe('legacy AutoHeal projection', () => {
     ['false dependency', JSON.stringify(parse(yaml))],
     ['alias wrapper', JSON.stringify({ content: yaml.replace('dependsOn: false', 'dependsOn: []') })],
   ])('keeps Editor deployment strict for %s', async (_label, draft) => {
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(draft);
+    const parsed = JSON.parse(draft) as Record<string, unknown>;
+    syncLegacyProjection(parsed, typeof parsed.content === 'string' && !Array.isArray(parsed.nodes) ? parsed.content : yaml);
     const specs = new WorkflowSpecRepository(db, new WorkflowDeployHistoryRepository(db));
     const row = await specs.findByWorkflowId('flow');
     if (!row) throw new Error('Missing draft');
@@ -86,7 +95,7 @@ describe('legacy AutoHeal projection', () => {
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
   });
   it('deploys an existing content-only wrapper with aliases and exact YAML bytes', async () => {
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: yaml }));
+    syncLegacyProjection({ content: yaml }, yaml);
     const result = await deploy.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
     const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8' });
     const row = raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string };
@@ -107,7 +116,7 @@ describe('legacy AutoHeal projection', () => {
   });
   it('deploys tagged strings and numeric keys in a legacy content-only wrapper', async () => {
     const document = 'id: flow\nconfig: {200: ok}\nlabel: !!str 200\nlarge: 10000000000000000\nnodes:\n  - id: start\n    executor: {type: start}\n';
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: document }));
+    syncLegacyProjection({ content: document }, document);
     const result = await deploy.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
     const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8' });
     const history = JSON.parse((raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string }).spec_json);
@@ -118,7 +127,7 @@ describe('legacy AutoHeal projection', () => {
   });
   it('deploys and archives lossless standard YAML tags in a legacy content wrapper', async () => {
     const document = 'id: flow\nconfig: !!map { retries: !!int 2, rate: !!float 0.5, enabled: !!bool true, values: !!seq [a, b] }\nnodes:\n  - id: start\n    executor: {type: start}\n';
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: document }));
+    syncLegacyProjection({ content: document }, document);
     const result = await deploy.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
     const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8' });
     const history = JSON.parse((raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string }).spec_json);
@@ -128,7 +137,7 @@ describe('legacy AutoHeal projection', () => {
   });
   it('deploys a legacy YAML whose escaped JSON representation exceeds 1 MiB', async () => {
     const document = `id: flow\nnodes:\n  - id: start\n    executor: {type: start}\ntext: '${'\\'.repeat(550_000)}'\n`;
-    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ content: document }));
+    syncLegacyProjection({ content: document }, document);
     const result = await deploy.deploy({ workflowId: 'flow', actorId: 'user', autoRun: false });
     const gitYaml = execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:workflows/flow.yaml`], { encoding: 'utf8', maxBuffer: 3 * 1024 * 1024 });
     const history = JSON.parse((raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string }).spec_json);

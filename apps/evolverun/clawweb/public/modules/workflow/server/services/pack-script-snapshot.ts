@@ -35,7 +35,7 @@ function validId(value: string): boolean {
 }
 
 /** Read an authorized caller's already-cloned repository. Lazy fetching is disabled where Git supports it. */
-export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean }): Promise<PackScriptSnapshot> {
+export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean; activeTag?: string }): Promise<PackScriptSnapshot> {
   if (version !== undefined && version !== 'current' && version !== 'draft') throw new Error('Invalid snapshot version');
   if (!validId(workflowId) || !validId(packId)) throw new Error('Invalid workflowId or packId');
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
@@ -43,7 +43,7 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
   const git = (args: string[], maxBuffer = TREE_LIMIT) => executeGit(args, { cwd: repoDir, env, maxBuffer });
   const text = async (args: string[]) => (await git(args)).toString('ascii').trim();
   const resolve = async (shortRef: string): Promise<string | undefined> => {
-    const full = `refs/remotes/${shortRef}`;
+    const full = shortRef.startsWith('refs/') ? shortRef : `refs/remotes/${shortRef}`;
     try { await git(['show-ref', '--verify', '--quiet', full]); }
     catch (error) {
       if ((error as { status?: number }).status === 1) return undefined;
@@ -54,28 +54,21 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     return oid;
   };
   const wfRef = `origin/wf/${workflowId}`;
-  const savedRef = `origin/saved/${workflowId}`;
   let baseCommit: string;
   let baseRef: string;
-  if (version) {
-    baseRef = version === 'current' ? wfRef : savedRef;
-    const selected = await resolve(baseRef);
+  if (version === 'current') {
+    const tag = options?.activeTag;
+    const prefix = `deploy/${workflowId}/#`;
+    if (!tag?.startsWith(prefix) || !/^[1-9][0-9]*$/.test(tag.slice(prefix.length))) throw new Error('Workflow snapshot not found');
+    const selected = await resolve('refs/pack-version/active');
     if (!selected) throw new Error('Workflow snapshot not found');
+    baseRef = `refs/tags/${tag}`;
     baseCommit = selected;
   } else {
-    // Preserve the legacy reconciliation policy only for callers without a version.
-    const [wf, saved] = await Promise.all([resolve(wfRef), resolve(savedRef)]);
-    if (!wf && !saved) throw new Error('Workflow snapshot not found');
-    baseCommit = wf ?? saved!;
-    baseRef = wf ? wfRef : savedRef;
-    if (wf && saved && wf !== saved) {
-      const ancestor = async (a: string, b: string) => {
-        try { await git(['merge-base', '--is-ancestor', a, b]); return true; }
-        catch (error) { if ((error as { status?: number }).status === 1) return false; throw error; }
-      };
-      if (await ancestor(wf, saved)) { baseCommit = saved; baseRef = savedRef; }
-      else if (!await ancestor(saved, wf)) throw new Error('Workflow ref conflict: histories diverged');
-    }
+    baseRef = wfRef;
+    const selected = await resolve(wfRef);
+    if (!selected) throw new Error('Workflow snapshot not found');
+    baseCommit = selected;
   }
   let treeBytes = 0;
   let treeCalls = 0;
@@ -257,7 +250,7 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
       versionFiles.push({ path: entry.name, contentBase64: data.toString('base64'), mode: entry.mode as '100644' | '100755' });
     }
     return { workflowId, packId: actualPackId, baseCommit, baseRef, files: [],
-      packPath: candidate.packPath, draftHead: (await resolve(savedRef)) ?? null, versionFiles };
+      packPath: candidate.packPath, draftHead: (await resolve(wfRef)) ?? null, versionFiles };
   }
   const skippedFiles: NonNullable<PackScriptSnapshot['skippedFiles']> = { count: 0, paths: [], truncated: false };
   const scripts = entries.find(e => e.name === 'scripts');

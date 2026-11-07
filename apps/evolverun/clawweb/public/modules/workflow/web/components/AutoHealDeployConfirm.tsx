@@ -24,7 +24,7 @@ export default function AutoHealDeployConfirm({ receipt, onCancel, onConfirm }: 
       <h3 id="autoheal-deploy-title" className="text-lg font-semibold">{unified ? '确认部署已保存快照' : '确认兼容部署'}</h3>
       {unified ? <>
         {error ? <p role="alert" className="mt-3 text-sm">{error}</p> : !snapshot ? <p className="mt-3 text-sm">正在读取并核对部署基线…</p> : <>
-          <p className="mt-3 break-all text-xs">saved commit：{snapshot.commit}<br />已核对 wf commit：{snapshot.expectedActiveCommit || '不存在（首次部署）'}</p>
+          <p className="mt-3 break-all text-xs">保存版本 commit：{snapshot.commit}<br />当前生效 tag：{snapshot.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{snapshot.expectedActiveCommit || '不存在（首次部署）'}</p>
           <DeploySnapshotReview changes={snapshot.changes} reviewed={reviewed} onReviewedChange={setReviewed} />
         </>}
       </> : <>

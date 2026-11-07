@@ -34,11 +34,11 @@ let sequence = 0
 async function setup(source: 'draft' | 'current' = 'draft', fresh = false, existingId?: string) {
   const id = existingId ?? `deploy-db-${++sequence}`, commit = 'a'.repeat(40)
   mocks.spec = { id, title: 'DB draft', version: '1', nodes: [] }
-  mocks.snapshot = { packPath: '', workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/saved/${id}`, baseCommit: commit, draftHead: commit,
+  mocks.snapshot = { packPath: '', workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: commit, draftHead: commit,
     versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [id] })), mode: '100644' },
       { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify({ ...mocks.spec, title: 'Old Git' })), mode: '100644' }] }
   mocks.deploymentState = { protocol: 'editor-deployment-state-v1', workflowId: id, packId: 'pack', canDeploy: true, savedCommit: commit, activeCommit: fresh ? null : commit }
-  if (source === 'current') mocks.snapshot = { ...mocks.snapshot, baseRef: `origin/wf/${id}`, draftHead: null }
+  if (source === 'current') mocks.snapshot = { ...mocks.snapshot, baseRef: `refs/tags/deploy/${id}/#1`, draftHead: null }
   useEditorStore.getState().reset({ force: true })
   const session = sessionFor(id)
   if (!fresh) publish(session, { ...session.state, version: source, versions: { ...session.state.versions,
@@ -48,7 +48,7 @@ async function setup(source: 'draft' | 'current' = 'draft', fresh = false, exist
     if (fresh && url.includes('/snapshot-v2/state')) return { protocol: 'editor-deployment-state-v1', workflowId: id, savedCommit: mocks.snapshot.baseCommit, activeCommit: null }
     if (fresh && url.endsWith('version=current')) throw { status: 404, body: '{"code":"SNAPSHOT_NOT_FOUND"}' }
     if (source === 'current' && url.endsWith('version=draft')) throw { status: 404, body: '{"code":"SNAPSHOT_NOT_FOUND"}' }
-    if (url.endsWith('version=current') && source === 'draft') return { ...mocks.snapshot, baseRef: `origin/wf/${id}`, draftHead: null }
+    if (url.endsWith('version=current') && source === 'draft') return { ...mocks.snapshot, baseRef: `refs/tags/deploy/${id}/#1`, draftHead: null }
     return mocks.snapshot
   }); mocks.get.mockResolvedValue(mocks.spec)
   mocks.baseline = await readDatabaseWorkflowDraft(id)
@@ -105,8 +105,8 @@ it('unlocks only the rejected Editor attempt and allows deployment after the can
   transport.restore()
   expect(localStorage.getItem(otherKey)).toBe('1')
   expect(screen.queryByText(/没有日志恢复/)).not.toBeInTheDocument()
-  // Model a separately repaired, newly saved Pack; the next confirmation must use it.
-  const active = { ...mocks.snapshot, baseRef: `origin/wf/${id}`, draftHead: null }
+  // Model a separately repaired, newly 草稿(wf) Pack; the next confirmation must use it.
+  const active = { ...mocks.snapshot, baseRef: `refs/tags/deploy/${id}/#1`, draftHead: null }
   const repaired = { ...mocks.snapshot, baseCommit: 'b'.repeat(40), draftHead: 'b'.repeat(40) }
   mocks.snapshot = repaired
   mocks.deploymentState = { ...mocks.deploymentState, savedCommit: repaired.baseCommit, activeCommit: active.baseCommit }
@@ -256,10 +256,10 @@ it('keeps unknown deployment visible and never offers journal recovery or retrie
   expect(mocks.deploy).toHaveBeenCalledTimes(1)
   expect(mocks.fetchJson.mock.calls.every(([url]) => !url.includes('pack-operations'))).toBe(true)
 })
-it('blocks deployment when saved is absent instead of falling back to current wf', async () => {
+it('blocks deployment when wf draft is absent instead of falling back to the active tag', async () => {
   const { id } = await setup('current')
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeInTheDocument()
+  expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeInTheDocument()
   expect(mocks.fetchJson.mock.calls.map(([url]) => url)).toEqual([
     `/api/workflows/${id}/pack-version?version=draft`, `/api/workflows/${id}/pack-version?version=current`,
   ])
@@ -289,7 +289,7 @@ it('refuses current when saved exists or appeared after the draft 404', async ()
     return { ...mocks.snapshot, draftHead: 'b'.repeat(40) }
   })
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeInTheDocument()
+  expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()
   expect(mocks.deploy).not.toHaveBeenCalled()
 })
@@ -300,7 +300,7 @@ it('refuses a changed current baseline when no saved ref exists', async () => {
     return { ...mocks.snapshot, baseCommit: 'b'.repeat(40) }
   })
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeInTheDocument()
+  expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeInTheDocument()
   expect(mocks.deploy).not.toHaveBeenCalled()
 })
 it('passes the current commit as a precondition and does not claim success on a race', async () => {
@@ -320,7 +320,7 @@ it('rejects a current baseline that was read while saved existed', async () => {
       current: { ...current, snapshot: { ...current.snapshot!, draftHead: 'b'.repeat(40) } } } })
   })
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeInTheDocument()
+  expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeInTheDocument()
   expect(mocks.deploy).not.toHaveBeenCalled()
 })
 it('blocks saved-tree confirmation if local file edits happen during the fresh read', async () => {
@@ -329,7 +329,7 @@ it('blocks saved-tree confirmation if local file edits happen during the fresh r
   const waiting = new Promise(r => { resolve = r })
   mocks.fetchJson.mockImplementation(async (url: string) => {
     if (url.endsWith('version=draft')) return waiting
-    return { ...mocks.snapshot, baseRef: `origin/wf/${mocks.spec.id}`, draftHead: null }
+    return { ...mocks.snapshot, baseRef: `refs/tags/deploy/${mocks.spec.id}/#1`, draftHead: null }
   })
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
   await waitFor(() => expect(mocks.fetchJson).toHaveBeenCalledTimes(2))
@@ -359,7 +359,7 @@ function openPanel(id: string) {
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob)
     })
     const input = JSON.parse(body)
-    return new Response(JSON.stringify({ ok: true, saved: true, workflowId: input.workflowId, packId: 'pack' }))
+    return new Response(JSON.stringify({ ok: true, saved: true, workflowId: input.workflowId, packId: 'pack', branch: `wf/${input.workflowId}`, commit: 'a'.repeat(40) }))
   })
   return render(<QueryClientProvider client={client}><AutoHealPanel run={panelRun(id)} onClose={() => {}} /></QueryClientProvider>)
 }
@@ -376,11 +376,11 @@ async function diagnoseAndSave() {
 it('deploys a reopened saved-only workflow without manually loading draft', async () => {
   const id = `created-before-reload-${++sequence}`, commit = 'a'.repeat(40)
   const spec = { id, title: 'DB draft', version: '1', nodes: [] }
-  const saved = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/saved/${id}`, baseCommit: commit, draftHead: commit,
+  const saved = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: commit, draftHead: commit,
     versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [id] })), mode: '100644' },
       { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' }] }
   mocks.fetchJson.mockImplementation(async (_url, init) => init?.method === 'POST'
-    ? { ok: true, saved: true, workflowId: id, packId: 'pack', branch: `saved/${id}`, commit } : saved)
+    ? { ok: true, saved: true, workflowId: id, packId: 'pack', branch: `wf/${id}`, commit } : saved)
   mocks.spec = spec
   mocks.get.mockResolvedValue(spec)
   await createWorkflowPack(spec, 'pack')
@@ -600,10 +600,10 @@ it('does not bypass an existing conflicting baseline with a fresh saved read', a
   expect(session.state.versions.draft.snapshot?.baseCommit).toBe('a'.repeat(40))
   mocks.deploymentState = { ...mocks.deploymentState, savedCommit: 'b'.repeat(40) }
   mocks.fetchJson.mockImplementation(async (url: string) => url.endsWith('version=current')
-    ? { ...mocks.snapshot, baseRef: `origin/wf/${mocks.spec.id}`, draftHead: null }
+    ? { ...mocks.snapshot, baseRef: `refs/tags/deploy/${mocks.spec.id}/#1`, draftHead: null }
     : { ...mocks.snapshot, baseCommit: 'b'.repeat(40), draftHead: 'b'.repeat(40) })
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(await screen.findByText(/saved文件快照与已读取基线不一致/)).toBeInTheDocument()
+  expect(await screen.findByText(/草稿文件快照与已读取基线不一致/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()
   expect(session.state.versions.draft.snapshot?.baseCommit).toBe('a'.repeat(40))
   expect(mocks.deploy).not.toHaveBeenCalled()

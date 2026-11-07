@@ -16,7 +16,8 @@ const spec = { id: 'flow', title: 'before', nodes: [{ id: 'n', executor: { type:
 const repoId = 'a'.repeat(64);
 let root: string, bare: string, seed: string, current: string;
 let raw: Database.Database, db: SqliteDatabase, cas: EditorDraftCasService, perms: BotWorkflowPermissionRepository;
-const saved = () => { try { return runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow']); } catch { return null; } };
+// Saved now means the wf snapshot, including the pre-existing baseline on rejected writes.
+const saved = () => runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow']);
 const row = () => raw.prepare("SELECT spec_json FROM workflow_specs WHERE workflow_id = 'flow'").get() as { spec_json: string };
 const service = (overrides: Partial<ConstructorParameters<typeof WorkflowUnifiedSaveService>[0]> = {}) => new WorkflowUnifiedSaveService({
   draft: cas, canEdit: (workflowId, actorId) => perms.hasEditPermission(workflowId, actorId),
@@ -24,7 +25,7 @@ const service = (overrides: Partial<ConstructorParameters<typeof WorkflowUnified
 });
 async function request() {
   return { requestId: 'request_123', actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId: repoId,
-    sourceVersion: 'current' as const, sourceCommit: current, expectedSavedHead: null, expectedDraftToken: (await cas.read('flow', 'editor')).draftToken,
+    sourceVersion: 'current' as const, sourceCommit: current, expectedSavedHead: current, expectedDraftToken: (await cas.read('flow', 'editor')).draftToken,
     specJson: JSON.stringify({ ...spec, title: 'after', value: 3 }), changes: [] };
 }
 beforeEach(() => {
@@ -100,7 +101,7 @@ describe('unified save without a durable coordinator', () => {
     const result = await service().save(req, 'editor');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
     expect(row().spec_json).toBe(before);
-    expect(saved()).toBeNull();
+    expect(saved()).toBe(current);
   });
   it('rejects a candidate with another Pack ID for a NULL binding', async () => {
     raw.prepare('UPDATE workflow_specs SET pack_id = NULL WHERE workflow_id = ?').run('flow');
@@ -113,7 +114,7 @@ describe('unified save without a durable coordinator', () => {
     const result = await service({ prepare }).save({ ...await request(), packId: 'flow' }, 'editor');
     expect(candidatePackId).toBe('pack');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(row().spec_json).toBe(before); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(before); expect(saved()).toBe(current);
   });
   it.each(['edit', 'pack'])('denies %s permission before writing a NULL-bound workflow', async denied => {
     raw.prepare('UPDATE workflow_specs SET pack_id = NULL WHERE workflow_id = ?').run('flow');
@@ -128,7 +129,7 @@ describe('unified save without a durable coordinator', () => {
     } }).save({ ...await request(), packId: 'flow' }, 'editor');
     expect(policyCalls).toBe(denied === 'pack' ? 1 : 0);
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(row().spec_json).toBe(before); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(before); expect(saved()).toBe(current);
   });
   it('rejects a concurrent raw NULL binding change even when effective Pack identity is unchanged', async () => {
     raw.prepare('UPDATE workflow_specs SET pack_id = NULL WHERE workflow_id = ?').run('flow');
@@ -141,7 +142,7 @@ describe('unified save without a durable coordinator', () => {
       raw.prepare('UPDATE workflow_specs SET pack_id = ? WHERE workflow_id = ?').run('flow', 'flow'); return true;
     } }).save({ ...await request(), packId: 'flow' }, 'editor');
     expect(result).toMatchObject({ outcome: 'unknown', evidence: { db: 'unknown', git: 'not_started' } });
-    expect(row().spec_json).toBe(before); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(before); expect(saved()).toBe(current);
     expect(raw.prepare('SELECT pack_id FROM workflow_specs WHERE workflow_id = ?').get('flow')).toEqual({ pack_id: 'flow' });
   });
   it.each(['edit', 'pack', 'edit-error', 'pack-error'])('reports partial and never pushes when %s authorization fails after DB confirmation', async failure => {
@@ -159,7 +160,7 @@ describe('unified save without a durable coordinator', () => {
     expect(result).toMatchObject({ outcome: 'partial', evidence: { db: 'confirmed', git: 'not_started' } });
     expect(result.evidence.commit).toMatch(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/); expect(result.evidence.draftToken).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(result)).not.toContain('secret');
-    expect(row().spec_json).toContain('after'); expect(saved()).toBeNull(); expect(pushes).toBe(0);
+    expect(row().spec_json).toContain('after'); expect(saved()).toBe(current); expect(pushes).toBe(0);
   });
   it('rejects authorization, token, binding and manifest modifications before either write', async () => {
     const req = await request(); const original = row().spec_json;
@@ -171,7 +172,7 @@ describe('unified save without a durable coordinator', () => {
       const result = await service().save(input as typeof req, actor);
       expect(result.outcome).not.toBe('confirmed'); expect(result.evidence.db).toBe('not_started'); expect(result.evidence.git).toBe('not_started');
     }
-    expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
   it('does not write DB when source belongs to another pack or candidate is invalid', async () => {
     const req = await request(); const original = row().spec_json;
@@ -181,7 +182,7 @@ describe('unified save without a durable coordinator', () => {
     raw.prepare('UPDATE workflow_specs SET pack_id = ?').run('pack');
     const invalid = await service().save({ ...req, expectedDraftToken: (await cas.read('flow', 'editor')).draftToken,
       changes: [{ path: 'workflows/flow.yaml', operation: 'delete' }] } as typeof req, 'editor');
-    expect(invalid.evidence.db).toBe('not_started'); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(invalid.evidence.db).toBe('not_started'); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
   it('does not push when the DB save fails before writing', async () => {
     const req = await request(); const original = row().spec_json; let pushes = 0;
@@ -193,14 +194,14 @@ describe('unified save without a durable coordinator', () => {
       throw new Error('database unavailable');
     } } }).save(req, 'editor');
     expect(result).toMatchObject({ outcome: 'unknown', evidence: { db: 'unknown', git: 'not_started' } });
-    expect(pushes).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(pushes).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
   it('treats a lost DB acknowledgement as unknown and never pushes', async () => {
     const req = await request(); const result = await service({ draft: { read: cas.read.bind(cas), save: async input => {
       await cas.save(input); throw new Error('secret database details');
     } } }).save(req, 'editor');
     expect(result.outcome).toBe('unknown'); expect(result.evidence).toMatchObject({ db: 'unknown', git: 'not_started' });
-    expect(row().spec_json).toContain('after'); expect(saved()).toBeNull(); expect(JSON.stringify(result)).not.toContain('secret');
+    expect(row().spec_json).toContain('after'); expect(saved()).toBe(current); expect(JSON.stringify(result)).not.toContain('secret');
   });
   it('re-reads the just-committed draft before pushing when there is no concurrent writer', async () => {
     const req = await request(); const events: string[] = [];
@@ -229,7 +230,7 @@ describe('unified save without a durable coordinator', () => {
     expect(result).toMatchObject({ outcome: 'partial', evidence: { db: 'confirmed', git: 'not_started' } });
     expect(result.evidence.draftToken).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.parse(row().spec_json).title).toBe('concurrent writer');
-    expect(saved()).toBeNull(); expect(pushes).toBe(0);
+    expect(saved()).toBe(current); expect(pushes).toBe(0);
   });
   it('does not recreate a concurrently deleted draft or push the older candidate', async () => {
     const req = await request(); let pushes = 0;
@@ -244,7 +245,7 @@ describe('unified save without a durable coordinator', () => {
     } } }).save(req, 'editor');
     expect(result).toMatchObject({ outcome: 'partial', evidence: { db: 'confirmed', git: 'not_started' } });
     expect(raw.prepare('SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?').get('flow')).toBeUndefined();
-    expect(saved()).toBeNull(); expect(pushes).toBe(0);
+    expect(saved()).toBe(current); expect(pushes).toBe(0);
   });
   it.each(['token', 'workflowId', 'packId', 'specJson', 'read-error'] as const)(
     'stops after DB confirmation if the re-read has a changed %s or fails', async mismatch => {
@@ -263,7 +264,7 @@ describe('unified save without a durable coordinator', () => {
         return { ...currentDraft, specJson: currentDraft.specJson + ' ' };
       } } }).save(req, 'editor');
       expect(result).toMatchObject({ outcome: 'partial', evidence: { db: 'confirmed', git: 'not_started' } });
-      expect(reads).toBe(2); expect(pushes).toBe(0); expect(saved()).toBeNull();
+      expect(reads).toBe(2); expect(pushes).toBe(0); expect(saved()).toBe(current);
       expect(row().spec_json).toContain('after'); expect(JSON.stringify(result)).not.toContain('private');
     },
   );
@@ -283,15 +284,15 @@ describe('unified save without a durable coordinator', () => {
     req.specJson = JSON.stringify({ ...spec, title: 'mutated' }); release();
     const result = await pending; expect(result.outcome).toBe('confirmed'); expect(row().spec_json).toContain('after');
   });
-  it('reports a lost lease as unknown after DB confirmation and does not retry', async () => {
+  it('ignores an independent saved ref appearing after DB confirmation', async () => {
     const req = await request(); let pushes = 0;
     const prepare: typeof withPreparedPackCandidateForUnifiedSave = (input, yaml, callback) =>
       withPreparedPackCandidateForUnifiedSave(input, yaml, (prepared, push) => callback(prepared, async () => {
         pushes++; runGit(seed, ['push', bare, `${current}:refs/heads/saved/flow`]); return push();
       }));
     const result = await service({ prepare }).save(req, 'editor');
-    expect(result.outcome).toBe('unknown'); expect(result.evidence).toMatchObject({ db: 'confirmed', git: 'unknown' });
-    expect(saved()).toBe(current); expect(pushes).toBe(1); expect(row().spec_json).toContain('after');
+    expect(result.outcome).toBe('confirmed'); expect(result.evidence).toMatchObject({ db: 'confirmed', git: 'confirmed' });
+    expect(saved()).toBe(result.evidence.commit); expect(pushes).toBe(1); expect(row().spec_json).toContain('after');
   });
   it('does not push when another writer wins the DB CAS after candidate validation', async () => {
     const req = await request();
@@ -300,7 +301,7 @@ describe('unified save without a durable coordinator', () => {
       return cas.save(input);
     } } }).save(req, 'editor');
     expect(result.outcome).toBe('unknown'); expect(result.evidence).toMatchObject({ db: 'unknown', git: 'not_started' });
-    expect(row().spec_json).toContain('other writer'); expect(saved()).toBeNull();
+    expect(row().spec_json).toContain('other writer'); expect(saved()).toBe(current);
   });
   it('freezes the exact change snapshot through authorization and candidate push', async () => {
     const req = await request();
@@ -345,7 +346,7 @@ describe('unified save without a durable coordinator', () => {
     for (const canWritePack of [async () => false, async () => { throw new Error('denied'); }]) {
       const result = await service({ canWritePack }).save({ ...req, changes }, 'editor');
       expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-      expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+      expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
     }
   });
 
@@ -358,7 +359,7 @@ describe('unified save without a durable coordinator', () => {
       path: 'scripts/run.sh', operation: 'delete',
     }] }, 'viewer');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(preparations).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(preparations).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('rejects an out-of-Pack path without modifying DB or Git', async () => {
@@ -367,7 +368,7 @@ describe('unified save without a durable coordinator', () => {
       path: '../other/scripts/run.sh', operation: 'create', contentBase64: 'YQ==', mode: '100644',
     }] }, 'editor');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('reports unknown on a lost Git receipt for a candidate containing script changes', async () => {
@@ -397,7 +398,7 @@ describe('unified save without a durable coordinator', () => {
     } }).save({ ...req, changes }, 'editor');
     expect(observed).toEqual(['scripts/run.sh', 'workflows/unlisted.yaml']);
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('denies a real shared Pack when an optional additional restriction denies or fails', async () => {
@@ -408,7 +409,7 @@ describe('unified save without a durable coordinator', () => {
       const result = await service({ canWritePack: policy }).save(req, 'editor');
       expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
       expect(JSON.stringify(result)).not.toContain('private policy data');
-      expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+      expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
     }
   });
 
@@ -424,7 +425,7 @@ describe('unified save without a durable coordinator', () => {
     const { bundleBase64: _bundle, ...identity } = observed!;
     expect(identity).toEqual({ actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId: repoId,
       packPath: 'packs/pack/', workflowFile: 'workflows/flow.yaml', sourceVersion: 'current',
-      sourceCommit: current, expectedSavedHead: null, branch: 'saved/flow', commit: result.evidence.commit, inputHash: result.evidence.inputHash,
+      sourceCommit: current, expectedSavedHead: current, branch: 'wf/flow', commit: result.evidence.commit, inputHash: result.evidence.inputHash,
       changes: [], manifestContent: 'id: pack\nworkflows: [flow, other]\n' });
     expect(Object.isFrozen(observed)).toBe(true);
     expect(runGit(root, ['--git-dir', bare, 'show', `${saved()}:packs/pack/workflows/other.yaml`])).toContain('id: other');
@@ -439,7 +440,7 @@ describe('unified save without a durable coordinator', () => {
     expect(denyDifferentCommit).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
     const notTrue = await service({ canWritePack: async () => 'yes' as unknown as boolean }).save(req, 'editor');
     expect(notTrue).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('rejects changes to another workflow even with Pack write authorization', async () => {
@@ -450,7 +451,7 @@ describe('unified save without a durable coordinator', () => {
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
     expect(row().spec_json).toBe(original);
     expect(raw.prepare("SELECT spec_json FROM workflow_specs WHERE workflow_id = 'other'").get()).toEqual(otherBefore);
-    expect(saved()).toBeNull();
+    expect(saved()).toBe(current);
   });
 
   it('rejects manifest replacement and custom manifest workflow paths even when policy grants', async () => {
@@ -467,7 +468,7 @@ describe('unified save without a durable coordinator', () => {
     ]) {
       const result = await service({ canWritePack: async () => { policies++; return true; } }).save({ ...req, changes: [change] }, 'editor');
       expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-      expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+      expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
     }
     expect(policies).toBe(0);
   });
@@ -486,7 +487,7 @@ describe('unified save without a durable coordinator', () => {
         path: file, operation: 'create', contentBase64: Buffer.from('id: other\nnodes: []\n').toString('base64'), mode: '100644',
       }] }, 'editor');
       expect(result, file).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-      expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+      expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
     }
     expect(policyCalls).toBe(0);
     expect(preparedFiles).not.toContain('WORKFLOWS/other.yaml');
@@ -507,7 +508,7 @@ describe('unified save without a durable coordinator', () => {
     ]) {
       const result = await service({ prepare }).save({ ...req, changes }, 'editor');
       expect(result, JSON.stringify(changes)).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-      expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+      expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
     }
     expect(preparations).toBe(0);
   });
@@ -524,7 +525,7 @@ describe('unified save without a durable coordinator', () => {
       path: 'scripts/new.sh', operation: 'create', contentBase64: 'YQ==', mode: '100644',
     }] }, 'editor');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(prepared).toBe(false); expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(prepared).toBe(false); expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it.each([
@@ -559,7 +560,7 @@ describe('unified save without a durable coordinator', () => {
     const req = await request(); const original = row().spec_json; let policies = 0;
     const result = await service({ canWritePack: async () => { policies++; return true; } }).save(req, 'editor');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('rejects a new candidate-tree alias of a protected ancestor before DB or Git writes', async () => {
@@ -568,7 +569,7 @@ describe('unified save without a durable coordinator', () => {
       path: 'WORKFLOWS/unrelated.txt', operation: 'create', contentBase64: 'YQ==', mode: '100644',
     }] }, 'editor');
     expect(result).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
-    expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBeNull();
+    expect(policies).toBe(0); expect(row().spec_json).toBe(original); expect(saved()).toBe(current);
   });
 
   it('rejects an overlapping save based on the new DB token and old Git head across service instances', async () => {
@@ -600,7 +601,7 @@ describe('unified save without a durable coordinator', () => {
     const secondResult = await secondPending!;
     expect.soft(secondResult).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
     expect.soft(JSON.parse(dbDuring).title).toBe('after');
-    expect(gitDuring).toBeNull();
+    expect(gitDuring).toBe(current);
     expect((await pending).outcome).toBe('confirmed');
     const yaml = runGit(root, ['--git-dir', bare, 'show', `${saved()}:packs/pack/workflows/flow.yaml`]);
     expect(projectWorkflowSnapshotYaml('flow', yaml).specJson).toBe(row().spec_json);

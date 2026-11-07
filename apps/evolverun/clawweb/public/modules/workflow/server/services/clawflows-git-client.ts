@@ -2,11 +2,11 @@
  * ClawFlowsGitClient — isolated temporary-directory git operations for AutoHeal.
  *
  * ClawMind owns packsRoot and the long-lived pack repos. AutoHeal clones a
- * fresh temporary copy for every save/deploy so it never competes with local
- * Pack state. Branch names, tag names and annotations match ClawMind exactly:
+ * fresh temporary repository for every operation so it never competes with
+ * local Pack state. Saves initialize an empty repo and fetch only wf; the clone
+ * primitive remains for callers that explicitly need a checkout. Ref names:
  *
- *   saved branch: saved/{workflowId}
- *   deploy branch: wf/{workflowId}
+ *   saved Pack branch: wf/{workflowId}
  *   deploy tag:   deploy/{workflowId}/#N
  *   annotation:   version=N\naction=deploy\nworkflowIds={workflowId}
  */
@@ -840,31 +840,11 @@ export async function prepareBranchBase(
   return "default";
 }
 
+/** @deprecated No DB-first callback or immutable lease. Use withPreparedWorkflowSpec. */
 export async function commitAndPushSaved(
-  repoDir: string,
-  workflowId: string,
-  note: string,
-  author: GitAuthor,
+  _repoDir: string, _workflowId: string, _note: string, _author: GitAuthor,
 ): Promise<SaveGitResult> {
-  const branch = `saved/${workflowId}`;
-
-  // The branch base is prepared by prepareBranchBase before the spec/manifest writes
-  // (see AutoHealSaveService.save), so the saved snapshot inherits the previous full
-  // Pack content. This reset is a no-op when the base was prepared, and a
-  // default-HEAD fallback for legacy callers that skip prepareBranchBase. The old
-  // --orphan reset discarded the base and published a scripts-less snapshot.
-  await git(repoDir, ["checkout", "-B", branch]);
-
-  await git(repoDir, ["add", "."]);
-
-  const message = `[auto-heal] save ${workflowId}: ${note || "auto"}`;
-  await git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
-
-  const commit = await git(repoDir, ["rev-parse", "HEAD"]);
-
-  await git(repoDir, ["push", "--force-with-lease", "origin", branch]);
-
-  return { branch, commit };
+  throw new Error('Legacy saved writer retired; use the prepared DB-first save core');
 }
 
 export async function getMaxDeployNumberFromGitTags(repoDir: string, workflowId: string): Promise<number> {

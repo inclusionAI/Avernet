@@ -65,7 +65,7 @@ async function setup(script: boolean) {
   const files = [{ path: 'workflow.pack.yaml', contentBase64: encode(stringify({ id, workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: encode(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: encode('old'), mode: '100644' as const }]
-  snapshot = { workflowId: id, packId: id, baseRef: `origin/saved/${id}`, baseCommit: old, draftHead: old, canWrite: false, versionFiles: files }
+  snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: old, draftHead: old, canWrite: false, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   if (script) updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: encode('new') } : f) })

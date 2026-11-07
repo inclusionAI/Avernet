@@ -26,7 +26,7 @@ const workflowFiles = (workflowId: string) => [
   file(`workflows/${workflowId}.yaml`, btoa(JSON.stringify({ id: workflowId, title: 'Workflow', nodes: [] }))),
 ]
 function snapshot(workflowId: string, version: 'current' | 'draft' = 'current', overrides: Record<string, unknown> = {}) {
-  const data = { workflowId, packId: 'pack', canWrite: true, baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${workflowId}`, baseCommit: version === 'current' ? A : B, draftHead: version === 'current' ? null : B, versionFiles: [file('scripts/a', 'b2xk', '100755')], ...overrides }
+  const data = { workflowId, packId: 'pack', canWrite: true, baseRef: (version === 'current' ? `refs/tags/deploy/${workflowId}/#1` : `origin/wf/${workflowId}`), baseCommit: version === 'current' ? A : B, draftHead: version === 'current' ? null : B, versionFiles: [file('scripts/a', 'b2xk', '100755')], ...overrides }
   if (Array.isArray(data.versionFiles)) data.versionFiles = [...data.versionFiles, ...workflowFiles(workflowId)]
   return data
 }
@@ -44,7 +44,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   })
   it('submits full create/replace/delete diff with exact source and CAS and uses returned commit without rereading', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', { versionFiles: [file('scripts/a', 'b2xk', '100755'), file('assets/remove', '/w=='), file('assets/keep', 'AAE=')] })).mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', { versionFiles: [file('scripts/a', 'b2xk', '100755'), file('assets/remove', '/w=='), file('assets/keep', 'AAE=')] })).mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('new')
     select('assets/remove'); expect(screen.getByText(/不是可安全编辑/)).toBeInTheDocument()
@@ -69,8 +69,8 @@ describe('ScriptFilesTab complete version wiring', () => {
     const workflowId = currentVersionId(), renamed = 'renamed-pack', nextCommit = 'd'.repeat(40)
     const initial = snapshot(workflowId, 'current', { packPath, versionFiles: [file('scripts/a', 'b2xk', '100755'), file('assets/raw', 'AP8C')] })
     vi.mocked(fetchJson).mockResolvedValueOnce(initial)
-      .mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: renamed })
-      .mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: nextCommit, requestId: REQUEST_ID, version: 2, packId: renamed })
+      .mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: renamed })
+      .mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: nextCommit, requestId: REQUEST_ID, version: 2, packId: renamed })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'workflow.pack.yaml' }); select('workflow.pack.yaml')
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: manifest(workflowId, renamed) } }); save()
@@ -92,7 +92,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   it.each(['pack', 'forged-pack'])('freezes a response naming %s instead of the candidate manifest identity', async responsePackId => {
     const workflowId = currentVersionId(), renamed = 'renamed-pack'
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId))
-      .mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: responsePackId })
+      .mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: responsePackId })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'workflow.pack.yaml' }); select('workflow.pack.yaml')
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: manifest(workflowId, renamed) } }); save()
@@ -116,16 +116,16 @@ describe('ScriptFilesTab complete version wiring', () => {
     expect(screen.getByLabelText('文件内容')).toHaveValue(manifest(workflowId, '../unsafe'))
     expect(screen.queryByRole('region', { name: '保存结果对账' })).not.toBeInTheDocument()
   })
-  it('saves a draft against its exact saved head', async () => {
+  it('saves a draft against its exact 草稿(wf) head', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce(snapshot(workflowId, 'draft')).mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce(snapshot(workflowId, 'draft')).mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); fireEvent.click(screen.getByRole('button', { name: /草稿版/ }))
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     await screen.findByText(new RegExp(`已保存到草稿 commit ${C}`))
     expect(JSON.parse(await readBlob(vi.mocked(fetchJson).mock.calls[2][1]!.body as Blob))).toMatchObject({ sourceVersion: 'draft', sourceCommit: B, expectedSavedHead: B, changes: [{ operation: 'replace' }] })
   })
-  it('blocks replacement of a different observed saved head and retains edits', async () => {
+  it('blocks replacement of a different observed 草稿(wf) head and retains edits', async () => {
     const workflowId = currentVersionId(); vi.spyOn(window, 'confirm').mockReturnValue(false); vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', { draftHead: B }))
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
@@ -162,7 +162,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, version))
       .mockRejectedValueOnce(Object.assign(new Error('read failed'), { status }))
-      .mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
+      .mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('local edit')
     fireEvent.click(screen.getByRole('button', { name: '重新读取' }))
@@ -187,13 +187,13 @@ describe('ScriptFilesTab complete version wiring', () => {
     expect(screen.getByText(/保存结果无法确认/)).not.toHaveTextContent('secret'); expect(screen.getByLabelText('文件内容')).toHaveValue('changed')
     expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
   })
-  it.each([{ commit: C }, { branch: 'wrong', commit: C }, { branch: 'saved/placeholder', commit: 'bad' }])('treats incomplete save responses as uncertain', async response => {
+  it.each([{ commit: C }, { branch: 'wrong', commit: C }, { branch: 'wf/placeholder', commit: 'bad' }])('treats incomplete save responses as uncertain', async response => {
     const workflowId = currentVersionId(); vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce(response)
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     expect(await screen.findByText(/保存结果无法确认/)).toHaveAttribute('role', 'alert'); expect(screen.getByLabelText('文件内容')).toHaveValue('changed')
   })
-  it.each([{ files: [], versionFiles: undefined }, { baseRef: 'origin/saved/wrong' }, { draftHead: undefined }, { versionFiles: [file('a', '!!!')] }, { versionFiles: [file('a', ''), file('a/b', '')] }, { versionFiles: [file('../bad', '')] }])('rejects old or unsafe incomplete responses %o', async overrides => {
+  it.each([{ files: [], versionFiles: undefined }, { baseRef: 'origin/wf/wrong' }, { draftHead: undefined }, { versionFiles: [file('a', '!!!')] }, { versionFiles: [file('a', ''), file('a/b', '')] }, { versionFiles: [file('../bad', '')] }])('rejects old or unsafe incomplete responses %o', async overrides => {
     const workflowId = currentVersionId(); vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', overrides))
     render(<ScriptFilesTab workflowId={workflowId} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('无法读取完整版本'); expect(screen.queryByRole('button', { name: '保存到草稿' })).not.toBeInTheDocument()
@@ -206,10 +206,10 @@ describe('ScriptFilesTab complete version wiring', () => {
     fireEvent.click(screen.getByRole('button', { name: /草稿版/ })); await waitFor(() => expect(fetchJson).toHaveBeenCalledTimes(2))
     const signal = vi.mocked(fetchJson).mock.calls[1][1]!.signal as AbortSignal
     fireEvent.click(screen.getByRole('button', { name: /当前版/ })); save(); expect(signal.aborted).toBe(true)
-    await act(async () => { saved.resolve({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' }); await saved.promise })
+    await act(async () => { saved.resolve({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' }); await saved.promise })
     await act(async () => { pending.resolve(snapshot(workflowId, 'draft')); await pending.promise })
     expect(screen.getByText(new RegExp(`已保存到草稿 commit ${C}`))).toBeInTheDocument()
-    expect(screen.getByText(new RegExp(`origin/saved/${workflowId}.*${C}`))).toBeInTheDocument(); expect(fetchJson).toHaveBeenCalledTimes(3)
+    expect(screen.getByText(new RegExp(`origin/wf/${workflowId}.*${C}`))).toBeInTheDocument(); expect(fetchJson).toHaveBeenCalledTimes(3)
   })
   it('preserves in-flight save and edits through unmount until completion', async () => {
     const workflowId = currentVersionId(), pending = deferred<unknown>()
@@ -218,7 +218,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled(); view.unmount(); render(<ScriptFilesTab workflowId={workflowId} />)
     expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled()
-    await act(async () => { pending.resolve({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' }); await pending.promise })
+    await act(async () => { pending.resolve({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' }); await pending.promise })
     expect(screen.getByText(new RegExp(`已保存到草稿 commit ${C}`))).toBeInTheDocument(); select(); expect(screen.getByLabelText('文件内容')).toHaveValue('changed')
   })
   it('warns on unload even if the tab was unmounted with changes', async () => {
@@ -229,7 +229,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   })
   it('updates current draft-head knowledge and blocks another replacement', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     await screen.findByText(new RegExp(`已保存到草稿 commit ${C}`))
@@ -253,7 +253,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     const workflowId = currentVersionId(); vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId))
       .mockRejectedValueOnce({ status: 409, body: '{"code":"VERSION_CONFLICT"}' }).mockResolvedValueOnce(snapshot(workflowId, 'current', { baseCommit: B }))
-      .mockResolvedValueOnce({ branch: `saved/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
+      .mockResolvedValueOnce({ branch: `wf/${workflowId}`, commit: C, requestId: REQUEST_ID, version: 1, packId: 'pack' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save(); await screen.findByRole('alert')
     fireEvent.click(screen.getByRole('button', { name: '重新读取' }))
@@ -276,11 +276,11 @@ describe('ScriptFilesTab complete version wiring', () => {
 
   it.each([40, 64])('retains validated unknown-outcome identity and candidate when remote head moved (%i)', async length => {
     const workflowId = currentVersionId(), commit = 'c'.repeat(length)
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit, error: 'server secret' }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft', { baseCommit: B, draftHead: B }))
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit, error: 'server secret' }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft', { baseCommit: B, draftHead: B }))
     const view = render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('do not lose'); save()
     const section = await screen.findByRole('region', { name: '保存结果对账' })
-    expect(section).toHaveTextContent(`分支 saved/${workflowId}`); expect(section).toHaveTextContent(`commit ${commit}`)
+    expect(section).toHaveTextContent(`分支 wf/${workflowId}`); expect(section).toHaveTextContent(`commit ${commit}`)
     expect(section).toHaveTextContent('不代表保存成功'); expect(section).not.toHaveTextContent('server secret')
     expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '重新读取' })).toBeDisabled()
@@ -295,7 +295,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   })
   it('does not infer success when the observed head equals the returned commit and requires authoritative operation reconciliation', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft', { baseCommit: C, draftHead: C }))
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft', { baseCommit: C, draftHead: C }))
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('candidate'); save()
@@ -311,7 +311,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   })
   it('does not misclassify a non-VERSION_CONFLICT 409 or accept its fabricated identity', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 409, body: JSON.stringify({ code: 'OTHER', branch: `saved/${workflowId}`, commit: C, error: 'secret' }) })
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 409, body: JSON.stringify({ code: 'OTHER', branch: `wf/${workflowId}`, commit: C, error: 'secret' }) })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     expect(await screen.findByText(/保存结果无法确认/)).toHaveAttribute('role', 'alert')
@@ -327,14 +327,14 @@ describe('ScriptFilesTab complete version wiring', () => {
     await screen.findByRole('button', { name: 'scripts/a' }); edit(); save()
     expect(await screen.findByText(/未收到可用响应/)).toHaveAttribute('role', 'alert')
     expect(screen.getByRole('region', { name: '保存结果对账' })).toHaveTextContent('没有可信的待对账分支和 commit')
-    expect(screen.getByRole('region', { name: '保存结果对账' })).not.toHaveTextContent(`saved/${workflowId}`)
+    expect(screen.getByRole('region', { name: '保存结果对账' })).not.toHaveTextContent(`wf/${workflowId}`)
     expect(screen.getByText(/未收到可用响应/)).not.toHaveTextContent('secret')
   })
   it.each([
-    ['wrong branch', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${id}/other`, commit: C })],
-    ['bad commit length', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${id}`, commit: 'a'.repeat(41) })],
-    ['uppercase commit', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${id}`, commit: 'A'.repeat(40) })],
-    ['wrong code', (id: string) => ({ code: 'OTHER', branch: `saved/${id}`, commit: C })],
+    ['wrong branch', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${id}/other`, commit: C })],
+    ['bad commit length', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${id}`, commit: 'a'.repeat(41) })],
+    ['uppercase commit', (id: string) => ({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${id}`, commit: 'A'.repeat(40) })],
+    ['wrong code', (id: string) => ({ code: 'OTHER', branch: `wf/${id}`, commit: C })],
   ])('rejects untrusted unknown-result identity: %s', async (_name, makeBody) => {
     const workflowId = currentVersionId()
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify(makeBody(workflowId)) })
@@ -345,7 +345,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   })
   it('keeps all versions blocked and the submitted draft after a failed head observation', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) }).mockRejectedValueOnce(new Error('secret'))
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) }).mockRejectedValueOnce(new Error('secret'))
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('keep'); save()
     await screen.findByRole('region', { name: '保存结果对账' })
@@ -358,7 +358,7 @@ describe('ScriptFilesTab complete version wiring', () => {
 
   it('does not permit retry by switching to another version', async () => {
     const workflowId = currentVersionId()
-    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft'))
+    vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) }).mockResolvedValueOnce(snapshot(workflowId, 'draft'))
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('current candidate'); save()
     await screen.findByRole('region', { name: '保存结果对账' })
@@ -413,7 +413,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     const workflowId = currentVersionId(), user = userEvent.setup()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId)).mockResolvedValueOnce(snapshot(workflowId, 'draft'))
-      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) })
+      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) })
       .mockRejectedValueOnce({ status: 404, body: '{"code":"SNAPSHOT_NOT_FOUND"}' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('other version remains')
@@ -447,7 +447,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     const workflowId = currentVersionId(), user = userEvent.setup()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', { versionFiles: [file('bin/data', 'AA==', '100755')] }))
-      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) })
+      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) })
       .mockRejectedValueOnce({ status: 404, body: '{"code":"SNAPSHOT_NOT_FOUND"}' })
     render(<ScriptFilesTab workflowId={workflowId} />)
     await user.click(await screen.findByRole('button', { name: 'bin/data' }))
@@ -469,7 +469,7 @@ describe('ScriptFilesTab complete version wiring', () => {
   it('times out a hung observation, aborts its signal, retries and ignores a late result', async () => {
     const workflowId = currentVersionId(), old = deferred<unknown>(), next = deferred<unknown>()
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId))
-      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) })
+      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) })
       .mockImplementationOnce(() => old.promise).mockImplementationOnce(() => next.promise)
     render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('timeout candidate'); save()
@@ -520,7 +520,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: create, revokeObjectURL: revoke }))
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(workflowId, 'current', { versionFiles: [file('scripts/a', 'b2xk', '100755'), file('assets/raw', 'AP8C')] }))
-      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `saved/${workflowId}`, commit: C }) })
+      .mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN', branch: `wf/${workflowId}`, commit: C }) })
     const view = render(<ScriptFilesTab workflowId={workflowId} />)
     await screen.findByRole('button', { name: 'scripts/a' }); edit('copy this'); save()
     await screen.findByRole('region', { name: '保存结果对账' }); view.unmount()
@@ -536,7 +536,7 @@ describe('ScriptFilesTab complete version wiring', () => {
     const bytes = await new Promise<Uint8Array>((resolve, reject) => { reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer)); reader.onerror = reject; reader.readAsArrayBuffer(blobs[0]) })
     expect([...bytes]).toEqual([0, 255, 2]); expect(blobs[0].type).toBe('application/octet-stream')
     await user.click(screen.getByRole('button', { name: '下载原始尝试候选（JSON）' }))
-    expect(JSON.parse(await readBlob(blobs[1]))).toEqual({ format: 'pack-version-candidate-v1', workflowId, requestId: REQUEST_ID, sourceVersion: 'current', sourceCommit: A, expectedSavedHead: null, identity: { branch: `saved/${workflowId}`, commit: C }, files: [file('scripts/a', 'Y29weSB0aGlz', '100755'), file('assets/raw', 'AP8C'), ...workflowFiles(workflowId)] })
+    expect(JSON.parse(await readBlob(blobs[1]))).toEqual({ format: 'pack-version-candidate-v1', workflowId, requestId: REQUEST_ID, sourceVersion: 'current', sourceCommit: A, expectedSavedHead: null, identity: { branch: `wf/${workflowId}`, commit: C }, files: [file('scripts/a', 'Y29weSB0aGlz', '100755'), file('assets/raw', 'AP8C'), ...workflowFiles(workflowId)] })
     expect(blobs[1].type).toBe('application/json')
     expect(fetchJson).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()

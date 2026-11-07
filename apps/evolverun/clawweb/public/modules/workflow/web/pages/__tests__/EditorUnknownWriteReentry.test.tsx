@@ -75,7 +75,7 @@ async function setup() {
     { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(db)), mode: '100644' as const },
   ]
-  const snapshot = { packPath: '', workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/saved/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: files }
+  const snapshot = { packPath: '', workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files, loading: false, error: null, blocked: false, notice: null } } })
   const page = render(<QueryClientProvider client={client}><Editor embedded initialWorkflowId={id} /></QueryClientProvider>)

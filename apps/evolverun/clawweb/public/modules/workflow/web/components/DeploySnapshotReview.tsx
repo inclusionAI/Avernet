@@ -16,16 +16,16 @@ export default function DeploySnapshotReview({ changes, reviewed, onReviewedChan
 }) {
   return <>
     <div className="mt-3 max-h-80 overflow-auto rounded border border-border p-2" aria-label="部署文件差异">
-      {changes.length === 0 ? <p>与已捕获的 wf 文件完全一致。</p> : changes.map(change => (
+      {changes.length === 0 ? <p>与已捕获的当前生效 tag 文件完全一致。</p> : changes.map(change => (
         <section key={change.path} className="mb-3 border-b border-border pb-2">
           <h4 className="break-all font-semibold">{change.operation}：{change.path}</h4>
-          <p>生效模式：{change.before?.mode ?? '无'} → saved 模式：{change.after?.mode ?? '无'}</p>
+          <p>生效模式：{change.before?.mode ?? '无'} → 草稿模式：{change.after?.mode ?? '无'}</p>
           <p>生效内容：</p><pre className="whitespace-pre-wrap break-all">{reviewContents(change.before)}</pre>
-          <p>saved 内容：</p><pre className="whitespace-pre-wrap break-all">{reviewContents(change.after)}</pre>
+          <p>保存版本内容：</p><pre className="whitespace-pre-wrap break-all">{reviewContents(change.after)}</pre>
         </section>
       ))}
     </div>
-    <p className="mt-2 text-xs">删除、文件模式变化及 Pack 外变化可能被服务器安全保护拒绝。仅服务器证明 wf 与数据库 active 均不存在时可按首次部署审阅。</p>
-    <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={reviewed} onChange={event => onReviewedChange(event.target.checked)} />我已核对上述 wf 与 saved 的全部文件差异，并确认替换。</label>
+    <p className="mt-2 text-xs">删除、文件模式变化及 Pack 外变化可能被服务器安全保护拒绝。仅服务器证明数据库无 active history 时可按首次部署审阅；缺失生产 tag 不能当作首次部署。</p>
+    <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={reviewed} onChange={event => onReviewedChange(event.target.checked)} />我已核对当前生效 tag 与草稿(wf)的全部文件差异，并确认发布；部署不会改写草稿分支。</label>
   </>
 }

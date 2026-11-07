@@ -6,7 +6,7 @@ import { diff, validateSnapshot } from '../editor/packVersionSession'
 import { packWorkflow } from '../editor/packCanvas'
 import type { DeployReview } from '../components/DeploySnapshotReview'
 
-export type AutoHealDeploySnapshot = { commit: string; draftToken: string; expectedActiveCommit: string; changes: DeployReview[] }
+export type AutoHealDeploySnapshot = { commit: string; draftToken: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[] }
 
 /** Read the same complete saved/active file snapshots and authorized state as Editor. */
 export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): Promise<AutoHealDeploySnapshot> {
@@ -26,7 +26,7 @@ export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): P
   const state = proof as Record<string, unknown>
   if (state.protocol !== 'editor-deployment-state-v1' || state.workflowId !== id || state.packId !== receipt.packId
     || state.canDeploy !== true || state.savedCommit !== identity.commit || saved.baseCommit !== identity.commit
-    || saved.draftHead !== identity.commit || saved.packId !== receipt.packId || typeof packPath !== 'string'
+    || saved.baseRef !== `origin/wf/${id}` || saved.draftHead !== identity.commit || saved.packId !== receipt.packId || typeof packPath !== 'string'
     || (draft.packId ?? id) !== receipt.packId || draft.draftToken !== identity.draftToken) throw new Error('保存后的 Git 或数据库草稿基线已变化，无法部署；请重新核对。')
   let active: ReturnType<typeof validateSnapshot> | null = null
   if (current.ok) {
@@ -42,5 +42,5 @@ export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): P
   if (changes.reduce((n, change) => n + (change.before?.contentBase64.length ?? 0) + (change.after?.contentBase64.length ?? 0), 0) > 512 * 1024) throw new Error('差异内容过大，无法完整审阅；部署未发送。')
   packWorkflow(saved.versionFiles, id, saved.packId)
   if (!autoHealSaveIsCurrent(receipt)) throw new Error('读取期间数据库状态已变化；部署未发送。')
-  return { ...identity, expectedActiveCommit: active?.baseCommit ?? '', changes }
+  return { ...identity, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes }
 }

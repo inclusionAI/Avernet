@@ -37,13 +37,13 @@ describe('PackVersionEditor', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
   it('shows selected file details, version source, and parent save state', () => {
-    render(<PackVersionEditor files={initial} onUploadStateChange={() => {}} onChange={() => {}} versionSource={{ version: 'draft', packId: 'pack-1', baseRef: 'saved/pack-1', baseCommit: 'commit-1' }} saveStatus="dirty" />)
+    render(<PackVersionEditor files={initial} onUploadStateChange={() => {}} onChange={() => {}} versionSource={{ version: 'draft', packId: 'pack-1', baseRef: 'wf/pack-1', baseCommit: 'commit-1' }} saveStatus="dirty" />)
     select('images/logo.bin')
     const info = screen.getByRole('complementary', { name: '文件信息' })
     expect(info).toHaveTextContent('images/logo.bin')
     expect(info).toHaveTextContent('100644')
-    expect(info).toHaveTextContent('草稿版（saved）')
-    expect(info).toHaveTextContent('saved/pack-1')
+    expect(info).toHaveTextContent('草稿版（wf）')
+    expect(info).toHaveTextContent('wf/pack-1')
     expect(info).toHaveTextContent('有未保存更改')
   })
 

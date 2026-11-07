@@ -37,7 +37,7 @@ async function saveFix() {
 /** Real Git save pipeline: successful HTTP acknowledgement, then DB postflight failure. */
 async function failPostflight() {
   const files = [file('workflow.pack.yaml', stringify({ id: 'pack', workflows: [id] })), file(`workflows/${id}.yaml`, stringify({ id, title: 'Workflow', nodes: [] })), file('scripts/run', 'old')]
-  const snapshot = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/saved/${id}`, baseCommit: commit, draftHead: commit, versionFiles: files }
+  const snapshot = { workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: commit, draftHead: commit, versionFiles: files }
   const session = sessionFor(id)
   ownedSessions.push({ id, session })
   const changed = files.map(item => item.path === 'scripts/run' ? file(item.path, 'new') : item)
@@ -53,11 +53,11 @@ beforeEach(() => {
   fetchMock.mockReset().mockImplementation(async (url, init) => {
     if (String(url) === `/api/workflows/${id}/pack-version`) {
       const body = JSON.parse(await readBlob(init!.body as Blob))
-      return response({ branch: `saved/${id}`, commit, packId: 'pack', requestId: body.requestId, version: 1 })
+      return response({ branch: `wf/${id}`, commit, packId: 'pack', requestId: body.requestId, version: 1 })
     }
     if (url === '/api/auto-heal/capabilities') return response({ autoHealUnifiedSave: false })
     if (url === '/api/auto-heal/diagnose') return response({ ok: true, workflowId: id, diagnosisId: 'diagnosis', summary: 'repair', errorChain: [], fixSuggestions: [], fixedYaml: '', fixedSpec: { id, title: 'Workflow', nodes: [] }, diff: [], rawResponse: '' })
-    if (url === '/api/auto-heal/save') return response({ ok: true, saved: true, workflowId: id, packId: 'pack' })
+    if (url === '/api/auto-heal/save') return response({ ok: true, saved: true, workflowId: id, packId: 'pack', branch: `wf/${id}`, commit })
     if (url === '/api/auto-heal/deploy') return response({ ok: true, deployed: true, workflowId: id, packId: 'pack', deployNumber: 1, version: 1, tagName: 'v1' })
     throw new Error(`Unexpected request ${String(url)}`)
   })

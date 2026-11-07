@@ -4,7 +4,7 @@
  * workflow edit authorization and quiesce legacy writers. requestId is correlation only:
  * there is no idempotent deduplication, retry, distributed lock, journal, or recovery.
  *
- * We validate the complete Git candidate before DB CAS, then push with a saved
+ * We validate the complete Git candidate before DB CAS, then push with a wf
  * lease. After DB confirmation we re-read the committed draft immediately
  * before push and reject if it changed or cannot be read. This is not a lock:
  * another writer may still change or delete the row after the re-read and before
@@ -181,7 +181,7 @@ export class WorkflowUnifiedSaveService {
         if (candidate.packId !== request.packId || candidate.content !== snapshot.projection.yaml
           || candidate.workflowId !== request.workflowId || candidate.sourceVersion !== request.sourceVersion
           || candidate.sourceCommit !== request.sourceCommit
-          || candidate.expectedSavedHead !== request.expectedSavedHead || candidate.branch !== `saved/${request.workflowId}`
+          || candidate.expectedSavedHead !== request.expectedSavedHead || candidate.branch !== `wf/${request.workflowId}`
           || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(candidate.commit)) throw new Error('Candidate mismatch');
         rejectProtectedChanges(request.changes, candidate.manifestContent, candidate.workflowFile);
         // Preserve the exact server-prepared identity for a host that imposes

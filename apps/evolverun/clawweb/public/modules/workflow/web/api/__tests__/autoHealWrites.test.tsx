@@ -4,8 +4,8 @@ import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAutoHealSave, useAutoHealDeploy } from '../hooks'
 import { useAutoHealSave as localSave, useAutoHealDeploy as localDeploy,
-  bindEditorDeploymentWriteEpoch, isDeployPrePushConflict, PostSaveLockError, type WorkflowAutoHealSaveRequest, type WorkflowAutoHealDeployRequest } from '../autoHealWrites'
-import { assertEditorWorkflowReadable } from '../../editor/workflowWriteGuard'
+  autoHealSaveIsCurrent, bindAutoHealDeployToSave, bindEditorDeploymentWriteEpoch, isAutoHealWriteNotSent, isDeployPrePushConflict, PostSaveLockError, type WorkflowAutoHealSaveRequest, type WorkflowAutoHealDeployRequest } from '../autoHealWrites'
+import { assertEditorWorkflowReadable, editorWorkflowWriteState } from '../../editor/workflowWriteGuard'
 import { publish, releaseCleanSession, sessionFor } from '../../editor/packVersionSession'
 
 // Real exported hooks and source fetchJson: only the final HTTP boundary is replaced.
@@ -15,7 +15,7 @@ const saveInput: WorkflowAutoHealSaveRequest = { workflowId: 'flow', packId: 'pa
   spec: { id: 'flow', title: 'Workflow', version: '1', nodes: [], input: { large: '中文'.repeat(18000) } } }
 const deployInput: WorkflowAutoHealDeployRequest = { workflowId: 'flow', packId: 'pack', diagnosisId: 'diagnosis',
   requestId, candidateCommit: commit, sourceFlowId: 'source-flow', note: '部署', autoRun: false }
-const saved = { ok: true, saved: true, workflowId: 'flow', packId: 'pack', requestId, branch: 'saved/flow', commit, version: 1 }
+const saved = { ok: true, saved: true, workflowId: 'flow', packId: 'pack', requestId, branch: 'wf/flow', commit, version: 1 }
 const deployed = { ok: true, deployed: true, workflowId: 'flow', packId: 'pack', requestId, deployNumber: 1, version: 1, tagName: 'deploy/flow/#1', messageId: null }
 let queryClient: QueryClient
 const fetchMock = vi.fn<typeof fetch>()
@@ -59,6 +59,67 @@ describe('auto-heal write transport', () => {
     await expectTransport('save', saveInput)
     expect((fetchMock.mock.calls[0][1]!.body as Blob).size).toBeGreaterThan(14 * 1024)
     expect(invalidate.mock.calls).toEqual([[{ queryKey: ['editor-workflow-document', 'flow'] }], [{ queryKey: ['db-workflows'] }], [{ queryKey: ['workflow-types'] }]])
+  })
+  it.each([40, 64])('confirms an ordinary save only with its wf branch and a %i-character OID', async length => {
+    const workflowId = `ordinary-valid-${length}`
+    const receipt = { ...saved, workflowId, branch: `wf/${workflowId}`, commit: 'a'.repeat(length) }
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(receipt)))
+    const { result } = renderHook(useAutoHealSave, { wrapper })
+    let confirmed: Awaited<ReturnType<typeof result.current.mutateAsync>>
+    await act(async () => { confirmed = await result.current.mutateAsync({ ...saveInput, workflowId }) })
+    expect(confirmed!).toEqual(receipt)
+    expect(editorWorkflowWriteState(workflowId).phase).toBe('clear')
+    expect(autoHealSaveIsCurrent(confirmed!)).toBe(true)
+    expect(() => bindAutoHealDeployToSave({ ...deployInput, workflowId }, confirmed!)).not.toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    ['missing-branch', { branch: undefined }],
+    ['null-branch', { branch: null }],
+    ['non-string-branch', { branch: 1 }],
+    ['legacy-branch', { branch: 'saved/flow' }],
+    ['remote-alias-branch', { branch: 'origin/wf/flow' }],
+    ['other-workflow-branch', { branch: 'wf/other' }],
+    ['missing-commit', { commit: undefined }],
+    ['null-commit', { commit: null }],
+    ['non-string-commit', { commit: 1 }],
+    ['malformed-commit', { commit: 'not-an-oid' }],
+    ['short-sha1', { commit: 'a'.repeat(39) }],
+    ['long-sha1', { commit: 'a'.repeat(41) }],
+    ['short-sha256', { commit: 'a'.repeat(63) }],
+    ['long-sha256', { commit: 'a'.repeat(65) }],
+    ['uppercase-commit', { commit: 'A'.repeat(40) }],
+    ['non-hex-commit', { commit: 'g'.repeat(40) }],
+    ['sha1-trailing-newline', { commit: 'a'.repeat(40) + '\n' }],
+    ['sha256-trailing-newline', { commit: 'a'.repeat(64) + '\n' }],
+  ])('keeps ordinary save %s uncertain without granting a deployment baseline', async (name, fields) => {
+    const workflowId = `ordinary-invalid-${name}`
+    const body = JSON.stringify({ ...saved, workflowId, branch: `wf/${workflowId}`, ...fields })
+    fetchMock.mockResolvedValueOnce(new Response(body))
+    const parsed = vi.spyOn(JSON, 'parse')
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries'), onSuccess = vi.fn()
+    const { result } = renderHook(useAutoHealSave, { wrapper })
+    const input = { ...saveInput, workflowId }
+    let failure: unknown
+    await act(async () => {
+      try { await result.current.mutateAsync(input, { onSuccess }) } catch (error) { failure = error }
+    })
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error).message).toContain('写入结果未知')
+    expect(isAutoHealWriteNotSent(failure, input)).toBe(false)
+    expect(editorWorkflowWriteState(workflowId).phase).toBe('unknown')
+    expect(sessionStorage.getItem(`avernet.editor.pending-workflow-write.v1:${encodeURIComponent(workflowId)}`)).not.toBeNull()
+    expect(() => assertEditorWorkflowReadable(workflowId)).toThrow('需人工核对')
+    // Check the actual object returned by JSON.parse, not a lookalike: baseline
+    // capabilities are keyed by receipt identity, independently of the lock.
+    const index = parsed.mock.calls.findIndex(([text]) => text === body)
+    expect(index).toBeGreaterThanOrEqual(0)
+    const receipt = parsed.mock.results[index].value
+    expect(autoHealSaveIsCurrent(receipt)).toBe(false)
+    expect(() => bindAutoHealDeployToSave({ ...deployInput, workflowId }, receipt)).toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(onSuccess).not.toHaveBeenCalled()
   })
   it('deploys the exact candidate and requestId including sourceFlowId without dropping nullable legacy fields', async () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
@@ -106,7 +167,7 @@ describe('auto-heal write transport', () => {
     const { result } = renderHook(useAutoHealDeploy, { wrapper })
     await act(async () => {
       await expect(result.current.mutateAsync(deployInput)).rejects.toMatchObject({
-        status: 409, message: expect.stringContaining('已阻止部署'),
+        status: 409, message: expect.stringContaining('当前生效 tag 缺失'),
       })
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)

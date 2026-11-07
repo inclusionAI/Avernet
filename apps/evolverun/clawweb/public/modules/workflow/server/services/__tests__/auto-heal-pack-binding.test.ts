@@ -5,6 +5,7 @@ import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-databas
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { AutoHealSaveService } from '../auto-heal-save-service.js';
+import { mockPreparedSpecSave, preparedSaveAuthor, preparedSaveConfig, preparedSaveIdentity } from './auto-heal-prepared-save-fixture.js';
 
 const spec = { id: 'flow', title: 'repaired', nodes: [{ id: 'n', executor: { type: 'agent' } }] };
 
@@ -12,6 +13,7 @@ describe('legacy AutoHeal save Pack binding compatibility', () => {
   let raw: Database.Database;
   let db: SqliteDatabase;
   let service: AutoHealSaveService;
+  let publication: ReturnType<typeof mockPreparedSpecSave>;
   const row = () => raw.prepare('SELECT pack_id, spec_json FROM workflow_specs').get();
   beforeEach(() => {
     raw = new Database(':memory:');
@@ -19,7 +21,13 @@ describe('legacy AutoHeal save Pack binding compatibility', () => {
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT, workflow_id TEXT, can_view INTEGER, can_execute INTEGER, can_edit INTEGER, env TEXT, gmt_create INTEGER, gmt_modified INTEGER);
       INSERT INTO bot_workflow_permissions VALUES (1,NULL,'editor','flow',1,0,1,'test',0,0);`);
     db = new SqliteDatabase(raw);
-    service = new AutoHealSaveService(db, new WorkflowSpecRepository(db), null, new BotWorkflowPermissionRepository(db));
+    publication = mockPreparedSpecSave(input => {
+      expect(input.workflowId).toBe('flow');
+      expect(input.spec).toEqual(spec);
+      expect(raw.inTransaction).toBe(false);
+      expect(row()).toEqual({ pack_id: input.packId, spec_json: JSON.stringify(input.spec) });
+    });
+    service = new AutoHealSaveService(db, new WorkflowSpecRepository(db), null, new BotWorkflowPermissionRepository(db), preparedSaveConfig, preparedSaveAuthor);
   });
   afterEach(async () => { vi.restoreAllMocks(); await db.close(); });
   function seed(packId: string | null) {
@@ -37,8 +45,11 @@ describe('legacy AutoHeal save Pack binding compatibility', () => {
     seed(stored);
     const input = { workflowId: 'flow', actorId: 'editor', spec };
     const request = supplied === undefined ? input : { ...input, packId: supplied };
-    await expect(service.save(request)).resolves.toMatchObject({ saved: true, packId: effective });
+    await expect(service.save(request)).resolves.toMatchObject({ saved: true, packId: effective, ...preparedSaveIdentity });
     expect(row()).toMatchObject({ pack_id: effective, spec_json: JSON.stringify(spec) });
+    expect(publication.prepare).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'flow', packId: effective, spec }), expect.any(Function));
+    expect(publication.push).toHaveBeenCalledOnce();
+    expect(await publication.push.mock.results[0]!.value).toMatchObject(preparedSaveIdentity);
   });
   it('rechecks revoked edit permission in the transaction before rebinding', async () => {
     seed('old-pack');
@@ -51,6 +62,7 @@ describe('legacy AutoHeal save Pack binding compatibility', () => {
     await expect(service.save({ workflowId: 'flow', actorId: 'editor', spec, packId: 'new-pack' }))
       .rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
     expect(raw.prepare('SELECT * FROM workflow_specs').get()).toEqual(before);
+    expect(publication.push).not.toHaveBeenCalled();
   });
   it.each(['old-pack', null])('denies an unauthorized rebind without changing stored=%s', async stored => {
     seed(stored);
@@ -58,5 +70,6 @@ describe('legacy AutoHeal save Pack binding compatibility', () => {
     await expect(service.save({ workflowId: 'flow', actorId: 'intruder', spec, packId: 'new-pack' }))
       .rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
     expect(raw.prepare('SELECT * FROM workflow_specs').get()).toEqual(before);
+    expect(publication.push).not.toHaveBeenCalled();
   });
 });

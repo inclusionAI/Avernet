@@ -66,7 +66,7 @@ export function createPackVersionRouter(deps: Dependencies): Router {
         if ((version !== 'current' && version !== 'draft') || Object.keys(req.query).some(k => k !== 'version')) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
         phase = 'snapshot';
         const snapshot = row ? await deps.readSnapshot(workflowId, packId!, version) : await deps.readActiveSnapshot!(workflowId, version);
-        if (!snapshot || snapshot.workflowId !== workflowId || !validId(snapshot.packId) || snapshot.baseRef !== `origin/${version === 'current' ? 'wf' : 'saved'}/${workflowId}`
+        if (!snapshot || snapshot.workflowId !== workflowId || !validId(snapshot.packId) || !validSnapshotRef(snapshot.baseRef, workflowId, version)
           || !oid(snapshot.baseCommit) || !(snapshot.draftHead === null || oid(snapshot.draftHead)) || !Array.isArray(snapshot.versionFiles)) throw new Error('Invalid snapshot');
         // Never reflect active-history evidence from the ordinary draft-backed
         // reader, even if a host accidentally returns an identically named field.
@@ -136,4 +136,10 @@ export function createPackVersionRouter(deps: Dependencies): Router {
     }
   });
   return router;
+}
+
+function validSnapshotRef(ref: string, id: string, version: 'current' | 'draft'): boolean {
+  if (version === 'draft') return ref === `origin/wf/${id}`;
+  const prefix = `refs/tags/deploy/${id}/#`;
+  return typeof ref === 'string' && ref.startsWith(prefix) && /^[1-9][0-9]*$/.test(ref.slice(prefix.length));
 }

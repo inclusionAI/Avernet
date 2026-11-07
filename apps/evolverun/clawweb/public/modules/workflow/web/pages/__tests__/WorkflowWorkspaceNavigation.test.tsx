@@ -116,7 +116,7 @@ describe('unified task escort navigation', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '数据大盘' }))
 
-    expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard')
+    await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard'))
     expect(screen.getByText('管理员大盘内容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '数据大盘' })).toHaveAttribute('aria-current', 'page')
   })
