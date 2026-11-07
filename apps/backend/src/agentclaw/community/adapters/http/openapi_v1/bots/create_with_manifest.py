@@ -577,6 +577,8 @@ def _message(state: CreationState, job) -> str:
         return "the authorization window elapsed before the user responded"
     if state is CreationState.APPLY_FAILED and "bound Manifest" in str(getattr(job, "last_error", "") or ""):
         return "bound Manifest has changed; creation stopped without replacing the stored document"
+    if state is CreationState.APPLY_FAILED and str(getattr(job, "last_error", "") or "").startswith("expert adapter readiness"):
+        return str(job.last_error)
     if state is CreationState.CREATE_FAILED:
         return str(
             getattr(job, "last_error", "") or "the bot could not be provisioned"

@@ -28,6 +28,30 @@ from agentclaw.community.plugins.local.device_adapter_transport import (
 
 
 @pytest.mark.asyncio
+async def test_runtime_readiness_probes_real_adapter_for_both_endpoints(monkeypatch):
+    transport = InMemoryDeviceAdapterTransport()
+    calls = []
+
+    async def proxy(url, conn_info, method, path, body, params, timeout):
+        calls.append((url, path))
+        return {"status": "ok"}
+
+    monkeypatch.setattr(transport, "_proxy", proxy)
+    conn = {"url": "http://127.0.0.1:20003", "probe_runtime_readiness": True}
+    await transport.invoke(conn, "GET", "/readiness")
+    await transport.invoke(conn, "GET", "/health")
+    assert calls == [("http://127.0.0.1:20003", "/readiness"), ("http://127.0.0.1:20003", "/health")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url,target", [(None, None), ("ws://wrong-device", None), (None, 1)])
+async def test_runtime_readiness_without_address_cannot_use_fake_health(url, target):
+    transport = InMemoryDeviceAdapterTransport(default_adapter_url="http://shared-adapter:20003")
+    with pytest.raises(ValueError, match="no per-device adapter address"):
+        await transport.invoke({"probe_runtime_readiness": True, "url": url, "target": target}, "GET", "/health")
+
+
+@pytest.mark.asyncio
 async def test_mocked_path_with_url_still_uses_memory():
     """A path the transport handles in memory (health) must never proxy,
     even when adapter resolution is possible."""

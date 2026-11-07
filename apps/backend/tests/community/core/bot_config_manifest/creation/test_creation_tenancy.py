@@ -246,6 +246,7 @@ def _job(passport):
         auth_relationship_provider=lambda: _RecordedRelationship(),
         # The ARCA order, said rather than defaulted: the composition root,
         # always passes the delivery strategy's own answer.,
+        creation_readiness_probe=lambda **_: True,
         creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
     )
 

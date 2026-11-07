@@ -304,6 +304,7 @@ class BotCreateWithManifestHandler:
         bot_service_provider: Callable[[], Any],
         auth_relationship_provider: Callable[[], Any],
         creation_sequence: Callable[[Optional[str]], CreationSequence],
+        creation_readiness_probe: Callable[..., bool],
         # The bot-grant sweep, so a creation that gives up before a bot exists
         # also withdraws the grant the submitting application was given at
         # submission (``BotAppGrantService.grant_for_creation``). Optional
@@ -327,6 +328,7 @@ class BotCreateWithManifestHandler:
         # one, because falling back to ``CREATE_BETWEEN_PHASES`` would run a
         # platform-managed teclaw creation in the container family's order.
         self._creation_sequence = creation_sequence
+        self._creation_readiness_probe = creation_readiness_probe
         self._grant_sweep_provider = grant_sweep_provider
 
     @property
@@ -620,6 +622,19 @@ class BotCreateWithManifestHandler:
         if status not in _CONTAINER_READY_STATUSES:
             return Reschedule(POLL_DELAY_SECONDS)
 
+        try:
+            ready = self._creation_readiness_probe(
+                spec=payload["spec"], bot=bot, bot_id=bot_id,
+                owner_id=str(payload["user_id"]),
+            )
+        except Exception:
+            logger.warning("[manifest_create] adapter probe failed bot_id=%s", bot_id, exc_info=True)
+            ready = False
+        if not ready:
+            if self._readiness_expired(payload):
+                return Fail("expert adapter readiness timed out before Manifest Apply")
+            return Reschedule(POLL_DELAY_SECONDS)
+
         # The container is up and this is the job's last act, so it is also the
         # last chance to notice a completion that only half happened.
         self._repair_owner_relationship_if_missing(payload, bot)
@@ -794,6 +809,17 @@ class BotCreateWithManifestHandler:
             )
             return False
         return datetime.now() - started > timedelta(seconds=int(window))
+
+    def _readiness_expired(self, payload: dict) -> bool:
+        """Fail before the queue deadline so the existing status can explain why."""
+        try:
+            submitted = datetime.fromisoformat(str(payload["submitted_at"]))
+            window = int(payload.get("window_seconds") or DEFAULT_CREATE_DEADLINE_SECONDS)
+            deadline = window + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS - 30
+            return datetime.now() - submitted >= timedelta(seconds=deadline)
+        except (KeyError, TypeError, ValueError):
+            # Old tasks remain bounded by the queue's own deadline.
+            return False
 
     def _authorization_status(self, *, bot_id: str, user_id: str) -> Optional[str]:
         try:
