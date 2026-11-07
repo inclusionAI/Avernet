@@ -107,6 +107,21 @@ def _text_message(text: str) -> Dict[str, Any]:
     }
 
 
+def _accepted_sessions_spawn_data() -> Dict[str, Any]:
+    return {
+        "name": "sessions_spawn",
+        "phase": "result",
+        "isError": False,
+        "result": {
+            "details": {
+                "status": "accepted",
+                "childSessionKey": "agent:main:subagent:child-1",
+                "runId": "child-run-1",
+            },
+        },
+    }
+
+
 def _fire_text_chat(
     client: OpenClawGatewayClient,
     *,
@@ -1007,7 +1022,7 @@ async def test_chat_stream_timeout_waiting_subagent_final(monkeypatch):
             "runId": "run-1",
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         # 然后不再发 final
         return ResponseFrame.ok_response("rid", {"runId": "run-1"})
@@ -1030,6 +1045,298 @@ async def test_chat_stream_timeout_waiting_subagent_final(monkeypatch):
     assert events[1]["errorMessage"] == "Chat stream timeout"
 
 
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"status": "forbidden", "error": "sessions_spawn is not allowed"},
+        {"status": "accepted", "childSessionKey": "agent:main:subagent:child-1"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_chat_stream_does_not_wait_for_rejected_sessions_spawn(
+    monkeypatch,
+    details: Dict[str, Any],
+    caplog,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    caplog.set_level("INFO", logger="openclaw-client")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_event(client, "chat", {
+            "sessionKey": "sk-1",
+            "runId": "run-1",
+            "state": "delta",
+            "stream": "tool",
+            "data": {
+                "name": "sessions_spawn",
+                "phase": "result",
+                "isError": False,
+                "result": {"details": details},
+            },
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": "sk-1",
+            "runId": "run-1",
+            "state": "final",
+            "text": "spawn rejected",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            timeout_ms=100,
+            idempotency_key="run-1",
+        )
+    )
+
+    assert [event["state"] for event in events] == ["delta", "final"]
+    assert events[-1]["text"] == "spawn rejected"
+    assert "sessions_spawn_not_accepted" in caplog.text
+    assert "sessions_spawn is not allowed" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_finishes_when_child_result_resumes_parent_session(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    caplog.set_level("INFO", logger="openclaw-client")
+    client = _make_client()
+    canonical_session_key = "agent:main:gfr_sess-current"
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_event(client, "chat", {
+            "sessionKey": canonical_session_key,
+            "runId": "run-1",
+            "state": "delta",
+            "stream": "tool",
+            "data": _accepted_sessions_spawn_data(),
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": canonical_session_key,
+            "runId": "run-1",
+            "state": "final",
+        })
+        _fire_event(client, "agent", {
+            "sessionKey": "agent:main:gfr_sess-foreign",
+            "runId": "run-foreign",
+            "state": "error",
+            "errorMessage": "foreign failure",
+        })
+        _fire_event(client, "agent", {
+            "sessionKey": "agent:main:gfr_sess-foreign",
+            "runId": "run-foreign",
+            "stream": "assistant",
+            "data": {"delta": "foreign child result"},
+        })
+        _fire_event(client, "agent", {
+            "sessionKey": canonical_session_key,
+            "runId": "run-resumed",
+            "stream": "assistant",
+            "data": {"delta": "child result received"},
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": canonical_session_key,
+            "runId": "run-resumed",
+            "state": "final",
+            "text": "completed after child",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="gfr_sess-current",
+            message="hello",
+            timeout_ms=100,
+            idempotency_key="run-1",
+        )
+    )
+
+    assert [event["runId"] for event in events] == [
+        "run-1",
+        "run-resumed",
+        "run-resumed",
+    ]
+    assert events[-1]["state"] == "final"
+    assert events[-1]["text"] == "completed after child"
+    assert "sessions_spawn_accepted" in caplog.text
+    assert "subagent_parent_final_deferred" in caplog.text
+    assert "subagent_parent_resumed" in caplog.text
+    assert "child result received" not in caplog.text
+
+
+@pytest.mark.parametrize("terminal_state", ["error", "aborted"])
+@pytest.mark.asyncio
+async def test_direct_parent_resume_accepts_terminal_first_frame(
+    monkeypatch,
+    terminal_state: str,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    session_key = "agent:main:gfr_sess-current"
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-1",
+            "state": "delta",
+            "stream": "tool",
+            "data": _accepted_sessions_spawn_data(),
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-1",
+            "state": "final",
+        })
+        _fire_event(client, "agent", {
+            "sessionKey": session_key,
+            "runId": "run-resumed",
+            "state": terminal_state,
+            "errorMessage": "child continuation failed",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="gfr_sess-current",
+            message="hello",
+            timeout_ms=100,
+            idempotency_key="run-1",
+        )
+    )
+
+    assert [event["state"] for event in events] == ["delta", terminal_state]
+    assert events[-1]["runId"] == "run-resumed"
+
+
+@pytest.mark.parametrize(
+    ("approval_event", "approval_state"),
+    [
+        ("approval.requested", "approval_requested"),
+        ("approval.resolved", "approval_resolved"),
+        ("exec.approval.requested", "approval_requested"),
+        ("exec.approval.resolved", "approval_resolved"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_direct_parent_resume_accepts_approval_first_frame_after_ack(
+    monkeypatch,
+    approval_event: str,
+    approval_state: str,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    session_key = "agent:main:gfr_sess-current"
+    seen: list[str] = []
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-1",
+            "state": "delta",
+            "stream": "tool",
+            "data": _accepted_sessions_spawn_data(),
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-1",
+            "state": "final",
+        })
+        _fire_event(client, approval_event, {
+            "sessionKey": session_key,
+            "runId": "run-resumed",
+            "approvalId": "approval-1",
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-resumed",
+            "state": "final",
+            "text": "completed after approval",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    async def on_ack(_response: ResponseFrame) -> None:
+        seen.append("ack")
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    async for event in client.chat_stream(
+        session_key="gfr_sess-current",
+        message="hello",
+        timeout_ms=100,
+        idempotency_key="run-1",
+        on_ack=on_ack,
+    ):
+        seen.append(event["state"])
+
+    assert seen == ["ack", "delta", approval_state, "final"]
+
+
+@pytest.mark.asyncio
+async def test_each_parent_resume_consumes_exactly_one_pending_child(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    session_key = "agent:main:gfr_sess-current"
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        for _ in range(2):
+            _fire_event(client, "chat", {
+                "sessionKey": session_key,
+                "runId": "run-1",
+                "state": "delta",
+                "stream": "tool",
+                "data": _accepted_sessions_spawn_data(),
+            })
+        for run_id in ("run-resumed-1", "run-resumed-2"):
+            _fire_event(client, "chat", {
+                "sessionKey": session_key,
+                "runId": "run-1" if run_id.endswith("1") else "run-resumed-1",
+                "state": "final",
+            })
+            _fire_event(client, "agent", {
+                "sessionKey": session_key,
+                "runId": run_id,
+                "stream": "assistant",
+                "data": {"delta": run_id},
+            })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-resumed-2",
+            "state": "final",
+            "text": "all direct children complete",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="gfr_sess-current",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert [event["runId"] for event in events] == [
+        "run-1",
+        "run-1",
+        "run-resumed-1",
+        "run-resumed-2",
+        "run-resumed-2",
+    ]
+    assert events[-1]["text"] == "all direct children complete"
+
+
 @pytest.mark.parametrize("foreign_state", ["delta", "final", "error", "aborted"])
 @pytest.mark.asyncio
 async def test_chat_stream_drops_foreign_session_announce(
@@ -1047,7 +1354,7 @@ async def test_chat_stream_drops_foreign_session_announce(
             "runId": "run-1",
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             "sessionKey": canonical_session_key,
@@ -1102,7 +1409,7 @@ async def test_chat_stream_drops_announce_with_invalid_session_key(
             "runId": "run-1",
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             **foreign_payload,
@@ -1142,7 +1449,7 @@ async def test_chat_stream_does_not_learn_parent_session_from_untrusted_run(monk
             "runId": "run-1",
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             "sessionKey": "agent:main:foreign-session",
@@ -1221,7 +1528,7 @@ async def test_announce_prefixed_foreground_final_does_not_consume_pending_subag
             "runId": foreground_run_id,
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             "sessionKey": "agent:main:gfr_sess-current",
@@ -1269,7 +1576,7 @@ async def test_chat_stream_accepts_current_session_announce_hard_stop(
             "runId": "run-1",
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             "sessionKey": "agent:main:gfr_sess-current",
@@ -1290,6 +1597,64 @@ async def test_chat_stream_accepts_current_session_announce_hard_stop(
 
     assert [event["runId"] for event in events] == ["run-1", own_announce_run_id]
     assert events[-1]["state"] == terminal_state
+
+
+@pytest.mark.asyncio
+async def test_announce_delta_does_not_consume_pending_child(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    session_key = "agent:main:gfr_sess-current"
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        for _ in range(2):
+            _fire_event(client, "chat", {
+                "sessionKey": session_key,
+                "runId": "run-1",
+                "state": "delta",
+                "stream": "tool",
+                "data": _accepted_sessions_spawn_data(),
+            })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "run-1",
+            "state": "final",
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "announce:v1:child-1:run",
+            "state": "delta",
+            "text": "first child partial",
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "announce:v1:child-1:run",
+            "state": "final",
+        })
+        _fire_event(client, "chat", {
+            "sessionKey": session_key,
+            "runId": "announce:v1:child-2:run",
+            "state": "final",
+            "text": "all children complete",
+        })
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="gfr_sess-current",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert [event["runId"] for event in events] == [
+        "run-1",
+        "run-1",
+        "announce:v1:child-1:run",
+        "announce:v1:child-2:run",
+    ]
+    assert events[-1]["text"] == "all children complete"
 
 
 @pytest.mark.asyncio
@@ -1329,7 +1694,7 @@ async def test_chat_stream_isolates_concurrent_parent_sessions(monkeypatch):
             "runId": run_id,
             "state": "delta",
             "stream": "tool",
-            "data": {"name": "sessions_spawn", "phase": "result", "isError": False},
+            "data": _accepted_sessions_spawn_data(),
         })
         _fire_event(client, "chat", {
             "sessionKey": session_key,
