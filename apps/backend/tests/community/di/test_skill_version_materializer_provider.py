@@ -17,3 +17,14 @@ def test_materializer_uses_the_validated_gateway_service_seam() -> None:
     assert materializer._gateway is injector.get(  # noqa: SLF001
         SkillCenterGatewayServiceProtocol
     )
+
+
+def test_stable_reference_service_is_available_in_the_public_composition_root():
+    from agentclaw.community.api.skill_reference_service import (
+        SkillReferenceServiceProtocol,
+    )
+
+    injector = build_injector(profile=DeployProfile.TEST)
+    assert isinstance(
+        injector.get(SkillReferenceServiceProtocol), SkillReferenceServiceProtocol
+    )

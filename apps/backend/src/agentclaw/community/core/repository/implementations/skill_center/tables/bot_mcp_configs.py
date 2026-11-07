@@ -25,6 +25,53 @@ def replace(
     config: dict[str, Any] | None,
     preserve_equivalent: bool = False,
 ) -> bool:
+    changed, value_changed = _replace(
+        session,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        env=env,
+        server_code=server_code,
+        config=config,
+        preserve_equivalent=preserve_equivalent,
+    )
+    return value_changed if preserve_equivalent else changed
+
+
+def replace_apply(
+    session,
+    *,
+    bot_id: str,
+    owner_id: str,
+    env: str,
+    server_code: str,
+    config: dict[str, Any] | None,
+) -> tuple[bool, bool]:
+    """Return actual persistence change and effective config change separately.
+
+    Apply consumes aliases even when the effective value is unchanged. That is
+    a durable Bot mutation, but does not expand the MCP runtime update scope.
+    """
+    return _replace(
+        session,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        env=env,
+        server_code=server_code,
+        config=config,
+        preserve_equivalent=True,
+    )
+
+
+def _replace(
+    session,
+    *,
+    bot_id: str,
+    owner_id: str,
+    env: str,
+    server_code: str,
+    config: dict[str, Any] | None,
+    preserve_equivalent: bool = False,
+) -> tuple[bool, bool]:
     row = (
         _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
         .filter(
@@ -48,7 +95,7 @@ def replace(
     if not config:
         if row is not None:
             session.delete(row)
-        return value_changed if preserve_equivalent else row is not None or bool(legacy)
+        return row is not None or bool(legacy), value_changed
     encoded = json.dumps(
         config, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
@@ -63,14 +110,14 @@ def replace(
                 avernet_tenant=get_current_avernet_tenant(),
             )
         )
-        return value_changed if preserve_equivalent else True
+        return True, value_changed
     if row.config == encoded or (
         preserve_equivalent
         and comparable_config(json.loads(row.config)) == comparable_config(config)
     ):
-        return value_changed if preserve_equivalent else bool(legacy)
+        return bool(legacy), value_changed
     row.config = encoded
-    return value_changed if preserve_equivalent else True
+    return True, value_changed
 
 
 def delete(
@@ -103,9 +150,14 @@ def delete_all(session, *, bot_id: str, owner_id: str, env: str) -> int:
 def normalize(session, *, bot_id: str, owner_id: str, env: str) -> None:
     """Move safe aliases without replaying an earlier configuration snapshot."""
     for legacy in _legacy_rows(session, bot_id=bot_id, owner_id=owner_id, env=env):
-        canonical = _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).filter(
-            BotMCPConfig.server_code == legacy.server_code,
-        ).with_for_update().one_or_none()
+        canonical = (
+            _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
+            .filter(
+                BotMCPConfig.server_code == legacy.server_code,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
         if canonical is not None:
             session.delete(legacy)
         else:

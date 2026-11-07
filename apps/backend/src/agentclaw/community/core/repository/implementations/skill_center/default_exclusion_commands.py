@@ -26,10 +26,10 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
-    SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
+from agentclaw.community.core.skill_center.policies.capability_ownership import require_can_join_set
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
@@ -174,17 +174,35 @@ class DefaultExclusionCommands:
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
             membership_skill_uuid = center_membership_skill_uuid(skill)
-            if int(row.id) in excluded_default_ids and any(
-                member[0] == int(skill_id)
-                or (
-                    membership_skill_uuid is not None
-                    and member[2] == membership_skill_uuid
+            member_ids = set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id)
+            )
+            if int(row.id) in excluded_default_ids and int(skill_id) in member_ids:
+                references = self._skill_referencing_set_ids(
+                    session, skill_id=int(skill_id), skill_uuid=skill.skill_uuid
                 )
-                for members in old.memberships.values()
-                for member in members
-            ):
-                raise SkillSetControlPlaneConflictError(
-                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+                active_set_claim = self._has_active_skill_set_claim(
+                    session,
+                    bot_sets=self._bot_sets(
+                        session, bot_id=bot_id, owner_id=owner_id,
+                        engine_type=engine_type, default_engine_types=default_engine_types,
+                    ),
+                    membership_set_ids=references, skill_id=int(skill_id),
+                    bot_id=bot_id, owner_id=owner_id,
+                )
+                require_can_join_set(
+                    is_directly_active=(
+                        int(skill_id) in old.installations and not active_set_claim
+                    ),
+                    is_in_another_set=any(
+                        member[0] == int(skill_id)
+                        or (
+                            membership_skill_uuid is not None
+                            and member[2] == membership_skill_uuid
+                        )
+                        for members in old.memberships.values()
+                        for member in members
+                    ),
                 )
             removed = default_exclusions.unexclude_skill(
                 session, bot_id=bot_id, owner_id=owner_id,
@@ -193,9 +211,7 @@ class DefaultExclusionCommands:
             if not removed:
                 return DesiredStateMutation(_item(row), False, old)
             claimed: frozenset[str] = frozenset()
-            if int(skill_id) in set_member_skill_ids(
-                self._scope, session, skill_set_id=int(row.id)
-            ):
+            if int(skill_id) in member_ids:
                 self._require_unique_runtime_names(
                     session, bot_id=bot_id, owner_id=owner_id,
                     candidate_ids={int(skill_id)},

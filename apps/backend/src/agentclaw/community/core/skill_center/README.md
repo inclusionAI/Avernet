@@ -15,6 +15,13 @@ provides:
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
+  - "SkillReferenceService"
+  - "SkillReferenceServiceProtocol"
+  - "SkillAccessScope"
+  - "ReadySharedSkill"
+  - "ReadyRepoSkill"
+  - "PublicSkillPreview"
+  - "ValidatedExactSkillPackage"
   - "LocalSkillUploadService"
   - "LocalSkillSecurityScanTaskHandler"
   - "LocalSkillSecuritySyncTaskHandler"
@@ -137,6 +144,7 @@ consumes:
   - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
+  - agentclaw.community.core.apply_engine.fetch_budget # execution ledger shared by exact package acquisition; absent outside Apply
   - agentclaw.community.core.ports.mcp_config  # shared Direct MCP preserve / clear / replace command types
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.digital_employee.contracts
@@ -497,3 +505,27 @@ metadata transaction. A later metadata failure is returned as a storage error
 without restoring runtime files, so this flow is not a cross-storage atomic
 transaction. The exact trade-off and Teclaw adapter semantics are recorded in
 `docs/adr/0014-engine-owned-package-deletion.md`.
+
+### Stable references for Apply
+
+Direct Skills and SkillSet members share `SkillReferenceServiceProtocol`.
+UUID reads resolve an existing visible Center asset and its latest PUBLISHED
+Version; public-code reads prefer the exact persisted locator and UUID.
+First-time public references use `preview_exact` to validate the downloaded
+package, digest, runtime name and dependency metadata without management writes.
+The private preview keeps the exact content and actual `download_size` for the
+caller's Apply fetch budget. Only `prepare_public_reference` may create the
+shared asset/Version, publish canonical content and ensure Track Latest work.
+
+Preparation checks Ready reuse and refuses competing unprepared versions in the
+same existing Skill lock transaction that allocates the exact Version. A Ready
+version must retain the previewed runtime name and dependency codes. Legacy
+Reference/Sync allocation and by-name Genome resolution retain their contracts.
+These contracts are exercised at the real repository and service seams in
+`test_skill_center_reference_repository.py`, `test_skill_reference_service.py`
+and `test_skill_version_materializer.py`.
+
+`resolve_shared_skill_id` reads actual name, identity and dependencies for IDs
+returned by the legacy by-name/path port. Repo assets retain the existing
+NULL/empty dependency decoding; malformed collections or dependency entries
+fail. Center dependencies always come from the resolved PUBLISHED Version.

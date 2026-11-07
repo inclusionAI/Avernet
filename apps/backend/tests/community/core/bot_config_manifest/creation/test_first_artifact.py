@@ -10,6 +10,8 @@ real one over the index — and handing it to ``create_teclaw_bot``.
 """
 from __future__ import annotations
 
+from tests.community.core.apply_engine._capability_facts import materialiser_ports
+
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock
@@ -207,7 +209,7 @@ def _build(db, document: str = _DOCUMENT):
         return DeclaredSourceResolver(content, FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
 
     def platform_ports() -> MaterialiserPorts:
-        return MaterialiserPorts(
+        return materialiser_ports(
             script_service=scripts,
             activation_service=PlatformActivation(activation),
             mcp_auth_service=FakeMcpAuth(),
@@ -311,7 +313,7 @@ def test_the_first_artifact_carries_the_manifest(world):
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.apply_id == accepted.apply_id
     assert report.status is ApplyStatus.SUCCEEDED, report
-    assert sorted(c.construct.value for c in report.categories) == ["cli_tools", "identity", "mcp", "resources", "skills"]
+    assert sorted(c.construct.value for c in report.categories) == ["capabilities", "cli_tools", "identity", "resources"]
 
     # Then provisioning: the artifact the container is created with.
     result = provisioner.provision(bot=dict(_RECORD), owner_id=_OWNER)

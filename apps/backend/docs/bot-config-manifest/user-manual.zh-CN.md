@@ -56,6 +56,25 @@
 
 ---
 
+### 升级到聚合能力后的兼容
+
+新版本继续接受 schema v1 的旧 `manifest.skills` / `manifest.mcp` 写法，并在内部统一成
+`manifest.capabilities`。新旧位置不能混用。每一份有效 Manifest 都是完整能力目标：
+省略 `skill_sets` 等价于空列表，会清空普通集并排除当前适用 Default 成员；需要保留的
+普通集必须完整声明，Default 必须显式写 `{name: default}`。省略 MCP `config` 或写 `{}`
+都会清除 Bot override，非空配置完整替换。升级前应补齐希望保留的内容，再 Apply。
+普通集合不能创建或改名为保留名 `default`。适用 Default 成员被排除后，可沿原权限与资产
+归属规则显式 Direct 控制或加入普通集；恢复 Default 时若该成员已被占用，整组能力会拒绝。
+
+没有 Manifest 记录时不清理能力。Genome 的旧 Direct Skills/MCP 目标继续保留集合和
+Default 的不参与范围，本期不扩充 Genome schema 或迁移历史 revision ID。
+新执行报告只有一个 `capabilities` 类别，条目与移除名称带 `skills/`、`skill_sets/`、
+`mcp/` 前缀；历史报告保留原值读取。Backend、worker 与读取报告/任务的消费者应一起升级，
+降级前先处理在途任务，不承诺旧服务续跑新类别任务。
+
+Device 创建在容器可用后的 ON 阶段写能力；Platform 在真实 Bot 记录已建立后的 PRE 阶段
+写能力，然后合成首个 artifact。权限、Bot 地址、异步任务与报告 envelope 保持既有合同。
+
 ## 2. 上手：两条路径
 
 先分清你在哪条路上——它决定第一步做什么。**两条路的清单文档一模一样**，区别
@@ -116,6 +135,14 @@ GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities
 矩阵的每一格一行（`category` / `protocol` / `supported` / `reason`）。扁平的
 `constructs` 结构上表达不了「组合」这个问题——而表达不了，正是这张表从前会
 和代码走散的原因。
+
+当前执行类别只有一个 `capabilities` 负责 Direct Skills、SkillSet/Default 与 MCP；
+历史 `skills`、`mcp` 不作为独立执行类别发布。`source_matrix` 的 capabilities 行
+描述 Local Skill 包传输，不能用 `git` 可用推断共享 Repo 引用可用。
+`skill_references` 另列 `package`、`repo_path`、`skill_uuid`、`skill_code` 四种引用的
+`supported` / `reason`，Direct 与 Set 复用同一判断。结论针对当前 Bot/engine；
+DeepSeek Harness 当前只支持 Local/Repo，Center UUID/code 会返回不支持原因。
+具体资产权限、在线状态与版本在解析时核验。
 
 ### 2.2 路径 A：还没有 bot
 
@@ -305,10 +332,11 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 
 | 类目 | 被覆盖的区域 |
 | --- | --- |
-| `skills` | 受管理的 Direct 安装和未被 Set 引用的 Bot 本地技能包 |
+| `capabilities.skills` | 受管理的 Direct 安装和未被任何持久 Set 引用的 Bot 本地技能包 |
 | `identity` | **identity 文件集合**，减去保留名单（见 §8） |
 | `resources` | workspace 中的非保护根条目，包括手工上传和 Bot 生成的普通文件 |
-| `mcp` | 受管理的 Direct 安装和 Bot override，保留现有 Set、平台默认及 Skill 依赖供应规则 |
+| `capabilities.skill_sets` | 按名称替换普通集（含停用集）及成员；`name: default` 恢复适用默认成员，否则排除当前默认成员 |
+| `capabilities.mcp` | 受管理的 Direct 安装和 Bot override；在 Set 收敛后保留最终有效 Set/Default 与 Skill 依赖供应规则 |
 
 设备模式下，非保护目录会递归删除，包括首次创建时容器启动后生成的普通文件。
 
@@ -330,7 +358,12 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 这是在保护你：在覆盖语义下，一个不完整的集合是**破坏性**的。声明 `{A, B}` 却只
 写进 `{A}`，就等于把 B 删了——一次网络抖动删掉一个正在工作的 skill，这不能接受。
 
-一个类目的失败**不牵连**别的类目：`skills` 全军覆没时，`identity` 该怎么写还怎么写。
+能力共用一个 `capabilities` 类别：Direct Skills、SkillSet/Default 和 MCP 在同一次解析、规划中校验。
+其中一个编译或解析失败时，能力整组不写；`identity`、`resources` 等其他类别继续。
+写入阶段按共享资产准备、本地上传、Set/Default 关系、Direct Skills、MCP、Local 清理执行。
+这些步骤不构成跨资产和 Runtime 的整体事务；后续失败停止能力内剩余步骤，
+本轮实际改变并确认提交的 Bot 写入可使报告为 `PARTIAL`。写入异常沿既有保守报告，
+不保证逐项保留已成功条目，也不会把未执行的删除报为完成。
 
 ### 3.5 secret 永远不进清单
 
@@ -1657,22 +1690,37 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `engine_type` | string | 结论是按哪个引擎算的 |
 | `bot_type` | string | 结论是按哪个 bot 类型算的 |
 | `schema_versions` | int[] | 本部署接受的 `schema_version` 取值，今天是 `[1]` |
-| `constructs` | object[] | 每个构造一行，**支持与不支持的都在**，见下 |
+| `constructs` | object[] | 每个当前构造一行，**支持与不支持的都在**，见下 |
+| `source_matrix` | object[] | 每个当前类别与传输协议一行；capabilities 行描述 Local Skill 包传输 |
+| `skill_references` | object[] | package、repo_path、skill_uuid、skill_code 四种引用各一行，Direct 与 Set 共用 |
 
 `constructs[]` 每一行：
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `kind` | enum | `category`（`manifest` 下的六个类目）/ `section`（顶层非类目段，今天只有 `script`）/ `source`（条目怎么指定来源） |
+| `kind` | string | `category`（当前执行类别）/ `section`（顶层非类目段，今天只有 `script`） |
 | `name` | string | 该 `kind` 内的名字。取值见 B.7 |
 | `supported` | bool | 能不能写 |
 | `reason` | string | 不支持时说明原因；**支持时是空串** |
 
-> 这张表与 `PUT` 的拒绝**是同一个函数算的**，所以不会出现「这里说支持、`PUT` 却
-> 拒绝」。唯一它答不了的是「类目 × 源形态」的组合（`resources` 不能用 `from`/git，
-> 附录 C）——那由条目校验逐条拒绝，`reason` 里会点名类目。
->
-> 不认识的引擎**什么都不支持**，每一行的 `reason` 都会这么说。
+`source_matrix[]` 每行含 `category`、`protocol`、`supported`、`reason`。
+`skill_references[]` 每行含 `reference`、`supported`、`reason`；支持时 reason 为空串。
+例如，支持四种引用的 Bot 返回以下片段（实际值以查询结果为准）：
+
+```json
+{
+  "skill_references": [
+    {"reference": "package", "supported": true, "reason": ""},
+    {"reference": "repo_path", "supported": true, "reason": ""},
+    {"reference": "skill_uuid", "supported": true, "reason": ""},
+    {"reference": "skill_code", "supported": true, "reason": ""}
+  ]
+}
+```
+
+这三张表与 `PUT`、创建校验及 compiler 共用支持判断；不认识的引擎没有支持项，
+每一行给出原因。`constructs` 不再发布独立 `skills` / `mcp` 执行类别。
+资产权限、在线状态和版本在解析时校验，能力发现不代表某个具体资产已经可用。
 
 ---
 

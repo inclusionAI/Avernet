@@ -45,7 +45,9 @@ def center_membership_skill_uuid(skill: Skill) -> str | None:
     return skill_uuid
 
 
-def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
+def set_member_skill_ids(
+    scope, session, *, skill_set_id: int, excluded_raw_ids: frozenset[int] = frozenset()
+) -> set[int]:
     """The Skill ids one SkillSet provides.
 
     Must agree with ``SkillSetRepository.get_skills_in_set_for_env``: a
@@ -59,6 +61,7 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
         .join(Skill, SkillSetSkill.skill_id == Skill.id)
         .filter(
             SkillSetSkill.skill_set_id == skill_set_id,
+            SkillSetSkill.skill_id.notin_(excluded_raw_ids),
             SkillSetSkill.env == env,
             Skill.git_path.like("center://%"),
             or_(
@@ -81,6 +84,7 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
         .join(SkillSetSkill, SkillSetSkill.skill_id == Skill.id)
         .filter(
             SkillSetSkill.skill_set_id == skill_set_id,
+            SkillSetSkill.skill_id.notin_(excluded_raw_ids),
             SkillSetSkill.env == env,
             ~Skill.git_path.like("center://%"),
         )
@@ -106,6 +110,7 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
         )
         .filter(
             SkillSetSkill.skill_set_id == skill_set_id,
+            SkillSetSkill.skill_id.notin_(excluded_raw_ids),
             SkillSetSkill.env == env,
             Skill.git_path.like("center://%"),
             Skill.status == "PUBLISHED",
@@ -319,7 +324,11 @@ class BotSkillSetInstallations:
                 session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id),
             ):
                 continue
-            if skill_id in set_member_skill_ids(self._scope, session, skill_set_id=int(row.id)):
+            excluded_ids = default_exclusions.excluded_skill_ids(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+            ) if row.is_default else set()
+            if skill_id in set_member_skill_ids(self._scope, session,
+                skill_set_id=int(row.id), excluded_raw_ids=frozenset(excluded_ids)):
                 return (
                     SkillInstallationSourceKind.DEFAULT if row.is_default
                     else SkillInstallationSourceKind.SKILL_SET,
@@ -354,17 +363,12 @@ class BotSkillSetInstallations:
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             ):
-                ids = set_member_skill_ids(self._scope, session, skill_set_id=int(row.id))
-                if row.is_default:
-                    ids -= set(
-                        default_exclusions.excluded_skill_ids(
-                            session,
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            set_id=int(row.id),
-                        )
-                    )
-                members |= ids
+                excluded = default_exclusions.excluded_skill_ids(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                ) if row.is_default else set()
+                ids = set_member_skill_ids(self._scope, session,
+                    skill_set_id=int(row.id), excluded_raw_ids=frozenset(excluded))
+                members |= ids - excluded
             return frozenset(members)
 
     def _resolve_default_sync_plan(
@@ -400,8 +404,12 @@ class BotSkillSetInstallations:
             session, bot_id=bot_id, owner_id=owner_id, env=env
         )
         for row in bot_sets:
+            raw_excluded = default_exclusions.excluded_skill_ids(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+            ) if row.is_default else set()
             skill_ids = set_member_skill_ids(
-                self._scope, session, skill_set_id=int(row.id)
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(raw_excluded),
             )
             mcp_codes = set_member_mcp_codes(
                 self._scope, session, skill_set_id=int(row.id)
@@ -421,8 +429,9 @@ class BotSkillSetInstallations:
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
             )
+            raw_excluded_members = {int(value[0]) for value in self._scope(session.query(SkillSetSkill.skill_id), SkillSetSkill).filter(SkillSetSkill.skill_set_id == row.id, SkillSetSkill.skill_id.in_(excluded_skill_ids)).all()}
             default_skills |= skill_ids - excluded_skill_ids
-            excluded_skills |= (skill_ids & excluded_skill_ids) - installed_skills
+            excluded_skills |= ((skill_ids & excluded_skill_ids) | raw_excluded_members) - installed_skills
             default_mcps |= mcp_codes - excluded_mcp_codes
             excluded_mcps |= (mcp_codes & excluded_mcp_codes) - installed_mcps
         return InstallationFlushPlan(
@@ -486,8 +495,11 @@ class BotSkillSetInstallations:
                 if is_default
                 else frozenset()
             )
+            raw_excluded_members = {int(value[0]) for value in self._scope(session.query(SkillSetSkill.skill_id), SkillSetSkill).filter(SkillSetSkill.skill_set_id == row.id, SkillSetSkill.skill_id.in_(excluded)).all()}
+            inactive_skills |= raw_excluded_members - installed_skills
             for member_id in set_member_skill_ids(
-                self._scope, session, skill_set_id=int(row.id)
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(excluded),
             ):
                 # Exclusion is the Default Set's per-Bot deactivation: an
                 # excluded member stays the Set's, is absent from the listing,

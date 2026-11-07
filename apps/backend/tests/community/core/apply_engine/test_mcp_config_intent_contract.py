@@ -16,8 +16,8 @@ from ._mcp_config_support import McpWorld
 
 
 def _mcp_entry(report):
-    category = next(item for item in report.categories if item.construct == Category.MCP)
-    return next(entry for entry in category.entries if entry.identity == "mcp.explicit")
+    category = next(item for item in report.categories if item.construct == Category.CAPABILITIES)
+    return next(entry for entry in category.entries if entry.identity == "mcp/mcp.explicit")
 
 
 @pytest.mark.asyncio

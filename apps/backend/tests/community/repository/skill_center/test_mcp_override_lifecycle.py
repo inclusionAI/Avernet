@@ -105,7 +105,9 @@ def test_default_exclusion_and_reconciliation_preserve_config(tmp_path):
         repo.flush_installations(**_SCOPE, env="dev")
     assert repo.list_installed_mcps(**_SCOPE) == set()
     assert repo.get_mcp_overrides(bot_id="bot", owner_id="owner") == {_CODE: _CONFIG}
-    assert repo.unexclude_default_mcp(**_SCOPE, set_id=set_id, server_code=_CODE).changed
+    assert repo.unexclude_default_mcp(
+        **_SCOPE, set_id=set_id, server_code=_CODE, platform_default_codes=frozenset()
+    ).changed
     assert repo.list_installed_mcps(**_SCOPE) == {_CODE}
     assert repo.get_mcp_overrides(bot_id="bot", owner_id="owner") == {_CODE: _CONFIG}
 
