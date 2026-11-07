@@ -3,7 +3,7 @@ import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ fetchJson: vi.fn(), snapshot: vi.fn(), workflow: vi.fn(), childId: 'child', childVersion: 4 as number | null, childDeploy: 2 as number | null }))
+const mocks = vi.hoisted(() => ({ fetchJson: vi.fn(), snapshot: vi.fn(), workflow: vi.fn(), childId: 'child', childVersion: 4 as number | null, childDeploy: 2 as number | null, flowEvents: [] as Array<Record<string, unknown>> }))
 vi.mock('../../hooks/useObservedAuthEpoch', () => ({ useObservedAuthEpoch: () => 1 }))
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: mocks.fetchJson }))
 vi.mock('../../api/hooks', () => ({
@@ -14,8 +14,9 @@ vi.mock('../../api/hooks', () => ({
   useAnalysisProgress: () => ({}), useRunEvolutionAnalysis: () => ({ data: null, isLoading: false, refetch: vi.fn() }),
 }))
 vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({ useFlowApprovals: () => ({ data: { items: [] } }) }))
+vi.mock('../../utils/use-recovered-flow-events', () => ({ useRecoveredFlowEvents: () => ({ data: mocks.flowEvents }) }))
 vi.mock('../../components/RunSummaryHeader', () => ({ default: () => null }))
-vi.mock('../../components/NodeExecutionList', () => ({ default: ({ nodes, renderSubworkflowLinks, workflowSpec }: any) => <div><span>规格 {workflowSpec?.nodes?.map((n: any) => n.id).join(',') ?? '无'}</span>{nodes.filter((n: any) => n.executor_type === 'subworkflow').map((n: any) => <div key={n.node_id}>{renderSubworkflowLinks(n)}</div>)}</div> }))
+vi.mock('../../components/NodeExecutionList', () => ({ default: ({ nodes, renderSubworkflowLinks, workflowSpec }: any) => <div><span>规格 {workflowSpec?.nodes?.map((n: any) => n.id).join(',') ?? '无'}</span>{nodes.map((n: any) => <div key={`${n.node_id}:${n.attempt}`}>节点 {n.node_id} 状态 {n.status}</div>)}{nodes.filter((n: any) => n.executor_type === 'subworkflow').map((n: any) => <div key={`${n.node_id}:subworkflow`}>{renderSubworkflowLinks(n)}</div>)}</div> }))
 vi.mock('../../components/RunDagView', () => ({ default: ({ specNodes }: any) => <div>DAG: {specNodes.map((node: any) => node.id).join(',')}</div> }))
 vi.mock('../../components/InterventionPanel', () => ({ default: () => null }))
 vi.mock('../../components/ApprovalPanel', () => ({ default: () => null }))
@@ -33,7 +34,7 @@ async function openDrawer() {
   return { drawer, client }
 }
 beforeEach(() => {
-  mocks.childVersion = 4; mocks.childDeploy = 2; mocks.childId = 'child'
+  mocks.childVersion = 4; mocks.childDeploy = 2; mocks.childId = 'child'; mocks.flowEvents = []
   mocks.snapshot.mockReset().mockResolvedValue(response)
   mocks.workflow.mockReset().mockImplementation(() => ({ data: { nodes: [{ id: 'latest' }] } }))
   mocks.fetchJson.mockReset().mockImplementation(async (url: string, init: RequestInit) => {
@@ -63,6 +64,28 @@ describe('child historical DAG', () => {
     resolve(response)
     expect(await within(drawer).findByText('DAG: historical')).toBeInTheDocument()
   })
+  it('recovers a child event gap only from a valid run snapshot', async () => {
+    mocks.flowEvents = [
+      { event_id: 'child-start', flow_id: 'child', event_type: 'node_started', node_id: 'missing-node', attempt: 1, time: 100, data_json: '{}', error_text: null },
+      { event_id: 'child-success', flow_id: 'child', event_type: 'node_succeeded', node_id: 'missing-node', attempt: 1, time: 110, data_json: '{}', error_text: null },
+    ]
+    mocks.snapshot.mockResolvedValue({ nodes: response.nodes.concat([{ id: 'missing-node', title: 'Snapshot Missing', dependsOn: [], executor: { type: 'action' } }]) })
+    const { drawer } = await openDrawer()
+    fireEvent.click(within(drawer).getByRole('button', { name: '节点' }))
+    expect(await within(drawer).findByText('节点 missing-node 状态 succeeded')).toBeInTheDocument()
+  })
+
+  it('does not recover a child event gap when the snapshot fails', async () => {
+    mocks.flowEvents = [
+      { event_id: 'child-success', flow_id: 'child', event_type: 'node_succeeded', node_id: 'missing-node', attempt: 1, time: 110, data_json: '{}', error_text: null },
+    ]
+    mocks.snapshot.mockRejectedValue(new Error('forbidden'))
+    const { drawer } = await openDrawer()
+    expect(await within(drawer).findByText(/无法确认本次运行的历史 DAG/)).toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('button', { name: '节点' }))
+    expect(within(drawer).queryByText(/节点 missing-node/)).not.toBeInTheDocument()
+  })
+
   it('cancels an in-flight snapshot request when the drawer closes', async () => {
     mocks.snapshot.mockReturnValue(new Promise(() => {}))
     const { drawer } = await openDrawer()

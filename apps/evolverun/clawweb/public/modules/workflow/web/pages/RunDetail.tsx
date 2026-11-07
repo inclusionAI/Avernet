@@ -17,6 +17,8 @@ import RunEvolutionAnalysis from '../components/evolution/RunEvolutionAnalysis'
 import AggregationProgress from '../components/workflow-workspace/AggregationProgress'
 import type { RunEvolutionAnalysisResponse, WorkflowAnalysisProgressResponse } from '@avernet/clawweb-shared/web/api/client'
 import type { FlowRun, NodeExecution, WorkflowNode } from '@avernet/clawweb-shared/web/types'
+import { recoverNodesFromEvents } from '../utils/recovered-node-executions'
+import { useRecoveredFlowEvents } from '../utils/use-recovered-flow-events'
 import RunArchivePanel from '../components/RunArchivePanel'
 import AutoHealPanel from '../components/AutoHealPanel'
 import ApprovalPanel from '../components/ApprovalPanel'
@@ -145,7 +147,21 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
   }, [])
 
   const run = runDetail?.run
-  const nodes = useMemo(() => runDetail?.nodes ?? [], [runDetail?.nodes])
+  // Keep the main run's existing behavior; child views must never use the mutable spec.
+  const workflowQuery = useDbWorkflow(readOnly ? '' : run?.workflow_id ?? '')
+  const snapshotError = historicalSnapshot?.flowId !== flowId || !!historicalSnapshot?.isError
+  const workflowSpec = readOnly ? undefined : workflowQuery.data
+  const specNodes = readOnly ? (snapshotError ? undefined : historicalSnapshot?.nodes) : workflowSpec?.nodes
+  const eventsQuery = useRecoveredFlowEvents(flowId ?? '')
+  const nodes = useMemo(
+    () => recoverNodesFromEvents({
+      flowId: flowId ?? '',
+      nodes: runDetail?.nodes ?? [],
+      events: eventsQuery.data ?? [],
+      specNodes: specNodes ?? [],
+    }),
+    [eventsQuery.data, flowId, runDetail?.nodes, specNodes],
+  )
   const workspaceReturnUrl = run?.workflow_id
     ? (() => {
         const params = new URLSearchParams({ workflowId: run.workflow_id })
@@ -171,12 +187,6 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
     const total = Math.max(run?.node_count ?? 0, nodes.length)
     return { succeeded, failed, total }
   }, [nodes, run?.node_count])
-
-  // Keep the main run's existing behavior; child views must never use the mutable spec.
-  const workflowQuery = useDbWorkflow(readOnly ? '' : run?.workflow_id ?? '')
-  const snapshotError = historicalSnapshot?.flowId !== flowId || !!historicalSnapshot?.isError
-  const workflowSpec = readOnly ? undefined : workflowQuery.data
-  const specNodes = readOnly ? (snapshotError ? undefined : historicalSnapshot?.nodes) : workflowSpec?.nodes
 
   const nodeStatusMap = useMemo(() => {
     const map: Record<string, { status: string; executorType?: string; progressMessage?: string | null }> = {}
