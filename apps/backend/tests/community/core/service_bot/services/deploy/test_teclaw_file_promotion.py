@@ -230,14 +230,54 @@ async def test_unreadable_node_modules_map_does_not_fail_build():
 
 
 @pytest.mark.asyncio
-async def test_unreadable_source_file_raises():
+async def test_unreadable_source_file_skipped_with_warning():
+    """A non-excluded file whose read_file returns None is skipped with a warning,
+    not turned into a hard build failure (the promotion continues with other files)."""
     fs = _FakeDeviceFs(
-        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
-        contents={},  # read_file returns None → hard error
+        listings={
+            "workspace": [
+                {"path": "/workspace/a.csv", "is_dir": False},
+                {"path": "/workspace/x", "is_dir": False},  # unreadable
+            ],
+            "identity": [],
+        },
+        contents={"workspace/a.csv": b"a"},  # x has no content → None
     )
-    with pytest.raises(TeclawFilePromotionError):
-        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    # x is skipped, a.csv is still promoted
+    assert [r["name"] for r in refs.resources] == ["a.csv"]
+    # x was attempted to be read (then skipped)
+    assert "workspace/x" in fs.read_calls
 
+
+
+
+@pytest.mark.asyncio
+async def test_test_dir_files_are_not_excluded_but_unreadable_skipped():
+    """Test directories are NOT excluded — their files are promoted normally.
+    Only if a file inside test/ is unreadable is it skipped (by F2 fallback)."""
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/test", "is_dir": True},
+                {"path": "/workspace/test/real_data.json", "is_dir": False},
+                {"path": "/workspace/test/unreadable.csv", "is_dir": False},
+            ],
+            "identity": [],
+        },
+        contents={
+            "workspace/test/real_data.json": b"real",
+            # unreadable.csv has no content → None → skipped
+        },
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    # real_data.json is promoted (test/ is NOT excluded)
+    assert [r["name"] for r in refs.resources] == ["real_data.json"]
+    # Both files were attempted to be read
+    assert "workspace/test/real_data.json" in fs.read_calls
+    assert "workspace/test/unreadable.csv" in fs.read_calls
 
 @pytest.mark.asyncio
 async def test_oss_put_failure_raises():
