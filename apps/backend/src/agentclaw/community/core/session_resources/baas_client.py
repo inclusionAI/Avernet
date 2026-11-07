@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 from urllib.parse import quote
 
 import httpx
@@ -15,6 +16,13 @@ log = logging.getLogger("session_resource.baas")
 class SessionFileUpstreamUnavailableError(ValueError):
     def __init__(self) -> None:
         super().__init__("session_file_upstream_unavailable")
+
+
+class SessionFileTransferNotDoneError(ValueError):
+    """A functional BaaS complete-request conflict, not upstream capacity loss."""
+
+    def __init__(self) -> None:
+        super().__init__("session_file_transfer_not_done")
 
 
 class SessionResourceBaasClient:
@@ -105,6 +113,7 @@ class SessionResourceBaasClient:
                 tenant=tenant,
                 reference=transfer_id,
                 exc=exc,
+                allow_not_done=True,
             ) from exc
         log.info(
             "session_resource.baas.session_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
@@ -145,6 +154,7 @@ class SessionResourceBaasClient:
                 tenant=tenant,
                 reference=transfer_id,
                 exc=exc,
+                allow_not_done=True,
             ) from exc
         log.info(
             "session_resource.baas.legacy_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
@@ -231,7 +241,8 @@ class SessionResourceBaasClient:
         tenant: str,
         reference: str,
         exc: BaseException,
-    ) -> SessionFileUpstreamUnavailableError:
+        allow_not_done: bool = False,
+    ) -> SessionFileUpstreamUnavailableError | SessionFileTransferNotDoneError:
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None)
         log.warning(
@@ -242,6 +253,8 @@ class SessionResourceBaasClient:
             type(exc).__name__,
             status_code if isinstance(status_code, int) else None,
         )
+        if allow_not_done and status_code == HTTPStatus.CONFLICT:
+            return SessionFileTransferNotDoneError()
         return SessionFileUpstreamUnavailableError()
 
     @staticmethod
