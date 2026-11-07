@@ -230,6 +230,43 @@ async def test_unreadable_node_modules_map_does_not_fail_build():
 
 
 @pytest.mark.asyncio
+async def test_pycache_bytecodes_are_excluded_from_snapshot():
+    """Python bytecode caches are regenerable, non-content artifacts.
+
+    They can be listed while the running container is still invalidating their
+    inodes, so promotion must skip ``__pycache__`` rather than turn a listed but
+    unreadable ``.pyc``/``.pyo`` into a hard publish/build failure. Their sibling
+    source file still has to be read and staged normally.
+    """
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/app.py", "is_dir": False},
+                {
+                    "path": "/workspace/sub/__pycache__/mod.cpython-311.pyc",
+                    "is_dir": False,
+                },
+                {"path": "/workspace/__pycache__/other.pyo", "is_dir": False},
+            ],
+            "identity": [],
+        },
+        contents={"workspace/app.py": b"source"},
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+
+    assert refs.resources == [
+        {"name": "app.py", "store": "bot-data",
+         "path": f"{_PREFIX}/workspace/app.py"},
+    ]
+    # Bytecode caches were never read nor written to OSS, and the .py survived.
+    assert fs.read_calls == ["workspace/app.py"]
+    assert {c.args[0] for c in oss.put_object.call_args_list} == {
+        f"teclaw/pre/bolt_data/{_PREFIX}/workspace/app.py",
+    }
+
+
+@pytest.mark.asyncio
 async def test_unreadable_source_file_raises():
     fs = _FakeDeviceFs(
         listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
