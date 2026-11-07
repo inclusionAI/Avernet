@@ -57,7 +57,7 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
   const draft = new EditorDraftCasService(db, new BotWorkflowPermissionRepository(db));
   const spec = { ...before, title: 'after' }, script = 'echo updated\n';
   const change = { path: 'scripts/run.sh', operation: 'replace', mode: '100644', contentBase64: Buffer.from(script).toString('base64') };
-  const input = { requestId: 'request_123', sourceVersion: 'current', sourceCommit, expectedSavedHead: null,
+  const input = { requestId: 'request_123', sourceVersion: 'current', sourceCommit, expectedSavedHead: sourceCommit,
     expectedDraftToken: (await draft.read('flow', 'editor')).draftToken, specJson: JSON.stringify(spec), changes: [change] };
   let policy: 'deny' | 'throw' | 'allow' = 'deny', principal: string | null = 'editor';
   const calls: Array<{ candidate: WorkflowPackWriteAuthorization; number: number; dbSpec: unknown; gitStatus: number | null; gitRef: string; action: 'allow' | 'deny' | 'throw' }> = [];
@@ -67,7 +67,7 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
   const acl = vi.fn(async (candidate: WorkflowPackWriteAuthorization) => {
     const number = calls.length + 1;
     const dbSpec = JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json);
-    const ref = spawnSync('git', ['--git-dir', bare, 'rev-parse', '--verify', '--quiet', 'refs/heads/saved/flow'], { encoding: 'utf8' });
+    const ref = spawnSync('git', ['--git-dir', bare, 'rev-parse', '--verify', '--quiet', 'refs/heads/wf/flow'], { encoding: 'utf8' });
     const action = policy !== 'allow' ? policy
       : number === 2 && mode === 'late-deny' ? 'deny'
       : number === 2 && mode === 'late-throw' ? 'throw' : 'allow';
@@ -75,6 +75,7 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
     if (action === 'throw') throw new Error(number === 2 ? 'sensitive late policy error' : 'sensitive policy error');
     return action === 'allow';
   });
+  let authorizedCommit: string | undefined;
   const assertCalls = async (actions: Array<'allow' | 'deny' | 'throw'>) => {
     expect(calls).toHaveLength(actions.length);
     expect(acl.mock.results).toHaveLength(actions.length);
@@ -88,11 +89,16 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
       } else {
         await expect(acl.mock.results[index].value).resolves.toBe(action === 'allow');
       }
-      expect(call.candidate).toMatchObject({ actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId: 'a'.repeat(64), branch: 'saved/flow', changes: [change] });
+      expect(call.candidate).toMatchObject({ actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId: 'a'.repeat(64), branch: 'wf/flow', changes: [change] });
+      expect(call.candidate).toMatchObject({ sourceVersion: 'current', sourceCommit, expectedSavedHead: sourceCommit });
       expect(call.candidate.commit).toMatch(/^[a-f0-9]{40}$/);
       expect(call.dbSpec).toEqual(index === 0 ? before : spec);
-      expect(call.gitStatus).toBe(1);
-      expect(call.gitRef).toBe('');
+      expect(call.gitStatus).toBe(0);
+      expect(call.gitRef.trim()).toBe(sourceCommit);
+    }
+    if (calls.length === 2) {
+      expect(calls[1].candidate).toEqual(calls[0].candidate);
+      authorizedCommit = calls[0].candidate.commit;
     }
     calls.length = 0;
     acl.mockClear();
@@ -120,10 +126,22 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
   expect(wrongPack.status).toBe(409);
   expect(await wrongPack.json()).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
   expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json)).toEqual(before);
-  expect(() => runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow'])).toThrow();
+  expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(sourceCommit);
   raw.prepare('UPDATE workflow_specs SET pack_id = ? WHERE workflow_id = ?').run('pack', 'flow');
   input.expectedDraftToken = (await draft.read('flow', 'editor')).draftToken;
   await assertCalls([]);
+  // A stale wf lease must reject before the host policy or either write.
+  const staleCommit = runGit(seed, ['rev-parse', 'HEAD^']);
+  input.sourceCommit = staleCommit;
+  input.expectedSavedHead = staleCommit;
+  const stale = await post();
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
+  expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json)).toEqual(before);
+  expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(sourceCommit);
+  await assertCalls([]);
+  input.sourceCommit = sourceCommit;
+  input.expectedSavedHead = sourceCommit;
   if (withPolicy) {
     for (const rejectedPolicy of ['deny', 'throw'] as const) {
       policy = rejectedPolicy;
@@ -134,7 +152,7 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
       expect(body).not.toContain('sensitive policy error');
       expect(JSON.parse(body)).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
       expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json)).toEqual(before);
-      expect(() => runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow'])).toThrow();
+      expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(sourceCommit);
     }
     policy = 'allow';
   }
@@ -146,16 +164,20 @@ it.each(['absent', 'allow', 'late-deny', 'late-throw'])('uses real SQLite and Gi
     expect(body).not.toContain('sensitive late policy error');
     expect(JSON.parse(body)).toMatchObject({ outcome: 'partial', evidence: { db: 'confirmed', git: 'not_started' } });
     expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json)).toEqual(spec);
-    expect(() => runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow'])).toThrow();
+    expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(sourceCommit);
     return;
   }
   expect(response.status).toBe(200);
   const result = await response.json(); expect(result).toMatchObject({ outcome: 'confirmed', evidence: { db: 'confirmed', git: 'confirmed' } });
-  const commit = runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/saved/flow']); expect(commit).toBe(result.evidence.commit);
+  const commit = runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow']); expect(commit).toBe(result.evidence.commit);
+  if (withPolicy) expect(commit).toBe(authorizedCommit);
+  expect(commit).not.toBe(sourceCommit);
+  expect(runGit(root, ['--git-dir', bare, 'rev-parse', `${commit}^`])).toBe(sourceCommit);
+  expect(runGit(root, ['--git-dir', bare, 'tag', '--list'])).toBe('');
   const yaml = runGit(root, ['--git-dir', bare, 'show', `${commit}:packs/pack/workflows/flow.yaml`]);
   expect(JSON.parse(projectWorkflowSnapshotYaml('flow', yaml).specJson)).toEqual(spec);
   expect(runGit(root, ['--git-dir', bare, 'show', `${commit}:packs/pack/scripts/run.sh`])).toBe(script.trim());
-});
+}, 30_000);
 
 it.each(['missing identity', 'missing repository', 'invalid policy', 'undefined policy'])('disables a malformed host binding: %s', async (kind) => {
   const db = new SqliteDatabase(new Database(':memory:')); state.db = db;

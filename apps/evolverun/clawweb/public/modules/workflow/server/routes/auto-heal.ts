@@ -181,10 +181,8 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
         res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
         return;
       }
-      const settings = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
-      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo,
-        settings.gitConfig, settings.gitAuthor);
-      const result = await service.save({ workflowId, spec, packId: packId ?? null, diagnosisId: diagnosisId ?? null,
+      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo);
+      const result = await service.saveEditorFirstDraft({ workflowId, spec, packId: packId ?? null, diagnosisId: diagnosisId ?? null,
         note: note ?? null, actorId: actor, requestId, sourceCommit, expectedSavedHead,
         expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken });
       res.status(200).json(result);

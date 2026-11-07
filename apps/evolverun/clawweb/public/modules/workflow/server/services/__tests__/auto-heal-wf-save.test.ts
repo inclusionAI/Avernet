@@ -82,6 +82,8 @@ async function repositories(ctx: ReturnType<typeof createTestDb>) {
 
 import * as execution from '@avernet/clawweb-shared/server/services/git-execution';
 import { editorActiveDeploymentToken } from '../editor-active-deployment-token.js';
+import { EditorDraftCasService } from '../editor-draft-cas-service.js';
+import { WorkflowUnifiedSaveService } from '../workflow-unified-save-service.js';
 vi.setConfig({ testTimeout: 30_000 });
 describe('AutoHeal DB then wf save contract', () => {
   let ctx: ReturnType<typeof createTestDb>, remote: ReturnType<typeof createRemote>;
@@ -117,6 +119,30 @@ describe('AutoHeal DB then wf save contract', () => {
     expect(remoteGit('ls-tree', commit, 'scripts/run.sh')).toMatch(/^100755/);
     expect(remoteGit('tag', '-l')).toBe('');
   }
+  it('keeps the observed Git baseline through Editor first draft and unified save', async () => {
+    ctx.raw.prepare('DELETE FROM workflow_specs WHERE workflow_id = ?').run('wf-test');
+    await repos.history.insert({ workflowId: 'wf-test', packId: 'pack-1', deployNumber: 3, version: 1, action: 'deploy',
+      tagName: 'deploy/wf-test/#3', specJson: JSON.stringify(TEST_SPEC), isActive: true });
+    const active = (await repos.history.findActiveByWorkflowId('wf-test'))!;
+    const beforeRefs = remoteGit('show-ref');
+    const first = await service().saveEditorFirstDraft({ ...input(), expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 3, expectedActiveToken: editorActiveDeploymentToken('wf-test', active) });
+    expect(first).toEqual({ ok: true, saved: true, workflowId: 'wf-test', packId: 'pack-1' });
+    expect(remoteGit('show-ref')).toBe(beforeRefs);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/wf-test')).toBe(remote.candidateCommit);
+    const draft = new EditorDraftCasService(ctx.db, repos.permissions);
+    const token = (await draft.read('wf-test', 'user-1')).draftToken;
+    const repositoryId = 'a'.repeat(64);
+    const unified = new WorkflowUnifiedSaveService({ draft, repositoryId, config: remote.config,
+      canEdit: (workflowId, actorId) => repos.permissions.hasEditPermission(workflowId, actorId) });
+    const result = await unified.save({ requestId: 'editor-unified-1', workflowId: 'wf-test', actorId: 'user-1',
+      packId: 'pack-1', repositoryId, sourceVersion: 'current', sourceCommit: remote.candidateCommit,
+      expectedSavedHead: remote.candidateCommit, expectedDraftToken: token, specJson: JSON.stringify(edited), changes: [] }, 'user-1');
+    expect(result).toMatchObject({ outcome: 'confirmed', evidence: { db: 'confirmed', git: 'confirmed' } });
+    expect(result.evidence.commit).toBeTruthy();
+    expect(result.evidence.commit).not.toBe(remote.candidateCommit);
+    assertPack(result.evidence.commit!);
+  });
   it('commits an existing draft before pushing the full Pack', async () => {
     const pushes = interceptPush(); const result = await service().save(input());
     expect(result).toMatchObject({ ok: true, saved: true, branch: 'wf/wf-test', commit: expect.any(String) });
