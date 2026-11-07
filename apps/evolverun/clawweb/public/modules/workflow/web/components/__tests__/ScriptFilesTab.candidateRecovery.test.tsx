@@ -8,7 +8,7 @@ const file = (text: string) => ({ path: 'script.txt', contentBase64: btoa(text),
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('allows explicit recovery from two dirty versions with a dirty canvas without losing the other candidate', () => {
   const id = 'candidate-recovery-test', session = sessionFor(id)
-  const state = (version: 'current' | 'draft') => ({ snapshot: { workflowId: id, packId: 'pack', baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('original')] }, files: [file(`${version} candidate`)], loading: false, error: null, blocked: false, notice: null })
+  const state = (version: 'current' | 'draft') => ({ snapshot: { workflowId: id, packId: 'pack', baseRef: (version === 'current' ? `refs/tags/deploy/${id}/#1` : `origin/wf/${id}`), baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('original')] }, files: [file(`${version} candidate`)], loading: false, error: null, blocked: false, notice: null })
   publish(session, { ...session.state, version: 'draft', versions: { current: state('current'), draft: state('draft') } })
   vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true)
   render(<ScriptFilesTab workflowId={id} canvasDirty />)
@@ -26,7 +26,7 @@ it('allows explicit recovery from two dirty versions with a dirty canvas without
 
 it('exports the exact candidate before any discard', async () => {
   const id = 'candidate-export-test', session = sessionFor(id), blobs: Blob[] = []
-  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('base')] }
+  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('base')] }
   publish(session, { ...session.state, versions: { ...session.state.versions, draft: { snapshot, files: [file('keep exact bytes')], loading: false, error: null, blocked: false, notice: null } } })
   vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: (blob: Blob) => { blobs.push(blob); return 'blob:candidate' }, revokeObjectURL: vi.fn() }))
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -39,7 +39,7 @@ it('exports the exact candidate before any discard', async () => {
 
 it('does not discard either candidate when session state changes during confirmation', () => {
   const id = 'candidate-confirm-race-test', session = sessionFor(id)
-  const state = (version: 'current' | 'draft') => ({ snapshot: { workflowId: id, packId: 'pack', baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('original')] }, files: [file(`${version} candidate`)], loading: false, error: null, blocked: false, notice: null })
+  const state = (version: 'current' | 'draft') => ({ snapshot: { workflowId: id, packId: 'pack', baseRef: (version === 'current' ? `refs/tags/deploy/${id}/#1` : `origin/wf/${id}`), baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [file('original')] }, files: [file(`${version} candidate`)], loading: false, error: null, blocked: false, notice: null })
   publish(session, { ...session.state, version: 'current', versions: { current: state('current'), draft: state('draft') } })
   useEditorStore.getState().reset({ force: true })
   useEditorStore.getState().loadSpec({ id, title: 'Original canvas', version: '1', nodes: [] })

@@ -53,7 +53,7 @@ async function fixture(packId = 'pack', dbPackId: string | null = packId) {
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('address');
   const base = `http://127.0.0.1:${address.port}/flow/pack-version`;
   const save = (file: string, content: string) => fetch(base, { method: 'PUT', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sourceVersion: 'current', sourceCommit: sha, expectedSavedHead: null, requestId: 'identity-test-001',
+    body: JSON.stringify({ sourceVersion: 'draft', sourceCommit: sha, expectedSavedHead: sha, requestId: 'identity-test-001',
       changes: [{ path: file, operation: 'replace', contentBase64: Buffer.from(content).toString('base64'), mode: '100644' }] }) });
   const remote = (...args: string[]) => runGit(root, ['--git-dir', bare, ...args]);
   return { db, sha, save, remote };
@@ -77,11 +77,11 @@ it('accepts a rename already coordinated in the database and pushes the renamed 
   const result = await f.save('workflow.pack.yaml', 'id: renamed\nworkflows: [flow]\n');
   expect(result.status).toBe(200);
   const body = await result.json();
-  expect(body).toMatchObject({ saved: true, packId: 'renamed', branch: 'saved/flow' });
-  expect(f.remote('rev-parse', 'refs/heads/saved/flow')).toBe(body.commit);
+  expect(body).toMatchObject({ saved: true, packId: 'renamed', branch: 'wf/flow' });
+  expect(f.remote('rev-parse', 'refs/heads/wf/flow')).toBe(body.commit);
   expect(f.remote('show', `${body.commit}:packs/renamed/run.sh`)).toBe('original');
   expect(f.remote('show', `${body.commit}:packs/renamed/workflow.pack.yaml`)).toContain('id: renamed');
-  expect(f.remote('rev-parse', 'refs/heads/wf/flow')).toBe(f.sha);
+  expect(f.remote('branch', '--list', 'saved/flow')).toBe('');
   expect(await f.db.query('SELECT * FROM workflow_specs')).toEqual(before);
 }, 30000);
 
@@ -91,7 +91,7 @@ it('allows ordinary saves when final and database identities match, including le
   const result = await f.save('run.sh', 'changed\n');
   expect(result.status).toBe(200); const body = await result.json();
   expect(body).toMatchObject({ saved: true, packId: 'flow' });
-  expect(f.remote('rev-parse', 'refs/heads/saved/flow')).toBe(body.commit);
+  expect(f.remote('rev-parse', 'refs/heads/wf/flow')).toBe(body.commit);
   expect(f.remote('show', `${body.commit}:packs/flow/run.sh`)).toBe('changed');
   expect(await f.db.query('SELECT * FROM workflow_specs')).toEqual(before);
 }, 30000);
@@ -123,7 +123,7 @@ it('allows an ordinary script save with an explicit unchanged database identity'
   const result = await f.save('run.sh', 'explicit identity\n');
   expect(result.status).toBe(200); const body = await result.json();
   expect(body).toMatchObject({ saved: true, packId: 'pack' });
-  expect(f.remote('rev-parse', 'refs/heads/saved/flow')).toBe(body.commit);
+  expect(f.remote('rev-parse', 'refs/heads/wf/flow')).toBe(body.commit);
   expect(f.remote('show', `${body.commit}:packs/pack/run.sh`)).toBe('explicit identity');
   expect(await f.db.query('SELECT * FROM workflow_specs')).toEqual(before);
 }, 30000);

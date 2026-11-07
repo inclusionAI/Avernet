@@ -5,7 +5,7 @@ import { usePackCanvasSession } from '../usePackCanvasSession'
 import { sessionFor, updateVersion } from '../packVersionSession'
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: vi.fn() }))
 let sequence = 0
-const snapshot = (id: string, version: 'current' | 'draft') => ({ workflowId: id, packId: 'pack', baseRef: `origin/${version === 'draft' ? 'saved' : 'wf'}/${id}`, baseCommit: (version === 'draft' ? 'b' : 'a').repeat(40), draftHead: 'b'.repeat(40), versionFiles: [] })
+const snapshot = (id: string, version: 'current' | 'draft') => ({ workflowId: id, packId: 'pack', baseRef: (version !== 'draft' ? `refs/tags/deploy/${id}/#1` : `origin/wf/${id}`), baseCommit: (version === 'draft' ? 'b' : 'a').repeat(40), draftHead: 'b'.repeat(40), versionFiles: [] })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 it('defaults to draft but does not load it until enabled', async () => {
   const id = `lazy-pack-${++sequence}`, session = sessionFor(id)

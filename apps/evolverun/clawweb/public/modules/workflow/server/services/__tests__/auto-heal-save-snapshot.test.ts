@@ -14,6 +14,7 @@ import { WorkflowSpecRepository } from '../../repositories/workflow-spec-reposit
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import { createAutoHealRouter } from '../../routes/auto-heal.js';
 import { AutoHealSaveService } from '../auto-heal-save-service.js';
+import { mockPreparedSpecSave, preparedSaveConfig, preparedSaveAuthor, preparedSaveIdentity } from './auto-heal-prepared-save-fixture.js';
 
 const spec = { id: 'flow', version: '1', title: 'Original', nodes: [
   { id: 'start', title: 'Start', executor: { type: 'start' }, dependsOn: [] },
@@ -33,7 +34,8 @@ function post(router: Router, endpoint = 'save', body: unknown = input): Promise
 describe('AutoHeal existing draft transactional snapshot', () => {
   let dir: string, raw: Database.Database, writer: Database.Database, db: SqliteDatabase;
   let specs: WorkflowSpecRepository, permissions: BotWorkflowPermissionRepository;
-  const service = () => new AutoHealSaveService(db, specs, null, permissions);
+  let gitMock: ReturnType<typeof mockPreparedSpecSave>;
+  const service = () => new AutoHealSaveService(db, specs, null, permissions, preparedSaveConfig, preparedSaveAuthor);
   const row = () => writer.prepare('SELECT * FROM workflow_specs').all();
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'auto-heal-snapshot-'));
@@ -44,10 +46,16 @@ describe('AutoHeal existing draft transactional snapshot', () => {
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT NOT NULL,
       workflow_id TEXT NOT NULL, env TEXT NOT NULL, can_view INTEGER, can_execute INTEGER, can_edit INTEGER,
       gmt_create INTEGER NOT NULL, gmt_modified INTEGER NOT NULL);
-      CREATE TABLE clawweb_pack_operations (request_id TEXT, workflow_id TEXT, phase TEXT, lock_workflow_id TEXT);`);
+      CREATE TABLE clawweb_pack_operations (request_id TEXT, workflow_id TEXT, phase TEXT, lock_workflow_id TEXT);
+      CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER, description TEXT, updated_by TEXT, gmt_create INTEGER, gmt_modified INTEGER);`);
     db = new SqliteDatabase(raw); specs = new WorkflowSpecRepository(db); permissions = new BotWorkflowPermissionRepository(db);
     await specs.upsert('flow', 'pack', JSON.stringify(spec), 'owner');
     await permissions.upsert({ bot_id: null, bot_owner_id: 'owner', workflow_id: 'flow', can_view: 1, can_execute: 1, can_edit: 1 });
+    gitMock = mockPreparedSpecSave(candidate => {
+      const committed = row()[0] as { spec_json: string; pack_id: string };
+      expect(committed.pack_id).toBe(candidate.packId);
+      expect(JSON.parse(committed.spec_json)).toEqual(candidate.spec);
+    });
   });
   afterEach(async () => { vi.restoreAllMocks(); writer.close(); await db.close(); rmSync(dir, { recursive: true, force: true }); });
 
@@ -77,27 +85,29 @@ describe('AutoHeal existing draft transactional snapshot', () => {
   ])('preserves committed concurrent %s change', async (_name, sql) => {
     const gate = pauseBeforeTransaction();
     const pending = service().save(input);
-    await gate.ready; writer.exec(sql); const winner = row(); gate.resume();
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); writer.exec(sql); const winner = row(); gate.resume();
     await expect(pending).rejects.toMatchObject({ status: 409, code: 'DRAFT_CONFLICT' });
-    expect(row()).toEqual(winner);
+    expect(row()).toEqual(winner); expect(gitMock.push).not.toHaveBeenCalled();
   });
   it('distinguishes adjacent BIGINT identities that JavaScript cannot represent exactly', async () => {
     writer.exec('UPDATE workflow_specs SET id = 9007199254740992');
     const gate = pauseBeforeTransaction(); const pending = service().save(input);
-    await gate.ready; writer.exec('UPDATE workflow_specs SET id = 9007199254740993'); gate.resume();
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); writer.exec('UPDATE workflow_specs SET id = 9007199254740993'); gate.resume();
     await expect(pending).rejects.toMatchObject({ status: 409, code: 'DRAFT_CONFLICT' });
+    expect(gitMock.push).not.toHaveBeenCalled();
     expect(writer.prepare('SELECT CAST(id AS TEXT) AS id, title FROM workflow_specs').get())
       .toEqual({ id: '9007199254740993', title: 'Original' });
   });
   it('returns a sanitized conflict from the real save route', async () => {
     const gate = pauseBeforeTransaction();
     const router = createAutoHealRouter({ db, workflowSpecRepo: specs, deployHistoryRepo: new WorkflowDeployHistoryRepository(db),
-      botPermRepo: permissions, resolvePrincipal: async () => ({ actorId: 'owner' }), gitConfig: { remoteUrl: '', username: '', email: '' }, gitAuthor: author });
+      botPermRepo: permissions, resolvePrincipal: async () => ({ actorId: 'owner' }), gitConfig: preparedSaveConfig, gitAuthor: preparedSaveAuthor });
     const pending = post(router);
-    await gate.ready; writer.prepare('UPDATE workflow_specs SET spec_json = ?').run('private concurrent payload'); gate.resume();
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); writer.prepare('UPDATE workflow_specs SET spec_json = ?').run('private concurrent payload'); gate.resume();
     const response = await pending;
     expect(response).toEqual({ status: 409, body: { error: 'Save could not be completed', code: 'DRAFT_CONFLICT', requestId: undefined, branch: undefined, commit: undefined } });
     expect(JSON.stringify(response)).not.toContain('private concurrent payload');
+    expect(gitMock.push).not.toHaveBeenCalled();
     expect((row()[0] as { spec_json: string }).spec_json).toBe('private concurrent payload');
   });
   it('allows only one of two AutoHeal requests that read the same baseline', async () => {
@@ -119,18 +129,21 @@ describe('AutoHeal existing draft transactional snapshot', () => {
     ]);
     const winner = result.findIndex(r => r.status === 'fulfilled');
     expect((row()[0] as { title: string }).title).toBe(['First', 'Second'][winner]);
+    expect(gitMock.push).toHaveBeenCalledTimes(1);
   });
   it('retains inherited Bot permissions while rechecking live membership', async () => {
     writer.exec("UPDATE bot_workflow_permissions SET bot_id = 'shared', bot_owner_id = 'bot-owner'");
     const listBots = vi.fn().mockResolvedValue([{ botId: 'shared', ownerId: 'bot-owner' }]);
     permissions = new BotWorkflowPermissionRepository(db, { listBots });
     const gate = pauseBeforeTransaction(); const pending = service().save(input);
-    await gate.ready; listBots.mockResolvedValue([]); gate.resume();
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); listBots.mockResolvedValue([]); gate.resume();
     await expect(pending).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
     expect(listBots).toHaveBeenCalledTimes(2);
+    expect(gitMock.push).not.toHaveBeenCalled();
     expect((row()[0] as { title: string }).title).toBe('Original');
   });
-  it('saves through the ordinary route to SQLite only, then deploys that repair to Git and history', async () => {
+  it('saves the full Pack to wf, then deploys that exact repair to Git and history', async () => {
+    gitMock.prepare.mockRestore();
     vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
     vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1'); vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
     const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
@@ -145,44 +158,47 @@ describe('AutoHeal existing draft transactional snapshot', () => {
       writeFileSync(join(seed, 'workflow.pack.yaml'), stringify({ id: 'pack', version: '1.0.0', workflows: [{ id: 'flow', file: 'workflows/flow.yaml' }] }));
       writeFileSync(join(seed, 'workflows/flow.yaml'), stringify(spec)); writeFileSync(join(seed, 'scripts/run.sh'), 'untouched\n');
       git(seed, 'add', '.'); git(seed, 'commit', '-m', 'initial');
-      git(seed, 'push', remote, 'HEAD:refs/heads/main', 'HEAD:refs/heads/saved/flow', 'HEAD:refs/heads/wf/flow');
+      git(seed, 'push', remote, 'HEAD:refs/heads/main', 'HEAD:refs/heads/wf/flow');
       const remoteGit = (...args: string[]) => git(dir, '--git-dir', remote, ...args);
-      const originalCommit = remoteGit('rev-parse', 'refs/heads/saved/flow');
-      raw.exec(`CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER, description TEXT, updated_by TEXT, gmt_create INTEGER, gmt_modified INTEGER);
-        CREATE TABLE workflow_deploy_history (id INTEGER PRIMARY KEY, pack_id TEXT, workflow_id TEXT, deploy_number INTEGER, version INTEGER, tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT, owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER);
+      const originalCommit = remoteGit('rev-parse', 'refs/heads/wf/flow');
+      raw.exec(`CREATE TABLE workflow_deploy_history (id INTEGER PRIMARY KEY, pack_id TEXT, workflow_id TEXT, deploy_number INTEGER, version INTEGER, tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT, owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER);
         CREATE TABLE facade_bindings (command TEXT PRIMARY KEY, workflow_id TEXT, pack_id TEXT, remark TEXT, gmt_create INTEGER, gmt_modified INTEGER);`);
       const router = createAutoHealRouter({ db, workflowSpecRepo: specs, deployHistoryRepo: new WorkflowDeployHistoryRepository(db),
         botPermRepo: permissions, resolvePrincipal: async () => ({ actorId: 'owner' }),
         gitConfig: { remoteUrl: remote, username: author.name, email: author.email }, gitAuthor: author });
-      expect(await post(router)).toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: 'pack' } });
+      const saved = await post(router);
+      expect(saved).toMatchObject({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: 'pack', branch: 'wf/flow' } });
+      expect(saved.body.commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(saved.body.commit).not.toBe(originalCommit);
       expect(JSON.parse((row()[0] as { spec_json: string }).spec_json)).toEqual(input.spec);
-      expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(originalCommit);
-      expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(originalCommit);
+      expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(saved.body.commit);
       expect(writer.prepare('SELECT * FROM workflow_deploy_history').all()).toEqual([]);
       const result = await post(router, 'deploy', { workflowId: 'flow', packId: 'pack', requestId: 'snapshot-regression-01', autoRun: false });
       expect(result).toMatchObject({ status: 200, body: { ok: true, deployed: true, workflowId: 'flow', packId: 'pack', deployNumber: 1 } });
       expect(parse(remoteGit('show', `${result.body.commit}:workflows/flow.yaml`))).toEqual(input.spec);
       expect(remoteGit('show', `${result.body.commit}:scripts/run.sh`)).toBe('untouched');
-      expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(originalCommit);
+      expect(result.body.commit).toBe(saved.body.commit);
+      expect(remoteGit('rev-parse', 'refs/tags/deploy/flow/#1^{}')).toBe(saved.body.commit);
+      expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(saved.body.commit);
       expect(writer.prepare('SELECT deploy_number, is_active FROM workflow_deploy_history').all()).toEqual([{ deploy_number: 1, is_active: 1 }]);
     } finally { vi.unstubAllEnvs(); }
   }, 30_000);
   it('rechecks revocation before revealing a conflict', async () => {
     const gate = pauseBeforeTransaction(); const pending = service().save(input);
-    await gate.ready; writer.exec("UPDATE workflow_specs SET title = 'winner'; UPDATE bot_workflow_permissions SET can_edit = 0");
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); writer.exec("UPDATE workflow_specs SET title = 'winner'; UPDATE bot_workflow_permissions SET can_edit = 0");
     const winner = row(); gate.resume();
-    await expect(pending).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' }); expect(row()).toEqual(winner);
+    await expect(pending).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' }); expect(row()).toEqual(winner); expect(gitMock.push).not.toHaveBeenCalled();
   });
   it('rechecks the legacy guard inside the transaction', async () => {
     const gate = pauseBeforeTransaction(); const pending = service().save(input);
-    await gate.ready; writer.exec("INSERT INTO clawweb_pack_operations VALUES ('request', 'flow', 'unknown', 'flow')");
+    await Promise.race([gate.ready, pending.then(() => { throw new Error('Save completed before transaction'); })]); writer.exec("INSERT INTO clawweb_pack_operations VALUES ('request', 'flow', 'unknown', 'flow')");
     const winner = row(); gate.resume();
-    await expect(pending).rejects.toMatchObject({ status: 409, code: 'LEGACY_PACK_OPERATION_UNRESOLVED' }); expect(row()).toEqual(winner);
+    await expect(pending).rejects.toMatchObject({ status: 409, code: 'LEGACY_PACK_OPERATION_UNRESOLVED' }); expect(row()).toEqual(winner); expect(gitMock.push).not.toHaveBeenCalled();
   });
   it('rolls back a trigger that changes persisted fields after update', async () => {
     const before = row();
     writer.exec("CREATE TRIGGER corrupt AFTER UPDATE ON workflow_specs BEGIN UPDATE workflow_specs SET title = 'wrong' WHERE id = NEW.id; END");
-    await expect(service().save(input)).rejects.toThrow('Workflow update failed'); expect(row()).toEqual(before);
+    await expect(service().save(input)).rejects.toThrow('Workflow update failed'); expect(row()).toEqual(before); expect(gitMock.push).not.toHaveBeenCalled();
   });
   it.each(['mysql', 'zdas'] as const)('uses draft then permission locking before snapshot reads on %s', async dbType => {
     const statements: string[] = [];
@@ -190,8 +206,9 @@ describe('AutoHeal existing draft transactional snapshot', () => {
       transaction: fn => db.transaction(tx => fn({ ...wrapped, query: <T>(sql: string, params?: unknown[]) => {
         statements.push(sql); return tx.query<T>(sql.replace(/ FOR UPDATE$/, ''), params);
       }, exec: tx.exec.bind(tx) })) };
-    const svc = new AutoHealSaveService(wrapped, specs, null, new BotWorkflowPermissionRepository(wrapped));
-    expect(await svc.save(input)).toMatchObject({ saved: true });
+    const svc = new AutoHealSaveService(wrapped, specs, null, new BotWorkflowPermissionRepository(wrapped), preparedSaveConfig, preparedSaveAuthor);
+    expect(await svc.save(input)).toMatchObject({ saved: true, ...preparedSaveIdentity });
+    expect(gitMock.push).toHaveBeenCalledTimes(1);
     expect(statements[0]).toMatch(/FROM workflow_specs WHERE workflow_id = \? FOR UPDATE$/);
     expect(statements[1]).toMatch(/FROM bot_workflow_permissions WHERE workflow_id = \? ORDER BY id FOR UPDATE$/);
     expect(statements.slice(2).some(sql => sql.includes('clawweb_pack_operations'))).toBe(true);

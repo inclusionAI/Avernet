@@ -15,6 +15,13 @@ export interface WorkflowAutoHealSaveRequest extends AutoHealSaveRequest {
   sourceCommit?: string
   expectedSavedHead?: string | null
 }
+/** Ordinary saves attest DB plus the exact wf target; unified keeps its existing receipt shape. */
+type WorkflowAutoHealGitSaveResult = AutoHealSaveResult & { branch: `wf/${string}`; commit: string }
+export type WorkflowAutoHealSaveResult = (
+  | WorkflowAutoHealGitSaveResult & { unified?: false }
+  | AutoHealSaveResult & { unified: true; commit: string; draftToken: string }
+) & { requestId?: string }
+
 export interface WorkflowAutoHealDeployRequest extends AutoHealDeployRequest {
   requestId?: string
   candidateCommit?: string
@@ -226,10 +233,13 @@ async function postAutoHealWrite<T>(operation: 'save' | 'deploy' | 'editor-deplo
         throw error
       }
       if (!bodyRead) throw new Error('保存响应不可读取，结果未知；请人工核对，勿重试。')
-      const result = JSON.parse(text) as AutoHealSaveResult
+      const result = JSON.parse(text) as WorkflowAutoHealGitSaveResult
       // A malformed or mismatched acknowledgement is not proof of a terminal
       // write, even if it arrived with an HTTP success status.
-      if (!result || result.ok !== true || result.saved !== true || result.workflowId !== workflowId || typeof result.packId !== 'string' || !result.packId.trim() || (expectedPackId != null && result.packId !== expectedPackId)) {
+      if (!result || result.ok !== true || result.saved !== true || result.workflowId !== workflowId
+        || typeof result.packId !== 'string' || !result.packId.trim() || (expectedPackId != null && result.packId !== expectedPackId)
+        || result.branch !== `wf/${workflowId}` || typeof result.commit !== 'string'
+        || ![40, 64].includes(result.commit.length) || /[^a-f0-9]/.test(result.commit)) {
         abandonEditorWorkflowWrite(workflowId, owner)
         throw new Error('保存结果无效或工作流不匹配，写入结果未知；请人工核对，勿重试。')
       } else {
@@ -279,7 +289,7 @@ async function postAutoHealWrite<T>(operation: 'save' | 'deploy' | 'editor-deplo
           if ((value.code === 'DEPLOY_TREE_CONFLICT' || (operation === 'editor-deploy' || (input as WorkflowAutoHealDeployRequest).snapshotProtocol === 'saved-tree-v2') && (value.code === 'DEPLOY_BASELINE_MISSING' || value.code === 'DRAFT_CONFLICT'
             || (input as WorkflowAutoHealDeployRequest).snapshotProtocol === 'saved-tree-v2' && ['SNAPSHOT_DB_MISMATCH', 'CANDIDATE_NOT_SAVED', 'SAVE_REQUIRED', 'DEPLOY_BASELINE_STALE'].includes(String(value.code)))) && typeof requestId === 'string' && requestId.length > 0 && value.requestId === requestId) {
             rejectedDeployments.set(error, { workflowId, requestId })
-            error.message = value.code === 'DRAFT_CONFLICT' ? '数据库草稿已变化或不存在，请重新读取并确认部署。' : '已部署分支缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
+            error.message = value.code === 'DRAFT_CONFLICT' ? '数据库草稿已变化或不存在，请重新读取并确认部署。' : '当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
           }
         }
       } catch { /* an unrecognized response remains uncertain */ }
@@ -301,7 +311,7 @@ async function postLegacyAutoHealDeploy<T>(input: WorkflowAutoHealDeployRequest,
           const reply = value as { code?: unknown; requestId?: unknown }
           if (reply.code === 'DEPLOY_TREE_CONFLICT' && typeof input.requestId === 'string' && input.requestId.length > 0 && reply.requestId === input.requestId) {
             rejectedDeployments.set(error, { workflowId: input.workflowId, requestId: input.requestId })
-            error.message = '已部署分支缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
+            error.message = '当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
           }
         }
       } catch { /* malformed responses are uncertain */ }
@@ -382,7 +392,7 @@ async function postUnifiedAutoHealSave<T>(input: WorkflowAutoHealSaveRequest): P
 export function useAutoHealSave() {
   const queryClient = useQueryClient()
   const mutation = useMutation({
-    mutationFn: (input: WorkflowAutoHealSaveRequest) => postAutoHealWrite<AutoHealSaveResult & { requestId?: string }>('save', input),
+    mutationFn: (input: WorkflowAutoHealSaveRequest) => postAutoHealWrite<WorkflowAutoHealSaveResult>('save', input),
     // The caller owns the immutable candidate and requestId across explicit retries.
     retry: false,
     onSuccess: (_result, input) => {

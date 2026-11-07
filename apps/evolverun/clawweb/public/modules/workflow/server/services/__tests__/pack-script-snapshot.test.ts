@@ -6,12 +6,19 @@ import { rm } from 'node:fs/promises';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { readPackScriptSnapshot } from '../pack-script-snapshot.js';
+import { readPackScriptSnapshot as readSnapshot } from '../pack-script-snapshot.js';
 let repo: string;
 function git(...args: string[]): string { return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
 function put(file: string, content: string | Buffer) { const target = path.join(repo, file); mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, content); }
 function commit(): string { git('add', '-A'); git('commit', '-qm', 'fixture'); return git('rev-parse', 'HEAD'); }
-function ref(name: string, sha: string) { git('update-ref', `refs/remotes/origin/${name}/flow`, sha); }
+// Inventory fixtures publish the same commit as their wf baseline. Selection
+// with an independently advanced draft is covered by pack-version-wf-tag.test.ts.
+function ref(name: string, sha: string) {
+  git('update-ref', `refs/remotes/origin/${name}/flow`, sha);
+  if (name === 'wf') git('update-ref', 'refs/pack-version/active', sha);
+}
+const readPackScriptSnapshot: typeof readSnapshot = (dir, id, pack, version, options) => readSnapshot(dir, id, pack, version,
+  version === 'current' ? { ...options, activeTag: `deploy/${id}/#1` } : options);
 beforeEach(() => { repo = mkdtempSync(path.join(tmpdir(), 'pack-snapshot-')); git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); put('pack/workflow.pack.yaml', 'id: pack\nversion: 1\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n'); put('pack/workflows/flow.yaml', 'id: flow\nnodes: []\n'); put('pack/scripts/a.py', 'print(1)\r\n'); put('pack/scripts/sub/empty.sh', ''); commit(); });
 afterEach(async () => { vi.restoreAllMocks(); await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
 describe('readPackScriptSnapshot', () => {
@@ -25,11 +32,11 @@ describe('readPackScriptSnapshot', () => {
     rmSync(path.join(repo, 'pack/scripts'), { recursive: true }); ref('wf', commit());
     expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).skippedFiles).toEqual({ count: 0, paths: [], truncated: false });
   });
-  it('handles missing refs and rejects when both are absent', async () => { await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/not.found/i); const sha = git('rev-parse', 'HEAD'); ref('saved', sha); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/saved/flow'); });
-  it('chooses descendants in either direction and rejects divergence', async () => { const first = git('rev-parse', 'HEAD'); put('pack/scripts/a.py', 'new'); const second = commit(); ref('wf', first); ref('saved', second); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseCommit).toBe(second); ref('wf', second); ref('saved', first); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/wf/flow'); git('checkout', '-q', '--detach', first); put('pack/scripts/a.py', 'other'); const third = commit(); ref('saved', third); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/conflict/i); });
+  it('requires wf and never adopts a saved-only branch', async () => { await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/not.found/i); const sha = git('rev-parse', 'HEAD'); ref('saved', sha); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/not.found/i); ref('wf', sha); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/wf/flow'); });
+  it('ignores newer, older and divergent saved refs', async () => { const first = git('rev-parse', 'HEAD'); put('pack/scripts/a.py', 'new'); const second = commit(); ref('wf', first); ref('saved', second); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseCommit).toBe(first); ref('wf', second); ref('saved', first); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/wf/flow'); git('checkout', '-q', '--detach', first); put('pack/scripts/a.py', 'other'); const third = commit(); ref('saved', third); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseCommit).toBe(second); });
   it('reads the requested ref rather than the newer ancestor or descendant', async () => {
     const current = git('rev-parse', 'HEAD'); ref('wf', current);
-    put('pack/scripts/a.py', 'draft'); const draft = commit(); ref('saved', draft);
+    put('pack/scripts/a.py', 'draft'); const draft = commit(); ref('wf', draft); git('update-ref', 'refs/pack-version/active', current);
     expect((await readPackScriptSnapshot(repo, 'flow', 'pack', 'current')).baseCommit).toBe(current);
     expect((await readPackScriptSnapshot(repo, 'flow', 'pack', 'draft')).baseCommit).toBe(draft);
     await expect(readPackScriptSnapshot(repo, 'flow', 'pack', 'origin/wf/flow' as never)).rejects.toThrow('Invalid snapshot version');
@@ -256,7 +263,7 @@ describe('full version inventory', () => {
     git('add', '-A'); git('update-index', '--chmod=+x', 'pack/scripts/a.py'); git('commit', '-qm', 'inventory');
     const sha = git('rev-parse', 'HEAD'); ref('wf', sha);
     const snapshot = await readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true });
-    expect(snapshot.packPath).toBe('pack'); expect(snapshot.baseCommit).toBe(sha); expect(snapshot.draftHead).toBeNull();
+    expect(snapshot.packPath).toBe('pack'); expect(snapshot.baseCommit).toBe(sha); expect(snapshot.draftHead).toBe(sha);
     expect(snapshot.versionFiles).toContainEqual({ path: 'assets/data.bin', contentBase64: Buffer.from([0, 255, 42]).toString('base64'), mode: '100644' });
     expect(snapshot.versionFiles).toContainEqual({ path: 'scripts/a.py', contentBase64: Buffer.from('print(1)\r\n').toString('base64'), mode: '100755' });
     expect(snapshot.versionFiles?.map(file => file.path)).toEqual(expect.arrayContaining(['workflow.pack.yaml', 'workflows/flow.yaml', 'scripts/binary.py']));
@@ -265,7 +272,7 @@ describe('full version inventory', () => {
     git('mv', 'pack', 'tmp-pack'); mkdirSync(path.join(repo, 'packs')); git('mv', 'tmp-pack', 'packs/pack');
     const current = commit(); ref('wf', current); put('packs/pack/readme.md', 'draft'); const draft = commit(); ref('saved', draft);
     const result = await readPackScriptSnapshot(repo, 'flow', 'old', 'current', { includeVersionFiles: true });
-    expect(result.packPath).toBe('packs/pack'); expect(result.draftHead).toBe(draft); expect(result.baseCommit).toBe(current);
+    expect(result.packPath).toBe('packs/pack'); expect(result.draftHead).toBe(current); expect(result.baseCommit).toBe(current);
     expect(result.versionFiles?.some(file => file.path === 'readme.md')).toBe(false);
   });
   it('supports a repository-root Pack', async () => {

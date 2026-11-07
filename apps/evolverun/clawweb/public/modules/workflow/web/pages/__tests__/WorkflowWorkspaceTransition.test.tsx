@@ -110,7 +110,7 @@ describe('real workspace and embedded editor transitions', () => {
   it('confirms canvas and Pack risk once and leaves the Pack draft in memory', async () => {
     const packId = 'workspace-combined-pack', pack = sessionFor(packId)
     const file = { path: 'workflows/a.yaml', contentBase64: 'b2xk', mode: '100644' as const }
-    const snapshot = { workflowId: packId, packId, baseRef: `origin/wf/${packId}`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
+    const snapshot = { workflowId: packId, packId, baseRef: `refs/tags/deploy/${packId}/#1`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
     updateVersion(pack, 'current', { snapshot, files: [{ ...file, contentBase64: 'bmV3' }] })
     makeDraft(); mocks.get.mockResolvedValueOnce(B); mount(); chooseB()
     await waitFor(() => expect(state().spec?.id).toBe('b'))

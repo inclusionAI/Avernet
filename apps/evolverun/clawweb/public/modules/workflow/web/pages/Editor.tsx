@@ -1,8 +1,8 @@
 import DeploySnapshotReview, { type DeployReview } from '../components/DeploySnapshotReview'
 import WorkflowSnapshotReconciliation from '../components/WorkflowSnapshotReconciliation'
-import { assertWorkflowReconciliation, invalidateWorkflowReconciliation, workflowReconciliationIsCurrent } from '../api/workflowSnapshotReconciliation'
-import type { ReconciliationApproval, ReconciliationContext, ReconciliationReview } from '../api/workflowSnapshotReconciliation'
-import { supportsEditorReconciliation } from './editorReconciliationContract'
+import { assertWorkflowReconciliation } from '../api/workflowSnapshotReconciliation'
+import type { ReconciliationApproval } from '../api/workflowSnapshotReconciliation'
+import { useEditorMergeReview } from './useEditorMergeReview'
 import { bindEditorDeploymentWriteEpoch, isDeployPrePushConflict, isEditorDeploymentNotSent } from '../api/autoHealWrites'
 import { assertDeploymentAvailable, clearEditorConfirmedDeployment, clearEditorReconciledDeployment, clearRejectedDeployment, editorDeploymentMarkerMatches, finishEditorDeployment, isEditorDeploymentPending, markEditorDeploymentPending, readEditorDeploymentMarker, subscribeWorkflowDeploymentPending, workflowDeploymentPendingRevision } from '../editor/deploymentGuard'
 import { editorWorkflowSourceIsCurrent, readEditorWorkflowSource } from '../api/editorWorkflowSource'
@@ -84,15 +84,13 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [viewMode, setViewMode] = useState<ViewMode>('visual')
   const [workspaceTab, setWorkspaceTab] = useState<'workflow' | 'scripts'>('workflow')
   const [saveMessage, setSaveMessage] = useState<SaveMessage>(null)
-  const [mergeReview, setMergeReview] = useState<{ workflowId: string; sessionId: number; review: ReconciliationReview } | null>(null)
-  const mergeRequest = useRef(0)
   const [workflowSaving, setWorkflowSaving] = useState(false)
   const workflowSaveInFlight = useRef(false)
   const [showHistory, setShowHistory] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
   const [deploymentBaselineStatus, setDeploymentBaselineStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
-  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions'] } | null>(null)
+  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions'] } | null>(null)
   const candidateRequest = useRef(0)
   const switchRequest = useRef(0)
   // Invalidate before passive effects or pending promises can apply an obsolete
@@ -129,17 +127,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const { data: workflowSpec, databaseSpec: workflowDatabaseSpec, activeDeployNumber: workflowActiveDeployNumber, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '', editorSessionId)
 
   const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowDatabaseSpec)
-  const mergeAdapter = supportsEditorReconciliation(packCanvas) ? packCanvas : null
-  const visibleMerge = mergeReview?.workflowId === selectedWorkflowId && mergeReview.sessionId === editorSessionId ? mergeReview : null
-  let mergeCurrent: ReconciliationContext | null = null
-  if (visibleMerge && mergeAdapter) {
-    try { mergeCurrent = mergeAdapter.currentReconciliation(visibleMerge.review) } catch { invalidateWorkflowReconciliation(visibleMerge.review) }
-  }
-  useEffect(() => {
-    mergeRequest.current++
-    return () => { mergeRequest.current++ }
-  }, [selectedWorkflowId, editorSessionId])
-  useEffect(() => () => { if (mergeReview) invalidateWorkflowReconciliation(mergeReview.review) }, [mergeReview])
+  const { mergeAdapter, visibleMerge, mergeCurrent, wantsReview, preparing, openMergeReview, cancelMergeReview, clearMergeReview } = useEditorMergeReview(selectedWorkflowId, editorSessionId, packCanvas, workflowSaveInFlight, setWorkflowSaving, setSaveMessage, extractApiErrorMessage)
   // The combined-save message may add DB partial-success context to the same
   // Pack error. Show that richer message once, without hiding unrelated errors.
   const packErrors = [...new Set([packCanvas.error, packCanvas.versionError])].filter((error): error is string =>
@@ -295,7 +283,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         }
         if (!created.databaseSpec || !current.completeSave(created.requestedSpec, created.requestedSpec, sessionId, created.databaseSpec)) throw new Error('创建成功，但编辑器会话无法更新；草稿仍保留。')
         setSelectedWorkflowId(submitted.id)
-        setSaveMessage({ type: 'success', text: `已创建并保存到 saved commit ${created.result.commit}，尚未部署。保存期间的后续修改仍保留。` })
+        setSaveMessage({ type: 'success', text: `已创建并保存为保存版本 commit ${created.result.commit}，尚未部署。保存期间的后续修改仍保留。` })
         return
       }
       assertEditorWorkflowReadable(workflowId)
@@ -308,11 +296,12 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         }
       }
       if (selectedWorkflowRef.current !== workflowId || useEditorStore.getState().sessionId !== sessionId) return
+      clearMergeReview()
       if (result) setSaveMessage({ type: 'success', text: result.mode === 'unified'
-        ? `数据库和 saved 分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。保存期间的新改动仍需再次保存；节点位置仅在当前会话保留。`
+        ? `数据库和草稿(wf)分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。保存期间的新改动仍需再次保存；节点位置仅在当前会话保留。`
         : !result.dbSaved && !result.gitSaved && !result.remainingFileChanges
           ? '没有需要保存的更改。'
-        : `${result.dbSaved ? '工作流已保存到数据库。' : '本次未更新数据库工作流。'}${result.gitSaved ? `部分文件已保存到 saved commit ${result.commit}。` : '本次未更新 Git 文件。'}本次未将数据库中的工作流编排写入 Git 工作流 YAML；旧路径未更新 Git 工作流 YAML。${result.remainingFileChanges ? '仍有文件修改未保存，关闭或刷新页面会丢失；请先导出或处理。' : ''}尚未部署。保存期间的后续修改仍需再次保存。` })
+        : `${result.dbSaved ? '工作流已保存到数据库。' : '本次未更新数据库工作流。'}${result.gitSaved ? `部分文件已保存为保存版本 commit ${result.commit}。` : '本次未更新 Git 文件。'}本次未将数据库中的工作流编排写入 Git 工作流 YAML；旧路径未更新 Git 工作流 YAML。${result.remainingFileChanges ? '仍有文件修改未保存，关闭或刷新页面会丢失；请先导出或处理。' : ''}尚未部署。保存期间的后续修改仍需再次保存。` })
       else if (workflowId) {
         const state = sessionFor(workflowId).state
         const error = state.versions[state.version].error
@@ -332,27 +321,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     } finally {
       workflowSaveInFlight.current = false; setWorkflowSaving(false)
     }
-  }, [selectedWorkflowId, packCanvas, queryClient, setSaveMessage])
+  }, [selectedWorkflowId, packCanvas, queryClient, setSaveMessage, clearMergeReview])
 
-  // The page only presents a hook-owned review. The hook must revalidate all
-  // original tokens and file/session revisions immediately before its POST.
-  const openMergeReview = async () => {
-    if (!mergeAdapter || !selectedWorkflowId || workflowSaveInFlight.current) return
-    const workflowId = selectedWorkflowId, sessionId = useEditorStore.getState().sessionId, request = ++mergeRequest.current
-    workflowSaveInFlight.current = true; setWorkflowSaving(true)
-    try {
-      const review = await mergeAdapter.prepareReconciliation()
-      if (request !== mergeRequest.current || selectedWorkflowRef.current !== workflowId || useEditorStore.getState().sessionId !== sessionId
-        || review.workflowId !== workflowId || !workflowReconciliationIsCurrent(review, mergeAdapter.currentReconciliation(review))) {
-        mergeAdapter.cancelReconciliation(review); invalidateWorkflowReconciliation(review)
-        throw new Error('审阅准备期间工作流或基线已变化；未发送保存。')
-      }
-      setMergeReview({ workflowId, sessionId, review }); setSaveMessage(null)
-    } catch (cause) {
-      if (request === mergeRequest.current && selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId)
-        setSaveMessage({ type: 'error', text: `无法准备审阅：${extractApiErrorMessage(cause)}` })
-    } finally { workflowSaveInFlight.current = false; setWorkflowSaving(false) }
-  }
   const confirmMergeReview = async (approval: ReconciliationApproval) => {
     if (!visibleMerge || !mergeAdapter || workflowSaveInFlight.current) return
     const { workflowId, sessionId, review } = visibleMerge
@@ -364,13 +334,13 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       if (result.mode !== 'unified' || !result.dbSaved || !result.gitSaved) throw new Error('审阅结果未通过统一保存；请核对数据库与 Git。')
       if (result.dbSaved) for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) void queryClient?.invalidateQueries({ queryKey: key })
       if (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId) {
-        setSaveMessage({ type: 'success', text: `数据库和 saved 分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。` })
+        setSaveMessage({ type: 'success', text: `数据库和草稿(wf)分支已确认保存工作流及文件，commit ${result.commit}。尚未部署。` })
       }
-      invalidateWorkflowReconciliation(review); setMergeReview(null)
+      clearMergeReview()
     } catch (cause) {
       if (cause instanceof PackCanvasPartialSaveError && cause.workflowId === workflowId) for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) void queryClient?.invalidateQueries({ queryKey: key })
       if (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: extractApiErrorMessage(cause) })
-      invalidateWorkflowReconciliation(review); setMergeReview(null)
+      clearMergeReview()
     } finally { workflowSaveInFlight.current = false; setWorkflowSaving(false) }
   }
 
@@ -598,17 +568,18 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       if (!proof || typeof proof !== 'object' || Array.isArray(proof)) throw new Error('部署能力不可验证')
       const state = proof as Record<string, unknown>
       if (state.protocol !== 'editor-deployment-state-v1' || state.workflowId !== selectedWorkflowId || state.packId !== snapshot.packId
+        || snapshot.baseRef !== `origin/wf/${selectedWorkflowId}` || snapshot.draftHead !== snapshot.baseCommit
         || state.canDeploy !== true || state.savedCommit !== snapshot.baseCommit || typeof packPath !== 'string') {
-        throw new Error('部署能力未获授权或 saved Pack 基线已变化')
+        throw new Error('部署能力未获授权或草稿(wf) Pack 基线已变化')
       }
       let active: ReturnType<typeof validateSnapshot> | null = null
       if (currentResult.ok) {
         active = validateSnapshot(currentResult.value, selectedWorkflowId, 'current')
         if (packPath !== (currentResult.value as { packPath?: unknown }).packPath || active.packId !== snapshot.packId || state.activeCommit !== active.baseCommit) {
-          throw new Error('生效版和 saved Pack 范围或基线不一致，无法完整核对。')
+          throw new Error('生效版和草稿(wf) Pack 范围或基线不一致，无法完整核对。')
         }
       } else if (state.activeCommit !== null) {
-        throw new Error('无法证明 wf 不存在')
+        throw new Error('无法证明当前生效版本不存在')
       }
       const priorFiles = active?.versionFiles ?? []
       const prior = new Map(priorFiles.map(file => [file.path, file]))
@@ -642,12 +613,12 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       // revision/session checks still reject concurrent changes at confirmation.
       const freshBaseline = !versions.current.loading && !versions.draft.loading && !versions.current.snapshot && !versions.draft.snapshot
         && versions.current.files.length === 0 && versions.draft.files.length === 0
-      if (!baseline && !freshBaseline) throw new Error(`saved文件快照与已读取基线不一致；请先核对版本`)
+      if (!baseline && !freshBaseline) throw new Error(`草稿文件快照与已读取基线不一致；请先核对版本`)
       packWorkflow(snapshot.versionFiles, selectedWorkflowId, snapshot.packId)
-      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions })
+      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions })
       setShowDeployConfirm(true)
     } catch (err) {
-      if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和 saved 文件，已阻止部署：${extractApiErrorMessage(err)}。` })
+      if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和草稿文件，已阻止部署：${extractApiErrorMessage(err)}。` })
     }
   }, [selectedWorkflowId, isDirty, hasPendingEdits, validationErrors, setSaveMessage])
 
@@ -819,7 +790,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           className={`border-b border-border px-4 py-2 text-sm ${deploymentPending ? 'bg-muted text-muted-foreground' : 'bg-destructive/10 text-destructive'}`}
         >
           <p>{deploymentPending ? '部署操作正在进行，不能清除核对标记或重复部署。' : visibleDeployment.pending ? '部署结果未知，请人工核对 Git 和数据库。' : visibleDeployment.error}</p>
-          <p className="break-all">requestId：{visibleDeployment.input.requestId} · saved commit：{visibleDeployment.input.candidateCommit}</p>
+          <p className="break-all">requestId：{visibleDeployment.input.requestId} · 保存版本 commit：{visibleDeployment.input.candidateCommit}</p>
           {!deploymentPending && (
             <button
               type="button"
@@ -838,14 +809,15 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         </div>
       )}
 
-      {saveMessage?.type === 'error' && /Git 工作流 YAML 与数据库基线不一致或不可比较/.test(saveMessage.text) && !visibleMerge && (
+      {(wantsReview || (saveMessage?.type === 'error' && /Git 工作流 YAML 与数据库基线不一致或不可比较/.test(saveMessage.text))) && !visibleMerge && (
         mergeAdapter ? <button type="button" disabled={workflowSaving} onClick={openMergeReview} className="mx-4 my-2 rounded border border-input px-3 py-2 text-sm">核对数据库和 Git 差异…</button>
           : <p role="status" className="px-4 py-2 text-sm">差异审阅保存能力尚不可用；未发送写入，请保留草稿。</p>
       )}
+      {preparing && <div role="status" aria-label="差异审阅准备状态">正在核对数据库和 Git 差异</div>}
       {visibleMerge && mergeAdapter && (mergeCurrent
         ? <WorkflowSnapshotReconciliation review={visibleMerge.review} current={mergeCurrent} busy={workflowSaving}
-            onConfirm={confirmMergeReview} onCancel={() => { mergeAdapter.cancelReconciliation(visibleMerge.review); invalidateWorkflowReconciliation(visibleMerge.review); setMergeReview(null) }} />
-        : <section role="alert">审阅基线不可用或已变化；请取消后重新核对。<button type="button" onClick={() => { mergeAdapter.cancelReconciliation(visibleMerge.review); setMergeReview(null) }}>取消</button></section>)}
+            onConfirm={confirmMergeReview} onCancel={cancelMergeReview} />
+        : <section role="alert">审阅基线不可用或已变化；请取消后重新核对。<button type="button" onClick={cancelMergeReview}>取消</button></section>)}
       {actionError && <div role="alert" className="flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError?.(null)} aria-label="关闭编辑提示">×</button></div>}
       {visibleRecovery && deploymentRecoveryOpen && !deploymentPending && (
         <DeploymentRecoveryDialog
@@ -992,8 +964,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-3 text-sm text-gray-600">即将部署以下 saved 完整快照（含工作流 YAML、脚本与其他文件）；服务端将校验 YAML 与数据库草稿一致。</p>
-            <p className="mt-2 break-all text-xs text-gray-600">Pack：{deployCandidate.packId}<br />saved commit：{deployCandidate.commit}<br />已核对 wf commit：{deployCandidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{deployCandidate.fileCount} 个</p>
+            <p className="mt-3 text-sm text-gray-600">即将部署以下草稿(wf)完整快照（含工作流 YAML、脚本与其他文件）；服务端将校验 YAML 与数据库草稿一致。</p>
+            <p className="mt-2 break-all text-xs text-gray-600">Pack：{deployCandidate.packId}<br />保存版本 commit：{deployCandidate.commit}<br />当前生效 tag：{deployCandidate.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{deployCandidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{deployCandidate.fileCount} 个</p>
             <p className="mt-2 text-xs text-gray-500">部署不会用数据库改写 YAML；未保存的编辑不会部署。Git 与数据库写入不是跨存储原子操作，结果不确定时须人工核对。</p>
             <DeploySnapshotReview changes={deployCandidate.changes} reviewed={deployReviewed} onReviewedChange={setDeployReviewed} />
             <div className="mt-5 flex justify-end gap-2">

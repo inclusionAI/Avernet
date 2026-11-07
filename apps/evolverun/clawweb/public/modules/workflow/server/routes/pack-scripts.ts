@@ -62,9 +62,8 @@ export function createPackScriptsRouter(deps: PackScriptsDependencies): Router {
         const snapshot = selectedVersion === undefined
           ? await deps.readSnapshot(row.workflow_id, packId)
           : await deps.readSnapshot(row.workflow_id, packId, selectedVersion);
-        const expectedRef = selectedVersion === 'current' ? `origin/wf/${row.workflow_id}` : `origin/saved/${row.workflow_id}`;
         if (!snapshot || snapshot.workflowId !== row.workflow_id || !validId(snapshot.packId)
-          || (selectedVersion === undefined ? snapshot.packId !== packId : snapshot.baseRef !== expectedRef)) {
+          || (selectedVersion === undefined ? snapshot.packId !== packId || snapshot.baseRef !== `origin/wf/${workflowId}` : !validSnapshotRef(snapshot.baseRef, workflowId, selectedVersion))) {
           res.status(503).json({ error: 'Snapshot unavailable', code: 'SERVICE_UNAVAILABLE' }); return;
         }
         // Versioned Packs can have historical identities different from the DB row.
@@ -88,4 +87,10 @@ export function createPackScriptsRouter(deps: PackScriptsDependencies): Router {
     }
   });
   return router;
+}
+
+function validSnapshotRef(ref: string, id: string, version: 'current' | 'draft'): boolean {
+  if (version === 'draft') return ref === `origin/wf/${id}`;
+  const prefix = `refs/tags/deploy/${id}/#`;
+  return typeof ref === 'string' && ref.startsWith(prefix) && /^[1-9][0-9]*$/.test(ref.slice(prefix.length));
 }

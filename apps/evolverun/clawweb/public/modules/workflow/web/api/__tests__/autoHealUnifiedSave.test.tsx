@@ -17,7 +17,7 @@ function setupReads() {
   mock.mockImplementation(async url => {
     if (url === '/api/auto-heal/capabilities') return json({ autoHealUnifiedSave: 'v1' })
     if (String(url).endsWith('/editor-draft')) return json({ workflowId: id, packId: 'pack', specJson: JSON.stringify({ id, nodes: [] }), draftToken: token })
-    if (String(url).endsWith('/pack-version?version=draft')) return json({ workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, versionFiles: [] })
+    if (String(url).endsWith('/pack-version?version=draft')) return json({ workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, versionFiles: [] })
     throw new Error('unexpected request')
   })
 }
@@ -85,14 +85,14 @@ it('rejects inconsistent Pack identity and a missing saved-ref baseline', async 
   mock.mockImplementation(async url => {
     if (url === '/api/auto-heal/capabilities') return json({ autoHealUnifiedSave: 'v1' })
     if (String(url).endsWith('/editor-draft')) return json({ workflowId: id, packId: 'different-pack', specJson: JSON.stringify({ id, nodes: [] }), draftToken: token })
-    return json({ workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, versionFiles: [] })
+    return json({ workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, versionFiles: [] })
   })
   await expect(readAutoHealUnifiedBaseline(id)).rejects.toThrow('基线不一致')
   expect(mock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
 })
 
 it('does not route existing createOnly through unified save', async () => {
-  mock.mockImplementation(async () => json({ ok: true, saved: true, workflowId: id, packId: 'pack' }))
+  mock.mockImplementation(async () => json({ ok: true, saved: true, workflowId: id, packId: 'pack', branch: `wf/${id}`, commit: oid }))
   const { result } = renderHook(useAutoHealSave, { wrapper })
   await act(async () => { await result.current.mutateAsync({ workflowId: id, packId: 'pack', spec: spec(), createOnly: true, requestId, expectedSavedHead: null }) })
   expect(mock).toHaveBeenCalledTimes(1)
@@ -224,13 +224,13 @@ it('binds snapshot deployment to the exact saved receipt and forbids mutation or
   expect(mock).toHaveBeenCalledTimes(count)
 })
 
-it('uses current and a null saved head only after an exact missing-snapshot response, then sends those CAS values', async () => {
+it('uses current and a null 草稿(wf) head only after an exact missing-snapshot response, then sends those CAS values', async () => {
   const current = 'f'.repeat(40)
   mock.mockImplementation(async url => {
     if (url === '/api/auto-heal/capabilities') return json({ autoHealUnifiedSave: 'v1' })
     if (String(url).endsWith('/editor-draft')) return json({ workflowId: id, packId: 'pack', specJson: JSON.stringify({ id, nodes: [] }), draftToken: token })
     if (String(url).endsWith('/pack-version?version=draft')) return json({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }, 404)
-    if (String(url).endsWith('/pack-version?version=current')) return json({ workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: current, draftHead: null, versionFiles: [] })
+    if (String(url).endsWith('/pack-version?version=current')) return json({ workflowId: id, packId: 'pack', baseRef: `refs/tags/deploy/${id}/#1`, baseCommit: current, draftHead: null, versionFiles: [] })
     if (url === '/api/auto-heal/unified-save') return json(receipt())
     throw new Error('unexpected request')
   })
@@ -265,7 +265,7 @@ it.each([
   const prior = mock.getMockImplementation()!
   mock.mockImplementation(async (url, init) => {
     if (String(url).endsWith('/pack-version?version=draft')) return json({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }, 404)
-    if (String(url).endsWith('/pack-version?version=current')) return json({ workflowId: id, packId: fields.packId, baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: fields.draftHead, versionFiles: [] })
+    if (String(url).endsWith('/pack-version?version=current')) return json({ workflowId: id, packId: fields.packId, baseRef: `refs/tags/deploy/${id}/#1`, baseCommit: oid, draftHead: fields.draftHead, versionFiles: [] })
     return prior(url, init)
   })
   await expect(readAutoHealUnifiedBaseline(id)).rejects.toThrow('基线不一致')
@@ -279,5 +279,14 @@ it.each([401, 403, 404, 503])('fails closed when current snapshot returns HTTP %
     return prior(url, init)
   })
   await expect(readAutoHealUnifiedBaseline(id)).rejects.toThrow()
+  expect(mock.mock.calls.some(([url]) => url === '/api/auto-heal/unified-save' || url === '/api/auto-heal/save')).toBe(false)
+})
+
+it.each([null, oid, 'e'.repeat(40)])('rejects a legacy saved source regardless of its wf target head %s', async draftHead => {
+  const prior = mock.getMockImplementation()!
+  mock.mockImplementation(async (url, init) => String(url).endsWith('/pack-version?version=draft')
+    ? json({ workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead, versionFiles: [] }) : prior(url, init))
+  await expect(readAutoHealUnifiedBaseline(id)).rejects.toThrow('Invalid response')
+  expect(mock.mock.calls.some(([url]) => String(url).includes('version=current'))).toBe(false)
   expect(mock.mock.calls.some(([url]) => url === '/api/auto-heal/unified-save' || url === '/api/auto-heal/save')).toBe(false)
 })

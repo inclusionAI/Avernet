@@ -9,16 +9,16 @@ import { savePackVersionToRemote, readPackOperationFromRemote, reconcilePackOper
 const sha = 'a'.repeat(40), saved = 'b'.repeat(40);
 const db = { query: vi.fn(async (sql: string) => sql.includes('clawweb_pack_operations') ? [] : sql.includes('workflow_specs') ? [{ workflow_id: 'flow', pack_id: 'pack' }] : [{ max_version: 0 }]), exec: vi.fn(), transaction: vi.fn() } as never;
 const input = { db, workflowId: 'flow', actorId: 'editor', gitConfig: { remoteUrl: 'fixture', username: '', token: '', email: '' },
-  gitAuthor: { name: 'Fixture', email: 'fixture@example.invalid' }, sourceVersion: 'current' as const,
-  sourceCommit: sha, expectedSavedHead: null, requestId: 'request-001', changes: [{ path: 'scripts/run.py', operation: 'replace' as const, contentBase64: 'YQ==', mode: '100644' as const }] };
+  gitAuthor: { name: 'Fixture', email: 'fixture@example.invalid' }, sourceVersion: 'draft' as const,
+  sourceCommit: sha, expectedSavedHead: sha, requestId: 'request-001', changes: [{ path: 'scripts/run.py', operation: 'replace' as const, contentBase64: 'YQ==', mode: '100644' as const }] };
 
 describe('Pack file save without operation table', () => {
-  it('pushes prepared files only to saved, with no database journal access', async () => {
+  it('pushes prepared files only to wf, with no database journal access', async () => {
     calls.settings.mockResolvedValue({ gitConfig: input.gitConfig, gitAuthor: input.gitAuthor });
-    calls.push.mockResolvedValue({ branch: 'saved/flow', commit: saved });
-    calls.prepare.mockImplementation(async (_input, callback) => callback({ workflowId: 'flow', workflowFile: 'workflows/flow.yaml', packId: 'pack', branch: 'saved/flow', commit: saved }, calls.push));
+    calls.push.mockResolvedValue({ branch: 'wf/flow', commit: saved });
+    calls.prepare.mockImplementation(async (_input, callback) => callback({ workflowId: 'flow', workflowFile: 'workflows/flow.yaml', packId: 'pack', branch: 'wf/flow', commit: saved }, calls.push));
     const result = await savePackVersionToRemote(input);
-    expect(result).toMatchObject({ saved: true, branch: 'saved/flow', commit: saved, requestId: 'request-001' });
+    expect(result).toMatchObject({ saved: true, branch: 'wf/flow', commit: saved, requestId: 'request-001' });
     expect(calls.push).toHaveBeenCalledOnce();
     expect(calls.prepare).toHaveBeenCalledWith(expect.objectContaining({ preserveWorkflowContent: true }), expect.any(Function));
     expect(vi.mocked(db.query).mock.calls.some(([sql]) => String(sql).includes('clawweb_pack_operations'))).toBe(true); expect(db.exec).not.toHaveBeenCalled();

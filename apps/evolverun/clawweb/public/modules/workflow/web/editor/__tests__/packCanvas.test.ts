@@ -9,7 +9,7 @@ const file = (path: string, value: unknown): PackVersionFile => ({ path, mode: '
 function files(packId: unknown = 'pack'): PackVersionFile[] {
   return [file('workflow.pack.yaml', { id: packId, workflows: [{ id: spec.id, file: 'flows/custom.yaml' }] }), file('flows/custom.yaml', spec)]
 }
-const snapshot: Snapshot = { workflowId: spec.id, packId: 'pack', baseRef: 'origin/wf/workflow', baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: files() }
+const snapshot: Snapshot = { workflowId: spec.id, packId: 'pack', baseRef: 'refs/tags/deploy/workflow/#1', baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: files() }
 
 it.each(['renamed', 'new-pack', 'new_pack.v2', 'A'.repeat(128)])('accepts a legal candidate Pack ID %s without weakening read snapshot validation', packId => {
   expect(packManifest(files(packId), spec.id)).toEqual({ packId, path: 'flows/custom.yaml' })

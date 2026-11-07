@@ -37,7 +37,7 @@ async function verifySavedWithinDeadline(verify: (result: SaveResult) => Promise
 }
 
 function verifiedResult(value: Partial<SaveResult>, id: string, attempt: SaveAttempt): SaveResult {
-  if (!value || value.branch !== `saved/${id}` || typeof value.commit !== 'string' || !oid.test(value.commit)
+  if (!value || value.branch !== `wf/${id}` || typeof value.commit !== 'string' || !oid.test(value.commit)
     || value.requestId !== attempt.requestId || value.packId !== attempt.expectedPackId
     || !Number.isSafeInteger(value.version) || value.version! < 1) throw { status: 200 }
   return value as SaveResult
@@ -47,7 +47,7 @@ function verifiedResult(value: Partial<SaveResult>, id: string, attempt: SaveAtt
 function complete(session: Session, id: string, attempt: SaveAttempt, result: SaveResult) {
   const snapshot = attempt.snapshot
   const candidate = attempt.files.map(file => ({ ...file }))
-  const saved: Snapshot = { ...snapshot, packId: result.packId, baseRef: `origin/saved/${id}`, baseCommit: result.commit, draftHead: result.commit, versionFiles: candidate }
+  const saved: Snapshot = { ...snapshot, packId: result.packId, baseRef: `origin/wf/${id}`, baseCommit: result.commit, draftHead: result.commit, versionFiles: candidate }
   const source = session.state.versions[attempt.input.sourceVersion]
   const localFiles = (attempt as SaveAttempt & { localFiles?: typeof attempt.files }).localFiles ?? attempt.files
   const sourceChanged = diff(localFiles, source.files).length > 0
@@ -83,7 +83,7 @@ async function submit(session: Session, id: string, attempt: SaveAttempt): Promi
       try { await verifySavedWithinDeadline(attempt.verifySaved, result) }
       catch {
         if (session.saveRequest !== token) return null
-        publish(session, { ...session.state, postSaveVerificationError: `Git 已成功保存到 saved commit ${result.commit}，但数据库原始文档或 Pack 身份已变化或无法核对；请人工核对数据库和 Git，勿盲目重试。本页会话已锁定。` })
+        publish(session, { ...session.state, postSaveVerificationError: `Git 已成功保存为保存版本 commit ${result.commit}，但数据库原始文档或 Pack 身份已变化或无法核对；请人工核对数据库和 Git，勿盲目重试。本页会话已锁定。` })
       }
     }
     if (session.saveRequest !== token) return null
@@ -104,7 +104,7 @@ async function submit(session: Session, id: string, attempt: SaveAttempt): Promi
     }
     const errorMessage = failure.preOperationConflict ? '保存未开始：服务端检测到并发请求。当前候选仍保留，请修改后使用新的 requestId 重试。'
       : failure.conflict ? '保存冲突：远端版本已变化。更改仍在本地，请重新读取后处理。'
-      : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请先人工核对 Git 的 saved 分支，不要盲目重试。'
+      : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请先人工核对 Git 的 草稿(wf)分支，不要盲目重试。'
       : '保存结果无法确认，可能已部分完成；更改仍在本地，请先人工核对 Git 分支。'
     if (failure.preOperationConflict) {
       // The server did not create this operation, so there is nothing safe to
@@ -171,7 +171,7 @@ export async function savePackVersion(session: Session, id: string, version: Ver
 
 /** Without a durable journal a retry may perform a second write. */
 export async function retryPackVersionSave(_session: Session, _id: string): Promise<SaveResult | null> {
-  throw new Error('未配置持久操作日志，无法安全自动重试；请先人工核对 saved 分支。')
+  throw new Error('未配置持久操作日志，无法安全自动重试；请先人工核对 草稿(wf)分支。')
 }
 
 /** GET is observation-only; recovery is always an explicit CSRF-guarded POST. */
@@ -195,7 +195,7 @@ export async function reconcilePackVersionSave(session: Session, id: string, rec
         try { await verifySavedWithinDeadline(pending.attempt.verifySaved, result) }
         catch {
           if (session.saveRequest !== token || session.state.reconciliation?.token !== pending.token) return
-          publish(session, { ...session.state, postSaveVerificationError: `Git 已成功保存到 saved commit ${result.commit}，但数据库原始文档或 Pack 身份已变化或无法核对；请人工核对数据库和 Git，勿盲目重试。本页会话已锁定。` })
+          publish(session, { ...session.state, postSaveVerificationError: `Git 已成功保存为保存版本 commit ${result.commit}，但数据库原始文档或 Pack 身份已变化或无法核对；请人工核对数据库和 Git，勿盲目重试。本页会话已锁定。` })
         }
       }
       if (session.saveRequest !== token || session.state.reconciliation?.token !== pending.token) return

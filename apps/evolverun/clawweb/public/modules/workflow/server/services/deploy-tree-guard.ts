@@ -24,7 +24,8 @@ async function treeEntries(dir: string, commit: string): Promise<Map<string, Tre
   return entries;
 }
 
-/** Preserve all existing paths and modes. For a nested selected Pack, also preserve
+/** The caller supplies the active history tag's commit, never the saved wf draft.
+ * Preserve all existing paths and modes. For a nested selected Pack, also preserve
  * outside leaf object IDs (including symlinks and gitlinks). A root Pack has no
  * outside directory, so this cannot protect content belonging to other concerns. */
 export async function assertDeploymentTreePreserved(dir: string, active: string, candidate: string, requestId: string, packPath: string): Promise<void> {

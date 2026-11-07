@@ -49,7 +49,7 @@ it('creates a valid initial node and retains edits made while the save is in fli
   await waitFor(() => expect(useEditorStore.getState()._savedSpec?.title).toBe('Original'))
   expect(useEditorStore.getState().spec?.title).toBe('Later edit')
   expect(useEditorStore.getState().isDirty).toBe(true)
-  expect(screen.getByText(/已创建并保存到 saved commit/)).toBeInTheDocument()
+  expect(screen.getByText(/已创建并保存为保存版本 commit/)).toBeInTheDocument()
 })
 it('preserves the new draft and does not mark it saved on an unknown outcome', async () => {
   const id = newDraft(); mocks.create.mockRejectedValue(new Error('结果尚未确认，请勿重试'))
@@ -76,5 +76,5 @@ it('does not replace another editor session when a create response arrives late'
   await act(async () => { finish({ result: { commit: 'a'.repeat(40) }, requestedSpec: submitted }) })
   expect(useEditorStore.getState().spec?.id).toBe('other-session')
   expect(useEditorStore.getState()._savedSpec?.id).toBe('other-session')
-  expect(screen.queryByText(/已创建并保存到 saved commit/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/已创建并保存为保存版本 commit/)).not.toBeInTheDocument()
 })

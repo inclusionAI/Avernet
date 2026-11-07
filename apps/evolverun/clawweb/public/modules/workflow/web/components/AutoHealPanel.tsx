@@ -333,7 +333,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
               setDiagnosisResult(null)
               setSaveResult(null)
               setPhase('error')
-              setErrorMessage('已部署分支缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，部署已阻止。请联系有权限的维护人员核对并修复，然后重新诊断并保存。')
+              setErrorMessage('当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，部署已阻止。请联系有权限的维护人员核对并修复，然后重新诊断并保存。')
               return
             } catch (clearError) {
               setLegacyBlocked(true)

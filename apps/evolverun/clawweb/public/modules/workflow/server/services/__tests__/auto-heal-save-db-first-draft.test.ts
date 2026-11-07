@@ -13,7 +13,7 @@ import { AutoHealSaveService } from '../auto-heal-save-service.js';
 import { editorActiveDeploymentToken, InvalidEditorActiveDeploymentTokenInputError } from '../editor-active-deployment-token.js';
 import * as activeTokenHelper from '../editor-active-deployment-token.js';
 import * as git from '../clawflows-git-client.js';
-import * as specGit from '../pack-spec-save.js';
+import { mockPreparedSpecSave, preparedSaveIdentity, preparedSaveConfig, preparedSaveAuthor } from './auto-heal-prepared-save-fixture.js';
 
 const published: WorkflowSpec = { id: 'flow', version: '7', title: 'Published', nodes: [
   { id: 'start', title: 'Start', executor: { type: 'start' }, dependsOn: [] },
@@ -25,10 +25,10 @@ const notFound = { status: 404, code: 'WORKFLOW_NOT_FOUND' };
 const forbidden = { status: 403, code: 'FORBIDDEN' };
 const conflict = { status: 409, code: 'WORKFLOW_ALREADY_EXISTS' };
 
-describe('AutoHeal first database-only draft from active history', () => {
+describe('AutoHeal first-draft DB and policy checks inside prepared publication', () => {
   let raw: Database.Database, db: SqliteDatabase;
   let specs: WorkflowSpecRepository, history: WorkflowDeployHistoryRepository, permissions: BotWorkflowPermissionRepository;
-  const service = () => new AutoHealSaveService(db, specs, history, permissions);
+  const service = () => new AutoHealSaveService(db, specs, history, permissions, preparedSaveConfig, preparedSaveAuthor);
   const drafts = () => raw.prepare('SELECT * FROM workflow_specs ORDER BY id').all();
   // Compare every persisted value, including the original spec_json bytes and timestamps.
   const historyBytes = () => JSON.stringify(raw.prepare('SELECT * FROM workflow_deploy_history ORDER BY id').all());
@@ -52,17 +52,20 @@ describe('AutoHeal first database-only draft from active history', () => {
     await history.insert({ workflowId: 'flow', packId: 'older-pack', deployNumber: 8, version: 6,
       action: 'deploy', tagName: 'deploy/flow/#8', specJson: '{ "title": "older" }', ownerId: 'publisher' });
     await permissions.upsert({ bot_id: null, bot_owner_id: 'editor', workflow_id: 'flow', can_view: 1, can_execute: 0, can_edit: 1 });
-    // Even an unavailable Git installation / remote must be irrelevant to this path.
+    // Isolate transport, not the real DB transaction, active token or permission policy.
     vi.spyOn(git, 'createTempRepo').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(git, 'cloneClawflows').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'executeGit').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'withGitOperation').mockRejectedValue(new Error('Git unavailable'));
-    vi.spyOn(specGit, 'withPreparedWorkflowSpec').mockRejectedValue(new Error('Git unavailable'));
+    mockPreparedSpecSave(input => {
+      expect(raw.inTransaction).toBe(false);
+      expect(raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get(input.workflowId)).toEqual({ spec_json: JSON.stringify(input.spec) });
+    });
   });
   afterEach(async () => {
     try {
       for (const spy of [git.createTempRepo, git.cloneClawflows, gitExecution.executeGit,
-        gitExecution.withGitOperation, specGit.withPreparedWorkflowSpec]) expect(spy).not.toHaveBeenCalled();
+        gitExecution.withGitOperation]) expect(spy).not.toHaveBeenCalled();
     } finally { vi.restoreAllMocks(); await db.close(); }
   });
   function beforeTransaction(change: () => void) {
@@ -77,7 +80,7 @@ describe('AutoHeal first database-only draft from active history', () => {
   it.each([undefined, null, 'published-pack'])('inserts the applied document with DB pack identity (packId=%s)', async packId => {
     const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
     const lookup = vi.spyOn(history, 'findActiveByWorkflowId');
-    expect(await service().save({ ...input(), packId })).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack' });
+    expect(await service().save({ ...input(), packId })).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack', ...preparedSaveIdentity });
     expect(lookup).toHaveBeenCalledWith('flow');
     expect(drafts()).toHaveLength(1);
     expect(await specs.findByWorkflowId('flow')).toMatchObject({ pack_id: 'published-pack', owner_id: 'editor',
@@ -222,7 +225,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     expect(drafts()).toEqual([]);
   });
 
-  it('still updates an existing draft without consulting history or Git', async () => {
+  it('updates an existing draft through prepared publication without consulting history', async () => {
     await specs.upsert('flow', 'draft-pack', JSON.stringify(published), 'editor');
     await specs.updateVersion('flow', 7);
     const beforeHistory = historyBytes();
@@ -230,7 +233,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     const configured = new AutoHealSaveService(db, specs, history, permissions,
       { remoteUrl: 'https://invalid.example/repo', username: 'test', email: 'test@example.invalid', token: '' },
       { name: 'Test', email: 'test@example.invalid' });
-    expect(await configured.save(input())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'draft-pack' });
+    expect(await configured.save(input())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'draft-pack', ...preparedSaveIdentity });
     expect(await specs.findByWorkflowId('flow')).toMatchObject({ spec_json: JSON.stringify(applied), version: 7 });
     expect(lookup).not.toHaveBeenCalled(); expect(historyBytes()).toBe(beforeHistory);
   });
@@ -438,9 +441,10 @@ describe('AutoHeal first database-only draft from active history', () => {
     listBots.mockClear();
     const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
     expect(await service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 })).toMatchObject({ saved: true });
-    expect(listBots).toHaveBeenCalledTimes(2);
+    expect(listBots).toHaveBeenCalledTimes(3); // preflight, transaction and post-commit/pre-push
     expect(listBots).toHaveBeenNthCalledWith(1, 'editor', 'all');
     expect(listBots).toHaveBeenNthCalledWith(2, 'editor', 'all');
+    expect(listBots).toHaveBeenNthCalledWith(3, 'editor', 'all');
     expect((await specs.findByWorkflowId('flow'))?.owner_id).toBe('editor');
     expect(historyBytes()).toBe(beforeHistory); expect(permissionBytes()).toBe(beforePermissions);
   });
@@ -454,7 +458,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     });
     const before = historyBytes();
     await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 })).rejects.toMatchObject(forbidden);
-    expect(listBots).toHaveBeenCalledTimes(2);
+    expect(listBots).toHaveBeenCalledTimes(2); // rejected in the transaction; no post-commit push check
     expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
   });
 
@@ -505,7 +509,7 @@ describe('AutoHeal first database-only draft from active history', () => {
   });
 
   it('does not change the explicit createOnly Git protocol', async () => {
-    await expect(service().save({ ...input(), createOnly: true })).rejects.toMatchObject({
+    await expect(new AutoHealSaveService(db, specs, history, permissions).save({ ...input(), createOnly: true })).rejects.toMatchObject({
       status: 503, code: 'CREATE_ONLY_UNAVAILABLE_GIT_OWNERSHIP_UNVERIFIED',
     });
     const configured = new AutoHealSaveService(db, specs, history, permissions,

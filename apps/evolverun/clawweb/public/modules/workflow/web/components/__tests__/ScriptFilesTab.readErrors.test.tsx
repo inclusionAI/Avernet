@@ -23,7 +23,7 @@ function snapshot(id: string, canWrite?: boolean) {
   return {
     workflowId: id,
     packId: 'pack',
-    baseRef: `origin/saved/${id}`,
+    baseRef: `origin/wf/${id}`,
     baseCommit: COMMIT,
     draftHead: COMMIT,
     versionFiles: [{ path: 'scripts/a', contentBase64: 'b2xk', mode: '100755' }],

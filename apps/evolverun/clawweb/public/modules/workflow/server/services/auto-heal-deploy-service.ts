@@ -1,21 +1,23 @@
-/** Deploy the database workflow with the Pack at saved, or its own existing wf ref if unsaved.
+/** Deploy the exact saved wf snapshot after matching the database workflow.
  * There is no durable operation journal: a Git/DB partial result requires manual reconciliation. */
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { stringify as stringifyYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import type { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import { WorkflowSpecRepository, type WorkflowSpecRow } from '../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../repositories/workflow-deploy-history-repository.js';
-import { cloneClawflows, createTempRepo, getMaxDeployNumberFromGitTags, removeTempRepo,
+import { initClawflowsReadRepo, createTempRepo, removeTempRepo,
   type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
 import { prepareDeployCandidate, pushPreparedDeployment, type PreparedDeployment } from './auto-heal-deploy-git.js';
 import { gitOidPattern, readPreparedPackMetadata, readPreparedRemoteRefs, preparedGitRunner, validPackGitId } from './pack-git-prepared.js';
-import { candidateProjection, PackOperationError, requestIdentity } from './pack-operation-service.js';
+import { candidateProjection, legacyWorkflowDocument, PackOperationError, requestIdentity } from './pack-operation-service.js';
 import { assertNoUnresolvedLegacyPackOperation } from './legacy-pack-operation-guard.js';
 import { assertDeploymentTreePreserved } from './deploy-tree-guard.js';
+import { resolveActiveDeploymentGit, type ActiveDeploymentGitRecord } from './active-deployment-git.js';
 import { editorDraftToken } from './editor-draft-token.js';
 import { assertLosslessJson } from './lossless-json-validation.js';
 import { compareWorkflowSnapshotYaml, projectWorkflowSnapshotJson } from './workflow-snapshot-projection.js';
@@ -47,29 +49,6 @@ function workflowYaml(row: WorkflowSpecRow): string {
   } catch { throw new PackOperationError(400, 'INVALID_WORKFLOW'); }
 }
 
-/** Build an immutable tree from the observed workflow ref, staging only the selected YAML bytes without filters. */
-async function combineSourceAndYaml(dir: string, workflowId: string, source: string, content: string, author: GitAuthor) {
-  const metadata = await readPreparedPackMetadata(dir, workflowId, source);
-  const file = `${metadata.packPath}${metadata.workflowFile}`;
-  const { text } = preparedGitRunner(dir);
-  await text(['read-tree', source]);
-  const staged = await text(['ls-files', '--stage', '--', `:(literal)${file}`]);
-  const mode = staged.slice(0, 6);
-  if (!['100644', '100755'].includes(mode)) throw new Error('Unsafe workflow file mode');
-  if (Buffer.byteLength(content) > 1024 * 1024 || content.includes('\0')) throw new PackOperationError(400, 'INVALID_WORKFLOW');
-  // Outside the checkout: never follow paths from the remote tree on the filesystem.
-  const temp = path.join(dir, '.git', `workflow-${randomUUID()}`);
-  await writeFile(temp, content, { mode: 0o600, flag: 'wx' });
-  const oid = await text(['hash-object', '-w', '--no-filters', '--', temp]);
-  if (!gitOidPattern.test(oid)) throw new Error('Invalid workflow blob');
-  await text(['update-index', '--add', '--cacheinfo', mode, oid, file]);
-  const tree = await text(['write-tree']);
-  const commit = await text(['-c', `user.name=${author.name}`, '-c', `user.email=${author.email}`,
-    'commit-tree', tree, '-p', source, '-m', `Prepare workflow ${workflowId}`]);
-  if (!gitOidPattern.test(commit)) throw new Error('Invalid candidate commit');
-  return { commit, metadata };
-}
-
 /** Nested Pack previews contain only Pack-relative files; never publish unseen outside changes. */
 async function assertNoOutsideChanges(dir: string, active: string, candidate: string, packPath: string, requestId: string): Promise<void> {
   const data = await preparedGitRunner(dir).bytes(active
@@ -79,6 +58,33 @@ async function assertNoOutsideChanges(dir: string, active: string, candidate: st
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   const names = data.length ? data.subarray(0, -1).toString('binary').split('\0').map(name => decoder.decode(Buffer.from(name, 'binary'))) : [];
   if (names.some(name => !name.startsWith(packPath))) throw new PackOperationError(409, 'DEPLOY_TREE_CONFLICT', requestId);
+}
+
+/** Fetch only the observed wf object graph, never clone/discover other branches. */
+async function fetchWfObjects(dir: string, config: ClawFlowsGitConfig, commit: string): Promise<void> {
+  if (commit.length === 64) {
+    // Only this newly initialized, owned temporary Git directory is replaced.
+    await rm(path.join(dir, '.git'), { recursive: true, force: true });
+    await initClawflowsReadRepo(dir, config, 'sha256');
+  }
+  await preparedGitRunner(dir).text(['fetch', '--no-tags', '--no-write-fetch-head', '--refmap=', 'origin', commit]);
+}
+
+/** Tag names are enough for allocation; fetching unrelated branches/tags is unnecessary. */
+async function maxRemoteDeployNumber(dir: string, workflowId: string): Promise<number> {
+  const prefix = `refs/tags/deploy/${workflowId}/#`;
+  const raw = await preparedGitRunner(dir).text(['ls-remote', '--refs', '--tags', 'origin', `${prefix}*`]);
+  let max = 0;
+  for (const line of raw ? raw.split('\n') : []) {
+    const [oid, name, extra] = line.split('\t');
+    if (!gitOidPattern.test(oid) || typeof name !== 'string' || !name.startsWith(prefix) || extra !== undefined) throw new Error('Invalid deployment tags');
+    const number = name.slice(prefix.length);
+    if (!/^[0-9]+$/.test(number)) continue;
+    const value = Number(number);
+    if (!Number.isSafeInteger(value)) throw new Error('Invalid deployment number');
+    max = Math.max(max, value);
+  }
+  return max;
 }
 
 async function checkFacades(db: IDatabase, workflowId: string, commands: string[] | undefined, lock = '') {
@@ -107,18 +113,24 @@ export class AutoHealDeployService {
     return withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
       const dir = await createTempRepo();
       try {
-        await cloneClawflows(dir, this.gitConfig);
-        const savedRef = `refs/heads/saved/${workflowId}`, activeRef = `refs/heads/wf/${workflowId}`;
-        const refs = await readPreparedRemoteRefs(dir, [savedRef, activeRef]);
-        const active = await this.db.query('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
-        const after = await readPreparedRemoteRefs(dir, [savedRef, activeRef]);
-        if (refs.get(savedRef) !== after.get(savedRef) || refs.get(activeRef) !== after.get(activeRef)) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE');
-        const savedCommit = refs.get(savedRef), activeCommit = refs.get(activeRef);
+        await initClawflowsReadRepo(dir, this.gitConfig);
+        const savedRef = `refs/heads/wf/${workflowId}`;
+        const refs = await readPreparedRemoteRefs(dir, [savedRef]);
+        const savedCommit = refs.get(savedRef);
         if (!savedCommit) throw new PackOperationError(409, 'SAVE_REQUIRED');
-        if (!activeCommit && active.length) throw new PackOperationError(409, 'DEPLOY_BASELINE_MISSING');
+        await fetchWfObjects(dir, this.gitConfig, savedCommit);
+        const active = await this.db.query<ActiveDeploymentGitRecord>('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
+        if (active.length > 1) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE');
+        const baseline = await resolveActiveDeploymentGit(dir, workflowId, active[0] ?? null);
+        const activeCommit = baseline?.commit ?? null;
         const metadata = await readPreparedPackMetadata(dir, workflowId, savedCommit);
         if (metadata.packId !== packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH');
         if (this.authorizeSnapshotDeploy) await this.assertSnapshotDeployAuthorized({ actorId, workflowId, packId, candidateCommit: savedCommit });
+        const after = await readPreparedRemoteRefs(dir, [savedRef]);
+        const afterActive = await this.db.query<ActiveDeploymentGitRecord>('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
+        const afterBaseline = await resolveActiveDeploymentGit(dir, workflowId, afterActive[0] ?? null);
+        if (refs.get(savedRef) !== after.get(savedRef) || JSON.stringify(active) !== JSON.stringify(afterActive)
+          || JSON.stringify(baseline) !== JSON.stringify(afterBaseline)) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE');
         return { protocol: 'editor-deployment-state-v1', workflowId, packId, canDeploy: true, savedCommit, activeCommit: activeCommit ?? null };
       } finally { await removeTempRepo(dir); }
     });
@@ -157,7 +169,8 @@ export class AutoHealDeployService {
     if (!row) throw new PackOperationError(404, 'WORKFLOW_NOT_FOUND');
     await assertNoUnresolvedLegacyPackOperation(this.db, workflowId);
     const operationRequestId = requestId ?? requestIdentity(input.requestId, randomUUID);
-    const content = workflowYaml(row);
+    try { assertLosslessJson(row.spec_json); }
+    catch { throw new PackOperationError(400, 'INVALID_WORKFLOW', operationRequestId); }
     let pushStarted = false, pushConfirmed = false, dbConfirmed = false;
     let prepared: PreparedDeployment | undefined;
     let result: AutoHealDeployResult;
@@ -165,73 +178,73 @@ export class AutoHealDeployService {
       result = await withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
         const dir = await createTempRepo();
         try {
-          await cloneClawflows(dir, this.gitConfig);
-          const savedRef = `refs/heads/saved/${workflowId}`, activeRef = `refs/heads/wf/${workflowId}`;
-          const refs = await readPreparedRemoteRefs(dir, [savedRef, activeRef]);
-          // Legacy workflows may have a published wf but no saved ref. Never use the
-          // default branch or a caller-supplied object as provenance for their Pack.
-          const activeCommit = refs.get(activeRef) ?? '';
-          if (exactSnapshot && expectedActiveCommit !== activeCommit) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
-          // A missing wf is a first deployment only if the observed DB baseline
-          // also has no active release. This observation is not atomic with Git.
-          const missingWfActive = preserveTree && !activeCommit
-            ? await this.db.query('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId])
-            : undefined;
-          if (missingWfActive?.length) throw new PackOperationError(409, 'DEPLOY_BASELINE_MISSING', operationRequestId);
-          const source = exactSnapshot ? refs.get(savedRef) : refs.get(savedRef) ?? activeCommit;
+          await initClawflowsReadRepo(dir, this.gitConfig);
+          const savedRef = `refs/heads/wf/${workflowId}`;
+          const refs = await readPreparedRemoteRefs(dir, [savedRef]);
+          const source = refs.get(savedRef);
           if (!source) throw new PackOperationError(409, 'SAVE_REQUIRED', operationRequestId);
           if (input.candidateCommit !== undefined && input.candidateCommit !== source) throw new PackOperationError(409, 'CANDIDATE_NOT_SAVED', operationRequestId);
+          await fetchWfObjects(dir, this.gitConfig, source);
+          const active = await this.db.query<ActiveDeploymentGitRecord>('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
+          if (active.length > 1) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
+          const baseline = await resolveActiveDeploymentGit(dir, workflowId, active[0] ?? null);
+          const activeCommit = baseline?.commit ?? '';
+          if (exactSnapshot && expectedActiveCommit !== activeCommit) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
           if (preserveTree) await this.assertEditorDraftCurrent(row, expectedDraftToken!, operationRequestId);
-          const { commit, metadata } = exactSnapshot
-            ? { commit: source, metadata: await readPreparedPackMetadata(dir, workflowId, source) }
-            : await combineSourceAndYaml(dir, workflowId, source, content, this.author);
-          if (exactSnapshot) {
-            try {
-              const dbDocument: unknown = JSON.parse(projectWorkflowSnapshotJson(workflowId, row.spec_json).specJson);
-              if (!compareWorkflowSnapshotYaml(workflowId, metadata.content, dbDocument).matches) {
-                throw new PackOperationError(409, 'SNAPSHOT_DB_MISMATCH', operationRequestId);
-              }
-            } catch (error) {
-              if (error instanceof PackOperationError) throw error;
-              throw new PackOperationError(409, 'SNAPSHOT_DB_MISMATCH', operationRequestId);
-            }
-          }
-          if (exactSnapshot && metadata.packPath) await assertNoOutsideChanges(dir, activeCommit, source, metadata.packPath, operationRequestId);
-          if (preserveTree && activeCommit) await assertDeploymentTreePreserved(dir, activeCommit, commit, operationRequestId, metadata.packPath);
-          if ((input.packId && input.packId !== metadata.packId) || (row.pack_id ?? row.workflow_id) !== metadata.packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH', operationRequestId);
-          if (preserveTree && (!exactSnapshot || this.authorizeSnapshotDeploy)) await this.assertSnapshotDeployAuthorized({ actorId, workflowId, packId: metadata.packId, candidateCommit: commit });
+          const commit = source;
+          const metadata = await readPreparedPackMetadata(dir, workflowId, source);
           let projection: Projection;
-          try { projection = candidateProjection(workflowId, exactSnapshot ? metadata.content : content, metadata.manifestContent, preserveTree ? 'strict' : 'legacy-autoheal'); }
+          try { projection = candidateProjection(workflowId, metadata.content, metadata.manifestContent, preserveTree ? 'strict' : 'legacy-autoheal'); }
           catch (error) {
-            // A content-only database wrapper with an invalid embedded YAML is
-            // an invalid stored workflow, not a caller-facing identity conflict.
-            // Keep the direct projection helper's precise mismatch contract.
+            // Keep candidate validation errors separate from DB/candidate mismatches.
             if (error instanceof PackOperationError && error.code === 'WORKFLOW_ID_MISMATCH') {
               throw new PackOperationError(400, 'INVALID_WORKFLOW', operationRequestId);
             }
             throw error;
           }
+          try {
+            const parsed = JSON.parse(row.spec_json) as Record<string, unknown>;
+            if (!preserveTree || (typeof parsed.content === 'string' && !Array.isArray(parsed.nodes))) {
+              // Preserve the existing AutoHeal document grammar, not Editor normalization.
+              // Both inputs are losslessly validated; matching never rewrites the candidate.
+              let dbDocument: Record<string, unknown>;
+              try { dbDocument = legacyWorkflowDocument(workflowId, workflowYaml(row)); }
+              catch { throw new PackOperationError(400, 'INVALID_WORKFLOW', operationRequestId); }
+              const candidateDocument = legacyWorkflowDocument(workflowId, metadata.content);
+              if (!isDeepStrictEqual(candidateDocument, dbDocument)) throw new Error('Mismatch');
+            } else {
+              const dbDocument: unknown = JSON.parse(projectWorkflowSnapshotJson(workflowId, row.spec_json).specJson);
+              if (!compareWorkflowSnapshotYaml(workflowId, metadata.content, dbDocument).matches) throw new Error('Mismatch');
+            }
+          } catch (error) {
+            if (error instanceof PackOperationError && error.code === 'INVALID_WORKFLOW') throw error;
+            throw new PackOperationError(409, 'SNAPSHOT_DB_MISMATCH', operationRequestId);
+          }
+          if (metadata.packPath) await assertNoOutsideChanges(dir, activeCommit, source, metadata.packPath, operationRequestId);
+          if (activeCommit) await assertDeploymentTreePreserved(dir, activeCommit, commit, operationRequestId, metadata.packPath);
+          if ((input.packId && input.packId !== metadata.packId) || (row.pack_id ?? row.workflow_id) !== metadata.packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH', operationRequestId);
+          if (preserveTree && (!exactSnapshot || this.authorizeSnapshotDeploy)) await this.assertSnapshotDeployAuthorized({ actorId, workflowId, packId: metadata.packId, candidateCommit: commit });
           await checkFacades(this.db, workflowId, projection.facadeCommands);
-          const active = missingWfActive ?? await this.db.query('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
           const version = Number(await this.deployHistoryRepo.getLatestVersion(workflowId)) + 1;
           const maxRows = await this.db.query<{ n: number | null }>('SELECT MAX(deploy_number) AS n FROM workflow_deploy_history WHERE workflow_id = ?', [workflowId]);
-          const deployNumber = Math.max(Number(maxRows[0]?.n ?? 0), await getMaxDeployNumberFromGitTags(dir, workflowId)) + 1;
+          const deployNumber = Math.max(Number(maxRows[0]?.n ?? 0), await maxRemoteDeployNumber(dir, workflowId)) + 1;
           prepared = await prepareDeployCandidate(dir, workflowId, commit, activeCommit, deployNumber, version, this.author);
           if (preserveTree) await this.assertEditorDraftCurrent(row, expectedDraftToken!, operationRequestId);
-          if (exactSnapshot) {
-            const latest = await readPreparedRemoteRefs(dir, [savedRef, activeRef]);
-            if (latest.get(savedRef) !== source) throw new PackOperationError(409, 'CANDIDATE_NOT_SAVED', operationRequestId);
-            if ((latest.get(activeRef) ?? '') !== activeCommit) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
-          }
-          if (exactSnapshot && !activeCommit) {
-            const latestActive = await this.db.query('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
-            if (latestActive.length) throw new PackOperationError(409, 'DEPLOY_BASELINE_MISSING', operationRequestId);
-          }
+          const latestActive = await this.db.query<ActiveDeploymentGitRecord>('SELECT * FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1 ORDER BY id', [workflowId]);
+          if (JSON.stringify(latestActive) !== JSON.stringify(active)) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
+          const latestBaseline = await resolveActiveDeploymentGit(dir, workflowId, latestActive[0] ?? null);
+          if (JSON.stringify(latestBaseline) !== JSON.stringify(baseline)) throw new PackOperationError(409, 'DEPLOY_BASELINE_STALE', operationRequestId);
+          const latestRow = await this.specRepo.findByWorkflowId(workflowId);
+          if (!latestRow || JSON.stringify(latestRow) !== JSON.stringify(row)) throw new PackOperationError(409, 'DRAFT_CONFLICT', operationRequestId);
           // Recheck edit and any configured host candidate policy immediately
           // before publication. The host policy is mandatory for non-v2 only.
           if (preserveTree) {
             if (await this.botPermRepo!.hasEditPermission(workflowId, actorId) !== true) throw new PackOperationError(403, 'FORBIDDEN', operationRequestId);
             if (!exactSnapshot || this.authorizeSnapshotDeploy) await this.assertSnapshotDeployAuthorized({ actorId, workflowId, packId: metadata.packId, candidateCommit: commit });
+          }
+          if (!preserveTree) {
+            const [execute, edit] = await Promise.all([this.botPermRepo!.hasExecutePermission(workflowId, actorId), this.botPermRepo!.hasEditPermission(workflowId, actorId)]);
+            if (!execute && !edit) throw new PackOperationError(403, 'FORBIDDEN', operationRequestId);
           }
           pushStarted = true;
           await pushPreparedDeployment(dir, prepared);

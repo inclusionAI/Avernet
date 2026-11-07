@@ -1,4 +1,4 @@
-/** Save a validated workflow draft in workflow_specs; publication is separate. */
+/** Save a validated workflow draft in workflow_specs and its full Git Pack. */
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import type { WorkflowSpec } from '../workflow.js';
@@ -10,7 +10,7 @@ import type { ClawFlowsGitConfig, GitAuthor } from './clawflows-git-client.js';
 import { validPackGitId, gitOidPattern } from './pack-git-prepared.js';
 import { PackOperationError } from './pack-operation-service.js';
 import { assertNoUnresolvedLegacyPackOperation } from './legacy-pack-operation-guard.js';
-import { withPreparedWorkflowSpec } from './pack-spec-save.js';
+import { withPreparedWorkflowSpec, WorkflowSaveRequiredError } from './pack-spec-save.js';
 import { PackCandidateConflictError, PackCandidateOutcomeUnknownError } from './pack-candidate-save.js';
 import { editorActiveDeploymentToken, InvalidEditorActiveDeploymentTokenInputError, type EditorActiveDeploymentTokenRow } from './editor-active-deployment-token.js';
 import { fingerprintWorkflowSnapshotSaveRequest, type WorkflowSnapshotSaveRequest } from './workflow-snapshot-save-request.js';
@@ -41,7 +41,7 @@ export type AutoHealUnifiedSaveResponse = Readonly<{
   evidence: WorkflowUnifiedSaveResult['evidence']; reconciliationRequired: boolean;
 }>;
 
-/** DB-only drafts have no Git identity; createOnly also initializes the saved ref. */
+/** A successful save has both a committed database draft and a Git identity. */
 export type AutoHealSaveResult = { ok: true; saved: true; workflowId: string; packId: string; branch?: string; commit?: string };
 
 // Cast numeric identities and timestamps in SQL, before a driver can round a
@@ -171,7 +171,7 @@ export class AutoHealSaveService {
     const specJson = JSON.stringify(submitted);
 
     if (!['sqlite', 'mysql', 'zdas'].includes(this.db.dbType)) throw new PackOperationError(503, 'DRAFT_STORAGE_UNAVAILABLE');
-    await this.db.transaction(async tx => {
+    return this.saveDraftWithGit(input, submitted, packId, async tx => {
       if (tx.dbType !== this.db.dbType) throw new PackOperationError(503, 'DRAFT_STORAGE_UNAVAILABLE');
       // Publication also locks the draft first. Lock grants before any consistent
       // permission read so MySQL repeatable-read sees committed revocations.
@@ -197,8 +197,8 @@ export class AutoHealSaveService {
           && /^0+$/.test(written.gmt_modified.slice(String(now).length + 1))));
       if (!written || !modifiedMatches || !sameDraft(written, { ...current, spec_json: specJson, pack_id: packId, title,
         owner_id: input.actorId, gmt_modified: written.gmt_modified })) throw new Error('Workflow update failed');
+      return written;
     });
-    return { ok: true, saved: true, workflowId: input.workflowId, packId };
   }
 
   /** Restore only an already-published workflow, never create a new Pack identity. */
@@ -217,7 +217,7 @@ export class AutoHealSaveService {
     if (input.packId != null && input.packId !== packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH');
     const conflict = () => new PackOperationError(409, input.expectedDraftAbsent ? 'DRAFT_ALREADY_EXISTS' : 'WORKFLOW_ALREADY_EXISTS');
 
-    await this.db.transaction(async tx => {
+    return this.saveDraftWithGit(input, submitted, packId, async tx => {
       const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
       // Lock the existing active publication first to serialize first-draft saves,
       // rather than sharing a missing-draft gap lock before competing for active.
@@ -257,8 +257,66 @@ export class AutoHealSaveService {
         if (code === 'ER_DUP_ENTRY' || code?.startsWith('SQLITE_CONSTRAINT_UNIQUE')) throw conflict();
         throw error;
       }
+      const created = await readDraftSnapshot(tx, input.workflowId);
+      if (!created || created.workflow_id !== input.workflowId || created.pack_id !== packId
+        || created.spec_json !== JSON.stringify(submitted) || created.title !== title || created.owner_id !== input.actorId) {
+        throw new Error('Workflow creation failed');
+      }
+      return created;
     });
-    return { ok: true, saved: true, workflowId: input.workflowId, packId };
+  }
+
+  /** Prepare before the existing transaction; push only after its acknowledgement
+   * and a fresh full-row and edit-permission check. This is not an atomic
+   * cross-store transaction: partial and uncertain outcomes require review. */
+  private async saveDraftWithGit(input: AutoHealSaveInput, spec: WorkflowSpec, packId: string,
+    write: (tx: IDatabase) => Promise<DraftSnapshot>): Promise<AutoHealSaveResult> {
+    if (!this.gitConfig?.remoteUrl?.trim() || !this.author) {
+      throw new PackOperationError(503, 'SAVE_UNAVAILABLE_GIT_OWNERSHIP_UNVERIFIED', input.requestId);
+    }
+    let result: { branch: string; commit: string } | undefined;
+    let candidate: { branch: string; commit: string } | undefined;
+    let dbConfirmed = false, pushStarted = false;
+    try {
+      await withPreparedWorkflowSpec({ workflowId: input.workflowId, packId, spec, config: this.gitConfig,
+        author: this.author }, async (prepared, push) => {
+        // Neither an existing DB document nor active history authorizes a
+        // YAML-only replacement. Only create() may initialize a new empty Pack;
+        // ordinary saves/restores require wf, with no fallback to another ref.
+        if (prepared.sourceVersion === 'initial') {
+          throw new PackOperationError(409, 'SAVE_REQUIRED', input.requestId);
+        }
+        candidate = { branch: prepared.branch, commit: prepared.commit };
+        let completed = false;
+        let committed: DraftSnapshot | undefined;
+        try {
+          await this.db.transaction(async tx => { committed = await write(tx); completed = true; });
+        } catch (error) {
+          if (completed) throw new PackOperationError(503, 'SAVE_DB_OUTCOME_UNKNOWN', input.requestId);
+          throw error;
+        }
+        dbConfirmed = true;
+        const current = await readDraftSnapshot(this.db, input.workflowId);
+        if (!committed || !current || !sameDraft(committed, current)
+          || !await this.botPermRepo!.hasEditPermission(input.workflowId, input.actorId)) {
+          throw new Error('Committed workflow changed before push');
+        }
+        pushStarted = true;
+        result = await push();
+      });
+    } catch (error) {
+      if (dbConfirmed) {
+        if (pushStarted) throw new PackOperationError(503, 'SAVE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN', input.requestId,
+          error instanceof PackCandidateOutcomeUnknownError ? error.branch : candidate?.branch,
+          error instanceof PackCandidateOutcomeUnknownError ? error.commit : candidate?.commit);
+        throw new PackOperationError(503, 'SAVE_DB_CONFIRMED_GIT_NOT_STARTED', input.requestId);
+      }
+      if (error instanceof WorkflowSaveRequiredError) throw new PackOperationError(409, 'SAVE_REQUIRED', input.requestId);
+      if (error instanceof PackCandidateConflictError) throw new PackOperationError(409, 'BASELINE_STALE', input.requestId);
+      throw error;
+    }
+    if (!result) throw new Error('Workflow save did not complete');
+    return { ok: true, saved: true, workflowId: input.workflowId, packId, ...result };
   }
 
   private async create(input: AutoHealSaveInput, spec: WorkflowSpec): Promise<AutoHealSaveResult> {
@@ -338,8 +396,6 @@ export class AutoHealSaveService {
       if (error instanceof PackCandidateConflictError) throw conflict();
       throw error;
     }
-    // Only saved is leased: an independent actor can create wf/<id> after the
-    // absence check. Operators must reconcile that unavoidable cross-ref race.
     if (!initialized) throw new Error('Workflow initialization did not complete');
     return { ok: true, saved: true, workflowId: input.workflowId, packId, ...initialized };
   }

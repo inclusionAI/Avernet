@@ -17,10 +17,10 @@ export async function preparePackVersionRepo(repoDir: string, config: ClawFlowsG
 }
 
 /** Fetch workflow tips and, for active recovery only, the bound deployment tag. */
-export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGitConfig, workflowId: string, activeTag?: string, allowMissingActiveBranch = false, allowDifferentActiveBranch = false): Promise<(() => Promise<void>) & { activeCommit?: string }> {
+export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGitConfig, workflowId: string, activeTag?: string, _allowMissingActiveBranch = false, _allowDifferentActiveBranch = false): Promise<(() => Promise<void>) & { activeCommit?: string }> {
   validateWorkflowId(workflowId);
   if (activeTag !== undefined && (!activeTag.startsWith(`deploy/${workflowId}/#`) || !/^[1-9][0-9]*$/.test(activeTag.slice(`deploy/${workflowId}/#`.length)))) throw new Error('Invalid active tag');
-  const refs = [`refs/heads/wf/${workflowId}`, `refs/heads/saved/${workflowId}`];
+  const refs = [`refs/heads/wf/${workflowId}`];
   const tagRef = activeTag ? `refs/tags/${activeTag}` : undefined;
   const requestedRefs = tagRef ? [...refs, tagRef, `${tagRef}^{}`] : refs;
   const env = packVersionGitEnvironment();
@@ -38,11 +38,9 @@ export async function fetchPackVersionRefs(repoDir: string, config: ClawFlowsGit
   const observed = await discover();
   const changed = (after: Map<string, string>) => requestedRefs.some(ref => observed.get(ref) !== after.get(ref));
   // Compare the fetched tag object and commit with both remote observations.
-  // A differing wf is allowed only for rollback; the caller checks its Pack tree.
+  // wf is a mutable saved draft, not the production baseline; only the bound tag identifies production.
   const activeCommit = tagRef ? observed.get(`${tagRef}^{}`) ?? observed.get(tagRef) : undefined;
-  const wfCommit = observed.get(refs[0]);
-  if (tagRef && !wfCommit && !allowMissingActiveBranch) throw new Error('Workflow snapshot not found');
-  if (tagRef && (!observed.get(tagRef) || !activeCommit || (wfCommit && activeCommit !== wfCommit && !allowDifferentActiveBranch))) {
+  if (tagRef && (!observed.get(tagRef) || !activeCommit)) {
     throw Object.assign(new Error('Active deployment ref mismatch'), { code: 'PACK_REFS_CHANGED' });
   }
   const refConflict = () => Object.assign(new Error('Workflow refs changed during read'), { code: 'PACK_REFS_CHANGED' });

@@ -382,9 +382,13 @@ it('retains selections across issue pages and reviews their actual titles before
   await waitFor(() => expect(screen.getByRole('button', { name: '生成优化草稿（2）' })).toBeEnabled())
   await user.click(screen.getByRole('button', { name: '生成优化草稿（2）' }))
   const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
-  expect(within(confirmation).getAllByText('retry')[0]).toBeVisible()
-  expect(within(confirmation).getAllByText('timeout')[0]).toBeVisible()
-  expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+  const scope = within(within(confirmation).getByRole('complementary'))
+  await user.click(scope.getByText('查看全部已选（2）', { selector: 'summary' }))
+  const selected = within(scope.getByRole('list'))
+  expect(selected.getAllByRole('listitem')).toHaveLength(2)
+  expect(selected.getByText('retry')).toBeVisible()
+  expect(selected.getByText('timeout')).toBeVisible()
+  await waitFor(() => expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled())
 })
 
 it('offers later-page node and problem-type facets on the first selection page', async () => {
@@ -421,7 +425,7 @@ it('retains conflicting sources for candidate review without silently choosing a
   await user.click(screen.getByRole('checkbox', { name: '选择 90' }))
   await user.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
   const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
-  expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+  await waitFor(() => expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled())
 })
 
 it('opens a selected item directly even when neither its issue nor its suggestion is on the current page', async () => {

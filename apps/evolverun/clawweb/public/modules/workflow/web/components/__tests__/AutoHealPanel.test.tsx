@@ -95,7 +95,7 @@ beforeEach(() => {
   runResult.workflowId = run.workflow_id
   localStorage.clear()
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  saveResponse = async () => response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1' })
+  saveResponse = async () => response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1', branch: `wf/${run.workflow_id}`, commit: 'a'.repeat(40) })
   deployResponse = async () => response(deployed)
   runResponse = async () => response(runResult)
   fetchMock.mockReset().mockImplementation(async (input) => {
@@ -138,7 +138,7 @@ describe('AutoHealPanel source-aware reruns', () => {
     deployResponse = async () => response({ code: 'DEPLOY_TREE_CONFLICT', requestId: (await deployBody()).requestId }, 409)
     renderPanel()
     await confirmDeploy(await saveFix(false))
-    expect(await screen.findByText(/部署已阻止/)).toBeInTheDocument()
+    expect(await screen.findByText(/当前生效 tag 缺失.*部署已阻止/)).toBeInTheDocument()
     expect(localStorage.getItem(`clawweb.autoheal.review-blocked.v1.${encodeURIComponent(run.workflow_id)}`)).toBeNull()
     expect(screen.queryByText(/结果可能未知/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '部署修复' })).not.toBeInTheDocument()
@@ -352,7 +352,7 @@ describe('AutoHealPanel source-aware reruns', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存修复' }))
     expect(await screen.findByText('No edit permission for this workflow')).toBeInTheDocument()
     expect(screen.queryByText(/数据库写入结果未知/)).not.toBeInTheDocument()
-    saveResponse = async () => response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1' })
+    saveResponse = async () => response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1', branch: `wf/${run.workflow_id}`, commit: 'a'.repeat(40) })
     expect(screen.getByRole('button', { name: '保存修复' })).toBeEnabled()
     await userEvent.click(screen.getByRole('button', { name: '保存修复' }))
     expect(await screen.findByRole('button', { name: '部署修复' })).toBeEnabled()
@@ -558,7 +558,7 @@ function mockCapabilityAndBaselines(options: { unavailable: boolean }) {
   fetchMock.mockImplementation(async (url, init) => {
     if (url === '/api/auto-heal/capabilities') return response({ autoHealUnifiedSave: 'v1' })
     if (String(url).endsWith('/editor-draft')) return response({ workflowId: run.workflow_id, packId: 'pack-1', specJson: JSON.stringify({ id: run.workflow_id, title: 'original after diagnosis', nodes: [] }), draftToken: 'a'.repeat(64) })
-    if (String(url).endsWith('/pack-version?version=draft')) return response({ workflowId: run.workflow_id, packId: 'pack-1', baseRef: `origin/saved/${run.workflow_id}`, baseCommit: 'b'.repeat(40), draftHead: 'b'.repeat(40), versionFiles: [] })
+    if (String(url).endsWith('/pack-version?version=draft')) return response({ workflowId: run.workflow_id, packId: 'pack-1', baseRef: `origin/wf/${run.workflow_id}`, baseCommit: 'b'.repeat(40), draftHead: 'b'.repeat(40), versionFiles: [] })
     if (url === '/api/auto-heal/unified-save' && options.unavailable) return response({ code: 'UNIFIED_SAVE_UNAVAILABLE' }, 503)
     return prior(url, init)
   })
@@ -585,7 +585,7 @@ it('releases the write guard on a pre-write unified authorization rejection with
   expect(await screen.findByRole('region', { name: '保存前核对' })).toBeInTheDocument()
 })
 
-it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack'])('reviews and binds unified snapshot deployment (%s)', async scenario => {
+it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack', 'wf-production', 'legacy-draft'])('reviews and binds unified snapshot deployment (%s)', async scenario => {
   mockCapabilityAndBaselines({ unavailable: false })
   const prior = fetchMock.getMockImplementation()!
   const saved = 'd'.repeat(40), active = 'b'.repeat(40), token = 'e'.repeat(64)
@@ -597,7 +597,7 @@ it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack'])('review
   ]
   fetchMock.mockImplementation(async (url, init) => {
     if (!savedDone && scenario === 'first-saved' && String(url).endsWith('/pack-version?version=draft')) return response({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }, 404)
-    if (!savedDone && scenario === 'first-saved' && String(url).endsWith('/pack-version?version=current')) return response({ workflowId: run.workflow_id, packId: 'pack-1', packPath: 'pack', baseRef: `origin/wf/${run.workflow_id}`, baseCommit: active, draftHead: null, versionFiles: files('before') })
+    if (!savedDone && scenario === 'first-saved' && String(url).endsWith('/pack-version?version=current')) return response({ workflowId: run.workflow_id, packId: 'pack-1', packPath: 'pack', baseRef: `refs/tags/deploy/${run.workflow_id}/#1`, baseCommit: active, draftHead: null, versionFiles: files('before') })
     if (url === '/api/auto-heal/unified-save') {
       const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init!.body as Blob) })
       if (scenario === 'first-saved') expect(JSON.parse(text)).toMatchObject({ sourceVersion: 'current', sourceCommit: active, expectedSavedHead: null })
@@ -608,7 +608,7 @@ it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack'])('review
     if (savedDone && String(url).endsWith('/editor-draft')) return response({ workflowId: run.workflow_id, packId: 'pack-1', specJson: JSON.stringify(diagnosis.fixedSpec), draftToken: scenario === 'stale-token' ? 'f'.repeat(64) : token })
     if (savedDone && String(url).includes('/pack-version?version=')) {
       const isDraft = String(url).endsWith('draft')
-      return response({ workflowId: run.workflow_id, packId: 'pack-1', packPath: 'pack', baseRef: `origin/${isDraft ? 'saved' : 'wf'}/${run.workflow_id}`, baseCommit: isDraft ? saved : active, draftHead: saved, versionFiles: files(isDraft ? 'after' : 'before') })
+      return response({ workflowId: run.workflow_id, packId: 'pack-1', packPath: 'pack', baseRef: isDraft ? `${scenario === 'legacy-draft' ? 'origin/saved' : 'origin/wf'}/${run.workflow_id}` : scenario === 'wf-production' ? `origin/wf/${run.workflow_id}` : `refs/tags/deploy/${run.workflow_id}/#1`, baseCommit: isDraft ? saved : active, draftHead: saved, versionFiles: files(isDraft ? 'after' : 'before') })
     }
     if (String(url).includes('/snapshot-v2/state')) return response({ protocol: 'editor-deployment-state-v1', workflowId: run.workflow_id, packId: 'pack-1', canDeploy: true, savedCommit: saved, activeCommit: scenario === 'stale-active' ? 'f'.repeat(40) : active })
     if (url === '/api/auto-heal/editor-deploy/snapshot-v2') {
@@ -620,11 +620,12 @@ it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack'])('review
   renderPanel(); await prepareUnifiedReview()
   await userEvent.click(screen.getByRole('button', { name: '确认差异并保存' }))
   await userEvent.click(await screen.findByRole('button', { name: '部署修复' }))
-  if (scenario === 'stale-token' || scenario === 'stale-active') {
+  if (['stale-token', 'stale-active', 'wf-production', 'legacy-draft'].includes(scenario)) {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     expect(requests('editor-deploy/snapshot-v2')).toHaveLength(0)
   } else {
     expect(await screen.findByText('更新：scripts/test.sh')).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`当前生效 tag：.*deploy/${run.workflow_id}/#1`))).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认部署' })).toBeDisabled()
     await userEvent.click(screen.getByRole('checkbox', { name: /我已核对/ }))
     await userEvent.click(screen.getByRole('button', { name: '确认部署' }))
@@ -723,7 +724,7 @@ it('keeps compatibility save blocked after a timeout and remount, even if a late
     await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_HEAL_LEGACY_TIMEOUT_MS + 1) })
     expect(screen.getByText(/兼容保存超时，结果未知/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存修复' })).toBeDisabled()
-    await act(async () => { pending.resolve(response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1' })); await Promise.resolve(); await Promise.resolve() })
+    await act(async () => { pending.resolve(response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1', branch: `wf/${run.workflow_id}`, commit: 'a'.repeat(40) })); await Promise.resolve(); await Promise.resolve() })
     expect(requests('save')).toHaveLength(1)
     cleanup(); renderPanel()
     expect(screen.getByText(/数据库写入结果未知/)).toBeInTheDocument()
@@ -739,7 +740,7 @@ it('blocks DB-only fallback when the enterprise workflow has no Git baseline', a
     return prior(url, init)
   })
   renderPanel(); await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
-  expect(await screen.findByText(/缺少数据库草稿或 saved\/wf 基线/)).toBeInTheDocument()
+  expect(await screen.findByText(/缺少数据库草稿或草稿\(wf\)或生效 tag 基线/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '保存修复' })).toBeDisabled()
   expect(screen.queryByRole('button', { name: '我已了解风险，继续兼容保存' })).not.toBeInTheDocument()
   expect(requests('save')).toHaveLength(0); expect(requests('unified-save')).toHaveLength(0)

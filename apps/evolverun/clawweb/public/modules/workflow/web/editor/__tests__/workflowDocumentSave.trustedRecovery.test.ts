@@ -37,7 +37,7 @@ beforeEach(() => {
     if (url.includes('/history?')) { onHistory?.(); return json({ workflowId: id, history: [], active: currentActive }) }
     if (url.endsWith('/by-deploy/3')) { onSnapshot?.(); return json(currentSnapshot) }
     if (url === `/api/workflows/${id}/pack-version?version=current`) return json({
-      workflowId: id, packId, baseRef: `origin/wf/${id}`, baseCommit: 'b'.repeat(40), draftHead: null,
+      workflowId: id, packId, baseRef: `refs/tags/deploy/${id}/#1`, baseCommit: 'b'.repeat(40), draftHead: null,
       activeHistory: { protocol: 'active-history-v1', activeToken: gitToken },
       versionFiles: [
         { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: packId, workflows: [id] })), mode: '100644' },

@@ -31,7 +31,7 @@ import { stringify } from 'yaml'
 import Editor from '../Editor'
 const A = 'a'.repeat(40), B = 'b'.repeat(40)
 let seq = 0
-function snapshot(version: 'current' | 'draft' = 'current') { return { packPath: '', workflowId: mocks.id, packId: 'pack', canWrite: true, baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${mocks.id}`, baseCommit: A, draftHead: version === 'current' ? null : A, versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [{ id: mocks.id, file: 'flows/main.yaml' }] })), mode: '100644' }, { path: 'flows/main.yaml', contentBase64: btoa(stringify({ id: mocks.id, title: 'Flow', version: '1', nodes: [] })), mode: '100644' }, { path: 'scripts/test', contentBase64: 'b2xk', mode: '100644' }] } }
+function snapshot(version: 'current' | 'draft' = 'current') { return { packPath: '', workflowId: mocks.id, packId: 'pack', canWrite: true, baseRef: (version === 'current' ? `refs/tags/deploy/${mocks.id}/#1` : `origin/wf/${mocks.id}`), baseCommit: A, draftHead: version === 'current' ? null : A, versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [{ id: mocks.id, file: 'flows/main.yaml' }] })), mode: '100644' }, { path: 'flows/main.yaml', contentBase64: btoa(stringify({ id: mocks.id, title: 'Flow', version: '1', nodes: [] })), mode: '100644' }, { path: 'scripts/test', contentBase64: 'b2xk', mode: '100644' }] } }
 function Shell() { const navigate = useNavigate(); return <><Link to="/outside">离开</Link><button onClick={() => navigate(-1)}>后退</button><Routes><Route path="/editor" element={<Editor embedded initialWorkflowId={mocks.id} />} /><Route path="/outside" element={<h1>外部</h1>} /></Routes></> }
 function mount() { return render(<MemoryRouter initialEntries={['/outside', '/editor']} initialIndex={1}><Shell /></MemoryRouter>) }
 async function openFile() { fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); fireEvent.click(await screen.findByRole('button', { name: 'scripts/test' })) }
@@ -54,7 +54,7 @@ beforeEach(async () => {
   mocks.fetchJson.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob) })
-      return { branch: `saved/${mocks.id}`, commit: B, requestId: JSON.parse(text).requestId, packId: 'pack', version: 2 }
+      return { branch: `wf/${mocks.id}`, commit: B, requestId: JSON.parse(text).requestId, packId: 'pack', version: 2 }
     }
     return snapshot(url.includes('version=draft') ? 'draft' : 'current')
   })
@@ -231,12 +231,12 @@ describe('Editor and Pack candidate isolation', () => {
     const session = sessionFor(mocks.id)
     expect(session.state.versions.draft.snapshot?.baseCommit).toBe(A)
     fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
-    // The host authorizes the newly advanced saved head, while this session
+    // The host authorizes the newly advanced 草稿(wf) head, while this session
     // still holds the older baseline. The editor must detect that mismatch.
     mocks.savedCommit = B
     mocks.fetchJson.mockResolvedValueOnce({ ...snapshot('draft'), baseCommit: B, draftHead: B })
     fireEvent.click(screen.getByRole('button', { name: '部署' }))
-    expect(await screen.findByText(/saved\s*文件快照与已读取基线不一致/)).toBeInTheDocument()
+    expect(await screen.findByText(/草稿文件快照与已读取基线不一致/)).toBeInTheDocument()
     expect(session.state.versions.draft.snapshot?.baseCommit).toBe(A)
     expect(mocks.deploy).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()

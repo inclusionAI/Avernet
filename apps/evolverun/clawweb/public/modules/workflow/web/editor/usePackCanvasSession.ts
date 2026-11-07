@@ -116,7 +116,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   async function performSave(first?: { version: Version; base: Snapshot; files: Snapshot['versionFiles']; activeSpec: WorkflowSpec; sessionId: number }, approval?: ReconciliationApproval): Promise<PackCanvasSaveResult> {
     const live = useEditorStore.getState()
     if (!approval) closeReconciliation()
-    if (!id || !session) throw new Error('首次新建尚无法安全初始化 Git saved 分支；本地草稿仍保留。')
+    if (!id || !session) throw new Error('首次新建尚无法安全初始化 Git 草稿(wf)分支；本地草稿仍保留。')
     assertEditorWorkflowReadable(id)
     if (session.state.uncertainRename || session.state.postSaveVerificationError) throw new Error(session.state.uncertainRename ?? session.state.postSaveVerificationError ?? '')
     if (busy.current || session.state.saving || session.state.uploading || session.state.reconciliation || session.state.deployment) throw new Error('保存、上传或部署状态未完成；本地草稿仍保留。')
@@ -137,7 +137,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     // compatibility cannot satisfy that contract; leave both stores untouched.
     // The separate AutoHeal legacy API is unaffected.
     if (databaseBaseline !== null && capability === 'unavailable') {
-      throw new Error('统一保存不可用，无法同步 saved 工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。')
+      throw new Error('统一保存不可用，无法同步草稿(wf)工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。')
     }
     if (capability === 'unavailable') {
       const selected = session.state.version, source = session.state.versions[selected], base = source.snapshot
@@ -395,7 +395,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
         const actualYaml = saved.versionFiles.find(f => f.path === original.path)
         const text = actualYaml && new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(actualYaml.contentBase64), c => c.charCodeAt(0)))
         if (db.draftToken !== receipt.draftToken || db.packId !== row.packId || normalizationChanges(requestSpec, stored).length
-          || saved.baseCommit !== receipt.commit || saved.draftHead !== receipt.commit || saved.packId !== base.packId
+          || saved.baseRef !== `origin/wf/${id}` || saved.baseCommit !== receipt.commit || saved.draftHead !== receipt.commit || saved.packId !== base.packId
           || !actualYaml || actualYaml.mode !== originalFile.mode || text !== expectedYaml
           || diff(submitted.filter(f => f.path !== original.path), saved.versionFiles.filter(f => f.path !== original.path)).length
           || !sameBaseline()) throw new Error('postflight mismatch')
@@ -476,7 +476,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
           ? `已保存到草稿 commit ${receipt.commit}，尚未部署。保存期间的后续文件修改已迁移到草稿版，仍需再次保存；当前版已恢复原基线。`
           : `已保存到草稿 commit ${receipt.commit}，尚未部署。` } }
       if (versions.current.snapshot) versions.current = { ...versions.current, snapshot: { ...versions.current.snapshot, draftHead: receipt.commit } }
-      // A current-based save writes only saved/. Restore current's real tree and
+      // A current-based save writes only wf/. Restore current's real tree and
       // move only post-dispatch edits to the newly verified saved snapshot. The
       // unchanged-other-version check above prevents overwriting another draft.
       if (selected === 'current') versions.current = { ...versions.current, files: structuredClone(base.versionFiles) }
@@ -485,7 +485,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     } catch (cause) {
       if (owner) abandonEditorWorkflowWrite(id, owner)
       if (writeStarted) {
-        const message = `统一保存未能完整确认：${cause instanceof Error ? cause.message : '结果未知'} 本地草稿仍保留；请人工核对数据库和 saved 分支，勿重复提交。刷新不会清除写入风险标记。`
+        const message = `统一保存未能完整确认：${cause instanceof Error ? cause.message : '结果未知'} 本地草稿仍保留；请人工核对数据库和草稿(wf)分支，勿重复提交。刷新不会清除写入风险标记。`
         publish(session, { ...session.state, postSaveVerificationError: message })
         throw new PackCanvasPartialSaveError(id, message)
       }

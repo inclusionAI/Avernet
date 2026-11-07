@@ -25,7 +25,7 @@ function setup() {
   const files = [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/test.sh', contentBase64: btoa('old'), mode: '100644' as const }]
-  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/saved/${id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
+  const snapshot = { workflowId: id, packId: 'pack', baseRef: `origin/wf/${id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   let currentToken = token, savedSnapshot = snapshot
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -42,7 +42,7 @@ function setup() {
       const base = selected.snapshot!
       const files = structuredClone(selected.files).map(f => f.path === `workflows/${id}.yaml`
         ? { ...f, contentBase64: btoa(stringify(parsed, { sortMapEntries: true, lineWidth: 0 })) } : f)
-      savedSnapshot = { ...base, baseRef: `origin/saved/${id}`, baseCommit: B, draftHead: B, versionFiles: files }
+      savedSnapshot = { ...base, baseRef: `origin/wf/${id}`, baseCommit: B, draftHead: B, versionFiles: files }
       return new Response(JSON.stringify({ requestId: input.requestId, outcome: 'confirmed', reconciliationRequired: false,
         evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'e'.repeat(64), commit: B, draftToken: nextToken } }))
     }
@@ -54,7 +54,7 @@ function setup() {
     const input = JSON.parse(await blobText(init!.body as Blob))
     if (url.endsWith('/editor-draft')) { expect(input.expectedDraftToken).toBe(token); mocks.read.mockResolvedValue(structuredClone(input.spec)); return row(input.spec, nextToken) }
     if (url === '/api/auto-heal/save') { mocks.read.mockResolvedValue(structuredClone(input.spec)); return { ok: true, saved: true, workflowId: id, packId: 'pack' } }
-    return { branch: `saved/${id}`, commit: B, packId: 'pack', version: 1, requestId: input.requestId }
+    return { branch: `wf/${id}`, commit: B, packId: 'pack', version: 1, requestId: input.requestId }
   })
   const hook = renderHook(() => usePackCanvasSession(id, spec))
   return { id, spec, session, hook }
@@ -585,7 +585,7 @@ it.each([401, 404] as const)('capability HTTP %i blocks existing-draft writes an
     const beforeFiles = structuredClone(session.state.versions.draft.files)
     const beforeSnapshot = structuredClone(session.state.versions.draft.snapshot)
     const beforeSpec = structuredClone(useEditorStore.getState().spec)
-    await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存不可用，无法同步 saved 工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
+    await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存不可用，无法同步草稿(wf)工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
     expect(session.state.versions.draft.files, shape).toEqual(beforeFiles)
     expect(session.state.versions.draft.snapshot, shape).toEqual(beforeSnapshot)
     expect(useEditorStore.getState().spec, shape).toEqual(beforeSpec)
@@ -623,7 +623,7 @@ it.each(['changed-incomplete', 'wrong-identity'] as const)('legacy candidate val
   const v = session.state.versions.draft
   expect(() => legacyPackCandidate(v.files, id, v.snapshot!)).toThrow(variant === 'wrong-identity'
     ? '工作流 YAML 身份与当前画布不一致。' : '必须包含非空 id、title，以及 nodes 数组')
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存不可用，无法同步 saved 工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存不可用，无法同步草稿(wf)工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method !== 'GET')).toBe(false)
   expect(vi.mocked(fetchJson).mock.calls.some(([url, init]) => isGitPut(url, init))).toBe(false)
   expect(session.state.versions.draft.files.find(f => f.path === 'scripts/test.sh')?.contentBase64).toBe(btoa('new'))
@@ -722,7 +722,7 @@ it('ignores an earlier draft read that resolves after a current-version unified 
   })
   act(() => {
     load(session, id, 'draft')
-    const currentSnapshot = { ...oldSnapshot, baseRef: `origin/wf/${id}` }
+    const currentSnapshot = { ...oldSnapshot, baseRef: `refs/tags/deploy/${id}/#1` }
     publish(session, { ...session.state, version: 'current', versions: { ...session.state.versions,
       current: { ...session.state.versions.current, snapshot: currentSnapshot, files: structuredClone(currentSnapshot.versionFiles), loading: false } } })
     useEditorStore.getState().updateSpecField('title', 'Saved canvas')

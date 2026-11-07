@@ -48,7 +48,7 @@ function fixture(doc: WorkflowSpec, storage: 'projection' | 'wrapper' | 'json') 
     { path: `workflows/${doc.id}.yaml`, contentBase64: btoa(stringify(storage === 'projection' ? stored : doc)), mode: '100644' },
     { path: 'script', contentBase64: btoa('original script'), mode: '100755' },
   ]
-  let snapshot = { workflowId: doc.id, packId: 'pack', baseRef: `origin/saved/${doc.id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles }
+  let snapshot = { workflowId: doc.id, packId: 'pack', baseRef: `origin/wf/${doc.id}`, baseCommit: A, draftHead: A, canWrite: true, versionFiles }
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input === `/api/workflows/${doc.id}`) return route('/:workflowId')
     if (input === `/api/workflows/${doc.id}/export`) return route('/:workflowId/export')
@@ -111,7 +111,7 @@ it.each(['projection', 'wrapper', 'json'] as const)('uses the raw CAS %s documen
   const { result: canvas } = renderHook(() => usePackCanvasSession(doc.id, loaded))
   await waitFor(() => expect(canvas.current.snapshot).toBeTruthy())
   expect(canvas.current.error).toBeNull(); expect(useEditorStore.getState().positions.done).toEqual({ x: 301, y: 201 })
-  expect(canvas.current.snapshot?.baseRef).toBe(`origin/saved/${doc.id}`)
+  expect(canvas.current.snapshot?.baseRef).toBe(`origin/wf/${doc.id}`)
   expect(fetchMock.mock.calls.filter(([url]) => url.includes('/pack-version')).map(([url]) => url))
     .toEqual([`/api/workflows/${doc.id}/pack-version?version=draft`])
   // The hook's initial source read is the first CAS GET. The save must make
@@ -264,7 +264,7 @@ it('successful write invalidates only the editor workflow key and preserves the 
     if (url === '/api/auto-heal/save') {
       const next = { ...doc, title: 'Saved remotely' }
       row.spec_json = JSON.stringify({ ...next, content: stringify(next) })
-      return new Response(JSON.stringify({ ok: true, saved: true, workflowId: doc.id, packId: 'pack', branch: `saved/${doc.id}`, commit: A, version: 20 }))
+      return new Response(JSON.stringify({ ok: true, saved: true, workflowId: doc.id, packId: 'pack', branch: `wf/${doc.id}`, commit: A, version: 20 }))
     }
     return original(url, init)
   })

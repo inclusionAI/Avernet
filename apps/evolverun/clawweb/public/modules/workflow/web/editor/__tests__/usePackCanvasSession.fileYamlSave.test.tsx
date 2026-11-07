@@ -56,7 +56,7 @@ async function setup() {
   const files = [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id, workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: btoa(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: btoa('old'), mode: '100644' as const }]
-  snapshot = { workflowId: id, packId: id, baseRef: `origin/saved/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
+  snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: oid, draftHead: oid, canWrite: true, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: btoa('submitted') } : f) })

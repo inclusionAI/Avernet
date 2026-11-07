@@ -10,17 +10,17 @@ import { PackWorkflowContentChangedError, withPreparedPackCandidate, withPrepare
 const gate = vi.hoisted(() => ({ wait: undefined as undefined | (() => Promise<void>), clonedConfig: undefined as unknown }));
 vi.mock('../clawflows-git-client.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../clawflows-git-client.js')>();
-  return { ...actual, cloneClawflows: async (...args: Parameters<typeof actual.cloneClawflows>) => {
+  return { ...actual, initClawflowsReadRepo: async (...args: Parameters<typeof actual.initClawflowsReadRepo>) => {
     await gate.wait?.();
     gate.clonedConfig = args[1];
-    return actual.cloneClawflows(...args);
+    return actual.initClawflowsReadRepo(...args);
   } };
 });
 
 let root: string, bare: string, seed: string, current: string;
 const b64 = (value: string) => Buffer.from(value).toString('base64');
 function input(): SavePackCandidateInput {
-  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: null,
+  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: current,
     config: { remoteUrl: bare, username: 'original', email: 'original@example.invalid', token: 'test-token' },
     preserveWorkflowContent: true,
     changes: [{ path: 'scripts/run', operation: 'replace', contentBase64: b64('original'), mode: '100755' }] };
@@ -73,8 +73,8 @@ describe('candidate call snapshots', () => {
     barrier.release();
     const result = await promise;
     expect(gate.clonedConfig).toMatchObject({ token: 'test-token' });
-    expect(result.workflowId).toBe('flow'); expect(result.branch).toBe('saved/flow');
-    expect(result.sourceCommit).toBe(current); expect(result.expectedSavedHead).toBeNull();
+    expect(result.workflowId).toBe('flow'); expect(result.branch).toBe('wf/flow');
+    expect(result.sourceCommit).toBe(current); expect(result.expectedSavedHead).toBe(current);
     expect(result.sourceVersion).toBe('current');
     expect(show(result.commit, 'packs/pack/scripts/run')).toBe('original');
     expect(runGit(root, ['--git-dir', bare, 'ls-tree', result.commit, 'packs/pack/scripts/run'])).toMatch(/^100755 blob/);
@@ -82,8 +82,8 @@ describe('candidate call snapshots', () => {
     expect(show(result.commit, 'packs/pack/workflows/flow.yaml')).toBe(kind === 'workflow' ? 'id: flow\nname: trusted' : 'id: flow');
     expect(runGit(root, ['--git-dir', bare, 'show', '-s', '--format=%an <%ae>', result.commit])).toBe('original <original@example.invalid>');
     expect(runGit(root, ['--git-dir', bare, 'rev-parse', `${result.commit}^`])).toBe(current);
-    expect(refs()).toContain(`${result.commit} refs/heads/saved/flow`);
-    expect(refs()).not.toContain('saved/other');
+    expect(refs()).toContain(`${result.commit} refs/heads/wf/flow`);
+    expect(refs()).not.toContain('wf/other');
   });
 
   it('does not let mutation disable workflow preservation before validation or push', async () => {

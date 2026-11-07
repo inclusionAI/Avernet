@@ -36,15 +36,16 @@ beforeEach(() => {
 });
 afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true }); });
 describe('safe new workflow creation', () => {
-  it('creates a unique workflow, verified owner grant and leased saved ref', async () => {
-    expect(await service().save(input)).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'flow', branch: 'saved/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
+  it('creates a unique workflow, verified owner grant and leased wf ref', async () => {
+    expect(await service().save(input)).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'flow', branch: 'wf/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
     expect(counts()).toEqual([1, 1, 0]);
     expect(await new BotWorkflowPermissionRepository(db).hasEditPermission('flow', 'owner')).toBe(true);
-    expect(refs()).toContain('refs/heads/saved/flow'); expect(refs()).not.toContain('refs/heads/wf/flow');
-    expect(git('--git-dir', remote, 'show', 'saved/flow:packs/flow/workflows/flow.yaml')).toContain('id: flow');
+    expect(refs()).toContain('refs/heads/wf/flow'); expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(git('--git-dir', remote, 'show', 'wf/flow:packs/flow/workflows/flow.yaml')).toContain('id: flow');
     await expect(service().save(input)).rejects.toMatchObject({ code: 'WORKFLOW_ALREADY_EXISTS' });
   });
-  it.each(['wf', 'saved'])('rejects pre-existing %s ref without creating DB identity', async branch => {
+  it('rejects a pre-existing wf ref without creating DB identity', async () => {
+    const branch = 'wf';
     git('-C', path.join(root, 'seed'), 'push', remote, `HEAD:refs/heads/${branch}/flow`);
     const before = refs(); await expect(service().save(input)).rejects.toMatchObject({ code: 'WORKFLOW_ALREADY_EXISTS' });
     expect(counts()).toEqual([0, 0, 0]); expect(refs()).toBe(before);
@@ -58,13 +59,25 @@ describe('safe new workflow creation', () => {
     await expect(service().save(input)).rejects.toMatchObject({ code: 'WORKFLOW_ALREADY_EXISTS' });
     expect(counts()).toEqual(rows); expect(refs()).toBe(before);
   });
-  it('does not adopt a default-branch pack or overwrite its workflow', async () => {
+  it('does not adopt or overwrite a default-branch Pack when creating a new wf', async () => {
     const seed = path.join(root, 'seed'); mkdirSync(path.join(seed, 'packs/flow/workflows'), { recursive: true });
-    writeFileSync(path.join(seed, 'packs/flow/workflow.pack.yaml'), 'id: flow\nversion: 1\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n');
+    writeFileSync(path.join(seed, 'packs/flow/workflow.pack.yaml'), 'id: flow\nversion: 1\nworkflows: [flow]\n');
     writeFileSync(path.join(seed, 'packs/flow/workflows/flow.yaml'), 'id: flow\nnodes: []\n');
-    git('-C', seed, 'add', '.'); git('-C', seed, 'commit', '-m', 'existing'); git('-C', seed, 'push', remote, 'main');
-    const before = refs(); await expect(service().save(input)).rejects.toMatchObject({ code: 'WORKFLOW_ALREADY_EXISTS' });
-    expect(counts()).toEqual([0, 0, 0]); expect(refs()).toBe(before);
+    writeFileSync(path.join(seed, 'packs/flow/private.txt'), 'not the new workflow');
+    git('-C', seed, 'add', '.'); git('-C', seed, 'commit', '-m', 'unrelated default Pack'); git('-C', seed, 'push', remote, 'main');
+    const defaultHead = git('--git-dir', remote, 'rev-parse', 'refs/heads/main');
+    const result = await service().save(input);
+    expect(counts()).toEqual([1, 1, 0]); expect(git('--git-dir', remote, 'rev-parse', 'refs/heads/main')).toBe(defaultHead);
+    expect(git('--git-dir', remote, 'show', '-s', '--format=%P', result.commit!)).toBe('');
+    expect(git('--git-dir', remote, 'ls-tree', '-r', '--name-only', result.commit!)).not.toContain('private.txt');
+  });
+  it('ignores a saved-only ref without adopting or changing its objects', async () => {
+    const old = git('-C', path.join(root, 'seed'), 'rev-parse', 'HEAD');
+    git('-C', path.join(root, 'seed'), 'push', remote, `${old}:refs/heads/saved/flow`);
+    const result = await service().save(input);
+    expect(git('--git-dir', remote, 'rev-parse', 'refs/heads/saved/flow')).toBe(old);
+    expect(git('--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(result.commit);
+    expect(git('--git-dir', remote, 'show', '-s', '--format=%P', result.commit!)).toBe('');
   });
   it('commits the workflow and grant before starting Git push', async () => {
     const original = gitExecution.executeGit;
@@ -97,7 +110,7 @@ describe('safe new workflow creation', () => {
     }));
     await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_OUTCOME_UNKNOWN', branch: undefined, commit: undefined });
     expect(pushes).toBe(0); expect(counts()).toEqual([0, 0, 0]);
-    expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(refs()).not.toContain('refs/heads/wf/flow');
   });
   it.each(['push failed', 'push timed out'])('keeps the committed database draft when %s', async reason => {
     const original = gitExecution.executeGit;
@@ -106,9 +119,9 @@ describe('safe new workflow creation', () => {
       if (args[0] === 'push') { pushes++; throw new Error(reason); }
       return original(args, options);
     });
-    await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN', branch: 'saved/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
+    await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN', branch: 'wf/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
     expect(pushes).toBe(1); expect(counts()).toEqual([1, 1, 0]);
-    expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(refs()).not.toContain('refs/heads/wf/flow');
   });
   it('reports an unknown Git outcome when helper validation fails before any push command', async () => {
     const original = gitExecution.executeGit, transaction = db.transaction.bind(db);
@@ -124,9 +137,9 @@ describe('safe new workflow creation', () => {
       return original(args, options);
     });
     await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN',
-      branch: 'saved/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
+      branch: 'wf/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
     expect(validationFailed).toBe(true); expect(pushes).toBe(0);
-    expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/wf/flow');
   });
   it.each([
     ['spec', "UPDATE workflow_specs SET spec_json = '{\"id\":\"flow\",\"title\":\"other\"}' WHERE workflow_id = 'flow'"],
@@ -150,7 +163,7 @@ describe('safe new workflow creation', () => {
       return result;
     });
     await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_NOT_STARTED', branch: undefined, commit: undefined });
-    expect(pushes).toBe(0); expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(pushes).toBe(0); expect(refs()).not.toContain('refs/heads/wf/flow');
     expect(counts()).toEqual([_label === 'deleted draft' ? 0 : 1, 1, 0]);
     if (_label === 'spec') expect((raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string }).spec_json).toContain('other');
     if (_label === 'revoked edit grant') expect((raw.prepare('SELECT can_edit FROM bot_workflow_permissions').get() as { can_edit: number }).can_edit).toBe(0);
@@ -169,7 +182,7 @@ describe('safe new workflow creation', () => {
       return result;
     });
     await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_NOT_STARTED' });
-    expect(pushes).toBe(0); expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(pushes).toBe(0); expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/wf/flow');
   });
   it('rolls back before pushing if the grant was ignored', async () => {
     raw.exec('CREATE TRIGGER ignored_grant BEFORE INSERT ON bot_workflow_permissions BEGIN SELECT RAISE(IGNORE); END');
@@ -181,8 +194,8 @@ describe('safe new workflow creation', () => {
     vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
       const result = await original(args, options); if (args[0] === 'push') throw new Error('lost acknowledgement'); return result;
     });
-    await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN', branch: 'saved/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
-    expect(counts()).toEqual([1, 1, 0]); expect(refs()).toContain('refs/heads/saved/flow');
+    await expect(service().save(input)).rejects.toMatchObject({ status: 503, code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN', branch: 'wf/flow', commit: expect.stringMatching(/^[a-f0-9]{40,64}$/) });
+    expect(counts()).toEqual([1, 1, 0]); expect(refs()).toContain('refs/heads/wf/flow');
     vi.restoreAllMocks(); await expect(service().save(input)).rejects.toMatchObject({ code: 'WORKFLOW_ALREADY_EXISTS' });
   });
   it('reports unknown if the database commit acknowledgement is lost', async () => {
@@ -197,20 +210,20 @@ describe('safe new workflow creation', () => {
       await transaction(fn); throw new Error('lost database commit acknowledgement');
     });
     await expect(service().save(input)).rejects.toMatchObject({ code: 'CREATE_DB_OUTCOME_UNKNOWN', branch: undefined, commit: undefined });
-    expect(pushes).toBe(0); expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/saved/flow');
+    expect(pushes).toBe(0); expect(counts()).toEqual([1, 1, 0]); expect(refs()).not.toContain('refs/heads/wf/flow');
   });
-  it('does not overwrite a saved ref created after the absence check', async () => {
+  it('does not overwrite a wf ref created after the absence check', async () => {
     const original = gitExecution.executeGit;
     let injected = false;
     vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
       if (args[0] === 'push' && !injected) {
-        injected = true; git('-C', path.join(root, 'seed'), 'push', remote, 'HEAD:refs/heads/saved/flow');
+        injected = true; git('-C', path.join(root, 'seed'), 'push', remote, 'HEAD:refs/heads/wf/flow');
       }
       return original(args, options);
     });
     const initial = git('-C', path.join(root, 'seed'), 'rev-parse', 'HEAD');
     await expect(service().save(input)).rejects.toMatchObject({ code: 'CREATE_DB_CONFIRMED_GIT_OUTCOME_UNKNOWN' });
-    expect(git('--git-dir', remote, 'rev-parse', 'saved/flow')).toBe(initial);
+    expect(git('--git-dir', remote, 'rev-parse', 'wf/flow')).toBe(initial);
     expect(counts()).toEqual([1, 1, 0]);
   });
 
@@ -220,7 +233,7 @@ describe('safe new workflow creation', () => {
     await service().save({ ...input, spec: changed });
     const saved = JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string }).spec_json);
     expect(saved).toEqual(expected);
-    const yaml = git('--git-dir', remote, 'show', 'saved/flow:packs/flow/workflows/flow.yaml');
+    const yaml = git('--git-dir', remote, 'show', 'wf/flow:packs/flow/workflows/flow.yaml');
     expect(parseYaml(yaml)).toEqual(expected);
     const edited = { ...changed, title: 'Edited', content: 'edited content' };
     await service().save({ workflowId: 'flow', actorId: 'owner', spec: edited });

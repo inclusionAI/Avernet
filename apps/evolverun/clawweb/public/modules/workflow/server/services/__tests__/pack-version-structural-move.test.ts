@@ -38,8 +38,8 @@ async function setup(layout = 'packs/pack', extra?: string) {
   await new AppConfigRepository(db).create({ config_key: 'git', config_yaml: `remoteUrl: ${bare}\n` });
 }
 function context(changes: PackCandidateChange[]) {
-  return { db, workflowId: 'flow', actorId: 'editor', requestId: 'move-test', sourceVersion: 'current' as const,
-    sourceCommit: source, expectedSavedHead: null, changes,
+  return { db, workflowId: 'flow', actorId: 'editor', requestId: 'move-test', sourceVersion: 'draft' as const,
+    sourceCommit: source, expectedSavedHead: source, changes,
     gitConfig: { remoteUrl: bare, username: 'fixture', email: 'fixture@example.invalid' },
     gitAuthor: { name: 'Fixture', email: 'fixture@example.invalid' } };
 }
@@ -60,8 +60,8 @@ describe('no-journal selected workflow structural moves against a real Git remot
       put('workflow.pack.yaml', manifest('pack', 'workflows/moved.yaml')),
       remove('workflows/flow.yaml'), put('workflows/moved.yaml', yaml, 'create'),
     ]));
-    expect(remote('rev-parse', 'refs/heads/saved/flow')).toBe(result.commit);
-    expect(remote('rev-parse', 'refs/heads/wf/flow')).toBe(source);
+    expect(remote('rev-parse', 'refs/heads/wf/flow')).toBe(result.commit);
+    expect(remote('ls-remote', bare, 'refs/heads/saved/flow')).toBe('');
     expect(bytes(result.commit, `${prefix}workflows/moved.yaml`)).toEqual(Buffer.from(yaml));
     expect(remote('ls-tree', '-r', '--name-only', result.commit)).not.toContain(`${prefix}workflows/flow.yaml`);
     expect(await db.query('SELECT spec_json FROM workflow_specs')).toEqual([{ spec_json: 'database draft' }]);
@@ -88,7 +88,7 @@ describe('no-journal selected workflow structural moves against a real Git remot
     ]), sourceVersion: 'draft', sourceCommit: first.commit, expectedSavedHead: first.commit });
     expect(bytes(second.commit, 'packs/pack/workflows/existing.yaml')).toEqual(Buffer.from(yaml));
     expect(bytes(second.commit, 'packs/pack/asset.txt')).toEqual(Buffer.from('draft asset\n'));
-    expect(remote('rev-parse', 'refs/heads/wf/flow')).toBe(source);
+    expect(remote('rev-parse', 'refs/heads/wf/flow')).toBe(second.commit);
     expect(await db.query('SELECT spec_json FROM workflow_specs')).toEqual([{ spec_json: 'database draft' }]);
   });
   it('rejects direct content edits, even if the YAML is malformed', async () => {

@@ -189,10 +189,11 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
-    const saved = await commitAndPushSaved(repo, "git-fixture", "fixture", author);
+    // Exercise a live transport primitive; the old saved writer now fails before Git.
+    const saved = await commitAndPushDeploy(repo, "git-fixture-initial", 1, 1, "fixture", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/heads/${saved.branch}`])).toBe(saved.commit);
     writeFileSync(path.join(repo, "deployed.txt"), "deployed\n");
-    const deployed = await commitAndPushDeploy(repo, "git-fixture", 1, 1, "fixture", author);
+    const deployed = await commitAndPushDeploy(repo, "git-fixture", 2, 2, "fixture", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/tags/${deployed.tagName}^{commit}`])).toBe(deployed.commit);
     expect(counts).toEqual({ authenticatedClones: 1, authenticatedFetches: 1, authenticatedPushes: 2 });
     await removeTempRepo(repo);
@@ -227,7 +228,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "inherited-helper.txt"), "safe\n");
-    await commitAndPushSaved(repo, "inherited-helper", "fixture", author);
+    await commitAndPushDeploy(repo, "inherited-helper", 1, 1, "fixture", author);
     expect(counts.authenticatedFetches).toBe(1);
     expect(counts.authenticatedPushes).toBe(1);
   });
@@ -284,7 +285,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     }) });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
     let caught: unknown;
-    try { await commitAndPushSaved(repo, "git-fixture", "fixture", author); } catch (error) { caught = error; }
+    try { await commitAndPushDeploy(repo, "git-fixture", 1, 1, "fixture", author); } catch (error) { caught = error; }
     expect(caught).toBeInstanceOf(Error);
     expectNoSecrets(String(caught));
     await removeTempRepo(repo);
@@ -295,7 +296,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     await cloneClawflows(repo, { ...config, remoteUrl: bare, token: withToken ? token : undefined });
     expect(credentialFiles(root)).toEqual([]);
     writeFileSync(path.join(repo, "saved.txt"), "local\n");
-    const result = await commitAndPushSaved(repo, "local-fixture", "local", author);
+    const result = await commitAndPushDeploy(repo, "local-fixture", 1, 1, "local", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/heads/${result.branch}`])).toBe(result.commit);
     await removeTempRepo(repo);
     repo = await createTempRepo();
@@ -380,16 +381,17 @@ describe("ClawFlowsGitClient pack content inheritance", () => {
     });
   });
 
-  it("bases the first snapshot on the latest deploy branch when no saved branch exists", async () => {
+  it("retires the unleased saved writer without changing the inherited full Pack", async () => {
     seedBranch(`wf/${workflowId}`, fullPackFiles);
     await withClonedWork(async (work) => {
       expect(await prepareBranchBase(work, `saved/${workflowId}`, `wf/${workflowId}`)).toBe("fallback");
       await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
       await ensurePackManifest(work, packId, workflowId);
-      await commitAndPushSaved(work, workflowId, "save", author);
-      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `saved/${workflowId}`]);
-      expect(tree).toContain(`${packId}/scripts/run.sh`);
-      expect(tree).not.toContain(`packs/${packId}`);
+      const before = runGit(bare, ["show-ref"]);
+      await expect(commitAndPushSaved(work, workflowId, "save", author)).rejects.toThrow(/retired/);
+      expect(runGit(bare, ["show-ref"])).toBe(before);
+      expect(runGit(bare, ["ls-tree", "-r", "--name-only", `wf/${workflowId}`])).toContain(`${packId}/scripts/run.sh`);
+      expect(runGit(bare, ["branch", "--list", `saved/${workflowId}`])).toBe("");
     });
   });
 

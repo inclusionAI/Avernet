@@ -20,9 +20,9 @@ beforeEach(() => {
   vi.mocked(fetchJson).mockImplementation(async (url, init) => {
     if (url === '/api/auto-heal/save') {
       const body = JSON.parse(await text(init!.body as Blob)); stored = body.spec; packId = body.packId
-      return { ok: true, saved: true, workflowId: body.workflowId, packId, branch: `saved/${body.workflowId}`, commit } as never
+      return { ok: true, saved: true, workflowId: body.workflowId, packId, branch: `wf/${body.workflowId}`, commit } as never
     }
-    if (url.includes('/pack-version?')) return { workflowId: stored.id, packId: stored.id, baseRef: `origin/saved/${stored.id}`, baseCommit: commit, draftHead: commit,
+    if (url.includes('/pack-version?')) return { workflowId: stored.id, packId: stored.id, baseRef: `origin/wf/${stored.id}`, baseCommit: commit, draftHead: commit,
       versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: stored.id, workflows: [stored.id] })), mode: '100644' },
         { path: `workflows/${stored.id}.yaml`, contentBase64: btoa(stringify(stored)), mode: '100644' }] } as never
     if (url.endsWith('/editor-draft') && init?.method === 'GET') {

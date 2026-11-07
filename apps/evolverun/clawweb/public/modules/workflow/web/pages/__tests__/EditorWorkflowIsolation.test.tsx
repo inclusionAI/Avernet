@@ -43,7 +43,7 @@ function snapshot(version: 'draft' | 'current' = 'current'): Snapshot {
   const spec = mocks.spec!
   const file = (path: string, text: string) => ({ path, mode: '100644' as const, contentBase64: btoa(text) })
   return { ...{ packPath: '' }, workflowId: spec.id, packId: 'pack', canWrite: true, baseCommit: A, draftHead: version === 'draft' ? A : null,
-    baseRef: `origin/${version === 'draft' ? 'saved' : 'wf'}/${spec.id}`, versionFiles: [
+    baseRef: (version !== 'draft' ? `refs/tags/deploy/${spec.id}/#1` : `origin/wf/${spec.id}`), versionFiles: [
       file('workflow.pack.yaml', stringify({ id: 'pack', workflows: [spec.id] })),
       file(`workflows/${spec.id}.yaml`, stringify(spec)), file('scripts/run', 'original'),
     ] }
@@ -130,7 +130,7 @@ describe('workflow and script persistence safety', () => {
   it('invalidates editor and workflow-list caches after a confirmed unified save', async () => {
     mount(); await waitForPack(); const invalidate = vi.spyOn(queryClient!, 'invalidateQueries')
     act(() => state().updateSpecField('title', 'Persisted draft'))
-    click('保存'); await screen.findByText(/数据库和 saved 分支已确认保存/)
+    click('保存'); await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     expect(invalidate.mock.calls.map(([input]) => input.queryKey)).toEqual([
       ['editor-workflow-document', mocks.spec!.id], ['db-workflows'], ['workflow-types'],
     ])
@@ -172,7 +172,7 @@ describe('workflow and script persistence safety', () => {
     expect(state()._databaseSpec).toBeNull()
     expect(state()._databasePackId).toBe('pack'); expect(state()._activeBaseline?.activeToken).toBe(activeToken)
     act(() => state().updateSpecField('title', 'First DB draft'))
-    click('保存'); await screen.findByText(/数据库和 saved 分支已确认保存/)
+    click('保存'); await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     expect(state()._databaseSpec?.title).toBe('First DB draft')
     expect(state()._databasePackId).toBe('pack'); expect(state()._activeBaseline).toBeUndefined()
     expect(writes()).toHaveLength(2)
@@ -195,7 +195,7 @@ describe('workflow and script persistence safety', () => {
     mount(); await screen.findByText(/生效版本状态读取失败/); await waitForPack()
     expect(screen.queryByText('未发布 · 数据库暂存稿')).not.toBeInTheDocument()
     act(() => state().updateSpecField('title', 'DB independent'))
-    click('保存'); await screen.findByText(/数据库和 saved 分支已确认保存/)
+    click('保存'); await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     expect(mocks.db?.title).toBe('DB independent')
     expect(gitReads().map(([url]) => url)).toEqual([
       `/api/workflows/${mocks.spec!.id}/pack-version?version=draft`,
@@ -214,7 +214,7 @@ describe('workflow and script persistence safety', () => {
     expect(mocks.validate).toHaveBeenCalledWith(edited)
     expect(state().spec?.title).toBe('Applied draft'); expect(state().isDirty).toBe(true)
     expect(mocks.db?.title).toBe('DB draft'); expect(writes()).toEqual([])
-    click('保存'); await screen.findByText(/数据库和 saved 分支已确认保存/)
+    click('保存'); await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     expect(mocks.db?.title).toBe('Applied draft'); expect(state().isDirty).toBe(false)
     expect(writes()).toHaveLength(1); expect(writes()[0][1].method).toBe('POST')
     const body = JSON.parse(await blobText(writes()[0][1].body))
@@ -262,7 +262,7 @@ describe('workflow and script persistence safety', () => {
     expect(mocks.deploy).not.toHaveBeenCalled(); expect(writes()).toEqual([])
     act(() => state().updateSpecField('title', 'DB draft'))
     click('部署')
-    expect(await screen.findByText(/无法确认数据库草稿和 saved 文件/)).toBeVisible()
+    expect(await screen.findByText(/无法确认数据库草稿和草稿文件/)).toBeVisible()
     expect(successfulDbRead).toHaveBeenCalled()
     expect(mocks.proof).toHaveBeenCalled()
     expect(mocks.deploy).not.toHaveBeenCalled(); expect(writes()).toEqual([])
@@ -365,7 +365,7 @@ describe('workflow and script persistence safety', () => {
     expect(gitReads()).toHaveLength(1)
     click('部署')
     if (source === 'current') {
-      expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeVisible()
+      expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeVisible()
       expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()
       expect(mocks.deploy).not.toHaveBeenCalled(); expect(writes()).toEqual([])
     } else {
@@ -415,7 +415,7 @@ describe('cold deployment preserves pre-existing layout while detecting new layo
     })
     click('部署')
     if (source === 'current') {
-      expect(await screen.findByText(/无法确认数据库草稿和 saved 文件，已阻止部署/)).toBeVisible()
+      expect(await screen.findByText(/无法确认数据库草稿和草稿文件，已阻止部署/)).toBeVisible()
       expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()
       expect(mocks.deploy).not.toHaveBeenCalled()
     } else {
@@ -517,7 +517,7 @@ describe('DB and Git reconciliation through the real save hook', () => {
     expect(screen.getByRole('region', { name: '候选文件: scripts/run' })).toHaveTextContent('original')
     expect(writes()).toEqual([]); acknowledgeDatabase()
     expect(screen.getByRole('region', { name: '将保存的 YAML 预览' })).toHaveTextContent('DB draft')
-    click('确认最终文档'); await screen.findByText(/数据库和 saved 分支已确认保存/)
+    click('确认最终文档'); await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     expect(writes()).toHaveLength(1)
     const body = JSON.parse(await blobText(writes()[0][1].body))
     expect(body).toMatchObject({ sourceVersion: 'draft', sourceCommit: A, expectedSavedHead: A, expectedDraftToken: 'a'.repeat(64), changes: [] })
@@ -533,7 +533,7 @@ describe('DB and Git reconciliation through the real save hook', () => {
     const git = { ...mocks.spec, nodes: mocks.spec.nodes.map(({ _x, _y, ...node }) => node) }
     saved.versionFiles = saved.versionFiles.map(file => file.path === `workflows/${id}.yaml` ? { ...file, contentBase64: btoa(stringify(git)) } : file)
     await beginReview(); acknowledgeDatabase(); click('确认最终文档')
-    await screen.findByText(/数据库和 saved 分支已确认保存/)
+    await screen.findByText(/数据库和草稿\(wf\)分支已确认保存/)
     const body = JSON.parse(await blobText(writes()[0][1].body))
     expect(JSON.parse(body.specJson).nodes[0]).toMatchObject({ _x: 501, _y: 202 })
     expect(state().positions.done).toEqual({ x: 501, y: 202 })

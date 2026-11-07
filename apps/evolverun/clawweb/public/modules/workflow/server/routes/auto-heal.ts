@@ -3,7 +3,7 @@
  *
  *   POST /auto-heal/diagnose
  *   GET  /auto-heal/diagnoses/:diagnosisId
- *   POST /auto-heal/save      — save a fixed spec to the workflow database
+ *   POST /auto-heal/save      — save a fixed spec to the workflow database and Git Pack
  *   POST /auto-heal/editor-save-first-draft — save an Editor draft with mandatory snapshot preconditions
  *   POST /auto-heal/deploy    — deploy a confirmed saved candidate with git tag + history
  *   POST /auto-heal/editor-deploy — deploy with editor tree-preservation checks
@@ -111,18 +111,15 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
-        // Existing documents save to the database even without Git settings.
-        // Creating a Pack initializes saved/<id>, so resolve Git only then.
-        const settings = createOnly === true
-          ? await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor)
-          : undefined;
+        // Every save requires Git after the database commit.
+        const settings = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
         const saveService = new AutoHealSaveService(
           deps.db,
           deps.workflowSpecRepo,
           deps.deployHistoryRepo,
           deps.botPermRepo,
-          settings?.gitConfig,
-          settings?.gitAuthor,
+          settings.gitConfig,
+          settings.gitAuthor,
         );
         const result = await saveService.save({
           workflowId,
@@ -184,7 +181,9 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
         res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
         return;
       }
-      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo);
+      const settings = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo,
+        settings.gitConfig, settings.gitAuthor);
       const result = await service.save({ workflowId, spec, packId: packId ?? null, diagnosisId: diagnosisId ?? null,
         note: note ?? null, actorId: actor, requestId, sourceCommit, expectedSavedHead,
         expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken });

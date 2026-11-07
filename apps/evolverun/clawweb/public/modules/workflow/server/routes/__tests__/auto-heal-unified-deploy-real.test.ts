@@ -37,7 +37,7 @@ beforeEach(async () => {
   writeFileSync(path.join(seed, 'workflows/flow.yaml'), stringify(original));
   writeFileSync(path.join(seed, 'scripts/run.sh'), 'preserved script\n');
   runGit(seed, ['add', '.']); runGit(seed, ['commit', '-m', 'seed pack']); initialCommit = runGit(seed, ['rev-parse', 'HEAD']);
-  runGit(seed, ['push', remote, `${initialCommit}:refs/heads/saved/flow`, `${initialCommit}:refs/heads/wf/flow`]);
+  runGit(seed, ['push', remote, `${initialCommit}:refs/heads/wf/flow`]);
   raw = new Database(path.join(root, 'workflow.sqlite'));
   raw.exec(`CREATE TABLE workflow_specs (id INTEGER PRIMARY KEY, workflow_id TEXT UNIQUE, pack_id TEXT, spec_json TEXT, title TEXT, version INTEGER, owner_id TEXT, gmt_create INTEGER, gmt_modified INTEGER);
     CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT, workflow_id TEXT, can_view INTEGER, can_execute INTEGER, can_edit INTEGER, env TEXT, gmt_create INTEGER, gmt_modified INTEGER);
@@ -56,7 +56,7 @@ beforeEach(async () => {
     botPermRepo: permissions, resolvePrincipal: async () => ({ actorId: 'editor' }), gitConfig,
     gitAuthor: { name: 'test', email: 'test@example.invalid' }, resolveUnifiedSave: async (id, actor) => {
       if (!await permissions.hasEditPermission(id, actor)) return null;
-      const row = await draft.read(id, actor); const savedHead = git('rev-parse', `refs/heads/saved/${id}`);
+      const row = await draft.read(id, actor); const savedHead = git('rev-parse', `refs/heads/wf/${id}`);
       return { packId: row.packId ?? id, repositoryId, sourceVersion: 'draft', sourceCommit: savedHead,
         expectedSavedHead: savedHead, expectedDraftToken: row.draftToken, service };
     } };
@@ -70,19 +70,20 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it('saves DB and saved, then deploys the same tree with real SQLite and a local Git remote', async () => {
+it('saves DB and wf, then deploys the exact candidate with real SQLite and a local Git remote', async () => {
   const saved = await post('unified-save', { requestId: 'heal-real-001', workflowId: 'flow', packId: 'pack', sourceVersion: 'draft',
     sourceCommit: initialCommit, expectedSavedHead: initialCommit, expectedDraftToken: (await draft.read('flow', 'editor')).draftToken,
     specJson: JSON.stringify({ ...original, title: 'repaired' }) });
   expect(saved).toMatchObject({ status: 200, body: { outcome: 'confirmed', evidence: { db: 'confirmed', git: 'confirmed' } } });
   const candidate = saved.body.evidence.commit;
-  expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(candidate);
+  expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(candidate);
   expect(git('show', `${candidate}:scripts/run.sh`)).toBe('preserved script');
   const deployed = await post('editor-deploy/snapshot-v2', { workflowId: 'flow', packId: 'pack', requestId: 'deploy-real-001',
     candidateCommit: candidate, expectedDraftToken: saved.body.evidence.draftToken, snapshotProtocol: 'saved-tree-v2',
-    expectedActiveCommit: initialCommit, confirmedFileDiff: true, autoRun: false });
+    expectedActiveCommit: '', confirmedFileDiff: true, autoRun: false });
   expect(deployed).toMatchObject({ status: 200, body: { deployed: true, candidateCommit: candidate, snapshotProtocol: 'saved-tree-v2' } });
-  expect(git('rev-parse', 'refs/heads/wf/flow^{tree}')).toBe(git('rev-parse', `${candidate}^{tree}`));
+  expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(candidate);
+  expect(git('rev-parse', `refs/tags/${deployed.body.tagName}^{commit}`)).toBe(candidate);
   expect(raw.prepare('SELECT is_active, spec_json FROM workflow_deploy_history WHERE workflow_id = ?').get('flow')).toMatchObject({ is_active: 1, spec_json: expect.stringContaining('repaired') });
 });
 
@@ -103,7 +104,6 @@ it('rejects a stale DB token before changing either SQLite or Git', async () => 
     specJson: JSON.stringify({ ...original, title: 'repaired' }) });
   expect(result).toMatchObject({ status: 409, body: { code: 'BASELINE_STALE' } });
   expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json)).toEqual(original);
-  expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(initialCommit);
   expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(initialCommit);
 });
 
@@ -120,6 +120,5 @@ it('reports a partial save when edit authorization fails after DB confirmation, 
   expect(result).toMatchObject({ status: 409, body: { outcome: 'partial', reconciliationRequired: true,
     evidence: { db: 'confirmed', git: 'not_started' } } });
   expect(JSON.parse((raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get('flow') as { spec_json: string }).spec_json).title).toBe('repaired');
-  expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(initialCommit);
   expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(initialCommit);
 });

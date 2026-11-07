@@ -8,7 +8,7 @@ import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execu
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import * as git from '../../services/clawflows-git-client.js';
-import * as specGit from '../../services/pack-spec-save.js';
+import { mockPreparedSpecSave, preparedSaveIdentity, preparedSaveConfig, preparedSaveAuthor } from '../../services/__tests__/auto-heal-prepared-save-fixture.js';
 import * as gitSettings from '../../config/auto-heal-git-config.js';
 import { createAutoHealRouter, type AutoHealRouteDependencies } from '../auto-heal.js';
 import { editorActiveDeploymentToken } from '../../services/editor-active-deployment-token.js';
@@ -19,7 +19,7 @@ const spec = { id: 'flow', title: 'Applied draft', version: '3', nodes: [
   { id: 'end', title: 'End', executor: { type: 'end' }, dependsOn: ['start'] },
 ] };
 
-describe('POST /api/auto-heal/save first draft without Git', () => {
+describe('POST /api/auto-heal/save first-draft policy with prepared Git transport', () => {
   let raw: Database.Database, db: SqliteDatabase, deps: AutoHealRouteDependencies;
   const drafts = () => raw.prepare('SELECT * FROM workflow_specs').all();
   const historyBytes = () => JSON.stringify(raw.prepare('SELECT * FROM workflow_deploy_history ORDER BY id').all());
@@ -57,17 +57,20 @@ describe('POST /api/auto-heal/save first draft without Git', () => {
       if (sql.includes('cm_app_config')) throw new Error('Git config unavailable');
       return query(sql, params);
     });
-    vi.spyOn(gitSettings, 'resolveAutoHealGitSettings').mockRejectedValue(new Error('Git config unavailable'));
+    vi.spyOn(gitSettings, 'resolveAutoHealGitSettings').mockResolvedValue({ gitConfig: preparedSaveConfig, gitAuthor: preparedSaveAuthor });
     vi.spyOn(git, 'createTempRepo').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(git, 'cloneClawflows').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'executeGit').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'withGitOperation').mockRejectedValue(new Error('Git unavailable'));
-    vi.spyOn(specGit, 'withPreparedWorkflowSpec').mockRejectedValue(new Error('Git unavailable'));
+    mockPreparedSpecSave(input => {
+      expect(raw.inTransaction).toBe(false);
+      expect(raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get(input.workflowId)).toEqual({ spec_json: JSON.stringify(input.spec) });
+    });
   });
   afterEach(async () => {
     try {
-      for (const spy of [gitSettings.resolveAutoHealGitSettings, git.createTempRepo, git.cloneClawflows,
-        gitExecution.executeGit, gitExecution.withGitOperation, specGit.withPreparedWorkflowSpec, deps.triggerRun]) {
+      for (const spy of [git.createTempRepo, git.cloneClawflows,
+        gitExecution.executeGit, gitExecution.withGitOperation, deps.triggerRun]) {
         expect(spy).not.toHaveBeenCalled();
       }
       expect(vi.mocked(db.query).mock.calls.some(([sql]) => sql.includes('cm_app_config'))).toBe(false);
@@ -119,7 +122,7 @@ describe('POST /api/auto-heal/save first draft without Git', () => {
     const before = historyBytes();
     expect(await post({ workflowId: 'flow', spec, packId: active.pack_id, diagnosisId: 'diagnosis', note: 'note',
       ...validPreconditions, expectedActiveToken, actorId: 'impostor' }, editorEndpoint))
-      .toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: active.pack_id } });
+      .toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: active.pack_id, ...preparedSaveIdentity } });
     expect(save).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'flow', spec, actorId: 'editor',
       expectedDraftAbsent: true, expectedActiveDeployNumber: 5, expectedActiveToken, diagnosisId: 'diagnosis', note: 'note' }));
@@ -137,9 +140,9 @@ describe('POST /api/auto-heal/save first draft without Git', () => {
     expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
   });
 
-  it('accepts the unchanged save payload and only inserts a draft, returning 200', async () => {
+  it('accepts the unchanged save payload and acknowledges DB plus prepared Git, returning 200', async () => {
     const before = historyBytes();
-    expect(await post()).toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: 'active-pack' } });
+    expect(await post()).toEqual({ status: 200, body: { ok: true, saved: true, workflowId: 'flow', packId: 'active-pack', ...preparedSaveIdentity } });
     expect(drafts()).toHaveLength(1);
     expect(await deps.workflowSpecRepo.findByWorkflowId('flow')).toMatchObject({ spec_json: JSON.stringify(spec),
       title: spec.title, owner_id: 'editor', pack_id: 'active-pack', version: null });
@@ -229,7 +232,7 @@ describe('POST /api/auto-heal/save first draft without Git', () => {
     raw.prepare('UPDATE workflow_deploy_history SET spec_json = ? WHERE is_active = 1').run('published \uFFFD text');
     const before = historyBytes();
     expect(await post({ workflowId: 'flow', spec, expectedDraftAbsent: true, expectedActiveDeployNumber: 5 }))
-      .toMatchObject({ status: 200, body: { saved: true, packId: 'active-pack' } });
+      .toMatchObject({ status: 200, body: { saved: true, packId: 'active-pack', ...preparedSaveIdentity } });
     expect(drafts()).toHaveLength(1); expect(historyBytes()).toBe(before);
   });
 
@@ -247,7 +250,7 @@ describe('POST /api/auto-heal/save first draft without Git', () => {
     const active = (await deps.deployHistoryRepo.findActiveByWorkflowId('flow'))!;
     expect(await post({ workflowId: 'flow', spec, packId: active.pack_id, expectedDraftAbsent: true,
       expectedActiveDeployNumber: 5, expectedActiveToken: editorActiveDeploymentToken('flow', active) }))
-      .toMatchObject({ status: 200, body: { saved: true, packId: active.pack_id } });
+      .toMatchObject({ status: 200, body: { saved: true, packId: active.pack_id, ...preparedSaveIdentity } });
     expect(drafts()).toHaveLength(1);
   });
 

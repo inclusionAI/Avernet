@@ -213,23 +213,23 @@ describe('HTTP with real SQLite, Git and experimental service', () => {
         canEdit: (workflowId, actorId) => permissions.hasEditPermission(workflowId, actorId), canWritePack: async () => allowPack, prepare });
       resolveAuthorizedService.mockImplementation(async (workflowId, principal) => await permissions.hasEditPermission(workflowId, principal.actorId)
         ? { packId: 'pack', repositoryId, service } : null);
-      const request = { ...body(), sourceCommit: current, expectedDraftToken: (await draft.read('flow', 'editor')).draftToken };
+      const request = { ...body(), sourceVersion: 'draft', sourceCommit: current, expectedSavedHead: current, expectedDraftToken: (await draft.read('flow', 'editor')).draftToken };
       resolvePrincipal.mockResolvedValueOnce({ actorId: 'viewer' });
       expect((await send(request)).status).toBe(404);
       expect(pushes).toBe(0);
       const denied = await send(request);
-      expect(await denied.json()).toEqual({ requestId: 'request_123', outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started', inputHash: fingerprintWorkflowSnapshotSaveRequest({ ...request, sourceVersion: 'current', actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId }).inputHash }, reconciliationRequired: false });
+      expect(await denied.json()).toEqual({ requestId: 'request_123', outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started', inputHash: fingerprintWorkflowSnapshotSaveRequest({ ...request, sourceVersion: 'draft', actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId }).inputHash }, reconciliationRequired: false });
       expect((raw.prepare("SELECT spec_json FROM workflow_specs WHERE workflow_id = 'flow'").get() as { spec_json: string }).spec_json).toContain('before');
       expect(pushes).toBe(0);
       allowPack = true;
       const response = await send(request); expect(response.status).toBe(409);
       const result = await response.json();
-      expect(result).toEqual({ requestId: 'request_123', outcome: 'unknown', evidence: { db: 'confirmed', git: 'unknown', inputHash: fingerprintWorkflowSnapshotSaveRequest({ ...request, sourceVersion: 'current', actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId }).inputHash, commit: expect.stringMatching(/^[a-f0-9]{40}$/), draftToken: expect.stringMatching(/^[a-f0-9]{64}$/) }, reconciliationRequired: true });
+      expect(result).toEqual({ requestId: 'request_123', outcome: 'unknown', evidence: { db: 'confirmed', git: 'unknown', inputHash: fingerprintWorkflowSnapshotSaveRequest({ ...request, sourceVersion: 'draft', actorId: 'editor', workflowId: 'flow', packId: 'pack', repositoryId }).inputHash, commit: expect.stringMatching(/^[a-f0-9]{40}$/), draftToken: expect.stringMatching(/^[a-f0-9]{64}$/) }, reconciliationRequired: true });
       expect(pushes).toBe(1);
       expect((raw.prepare("SELECT spec_json FROM workflow_specs WHERE workflow_id = 'flow'").get() as { spec_json: string }).spec_json).toContain('private workflow data');
-      expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow'])).toBe(result.evidence.commit);
+      expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(result.evidence.commit);
       expect((await draft.read('flow', 'editor')).draftToken).toBe(result.evidence.draftToken);
-    } finally { if (db) await db.close(); rmSync(root, { recursive: true, force: true }); }
+    } finally { if (db) await db.close(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
   });
 });
 
@@ -380,7 +380,7 @@ it.each([[1, 'abort'], [2, 'abort'], [1, 'deadline'], [2, 'deadline']] as const)
     resolveAuthorizedService.mockResolvedValue({ packId: 'pack', repositoryId, service: { save: (...args: Parameters<typeof service.save>) => {
       control = args[2]; finished = service.save(...args); return finished;
     } } });
-    const request = { ...body(), sourceCommit: current, expectedDraftToken: (await draft.read('flow', 'editor')).draftToken };
+    const request = { ...body(), sourceVersion: 'draft', sourceCommit: current, expectedSavedHead: current, expectedDraftToken: (await draft.read('flow', 'editor')).draftToken };
     const pending = send(request);
     await vi.waitFor(() => { expect(finishAuthorization).toBeTypeOf('function'); expect(expire).toBeTypeOf('function'); }, { timeout: 15_000 });
     expect(writes).toBe(delayedAuthorization - 1);
@@ -405,9 +405,9 @@ it.each([[1, 'abort'], [2, 'abort'], [1, 'deadline'], [2, 'deadline']] as const)
     expect(writes).toBe(delayedAuthorization - 1); expect(pushes).toBe(0);
     const row = raw.prepare("SELECT spec_json FROM workflow_specs WHERE workflow_id = 'flow'").get() as { spec_json: string };
     expect(JSON.parse(row.spec_json)).toEqual(delayedAuthorization === 1 ? JSON.parse(before) : spec);
-    expect(() => runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/saved/flow'])).toThrow();
+    expect(runGit(root, ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/wf/flow'])).toBe(current);
   } finally {
     finishAuthorization?.(false); spy.mockRestore();
-    if (db) await db.close(); rmSync(root, { recursive: true, force: true });
+    if (db) await db.close(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }, 20_000);

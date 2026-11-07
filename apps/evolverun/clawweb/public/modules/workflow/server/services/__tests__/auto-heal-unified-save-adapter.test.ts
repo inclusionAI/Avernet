@@ -41,8 +41,9 @@ describe('explicit AutoHeal unified-save adapter', () => {
     writeFileSync(path.join(seed, 'workflow.pack.yaml'), 'id: pack\nworkflows: [flow]\n');
     writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\nnodes: []\n');
     writeFileSync(path.join(seed, 'scripts/run.sh'), 'preserved\n');
-    runGit(seed, ['add', '.']); runGit(seed, ['commit', '-m', 'pack']); commit = runGit(seed, ['rev-parse', 'HEAD']);
-    runGit(seed, ['push', bare, `${commit}:refs/heads/saved/flow`, `${commit}:refs/heads/wf/flow`]);
+    writeFileSync(path.join(seed, 'resource.bin'), Buffer.from([0, 255, 1, 128]));
+    runGit(seed, ['add', '.']); runGit(seed, ['update-index', '--chmod=+x', 'scripts/run.sh']); runGit(seed, ['commit', '-m', 'pack']); commit = runGit(seed, ['rev-parse', 'HEAD']);
+    runGit(seed, ['push', bare, `${commit}:refs/heads/wf/flow`]);
     raw = new Database(':memory:');
     raw.exec(`CREATE TABLE workflow_specs (id INTEGER PRIMARY KEY, workflow_id TEXT UNIQUE, pack_id TEXT, spec_json TEXT, title TEXT, version INTEGER, owner_id TEXT, gmt_create INTEGER, gmt_modified INTEGER);
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT, workflow_id TEXT, can_view INTEGER, can_execute INTEGER, can_edit INTEGER, env TEXT, gmt_create INTEGER, gmt_modified INTEGER);
@@ -66,21 +67,26 @@ describe('explicit AutoHeal unified-save adapter', () => {
     expect(result).toMatchObject({ status: 200, body: { outcome: 'confirmed', reconciliationRequired: false,
       evidence: { db: 'confirmed', git: 'confirmed' } } });
     expect(JSON.parse(row().spec_json).title).toBe('repair');
-    expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(result.body.evidence.commit);
+    expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(result.body.evidence.commit);
+    expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
     expect(git('show', `${result.body.evidence.commit}:scripts/run.sh`)).toBe('preserved');
-    expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(commit);
+    expect(result.body.evidence.commit).not.toBe(commit);
+    for (const file of ['workflow.pack.yaml', 'scripts/run.sh', 'resource.bin', 'README']) {
+      expect(git('ls-tree', result.body.evidence.commit, file)).toBe(git('ls-tree', commit, file));
+    }
+    expect(git('ls-tree', result.body.evidence.commit, 'scripts/run.sh')).toMatch(/^100755 /);
   });
   it('fails closed without a binding and never falls back to a DB save', async () => {
     deps.resolveUnifiedSave = undefined;
     expect(await request()).toMatchObject({ status: 503, body: { code: 'UNIFIED_SAVE_UNAVAILABLE' } });
-    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(commit);
+    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(commit); expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it.each(['packId', 'sourceCommit', 'expectedSavedHead', 'expectedDraftToken'] as const)('rejects a stale caller %s before writes', async field => {
     const resolve = deps.resolveUnifiedSave!; const binding = await resolve('flow', 'editor');
     deps.resolveUnifiedSave = async () => binding;
     (body as Record<string, unknown>)[field] = field === 'packId' ? 'other' : 'f'.repeat(64);
     expect(await request()).toMatchObject({ status: 409, body: { code: 'BASELINE_STALE' } });
-    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(commit);
+    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(commit); expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it('rejects unauthorized and lossy documents without writing', async () => {
     deps.resolvePrincipal = async () => null;
@@ -98,7 +104,7 @@ describe('explicit AutoHeal unified-save adapter', () => {
     deps.resolveUnifiedSave = async () => ({ ...b, service: denied });
     expect(await request()).toMatchObject({ status: 409, body: { outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } } });
     expect(policy).toHaveBeenCalledOnce();
-    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(commit);
+    expect(JSON.parse(row().spec_json)).toEqual(original); expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(commit); expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it('uses workflow edit permission when no additional Pack policy is configured', async () => {
     const b = (await deps.resolveUnifiedSave!('flow', 'editor'))!;
@@ -109,7 +115,8 @@ describe('explicit AutoHeal unified-save adapter', () => {
     const result = await request();
     expect(result).toMatchObject({ status: 200, body: { outcome: 'confirmed', evidence: { db: 'confirmed', git: 'confirmed' } } });
     expect(JSON.parse(row().spec_json).title).toBe('repair');
-    expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(result.body.evidence.commit);
+    expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(result.body.evidence.commit);
+    expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it('reports a partial result when Pack permission is revoked after the DB write', async () => {
     const b = (await deps.resolveUnifiedSave!('flow', 'editor'))!; let checks = 0;
@@ -120,7 +127,7 @@ describe('explicit AutoHeal unified-save adapter', () => {
     expect(await request()).toMatchObject({ status: 409, body: { outcome: 'partial', reconciliationRequired: true,
       evidence: { db: 'confirmed', git: 'not_started' } } });
     expect(JSON.parse(row().spec_json).title).toBe('repair');
-    expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(commit);
+    expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(commit); expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it('reports unknown when a real Git push succeeds but its acknowledgement is lost', async () => {
     const b = (await deps.resolveUnifiedSave!('flow', 'editor'))!;
@@ -136,7 +143,8 @@ describe('explicit AutoHeal unified-save adapter', () => {
       evidence: { db: 'confirmed', git: 'unknown' } } });
     expect(JSON.stringify(result)).not.toContain('private');
     expect(JSON.parse(row().spec_json).title).toBe('repair');
-    expect(git('rev-parse', 'refs/heads/saved/flow')).toBe(result.body.evidence.commit);
+    expect(git('rev-parse', 'refs/heads/wf/flow')).toBe(result.body.evidence.commit);
+    expect(() => git('rev-parse', 'refs/heads/saved/flow')).toThrow();
   });
   it.each(['throws', 'malformed', 'partial-without-evidence'])('treats %s service result as unknown, not success', async mode => {
     const resolve = deps.resolveUnifiedSave!; const b = (await resolve('flow', 'editor'))!;
