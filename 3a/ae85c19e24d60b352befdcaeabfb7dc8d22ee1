@@ -1,0 +1,34 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/auto-heal-unified-host.test.ts
+  h_5f06d4d8b4bdd5 15,51,84,86,123,125,130,133,145,147,155,180,191-192,205-206,209,214,217,220,223,228,241-265
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-full-path.test.ts
+  h_5f06d4d8b4bdd5 44-49,54-56,61,65-71,94,103
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-git-config.test.ts
+  h_5f06d4d8b4bdd5 62-65,71,93
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-browser-login.test.ts
+  h_5f06d4d8b4bdd5 55
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-host.test.ts
+  h_5f06d4d8b4bdd5 17-18
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  h_5f06d4d8b4bdd5 30,51,109,114,118,121-123,125-126,129,135-138,149,152,177-179,182-183,185
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-git-store.test.ts
+  h_5f06d4d8b4bdd5 6-8,15-16,98,102-104,107-110,115,117-305
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  h_5f06d4d8b4bdd5 20-22,97-98,196,198,200-201,208
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-git-store.ts
+  h_5f06d4d8b4bdd5 199-221,225-226,335,344,346-350,353-354
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auto-heal.ts
+  h_5f06d4d8b4bdd5 333-334,337
+submodules/avernet
+  h_5f06d4d8b4bdd5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3aae85c19e24d60b352befdcaeabfb7dc8d22ee1",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
