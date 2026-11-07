@@ -289,7 +289,9 @@ async function postAutoHealWrite<T>(operation: 'save' | 'deploy' | 'editor-deplo
           if ((value.code === 'DEPLOY_TREE_CONFLICT' || (operation === 'editor-deploy' || (input as WorkflowAutoHealDeployRequest).snapshotProtocol === 'saved-tree-v2') && (value.code === 'DEPLOY_BASELINE_MISSING' || value.code === 'DRAFT_CONFLICT'
             || (input as WorkflowAutoHealDeployRequest).snapshotProtocol === 'saved-tree-v2' && ['SNAPSHOT_DB_MISMATCH', 'CANDIDATE_NOT_SAVED', 'SAVE_REQUIRED', 'DEPLOY_BASELINE_STALE'].includes(String(value.code)))) && typeof requestId === 'string' && requestId.length > 0 && value.requestId === requestId) {
             rejectedDeployments.set(error, { workflowId, requestId })
-            error.message = value.code === 'DRAFT_CONFLICT' ? '数据库草稿已变化或不存在，请重新读取并确认部署。' : '当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
+            error.message = value.code === 'DRAFT_CONFLICT' ? '数据库草稿已变化或不存在，请重新读取并确认部署。'
+              : value.code === 'SNAPSHOT_DB_MISMATCH' ? '数据库草稿与待部署的 Git 工作流不一致或无法安全比较。为避免运行内容和部署内容不一致，请先保存当前内容，再重新部署。保存可能立即影响使用数据库草稿的运行端。'
+              : '当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，已阻止部署。请联系有权限的维护人员核对；未自动合并或恢复。'
           }
         }
       } catch { /* an unrecognized response remains uncertain */ }

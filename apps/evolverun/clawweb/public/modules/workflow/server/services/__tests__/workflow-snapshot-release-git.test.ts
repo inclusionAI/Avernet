@@ -89,10 +89,19 @@ describe('tag-only snapshot release preparation with an authorized active record
     const tree = execFileSync('git', ['mktree', '-z'], { cwd: seed, input: record, encoding: 'utf8' }).trim();
     const bad = git(seed, 'commit-tree', tree, '-m', 'invalid path'); await expect(assertDeploymentTreePreserved(seed, bad, candidate, 'request', '')).rejects.toThrow();
   });
+  it('keeps a nested packs/ manifest as an opaque root Pack resource', async () => {
+    mkdirSync(path.join(seed, 'packs/other'), { recursive: true });
+    const nested = 'id: other\nworkflows: [flow]\n';
+    writeFileSync(path.join(seed, 'packs/other/workflow.pack.yaml'), nested);
+    candidate = commit('nested resource'); save();
+    const prepared = await prepareWorkflowSnapshotRelease(input());
+    expect(prepared.commit).toBe(candidate);
+    expect(git(repo, 'show', `${prepared.commit}:packs/other/workflow.pack.yaml`)).toBe(nested.trimEnd());
+  });
   it('rejects mixed candidate layout and malformed or forged YAML', async () => {
-    mkdirSync(path.join(seed, 'packs/other'), { recursive: true }); writeFileSync(path.join(seed, 'packs/other/workflow.pack.yaml'), 'id: other\nworkflows: [flow]\n');
+    mkdirSync(path.join(seed, 'scripts/other'), { recursive: true }); writeFileSync(path.join(seed, 'scripts/other/workflow.pack.yaml'), 'id: other\nworkflows: [flow]\n');
     candidate = commit('mixed'); save(); await expect(prepareWorkflowSnapshotRelease(input())).rejects.toThrow();
-    rmSync(path.join(seed, 'packs'), { recursive: true }); writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\nid: other\nnodes: []\n');
+    rmSync(path.join(seed, 'scripts/other'), { recursive: true }); writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\nid: other\nnodes: []\n');
     candidate = commit('invalid YAML'); save(); await expect(prepareWorkflowSnapshotRelease(input())).rejects.toThrow();
   });
   it('freezes a confirmed saved candidate even when wf advances during preparation', async () => {

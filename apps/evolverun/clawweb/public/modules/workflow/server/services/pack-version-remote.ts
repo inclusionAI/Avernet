@@ -34,7 +34,7 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
     try {
       const verifyRefs = await packVersionPhase('git_fetch', () => fetchPackVersionRefs(dir, gitConfig, input.workflowId, input.active?.tag, !!input.active && input.version === 'draft', input.active?.action === 'rollback'));
       try {
-        const snapshot = await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: input.includeVersionFiles !== false, activeTag: input.active?.tag }));
+        const snapshot = await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: input.includeVersionFiles !== false, activeTag: input.active?.tag, allowMalformedDraftWorkflow: input.version === 'draft' }));
         if (input.active) {
           if (!verifyRefs.activeCommit) throw new Error('Active deployment unavailable');
           const metadata = await readPreparedPackMetadata(dir, input.workflowId, verifyRefs.activeCommit);

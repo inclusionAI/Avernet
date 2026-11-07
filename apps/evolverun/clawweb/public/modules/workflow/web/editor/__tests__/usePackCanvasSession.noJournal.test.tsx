@@ -321,7 +321,7 @@ it('requires explicit selection when Git would erase DB-only node coordinates', 
     updateVersion(session, 'draft', { snapshot: { ...v.snapshot!, versionFiles: baseFiles }, files: structuredClone(baseFiles) })
     editWorkflowFile(session, id, { ...git, title: 'File title' })
   })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('Git 工作流 YAML 与数据库基线不一致') })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('画布和文件同时修改') })
   expect(window.confirm).not.toHaveBeenCalled()
   expect(fetchJson).not.toHaveBeenCalled()
   expect(useEditorStore.getState().spec?.nodes[0]._x).toBe(90)
@@ -416,13 +416,13 @@ it('does not retry a correlated rejection from an unjournaled unified save', asy
   expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
 })
 
-it.each(['empty', 'missing manifest', 'missing workflow YAML', 'empty manifest', 'empty workflow YAML'] as const)('refuses an invalid Git snapshot (%s) before saving a dirty or clean DB', async kind => {
+it.each(['empty', 'missing manifest', 'missing workflow YAML', 'empty manifest'] as const)('refuses an invalid Git snapshot (%s) before saving a dirty or clean DB', async kind => {
   for (const isDirty of [false, true]) {
     const { hook, session } = setup()
     const state = session.state.versions.draft
     const files = kind === 'empty' ? [] : state.files
       .filter(f => kind === 'missing manifest' ? f.path !== 'workflow.pack.yaml' : kind === 'missing workflow YAML' ? !f.path.startsWith('workflows/') : true)
-      .map(f => (kind === 'empty manifest' && f.path === 'workflow.pack.yaml') || (kind === 'empty workflow YAML' && f.path.startsWith('workflows/')) ? { ...f, contentBase64: '' } : f)
+      .map(f => kind === 'empty manifest' && f.path === 'workflow.pack.yaml' ? { ...f, contentBase64: '' } : f)
     act(() => {
       updateVersion(session, 'draft', { snapshot: { ...state.snapshot!, versionFiles: files }, files: structuredClone(files) })
       if (isDirty) useEditorStore.getState().updateSpecField('title', 'Local change')
@@ -452,49 +452,141 @@ function setGitBaseline(session: ReturnType<typeof sessionFor>, id: string, text
   updateVersion(session, 'draft', { snapshot: { ...current.snapshot!, versionFiles: structuredClone(files) }, files })
 }
 
-it.each(['id-only', 'missing-title', 'missing-nodes'] as const)('rejects unified overwrite when legacy Git baseline is incomplete (%s)', async kind => {
+it('publishes a clean DB document when the selected Git baseline differs', async () => {
+  const { hook, session, id, spec } = setup()
+  expect(hook.result.current.baselineComparison).toBe('same')
+  act(() => setGitBaseline(session, id, stringify({ ...spec, title: 'Old Git' })))
+  expect(hook.result.current.baselineComparison).toBe('different')
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified' }) })
+  const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
+  const input = JSON.parse(await blobText(post[1]!.body as Blob))
+  expect(JSON.parse(input.specJson)).toEqual(spec)
+  expect(input).toMatchObject({ expectedDraftToken: token, sourceCommit: A, expectedSavedHead: A, changes: [] })
+  expect(hook.result.current.baselineComparison).toBe('same')
+})
+
+it('compares the selected snapshot, not unsubmitted files or canvas edits', () => {
+  const { hook, session, id, spec } = setup()
+  act(() => { editWorkflowFile(session, id, { ...spec, title: 'File edit' }); useEditorStore.getState().updateSpecField('title', 'Canvas edit') })
+  expect(hook.result.current.baselineComparison).toBe('same')
+  act(() => { const v = session.state.versions.draft; publish(session, { ...session.state, version: 'current', versions: { ...session.state.versions,
+    current: { ...v, snapshot: { ...v.snapshot!, versionFiles: v.snapshot!.versionFiles.map(f => f.path === `workflows/${id}.yaml` ? { ...f, contentBase64: btoa(stringify({ ...spec, title: 'Other' })) } : f) } } } }) })
+  expect(hook.result.current.baselineComparison).toBe('different')
+})
+
+it('opens a comparison with raw syntactically invalid Git YAML', async () => {
+  const { hook, session, id } = setup(), text = `id: ${id}\nnodes: [\n`
+  act(() => setGitBaseline(session, id, text))
+  expect(hook.result.current.baselineComparison).toBe('uncomparable')
+  let review!: Awaited<ReturnType<typeof hook.result.current.prepareReconciliation>>
+  await act(async () => { review = await hook.result.current.prepareReconciliation() })
+  expect(review.gitYaml).toBe(text)
+  expect(hook.result.current.currentReconciliation(review).gitYaml).toBe(text)
+  act(() => hook.result.current.cancelReconciliation(review))
+})
+
+it.each(['malformed', 'empty', 'invalid utf8'] as const)('does not let %s comparison block default save', async kind => {
+  const { hook, session, id } = setup()
+  act(() => {
+    setGitBaseline(session, id, kind === 'malformed' ? `id: ${id}\nnodes: [` : '')
+    if (kind === 'invalid utf8') {
+      const v = session.state.versions.draft
+      const files = v.files.map(f => f.path === `workflows/${id}.yaml` ? { ...f, contentBase64: '/w==' } : f)
+      updateVersion(session, 'draft', { snapshot: { ...v.snapshot!, versionFiles: files }, files: structuredClone(files) })
+    }
+  })
+  expect(hook.result.current.baselineComparison).toBe(kind === 'invalid utf8' ? 'unavailable' : 'uncomparable')
+  if (kind === 'invalid utf8') await act(async () => { await expect(hook.result.current.prepareReconciliation()).rejects.toThrow() })
+  const original = vi.mocked(fetch).getMockImplementation()!
+  // Model a server pre-write rejection; the client must still quarantine an
+  // untrusted response instead of assuming that no write occurred.
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (init?.method !== 'POST') return original(url, init)
+    const input = JSON.parse(await blobText(init.body as Blob))
+    return new Response(JSON.stringify({ requestId: input.requestId, outcome: 'rejected', reconciliationRequired: false,
+      evidence: { db: 'not_started', git: 'not_started' } }), { status: 409 })
+  })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存未能完整确认') })
+  expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  expect(editorWorkflowWriteState(id).phase).toBe('unknown')
+  expect(session.state.versions.draft.files.find(f => f.path === `workflows/${id}.yaml`)!.contentBase64)
+    .toBe(kind === 'invalid utf8' ? '/w==' : btoa(kind === 'malformed' ? `id: ${id}\nnodes: [` : ''))
+})
+
+it('still verifies the DB baseline when Git differs', async () => {
+  const { hook, session, id, spec } = setup()
+  act(() => { setGitBaseline(session, id, stringify({ ...spec, title: 'Old Git' })); useEditorStore.getState().updateSpecField('title', 'Local') })
+  mocks.read.mockResolvedValue({ ...spec, title: 'Remote DB change' })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('数据库草稿自读取后已变化') })
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  expect(useEditorStore.getState().spec?.title).toBe('Local')
+})
+
+it('retains later edits while saving a mismatched Git baseline', async () => {
+  const { hook, session, id, spec } = setup()
+  act(() => { setGitBaseline(session, id, stringify({ ...spec, title: 'Old Git' })); useEditorStore.getState().updateSpecField('title', 'Submitted') })
+  const original = vi.mocked(fetch).getMockImplementation()!
+  let release!: () => void, started!: () => void
+  const gate = new Promise<void>(r => { release = r }), began = new Promise<void>(r => { started = r })
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    const response = await original(url, init)
+    if (init?.method === 'POST') { started(); await gate }
+    return response
+  })
+  let pending!: ReturnType<typeof hook.result.current.save>
+  act(() => { pending = hook.result.current.save() }); await began
+  act(() => { useEditorStore.getState().updateSpecField('title', 'Later'); editScript(session) })
+  await act(async () => { release(); await expect(pending).resolves.toMatchObject({ mode: 'unified' }) })
+  expect(useEditorStore.getState().spec?.title).toBe('Later')
+  expect(useEditorStore.getState()._databaseSpec?.title).toBe('Submitted')
+  expect(useEditorStore.getState().isDirty).toBe(true)
+  expect(atob(session.state.versions.draft.files.find(f => f.path === 'scripts/test.sh')!.contentBase64)).toBe('new')
+})
+
+it.each(['id-only', 'missing-title', 'missing-nodes'] as const)('saves the edited DB candidate over an incomplete Git baseline (%s)', async kind => {
   const { hook, session, id, spec } = setup()
   const legacy = kind === 'id-only' ? { id } : kind === 'missing-title' ? { id, nodes: [] } : { id, title: 'Old' }
   act(() => { setGitBaseline(session, id, stringify(legacy)); useEditorStore.getState().updateSpecField('title', 'DB edit') })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('不可比较') })
-  expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true)
-  expect(useEditorStore.getState().spec).toEqual({ ...spec, title: 'DB edit' })
-  expect(session.state.versions.draft.files).toEqual(session.state.versions.draft.snapshot!.versionFiles)
+  expect(hook.result.current.baselineComparison).toBe('uncomparable')
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified' }) })
+  const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
+  const input = JSON.parse(await blobText(post[1]!.body as Blob))
+  expect(JSON.parse(input.specJson)).toEqual({ ...spec, title: 'DB edit' })
+  expect(input).toMatchObject({ expectedDraftToken: token, sourceCommit: A, expectedSavedHead: A, changes: [] })
+  expect(hook.result.current.baselineComparison).toBe('same')
 })
 
-it.each([false, true])('blocks replacing DB from YAML with an incomparable legacy baseline (confirm=%s)', async confirmed => {
+it.each([false, true])('preserves divergent YAML edits with an incomparable baseline (confirm=%s)', async confirmed => {
   const { hook, session, id, spec } = setup()
-  const edited = { ...spec, title: 'YAML candidate' }
-  act(() => { setGitBaseline(session, id, stringify({ id })); editWorkflowFile(session, id, edited) })
+  act(() => { setGitBaseline(session, id, stringify({ id })); editWorkflowFile(session, id, { ...spec, title: 'YAML candidate' }) })
   const originalFiles = structuredClone(session.state.versions.draft.files)
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(confirmed)
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow(/基线.*不可比较.*安全协议/) })
-  expect(confirm).not.toHaveBeenCalled()
-  expect(fetchJson).not.toHaveBeenCalled()
-  expect(mocks.read).not.toHaveBeenCalled()
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('画布和文件同时修改') })
+  expect(confirm).not.toHaveBeenCalled(); expect(fetchJson).not.toHaveBeenCalled()
   expect(session.state.versions.draft.files).toEqual(originalFiles)
   expect(useEditorStore.getState().spec).toEqual(spec)
 })
 
-it('blocks incomparable YAML replacement even when the canvas matches the candidate', async () => {
+it('saves an incomparable YAML edit already matching the canvas', async () => {
   const { hook, session, id, spec } = setup()
   act(() => { setGitBaseline(session, id, stringify({ id })); editWorkflowFile(session, id, { ...spec, title: 'Same' }); useEditorStore.getState().updateSpecField('title', 'Same') })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow(/基线.*不可比较.*安全协议/) })
-  expect(fetchJson).not.toHaveBeenCalled()
-  expect(useEditorStore.getState().isDirty).toBe(true)
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified' }) })
+  expect(useEditorStore.getState().spec?.title).toBe('Same')
 })
 
 it('retains conflict protection for a legacy baseline when canvas and candidate diverge', async () => {
   const { hook, session, id, spec } = setup()
   act(() => { setGitBaseline(session, id, stringify({ id })); editWorkflowFile(session, id, { ...spec, title: 'YAML' }); useEditorStore.getState().updateSpecField('title', 'Canvas') })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('不可比较') })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('画布和文件同时修改') })
   expect(fetchJson).not.toHaveBeenCalled()
+  expect(useEditorStore.getState().spec?.title).toBe('Canvas')
+  expect(atob(session.state.versions.draft.files.find(f => f.path === `workflows/${id}.yaml`)!.contentBase64)).toContain('YAML')
 })
 
-it.each(['invalid yaml', 'wrong id', 'invalid candidate', 'missing manifest', 'read failure'] as const)('fails closed with a legacy baseline on %s', async kind => {
+it.each(['wrong id', 'invalid candidate', 'missing manifest', 'read failure'] as const)('fails closed with a legacy baseline on %s', async kind => {
   const { hook, session, id, spec } = setup()
   act(() => {
-    setGitBaseline(session, id, kind === 'invalid yaml' ? 'id: [' : stringify({ id: kind === 'wrong id' ? 'other' : id }))
+    setGitBaseline(session, id, stringify({ id: kind === 'wrong id' ? 'other' : id }))
     if (kind === 'invalid candidate') editWorkflowFile(session, id, { id, title: 'missing nodes' })
     if (kind === 'missing manifest') updateVersion(session, 'draft', { files: session.state.versions.draft.files.filter(f => f.path !== 'workflow.pack.yaml') })
     if (kind === 'read failure') updateVersion(session, 'draft', { readFailure: 'partial read' })
@@ -505,34 +597,26 @@ it.each(['invalid yaml', 'wrong id', 'invalid candidate', 'missing manifest', 'r
   expect(useEditorStore.getState().spec).toEqual({ ...spec, title: 'DB edit' })
 })
 
-it('fails closed and retains script changes when Git preflight rejects an incomplete legacy candidate', async () => {
+it('saves script and canvas changes over an incomplete legacy Git baseline', async () => {
   const { hook, session, id } = setup()
-  act(() => { setGitBaseline(session, id, stringify({ id })); editScript(session) })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('不可比较') })
-  expect(fetchJson).not.toHaveBeenCalled()
-  expect(session.state.versions.draft.files.find(file => file.path === 'scripts/test.sh')?.contentBase64).toBe(btoa('new'))
+  act(() => { setGitBaseline(session, id, stringify({ id })); editScript(session); useEditorStore.getState().updateSpecField('title', 'DB edit') })
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified' }) })
+  const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
+  const input = JSON.parse(await blobText(post[1]!.body as Blob))
+  expect(input.changes.map((c: { path: string }) => c.path)).toEqual(['scripts/test.sh'])
+  expect(JSON.parse(input.specJson).title).toBe('DB edit')
+  expect(atob(session.state.versions.draft.files.find(f => f.path === 'scripts/test.sh')!.contentBase64)).toBe('new')
 })
 
-it.each([{ title: 3 }, { nodes: 'invalid' }, { nodes: [{ id: 'bad' }] }])('rejects a legacy baseline with invalid present fields: %j', async fields => {
+it.each([{ title: 3 }, { nodes: 'invalid' }, { nodes: [{ id: 'bad' }] }])('saves DB over Git with invalid editor fields: %j', async fields => {
   const { hook, session, id } = setup()
   act(() => { setGitBaseline(session, id, stringify({ id, ...fields })); useEditorStore.getState().updateSpecField('title', 'DB edit') })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow() })
-  expect(fetchJson).not.toHaveBeenCalled()
+  expect(hook.result.current.baselineComparison).toBe('uncomparable')
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified' }) })
+  expect(useEditorStore.getState()._databaseSpec?.title).toBe('DB edit')
 })
 
-it('preflights the actual Git candidate before a DB canvas write with a legacy YAML and script edit', async () => {
-  const { hook, session, id, spec } = setup()
-  act(() => { setGitBaseline(session, id, stringify({ id })); editScript(session); useEditorStore.getState().updateSpecField('title', 'DB edit') })
-  const originalFiles = structuredClone(session.state.versions.draft.files)
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('不可比较') })
-  expect(fetchJson).not.toHaveBeenCalled()
-  expect(mocks.read).not.toHaveBeenCalled()
-  expect(session.state.versions.draft.files).toEqual(originalFiles)
-  expect(useEditorStore.getState().spec).toEqual({ ...spec, title: 'DB edit' })
-  expect(useEditorStore.getState().isDirty).toBe(true)
-})
-
-it('preflights the actual Git candidate before changing DB identity for a legacy YAML and Pack rename', async () => {
+it('preflights Pack rename even with an incomparable Git baseline', async () => {
   const { hook, session, id, spec } = setup()
   act(() => {
     setGitBaseline(session, id, stringify({ id }))
@@ -541,9 +625,8 @@ it('preflights the actual Git candidate before changing DB identity for a legacy
       ? { ...file, contentBase64: btoa(stringify({ id: 'renamed-pack', workflows: [id] })) } : file) })
   })
   const originalFiles = structuredClone(session.state.versions.draft.files)
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('不可比较') })
-  expect(fetchJson).not.toHaveBeenCalled()
-  expect(mocks.read).not.toHaveBeenCalled()
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('Pack manifest') })
+  expect(fetchJson).not.toHaveBeenCalled(); expect(mocks.read).not.toHaveBeenCalled()
   expect(session.state.uncertainRename).toBeNull()
   expect(session.state.versions.draft.files).toEqual(originalFiles)
   expect(useEditorStore.getState().spec).toEqual(spec)
@@ -797,4 +880,15 @@ it.each(['title', 'layout'] as const)('quarantines YAML-only confirmation when %
   expect(session.state.postSaveVerificationError).toContain('人工核对')
   await expect(hook.result.current.save()).rejects.toThrow('人工核对')
   expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+})
+
+it('allows read-only comparison while unapplied form input is retained', async () => {
+  const { hook } = setup()
+  act(() => useEditorStore.getState().setPendingEdit('workflow:title', 'unapplied'))
+  let review!: Awaited<ReturnType<typeof hook.result.current.prepareReconciliation>>
+  await act(async () => { review = await hook.result.current.prepareReconciliation() })
+  expect(review.candidateSpecJson).toContain('Initial')
+  expect(useEditorStore.getState().pendingEdits['workflow:title']).toBe('unapplied')
+  act(() => hook.result.current.cancelReconciliation(review))
+  expect(useEditorStore.getState().pendingEdits['workflow:title']).toBe('unapplied')
 })

@@ -181,15 +181,18 @@ it.each(['cap-invalid', 'cap-down'] as const)('does not fall back or lock on ind
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
   expect(useEditorStore.getState().isDirty).toBe(true)
 })
-it('refuses to replace divergent Git YAML when only the canvas was edited', async () => {
+it('saves the edited DB candidate over divergent Git YAML', async () => {
   const ctx = await setup(false)
   act(() => {
     const v = ctx.session.state.versions.draft
     const files = v.files.map(f => f.path.startsWith('workflows/') ? { ...f, contentBase64: encode(stringify({ id: ctx.id, title: 'Different Git', version: '1', nodes: [] })) } : f)
     updateVersion(ctx.session, 'draft', { snapshot: { ...v.snapshot!, versionFiles: files }, files: structuredClone(files) })
   })
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('Git 工作流 YAML 与数据库基线不一致') })
-  expect(post.mock.calls.map(([, init]) => init.method)).toEqual(['GET'])
+  expect(ctx.hook.result.current.baselineComparison).toBe('different')
+  await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toMatchObject({ mode: 'unified', commit }) })
+  expect(post.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'POST'])
+  expect(JSON.parse(submitted.specJson).title).toBe('Edited')
+  expect(submitted.expectedDraftToken).toBe(token)
   expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
-  expect(useEditorStore.getState().isDirty).toBe(true)
+  expect(useEditorStore.getState().isDirty).toBe(false)
 })

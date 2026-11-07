@@ -53,6 +53,46 @@ wf is newer or absent; with no active deployment, production is unavailable
 rather than silently replaced by draft. A conflicting/failed read is not an
 empty Pack.
 
+### DB / Git divergence in the editor
+
+A difference between the persisted DB document and the workflow YAML in the
+observed Git Pack does not by itself prevent saving the current candidate, but
+**direct deployment is currently rejected**. TaskGuard currently prefers the DB
+draft, so publishing a different Git workflow could make execution differ from
+the released tree. The server must fail closed with HTTP 409
+`SNAPSHOT_DB_MISMATCH` when those documents differ or cannot be safely compared.
+The user can explicitly save the chosen current candidate to synchronize DB and
+wf, then review and deploy again. Saving can immediately affect runtimes that
+read the DB draft; it is not an automatic repair or deployment.
+
+Unsaved canvas edits do not prevent reviewing and deploying the already saved
+tree only when the saved DB and Git workflow match and all other server checks
+pass. The UI must warn that unsaved edits are excluded. Bind review and
+confirmation to the exact local draft and layout positions as well as DB and
+Git baselines; changes during the decision invalidate it. Existing unknown
+result, concurrency, CAS and authorization protections remain unchanged.
+
+The initial candidate remains the DB workflow plus existing editor changes;
+never silently replace it with Git. Users may compare that candidate with the
+Git YAML and explicitly choose the Git document only if decoding, parsing,
+lossless conversion and workflow identity validation are safe. Before loading that document into the editor,
+confirm that it will overwrite the current candidate. Cancelling, closing or
+failing leaves that candidate intact, and loading is not a save. If Git cannot
+be safely interpreted, explain why it cannot be selected; DB/the existing
+candidate remains usable. An uncomparable Git document is not evidence of a
+match, and other Pack files must not be silently dropped or misrepresented as
+reviewed.
+
+Saving still writes the explicitly chosen current candidate using the verified
+DB token and observed wf lease, with the complete Pack preserved. Deploying
+still reviews and publishes the exact saved wf tree only after the server has
+verified its workflow against the DB draft. Neither DB nor unsaved browser edits
+are overlaid onto the release. Existing validation, identity, authorization,
+Pack integrity, CAS and error/unknown outcome guards remain in force. A comparison and overwrite confirmation are
+bound to their workflow, editor session, baselines and local changes; invalidate
+stale or timed-out results, and do not let late responses replace edits or
+unlock a newer operation. Failure never means automatic retry or success.
+
 For wire compatibility, `expectedSavedHead` and `draftHead` retain their names
 but represent the wf write lease; `sourceCommit` is the observed wf commit for draft saves. `savedCommit` means the saved candidate, not a saved/ branch. Existing
 protocol names are retained; new browser code validates the actual ref type.

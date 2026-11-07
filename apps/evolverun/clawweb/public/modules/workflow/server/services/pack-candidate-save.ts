@@ -53,6 +53,7 @@ export class PackCandidateOutcomeUnknownError extends Error {
 }
 
 type Entry = { mode: string; type: string; oid: string; size: number | null };
+class MalformedCandidateYamlError extends Error {}
 const oidPattern = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const maxBlob = 1024 * 1024;
@@ -257,10 +258,15 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
         const bytes = await git(['cat-file', 'blob', entry.oid], 1024 * 1024 + 1);
         try {
           if (bytes.includes(0)) throw new Error();
-          const value: unknown = parseYaml(decoder.decode(bytes));
+          const text = decoder.decode(bytes);
+          let value: unknown;
+          try { value = parseYaml(text); } catch { throw new MalformedCandidateYamlError('Invalid manifest or workflow YAML'); }
           if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
           return value as Record<string, unknown>;
-        } catch { throw new Error('Invalid manifest or workflow YAML'); }
+        } catch (error) {
+          if (error instanceof MalformedCandidateYamlError) throw error;
+          throw new Error('Invalid manifest or workflow YAML');
+        }
       };
       const rootManifestDeclaresWorkflow = async (): Promise<boolean> => {
         const entry = entries.get('workflow.pack.yaml');
@@ -269,7 +275,7 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
         if (!Array.isArray(manifest.workflows)) throw new Error('Invalid pack manifest workflows');
         return manifest.workflows.some(item => itemId(item) === input.workflowId);
       };
-      const locate = async (): Promise<{ root: string; id: string; workflow: string; entry: Entry }> => {
+      const locate = async (allowMalformedSource = false): Promise<{ root: string; id: string; workflow: string; entry: Entry }> => {
         let found: { root: string; id: string; workflow: string; entry: Entry } | undefined;
         const files = await rootManifestDeclaresWorkflow()
           ? ['workflow.pack.yaml']
@@ -285,8 +291,15 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
           if (root && root.split('/').at(-2) !== manifest.id) throw new Error('Pack manifest location conflict');
           const workflow = workflowFile(matches[0]);
           if (workflow === 'workflow.pack.yaml') throw new Error('Workflow conflicts with manifest');
-          const spec = await yamlObject(entries.get(root + workflow));
-          if (spec.id !== input.workflowId) throw new Error('Workflow identity mismatch');
+          try {
+            const spec = await yamlObject(entries.get(root + workflow));
+            if (spec.id !== input.workflowId) throw new Error('Workflow identity mismatch');
+          } catch (error) {
+            // Only unified save may replace syntactically malformed source YAML.
+            // Mode, size, UTF-8, manifest/path and valid but wrong IDs still fail closed.
+            if (!(allowMalformedSource && protectTreeAliases && workflowYamlSnapshot !== undefined
+              && error instanceof MalformedCandidateYamlError)) throw error;
+          }
           found = { root, id: manifest.id, workflow, entry: entries.get(root + workflow)! };
         }
         if (!found) throw new Error('Pack manifest not found');
@@ -303,7 +316,7 @@ async function preparePackCandidate<T>(callerInput: SavePackCandidateInput,
         }
       };
       await rejectMixedRootLayout();
-      const sourcePack = await locate();
+      const sourcePack = await locate(true);
       let pack: { root: string; id: string } = sourcePack;
       if (protectTreeAliases) rejectProtectedTreeAliases(entries, sourcePack.root,
         await yamlObject(entries.get(`${sourcePack.root}workflow.pack.yaml`)));

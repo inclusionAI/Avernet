@@ -1,6 +1,9 @@
+import { revalidateGitComparison } from './revalidateGitComparison'
+import { extractApiErrorMessage } from './editorErrorMessage'
 import DeploySnapshotReview, { type DeployReview } from '../components/DeploySnapshotReview'
 import WorkflowSnapshotReconciliation from '../components/WorkflowSnapshotReconciliation'
-import { assertWorkflowReconciliation } from '../api/workflowSnapshotReconciliation'
+import WorkflowBaselineComparison, { WorkflowBaselineNotice, parseGitWorkflowForImport } from '../components/WorkflowBaselineComparison'
+import { assertWorkflowReconciliation, workflowReconciliationIsCurrent } from '../api/workflowSnapshotReconciliation'
 import type { ReconciliationApproval } from '../api/workflowSnapshotReconciliation'
 import { useEditorMergeReview } from './useEditorMergeReview'
 import { bindEditorDeploymentWriteEpoch, isDeployPrePushConflict, isEditorDeploymentNotSent } from '../api/autoHealWrites'
@@ -29,6 +32,7 @@ import { hasPackVersionRisk, hasPackVersionEditRisk, hasPackVersionUpload, sessi
 import { WorkspacePopPendingContext, isWorkflowPopOwned, subscribeWorkflowPopOwnership, usePackNavigationGuard, workflowPopOwnershipSnapshot } from '../editor/usePackNavigationGuard'
 import { packWorkflow, sameExecutionSpec } from '../editor/packCanvas'
 import { PackCanvasPartialSaveError, usePackCanvasSession } from '../editor/usePackCanvasSession'
+import { compareGitDatabase, type BaselineComparison } from '../editor/workflowBaselineComparison'
 import { WorkflowDocumentAcknowledgedError } from '../editor/workflowDocumentSave'
 import { assertEditorWorkflowReadable, editorWorkflowReadIsCurrent } from '../editor/workflowWriteGuard'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
@@ -42,19 +46,6 @@ type SaveMessage = { type: 'success' | 'error'; text: string } | null
 const deploymentTokens = new WeakMap<object, string>()
 
 
-
-/** Extract a human-readable message from fetchJson ApiError strings ("API NNN: {json}"). */
-function extractApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  const jsonMatch = msg.match(/^API \d+:\s*(\{.*\})$/s)
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]) as { message?: string }
-      if (parsed.message) return parsed.message
-    } catch { /* not valid JSON — fall through */ }
-  }
-  return msg
-}
 
 function hasUnsafePackEdits(id: string): boolean {
   const versions = sessionFor(id).state.versions
@@ -90,7 +81,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
   const [deploymentBaselineStatus, setDeploymentBaselineStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
-  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions'] } | null>(null)
+  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions']; editorSpec: EditorState['spec']; editorPending: EditorState['pendingEdits']; baselineComparison: BaselineComparison } | null>(null)
   const candidateRequest = useRef(0)
   const switchRequest = useRef(0)
   // Invalidate before passive effects or pending promises can apply an obsolete
@@ -353,6 +344,27 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     if (incoming.id !== previousId) setSelectedWorkflowId(null)
   }, [importYaml])
 
+  const useGitFromComparison = async () => {
+    if (!visibleMerge || !mergeAdapter || workflowSaveInFlight.current) return
+    const { workflowId, sessionId, review } = visibleMerge
+    const current = () => selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId
+      && workflowReconciliationIsCurrent(review, mergeAdapter.currentReconciliation(review))
+    workflowSaveInFlight.current = true; setWorkflowSaving(true)
+    try {
+      const epoch = assertEditorWorkflowReadable(workflowId)
+      if (!current()) throw new Error('对比期间工作流或文件已变化，请关闭后重新查看差异。')
+      const gitSpec = parseGitWorkflowForImport(review.gitYaml, workflowId)
+      await revalidateGitComparison(review)
+      if (!editorWorkflowReadIsCurrent(workflowId, epoch) || !current()) throw new Error('对比期间工作流或文件已变化，请关闭后重新查看差异。')
+      cancelMergeReview()
+      applyYamlToEditor(gitSpec)
+      setSaveMessage({ type: 'success', text: 'Git 工作流内容已载入编辑器；请按需保存，尚未部署。' })
+    } catch (cause) {
+      cancelMergeReview()
+      if (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法载入 Git 工作流：${extractApiErrorMessage(cause)}` })
+    } finally { workflowSaveInFlight.current = false; setWorkflowSaving(false) }
+  }
+
   const handleYamlImport = useCallback(() => {
     try {
       const parsed = parseWorkflowYaml(yamlInput)
@@ -428,8 +440,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     const live = useEditorStore.getState()
     const isOriginalSession = () => selectedWorkflowRef.current === id && useEditorStore.getState().sessionId === candidate.sessionId
     if (session.state.deployment || hasUnsafePackEdits(id) || candidate.packRevision !== packVersionsRevision()
-      || candidate.workflowId !== id || live.sessionId !== candidate.sessionId || live.isDirty || normalizationChanges(candidate.positions, live.positions).length > 0
-      || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length || !live._savedSpec) {
+      || candidate.workflowId !== id || live.sessionId !== candidate.sessionId || normalizationChanges(candidate.positions, live.positions).length > 0
+      || normalizationChanges(candidate.editorSpec, live.spec).length || normalizationChanges(candidate.editorPending, live.pendingEdits).length || !live._savedSpec) {
       setSaveMessage({ type: 'error', text: '确认期间编辑内容已变化，请先保存并重新确认部署。' }); return
     }
     deployInFlight.current = true
@@ -440,8 +452,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       const db = editorDraftDocument(receipt.specJson, id)
       if (receipt.draftToken !== candidate.draftToken || (receipt.packId ?? id) !== candidate.packId) throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
       const now = useEditorStore.getState()
-      if (selectedWorkflowRef.current !== id || now.sessionId !== candidate.sessionId || now.isDirty || normalizationChanges(candidate.positions, now.positions).length > 0
-        || Object.keys(now.pendingEdits ?? {}).length || hasUnsafePackEdits(id)
+      if (selectedWorkflowRef.current !== id || now.sessionId !== candidate.sessionId || normalizationChanges(candidate.positions, now.positions).length > 0
+        || normalizationChanges(candidate.editorSpec, now.spec).length || normalizationChanges(candidate.editorPending, now.pendingEdits).length || hasUnsafePackEdits(id)
         || candidate.packRevision !== packVersionsRevision() || !now._savedSpec || !sameExecutionSpec(db, now._savedSpec)) {
         throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
       }
@@ -547,14 +559,11 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     }
     if (sessionFor(selectedWorkflowId).state.deployment) { setSaveMessage({ type: 'error', text: '上次部署结果未知，请人工核对 Git 与数据库。' }); return }
     if (hasUnsafePackEdits(selectedWorkflowId)) { setSaveMessage({ type: 'error', text: '版本文件存在未保存更改或保存状态不确定，请先处理后再部署。' }); return }
-    if (validationErrors.length) { setSaveMessage({ type: 'error', text: `部署前请修复验证错误: ${validationErrors[0].message}` }); return }
-    if (isDirty || hasPendingEdits) {
-      setSaveMessage({ type: 'error', text: hasPendingEdits ? '存在未应用的配置草稿，无法部署；请先应用并保存。' : '画布有未保存改动，无法部署；请先保存。' }); return
-    }
     if (useEditorStore.getState()._databaseSpec === null) { setSaveMessage({ type: 'error', text: '尚无数据库暂存稿，请先保存当前编排，再确认部署。' }); return }
     const requestSequence = ++candidateRequest.current
-    const { sessionId, positions: currentPositions } = useEditorStore.getState()
+    const { sessionId, positions: currentPositions, spec: currentSpec, pendingEdits: currentPending } = useEditorStore.getState()
     const positions = structuredClone(currentPositions)
+    const editorSpec = structuredClone(currentSpec), editorPending = structuredClone(currentPending)
     const candidatePackRevision = packVersionsRevision()
     setDeployCandidate(null); setDeployReviewed(false); setSaveMessage(null)
     try {
@@ -595,8 +604,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       if (requestSequence !== candidateRequest.current || selectedWorkflowRef.current !== selectedWorkflowId) return
       const live = useEditorStore.getState()
       if ((receipt.packId ?? selectedWorkflowId) !== snapshot.packId) throw new Error('数据库草稿的 Pack 与 Git 文件快照不一致，请先核对后再部署。')
-      if (hasUnsafePackEdits(selectedWorkflowId) || packVersionsRevision() !== candidatePackRevision || live.sessionId !== sessionId || live.isDirty
-        || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length || !live._savedSpec || !sameExecutionSpec(db, live._savedSpec)) {
+      if (hasUnsafePackEdits(selectedWorkflowId) || packVersionsRevision() !== candidatePackRevision || live.sessionId !== sessionId
+        || normalizationChanges(editorSpec, live.spec).length || normalizationChanges(editorPending, live.pendingEdits).length
+        || !live._savedSpec || !sameExecutionSpec(db, live._savedSpec)) {
         throw new Error('读取期间编辑内容或数据库草稿已变化，请保存并重新读取')
       }
       const versions = sessionFor(selectedWorkflowId).state.versions
@@ -615,7 +625,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         && versions.current.files.length === 0 && versions.draft.files.length === 0
       if (!baseline && !freshBaseline) throw new Error(`草稿文件快照与已读取基线不一致；请先核对版本`)
       packWorkflow(snapshot.versionFiles, selectedWorkflowId, snapshot.packId)
-      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions })
+      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions, editorSpec, editorPending, baselineComparison: compareGitDatabase(snapshot, selectedWorkflowId, db) })
       setShowDeployConfirm(true)
     } catch (err) {
       if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和草稿文件，已阻止部署：${extractApiErrorMessage(err)}。` })
@@ -803,20 +813,26 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         </section>
       )}
 
+      {(packCanvas.baselineComparison === 'different' || packCanvas.baselineComparison === 'uncomparable') && !visibleMerge &&
+        <WorkflowBaselineNotice comparison={packCanvas.baselineComparison} canCompare={!!mergeAdapter} busy={workflowSaving} onCompare={openMergeReview} />}
+
       {saveMessage && (
         <div role={saveMessage.type === 'error' ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
           {saveMessage.text}
         </div>
       )}
 
-      {(wantsReview || (saveMessage?.type === 'error' && /Git 工作流 YAML 与数据库基线不一致或不可比较/.test(saveMessage.text))) && !visibleMerge && (
+      {(packCanvas.baselineComparison !== 'different' && packCanvas.baselineComparison !== 'uncomparable') && (wantsReview || (saveMessage?.type === 'error' && /Git 工作流 YAML 与数据库基线不一致或不可比较/.test(saveMessage.text))) && !visibleMerge && (
         mergeAdapter ? <button type="button" disabled={workflowSaving} onClick={openMergeReview} className="mx-4 my-2 rounded border border-input px-3 py-2 text-sm">核对数据库和 Git 差异…</button>
           : <p role="status" className="px-4 py-2 text-sm">差异审阅保存能力尚不可用；未发送写入，请保留草稿。</p>
       )}
       {preparing && <div role="status" aria-label="差异审阅准备状态">正在核对数据库和 Git 差异</div>}
       {visibleMerge && mergeAdapter && (mergeCurrent
-        ? <WorkflowSnapshotReconciliation review={visibleMerge.review} current={mergeCurrent} busy={workflowSaving}
-            onConfirm={confirmMergeReview} onCancel={cancelMergeReview} />
+        ? (packCanvas.baselineComparison === 'different' || packCanvas.baselineComparison === 'uncomparable'
+          ? <WorkflowBaselineComparison review={visibleMerge.review} current={mergeCurrent} onUseDatabase={cancelMergeReview}
+              onUseGit={() => void useGitFromComparison()} onCancel={cancelMergeReview} hasPendingEdits={hasPendingEdits} busy={workflowSaving} />
+          : <WorkflowSnapshotReconciliation review={visibleMerge.review} current={mergeCurrent} busy={workflowSaving}
+              onConfirm={confirmMergeReview} onCancel={cancelMergeReview} />)
         : <section role="alert">审阅基线不可用或已变化；请取消后重新核对。<button type="button" onClick={cancelMergeReview}>取消</button></section>)}
       {actionError && <div role="alert" className="flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError?.(null)} aria-label="关闭编辑提示">×</button></div>}
       {visibleRecovery && deploymentRecoveryOpen && !deploymentPending && (
@@ -964,8 +980,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-3 text-sm text-gray-600">即将部署以下草稿(wf)完整快照（含工作流 YAML、脚本与其他文件）；服务端将校验 YAML 与数据库草稿一致。</p>
+            <p className="mt-3 text-sm text-gray-600">即将部署以下已保存的草稿(wf)完整快照（含工作流 YAML、脚本与其他文件），不会使用未保存的编辑器修改。</p>
             <p className="mt-2 break-all text-xs text-gray-600">Pack：{deployCandidate.packId}<br />保存版本 commit：{deployCandidate.commit}<br />当前生效 tag：{deployCandidate.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{deployCandidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{deployCandidate.fileCount} 个</p>
+            {deployCandidate.baselineComparison === 'different' && <p role="status" className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">已保存 Git 工作流与数据库草稿不同；当前运行时可能读取数据库草稿，服务端会拒绝此部署。请先保存当前内容，再重新部署。保存可能立即影响使用数据库草稿的运行端。</p>}
+            {(isDirty || hasPendingEdits) && <p role="status" className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">当前存在未保存的修改，本次部署不包含这些修改；如需部署它们，请先保存。</p>}
             <p className="mt-2 text-xs text-gray-500">部署不会用数据库改写 YAML；未保存的编辑不会部署。Git 与数据库写入不是跨存储原子操作，结果不确定时须人工核对。</p>
             <DeploySnapshotReview changes={deployCandidate.changes} reviewed={deployReviewed} onReviewedChange={setDeployReviewed} />
             <div className="mt-5 flex justify-end gap-2">

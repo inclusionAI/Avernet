@@ -44,7 +44,7 @@ function fixture(doc: WorkflowSpec, storage: 'projection' | 'wrapper' | 'json') 
   }
   const versionFiles = [
     { path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [doc.id] })), mode: '100644' },
-    // Unified save requires Git to match the complete CAS document, including content.
+    // Preserve the complete CAS document in the Git fixture.
     { path: `workflows/${doc.id}.yaml`, contentBase64: btoa(stringify(storage === 'projection' ? stored : doc)), mode: '100644' },
     { path: 'script', contentBase64: btoa('original script'), mode: '100755' },
   ]
@@ -141,7 +141,7 @@ it.each(['projection', 'wrapper', 'json'] as const)('uses the raw CAS %s documen
   expect(useEditorStore.getState()._savedSpec).toEqual(submitted)
 })
 
-it('rejects unified save when Git lacks the raw projection content', async () => {
+it('quarantines a stale postflight snapshot when Git initially lacks raw projection content', async () => {
   const doc = document(), { fetchMock, snapshot } = fixture(doc, 'projection')
   const original = fetchMock.getMockImplementation()!
   fetchMock.mockImplementation((url, init) => url.endsWith('/pack-version?version=draft')
@@ -156,8 +156,8 @@ it('rejects unified save when Git lacks the raw projection content', async () =>
   const { result: canvas } = renderHook(() => usePackCanvasSession(doc.id, loaded))
   await waitFor(() => expect(canvas.current.snapshot).toBeTruthy())
   act(() => useEditorStore.getState().updateSpecField('title', 'Edited title'))
-  await act(async () => { await expect(canvas.current.save()).rejects.toThrow('Git 工作流 YAML 与数据库基线不一致') })
-  expect(fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/unified-save') && init?.method === 'POST')).toHaveLength(0)
+  await act(async () => { await expect(canvas.current.save()).rejects.toThrow('postflight mismatch') })
+  expect(fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/unified-save') && init?.method === 'POST')).toHaveLength(1)
   expect(useEditorStore.getState().isDirty).toBe(true)
 })
 
