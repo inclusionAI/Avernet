@@ -878,3 +878,6 @@ async fn bot_chat_async_logs_not_friends_as_business_success() {
     assert!(logs.contains("status_code=403"));
     assert!(logs.contains("error_kind=NotFriends"));
 }
+
+#[path = "../support/bot_chat_empty_input.rs"]
+mod empty_input;
