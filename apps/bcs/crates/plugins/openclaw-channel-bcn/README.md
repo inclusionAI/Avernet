@@ -25,11 +25,23 @@ terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
 run IDs are rejected. The plugin requires protocol V3, so the key is the
 canonical BCS Session ID from the original `chat.send`.
 
+Each `chat.send` has a fixed three-hour completion deadline, starting when the
+plugin creates the run context before acknowledging the request. Streaming
+output does not reset it. On timeout, the plugin reports a single chat error,
+aborts that run through the OpenClaw SDK's `abortSignal`, and cleans up its run
+context. Other runs and the Session's conversation history are preserved.
+
 `session.delete` requires the canonical `bcs_session_id`; optional
 `bcs_group_id` must match it. Group-only requests are rejected. The plugin
 resolves and deletes only that Session for the current account, including after
 a restart; it never deletes every Session in a Group. See the
 [deletion contract](../../../docs/session-delete-protocol.md).
+
+## 1.0.27 patch: cancel timed-out runs
+
+Extends the run completion deadline from 15 minutes to three hours. On timeout,
+the plugin now cancels the corresponding OpenClaw run through the SDK abort
+signal before cleaning up. Other runs and conversation history are preserved.
 
 ## 1.0.26 patch: OpenClaw direct-chat sessions
 
@@ -109,7 +121,7 @@ Select with the flag or env var (flag wins):
 BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.26 ./singlebox/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.27 ./singlebox/singlebox.sh
 ```
 
 ## Configure
