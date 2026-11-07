@@ -1,6 +1,6 @@
 """Owner-level routine listing — ``GET /openapi/v1/bots/routines/all``.
 
-The per-bot group lists one bot's draft workspace; this route aggregates the
+The per-bot group lists one bot; this route aggregates the
 named user's whole fleet — bots owned or collaborated on — across every
 runtime stage, the way the legacy ``/api/cron`` listing always did. The
 service layer owns the fan-out, the bot_name decoration, the per-stage dedup
@@ -37,8 +37,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
-from .router import _map_routine
+from .converter import _map_routine
 from .schemas import Routine
+from .params import RoutineActorDep
 
 router = APIRouter(
     prefix="/openapi/v1/bots/routines/all",
@@ -57,6 +58,7 @@ async def list_owner_routines(
     caller: ActingCallerDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    actor: RoutineActorDep = None,
 ) -> Envelope[Page[Routine]]:
     """List the named user's routines across all their bots (paginated).
 
@@ -83,6 +85,7 @@ async def list_owner_routines(
         nick_name=owner_id,
         bot_id=None,
         runtime_stage=None,
+        authenticated_user_id=actor.user_id if actor else caller.user_id,
     )
     data = result.get("data") if isinstance(result, dict) else None
     if isinstance(data, list):
