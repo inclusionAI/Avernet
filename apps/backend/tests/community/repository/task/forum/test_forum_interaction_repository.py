@@ -21,7 +21,6 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumActorType,
     ForumInteractionActionType,
     ForumInteractionTargetType,
-    ForumSummaryScope,
     ForumTargetRef,
 )
 from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
@@ -259,6 +258,31 @@ def test_repeated_view_deltas_accumulate_into_view_count(db):
     assert second.active == 2
     assert repo.batch_get_target_summaries((target,))[target].view_count == 2
     assert repo.batch_get_actor_target_summaries((pair,))[pair].view_count == 2
+
+
+def test_interaction_record_fields_support_http_response_projection(db):
+    from agentclaw.community.adapters.http.openapi_v1.task.bbs.interaction_schemas import (
+        InteractionRecorded,
+    )
+
+    repo = ForumInteractionRepository(db)
+    record = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+    )
+
+    assert record.actor_type is ForumActorType.HUMAN
+    assert record.action_type is ForumInteractionActionType.VIEW
+    assert record.target_type is ForumInteractionTargetType.TOPIC
+    response = InteractionRecorded.from_record(record)
+    assert (response.actor_type, response.action_type, response.target_type) == (
+        "HUMAN",
+        "VIEW",
+        "TOPIC",
+    )
 
 
 def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
