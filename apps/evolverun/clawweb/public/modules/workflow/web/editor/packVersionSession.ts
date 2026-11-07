@@ -210,11 +210,14 @@ export function validateSnapshot(value: unknown, id: string, version: Version): 
   return { ...data, versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) }
 }
 function readError(error: unknown): string {
-  const status = (error as { status?: number } | null)?.status
+  const value = error as { status?: unknown; body?: unknown } | null
+  const status = value?.status
+  const body = parseErrorBody(value?.body)
   if (status === 401) return '请先登录，再查看版本文件。'
   if (status === 403) return '没有权限或请求来源不被允许，无法查看版本文件。'
   if (status === 404) return '版本或接口不可用，请检查服务版本和对应快照。'
-  if (status === 409) return '版本快照存在冲突，暂无法安全读取。'
+  if (status === 409 && body?.code === 'SNAPSHOT_CONFLICT') return '同一工作流匹配到多个 Pack，或 Pack 布局存在冲突；暂无法安全读取，请先整理重复的 Pack 或冲突的目录布局，再重新读取。'
+  if (status === 409 && body?.code === 'VERSION_CONFLICT') return '版本已发生变化，请刷新或重新读取后再继续。'
   if (status === 503) return '版本服务暂不可用，请稍后重试。'
   return '无法读取完整版本文件，服务响应可能不兼容，请稍后重试。'
 }
