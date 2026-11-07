@@ -30,12 +30,14 @@ class _FakeDeviceFs:
         self._listings = listings
         self._contents = contents
         self.read_calls: list[str] = []
+        self.read_options: list[dict] = []
 
     async def list_dir(self, dir_path, *, recursive=False):
         return self._listings.get(dir_path, [])
 
-    async def read_file(self, file_path):
+    async def read_file(self, file_path, **kwargs):
         self.read_calls.append(file_path)
+        self.read_options.append(kwargs)
         return self._contents.get(file_path)
 
 
@@ -237,6 +239,33 @@ async def test_unreadable_source_file_raises():
     )
     with pytest.raises(TeclawFilePromotionError):
         await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+
+
+@pytest.mark.asyncio
+async def test_non_missing_read_error_is_not_reported_as_missing_file():
+    """A promotion read must distinguish absence from a real engine failure.
+
+    ``read_file`` returns ``None`` by default for swallowed engine failure. On a
+    follow-up read with errors preserved, the promotion must let that second call's
+    real failure propagate rather than classify it as a missing file.
+    """
+    class _EngineReadFails(_FakeDeviceFs):
+        async def read_file(self, file_path, **kwargs):
+            if kwargs.get("preserve_read_errors"):
+                # Record the disambiguating call before it is intentionally torn
+                # down by the engine-side failure this test simulates.
+                self.read_options.append(kwargs)
+                raise RuntimeError("engine blew up")
+            return await super().read_file(file_path, **kwargs)
+
+    fs = _EngineReadFails(
+        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
+        contents={},
+    )
+    with pytest.raises(RuntimeError, match="engine blew up"):
+        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+
+    assert fs.read_options and fs.read_options[-1].get("preserve_read_errors") is True
 
 
 @pytest.mark.asyncio
