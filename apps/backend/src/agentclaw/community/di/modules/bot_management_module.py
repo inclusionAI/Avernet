@@ -306,13 +306,8 @@ class BotManagementModule(Module):
         # ``BcnService`` is built by the ``bcn_service`` provider below — it needs
         # the bcn-qualified HttpClient injected.
         binder.bind(RenderScreenService, to=RenderScreenService, scope=singleton)
-        # Lifecycle 参与方:startup 阶段归位协作者 scope 漂移的存量/增量
-        # render screen 记录(discover_lifecycle_participants 经 bindings 自动发现并调度)。
-        binder.bind(
-            RenderScreenOwnerScopeBackfill,
-            to=RenderScreenOwnerScopeBackfill,
-            scope=singleton,
-        )
+        # Lifecycle 参与方:startup 阶段归位协作者 scope 漂移的 render screen 记录(经 bindings 自动发现并调度)。
+        binder.bind(RenderScreenOwnerScopeBackfill, to=RenderScreenOwnerScopeBackfill, scope=singleton)
         # BotRepository: single unified ORM impl — runs on prod
         # OceanBase and SQLite via the injected DatabasePlugin.
         # RenderScreenRepository was already unified earlier.
