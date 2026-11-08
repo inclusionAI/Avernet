@@ -1,4 +1,4 @@
-import { latestAttemptEvents, mergePublicOutputEvents } from './currentRound';
+import { latestAttemptEvents, mergePublicOutputEvents, sanitizePublicOutput } from './currentRound';
 import type {
   ActorViewModel,
   PendingHumanNode,
@@ -53,6 +53,8 @@ export function mapPublicOutputEvents(
     const isHost = actorId === params.host.actorId;
     if (voting && !isHost) continue;
     if (isHost && params.display?.showHostOutput === false) continue;
+    const text = sanitizePublicOutput(rawOutput, voting, isHost);
+    if (!text) continue;
 
     const attempt = typeof metadata.attempt === 'number' && metadata.attempt > 0 ? metadata.attempt : 1;
     const identity = `${params.gameSessionId ?? 'phase'}:${params.runId}:${nodeId}:${attempt}`;
@@ -62,7 +64,7 @@ export function mapPublicOutputEvents(
       nodeId,
       attempt,
       actorId,
-      text: rawOutput,
+      text,
       pending: Boolean(metadata.pending ?? message.pending),
       sequence: typeof message.sequence === 'number' ? message.sequence : undefined,
       timestamp: typeof (message.created_at ?? message.timestamp) === 'number'

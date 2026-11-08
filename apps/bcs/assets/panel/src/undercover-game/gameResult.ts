@@ -4,6 +4,9 @@ export interface GameResult {
   title: string;
   summary: string;
   winner: 'civilian' | 'undercover' | 'unknown';
+  /** Optional public judge reason from the authoritative result file. */
+  reason?: string;
+  reveal?: { civilianWord: string; undercoverWord: string; roles: Record<number, 'civilian' | 'undercover'> };
 }
 
 const END_DECLARATION = /^(游戏结束|本局(?:游戏)?已?结束|终局揭晓)(?:[！!。.:：\s—-]|$)/u;
