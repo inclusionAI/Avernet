@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { stringify as stringifyYaml } from 'yaml'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 interface YamlCodeViewerProps {
   /** A persisted spec_json value, legacy YAML wrapper, or raw YAML text. */
@@ -134,15 +134,20 @@ export function formatYamlSnapshot(value: unknown): string {
       const trimmed = text.trim()
       if (!trimmed) return ''
 
+      // JSON objects/arrays are valid YAML too. Parsing them with `intAsBigInt`
+      // keeps large persisted integers lossless while converting the snapshot to
+      // readable multiline YAML. Existing block/scalar YAML stays verbatim so
+      // comments, quoting, and anchors remain faithful to the release record.
+      if (!/^[\[{"]/.test(trimmed)) return text
       try {
-        current = JSON.parse(trimmed) as unknown
+        current = parseYaml(trimmed, { intAsBigInt: true }) as unknown
         continue
       } catch {
         return text
       }
     }
 
-    if (isRecord(current) && typeof current.content === 'string' && !Array.isArray(current.nodes)) {
+    if (isRecord(current) && Object.keys(current).length === 1 && typeof current.content === 'string') {
       return current.content
     }
 

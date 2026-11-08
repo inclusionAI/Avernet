@@ -12,6 +12,13 @@ describe('formatYamlSnapshot', () => {
     expect(formatted).not.toContain('{"id"')
   })
 
+  it('keeps outer JSON fields and large integer values when formatting snapshots', () => {
+    const formatted = formatYamlSnapshot('{"id":"support","content":"title: inner","large":9007199254740993}')
+
+    expect(formatted).toContain('content: "title: inner"')
+    expect(formatted).toContain('large: 9007199254740993')
+  })
+
   it('unwraps legacy content snapshots and formats their YAML', () => {
     expect(formatYamlSnapshot(JSON.stringify({ content: 'id: support\ntitle: 支持\n' }))).toContain('title: 支持')
   })
