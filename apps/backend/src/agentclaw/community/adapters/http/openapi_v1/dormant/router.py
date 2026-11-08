@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+from typing import Annotated
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
-from agentclaw.community.adapters.http.openapi_v1.principal import OwnerNameDep, UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    OwnerNameDep,
+    UserIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     envelope,
@@ -15,13 +20,13 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
-    BotDormantAuditServiceProtocol,
-    BotDormantRecycleServiceProtocol,
+    BotDormantRecycleOperationProtocol,
 )
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Path, Request, Response
+from starlette.concurrency import run_in_threadpool
 
-from .schemas import BotActivateResult, BotRecycleResult
-
+from .schemas import BotActivateResult, BotRecycleOperation, BotRecycleResult
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}",
@@ -33,36 +38,59 @@ router = APIRouter(
 @router.post(
     "/recycle",
     response_model=Envelope[BotRecycleResult],
+    responses={202: {"model": Envelope[BotRecycleResult]}},
 )
 @envelope_errors
 async def recycle_dormant_bot(
     bot_id: BotIdPath,
     request: Request,
+    response: Response,
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     owner_name: OwnerNameDep,
-    service: BotDormantRecycleServiceProtocol = Injected(
-        BotDormantRecycleServiceProtocol
-    ),
-    audit_service: BotDormantAuditServiceProtocol = Injected(
-        BotDormantAuditServiceProtocol
+    service: BotDormantRecycleOperationProtocol = Injected(
+        BotDormantRecycleOperationProtocol
     ),
 ) -> Envelope[BotRecycleResult]:
-    """Recycle an active personal managed-cloud Bot synchronously."""
-    result = service.recycle(
+    """Durably submit recycling; backup and release never run in this request."""
+    result = await run_in_threadpool(
+        service.submit,
         bot_id=bot_id,
         owner_id=owner_id,
         owner_name=owner_name,
+        request_id=getattr(request.state, "request_id", "") or "",
     )
-    payload = BotRecycleResult(**result.__dict__)
-    wrapped = envelope(payload, request)
-    if result.changed:
-        audit_service.record_openapi_recycle(
-            request_id=wrapped.request_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-        )
-    return wrapped
+    payload = BotRecycleResult(**result)
+    if payload.operation_id is not None:
+        response.status_code = 202
+        return accepted(payload, request)
+    return envelope(payload, request)
+
+
+@router.get(
+    "/recycle-operations/{operation_id}", response_model=Envelope[BotRecycleOperation]
+)
+@envelope_errors
+async def get_recycle_operation(
+    bot_id: BotIdPath,
+    operation_id: Annotated[
+        str, Path(description="Recycle operation handle returned by POST /recycle.")
+    ],
+    request: Request,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    service: BotDormantRecycleOperationProtocol = Injected(
+        BotDormantRecycleOperationProtocol
+    ),
+) -> Envelope[BotRecycleOperation]:
+    """Read the matching current/latest operation; never advance or retry it."""
+    result = await run_in_threadpool(
+        service.get_operation,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        operation_id=operation_id,
+    )
+    return envelope(BotRecycleOperation(**result), request)
 
 
 @router.post(
@@ -83,7 +111,8 @@ async def activate_dormant_bot(
     ),
 ) -> Envelope[BotActivateResult]:
     """Start or observe reactivation of a recycled personal managed-cloud Bot."""
-    result = service.activate(
+    result = await run_in_threadpool(
+        service.activate,
         bot_id=bot_id,
         owner_id=owner_id,
         owner_name=owner_name,

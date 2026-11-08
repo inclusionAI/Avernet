@@ -40,4 +40,39 @@ class BotActivateResult(BaseModel):
 
 
 class BotRecycleResult(BotLifecycleResult):
-    """Result of recycling an active personal managed-cloud Bot."""
+    """Admission handle; only the already-recycled path is immediately complete."""
+
+    operation_id: str | None = Field(
+        default=None,
+        description="Durable recycle handle; absent when already recycled.",
+    )
+    phase: str | None = Field(
+        default=None,
+        description="Current recycle operation phase, not Bot runtime status.",
+    )
+
+
+class BotRecycleOperation(BaseModel):
+    """Public projection of a single current/latest recycle; never raw ext."""
+
+    bot_id: str = Field(description="Bot addressed by this operation.")
+    owner_id: str = Field(description="Owner of the addressed Bot.")
+    operation_id: str = Field(
+        description="Current/latest recycle operation identifier."
+    )
+    bot_status: str = Field(
+        description="Current Bot runtime lifecycle status, independent of operation phase."
+    )
+    phase: str = Field(
+        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION."
+    )
+    error_code: str | None = Field(
+        default=None, description="Safe operation error code, if any."
+    )
+    message: str | None = Field(
+        default=None, description="Sanitized operation error detail, if any."
+    )
+    warning: dict[str, str] | None = Field(
+        default=None,
+        description="Safe code/message warning for best-effort backup or Passport failure.",
+    )

@@ -24,7 +24,7 @@ from agentclaw.community.adapters.http.openapi_v1.dormant.router import router
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
     BotDormantAuditServiceProtocol,
-    BotDormantRecycleServiceProtocol,
+    BotDormantRecycleOperationProtocol,
 )
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -34,7 +34,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
-from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
+from agentclaw.community.core.bot_dormant.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -60,8 +60,8 @@ def activate_service():
 @pytest.fixture
 def recycle_service():
     service = MagicMock()
-    service.recycle.return_value = BotLifecycleResult(
-        bot_id="b1", owner_id="u1", status="RECYCLED", changed=True
+    service.submit.return_value = dict(
+        bot_id="b1", owner_id="u1", status="ACTIVE", changed=True, operation_id="op1", phase="QUEUED"
     )
     return service
 
@@ -76,7 +76,7 @@ def client(activate_service, recycle_service, audit_service):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotDormantActivateServiceProtocol, to=activate_service)
-            binder.bind(BotDormantRecycleServiceProtocol, to=recycle_service)
+            binder.bind(BotDormantRecycleOperationProtocol, to=recycle_service)
             binder.bind(BotDormantAuditServiceProtocol, to=audit_service)
             binder.bind(BotRepository, to=SeamBots())
             binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
@@ -118,31 +118,27 @@ def test_activate_active_bot_is_synchronous_idempotent(client, activate_service)
     assert response.json()["data"]["changed"] is False
 
 
-def test_recycle_completes_synchronously_and_writes_audit(
+def test_recycle_accepts_without_executing_or_writing_audit(
     client, recycle_service, audit_service
 ):
     response = client.post("/openapi/v1/bots/b1/recycle")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json()["data"] == {
-        "bot_id": "b1",
-        "owner_id": "u1",
-        "status": "RECYCLED",
-        "changed": True,
+        "bot_id": "b1", "owner_id": "u1", "status": "ACTIVE", "changed": True,
+        "operation_id": "op1", "phase": "QUEUED",
     }
-    recycle_service.recycle.assert_called_once_with(
-        bot_id="b1", owner_id="u1", owner_name="u1"
+    recycle_service.submit.assert_called_once_with(
+        bot_id="b1", owner_id="u1", owner_name="u1", request_id="",
     )
-    audit_service.record_openapi_recycle.assert_called_once_with(
-        request_id="", bot_id="b1", owner_id="u1"
-    )
+    audit_service.record_openapi_recycle.assert_not_called()
 
 
 def test_recycle_idempotent_result_does_not_duplicate_audit(
     client, recycle_service, audit_service
 ):
-    recycle_service.recycle.return_value = BotLifecycleResult(
-        bot_id="b1", owner_id="u1", status="RECYCLED", changed=False
+    recycle_service.submit.return_value = dict(
+        bot_id="b1", owner_id="u1", status="RECYCLED", changed=False, operation_id=None, phase=None
     )
 
     response = client.post("/openapi/v1/bots/b1/recycle")
@@ -162,7 +158,7 @@ def test_recycle_idempotent_result_does_not_duplicate_audit(
 def test_lifecycle_rejections_use_public_conflict_contract(
     client, recycle_service, error
 ):
-    recycle_service.recycle.side_effect = error
+    recycle_service.submit.side_effect = error
 
     response = client.post("/openapi/v1/bots/b1/recycle")
 
@@ -170,16 +166,16 @@ def test_lifecycle_rejections_use_public_conflict_contract(
     assert response.json()["data"] is None
 
 
-def test_recycle_release_failure_uses_bad_gateway_contract(client, recycle_service):
-    recycle_service.recycle.side_effect = RecycleReleaseFailed("release failed")
+def test_recycle_submission_failure_uses_unavailable_contract(client, recycle_service):
+    recycle_service.submit.side_effect = RecycleUnavailable("queue unavailable")
 
     response = client.post("/openapi/v1/bots/b1/recycle")
 
-    assert response.status_code == 502
-    assert response.json()["message"] == "Bot resource release failed"
+    assert response.status_code == 503
+    assert response.json()["message"] == "Bot recycle service unavailable"
 
 
-@pytest.mark.parametrize("path", ["activate", "recycle"])
+@pytest.mark.parametrize("path", ["activate", "recycle", "recycle-operations/op1"])
 def test_admin_collaborator_cannot_change_dormant_lifecycle(path: str):
     activate_service = MagicMock()
     recycle_service = MagicMock()
@@ -187,7 +183,7 @@ def test_admin_collaborator_cannot_change_dormant_lifecycle(path: str):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotDormantActivateServiceProtocol, to=activate_service)
-            binder.bind(BotDormantRecycleServiceProtocol, to=recycle_service)
+            binder.bind(BotDormantRecycleOperationProtocol, to=recycle_service)
             binder.bind(
                 BotDormantAuditServiceProtocol,
                 to=MagicMock(spec=DormantAuditService),
@@ -205,14 +201,15 @@ def test_admin_collaborator_cannot_change_dormant_lifecycle(path: str):
     mount_public_error_handlers(app)
     client = user_scoped_client(app, "u2")
 
-    response = client.post(
+    request = client.get if path.startswith("recycle-operations/") else client.post
+    response = request(
         f"/openapi/v1/bots/b1/{path}",
         params={"owner_id": "u1"},
     )
 
     assert response.status_code == 404
     activate_service.activate.assert_not_called()
-    recycle_service.recycle.assert_not_called()
+    recycle_service.submit.assert_not_called()
 
 
 def test_admin_collaborator_cannot_poll_dormant_status():
@@ -247,7 +244,7 @@ def test_admin_collaborator_cannot_poll_dormant_status():
     ("method", "path", "expected_status"),
     [
         ("POST", "activate", 202),
-        ("POST", "recycle", 200),
+        ("POST", "recycle", 202),
         ("GET", "status", 200),
     ],
 )
@@ -259,8 +256,8 @@ def test_application_grant_is_checked_against_exact_owner(
         bot_id="b1", owner_id="u1", status="REACTIVATING", changed=True
     )
     recycle_service = MagicMock()
-    recycle_service.recycle.return_value = BotLifecycleResult(
-        bot_id="b1", owner_id="u1", status="RECYCLED", changed=True
+    recycle_service.submit.return_value = dict(
+        bot_id="b1", owner_id="u1", status="ACTIVE", changed=True, operation_id="op1", phase="QUEUED"
     )
     bot_service = MagicMock()
     bot_service.get_bot.return_value = {
@@ -292,7 +289,7 @@ def test_application_grant_is_checked_against_exact_owner(
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotDormantActivateServiceProtocol, to=activate_service)
-            binder.bind(BotDormantRecycleServiceProtocol, to=recycle_service)
+            binder.bind(BotDormantRecycleOperationProtocol, to=recycle_service)
             binder.bind(BotServiceProtocol, to=bot_service)
             binder.bind(
                 BotDormantAuditServiceProtocol,
@@ -340,8 +337,34 @@ def test_application_grant_is_checked_against_exact_owner(
         selected = (
             activate_service.activate
             if path == "activate"
-            else recycle_service.recycle
+            else recycle_service.submit
         )
-        selected.assert_called_once_with(
-            bot_id="b1", owner_id="u1", owner_name="u1"
-        )
+        expected = dict(bot_id="b1", owner_id="u1", owner_name="u1")
+        if path == "recycle":
+            expected["request_id"] = ""
+        selected.assert_called_once_with(**expected)
+
+
+def test_query_returns_operation_failure_not_http_failure(client, recycle_service):
+    recycle_service.get_operation.return_value = {
+        "bot_id": "b1", "owner_id": "u1", "operation_id": "op1", "bot_status": "ACTIVE",
+        "phase": "FAILED", "error_code": "BACKUP_FAILED", "message": "备份失败", "warning": None,
+    }
+    response = client.get("/openapi/v1/bots/b1/recycle-operations/op1")
+    assert response.status_code == 200
+    assert response.json()["data"]["bot_status"] == "ACTIVE"
+    assert response.json()["data"]["phase"] == "FAILED"
+    recycle_service.get_operation.assert_called_once_with(bot_id="b1", owner_id="u1", operation_id="op1")
+    recycle_service.submit.assert_not_called()
+
+
+def test_recycle_owner_alias_conflict_is_422(client, recycle_service):
+    response = client.post("/openapi/v1/bots/b1/recycle", params={"entity_id": "u1", "owner_id": "u2"})
+    assert response.status_code == 422
+    recycle_service.submit.assert_not_called()
+
+
+def test_query_owner_alias_conflict_is_422(client, recycle_service):
+    response = client.get("/openapi/v1/bots/b1/recycle-operations/op1", params={"entity_id": "u1", "owner_id": "u2"})
+    assert response.status_code == 422
+    recycle_service.get_operation.assert_not_called()

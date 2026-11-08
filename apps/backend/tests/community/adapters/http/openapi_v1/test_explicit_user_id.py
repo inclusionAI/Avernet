@@ -638,7 +638,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The non-user Bot overview adds one Bot-path operation with no user_id.
 # The task_config match probe adds one operation without a path/query bot_id.
 # Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 143}
+_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 143}
 
 
 def _schema() -> dict:
@@ -849,7 +849,8 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 291
+    # Dedicated recycle operation query adds one Bot-addressed OWNER-only read.
+    assert len(taking) == 292
 
 
 def test_the_exempt_operations_take_none():

@@ -65,6 +65,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
+    ("GET", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(
         PermissionLevel.MEMBER, explicit=True

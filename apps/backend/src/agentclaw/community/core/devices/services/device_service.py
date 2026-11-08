@@ -811,6 +811,18 @@ class DeviceService:
             return None
         return record
 
+    def submit_recycle_release(self, *, target: dict, request_id: str, owner_id: str) -> dict:
+        """Submit pinned resource destruction, WITHOUT changing the binding.
+
+        An exception is ambiguous; callers observe instead of replaying. Providers
+        opt in explicitly, never via legacy release_device's swallowed errors.
+        """
+        raise DeviceServiceError("Provider does not support confirmed recycle release")
+
+    def observe_recycle_release(self, *, target: dict, release: dict | None) -> str:
+        """Read exact target: RELEASED or UNKNOWN, never infer from local DB."""
+        return "UNKNOWN"
+
     def release_device(
         self,
         *,

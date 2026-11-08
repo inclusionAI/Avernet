@@ -38,9 +38,11 @@ class ActivateBotService:
         self,
         bot_service: BotServiceProtocol,
         passport_plugin: PassportPlugin,
+        activation_control=None,
     ):
         self._bot_service = bot_service
         self._passport = passport_plugin
+        self._activation_control = activation_control
 
     def activate(
         self,
@@ -72,7 +74,15 @@ class ActivateBotService:
                 "teclaw bots use their engine-owned lifecycle"
             )
 
+        from agentclaw.community.core.bot_dormant.recycle_state import assert_not_recycling
+        assert_not_recycling(bot)
         status = bot.get("status")
+        if self._activation_control is not None:
+            status, claimed = self._activation_control.claim_activation(bot_id, owner_id)
+            if not claimed:
+                return BotLifecycleResult(bot_id=bot_id, owner_id=owner_id, status=status, changed=False)
+            # The atomic claim, not the earlier service read, owns admission.
+            status = "RECYCLED"
         logger.info(
             "[activate] request bot_id=%s user_id=%s status=%s nick_name=%s",
             bot_id, owner_id, status, owner_name,
@@ -114,17 +124,22 @@ class ActivateBotService:
             "[activate] update status to REACTIVATING bot_id=%s user_id=%s",
             bot_id, owner_id,
         )
-        self._bot_service.update_status(
-            bot_id=bot_id, user_id=owner_id, status="REACTIVATING"
-        )
+        if self._activation_control is None:
+            self._bot_service.update_status(
+                bot_id=bot_id, user_id=owner_id, status="REACTIVATING"
+            )
 
         # Launch background task: unfreeze passport → start_bot; rollback on failure.
-        thread = threading.Thread(
-            target=bind_current_avernet_tenant(self._reactivate_async),
-            args=(bot_id, owner_id, owner_name or owner_id),
-            daemon=True,
-        )
-        thread.start()
+        try:
+            thread = threading.Thread(
+                target=bind_current_avernet_tenant(self._reactivate_async),
+                args=(bot_id, owner_id, owner_name or owner_id),
+                daemon=True,
+            )
+            thread.start()
+        except Exception:
+            self._rollback(bot_id, owner_id, freeze=False)
+            raise
         logger.info(
             "[activate] background reactivation dispatched bot_id=%s user_id=%s",
             bot_id, owner_id,
@@ -156,9 +171,7 @@ class ActivateBotService:
             logger.error(
                 "[activate] passport unfreeze failed bot_id=%s: %s", bot_id, e
             )
-            self._bot_service.update_status(
-                bot_id=bot_id, user_id=user_id, status="RECYCLED"
-            )
+            self._rollback(bot_id, user_id, freeze=False)
             return
 
         try:
@@ -194,23 +207,21 @@ class ActivateBotService:
             logger.error(
                 "[activate] start_bot failed bot_id=%s: %s", bot_id, e
             )
-            # Best-effort rollback: re-freeze the passport.
-            try:
-                self._passport.freeze_agent_passport(
-                    bot_id=bot_id,
-                    owner_workno=user_id,
-                    reason="reactivate rollback",
-                )
-                logger.info(
-                    "[activate] passport rollback freeze success bot_id=%s user_id=%s",
-                    bot_id, user_id,
-                )
-            except Exception as ferr:
-                logger.error(
-                    "[activate] passport rollback also failed bot_id=%s: %s",
-                    bot_id,
-                    ferr,
-                )
-            self._bot_service.update_status(
-                bot_id=bot_id, user_id=user_id, status="RECYCLED"
-            )
+            self._rollback(bot_id, user_id, freeze=True)
+
+    def _rollback(self, bot_id, user_id, *, freeze):
+        from contextlib import nullcontext
+        control = self._activation_control
+        guard = control.activation_rollback(bot_id, user_id) if control is not None else nullcontext(True)
+        with guard as allowed:
+            if not allowed:
+                return
+            if freeze:
+                try:
+                    self._passport.freeze_agent_passport(
+                        bot_id=bot_id, owner_workno=user_id, reason="reactivate rollback",
+                    )
+                except Exception:
+                    logger.warning("[activate] Passport rollback failed bot_id=%s", bot_id)
+            if control is None:
+                self._bot_service.update_status(bot_id=bot_id, user_id=user_id, status="RECYCLED")

@@ -62,7 +62,10 @@ from agentclaw.community.core.repository.protocols.bot.user_app_grant import (
     UserAppGrantRepositoryProtocol,
 )
 
+from .recycle import BotRecycleRepositoryProtocol
+
 __all__ = [
+    "BotRecycleRepositoryProtocol",
     "BotAppGrantRepositoryProtocol",
     "BotConfigManifestApplyLockRepositoryProtocol",
     "BotConfigManifestApplyRepositoryProtocol",

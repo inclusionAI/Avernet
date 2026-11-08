@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.bot_dormant.recycle_state import assert_not_recycling
+from .resource_mutation import held_resource_lock, serialize_resource_release
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
@@ -4067,6 +4069,7 @@ class BotService(BotServiceProtocol):
 
         try:
             bot = self.validate_delete_bot(bot_id, user_id)
+            assert_not_recycling(bot)
             # Resolve before grant withdrawal, device release or soft deletion.
             provider_address = provider_address_kwargs(bot)
             from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
@@ -4191,7 +4194,7 @@ class BotService(BotServiceProtocol):
             return True
         except BotNotFoundError:
             raise
-        except BotOperationNotAllowedError:
+        except (BotOperationNotAllowedError, BotInvalidLifecycleStateError):
             # 必须在 catch-all 之前放行：否则"不允许删除 default bot"这类客户端错误
             # 会被重新包成通用 BotServiceError，调用方看到 500 并可能无谓重试。
             raise
@@ -4428,6 +4431,7 @@ class BotService(BotServiceProtocol):
 
         return self._repository.exists_by_bot_name(bot_name.strip())
 
+    @serialize_resource_release
     def stop_bot(
         self,
         bot_id: str,
@@ -4457,6 +4461,8 @@ class BotService(BotServiceProtocol):
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        assert_not_recycling(bot)
 
         # 桌面 bot 的设备管理走 BaaS 流程，不应通过 DeviceService 释放，
         # 也不应清空 binding_id/device_id（桌面 bot 的 delete/restart 由 DesktopBotService 处理）。
@@ -4665,6 +4671,8 @@ class BotService(BotServiceProtocol):
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        assert_not_recycling(bot)
+
         entity_id = bot.get("entity_id")
         entity_type = bot.get("entity_type", "staff")
         engine_types = bot.get("engine_types", _get_engine_types())
@@ -4745,6 +4753,7 @@ class BotService(BotServiceProtocol):
     async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
         """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
+        assert_not_recycling(bot)
         ctx, strategy = resolve_restart_strategy(bot)
         from agentclaw.community.core.bot_management.engines.restart_contract import RestartServices
 
@@ -4790,6 +4799,8 @@ class BotService(BotServiceProtocol):
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        assert_not_recycling(bot)
 
         if self.is_teclaw_bot(bot.get("active_engine")):
             logger.warning(
@@ -5017,7 +5028,9 @@ class BotService(BotServiceProtocol):
         # lock so a synchronous failure can't orphan it.
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
+        resource_token = held_resource_lock.set((env, entity_id, bot_id, user_id))
         try:
+            assert_not_recycling(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
             # Under-lock verification: the backup must still match the binding
             # and container identity we are about to replace. On failure the
             # existing except/finally below releases the lock untouched.
@@ -5092,6 +5105,7 @@ class BotService(BotServiceProtocol):
             logger.error(f"[bot_service.restart_bot] Failed to restart bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to restart bot: {e}")
         finally:
+            held_resource_lock.reset(resource_token)
             # Only release here if the async thread never took ownership (i.e. a
             # synchronous failure before allocation was spawned). Otherwise the
             # thread's finally is responsible for the release. The token ensures

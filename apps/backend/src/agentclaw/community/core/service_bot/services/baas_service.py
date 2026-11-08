@@ -1325,6 +1325,29 @@ class BaasService:  # pragma: no cover
             )
             raise BaasServiceError(f"Failed to destroy bot in BaaS: {e}")
 
+    def get_recycle_release_status(self, *, bot_uuid: str) -> str:
+        """Strict terminal read for destruction recovery.
+
+        Unlike compatibility get_bot, an arbitrary HTTP 404 is NOT RELEASED;
+        only the provider's typed BOT_NOT_FOUND response proves absence.
+        """
+        try:
+            result = self._get_bots_api(path=f"/api/v1/bots/{bot_uuid}",
+                                        action="recycle_release_status", log_response=False)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    body = exc.response.json()
+                except ValueError:
+                    body = None
+                detail = body.get("detail") if isinstance(body, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "BOT_NOT_FOUND":
+                    return "RELEASED"
+            raise
+        if result.get("bot_uuid", bot_uuid) != bot_uuid:
+            raise BaasServiceError("Recycle target identity mismatch")
+        return str(result.get("status") or "UNKNOWN")
+
     def get_bot(
         self,
         bot_uuid: str,
