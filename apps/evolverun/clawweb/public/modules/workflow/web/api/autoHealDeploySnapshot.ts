@@ -2,7 +2,7 @@ import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { AutoHealSaveResult } from '@avernet/clawweb-shared/web/types'
 import { autoHealSaveIsCurrent, autoHealUnifiedSaveIdentity } from './autoHealWrites'
 import { readEditorDraftCas } from './editorDraftCas'
-import { diff, validateSnapshot } from '../editor/packVersionSession'
+import { compatiblePackScope, diff, validateSnapshot } from '../editor/packVersionSession'
 import { packWorkflow } from '../editor/packCanvas'
 import type { DeployReview } from '../components/DeploySnapshotReview'
 
@@ -21,7 +21,7 @@ export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): P
     fetchJson<unknown>(`/api/auto-heal/editor-deploy/snapshot-v2/state?workflowId=${encodeURIComponent(id)}`, { cache: 'no-store' }),
   ])
   const saved = validateSnapshot(raw, id, 'draft')
-  const packPath = (raw as { packPath?: unknown }).packPath
+  const packPath = saved.packPath
   if (!proof || typeof proof !== 'object' || Array.isArray(proof)) throw new Error('无法验证部署能力；部署未发送。')
   const state = proof as Record<string, unknown>
   if (state.protocol !== 'editor-deployment-state-v1' || state.workflowId !== id || state.packId !== receipt.packId
@@ -31,7 +31,7 @@ export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): P
   let active: ReturnType<typeof validateSnapshot> | null = null
   if (current.ok) {
     active = validateSnapshot(current.value, id, 'current')
-    if (state.activeCommit !== active.baseCommit || active.packId !== saved.packId || (current.value as { packPath?: unknown }).packPath !== packPath) throw new Error('生效版基线或 Pack 范围不一致，无法审阅。')
+    if (state.activeCommit !== active.baseCommit || !compatiblePackScope(saved, active)) throw new Error('生效版基线或 Pack 范围不一致，无法审阅。')
   } else if (state.activeCommit !== null) throw new Error('无法读取生效版或证明首次部署。')
   const priorFiles = active?.versionFiles ?? []
   const prior = new Map(priorFiles.map(file => [file.path, file]))

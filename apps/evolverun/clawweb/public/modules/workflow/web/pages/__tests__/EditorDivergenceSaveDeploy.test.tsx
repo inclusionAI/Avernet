@@ -140,6 +140,22 @@ describe('DB / Git divergence in the editor', () => {
     expect(screen.getByRole('button', { name: '部署', exact: true })).toBeEnabled()
     expect(state().spec!.title).toBe('Original')
   })
+
+  it('opens review for a root Pack draft over a historical packs/<packId> active Pack', async () => {
+    mocks.realDeploy = true
+    current = { ...snapshot('current'), packPath: 'packs/pack' }
+    saved = { ...snapshot('draft'), packPath: '', versionFiles: [
+      ...snapshot('draft').versionFiles,
+      file('packs/pack/workflow.pack.yaml', stringify({ id: 'pack', workflows: [{ id: mocks.db!.id, file: 'flows/custom.yaml' }] })),
+      file('packs/pack/flows/custom.yaml', stringify(mocks.db!)),
+    ] }
+    await mount('draft')
+    click('部署')
+    await screen.findByRole('button', { name: '确认部署' })
+    confirmDeploy()
+    await screen.findByText(/部署成功：/)
+    expect(mocks.serverReleases).toEqual([B])
+  })
   it('does not discard the DB candidate when Git YAML cannot be parsed', async () => {
     saved.versionFiles = saved.versionFiles.map(item => item.path === 'flows/custom.yaml' ? file(item.path, 'id: [unterminated') : item)
     await mount('draft')

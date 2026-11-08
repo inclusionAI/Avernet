@@ -3,7 +3,7 @@ import type { AutoHealDeployRequest, WorkflowSpec } from '@avernet/clawweb-share
 import type { PackVersionFile } from '../components/PackVersionEditor'
 
 export type Version = 'current' | 'draft'
-export type Snapshot = { workflowId: string; packId: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[] }
+export type Snapshot = { workflowId: string; packId: string; packPath?: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[] }
 export type Change = { path: string; operation: 'delete' } | ({ operation: 'create' | 'replace' } & PackVersionFile)
 type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; readFailure?: string; blocked: boolean; notice: string | null }
 export type SaveInput = { sourceVersion: Version; sourceCommit: string; expectedSavedHead: string | null; changes: Change[]; requestId?: string }
@@ -187,6 +187,27 @@ export function dirty(state: VersionState): boolean {
   return !!state.snapshot && diff(state.snapshot.versionFiles, state.files).length > 0
 }
 /** current is DB-active production; draft is only the writable wf tip. */
+export function canonicalPackPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  if (value === '') return ''
+  const normalized = value.replace(/\/+$/, '')
+  if (!normalized || normalized.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) return null
+  return normalized
+}
+
+/**
+ * A root Pack may contain a historical nested `packs/<packId>` tree as an
+ * ordinary resource. Treat that explicit root/nested transition as the same
+ * workflow Pack scope for review; the server still validates the immutable
+ * candidate tree before publishing it.
+ */
+export function compatiblePackScope(left: Pick<Snapshot, 'packId' | 'packPath'>, right: Pick<Snapshot, 'packId' | 'packPath'>): boolean {
+  if (left.packId !== right.packId || left.packPath === right.packPath) return left.packId === right.packId
+  if (typeof left.packPath !== 'string' || typeof right.packPath !== 'string') return false
+  return (left.packPath === '' && right.packPath === `packs/${left.packId}`)
+    || (right.packPath === '' && left.packPath === `packs/${right.packId}`)
+}
+
 function validSnapshotRef(ref: unknown, id: string, version: Version): boolean {
   if (typeof ref !== 'string') return false
   if (version === 'draft') return ref === `origin/wf/${id}`
@@ -198,7 +219,9 @@ function validSnapshotRef(ref: unknown, id: string, version: Version): boolean {
 export function validateSnapshot(value: unknown, id: string, version: Version): Snapshot {
   if (!value || typeof value !== 'object') throw new Error('Invalid response')
   const data = value as Snapshot
+  const packPath = data.packPath === undefined ? undefined : canonicalPackPath(data.packPath)
   if (data.workflowId !== id || typeof data.packId !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(data.packId) || data.packId.includes('..') || data.packId.endsWith('.') || data.packId.endsWith('.lock') ||
+      (data.packPath !== undefined && packPath === null) ||
       !validSnapshotRef(data.baseRef, id, version) ||
       typeof data.baseCommit !== 'string' || !oid.test(data.baseCommit) ||
       !(data.draftHead === null || (typeof data.draftHead === 'string' && oid.test(data.draftHead))) ||
@@ -216,7 +239,7 @@ export function validateSnapshot(value: unknown, id: string, version: Version): 
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) if (paths.has(parts.slice(0, i).join('/'))) throw new Error('Conflicting paths')
   }
-  return { ...data, versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) }
+  return { ...data, ...(packPath === undefined ? {} : { packPath }), versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) }
 }
 function readError(error: unknown): string {
   const value = error as { status?: unknown; body?: unknown } | null
