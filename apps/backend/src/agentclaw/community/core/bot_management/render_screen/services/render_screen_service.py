@@ -76,7 +76,14 @@ class RenderScreenService(RenderScreenServiceProtocol):
         """Resolve the scope and enforce collaborative access for coding bots."""
         scope = self._resolve_scope(bot_id)
         bot = self._bot_repo.get_by_id(bot_id)
-        if bot and self._is_service_member_instance(bot, user_id):
+        # 转出的源身份默认收回写权(scenario: 旧 Owner 不凭 stable locator 自动获权);
+        # 但新归属者在协作者表里明确授回时放行 — 在册是归属者的意志行为,不属于
+        # 「凭身份自动获权」,守卫只拦未获授权的源身份。
+        if (
+            bot
+            and self._is_entity_holder_not_owner(bot, user_id)
+            and not self._is_registered_collaborator(bot, user_id)
+        ):
             raise PermissionError("无权操作此 Bot 的 CDN 配置")
         if scope == "bot" and not self._bot_has_collaborative_access(bot_id, user_id):
             raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
@@ -113,7 +120,14 @@ class RenderScreenService(RenderScreenServiceProtocol):
                     str(bot.get("entity_id") or ""),
                 )
             )
-            if bot and not personal_customization and not self._is_service_member_instance(bot, user_id):
+            # 源身份守卫与 authorize_render_screen_bot 同口径:在册协作者视为
+            # 归属者明确授回,放行;未获授回的转出源身份不短路、落兜底判定。
+            entity_detached = (
+                bot is not None
+                and self._is_entity_holder_not_owner(bot, user_id)
+                and not self._is_registered_collaborator(bot, user_id)
+            )
+            if bot and not personal_customization and not entity_detached:
                 if self._bot_has_collaborative_access(record.bot_id, user_id):
                     return record
             # 兜底保持存量语义:BCN 无 bot 行按「记录 owner == 登录人」判;
@@ -127,17 +141,41 @@ class RenderScreenService(RenderScreenServiceProtocol):
         return record
 
     @staticmethod
-    def _is_service_member_instance(bot: dict, user_id: str) -> bool:
-        """服务 Bot 的「被服务成员实例」:行 entity 归本人、归属者另有其人。
+    def _is_entity_holder_not_owner(bot: dict, user_id: str) -> bool:
+        """服务 Bot 的「已脱管源身份」:行 entity 归本人,当前负责人另有其人。
 
-        与 authorize_render_screen_bot 创建侧的拦截对称 — 这类成员实例
-        既不是归属者也不应经协作关系放行写操作。
+        entity 是创建时固化的资源地址(pre 库实证:service 行 entity 恒等于
+        creator,与 owner 不一致全部来自转交),转交只改 owner 一列。命中的
+        是把服务 Bot 转交出去的创建者:行身份仍是本人,但管理责任已交出。
+        默认收回写权;唯一豁免是新归属者在协作者表里明确授回(见调用点的
+        _is_registered_collaborator 判定)— 在册是归属者意志,不属于
+        「凭 stable locator 自动获权」。
         """
         return (
             bot.get("bot_type") == "service"
             and str(bot.get("entity_id") or "") == user_id
             and str(bot.get("owner_id") or "") != user_id
         )
+
+    def _is_registered_collaborator(self, bot: dict, user_id: str) -> bool:
+        """登录人是否在该行的在册协作者表内(不含 owner 短路)。
+
+        查表失败按不在册处理(fail-closed):授权面读不到时,守卫宁可
+        拒绝源身份,不放行。
+        """
+        bot_pk = bot.get("id")
+        if bot_pk is None:
+            return False
+        try:
+            return self._collaborator_repo.get_by_bot_and_user(
+                int(bot_pk), user_id, get_current_env(),
+            ) is not None
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "[RenderScreen] collaborator lookup failed bot_pk=%s user_id=%s err=%s",
+                bot_pk, user_id, exc,
+            )
+            return False
 
     def list_render_screens(
         self,
@@ -192,12 +230,12 @@ class RenderScreenService(RenderScreenServiceProtocol):
         else:
             # 收口 legacy 宽口:历史代码对非共享 Bot 的创建不做归属校验,任何
             # 登录人都能写入,是「记录 scope 漂移」这一整类 bug 的根源。BCN 等
-            # 无 bot 行的场景保持开放(无从归属判定)。服务 Bot 成员实例与创建侧
-            # authorize_render_screen_bot 的拦截对称,不经协作关系放行。
-            if bot and not self._is_service_member_instance(bot, current_user_id or creator_id or ""):
-                acting_user = current_user_id or creator_id or ""
-                if not acting_user or not self._bot_has_collaborative_access(bot_id, acting_user):
-                    raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
+            # 无 bot 行的场景保持开放(无从归属判定)。源身份守卫不在此重复
+            # (legacy 与 openapi 两入口在到达此处前已各自拦下未获授回者),
+            # 判权统一为归属者/在册协作者 — 与改删两处的授回口径一致。
+            acting_user = current_user_id or creator_id or ""
+            if bot and (not acting_user or not self._bot_has_collaborative_access(bot_id, acting_user)):
+                raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
             existing = self._repo.list_by_bot_id(
                 bot_id=bot_id, owner_id=record_owner_id or None
             )

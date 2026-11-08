@@ -6,6 +6,9 @@ from typing import Any, Mapping
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.render_screen_service import RenderScreenServiceProtocol
+from agentclaw.community.core.bot_management.errors import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.bot_management.render_screen.errors import (
     RenderScreenNotFoundError,
 )
@@ -38,10 +41,19 @@ def resolve_readable_bot(
     ``get_by_id_and_owner`` and refused on absence before their handlers are
     entered, so calling this there would re-read the Bot to learn what the seam
     just proved. If a mutation ever moves off ``Check``, it needs this back.
+
+    The address here is the same legacy locator the mutations resolve
+    (``owner_id`` may carry the stable ``entity_id``, a pre-handover owner, or
+    the current one). ``get_bot`` reads strictly by current Owner — after a
+    handover that would 404 the canonical ``entity_id`` spelling while every
+    mutation still resolved — so this reads through the unified address
+    resolver instead. Resolution failure stays masked as 404 like the seam;
+    non-sensitive read grants no permissions by structurally refusing on an
+    unreadable or ambiguous address.
     """
     try:
-        bot = bots.get_bot(bot_id, owner_id)
-    except BotNotFoundError:
+        bot = bots.get_bot_by_address(bot_id, owner_id)
+    except (BotNotFoundError, BotLookupAmbiguousError, ValueError):
         raise RenderScreenNotFoundError("render screen not found") from None
     if not bot:
         raise RenderScreenNotFoundError("render screen not found")

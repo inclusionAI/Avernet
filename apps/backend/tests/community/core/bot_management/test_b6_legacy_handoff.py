@@ -47,7 +47,12 @@ def test_render_resource_follows_bot_but_creator_and_personal_customizations_do_
     owner_record = repo.insert(bot_id="service", owner_id="A", name="owned", cdn_url="/owned.js", creator_id="A")
     private_record = repo.insert(bot_id="service", owner_id="C", name="private", cdn_url="/private.js", creator_id="C")
     handoff(db, bot["id"])
-    service = RenderScreenService(repo, bots, MagicMock())
+    # 场景前提:交接后没有任何人被加回协作者表 — 源身份 A 不在册,对应
+    # 用例名「creator 不跟随」。默认 MagicMock 返回 truthy,会被在册豁免
+    # 误读成「新归属者授回」,须显式建模为空注册表。
+    collaborators = MagicMock()
+    collaborators.get_by_bot_and_user.return_value = None
+    service = RenderScreenService(repo, bots, collaborators)
     for locator in ["A", "B"]:
         rows = service.list_render_screens(bot_id="service", owner_id=locator, current_user_id="B")
         assert [(x.id, x.owner_id, x.creator_id) for x in rows] == [(owner_record, "B", "A")]
