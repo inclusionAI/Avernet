@@ -20,6 +20,7 @@ state across backend restarts. Documented in the project ``CLAUDE.md``
 """
 
 import os
+import sqlite3
 import threading
 from contextlib import contextmanager
 
@@ -93,6 +94,61 @@ def SessionLocal():
     return _get_session_factory()()
 
 
+# Snapshot of the first freshly bootstrapped in-memory schema in this process,
+# keyed by ``schema_signature()``. ``create_all`` over ~280 tables costs
+# ~150-200 ms, and the test profile builds a fresh in-memory database per test
+# (``reset_for_tests`` + ``bootstrap``); copying this snapshot with SQLite's
+# online backup API produces the identical schema in ~2 ms.
+_schema_template: tuple[tuple, sqlite3.Connection] | None = None
+
+
+def _is_in_memory(engine) -> bool:
+    return engine.url.get_backend_name() == "sqlite" and engine.url.database in (
+        None,
+        "",
+        ":memory:",
+    )
+
+
+def _bootstrap_schema(engine) -> None:
+    """Create the schema on ``engine``, cloning a cached snapshot when possible.
+
+    The snapshot is only copied into an *empty* in-memory database whose
+    registered table layout matches the one the snapshot was taken from; any
+    other case (a non-memory URL, a database that already holds tables, a
+    changed layout) runs the real ``create_all``.
+    """
+    global _schema_template
+    from agentclaw.community.core.schema import create_all, schema_signature
+
+    if not _is_in_memory(engine):
+        create_all(engine)
+        return
+
+    signature = schema_signature()
+    raw = engine.raw_connection()
+    try:
+        target = raw.driver_connection
+        empty = target.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0
+        template = _schema_template
+        if empty and template is not None and template[0] == signature:
+            template[1].backup(target)
+            return
+    finally:
+        raw.close()
+
+    create_all(engine)
+    if not empty:
+        return
+    snapshot = sqlite3.connect(":memory:", check_same_thread=False)
+    raw = engine.raw_connection()
+    try:
+        raw.driver_connection.backup(snapshot)
+    finally:
+        raw.close()
+    _schema_template = (signature, snapshot)
+
+
 def reset_for_tests() -> None:
     """Dispose the cached engine and null the singletons.
 
@@ -130,10 +186,9 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         about to be wiped, and the next request would lazy-init a fresh
         empty one.
         """
-        from agentclaw.community.core.schema import create_all
-
         _get_session_factory()
-        create_all(_engine)
+        with _session_lock:
+            _bootstrap_schema(_engine)
 
     @contextmanager
     def session(self):
