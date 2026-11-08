@@ -50,6 +50,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         access_mode: Optional[str] = None,
         admins: Optional[list[str]] = None,
         resource_scope: Optional[PassportResourceScope] = None,
+        bot_type: Optional[str] = None,
     ) -> None:
         # No external registry to notify — scope/admin changes are a no-op.
         # ``unpack_resource_scope`` is still called so a malformed scope raises
@@ -81,6 +82,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         cli_items: Optional[list[CliItem]] = None,
         *,
         target_env: Optional[str] = None,
+        bot_type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         return self._issue(bot_id)
@@ -99,6 +101,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         workspace_path: Optional[str] = None,
         admins: Optional[list[str]] = None,
         cli_items: Optional[list[CliItem]] = None,
+        bot_type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         return self._issue(bot_id)
 
@@ -115,6 +118,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         target_env: Optional[str] = None,
         handoff_operation_id: str | None = None,
         expected_credential_id: str | None = None,
+        bot_type: str | None = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         if handoff_operation_id is not None or expected_credential_id is not None:

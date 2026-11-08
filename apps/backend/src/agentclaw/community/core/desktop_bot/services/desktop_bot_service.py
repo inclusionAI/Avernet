@@ -1536,6 +1536,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
+                bot_type="desktop",
                 access_mode="RESTRICTED",
                 device_token=device_token,
                 workspace_path=workspace_path,

@@ -328,6 +328,7 @@ def _apply_passport(
             bot_name=bot_name,
             bot_desc=spec.bot_desc,
             engine_type=spec.engine_type,
+            bot_type=spec.bot_type,
             access_mode=_ACCESS_MODE,
             workspace_path=_WORKSPACE_PATH,
         )

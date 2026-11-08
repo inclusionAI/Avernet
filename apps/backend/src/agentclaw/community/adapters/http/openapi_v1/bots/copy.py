@@ -302,6 +302,7 @@ def submit_copy(
         bot_name=body.bot_name,
         bot_desc=body.bot_desc,
         engine_type=engine,
+        bot_type=str(source.get("bot_type") or "personal"),
     )
     iframe_url = (passport_result or {}).get("iframe_url")
     redirect_url = (passport_result or {}).get("redirect_url")

@@ -254,6 +254,7 @@ class OwnerHandoffService:
                     old_credential_id=str(old_id),
                     release=False,
                 )
+                bot = self._bots.get_by_pk(row["bot_pk"])
                 self._passport.reissue_agent_credentials(
                     bot_id=row["bot_id"],
                     owner_workno=row["new_owner_id"],
@@ -261,6 +262,11 @@ class OwnerHandoffService:
                     execution_workno=row["execution_workno"],
                     handoff_operation_id=operation_id,
                     expected_credential_id=str(old_id),
+                    bot_type=(
+                        str(bot.get("bot_type") or "personal")
+                        if bot is not None
+                        else None
+                    ),
                 )
                 self._repo.advance(operation_id, worker, "REISSUING", error_code=None)
             elif phase == "REISSUING":
