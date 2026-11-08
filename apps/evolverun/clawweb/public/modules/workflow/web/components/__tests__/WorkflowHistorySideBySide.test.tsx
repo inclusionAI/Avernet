@@ -34,17 +34,21 @@ it('compares the two selected release snapshots in deploy order through the real
   expect(screen.queryByRole('region', { name: '旧版本 v23' })).not.toBeInTheDocument()
 })
 
-it('shows the exact historical text, including a forged marker and outer content', async () => {
+it('shows formatted historical YAML, including a forged marker and outer content', async () => {
   const user = userEvent.setup()
   const release: DeployHistoryItem = { deployNumber: 31, version: 23, action: 'deploy', tagName: null,
     fromDeployNumber: null, note: null, botId: null, ownerId: null, isActive: true, gmtCreate: 1 }
   const specJson = '{"id":"support","title":"outer","content":"title: inner","__clawweb_snapshot_v1":{"version":1,"contentSource":"generated"},"large":9007199254740993}'
   vi.spyOn(api.workflows, 'getHistory').mockResolvedValue({ workflowId: 'support', history: [release], active: release })
   vi.spyOn(api.workflows, 'getDeploySnapshot').mockResolvedValue({ ...release, workflowId: 'support', specJson })
-  const { container } = render(<WorkflowHistoryPanel workflowId="support" />)
+  render(<WorkflowHistoryPanel workflowId="support" />)
   await user.click(await screen.findByText('v23'))
-  await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === specJson)
-  expect(container.querySelector('pre')?.textContent).toBe(specJson)
+  const viewer = await screen.findByTestId('yaml-code-viewer')
+  expect(viewer).toHaveTextContent('id: support')
+  expect(viewer).toHaveTextContent('title: outer')
+  expect(viewer).toHaveTextContent('content: "title: inner"')
+  expect(viewer).toHaveTextContent('__clawweb_snapshot_v1:')
+  expect(viewer).toHaveTextContent('large: 9007199254740993')
 })
 
 it.each([

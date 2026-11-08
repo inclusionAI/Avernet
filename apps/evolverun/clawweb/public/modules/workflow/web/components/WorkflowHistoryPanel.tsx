@@ -4,6 +4,7 @@ import type { DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared
 import { workflowVersionSourceLabel } from '../utils/workflow-version-source'
 import { useWorkflowAccess } from '../api/hooks'
 import WorkflowVersionDiff from './WorkflowVersionDiff'
+import YamlCodeViewer from './YamlCodeViewer'
 
 interface WorkflowHistoryPanelProps {
   workflowId: string
@@ -225,9 +226,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                 {snapshotLoading ? (
                   <div className="p-4 text-sm text-gray-500">加载中…</div>
                 ) : snapshot ? (
-                  <pre className="flex-1 overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-200">
-                    {snapshot.specJson}
-                  </pre>
+                  <YamlCodeViewer value={snapshot.specJson} />
                 ) : (
                   <div className="p-4 text-sm text-gray-400">无内容</div>
                 )}
