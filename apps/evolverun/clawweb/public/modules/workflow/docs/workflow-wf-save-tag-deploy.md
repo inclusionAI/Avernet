@@ -53,6 +53,43 @@ wf is newer or absent; with no active deployment, production is unavailable
 rather than silently replaced by draft. A conflicting/failed read is not an
 empty Pack.
 
+### AutoHeal save review
+
+On hosts supporting unified save, **保存前核对** opens a wider drawer and shows
+**当前数据库原始草稿** on the left and **拟保存的完整修复内容** on the right.
+Both complete documents are display-formatted as indented, syntax-highlighted
+YAML, with original side line numbers, `-` / `+` markers, deletion / addition
+backgrounds and blank rows for alignment. Nothing is folded or omitted. Vertical
+scrolling is synchronized; each side scrolls horizontally independently. Small
+screens retain two columns and allow horizontal scrolling instead of stacking.
+
+Formatting is read-only: it does not strip `version`, `updatedAt`, `facade`,
+`content` or other fields, unwrap nested content, evaluate templates/scripts, or
+change the candidate JSON, observed DB token or Git baseline. If lossless
+formatting cannot be established (for example, duplicate keys or unsafe numbers),
+the exact input text is retained. The structural difference paths and existing
+source-identity / server baseline warnings remain visible.
+
+Each input has a separate formatting budget of **65,536 characters** (64 KiB
+of characters, not a byte limit), checked **before any YAML parsing or lossless /
+duplicate-key scan**. Exactly the limit is eligible for formatting; limit + 1
+falls back to the complete, unchanged original JSON. The UI identifies the
+oversized side and explains this fallback. That side renders each line as a
+single React text node, without tokenization or token spans; HTML remains inert
+text. The other side retains normal formatting and colors if within budget.
+Nothing is truncated, and neither the save payload nor CAS protection changes.
+
+The LCS matrix is limited to 250,000 cells, including its boundary row/column.
+Above that limit, a notice explains the fallback to linear same-position line
+comparison: insertions/deletions may mark subsequent shifted lines as changed,
+but **both full documents remain available**. Identical documents need no LCS
+matrix and show an explicit no-difference message.
+
+Opening or cancelling review does not send a save. **确认差异并保存** keeps the
+existing explicit-confirmation callback and exact candidate / DB / Git CAS
+validation; a changed baseline is still rejected by the server. Saving is not
+deployment.
+
 ### DB / Git divergence in the editor
 
 A difference between the persisted DB document and the workflow YAML in the

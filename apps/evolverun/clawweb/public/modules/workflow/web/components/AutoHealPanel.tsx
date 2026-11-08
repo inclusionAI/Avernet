@@ -365,7 +365,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl"
+        className={`flex h-full w-full ${review ? 'max-w-6xl' : 'max-w-2xl'} flex-col bg-white shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

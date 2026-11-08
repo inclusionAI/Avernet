@@ -567,11 +567,17 @@ function mockCapabilityAndBaselines(options: { unavailable: boolean }) {
 async function prepareUnifiedReview() {
   await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
   await screen.findByText(/保存前需要核对当前草稿/)
+  expect(screen.getByRole('button', { name: '保存修复' }).closest('.max-w-2xl')).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: '保存修复' }))
   expect(await screen.findByRole('region', { name: '保存前核对' })).toBeInTheDocument()
-  expect(screen.getByText(/original after diagnosis/)).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '当前数据库原始草稿' })).toHaveTextContent('original after diagnosis')
   expect(screen.getByText(/拟保存的完整修复内容/)).toBeInTheDocument()
   expect(requests('unified-save')).toHaveLength(0)
+  expect(requests('save')).toHaveLength(0)
+  const review = screen.getByRole('region', { name: '保存前核对' })
+  expect(review.closest('.max-w-6xl')).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '当前数据库原始草稿' })).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '拟保存的完整修复内容' })).toBeInTheDocument()
 }
 
 it('releases the write guard on a pre-write unified authorization rejection without fallback', async () => {
@@ -600,7 +606,11 @@ it.each(['ok', 'first-saved', 'stale-token', 'stale-active', 'bad-ack', 'wf-prod
     if (!savedDone && scenario === 'first-saved' && String(url).endsWith('/pack-version?version=current')) return response({ workflowId: run.workflow_id, packId: 'pack-1', packPath: 'pack', baseRef: `refs/tags/deploy/${run.workflow_id}/#1`, baseCommit: active, draftHead: null, versionFiles: files('before') })
     if (url === '/api/auto-heal/unified-save') {
       const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init!.body as Blob) })
-      if (scenario === 'first-saved') expect(JSON.parse(text)).toMatchObject({ sourceVersion: 'current', sourceCommit: active, expectedSavedHead: null })
+      expect(JSON.parse(text)).toMatchObject({
+        specJson: JSON.stringify(diagnosis.fixedSpec), expectedDraftToken: 'a'.repeat(64),
+        sourceVersion: scenario === 'first-saved' ? 'current' : 'draft', sourceCommit: active,
+        expectedSavedHead: scenario === 'first-saved' ? null : active,
+      })
       savedDone = true
       return response({ requestId: JSON.parse(text).requestId, outcome: 'confirmed', reconciliationRequired: false,
         evidence: { db: 'confirmed', git: 'confirmed', inputHash: 'c'.repeat(64), commit: saved, draftToken: token } })
@@ -655,6 +665,12 @@ it('cancels the displayed review without sending and requires a fresh review', a
   expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
   await userEvent.click(screen.getByRole('button', { name: '取消核对' }))
   expect(screen.queryByRole('button', { name: '确认差异并保存' })).not.toBeInTheDocument()
+  expect(requests('unified-save')).toHaveLength(0); expect(requests('save')).toHaveLength(0)
+  expect(screen.getByRole('button', { name: '保存修复' }).closest('.max-w-2xl')).toBeInTheDocument()
+  const previousReads = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/editor-draft')).length
+  await userEvent.click(screen.getByRole('button', { name: '保存修复' }))
+  expect(await screen.findByRole('region', { name: '保存前核对' })).toBeInTheDocument()
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/editor-draft'))).toHaveLength(previousReads + 1)
   expect(requests('unified-save')).toHaveLength(0); expect(requests('save')).toHaveLength(0)
 })
 
