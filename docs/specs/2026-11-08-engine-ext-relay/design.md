@@ -301,10 +301,37 @@ Two independent things are sent upstream:
 2. **End-user principal** (`forward_principal: true`): the relay forwards a
    principal token scoped to the upstream audience (`aud = ext:{engine}`) in
    `X-Avernet-Principal`, plus `X-Avernet-Bot-Id` and `X-Avernet-Engine`.
-   Upstreams verify it with the platform's public verification key / JWKS.
    Re-signing for a dedicated audience (rather than forwarding the inbound
    token) means a leaked upstream token cannot be replayed against the
    adapter or other services — see §11 Q2.
+
+   **The outbound token must be credential-free.** The gateway's internal
+   principal models carry secrets — `Bot.token` and
+   `AccessKey.access_key_token` (`apps/gateway/.../spi/authn/_models.py`) —
+   and `PrincipalSigner.sign()` serializes whole principal models into the
+   readable `principals` claim. A new audience does not stop a leaked secret
+   from being replayed on its own. The outbound token is therefore built from
+   a dedicated projection, never from `model_dump()` of the internal models:
+
+   | Claim | Source | Notes |
+   | --- | --- | --- |
+   | `sub_type` | principal type | `user` / `bot` / `app` / `access_key` |
+   | `user_id`, `tenant_id` | `UserPrincipal.subject` | identifiers only |
+   | `bot_id`, `owner_id`, `app_id`, `tenant` | `BotPrincipal.bot` | **never** `token` |
+   | `app_id`, `tenant` | `AppPrincipal.app` | identifiers only |
+   | `access_key`, `tenant`, `expire_at` | `AccessKeyPrincipal.access_key` | key id only, **never** `access_key_token` |
+   | `iss`, `aud`, `iat`, `exp`, `jti` | relay / token exchange | short TTL (≤ 60 s) |
+
+   The projection is an allow-list of claims (new fields on the internal
+   models are not forwarded until added here), and contract tests assert
+   that no secret-typed field appears in the outbound token.
+
+   **Verification needs an asymmetric key.** The `bare` signer is HS256
+   (shared secret); handing that secret to external owners would let them
+   mint platform tokens. Outbound tokens are signed with an asymmetric key
+   (e.g. ES256/RS256) dedicated to the `ext:*` audiences, and owners verify
+   them via a published JWKS. Upstreams must not receive any key that can
+   sign.
 
 ### 7.4 Header policy
 
@@ -402,4 +429,5 @@ engine's extension features, never the common API.
   disconnect cancellation, timeouts and unreachable upstream.
 - **Security tests**: forged `X-Avernet-Principal`, `engine` mismatch,
   encoded traversal (`%2e%2e`, `%2f`), redirect not followed, credentials
-  absent from upstream request and logs.
+  absent from upstream request and logs, outbound principal token contains
+  no `token` / `access_key_token` for bot and access-key callers.

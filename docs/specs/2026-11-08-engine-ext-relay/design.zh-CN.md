@@ -274,9 +274,31 @@ Bot 沙箱网络访问）。由于中继是适配器上第一个把流量*向外
    请求体（受 `max_request_body_mb` 限制）而不是流式转发；响应仍然流式回传。
 2. **终端用户身份**（`forward_principal: true`）：中继在 `X-Avernet-Principal`
    中转发一个面向上游受众（`aud = ext:{engine}`）的身份令牌，并附带
-   `X-Avernet-Bot-Id` 与 `X-Avernet-Engine`。上游使用平台公开的验签密钥 / JWKS 校验。
+   `X-Avernet-Bot-Id` 与 `X-Avernet-Engine`。
    为专用受众重新签发（而不是直接转发入站令牌）可确保上游泄露的令牌无法被重放到
    适配器或其他服务——见 §11 问题 2。
+
+   **出站令牌必须不含凭证。** Gateway 内部的身份模型携带密钥——`Bot.token` 与
+   `AccessKey.access_key_token`（`apps/gateway/.../spi/authn/_models.py`）——而
+   `PrincipalSigner.sign()` 会把完整的身份模型序列化进可读的 `principals` claim。
+   更换受众并不能阻止泄露的密钥被单独重放。因此出站令牌必须由专用投影构建，
+   绝不能直接使用内部模型的 `model_dump()`：
+
+   | Claim | 来源 | 说明 |
+   | --- | --- | --- |
+   | `sub_type` | 身份类型 | `user` / `bot` / `app` / `access_key` |
+   | `user_id`、`tenant_id` | `UserPrincipal.subject` | 仅标识符 |
+   | `bot_id`、`owner_id`、`app_id`、`tenant` | `BotPrincipal.bot` | **绝不**包含 `token` |
+   | `app_id`、`tenant` | `AppPrincipal.app` | 仅标识符 |
+   | `access_key`、`tenant`、`expire_at` | `AccessKeyPrincipal.access_key` | 仅 key id，**绝不**包含 `access_key_token` |
+   | `iss`、`aud`、`iat`、`exp`、`jti` | 中继 / 令牌交换 | 短 TTL（≤ 60 秒） |
+
+   该投影是 claim 白名单（内部模型新增字段在加入此表之前不会被转发），一致性测试
+   断言出站令牌中不出现任何密钥类字段。
+
+   **验签需要非对称密钥。** `bare` 签名器使用 HS256（共享密钥）；把该密钥交给外部
+   Owner 会让他们能够签发平台令牌。出站令牌使用专用于 `ext:*` 受众的非对称密钥
+   （如 ES256/RS256）签名，Owner 通过公开的 JWKS 验签。上游绝不能拿到任何可用于签名的密钥。
 
 ### 7.4 请求头策略
 
@@ -360,4 +382,5 @@ Owner 的义务：发布清单；在同一主版本内保持向后兼容（`base
 - **集成测试**：使用进程内假上游（httpx `MockTransport` / 本地 ASGI 应用），覆盖
   状态码/响应体透传、SSE 流式、客户端断开取消、超时与上游不可达。
 - **安全测试**：伪造 `X-Avernet-Principal`、`engine` 不匹配、编码穿越
-  （`%2e%2e`、`%2f`）、不跟随重定向、上游请求与日志中不出现凭证。
+  （`%2e%2e`、`%2f`）、不跟随重定向、上游请求与日志中不出现凭证、Bot 与 AccessKey 调用方的出站身份令牌中不含
+  `token` / `access_key_token`。
