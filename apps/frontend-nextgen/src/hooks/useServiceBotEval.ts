@@ -41,11 +41,18 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
   }, [load]);
 
   const submit = useCallback(
-    async (files: File[], triggerSource: ServiceBotEvalTriggerSource) => {
+    async (sampleFiles: File[], reportFiles: File[], triggerSource: ServiceBotEvalTriggerSource) => {
       if (!botId || !botVersion) return;
       setSubmitting(true);
       try {
-        const result = await serviceBotEvalService.submit(botId, botVersion, ownerId, files, triggerSource);
+        const result = await serviceBotEvalService.submit(
+          botId,
+          botVersion,
+          ownerId,
+          sampleFiles,
+          reportFiles,
+          triggerSource,
+        );
         setSubmission(result);
         setActionError(undefined);
         return result;

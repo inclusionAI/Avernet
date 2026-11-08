@@ -70,6 +70,7 @@ const EvaluationPage: React.FC = () => {
   const [goalFile, setGoalFile] = useState<File>();
   const [datasetType, setDatasetType] = useState('jsonl');
   const [goalType, setGoalType] = useState<GoalType>('json');
+  const [goalPrompt, setGoalPrompt] = useState('');
 
   const options = useMemo(() => {
     const tabOptions: Array<{ value: EvalTab; label: string }> = [
@@ -88,13 +89,17 @@ const EvaluationPage: React.FC = () => {
 
   const submitSimple = async () => {
     if (!sampleFile || !reportFile) return;
-    await evaluation.submit([sampleFile, reportFile], 'manual_simple_cert');
+    await evaluation.submit([sampleFile], [reportFile], 'manual_simple_cert');
   };
 
   const submitRestart = async () => {
-    const files = goalType === 'json' ? [datasetFile, goalFile].filter(Boolean) : [datasetFile].filter(Boolean);
     if (!datasetFile) return;
-    await evaluation.submit(files as File[], 'manual_restart_eval');
+    const reportFile: File | undefined =
+      goalType === 'json'
+        ? goalFile
+        : new File([goalPrompt || '{}'], 'evaluation-goal.json', { type: 'application/json' });
+    if (!reportFile) return;
+    await evaluation.submit([datasetFile], [reportFile], 'manual_restart_eval');
   };
 
   const certStatus = String(certState?.cert_status ?? '');
@@ -221,6 +226,8 @@ const EvaluationPage: React.FC = () => {
                         <textarea
                           className="min-h-20 w-full rounded-md border border-border bg-background p-2 text-sm"
                           placeholder="例如：评估该 Bot 在金融政策问答场景下的准确率和安全性。"
+                        value={goalPrompt}
+                        onChange={(event) => setGoalPrompt(event.target.value)}
                         />
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-2">

@@ -9,7 +9,7 @@ community/local profiles provide deterministic no-op implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Literal, Protocol, Sequence
 
 from agentclaw.community.plugin_api.base import Plugin
 
@@ -33,6 +33,7 @@ class ServiceBotEvalFile:
     filename: str
     content: bytes
     content_type: str = "application/octet-stream"
+    file_kind: Literal["sample", "report"] = "sample"
 
 
 class ServiceBotEvalPlugin(Plugin, Protocol):

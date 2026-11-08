@@ -33,7 +33,10 @@ export const serviceBotEvalService = {
     botId: string,
     botVersion: string,
     ownerId: string | undefined,
-    files: File[],
+    sampleFiles: File[],
+    reportFiles: File[],
     triggerSource: ServiceBotEvalTriggerSource,
-  ) => assertSuccess(await serviceBotEvalController.submit(botId, botVersion, ownerId, files, triggerSource)) as ServiceBotEvalSubmissionDto,
+  ) => assertSuccess(
+    await serviceBotEvalController.submit(botId, botVersion, ownerId, sampleFiles, reportFiles, triggerSource),
+  ) as ServiceBotEvalSubmissionDto,
 };

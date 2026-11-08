@@ -43,6 +43,7 @@ export interface ServiceBotEvalSubmissionDto extends BackendUnknownRecord {
   task_status: string;
   next_step?: string;
   message?: string;
+  archive_download_url?: string;
 }
 
 export interface ServiceBotEvalHistoryRecord extends BackendUnknownRecord {
@@ -94,9 +95,17 @@ export const serviceBotEvalController = {
       bot_id: botId,
       owner_id: ownerId,
     }),
-  submit: (botId: string, botVersion: string, ownerId: string | undefined, files: File[], triggerSource: string) => {
+  submit: (
+    botId: string,
+    botVersion: string,
+    ownerId: string | undefined,
+    sampleFiles: File[],
+    reportFiles: File[],
+    triggerSource: string,
+  ) => {
     const body = new FormData();
-    files.forEach((file) => body.append('file', file, file.name));
+    sampleFiles.forEach((file) => body.append('sample_files', file, file.name));
+    reportFiles.forEach((file) => body.append('report_files', file, file.name));
     body.append('trigger_source', triggerSource);
     return backendRequest<ServiceBotEvalApiResponse<ServiceBotEvalSubmissionDto>>(
       basePath(botId, botVersion, 'simple-cert/submissions'),
