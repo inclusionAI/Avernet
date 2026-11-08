@@ -4,6 +4,7 @@ import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { VersionDiffResult } from '@avernet/clawweb-shared/web/types'
 import SideBySideView from './workflow-version-diff/SideBySideView'
 import { assertLosslessNumbers } from '../editor/losslessNumbers'
+import YamlCodeViewer from './YamlCodeViewer'
 
 interface WorkflowVersionDiffProps {
   workflowId: string
@@ -224,13 +225,13 @@ export default function WorkflowVersionDiff({
   if (historyComparisonUncertain(fromRaw) || historyComparisonUncertain(toRaw)) {
     return <div className="flex h-full min-h-0 flex-col">
       <div role="status" className="border-b border-border bg-muted px-3 py-2 text-xs text-foreground">
-        无法确认历史内容的来源或无损解析，无法判断工作流是否相同；以下仅展示未经展开或剥离的原始记录，请人工核对。
+        无法确认历史内容的来源或无损解析，无法判断工作流是否相同；以下展示完整历史记录（保留所有字段，不展开或剥离），请人工核对。
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-2 overflow-auto">
         {[{ label: '旧版本', snapshot: result.from, raw: fromRaw }, { label: '新版本', snapshot: result.to, raw: toRaw }].map(({ label, snapshot, raw }) =>
-          <section key={label} aria-label={`${label} v${snapshot.version} 原始记录`} className="min-w-0 border-r border-border">
+          <section key={label} aria-label={`${label} v${snapshot.version} 原始记录`} className="flex min-h-0 min-w-0 flex-col border-r border-border">
             <div className="border-b border-border bg-muted px-3 py-2 text-xs">{label} · v{snapshot.version} · deploy #{snapshot.deployNumber}</div>
-            <pre className="overflow-auto whitespace-pre p-3 text-xs">{raw}</pre>
+            <YamlCodeViewer value={raw} unwrapLegacyContent={false} />
           </section>)}
       </div>
     </div>

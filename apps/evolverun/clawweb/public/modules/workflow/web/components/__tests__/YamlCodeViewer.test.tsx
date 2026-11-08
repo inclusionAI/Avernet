@@ -23,6 +23,12 @@ describe('formatYamlSnapshot', () => {
     expect(formatYamlSnapshot(JSON.stringify({ content: 'id: support\ntitle: 支持\n' }))).toContain('title: 支持')
   })
 
+  it('can preserve a legacy wrapper when reviewing a complete history record', () => {
+    const formatted = formatYamlSnapshot(JSON.stringify({ content: 'id: support\n' }), { unwrapLegacyContent: false })
+    expect(formatted).toContain('content: |')
+    expect(formatted).toContain('id: support')
+  })
+
   it('preserves raw YAML comments and formatting for release-history fidelity', () => {
     const yaml = '# release rationale\nid: support\ntitle: "支持"\n'
     expect(formatYamlSnapshot(yaml)).toBe(yaml)

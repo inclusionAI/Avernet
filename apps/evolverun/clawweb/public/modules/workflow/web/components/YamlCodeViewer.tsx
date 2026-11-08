@@ -5,6 +5,8 @@ interface YamlCodeViewerProps {
   /** A persisted spec_json value, legacy YAML wrapper, or raw YAML text. */
   value: unknown
   className?: string
+  /** Keep legacy wrapper fields visible when reviewing a complete history record. */
+  unwrapLegacyContent?: boolean
 }
 
 export type YamlTokenType =
@@ -124,8 +126,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * YAML; existing YAML text stays lossless so release comments and quoting remain
  * available to reviewers.
  */
-export function formatYamlSnapshot(value: unknown): string {
+export function formatYamlSnapshot(value: unknown, options: { unwrapLegacyContent?: boolean } = {}): string {
   const original = typeof value === 'string' ? value : undefined
+  const unwrapLegacyContent = options.unwrapLegacyContent !== false
   let current: unknown = value
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -147,7 +150,7 @@ export function formatYamlSnapshot(value: unknown): string {
       }
     }
 
-    if (isRecord(current) && Object.keys(current).length === 1 && typeof current.content === 'string') {
+    if (unwrapLegacyContent && isRecord(current) && Object.keys(current).length === 1 && typeof current.content === 'string') {
       return current.content
     }
 
@@ -169,8 +172,8 @@ function renderTokens(tokens: YamlToken[]): ReactNode[] {
   ))
 }
 
-export default function YamlCodeViewer({ value, className = '' }: YamlCodeViewerProps) {
-  const yamlText = formatYamlSnapshot(value)
+export default function YamlCodeViewer({ value, className = '', unwrapLegacyContent = true }: YamlCodeViewerProps) {
+  const yamlText = formatYamlSnapshot(value, { unwrapLegacyContent })
   const lines = yamlText.split('\n')
 
   return (

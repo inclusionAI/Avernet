@@ -69,8 +69,17 @@ it.each([
   await user.click(screen.getByRole('checkbox', { name: '选择 v2 进行对比' }))
   await user.click(screen.getByRole('button', { name: '查看版本差异' }))
   expect(await screen.findByRole('status')).toHaveTextContent('无法判断工作流是否相同')
-  expect(within(screen.getByRole('region', { name: '旧版本 v1 原始记录' })).getByText(from)).toBeInTheDocument()
-  expect(within(screen.getByRole('region', { name: '新版本 v2 原始记录' })).getByText(to)).toBeInTheDocument()
+  const oldRecord = within(screen.getByRole('region', { name: '旧版本 v1 原始记录' })).getByTestId('yaml-code-viewer')
+  const newRecord = within(screen.getByRole('region', { name: '新版本 v2 原始记录' })).getByTestId('yaml-code-viewer')
+  expect(oldRecord).toHaveTextContent('id: support')
+  if ('content' in historical) {
+    expect(oldRecord).toHaveTextContent('content: |')
+    expect(oldRecord).toHaveTextContent('id: support')
+  } else {
+    expect(oldRecord).toHaveTextContent('__clawweb_snapshot_v1:')
+  }
+  expect(newRecord).toHaveTextContent('id: support')
+  expect(newRecord).toHaveTextContent('nodes: []')
   expect(screen.queryByText('两个版本内容完全相同')).not.toBeInTheDocument()
   expect(screen.queryByText('变更字段')).not.toBeInTheDocument()
 })
