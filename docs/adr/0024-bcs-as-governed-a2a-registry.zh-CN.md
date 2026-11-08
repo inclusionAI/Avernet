@@ -23,8 +23,28 @@ Card 保存在 `bcs_bots.agent_card`，用 `supportedInterfaces` 选择下行接
 支持多版本，同一版本号对应不可变的 Card，有 latest 指针；3.3.0 起强制 `MAJOR.MINOR.PATCH`
 版本格式；SERVICE 类型在查询时用服务注册表里的实例地址改写 Card 的接口字段。
 
-BCS 相对 Nacos 的不可替代之处是调用治理：可见性、好友关系和 Owner 决定的发现与调用权限，
-会话与 Task 关联，审计，工具观察，exec 审批，以及多 Agent 协作。这些能力只有在调用经过 BCS 时才成立。
+BCS 相对 Nacos 的不可替代之处在于它是一个 Agent 协作网络（BCN），而不只是目录。注册中心回答
+"有哪些 Agent、在哪里"；BCS 还能回答"谁和谁有关系、能一起做什么、做的过程是什么样"：
+
+1. **有向关系图与基于关系的授权。** `edge_grants` 有向边是好友关系的唯一数据源，边上可挂权限配置
+   （`contracts/bcs-domain/src/edge_permission.rs`），再加上 public/protected/private 可见性与需对方同意的
+   好友申请流程。"A 能否调用 B"由两者之间已批准的边决定；发现可以只返回可协作的 Agent
+   （`discover --collaborate-bot`）；限流、审批与审计可以落到具体某条关系上。
+2. **多 Agent 协作。** 群聊、driver/manager/worker 角色、@mention 路由、自定义协作 YAML 与一次性
+   状态机运行。BCS 只负责路由，Agent 自己决策。
+3. **共享上下文。** 会话记录、群上下文投递与多 Bot 上下文融合（`/groups/{id}/fuse`），参与协作的 Agent
+   共享同一份上下文，不需要调用方自行拼装转发。
+4. **调用链上的身份与审计。** AgentPass 身份、Provider 与 Owner 归属，以及规划中的可信调用上下文传递
+   （A2A-003）。"用户 → Agent A → Agent B"的每一跳都能知道最初用户与授权来源；运行记录、工具观察与
+   exec 审批构成链路级审计。
+5. **异构 Agent 互通。** 标准 A2A 的三种绑定、自定义协议适配器、WebSocket 插件 Bot 与 Provider Gateway
+   让不同协议、不同平台的 Agent 在同一网络中协作。
+6. **渠道接入。** 渠道绑定（如钉钉、微信）把外部会话路由到 Bot，人可以从办公渠道接入协作网络。
+7. **网络积累的数据（未来方向，未实现）。** 交互历史可沉淀可用性、成功率与协作关系等信号，用于协作者推荐、
+   发现排序与质量评估。统计范围与可见性需先定规则，且不得演变为替 Agent 决策。
+
+这些能力有一个共同前提：调用经过 BCS。直连时它们全部失效。因此 BCS 的定位是"内置注册中心的 Agent
+协作网络"，对外重点是基于关系的发现与授权、多 Agent 协作与共享上下文、链路级身份与审计。
 
 ## 决策
 
