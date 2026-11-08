@@ -4,17 +4,19 @@ use std::{collections::HashSet, path::Path};
 use anyhow::{Context, bail};
 use bcs_bridge_core::config::{BridgeConfig, ProviderConfig};
 
-use crate::{config::{self, Bootstrap, RegistrationSettings}, credentials::CredentialSource};
+use crate::{config::{self, Bootstrap, CliSettings, RegistrationSettings}, credentials::CredentialSource};
 
 pub(crate) struct Document {
     pub groups: Vec<toml::Table>,
     pub v2: bool,
+    pub cli: CliSettings,
 }
 
 impl Document {
     pub fn parse(text: &str) -> anyhow::Result<Self> {
         let mut root: toml::Table = toml::from_str(text)
             .map_err(|_| anyhow::anyhow!("Invalid bridge TOML configuration"))?;
+        let cli = root.remove("cli").map(CliSettings::from_value).transpose()?.unwrap_or_default();
         if root.contains_key("schema_version") || root.contains_key("provider") {
             if root.remove("schema_version").and_then(|v| v.as_integer()) != Some(2) {
                 bail!("Unsupported bridge schema_version; expected 2");
@@ -26,19 +28,20 @@ impl Document {
             if groups.is_empty() { bail!("Bridge configuration requires at least one Provider"); }
             let mut ids = HashSet::new();
             for group in &groups {
+                if group.contains_key("cli") { bail!("[cli] is global and cannot be nested under a Provider"); }
                 let id = group.get("provider_id").and_then(toml::Value::as_str)
                     .filter(|id| !id.trim().is_empty()).context("Provider requires provider_id")?;
                 if !ids.insert(id) { bail!("Duplicate provider_id in bridge configuration"); }
             }
-            Ok(Self { groups, v2: true })
+            Ok(Self { groups, v2: true, cli })
         } else if root.contains_key("provider_id") || root.contains_key("bot") {
-            Ok(Self { groups: vec![root], v2: false })
+            Ok(Self { groups: vec![root], v2: false, cli })
         } else {
             settings(&root)?;
             root.remove("registration");
             root.remove("bcs_to_provider_token");
-            if !root.is_empty() { bail!("Before registration, configuration may contain only [registration] settings"); }
-            Ok(Self { groups: Vec::new(), v2: false })
+            if !root.is_empty() { bail!("Before registration, configuration may contain only [registration] and [cli] settings"); }
+            Ok(Self { groups: Vec::new(), v2: false, cli })
         }
     }
 
@@ -68,8 +71,16 @@ pub(crate) fn load(path: &Path, credentials: &dyn CredentialSource) -> anyhow::R
     load_document(&Document::load(path)?, path, credentials)
 }
 
+pub(crate) fn resolve_cli_api_base_url(settings: &CliSettings, compiled: Option<&str>) -> Option<String> {
+    fn nonempty(value: Option<&str>) -> Option<String> {
+        value.filter(|value| !value.trim().is_empty()).map(str::to_owned)
+    }
+    nonempty(settings.api_base_url.as_deref()).or_else(|| nonempty(compiled))
+}
+
 pub(crate) fn load_document(document: &Document, path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<Vec<LoadedProvider>> {
     if document.groups.is_empty() { bail!("Bridge configuration has no registered Providers"); }
+    let cli_api_base_url = resolve_cli_api_base_url(&document.cli, option_env!("BCS_CLI_API_URL"));
     let mut providers = Vec::new();
     for group in &document.groups {
         let mut defaults = settings(group)?;
@@ -84,7 +95,9 @@ pub(crate) fn load_document(document: &Document, path: &Path, credentials: &dyn 
         let token = if group.get("mode").and_then(toml::Value::as_str) == Some("plugin") { None }
             else { Some(credentials.webhook_token(group.get("provider_id").and_then(toml::Value::as_str)
                 .context("Gateway configuration requires provider_id")?)?) };
-        providers.push(LoadedProvider { config: config::runtime(group, path, token.as_deref())?, registrations });
+        let mut config = config::runtime(group, path, token.as_deref())?;
+        config.cli_api_base_url = cli_api_base_url.clone();
+        providers.push(LoadedProvider { config, registrations });
     }
     BridgeConfig::new(providers.iter().map(|p| p.config.clone()).collect())?;
     Ok(providers)
@@ -121,7 +134,13 @@ impl Edit {
             group.insert("bot".into(), toml::Value::Array(bots));
         }
         match self.target { Some(index) => groups[index] = group, None => groups.push(group) }
-        if !self.source.v2 && groups.len() == 1 { return Ok(groups.remove(0)); }
+        if !self.source.v2 && groups.len() == 1 {
+            let mut group = groups.remove(0);
+            if !self.source.cli.is_empty() {
+                group.insert("cli".into(), toml::Value::try_from(self.source.cli.clone())?);
+            }
+            return Ok(group);
+        }
         for group in &mut groups {
             // Preserve V1's actual default, not the new Provider database default.
             group.entry("state_path").or_insert("~/.bcn-bridge/bridge-state.sqlite3".into());
@@ -133,10 +152,14 @@ impl Edit {
                 }
             }
         }
-        Ok(toml::Table::from_iter([
+        let mut document = toml::Table::from_iter([
             ("schema_version".into(), 2.into()),
             ("provider".into(), toml::Value::Array(groups.into_iter().map(toml::Value::Table).collect())),
-        ]))
+        ]);
+        if !self.source.cli.is_empty() {
+            document.insert("cli".into(), toml::Value::try_from(self.source.cli.clone())?);
+        }
+        Ok(document)
     }
 }
 
