@@ -65,6 +65,13 @@ steps. Confirmed Bot writes use the existing partial-error contract; shared
 publication alone is not a confirmed Bot write. Device and Platform
 `SkillSetApplyPort` delegates choose `project=True` / `False` outside the
 materialiser. Reads use the SkillCenter Apply snapshot without reconciliation.
+The snapshot's asset catalog stays keyed by actual asset ID. Historical Center
+membership aliases are resolved within each Set by UUID; Default exclusions
+still use that Set's raw membership key. Aliases never shadow Direct assets.
+An unchanged Direct Skill installation still reaches the claim flow so Device
+delivery can retry runtime projection. The report keeps `unchanged` and exposes
+any pending/degraded projection; Platform delegates retain their no-projection
+behavior, and dry-run performs no writes or projection.
 
 An MCP entry carries a configuration action separately from its supply:
 Manifest treats an absent `config` and an explicit `{}` as clearing the

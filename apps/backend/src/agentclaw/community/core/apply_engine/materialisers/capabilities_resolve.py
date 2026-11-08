@@ -15,6 +15,9 @@ from .capabilities_types import (
     direct_ids,
     effective_sets,
     existing_skill,
+    existing_member,
+    membership_assets,
+    membership_key,
 )
 
 
@@ -48,24 +51,24 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
     code_owners = {}
     for group in ordinary:
         for sid in group.skill_ids:
-            key = asset_key(catalog[sid]) if sid in catalog else "id:" + str(sid)
+            key = membership_key(snapshot, group, sid)
             owners.setdefault(key, set()).add(group.name)
         for code in group.mcp_codes:
             code_owners.setdefault(code, set()).add(group.name)
     # The default subtarget None preserves exclusions, empty excludes all snapshot members.
-    default_skill_ids, default_codes = set(), set()
+    default_members, default_codes = [], set()
     for group in defaults:
         for sid in group.skill_ids:
             excluded = (group.id, sid) in snapshot.skill_exclusions
             if enabled and (target.skill_sets is not None or not excluded):
-                default_skill_ids.add(sid)
+                default_members.append((group, sid))
         for code in set(group.mcp_codes) | snapshot.platform_default_codes:
             excluded = (group.id, code) in snapshot.mcp_exclusions
             if enabled and (target.skill_sets is not None or not excluded):
                 default_codes.add(code)
     if enabled and not defaults:
         default_codes.update(snapshot.platform_default_codes)
-    default_keys = {asset_key(catalog[i]) for i in default_skill_ids if i in catalog}
+    default_keys = {membership_key(snapshot, group, sid) for group, sid in default_members}
 
     def fail(identity, reason):
         failures.append(ResolveFailure(identity, reason))
@@ -80,9 +83,8 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
             # Preserve the existing effective-name Set guard for a different asset.
             for group in ordinary:
                 if group.is_active and any(
-                    catalog[i]["name"] == skill.name
-                    for i in group.skill_ids
-                    if i in catalog
+                    asset["name"] == skill.name
+                    for asset in membership_assets(snapshot, group).values()
                 ):
                     fail(
                         "skills/" + skill.name,
@@ -124,10 +126,10 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
     # Restore only real current members. Stale exclusions are cleared without inventing supply.
     if target.skill_sets is not None and enabled:
         restoring_keys = {
-            asset_key(catalog[i])
+            membership_key(snapshot, item, i)
             for item in defaults
             for i in item.skill_ids
-            if (item.id, i) in snapshot.skill_exclusions and i in catalog
+            if (item.id, i) in snapshot.skill_exclusions
         }
         restoring_codes = {
             code
@@ -136,10 +138,10 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
             if (item.id, code) in snapshot.mcp_exclusions
         }
         restoring_names = {
-            catalog[i]["name"]
+            asset["name"]
             for item in defaults
-            for i in item.skill_ids
-            if (item.id, i) in snapshot.skill_exclusions and i in catalog
+            for i, asset in membership_assets(snapshot, item).items()
+            if (item.id, i) in snapshot.skill_exclusions
         }
         if restoring_names & set(direct_names):
             fail(
@@ -169,15 +171,15 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
                         group.name,
                         group.description,
                         group.is_active,
-                        tuple(existing_skill(snapshot, i) for i in group.skill_ids),
+                        tuple(existing_member(snapshot, group, i) for i in group.skill_ids),
                         group.mcp_codes,
                     )
                 )
             except ValueError as exc:
                 fail("skill_sets/" + group.name, str(exc))
-    for sid in default_skill_ids:
+    for group, sid in default_members:
         try:
-            found = existing_skill(snapshot, sid)
+            found = existing_member(snapshot, group, sid)
             final.append(found)
             origins.setdefault(found.key, set()).add("skill_sets/default")
         except ValueError as exc:

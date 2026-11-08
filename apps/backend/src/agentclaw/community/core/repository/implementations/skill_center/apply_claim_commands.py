@@ -96,12 +96,18 @@ class ApplyClaimCommands:
             default_engine_types=default_engine_types,
             locked=locked,
         ):
-            members = set_member_skill_ids(self._scope, session, skill_set_id=int(row.id))
-            codes = set_member_mcp_codes(self._scope, session, skill_set_id=int(row.id))
-            if row.is_default:
-                members -= default_exclusions.excluded_skill_ids(
+            excluded_raw_ids = (
+                default_exclusions.excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
+                if row.is_default else frozenset()
+            )
+            members = set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(excluded_raw_ids),
+            )
+            codes = set_member_mcp_codes(self._scope, session, skill_set_id=int(row.id))
+            if row.is_default:
                 excluded = default_exclusions.excluded_mcp_codes(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )

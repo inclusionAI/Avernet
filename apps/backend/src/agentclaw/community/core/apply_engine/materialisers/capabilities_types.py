@@ -14,6 +14,7 @@ from agentclaw.community.core.skill_center.skill_reference_contract import (
 from agentclaw.community.core.skill_center.skill_set_apply import (
     DefaultExclusionChange,
     SkillSetApplySnapshot,
+    SkillSetSnapshot,
 )
 
 
@@ -62,15 +63,40 @@ class CapabilityPlan(CategoryPlan):
 
 
 def assets(snapshot: SkillSetApplySnapshot) -> dict[int, dict[str, Any]]:
-    result = {int(item["id"]): item for item in snapshot.skills}
+    return {int(item["id"]): item for item in snapshot.skills}
+
+
+def membership_assets(
+    snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot
+) -> dict[int, dict[str, Any]]:
+    """Map this Set's raw member keys without shadowing real asset IDs."""
+    catalog = assets(snapshot)
     by_uuid = {
         item["skill_uuid"]: item for item in snapshot.skills if item.get("skill_uuid")
     }
-    for group in snapshot.sets:
-        for raw_id, uuid in group.skill_references:
-            if uuid and uuid in by_uuid:
-                result[raw_id] = by_uuid[uuid]
+    references = dict(group.skill_references)
+    result = {}
+    for raw_id in group.skill_ids:
+        uuid = references.get(raw_id)
+        asset = by_uuid.get(uuid) if uuid else catalog.get(raw_id)
+        if asset is not None:
+            result[raw_id] = asset
     return result
+
+
+def membership_key(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot, raw_id: int) -> str:
+    uuid = dict(group.skill_references).get(raw_id)
+    if uuid:
+        return center_key(uuid)
+    asset = assets(snapshot).get(raw_id)
+    return asset_key(asset) if asset is not None else "id:" + str(raw_id)
+
+
+def existing_member(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot, raw_id: int) -> Skill:
+    asset = membership_assets(snapshot, group).get(raw_id)
+    if asset is None:
+        raise ValueError("Skill asset is unavailable")
+    return existing_skill(snapshot, int(asset["id"]))
 
 
 def asset_key(asset: dict[str, Any]) -> str:
@@ -112,9 +138,9 @@ def effective_sets(snapshot: SkillSetApplySnapshot) -> tuple[set[int], set[str]]
         if not item.is_active and not item.is_default:
             continue
         skill_ids.update(
-            i
-            for i in item.skill_ids
-            if not item.is_default or (item.id, i) not in snapshot.skill_exclusions
+            int(asset["id"])
+            for raw_id, asset in membership_assets(snapshot, item).items()
+            if not item.is_default or (item.id, raw_id) not in snapshot.skill_exclusions
         )
         codes.update(
             code

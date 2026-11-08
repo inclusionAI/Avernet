@@ -12,6 +12,7 @@ from .capabilities_types import (
     direct_ids,
     effective_sets,
     local_owned,
+    membership_assets,
 )
 
 
@@ -46,7 +47,9 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 PlannedEntry(
                     Intent("skills/" + skill.name, skill, skill.note),
                     outcome,
-                    requires_write=skill.package is not None or not same,
+                    # Installation equality does not establish runtime convergence.
+                    # Always reach the claim flow; delivery delegates decide projection.
+                    requires_write=True,
                 )
             )
         remove_skills = tuple(sorted(set(current_direct) - declared))
@@ -89,10 +92,9 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 group for group in snapshot.sets if group.is_default and group.is_active
             ]
             ids = {
-                int(catalog[i]["id"])
+                int(asset["id"])
                 for group in defaults
-                for i in group.skill_ids
-                if i in catalog
+                for asset in membership_assets(snapshot, group).values()
             }
             codes = {
                 code
@@ -115,7 +117,7 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
         for group in resolved.sets:
             current = existing.get(group.name)
             current_keys = (
-                {asset_key(catalog[i]) for i in current.skill_ids if i in catalog}
+                {asset_key(asset) for asset in membership_assets(snapshot, current).values()}
                 if current
                 else set()
             )
