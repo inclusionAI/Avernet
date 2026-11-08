@@ -573,7 +573,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         fetchJson<unknown>(`${endpoint}?version=current`).then(value => ({ ok: true as const, value }), () => ({ ok: false as const })),
         readEditorDraftCas(selectedWorkflowId), fetchJson<unknown>(`/api/auto-heal/editor-deploy/snapshot-v2/state?workflowId=${encodeURIComponent(selectedWorkflowId)}`)])
       const snapshot = validateSnapshot(raw, selectedWorkflowId, 'draft')
-      const packPath = (raw as { packPath?: unknown }).packPath
+      const packPath = snapshot.packPath
       if (!proof || typeof proof !== 'object' || Array.isArray(proof)) throw new Error('部署能力不可验证')
       const state = proof as Record<string, unknown>
       if (state.protocol !== 'editor-deployment-state-v1' || state.workflowId !== selectedWorkflowId || state.packId !== snapshot.packId
@@ -584,7 +584,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       let active: ReturnType<typeof validateSnapshot> | null = null
       if (currentResult.ok) {
         active = validateSnapshot(currentResult.value, selectedWorkflowId, 'current')
-        if (packPath !== (currentResult.value as { packPath?: unknown }).packPath || active.packId !== snapshot.packId || state.activeCommit !== active.baseCommit) {
+        if (packPath !== active.packPath || active.packId !== snapshot.packId || state.activeCommit !== active.baseCommit) {
           throw new Error('生效版和草稿(wf) Pack 范围或基线不一致，无法完整核对。')
         }
       } else if (state.activeCommit !== null) {
