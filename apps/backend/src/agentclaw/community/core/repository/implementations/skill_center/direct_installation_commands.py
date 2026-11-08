@@ -200,6 +200,30 @@ class DirectInstallationCommands:
             .all()
         }
 
+    def _skill_control_member_keys(
+        self, session, *, member: int, set_ids: set[int]
+    ) -> dict[int, set[int]]:
+        """Resolve matching associations to their raw exclusion keys."""
+        skill = self._scope(session.query(Skill), Skill).filter(Skill.id == member).one_or_none()
+        is_center = skill is not None and str(skill.git_path or "").startswith("center://")
+        target_uuid = (str(skill.skill_uuid or "").strip() or None) if is_center else None
+        # Uninstall also handles missing assets or legacy missing identities;
+        # retain the existing conservative raw-ID guard in that case.
+        missing_identity = skill is None or (is_center and not target_uuid)
+        result: dict[int, set[int]] = {}
+        for reference in self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
+            SkillSetSkill.skill_set_id.in_(set_ids)
+        ).all():
+            uuid = str(reference.skill_uuid or "").strip()
+            matches = (
+                uuid == target_uuid
+                if uuid and not missing_identity
+                else int(reference.skill_id) == member
+            )
+            if matches:
+                result.setdefault(int(reference.skill_set_id), set()).add(int(reference.skill_id))
+        return result
+
     def _require_not_set_managed(
         self,
         session,
@@ -224,24 +248,35 @@ class DirectInstallationCommands:
             engine_type=engine_type,
             default_engine_types=default_engine_types,
         )
-        rows = [
-            row
-            for row in rows
-            if int(row.id) in set_ids
-            and not (
-                row.is_default
-                and int(row.id)
-                in (
-                    default_exclusions.lock_skill_exclusions(
-                        session, bot_id=bot_id, owner_id=owner_id, skill_id=member
+        rows = [row for row in rows if int(row.id) in set_ids]
+        if isinstance(member, int):
+            memberships = self._skill_control_member_keys(
+                session, member=member, set_ids={int(row.id) for row in rows}
+            )
+            controlled = []
+            for row in rows:
+                raw_ids = memberships.get(int(row.id), set())
+                if not raw_ids:
+                    continue
+                if row.is_default and all(
+                    int(row.id) in default_exclusions.lock_skill_exclusions(
+                        session, bot_id=bot_id, owner_id=owner_id, skill_id=raw_id
                     )
-                    if isinstance(member, int)
-                    else default_exclusions.lock_mcp_exclusions(
+                    for raw_id in sorted(raw_ids)
+                ):
+                    continue
+                controlled.append(row)
+            rows = controlled
+        else:
+            rows = [
+                row for row in rows
+                if not (
+                    row.is_default
+                    and int(row.id) in default_exclusions.lock_mcp_exclusions(
                         session, bot_id=bot_id, owner_id=owner_id, server_code=member
                     )
                 )
-            )
-        ]
+            ]
         referencing = [
             {
                 "is_default": bool(row.is_default),
