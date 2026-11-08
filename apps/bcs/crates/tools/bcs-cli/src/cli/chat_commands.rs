@@ -53,7 +53,7 @@ pub(super) async fn execute(
             debug_request!(
                 debug,
                 "POST",
-                &format!("/bots/{}/chat-async", &bot_uuid),
+                &format!("/bots/{}/chat-async", urlencoding::encode(&bot_uuid)),
                 json!({
                     "message": &message,
                     "from": serde_json::Value::Null,

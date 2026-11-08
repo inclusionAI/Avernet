@@ -39,7 +39,11 @@ impl BcsClient {
         client_wait_timeout_ms: u64,
         detach: bool,
     ) -> Result<ChatRunSubmitResponse, ChatAsyncError> {
-        let url = format!("{}/bots/{}/chat-async", self.base_url, bot_id);
+        // `bot_id` is one URL path segment. Composite IDs such as
+        // `default:197262` must encode the colon before the request reaches
+        // gateways that apply strict path matching.
+        let encoded_bot_id = urlencoding::encode(bot_id);
+        let url = format!("{}/bots/{}/chat-async", self.base_url, encoded_bot_id);
         let payload = Self::chat_async_payload(
             message,
             from,
