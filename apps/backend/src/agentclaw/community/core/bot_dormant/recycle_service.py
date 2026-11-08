@@ -45,6 +45,8 @@ class RecycleBotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
         self.ensure_supported(bot)
+        from .recycle_state import assert_not_recycling
+        assert_not_recycling(bot)
 
         status = str(bot.get("status") or "")
         if status == "RECYCLED":

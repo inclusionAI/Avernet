@@ -31,6 +31,9 @@ class CommunitySandboxClient(SandboxRuntimeClient):
     def destroy_sandbox(self, **kwargs: Any) -> bool:
         raise SandboxRuntimeUnavailableError(self._MSG)
 
+    def is_sandbox_destroyed(self, *, sandbox_id: str, tenant_idx: int) -> bool:
+        raise SandboxRuntimeUnavailableError("Sandbox runtime unavailable")
+
     def get_sandbox_info(self, **kwargs: Any):
         raise SandboxRuntimeUnavailableError(self._MSG)
 

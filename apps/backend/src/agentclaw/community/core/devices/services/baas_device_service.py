@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.devices.services.recycle_release import BaasRecycleReleaseMixin
+
 import hashlib
 import time
 from dataclasses import replace
@@ -89,7 +91,7 @@ class TemplateConfigReader(Protocol):
     def get_template_config(self, bot_id: str) -> dict[str, Any] | None: ...
 
 
-class BaasDeviceService(DeviceService):
+class BaasDeviceService(BaasRecycleReleaseMixin, DeviceService):
     """BaaS 设备服务 - 与 BaaS 层 API 交互。
 
     继承 DeviceService，提供:

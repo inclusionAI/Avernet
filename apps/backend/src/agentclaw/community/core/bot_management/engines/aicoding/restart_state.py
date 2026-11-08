@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.core.bot_dormant.recycle_state import BLOCKING, journal as recycle_journal
 
 KEY = "coding_restart"
 TASK_TYPE = "aicoding.bot.restart"
@@ -215,6 +216,7 @@ class RestartState:
                 raise RestartSuperseded("A newer restart owns this Bot")
             matches = (
                 supports(bot)
+                and recycle_journal(bot).get("phase") not in BLOCKING
                 and bot.get("active_engine") == payload["engine"]
                 and bot.get("binding_id") == payload["binding_id"]
                 and bot.get("status") == payload["previous_status"]

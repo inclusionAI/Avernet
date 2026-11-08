@@ -47,3 +47,16 @@ class BotDormantAuditServiceProtocol(Protocol):
         bot_id: str,
         owner_id: str,
     ) -> None: ...
+
+
+@runtime_checkable
+class BotDormantRecycleOperationProtocol(Protocol):
+    """Durable recycle admission and OWNER-scoped read-only latest operation.
+
+    submit returns an operation handle, not proof of release. get_operation
+    returns only the current/latest matching handle, hiding others as not-found.
+    Backup/release errors after acceptance are reported in the operation result.
+    """
+    def submit(self, *, bot_id: str, owner_id: str, owner_name: str | None = None,
+               request_id: str = "") -> dict: ...
+    def get_operation(self, *, bot_id: str, owner_id: str, operation_id: str) -> dict: ...
