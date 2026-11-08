@@ -2,7 +2,7 @@ import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { AutoHealSaveResult } from '@avernet/clawweb-shared/web/types'
 import { autoHealSaveIsCurrent, autoHealUnifiedSaveIdentity } from './autoHealWrites'
 import { readEditorDraftCas } from './editorDraftCas'
-import { diff, validateSnapshot } from '../editor/packVersionSession'
+import { compatiblePackScope, diff, validateSnapshot } from '../editor/packVersionSession'
 import { packWorkflow } from '../editor/packCanvas'
 import type { DeployReview } from '../components/DeploySnapshotReview'
 
@@ -31,7 +31,7 @@ export async function readAutoHealDeploySnapshot(receipt: AutoHealSaveResult): P
   let active: ReturnType<typeof validateSnapshot> | null = null
   if (current.ok) {
     active = validateSnapshot(current.value, id, 'current')
-    if (state.activeCommit !== active.baseCommit || active.packId !== saved.packId || active.packPath !== packPath) throw new Error('生效版基线或 Pack 范围不一致，无法审阅。')
+    if (state.activeCommit !== active.baseCommit || !compatiblePackScope(saved, active)) throw new Error('生效版基线或 Pack 范围不一致，无法审阅。')
   } else if (state.activeCommit !== null) throw new Error('无法读取生效版或证明首次部署。')
   const priorFiles = active?.versionFiles ?? []
   const prior = new Map(priorFiles.map(file => [file.path, file]))

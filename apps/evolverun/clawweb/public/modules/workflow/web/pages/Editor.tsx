@@ -28,7 +28,7 @@ import { confirmDiscardEditor } from '../editor/navigation'
 import { beginWorkflowTransition, commitWorkflowTransition } from '../editor/workflowTransition'
 import YamlEditor from '../components/YamlEditor'
 import ScriptFilesTab from '../components/ScriptFilesTab'
-import { hasPackVersionRisk, hasPackVersionEditRisk, hasPackVersionUpload, sessionFor, validateSnapshot, packVersionsRevision, subscribePackVersions, diff, publish } from '../editor/packVersionSession'
+import { compatiblePackScope, hasPackVersionRisk, hasPackVersionEditRisk, hasPackVersionUpload, sessionFor, validateSnapshot, packVersionsRevision, subscribePackVersions, diff, publish } from '../editor/packVersionSession'
 import { WorkspacePopPendingContext, isWorkflowPopOwned, subscribeWorkflowPopOwnership, usePackNavigationGuard, workflowPopOwnershipSnapshot } from '../editor/usePackNavigationGuard'
 import { packWorkflow, sameExecutionSpec } from '../editor/packCanvas'
 import { PackCanvasPartialSaveError, usePackCanvasSession } from '../editor/usePackCanvasSession'
@@ -584,7 +584,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       let active: ReturnType<typeof validateSnapshot> | null = null
       if (currentResult.ok) {
         active = validateSnapshot(currentResult.value, selectedWorkflowId, 'current')
-        if (packPath !== active.packPath || active.packId !== snapshot.packId || state.activeCommit !== active.baseCommit) {
+        if (!compatiblePackScope(snapshot, active) || state.activeCommit !== active.baseCommit) {
           throw new Error('生效版和草稿(wf) Pack 范围或基线不一致，无法完整核对。')
         }
       } else if (state.activeCommit !== null) {

@@ -195,6 +195,19 @@ export function canonicalPackPath(value: unknown): string | null {
   return normalized
 }
 
+/**
+ * A root Pack may contain a historical nested `packs/<packId>` tree as an
+ * ordinary resource. Treat that explicit root/nested transition as the same
+ * workflow Pack scope for review; the server still validates the immutable
+ * candidate tree before publishing it.
+ */
+export function compatiblePackScope(left: Pick<Snapshot, 'packId' | 'packPath'>, right: Pick<Snapshot, 'packId' | 'packPath'>): boolean {
+  if (left.packId !== right.packId || left.packPath === right.packPath) return left.packId === right.packId
+  if (typeof left.packPath !== 'string' || typeof right.packPath !== 'string') return false
+  return (left.packPath === '' && right.packPath === `packs/${left.packId}`)
+    || (right.packPath === '' && left.packPath === `packs/${right.packId}`)
+}
+
 function validSnapshotRef(ref: unknown, id: string, version: Version): boolean {
   if (typeof ref !== 'string') return false
   if (version === 'draft') return ref === `origin/wf/${id}`
