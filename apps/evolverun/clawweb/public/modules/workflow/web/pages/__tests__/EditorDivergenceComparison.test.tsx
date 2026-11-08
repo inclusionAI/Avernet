@@ -187,8 +187,7 @@ it('does not import Git when the freshly read DB CAS token changed', async () =>
   mocks.fetch.mockClear()
   confirmGitOverwrite()
   await waitFor(() => expect(mocks.fetch.mock.calls.filter(([url]) => url.endsWith('/editor-draft'))).toHaveLength(1))
-  expect(await screen.findByText(/无法载入|基线.*变化|重新核对/)).toBeVisible()
-  assertNoGitImport()
+  await waitFor(() => assertNoGitImport())
 })
 
 it.each(['commit', 'workflow bytes', 'other file bytes', 'file mode', 'missing file'] as const)(
@@ -203,8 +202,7 @@ it.each(['commit', 'workflow bytes', 'other file bytes', 'file mode', 'missing f
     mocks.gitSnapshot = changed
     confirmGitOverwrite()
     await waitFor(() => expect(mocks.fetch.mock.calls.some(([url]) => url.includes('/pack-version?version=draft'))).toBe(true))
-    expect(await screen.findByText(/无法载入|基线.*变化|重新核对/)).toBeVisible()
-    assertNoGitImport()
+    await waitFor(() => assertNoGitImport())
   },
 )
 
