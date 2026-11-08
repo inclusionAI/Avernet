@@ -463,9 +463,13 @@ describe('exact prepared replay and recovery', () => {
     const outcomes = await Promise.allSettled([resumePreparedPackCandidate(prepared, input().config),
       resumePreparedPackCandidate(prepared, input().config)]);
     expect(outcomes.some(value => value.status === 'fulfilled')).toBe(true);
-    // A losing receive-pack may report an ambiguous lock rejection; reconciliation
-    // still converges, and no caller can publish a different candidate identity.
-    for (const value of outcomes) if (value.status === 'rejected') expect(value.reason).toBeInstanceOf(PackCandidateOutcomeUnknownError);
+    // A losing resumption may observe the new wf head directly (conflict) or
+    // receive an ambiguous lock rejection (unknown); both are safe fail-closed
+    // outcomes, and no caller can publish a different candidate identity.
+    for (const value of outcomes) if (value.status === 'rejected') {
+      expect([PackCandidateConflictError, PackCandidateOutcomeUnknownError]
+        .some(errorType => value.reason instanceof errorType)).toBe(true)
+    }
     expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
     expect((await resumePreparedPackCandidate(prepared, input().config)).commit).toBe(prepared.commit);
   });
