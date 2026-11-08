@@ -42,8 +42,8 @@ describe('AutoHealSaveReview', () => {
     expect(codeText(left)).toContain('${{ inputs.message }}')
     expect(codeText(left)).toContain('<img src=x onerror=alert(1)>')
     expect(container.querySelector('img, script')).toBeNull()
-    expect(left.querySelector('[data-token="key"]')).toHaveClass('text-primary')
-    expect(left.querySelector('[data-token="boolean"]')).toHaveTextContent('true')
+    expect(left.querySelector('[data-syntax-kind="key"]')).toHaveClass('text-primary')
+    expect(left.querySelector('[data-syntax-kind="boolean"]')).toHaveTextContent('true')
     expect(left.querySelectorAll('code').length).toBeGreaterThan(10)
     const grid = left.closest('.grid')!
     expect(grid).toHaveClass('grid-cols-2', 'min-w-[720px]')
@@ -137,7 +137,7 @@ describe('AutoHealSaveReview', () => {
       const largePane = screen.getByRole('region', { name: side === 'left' ? '当前数据库原始草稿' : '拟保存的完整修复内容' })
       const smallPane = screen.getByRole('region', { name: side === 'left' ? '拟保存的完整修复内容' : '当前数据库原始草稿' })
       expect(codeText(largePane)).toBe(largeJson)
-      expect(largePane.querySelector('[data-token]')).toBeNull()
+      expect(largePane.querySelector('[data-syntax-kind]')).toBeNull()
       const code = largePane.querySelector('code')!
       expect(code.childNodes).toHaveLength(1)
       expect(code.firstChild?.nodeType).toBe(Node.TEXT_NODE)
@@ -147,7 +147,7 @@ describe('AutoHealSaveReview', () => {
       expect(screen.getByRole('status')).toHaveTextContent('不截断')
       expect(screen.getByRole('status')).toHaveTextContent(side === 'left' ? '当前数据库原始草稿' : '拟保存的完整修复内容')
       expect(parse(codeText(smallPane))).toEqual(original)
-      expect(smallPane.querySelector('[data-token="key"]')).toHaveClass('text-primary')
+      expect(smallPane.querySelector('[data-syntax-kind="key"]')).toHaveClass('text-primary')
       expect(tokenizer.mock.calls.length).toBeGreaterThan(0)
       expect(tokenizer.mock.calls.some(([text]) => text === largeJson)).toBe(false)
       expect(largePane.closest('.grid')).toHaveClass('grid-cols-2')

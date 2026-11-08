@@ -61,7 +61,7 @@ export default function AutoHealReviewDiff({ originalJson, candidateJson }: {
                   <span data-line-number aria-hidden="true" className="sticky left-0 z-10 w-12 shrink-0 select-none border-r border-input bg-muted px-1 text-right tabular-nums text-muted-foreground">{number ?? ''}</span>
                   <span data-line-marker aria-hidden="true" className={`w-5 shrink-0 select-none text-center ${line?.type === 'del' ? 'text-destructive' : 'text-success'}`}>{marker}</span>
                   {line && <code className="whitespace-pre pr-6">{raw ? line.text : tokenizeYamlLine(line.text).map((token, tokenIndex) =>
-                    <span key={tokenIndex} data-token={token.type} className={TOKEN_CLASSES[token.type]}>{token.text}</span>)}</code>}
+                    <span key={tokenIndex} data-syntax-kind={token.type} className={TOKEN_CLASSES[token.type]}>{token.text}</span>)}</code>}
                 </div>
               })}
             </div>
