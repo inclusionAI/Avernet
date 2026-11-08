@@ -184,8 +184,9 @@ function assertNoGitImport(title = 'Keep local edit') {
 it('does not import Git when the freshly read DB CAS token changed', async () => {
   await prepareGitOverwriteWithLocalEdit()
   mocks.dbReceipt = { ...mocks.dbReceipt, draftToken: 'c'.repeat(64) }
+  mocks.fetch.mockClear()
   confirmGitOverwrite()
-  await waitFor(() => expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/editor-draft'))).toBe(true))
+  await waitFor(() => expect(mocks.fetch.mock.calls.filter(([url]) => url.endsWith('/editor-draft'))).toHaveLength(1))
   expect(await screen.findByText(/无法载入|基线.*变化|重新核对/)).toBeVisible()
   assertNoGitImport()
 })
