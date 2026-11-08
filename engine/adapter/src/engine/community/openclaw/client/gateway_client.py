@@ -260,14 +260,11 @@ class OpenClawGatewayClient(GatewayConnection):
         emitted_non_terminal = False
         early_final_grace_seconds = _get_early_final_grace_seconds()
         filter_drop_count = 0
-        # A compaction retry emits an intermediate lifecycle/chat final pair.
-        # Keep that pair internal and preserve the visible response text.
         pending_compaction_finals = 0
         suppressed_compaction_lifecycle_ends = 0
-        # Track pending subagent announce phases.  Incremented when a
-        # sessions_spawn tool completes successfully; decremented when
-        # the corresponding announce-run's chat-final arrives.
         pending_announces = 0
+        waiting_for_subagent_resume = False
+        approval_suffixes = ("approval.requested", "approval.resolved")
 
         def event_summary(event: EventFrame, payload: Dict[str, Any]) -> Dict[str, Any]:
             data = payload.get("data")
@@ -305,8 +302,7 @@ class OpenClawGatewayClient(GatewayConnection):
 
         def is_announce_event(payload: Dict[str, Any]) -> bool:
             payload_run_id = payload.get("runId")
-            # Caller-provided foreground IDs may use an announce-like prefix;
-            # correlated run identity takes precedence over prefix classification.
+            # Correlated foreground identity overrides an announce-like prefix.
             return (
                 isinstance(payload_run_id, str)
                 and payload_run_id.startswith("announce:")
@@ -326,18 +322,32 @@ class OpenClawGatewayClient(GatewayConnection):
             ):
                 return
             if payload_run_id in allowed_run_ids or payload_run_id == run_id:
-                # COSEC: Only the correlated foreground run may establish
-                # the canonical parent session used to isolate announce events.
+                # COSEC: Only the foreground run may establish the parent session.
                 trusted_parent_session_keys.add(payload_session_key)
 
         def announce_matches_parent_session(payload: Dict[str, Any]) -> bool:
             payload_session_key = payload.get("sessionKey")
-            return (
-                isinstance(payload_session_key, str)
-                and payload_session_key in trusted_parent_session_keys
+            return isinstance(payload_session_key, str) and payload_session_key in trusted_parent_session_keys
+
+        def continuation_matches_parent_session(payload: Dict[str, Any]) -> bool:
+            payload_session_key = payload.get("sessionKey")
+            return isinstance(payload_session_key, str) and (
+                payload_session_key.strip().lower().removeprefix("agent:main:")
+                == session_key.strip().lower().removeprefix("agent:main:")
             )
 
-        def matches_current_stream(payload: Dict[str, Any]) -> bool:
+        def is_parent_continuation(event: EventFrame, payload: Dict[str, Any]) -> bool:
+            data = payload.get("data")
+            stream = payload.get("stream")
+            return (event.event == "chat" and payload.get("state") == "delta") or (
+                event.event == "agent"
+                and (
+                    stream in {"assistant", "tool", "item"}
+                    or (stream == "lifecycle" and isinstance(data, dict) and data.get("phase") == "start")
+                )
+            )
+
+        def matches_current_stream(event: EventFrame, payload: Dict[str, Any]) -> bool:
             payload_run_id = payload.get("runId")
             if isinstance(payload_run_id, str) and payload_run_id:
                 if payload_run_id in allowed_run_ids or payload_run_id == run_id:
@@ -346,6 +356,12 @@ class OpenClawGatewayClient(GatewayConnection):
                     return True
                 if is_announce_event(payload) and pending_announces > 0:
                     return announce_matches_parent_session(payload)
+                if waiting_for_subagent_resume and continuation_matches_parent_session(payload):
+                    return (
+                        is_parent_continuation(event, payload)
+                        or event.event.endswith(approval_suffixes)
+                        or payload.get("state") in {"error", "aborted"}
+                    )
                 if pending_early_final is not None and payload.get("state") not in ("final", "error", "aborted"):
                     payload_session_key = payload.get("sessionKey")
                     # COSEC: Fold only the default-agent alias, preserving other agents' isolation.
@@ -360,10 +376,34 @@ class OpenClawGatewayClient(GatewayConnection):
                 return payload_session_key == session_key
             return True
 
+        def consume_parent_resume(event: EventFrame, payload: Dict[str, Any]) -> bool:
+            nonlocal pending_announces, waiting_for_subagent_resume
+            payload_run_id = payload.get("runId")
+            resumable = is_parent_continuation(event, payload) or event.event.endswith(approval_suffixes)
+            if not (
+                waiting_for_subagent_resume
+                and pending_announces > 0
+                and resumable
+                and not is_announce_event(payload)
+                and isinstance(payload_run_id, str)
+                and payload_run_id
+                and continuation_matches_parent_session(payload)
+            ):
+                return False
+            allowed_run_ids.add(payload_run_id)
+            pending_announces -= 1
+            waiting_for_subagent_resume = False
+            log.info(
+                "[chat_stream][subagent_parent_resumed] sessionKey=%s "
+                "runId=%s pendingAnnounces=%d",
+                payload.get("sessionKey"), payload_run_id, pending_announces,
+            )
+            return True
+
         def on_chat_event(event: EventFrame) -> None:
             nonlocal done, emitted_non_terminal, filter_drop_count, pending_announces
             nonlocal pending_compaction_finals, pending_early_final
-            nonlocal suppressed_compaction_lifecycle_ends
+            nonlocal suppressed_compaction_lifecycle_ends, waiting_for_subagent_resume
             if done:
                 return
             if buffer_before_ack(on_chat_event, event):
@@ -376,13 +416,11 @@ class OpenClawGatewayClient(GatewayConnection):
                 filter_drop_count += 1
                 log.info("[chat_stream][foreign_announce_drop]")
                 return
-            if not matches_current_stream(payload):
+            if not matches_current_stream(event, payload):
                 filter_drop_count += 1
                 log.info("[chat_stream][filter_drop] %s", event_summary(event, payload))
                 return
 
-            # Detect successful sessions_spawn tool result → expect an
-            # announce phase later for each spawned subagent.
             data = payload.get("data") or {}
             stream_val = payload.get("stream", "")
             data_phase = data.get("phase") if isinstance(data, dict) else None
@@ -422,15 +460,9 @@ class OpenClawGatewayClient(GatewayConnection):
                 )
                 return
 
-            is_continuation_event = (
-                event.event == "chat" and state == "delta"
-            ) or (
-                event.event == "agent"
-                and (
-                    stream_val in {"assistant", "tool", "item"}
-                    or (stream_val == "lifecycle" and data_phase == "start")
-                )
-            )
+            is_continuation_event = is_parent_continuation(event, payload)
+            if consume_parent_resume(event, payload):
+                is_foreground_run = True
             if (
                 is_foreground_run
                 and is_continuation_event
@@ -447,17 +479,34 @@ class OpenClawGatewayClient(GatewayConnection):
                     cleared_retries,
                 )
 
-            if (
+            spawn_result = data.get("result") if isinstance(data, dict) else None
+            spawn_details = spawn_result.get("details") if isinstance(spawn_result, dict) else None
+            is_spawn_result = (
                 stream_val == "tool"
                 and isinstance(data, dict)
                 and data.get("name") == "sessions_spawn"
                 and data.get("phase") == "result"
+            )
+            if (
+                is_spawn_result
                 and not data.get("isError")
+                and isinstance(spawn_details, dict)
+                and spawn_details.get("status") == "accepted"
+                and isinstance(spawn_details.get("childSessionKey"), str)
+                and bool(spawn_details.get("childSessionKey", "").strip())
+                and isinstance(spawn_details.get("runId"), str)
+                and bool(spawn_details.get("runId", "").strip())
             ):
                 pending_announces += 1
-                log.debug(
-                    "[chat_stream] sessions_spawn succeeded, pending_announces=%d",
+                log.info(
+                    "[chat_stream][sessions_spawn_accepted] pendingAnnounces=%d",
                     pending_announces,
+                )
+            elif is_spawn_result:
+                log.info(
+                    "[chat_stream][sessions_spawn_not_accepted] status=%s isError=%s",
+                    spawn_details.get("status") if isinstance(spawn_details, dict) else None,
+                    data.get("isError"),
                 )
 
             if (
@@ -486,9 +535,6 @@ class OpenClawGatewayClient(GatewayConnection):
                 payload_run_id = payload.get("runId", "")
                 is_inject = isinstance(payload_run_id, str) and payload_run_id.startswith("inject-")
                 if is_inject:
-                    # chat.inject broadcasts carry state="final" but are
-                    # out-of-band injected messages, not the end of the
-                    # current chat stream — forward without terminating.
                     payload["_source_event"] = event.event
                     event_queue.put_nowait(event)
                 elif (
@@ -510,24 +556,21 @@ class OpenClawGatewayClient(GatewayConnection):
                     if is_announce:
                         pending_announces -= 1
                     if is_announce and pending_announces <= 0:
-                        # Last announce-run completed — forward and terminate.
                         payload["_source_event"] = event.event
                         event_queue.put_nowait(event)
                         done = True
                         event_queue.put_nowait(None)
                     else:
-                        # Either a Phase-1 chat-final or an intermediate
-                        # announce chat-final — suppress so the yield loop
-                        # (which breaks on any state="final") doesn't exit
-                        # prematurely.
-                        log.debug(
-                            "[chat_stream] Suppressing intermediate chat-final "
-                            "(pending_announces=%d, runId=%s)",
+                        if is_foreground_run:
+                            waiting_for_subagent_resume = True
+                        # Keep parent/intermediate announce finals internal.
+                        log.info(
+                            "[chat_stream][subagent_parent_final_deferred] "
+                            "pendingAnnounces=%d runId=%s",
                             pending_announces,
                             payload.get("runId", "")[:40],
                         )
                 else:
-                    # No pending subagents — normal completion.
                     payload["_source_event"] = event.event
                     if (
                         not emitted_non_terminal
@@ -550,8 +593,10 @@ class OpenClawGatewayClient(GatewayConnection):
                 payload["_source_event"] = event.event
                 event_queue.put_nowait(event)
 
-        def on_approval_requested(event: EventFrame) -> None:
-            if buffer_before_ack(on_approval_requested, event):
+        def forward_approval(
+            event: EventFrame, state: str, handler: Callable[[EventFrame], None]
+        ) -> None:
+            if buffer_before_ack(handler, event):
                 return
             if done:
                 return
@@ -559,28 +604,19 @@ class OpenClawGatewayClient(GatewayConnection):
             payload.setdefault("approvalId", payload.get("requestId") or payload.get("id"))
             payload.setdefault("runId", run_id)
             payload.setdefault("sessionKey", session_key)
-            if not matches_current_stream(payload):
+            if not matches_current_stream(event, payload):
                 return
-            payload.setdefault("state", "approval_requested")
+            consume_parent_resume(event, payload)
+            payload.setdefault("state", state)
             payload["event"] = event.event
             payload["_source_event"] = event.event
             event_queue.put_nowait(EventFrame(event="chat", payload=payload))
 
+        def on_approval_requested(event: EventFrame) -> None:
+            forward_approval(event, "approval_requested", on_approval_requested)
+
         def on_approval_resolved(event: EventFrame) -> None:
-            if buffer_before_ack(on_approval_resolved, event):
-                return
-            if done:
-                return
-            payload = dict(event.payload or {})
-            payload.setdefault("approvalId", payload.get("requestId") or payload.get("id"))
-            payload.setdefault("runId", run_id)
-            payload.setdefault("sessionKey", session_key)
-            if not matches_current_stream(payload):
-                return
-            payload.setdefault("state", "approval_resolved")
-            payload["event"] = event.event
-            payload["_source_event"] = event.event
-            event_queue.put_nowait(EventFrame(event="chat", payload=payload))
+            forward_approval(event, "approval_resolved", on_approval_resolved)
 
         # 注册事件监听
         self.on_event("chat", on_chat_event)
