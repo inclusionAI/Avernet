@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/clawflows-git-client-fixture.ts
+  h_43af82e14600e4 1-43
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-unified-save-host.test.ts
+  h_43af82e14600e4 13-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9526c626ca23ce928759462d088fae766c2ec8a9",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+apps/bcs/crates/plugins/bcs-auth-wechat/src/provider.rs
+  s_de8b18a148c239::t_1f7845199f5155 88,148
+apps/bcs/crates/external-clients/bcs-webhook-client/src/lib.rs
+  s_de8b18a148c239::t_1f7845199f5155 156
+apps/bcs/crates/plugins/bcs-auth-alipay/src/provider.rs
+  s_de8b18a148c239::t_1f7845199f5155 261,353
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/lib.rs
+  s_de8b18a148c239::t_d8087ac1449b27 3,8-28,30,32-36
+apps/bcs/crates/adapters/http/bcs-http/src/admin_invocation_terminal.rs
+  s_de8b18a148c239::t_1f7845199f5155 59,105,117
+apps/bcs/crates/auxiliary/bcs-network-tracing/Cargo.toml
+  s_de8b18a148c239::t_7f9b46b09cba10 21
+apps/bcs/crates/plugins/bcs-storage-baas/Cargo.toml
+  s_de8b18a148c239::t_7aa7bf2ba8f38a 25,27
+apps/bcs/crates/plugins/bcs-auth-github/src/provider.rs
+  s_de8b18a148c239::t_1f7845199f5155 91,124
+apps/bcs/crates/plugins/bcs-storage-baas/tests/tracing_scope.rs
+  s_de8b18a148c239::t_7aa7bf2ba8f38a 1-54
+apps/bcs/crates/plugins/bcs-storage-baas/src/lib.rs
+  s_de8b18a148c239::t_1f7845199f5155 377
+apps/bcs/crates/external-clients/bcs-a2a-http/src/card_fetch.rs
+  s_de8b18a148c239::t_1f7845199f5155 68
+apps/bcs/crates/plugins/bcs-llm-anthropic/src/lib.rs
+  s_de8b18a148c239::t_1f7845199f5155 119
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_de8b18a148c239::t_d8087ac1449b27 342-345,348-356,395
+  s_de8b18a148c239::t_77a28367bdf106 346-347
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_de8b18a148c239::t_f8d6925722fd2b 8-13,23-24,39-40
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/conformance.rs
+  s_de8b18a148c239::t_87a27ee0cf73dc 2-3
+  s_de8b18a148c239::t_7f9b46b09cba10 25,29,33,35,49,66,74-83,85-109,113-116,118-138
+  s_de8b18a148c239::t_77a28367bdf106 84,110-112,117
+  s_de8b18a148c239::t_ea5b781566224b 139
+apps/bcs/crates/plugins/bcs-auth-google/src/provider.rs
+  s_de8b18a148c239::t_1f7845199f5155 85,123
+apps/bcs/crates/plugins/bcs-llm-openai-compatible/src/lib.rs
+  s_de8b18a148c239::t_1f7845199f5155 102
+apps/bcs/Cargo.lock
+  s_de8b18a148c239::t_effbe1677ed573 2397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a3d5203e9d5424a31dd1ccd2b8a38c498f32eb03",
+  "prompts": {},
+  "sessions": {
+    "s_de8b18a148c239": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a659-522b-7611-85d7-89f0d4fb9517",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

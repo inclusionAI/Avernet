@@ -1,0 +1,182 @@
+apps/frontend-nextgen/config/routes.ts
+  h_059e888e5e4e82 55-56
+apps/frontend-nextgen/package-lock.json
+  h_059e888e5e4e82 35,11081-11091,17658-17665
+apps/frontend-nextgen/package.json
+  h_059e888e5e4e82 48
+apps/frontend-nextgen/src/capabilities/conversationComposer.ts
+  h_059e888e5e4e82 13-15,21-27
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementMenu.tsx
+  h_059e888e5e4e82 68-84,137,139,188,252
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotTable.tsx
+  h_059e888e5e4e82 138
+apps/frontend-nextgen/src/components/BotWorkshop/BotChatLogs/BotChatList.tsx
+  h_059e888e5e4e82 164-165
+apps/frontend-nextgen/src/components/BotWorkshop/ExternalBotPanel.tsx
+  h_059e888e5e4e82 83
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/index.tsx
+  h_059e888e5e4e82 2,49,100,136
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/index.tsx
+  h_059e888e5e4e82 255
+apps/frontend-nextgen/src/components/Workspace/ConversationComposerHost.tsx
+  h_059e888e5e4e82 26
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/CapabilitySetEntryPill.tsx
+  h_059e888e5e4e82 1-79
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  h_059e888e5e4e82 7,31,36-37,62,79-80,169-171,189,195-201,255,260-263
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/composerCapabilitiesMenuTypes.ts
+  h_059e888e5e4e82 6,24,29-32
+apps/frontend-nextgen/src/components/ui/DataTable/DataTable.tsx
+  h_059e888e5e4e82 1,18-23,52-75,78,90
+apps/frontend-nextgen/src/components/ui/DataTable/DataTableCell.tsx
+  h_059e888e5e4e82 2-3,11-12,15-22,29,34-46
+apps/frontend-nextgen/src/components/ui/DataTable/DataTableHeader.tsx
+  h_059e888e5e4e82 2-3,22,26-40
+apps/frontend-nextgen/src/components/ui/DataTable/DataTableRow.tsx
+  h_059e888e5e4e82 38
+apps/frontend-nextgen/src/components/ui/DataTable/align.ts
+  h_059e888e5e4e82 16-32
+apps/frontend-nextgen/src/components/ui/DataTable/sticky.ts
+  h_059e888e5e4e82 1-29
+apps/frontend-nextgen/src/domain/conversation/types.ts
+  h_059e888e5e4e82 15,27,29
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  h_059e888e5e4e82 137-138,140
+apps/frontend-nextgen/src/hooks/useBotWorkshop.ts
+  h_059e888e5e4e82 142-143,145,147
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/DetailPanelContent.tsx
+  h_059e888e5e4e82 50
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  h_059e888e5e4e82 64
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineActions.tsx
+  h_059e888e5e4e82 1-76
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineDetail.tsx
+  h_059e888e5e4e82 1-182
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  h_059e888e5e4e82 1-279
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineList.tsx
+  h_059e888e5e4e82 1-158
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineNextRun.tsx
+  h_059e888e5e4e82 1-58
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/index.tsx
+  h_059e888e5e4e82 1-205
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/notifyRoutineResult.tsx
+  h_059e888e5e4e82 1-33
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/useScheduledTasks.ts
+  h_059e888e5e4e82 1-202
+apps/frontend-nextgen/src/pages/BotWorkshop/TaskInstances/index.tsx
+  h_059e888e5e4e82 2-8
+apps/frontend-nextgen/src/pages/EvolutionFactory/DomainList.tsx
+  h_059e888e5e4e82 122
+apps/frontend-nextgen/src/pages/EvolutionFactory/TaskListColumns.tsx
+  h_059e888e5e4e82 123
+apps/frontend-nextgen/src/pages/EvolutionFactory/VersionListColumns.tsx
+  h_059e888e5e4e82 110
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationInteractiveStage.tsx
+  h_059e888e5e4e82 57-76,138,140-141,150
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationPage.tsx
+  h_059e888e5e4e82 41
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItem.tsx
+  h_059e888e5e4e82 2-3,21,119-144,201-204,225-229,240
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItemActions.tsx
+  h_059e888e5e4e82 6-9,31-32,35,69,88-92,103,106-108,127,135,137-141,143,152,166-171
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItemLayout.ts
+  h_059e888e5e4e82 1-94
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationCollapsedRail.tsx
+  h_059e888e5e4e82 23
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationOriginFilter.tsx
+  h_059e888e5e4e82 22,24-25,48,93
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionSearchIconButton.tsx
+  h_059e888e5e4e82 10,15-16,33
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebar.tsx
+  h_059e888e5e4e82 1-2,22,68-69,71,137,176
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebarSection.tsx
+  h_059e888e5e4e82 82-84
+apps/frontend-nextgen/src/pages/Workspace/Chat/conversationPresentation.ts
+  h_059e888e5e4e82 23,54-61,85-87
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder.ts
+  h_059e888e5e4e82 47
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessions.ts
+  h_059e888e5e4e82 1
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotCapabilitySets.ts
+  h_059e888e5e4e82 6,18
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  h_059e888e5e4e82 32,103-107
+apps/frontend-nextgen/src/services/backendApi/bots/collaboratingBotController.ts
+  h_059e888e5e4e82 4
+apps/frontend-nextgen/src/services/botScheduledTasks/http.ts
+  h_059e888e5e4e82 1-36
+apps/frontend-nextgen/src/services/botScheduledTasks/locks.ts
+  h_059e888e5e4e82 1-50
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  h_059e888e5e4e82 1-81
+apps/frontend-nextgen/src/services/botScheduledTasks/nextRun.ts
+  h_059e888e5e4e82 1-18
+apps/frontend-nextgen/src/services/botScheduledTasks/results.ts
+  h_059e888e5e4e82 1-41
+apps/frontend-nextgen/src/services/botScheduledTasks/service.ts
+  h_059e888e5e4e82 1-203
+apps/frontend-nextgen/src/services/botScheduledTasks/types.ts
+  h_059e888e5e4e82 1-195
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  h_059e888e5e4e82 4,13,79,124-129,134-143,149,160-161
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  h_059e888e5e4e82 197-198,205
+apps/frontend-nextgen/src/services/workspace/botCapabilitySetService.ts
+  h_059e888e5e4e82 9
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  h_059e888e5e4e82 61
+apps/frontend-nextgen/src/services/workspace/managedBotConversationService.ts
+  h_059e888e5e4e82 36
+apps/frontend-nextgen/src/services/workspace/teamBotConversationService.ts
+  h_059e888e5e4e82 121,135
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  h_059e888e5e4e82 168,173-174
+apps/frontend-nextgen/test/components/BotWorkshop/BotAccessModal.test.tsx
+  h_059e888e5e4e82 9
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  h_059e888e5e4e82 101,113,256,265,525,536,544,549,552,556,873
+apps/frontend-nextgen/test/components/BotWorkshop/ExternalBotPanel.test.tsx
+  h_059e888e5e4e82 27,30
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  h_059e888e5e4e82 91,100,117,122,130,141
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  h_059e888e5e4e82 35,82-83,88-107,145-146,160-164,184,186
+apps/frontend-nextgen/test/domain/chatEngineVersionTarget.test.ts
+  h_059e888e5e4e82 24
+apps/frontend-nextgen/test/pages/BotWorkshop/DetailNavigation.test.tsx
+  h_059e888e5e4e82 41
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  h_059e888e5e4e82 142,147-151,154,163,342,347-352,462-463,480-488,570,575
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebar.test.tsx
+  h_059e888e5e4e82 64,72-73,89,99,103-104,118,120,138,714,724,730-732,736,739,742,865,880-881,883-884,891,903,906-907,911,913,976,985-986,997-999
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebar.testUtils.ts
+  h_059e888e5e4e82 29-30
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSelection.test.tsx
+  h_059e888e5e4e82 580
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  h_059e888e5e4e82 545
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotCapabilitySets.test.tsx
+  h_059e888e5e4e82 4
+apps/frontend-nextgen/test/services/botScheduledTasks/targets.test.ts
+  h_059e888e5e4e82 1-394
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  h_059e888e5e4e82 362,393,395-396
+apps/frontend-nextgen/test/services/botWorkshop/botManagementService.test.ts
+  h_059e888e5e4e82 115,120
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  h_059e888e5e4e82 238,246,258
+apps/frontend-nextgen/test/services/workspace/teamBotConversationService.test.ts
+  h_059e888e5e4e82 231,247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bcc2067ca1d5a58f312af4bec5f42125f98aa984",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

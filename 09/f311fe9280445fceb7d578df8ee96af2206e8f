@@ -1,0 +1,64 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  h_43af82e14600e4 230-255
+apps/evolverun/clawweb/public/modules/workflow/docs/run-list-contract.md
+  h_43af82e14600e4 104,234-298
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/run-subworkflows.ts
+  h_43af82e14600e4 18-23,28,57,62-63
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-claim-cas.test.ts
+  h_43af82e14600e4 1-251
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  h_43af82e14600e4 3,104-289
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  h_43af82e14600e4 190,233,274-279,324,326-327,330-331,349-353,357-361,363,365-368,372-373,378-390,392-408,416,419,426,496,512,518-520,562,572,577
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  h_43af82e14600e4 3,100-129
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-operations.test.ts
+  h_43af82e14600e4 1-127
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-writes.test.ts
+  h_43af82e14600e4 1-106
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-legacy-registration.integration.test.ts
+  h_43af82e14600e4 1-103
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-association.test.ts
+  h_43af82e14600e4 52-66
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/run-snapshot-registration.test.ts
+  h_43af82e14600e4 8,29,82-102
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/version-contract.test.ts
+  h_43af82e14600e4 66-94
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_43af82e14600e4 16-28,175-178
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-engine-auth.test.ts
+  h_43af82e14600e4 1-80
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-fanout-origin.test.ts
+  h_43af82e14600e4 1-145
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows.test.ts
+  h_43af82e14600e4 147-205
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-http.ts
+  h_43af82e14600e4 283,329,349-358
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-http.ts
+  h_43af82e14600e4 21-37,78-79
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-service.ts
+  h_43af82e14600e4 5,33-61,110,117-130,133,141-149,152-153,155,158-168,182
+apps/evolverun/clawweb/public/modules/workflow/server/validators/__tests__/subworkflow-fanout.test.ts
+  h_43af82e14600e4 1-261
+apps/evolverun/clawweb/public/modules/workflow/server/validators/subworkflow-fanout.ts
+  h_43af82e14600e4 1-150
+apps/evolverun/clawweb/public/modules/workflow/server/validators/workflow-validator.ts
+  h_43af82e14600e4 12,46
+apps/evolverun/clawweb/public/modules/workflow/web/components/InterventionPanel.tsx
+  h_43af82e14600e4 41,51-61
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/InterventionPanelChild.test.tsx
+  h_43af82e14600e4 1-52
+apps/evolverun/clawweb/public/shared/web/types-workflow-support.ts
+  h_43af82e14600e4 117-118,122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09f311fe9280445fceb7d578df8ee96af2206e8f",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
