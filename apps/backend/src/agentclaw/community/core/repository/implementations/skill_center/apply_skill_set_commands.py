@@ -285,16 +285,9 @@ class ApplySkillSetCommands:
                         raise SkillSetControlPlaneNotFoundError()
                     require_skill_online(skill)
                     center_membership_skill_uuid(skill)
-                    references = self._skill_referencing_set_ids(
-                        session, skill_id=skill_id, skill_uuid=skill.skill_uuid
-                    )
                     conflict = any(
                         item.id != own_id
-                        and item.id in references
-                        and (
-                            not item.is_default
-                            or (item.id, skill_id) not in skill_exclusions
-                        )
+                        and self._apply_set_owns_skill(item, skill, skill_exclusions)
                         for item in facts
                     )
                     require_can_join_set(
@@ -463,6 +456,22 @@ class ApplySkillSetCommands:
                 ),
                 mcp_codes=frozenset(affected_mcps),
             )
+
+    @staticmethod
+    def _apply_set_owns_skill(fact, skill, skill_exclusions):
+        """Filter raw Default exclusions before comparing stable membership identity."""
+        target_uuid = center_membership_skill_uuid(skill)
+        references = dict(fact.skill_references)
+        for raw_id in fact.skill_ids:
+            if fact.is_default and (fact.id, raw_id) in skill_exclusions:
+                continue
+            uuid = references.get(raw_id)
+            if uuid:
+                if uuid == target_uuid:
+                    return True
+            elif raw_id == int(skill.id):
+                return True
+        return False
 
     def _apply_supply(
         self,
@@ -650,11 +659,10 @@ class ApplySkillSetCommands:
                 )
                 if skill is None:
                     raise SkillSetControlPlaneNotFoundError()
-                references = self._skill_referencing_set_ids(
-                    session, skill_id=skill_id, skill_uuid=skill.skill_uuid
-                )
                 ordinary = any(
-                    not item.is_default and item.id in references for item in facts
+                    not item.is_default
+                    and self._apply_set_owns_skill(item, skill, old.skill_exclusions)
+                    for item in facts
                 )
                 require_can_join_set(
                     is_directly_active=skill_id in old.installations
