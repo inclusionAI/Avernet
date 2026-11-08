@@ -22,7 +22,7 @@ def test_persistence_failure_is_never_best_effort():
     op = BackupOperation(
         "a" * 32, time.time(), persist=MagicMock(side_effect=RuntimeError("db down"))
     )
-    token = current_backup.set(op)
+    reset_handle = current_backup.set(op)
     try:
         with pytest.raises(BackupPersistenceError):
             backup._best_effort(
@@ -33,20 +33,20 @@ def test_persistence_failure_is_never_best_effort():
                 operation_id=op.operation_id,
             )
     finally:
-        current_backup.reset(token)
+        current_backup.reset(reset_handle)
 
 
 def test_confirmed_targets_survive_redelivery_without_restart_context():
-    token = current_backup.set(BackupOperation("a" * 32, time.time(), confirmed={"s1"}))
+    reset_handle = current_backup.set(BackupOperation("a" * 32, time.time(), confirmed={"s1"}))
     try:
         assert backup._confirmed_targets() == {"s1"}
     finally:
-        current_backup.reset(token)
+        current_backup.reset(reset_handle)
 
 
 def test_backup_redelivery_does_not_reset_budget():
     op = BackupOperation("a" * 32, time.time() - 1501)
-    token = current_backup.set(op)
+    reset_handle = current_backup.set(op)
     execute = MagicMock()
     try:
         with pytest.raises(TimeoutError):
@@ -58,7 +58,7 @@ def test_backup_redelivery_does_not_reset_budget():
             )
         execute.assert_not_called()
     finally:
-        current_backup.reset(token)
+        current_backup.reset(reset_handle)
 
 
 def test_baas_new_physical_device_with_same_binding_blocks_release():
