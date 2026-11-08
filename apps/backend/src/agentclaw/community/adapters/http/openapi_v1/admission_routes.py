@@ -135,6 +135,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/recycle",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/data-init",

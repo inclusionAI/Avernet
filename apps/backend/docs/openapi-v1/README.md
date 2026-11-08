@@ -1353,7 +1353,8 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
-| POST | `/openapi/v1/bots/{bot_id}/recycle` | Release an ACTIVE personal managed-cloud Bot and enter RECYCLED | `200 Envelope[BotRecycleResult]` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Durably submit backup and resource release for an ACTIVE personal managed-cloud Bot | `202 Envelope[BotRecycleResult]`; already RECYCLED: `200`, `changed=false` |
+| GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
@@ -1369,11 +1370,84 @@ the other six: this is what "done" looks like per category.
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
 
-Dormant lifecycle operations and the status poll take optional `owner_id`
-(defaulting to the caller) because `bot_id` is not globally unique. They use
-the shared addressed-Bot authorization mechanism, but require OWNER permission;
-ADMIN and MEMBER collaborators cannot recycle or activate the Bot. Teclaw,
-desktop and service Bots are outside this lifecycle.
+Dormant lifecycle operations and their operation query accept optional `entity_id`
+(the addressed Bot's Owner, defaulting to the caller). `owner_id` remains a
+deprecated alias; conflicting values produce 422. They use addressed-Bot
+OWNER authorization: ADMIN/MEMBER collaborators cannot recycle, query its
+operation, or activate. Missing/inaccessible Bots and mismatched operation IDs
+are hidden as 404. Teclaw, desktop and service Bots are outside this lifecycle.
+
+#### Asynchronous recycle and reactivation
+
+`POST .../recycle` has no body. It persists a `bot.recycle` task and returns
+202 with `bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id`
+and `phase`. It does not wait for backup or call container destruction in the
+HTTP request. `changed=true` means a new operation was admitted, **not that the
+Bot is already recycled**. A repeated submission returns the same in-progress
+handle with `changed=false`. A fully recycled Bot without an unresolved
+operation still returns 200 / `status=RECYCLED` / `changed=false`, with no new
+backup, release or audit. Incompatible state or a busy lifecycle returns 409;
+a disabled worker or unconfirmed durable admission returns 503.
+
+Poll the dedicated `GET .../recycle-operations/{operation_id}`. Its data contains
+`bot_id`, `owner_id`, `operation_id`, `bot_status`, `phase`, nullable
+`error_code`, `message`, and `warning` (safe code/message only). HTTP 200 means
+the operation was read successfully, including when its phase is FAILED. GET
+never triggers work, repair, retries, release or compensation. It exposes only
+the current/latest handle stored in `Bot.ext.recycle`; after another operation
+replaces it, the previous handle returns 404. Activation retains the last
+recycle result. This is independent of the existing Bot `/status` response.
+
+```text
+QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
+                |             |
+              FAILED    NEEDS_CONFIRMATION
+```
+
+Backup reuses the engine's restart strategy and `fastdisk_fail_block` policy,
+read once per operation. With blocking enabled, a failed/expired required
+backup ends the **operation** as FAILED: Bot remains ACTIVE, with its old
+binding and Passport unchanged. It does not set Bot.status or startup markers
+to FAILED. With blocking disabled, existing best-effort behavior remains and a
+confirmed degraded backup is surfaced as a warning. Unsupported backup engines
+retain their existing no-op policy. Redelivery preserves the backup operation
+ID, first-start budget and already-confirmed fastdisk targets.
+
+Resource release is submitted only after the durable RELEASING fence, followed
+by provider confirmation. Acceptance, a DB-only RELEASED binding, an arbitrary
+404 or an empty inventory is not enough. An ambiguous release is observed, not
+blindly resubmitted. If release/finalization cannot be confirmed, the operation
+ends as NEEDS_CONFIRMATION and blocks new recycle/activate/restart/delete/stop
+requests until an operator verifies the result. There is no new manual-confirm
+or cancel API in this change.
+
+After confirmed release, Passport freeze is best effort; a failure is a warning.
+One transaction releases the binding, sets Bot.status=RECYCLED, finishes the
+journal, and inserts one audit (`source=openapi`, `run_id=operation_id`). Retries
+never repeat a confirmed destruction or successful audit. No recycle DingTalk
+notification is enqueued by this path.
+
+The existing `POST .../activate` remains asynchronous, with the same response
+shape. Pending recycle / NEEDS_CONFIRMATION returns 409 **before** ACTIVE
+idempotency. Historical RECYCLED Bots remain restorable. A row-locked
+RECYCLED -> REACTIVATING claim prevents duplicate activation; rollback cannot
+overwrite a new binding. Activation does not introduce a new queue or status
+endpoint. Backup data restoration still uses the existing provisioning path.
+
+Timing is deliberately separated: required fastdisk backup waits up to 300s;
+other applicable backup paths retain the restart strategy's 1500s budget;
+release/finalization observation is bounded to 600s, polling at 3s; the task
+queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
+cancellation** of an in-flight SDK call/container backup script.
+
+Deployment must enable the existing task worker and keep all worker versions
+compatible with `bot.recycle` before opening asynchronous submission. During a
+rolling upgrade, gate the recycle POST at ingress until every worker has the
+handler, then enable the endpoint and updated Gateway schema together. Clients
+must treat 202 as admission and poll for SUCCEEDED, rather than assuming a
+successful POST has already released resources. No new table/DDL or backup
+policy flag is introduced. Real provider release/data restoration needs a
+staging acceptance test; mock/SQLite tests do not prove container recovery.
 
 #### Space-scoped Bot quota
 

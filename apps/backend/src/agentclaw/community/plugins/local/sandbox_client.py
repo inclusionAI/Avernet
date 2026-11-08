@@ -29,6 +29,9 @@ class NoopSandboxClient(MockSeam, SandboxRuntimeClient):
     def destroy_sandbox(self, **kwargs: Any) -> bool:
         return True
 
+    def is_sandbox_destroyed(self, *, sandbox_id: str, tenant_idx: int) -> bool:
+        return False
+
     def get_sandbox_info(self, *, sandbox_id: str, tenant_idx: int) -> SandboxInfo:
         return SandboxInfo(sandbox_id=sandbox_id, status="RUNNING", ttl_in_minutes=60)
 

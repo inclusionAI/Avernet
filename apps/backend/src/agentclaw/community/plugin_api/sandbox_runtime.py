@@ -79,6 +79,14 @@ class SandboxRuntimeClient(Plugin, Protocol):
         """Destroy ``sandbox_id`` (raw id, no ``@alt`` suffix). Idempotent."""
         ...
 
+    def is_sandbox_destroyed(self, *, sandbox_id: str, tenant_idx: int) -> bool:
+        """True only on explicit provider destruction; transport/auth errors raise.
+
+        A failed query or missing projection is never evidence of destruction.
+        This read is used by durable recycle recovery after an ambiguous destroy.
+        """
+        ...
+
     def get_sandbox_info(self, *, sandbox_id: str, tenant_idx: int) -> "SandboxInfo":
         """Return current status/ttl for ``sandbox_id``."""
         ...

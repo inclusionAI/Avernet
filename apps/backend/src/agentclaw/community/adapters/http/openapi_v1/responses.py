@@ -133,6 +133,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
 )
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
+from agentclaw.community.core.bot_dormant.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaBusyError,
     BotQuotaExceededError,
@@ -563,6 +564,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     RecycleReleaseFailed: (502, "Bot resource release failed"),
+    RecycleUnavailable: (503, "Bot recycle service unavailable"),
     BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),

@@ -117,6 +117,7 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/recycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
     ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
