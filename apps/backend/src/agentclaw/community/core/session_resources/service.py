@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from agentclaw.community.core.session_resources.types import (
     SessionUploadIntent,
     TransferApiVersion,
     hash_identifier,
+    safe_creator_name,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -35,6 +37,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
 from agentclaw.community.core.session_resources.session_resource_service_protocol import SessionResourceServiceProtocol
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 log = logging.getLogger("session_resource.service")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
@@ -54,6 +57,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
         default_tenant: str,
         bot_repository: BotRepository,
         bot_friend_repository: BotFriendRepositoryProtocol,
+        staff_dept: StaffDeptPlugin | None = None,
     ) -> None:
         self._repository = repository
         self._baas = baas_client
@@ -64,6 +68,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
         self._default_tenant = default_tenant.strip()
         self._bot_repository = bot_repository
         self._bot_friend_repository = bot_friend_repository
+        self._staff_dept = staff_dept
 
     def create_upload_intent(
         self,
@@ -74,6 +79,8 @@ class SessionResourceService(SessionResourceServiceProtocol):
         scope_type: str,
         engine_type: str,
         filename: str,
+        actor_user_id: str | None = None,
+        creator_name: str | None = None,
         target_entity_id: str | None = None,
         binding_id: int | None = None,
         size_bytes: int | None = None,
@@ -159,6 +166,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 # shared legacy column as inapplicable; BOT_DEVICE_V1 needs a real value.
                 bot_uuid=bot_uuid,
                 display_name=filename,
+                creator_name=self._creator_name(actor_user_id, creator_name),
                 filename=safe_filename,
                 device_path=f"workspace/{relative}",
                 workspace_relative_path=relative,
@@ -172,6 +180,34 @@ class SessionResourceService(SessionResourceServiceProtocol):
             )
         )
         return SessionUploadIntent(resource=record, grant=grant)
+
+    def _creator_name(self, actor_user_id: str | None, supplied_name: str | None) -> str | None:
+        name = safe_creator_name(supplied_name)
+        if name:
+            return name
+        if not actor_user_id or self._staff_dept is None:
+            return None
+        started = time.monotonic()
+        actor_hash = hash_identifier(actor_user_id)[:16]
+        log.info("session_resource.creator_name.request actor_hash=%s", actor_hash)
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(work_no=actor_user_id)
+            # COSEC: a directory result for another user must not label this upload.
+            if profile.work_no != actor_user_id:
+                status = "identity_mismatch"
+                name = None
+            else:
+                name = safe_creator_name(profile.nick_name)
+                status = "found" if name else "missing"
+        except Exception:
+            # COSEC: directory exceptions can contain credentials; log only a fixed status.
+            status = "unavailable"
+            name = None
+        log.info(
+            "session_resource.creator_name.response actor_hash=%s status=%s duration_ms=%s",
+            actor_hash, status, int((time.monotonic() - started) * 1000),
+        )
+        return name or None
 
     def complete_upload(
         self,
