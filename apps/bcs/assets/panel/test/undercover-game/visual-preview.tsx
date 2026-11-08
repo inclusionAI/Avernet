@@ -1,5 +1,5 @@
 import React from 'react';import{createRoot}from'react-dom/client';import UndercoverGamePanel from '../../src/undercover-game/UndercoverGamePanel';
-const query=new URLSearchParams(location.search);const mode=query.get('mode')??'observe';const width=Math.max(280,Math.min(1000,Number(query.get('width'))||320));const height=Math.max(280,Math.min(1000,Number(query.get('height'))||600));const bubbleSeat=Number(query.get('bubbleSeat'))||5;let submitted=false;
+const query=new URLSearchParams(location.search);const mode=query.get('mode')??'observe';const width=Math.max(280,Math.min(1400,Number(query.get('width'))||320));const height=Math.max(280,Math.min(1200,Number(query.get('height'))||600));const bubbleSeat=Number(query.get('bubbleSeat'))||5;let submitted=false;
 const pk=mode.startsWith('pk-');const voting=mode==='vote'||mode==='pk-vote';const eliminated=mode==='eliminated';
 const players=[{actorId:'a',displayName:'夜宴宾客·甲',seatNumber:1},{actorId:'human',displayName:'你',seatNumber:2,isHuman:true},{actorId:'c',displayName:'夜宴宾客·乙',seatNumber:3},{actorId:'d',displayName:'夜宴宾客·丙',seatNumber:4},{actorId:'e',displayName:'夜宴宾客·丁',seatNumber:5},{actorId:'f',displayName:'夜宴宾客·戊',seatNumber:6,alive:!eliminated,eliminated}];
 const seatMap=Object.fromEntries(players.map(player=>[player.actorId,player]));

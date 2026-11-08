@@ -152,6 +152,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const board = boardOf(panel);
     assert.equal(board.getAttribute('data-run-id'), fixture.graph.run.run_id);
     assert.equal(board.getAttribute('data-run-status'), fixture.graph.run.status?.toLowerCase());
@@ -163,7 +165,7 @@ try {
     assert.equal(board.querySelector('[data-final-node="true"]').getAttribute('data-node-id'), 'collect');
     for (const node of fixture.graph.nodes) assert.equal(statusOf(panel, node.node_id), node.status);
     assert.match(text(panel), /本阶段真实流程/);
-    assert.equal(board.querySelector('[data-region="workflow-toggle"]'), null, 'wide layout keeps the board always expanded');
+    assert.equal(board.querySelector('[data-region="workflow-toggle"]').getAttribute('aria-expanded'), 'true');
     await act(async () => panel.unmount());
   }
 
@@ -173,6 +175,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const voteIds = fixture.graph.nodes.filter((node) => node.node_id.startsWith('vote_') && node.node_id !== 'vote_start').map((node) => node.node_id);
     assert.equal(statusOf(panel, 'vote_start'), 'completed');
     const voteRanks = voteIds.map((id) => rankOf(panel, id));
@@ -191,6 +195,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.equal(statusOf(panel, 'tally'), 'running');
     assert.match(boardOf(panel).querySelector('[data-node-id="tally"]').textContent, /进行中/);
     for (const node of fixture.graph.nodes.filter((item) => item.node_id.startsWith('vote_') && item.node_id !== 'vote_start')) {
@@ -205,6 +211,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.deepEqual(boardNodes(panel).map((node) => node.getAttribute('data-node-id')), fixture.graph.nodes.map((node) => node.node_id), `${key} renders exactly the graph nodes`);
     assert.deepEqual(edgePairs(panel), graphEdgePairs(fixture.graph), `${key} renders exactly the graph edges`);
     assert.ok(fixture.graph.nodes.some((node) => node.node_id === 'collect' || node.node_id === 'tally'));
@@ -217,6 +225,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const failed = boardNodes(panel).find((node) => node.getAttribute('data-node-status') === 'failed');
     assert.ok(failed, 'failed node remains visible');
     assert.match(failed.textContent, /失败/);
@@ -231,6 +241,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const retryNode = boardNodes(panel).find((node) => node.getAttribute('data-node-status') === 'retry_scheduled');
     assert.ok(retryNode);
     assert.match(retryNode.textContent, /等待重试/);
@@ -245,6 +257,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.equal(boardNodes(panel).length, fixture.graph.nodes.length);
     assert.equal(edgePairs(panel).length, 0);
     assert.match(boardOf(panel).getAttribute('data-workflow-degrade') ?? '', /missing-edges/);
@@ -256,6 +270,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.equal(boardNodes(panel).length, 0, 'graph for another run renders no nodes');
     assert.match(boardOf(panel).getAttribute('data-workflow-degrade') ?? '', /stale-run/);
     assert.match(text(panel), /已隐藏上一张运行图/);
@@ -266,6 +282,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const unknown = boardNodes(panel).find((node) => node.getAttribute('data-node-id') === 'vote_ghost');
     assert.ok(unknown, 'unmapped ghost node is explicitly rendered');
     assert.equal(unknown.getAttribute('data-node-mapped'), 'false');
@@ -279,6 +297,7 @@ try {
     globalThis.fetch = fetchFor(new Error('graph unavailable'));
     let panel;
     await act(async () => { panel = mount(fixtureProps(workflowFixtures.speakSequential)); await settle(); });
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.equal(boardNodes(panel).length, 0);
     assert.match(boardOf(panel).getAttribute('data-workflow-degrade') ?? '', /missing-graph/);
     assert.match(text(panel), /尚未获取本阶段运行图/);
@@ -292,6 +311,8 @@ try {
     globalThis.fetch = fetchFor(oldGraph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const oldIds = boardNodes(panel).map((node) => node.getAttribute('data-node-id'));
     assert.ok(oldIds.length > 0);
     await act(async () => { panel.render(fixtureProps(fixture, { runId: 'run-switched-away' })); await settle(); });
@@ -314,8 +335,12 @@ try {
     };
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.ok(boardNodes(panel).length > 0);
     await act(async () => { panel.render(fixtureProps(fixture, { runId: 'run-switched-to' })); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     assert.equal(boardOf(panel).getAttribute('data-run-id'), 'run-switched-to');
     assert.deepEqual(boardNodes(panel).map((node) => node.getAttribute('data-node-id')), runB.nodes.map((node) => node.node_id));
     assert.ok(boardNodes(panel).every((node) => node.getAttribute('data-node-status') === 'pending'));
@@ -364,6 +389,8 @@ try {
     globalThis.fetch = fetchFor(fixture.graph);
     let panel;
     await act(async () => { panel = mount(fixtureProps(fixture)); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const labels = Object.fromEntries(boardNodes(panel).map((node) => [node.getAttribute('data-node-status'), node.textContent]));
     assert.match(labels.completed ?? '', /已完成/);
     assert.match(labels.running ?? '', /进行中/);
@@ -396,6 +423,7 @@ try {
     globalThis.fetch = fetchFor(malicious);
     let panel;
     await act(async () => { panel = mount(fixtureProps({ ...fixture, graph: malicious })); await settle(); });
+    await act(async () => { boardOf(panel).querySelector('[data-region="workflow-toggle"]').click(); await settle(); });
     const boardText = boardOf(panel).textContent ?? '';
     for (const secret of ['SECRET_ARTIFACT_TEXT', 'SECRET_INSTRUCTION', 'PRIVATE_ERROR_SHOULD_NOT_RENDER', 'SECRET_DISPLAY_NAME', 'SECRET_WORD', 'SECRET_TARGET']) {
       assert.ok(!boardText.includes(secret), `${secret} must not reach the workflow board`);

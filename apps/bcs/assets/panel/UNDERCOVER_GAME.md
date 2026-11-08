@@ -37,13 +37,15 @@ referee profile together for the new notice; old running graphs are unchanged.
 
 ## Private HumanInput context
 
-The current viewer's pending HumanInput instruction may append a delimited `UNDERCOVER_UI_CONTEXT_V1` JSON block. The panel parses that authenticated, viewer-private boundary to show the owning player's word, speech limits, round/seat context, or vote action. Unsupported or malformed recognized blocks produce a safe recoverable error. Private values are not placed in public params, storage, URLs, console output, errors, or `onInteraction` records.
+The current viewer's pending HumanInput instruction may append a delimited `UNDERCOVER_UI_CONTEXT_V1` JSON block. The panel parses that authenticated, viewer-private boundary to show the owning player's word, speech limits, round/seat context, or vote action. Once received, the viewer's word remains available in component memory after submission while the panel stays mounted; it is scoped to the session, game and viewer and is masked by default. The running-node API cannot provide this word before the viewer's HumanInput becomes active, or recover it after a page reload when no such node is active. Unsupported or malformed recognized blocks produce a safe recoverable error. Private values are not placed in public params, storage, URLs, console output, errors, or `onInteraction` records.
 
 Pending speech nodes may also provide ordered `upstream_artifacts`; sanitized cross-round context comes from public params. The word is hidden by default and cleared whenever the run/action identity changes.
 
 ## Player actions
 
-The persistent Action Dock is independent of actor details:
+The persistent Action Dock is independent of actor details. Drag its top handle
+up or down to resize it, or focus the handle and use the up/down arrow keys. The
+input and confirmation controls remain in the dock:
 
 - speech: word reveal/hide, deadline, upstream speeches, public history, Unicode count, empty/length/own-word validation, and one HumanInput submission;
 - vote: eligible seat/name cards, explicit abstain, confirmation, and canonical content:
@@ -96,7 +98,7 @@ The view is a presentation layer over the existing panel parameters and the BCS 
 - **Current action and private word:** the pending HumanInput node and its viewer-private `UNDERCOVER_UI_CONTEXT_V1` block. The word is hidden until the viewer reveals it and is never placed in public params, storage, URLs, or the rendered public graph.
 - **Candidates:** `voteCandidates` / `pkCandidates` with the existing eligibility, no-self-vote, PK restriction, and abstention rules.
 - **Timing:** only server deadlines (`pending.timeout_deadline_ms`, `currentAction.deadlineAt`, `params.deadlineAt`) produce a `mm:ss` countdown. Without a deadline the panel shows guidance text; there is no fabricated countdown.
-- **Results:** the existing public result file and host finale parsing feed `GameOverDialog`. The view never derives roles or words itself.
+- **Results:** the authenticated public result file feeds `GameOverDialog`; its published V1 summary can reveal roles and words after the game.
 
 No static demo roster, demo word, sample speech, fixed room number, or `location.href` navigation is used.
 
@@ -117,8 +119,8 @@ The HUD step row (发词 · 描述 · 讨论 · 投票) is derived from `phase` 
 
 ### Layout
 
-- **wide (≥680px):** stage, full seat ring, and Action Dock; the dialogue view from the static describe/discuss pages renders inside the Action Dock while no input is required.
-- **medium (460–679px):** the same stage with smaller portraits, a labeled roster below it (per-seat plates are wide-only), and the same dock dialogue.
+- **wide (≥960px):** two-column layout — the night-banquet stage sits on the left, with the workflow summary and Action Dock on the right.
+- **wide/medium stacked (460–959px):** the same stage with smaller portraits; per-seat plates are wide-only and a labeled roster sits below. The dock uses a reduced height so the table remains large.
 - **narrow (<460px):** stage vignette plus the labeled roster; the fixed Action Dock still owns dialogue, submit, confirmation, and recovery. While an action is pending on a narrow panel the workflow board starts collapsed to a one-line run summary (the table stage and action entry stay visible) with a keyboard-reachable「查看流程/收起流程」toggle; the step row hides, and the dock uses a compact height so 320×600/360×640 do not need two nested scrolls. Expanding the board shows the same real nodes/edges; switching runs resets it to the default collapsed state.
 
 ### Provenance and visual verification
@@ -136,7 +138,7 @@ The scan enforces complete provenance, no tracked source-pack archives, a 120 Ki
 
 ### Local design preview
 
-Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=600&mode=vote`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states. Every mode also renders the real workflow-board mock: `mode=vote`/`mode=pk-vote` show the parallel `vote_start → vote_N → tally` graph, while speech modes show the serial `speak_N → collect` graph.
+Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=900&mode=vote`, `width=760&height=900&mode=speech`, `width=1024&height=768&mode=speech`, `width=1300&height=900&mode=speech`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states (the preview accepts widths up to 1400). Every mode also renders the real workflow-board mock: `mode=vote`/`mode=pk-vote` show the parallel `vote_start → vote_N → tally` graph, while speech modes show the serial `speak_N → collect` graph.
 
 ### 15-minute local preview and acceptance evidence
 
@@ -151,7 +153,7 @@ acceptance states without a BCS deployment. It is a **synthetic preview**
    - `...visual-preview.html?width=760&height=1100&mode=speech` — 发言 + 私有词卡（默认 `••••`）+ 真实 workflow 看板；
    - `...visual-preview.html?width=760&height=1100&mode=vote` — 投票候选、弃权项与二次确认；
    - `...visual-preview.html?width=760&height=1100&mode=pk-vote` — 平票 PK 投票（无弃权）；
-   - `...visual-preview.html?width=760&height=1100&mode=eliminated` — 出局座位与状态；
+   - `...visual-preview.html?width=760&height=1100&mode=eliminated` — 正常回合中的出局座位状态（合成 fixture；非终局，workflow 继续显示）；
    - `...visual-preview.html?width=760&height=1100&mode=finished` — 终局弹窗与公开复盘。
 4. Narrow checks: `?width=320&height=600&mode=speech`, `?width=320&height=600&mode=vote`,
    `?width=360&height=640&mode=speech`. Expect: no page horizontal overflow,
@@ -250,7 +252,7 @@ structural projection only:
   fabricate progress.
 - **Layout/privacy:** the board sits above the table stage with horizontally
   scrolling lanes (also in narrow panels) and connector lines/arrowheads drawn
-  from the real edges. In narrow panels with a pending action the board starts
+  from the real edges. In every layout and game phase the board starts
   collapsed behind a focusable「查看流程」button (`aria-expanded`/`aria-controls`);
   expanding renders the same real graph and「收起流程」collapses it again. A run
   switch remounts the board and restores the default collapsed state. The board body is height-capped (`min(240px, 30vh)`) and
@@ -295,11 +297,42 @@ A published result represents a finished game independently of the run and chat 
 
 For old games, a completed run still needs an explicit final phase or a non-pending mapped host output containing both an end declaration and a victory verdict. Compatibility includes `终局揭晓`, `本局结束——平民赢了`, and verdicts followed by a separate explanatory sentence, such as `平民胜利！卧底在第一轮就被精准揪出。`. Ordinary phase completion, player claims, unmapped artifacts, conditional rules, quoted verdicts, and contradictory winners do not trigger the dialog.
 
-The dialog honors `showPublicReveal` and `showHostOutput`, traps focus, supports Escape and "回到圆桌", and can be reopened via "查看终局". Dismissal is scoped to the mounted game session and survives refreshes and phase updates.
+The finale is a full-panel night-banquet result scene modelled on the static
+`ui/result.html` design: chapter kicker, the real winner title, six seat cards
+with portraits, two word boxes, the public reason, and the public recap. It
+renders only fields that are already public:
+
+- `title`/`winner` come from the structured result (or the legacy prose verdict);
+- the winner banner is derived from that public winner and reads 「公开结果未提供获胜方」 when reveal is disabled;
+- seat cards and word boxes use the referee's V1 published summary format only after the result file passes session, host, round and attempt checks. Each roster name, seat and word must match exactly; missing, conflicting or unrecognized information remains `未公开`;
+- the public `reason` and `summary` are shown verbatim, separate from any
+  inferred identity/word data.
+
+The terminal presentation hides the workflow board: it is not rendered while a
+finale result is present, and the dialog marks the remaining underlying
+`data-game-content` regions inert while focus is trapped. The dialog honors
+`showPublicReveal` and `showHostOutput`, traps focus, supports Escape and
+"回到圆桌", and can be reopened via "查看终局". Dismissal is scoped to the
+mounted game session and survives refreshes and phase updates.
 
 Release the compatible panel first, then activate the updated referee profile for new games. Existing games keep using prose compatibility. This change does not require a BCS server or database migration. The final review can still be read in the host broadcast; the structured dialog summary comes directly from script facts, independently of the model's prose.
 
-Preview `?width=760&height=660&mode=finished` for the finale fixture, or `?width=900&height=950&mode=observe` for the club room.
+Preview `?width=1300&height=900&mode=finished` (wide result scene) or
+`?width=320&height=600&mode=finished` (scrollable narrow result), and
+`?width=900&height=950&mode=observe` for the club room.
+
+### Eliminated seats vs. terminal presentation
+
+An eliminated player is a normal continuing-round seat state: the seat portrait
+is dimmed and marked 「已淘汰」, but the round, later speeches, votes, and the
+live workflow graph continue. The public contract has no dedicated "elimination
+transition" parameter or elimination screen; deriving one from history would
+incorrectly hide the graph for every later round once anyone had been
+eliminated. Therefore the panel intentionally keeps the workflow board for
+rounds that merely contain eliminated players, and only suppresses it for an
+explicit terminal result. Preview `mode=eliminated` is a synthetic seat-state
+fixture (it is not a production phase); it keeps the graph for that reason and
+must not be read as a production "out display"
 
 ### Character speech bubbles
 

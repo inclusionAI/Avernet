@@ -6,59 +6,11 @@ import type { NightDialogueEntry } from './nightView';
 import type { ActorViewModel, HostActor } from './types';
 import type { RoomComposition } from './sceneLayout';
 
-const Panel = styled.section`
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 2px 0;
-  > div {
-    min-width: 0;
-  }
-`;
-const Avatar = styled.span<{ $sprite: SpriteCoordinate; $compact: boolean }>`
-  display: block;
-  width: ${p => (p.$compact ? 44 : 56)}px;
-  height: ${p => (p.$compact ? 44 : 56)}px;
-  border: 2px solid #e8b45e;
-  background: #121f2f url("${p => spriteUrl(p.$sprite)}") center / 100% 100% no-repeat;
-  image-rendering: pixelated;
-  box-shadow: 0 0 0 2px #080a10;
-`;
-const Head = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 8px;
-  margin-bottom: 4px;
-  color: #8f9aab;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  strong {
-    color: #f2e7ce;
-    font-size: 12px;
-    letter-spacing: 0.03em;
-  }
-  em {
-    font-style: normal;
-    color: #e8b45e;
-  }
-`;
-const Body = styled.p`
-  margin: 0;
-  color: #f2e7ce;
-  font-size: 13px;
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-`;
-const Note = styled.span`
-  display: block;
-  margin-top: 5px;
-  color: #6e7686;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-`;
+const Panel = styled.section`display: grid;grid-template-columns: auto minmax(0, 1fr);gap: 10px;align-items: start;padding: 2px 0;> div{min-width: 0;}`;
+const Avatar = styled.span<{ $sprite: SpriteCoordinate; $compact: boolean }>`display: block;width: ${p => (p.$compact ? 44 : 56)}px;height: ${p => (p.$compact ? 44 : 56)}px;border: 2px solid #e8b45e;background: #121f2f url("${p => spriteUrl(p.$sprite)}") center / 100% 100% no-repeat;image-rendering: pixelated;box-shadow: 0 0 0 2px #080a10;`;
+const Head = styled.div`display: flex;flex-wrap: wrap;align-items: center;gap: 6px 8px;margin-bottom: 4px;color: #8f9aab;font-size: 10px;letter-spacing: 0.06em;strong{color: #f2e7ce;font-size: 12px;letter-spacing: 0.03em;}em{font-style: normal;color: #e8b45e;}`;
+const Body = styled.p`margin: 0;color: #f2e7ce;font-size: 13px;line-height: 1.7;overflow-wrap: anywhere;white-space: pre-wrap;`;
+const Note = styled.span`display: block;margin-top: 5px;color: #6e7686;font-size: 10px;letter-spacing: 0.04em;`;
 
 export interface NightDialogueProps {
   actors: ActorViewModel[];

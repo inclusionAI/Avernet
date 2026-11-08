@@ -31,9 +31,20 @@ try {
  ready=false;await act(async()=>{panel=mount({...params,autoRefresh:true});await settle(10)});
  assert.equal(Boolean(dialog(panel)),false);ready=true;
  await act(async()=>{for(let i=0;i<12&&!dialog(panel);i++)await settle(10)});if(!dialog(panel))await act(async()=>{button(panel,'刷新').click();await settle(10)});assert.ok(dialog(panel));assert.match(dialog(panel).textContent,/卧底阵营获胜/);
+ assert.match(dialog(panel).textContent,/场上只剩两个人，卧底还在/,'public reason is rendered');
+ assert.match(dialog(panel).textContent,/小甲/);assert.match(dialog(panel).textContent,/身份未公开/);
+ assert.match(dialog(panel).textContent,/平民词语/);assert.match(dialog(panel).textContent,/未公开/);
+ assert.doesNotMatch(dialog(panel).textContent,/水煮肉片|麻辣香锅/,'no hardcoded sample word pair');
+ assert.equal(panel.container.querySelector('[data-region="workflow-board"]'),null,'terminal hides the workflow board');
+ assert.equal(panel.container.querySelectorAll('[data-result-player]').length,3);
  await act(async()=>{button(panel,'回到圆桌').click();await settle()});
  await act(async()=>{button(panel,'刷新').click();await settle(5)});assert.equal(Boolean(dialog(panel)),false);
  await act(async()=>panel.unmount());panel=null;
+ // 仅从已验证的主持人公开终局摘要还原身份和词对。
+ body={...result,summary:'游戏结束！卧底阵营获胜。\n词对：平民词「苹果」／卧底词「梨子」\n全员身份：\n1号 小甲 — 平民（苹果）\n2号 小乙 — 卧底（梨子）\n3号 小丙 — 平民（苹果）'};
+ await act(async()=>{panel=mount(params);await settle(10)});assert.match(dialog(panel).textContent,/苹果/);assert.match(dialog(panel).textContent,/梨子/);assert.match(panel.container.querySelector('[data-result-player="b"]').textContent,/卧底/);assert.equal(getComputedStyle(panel.container.querySelector('[data-result-player="b"]')).borderColor,'rgb(224, 82, 82)');assert.notEqual(getComputedStyle(panel.container.querySelector('[data-result-player="a"]')).borderColor,'rgb(224, 82, 82)');await act(async()=>panel.unmount());panel=null;
+ body={...body,summary:body.summary+'\n2号 小乙 — 平民（苹果）'};await act(async()=>{panel=mount(params);await settle(10)});assert.match(panel.container.querySelector('[data-result-player="b"]').textContent,/身份未公开/);await act(async()=>panel.unmount());panel=null;
+ body=result;
  // The result is independent of run completion and chat-session closure.
  status='running';await act(async()=>{panel=mount(params);await settle(10)});assert.ok(dialog(panel));
  await act(async()=>panel.unmount());panel=null;status='completed';
@@ -63,6 +74,6 @@ try {
  assert.ok(lists>=5&&lists<=8,`terminal polling is bounded (got ${lists})`);await act(async()=>panel.unmount());panel=null;
  ready=true;
  await act(async()=>{panel=mount({...params,display:{showPublicReveal:false}});await settle(10)});
- assert.match(dialog(panel).textContent,/本局游戏结束/);assert.doesNotMatch(dialog(panel).textContent,/卧底阵营获胜|坚持到了最后/);
+ assert.match(dialog(panel).textContent,/本局游戏结束/);assert.doesNotMatch(dialog(panel).textContent,/卧底阵营获胜|坚持到了最后|场上只剩两个人/);assert.match(dialog(panel).textContent,/公开结果未提供获胜方/);
  console.log('Public-result lifecycle passed: late publication, identity, malformed data, retry, dismissal, privacy, and bounded polling.');
 } finally {if(panel)await act(async()=>panel.unmount());globalThis.fetch=originalFetch;dom.window.close()}

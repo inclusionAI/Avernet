@@ -59,9 +59,26 @@ export async function fetchPublicGameResult(params: UndercoverGamePanelParams, s
 
 export function publicGameResultView(result: PublicGameResult, params: UndercoverGamePanelParams): GameResult {
   const reveal = params.display?.showPublicReveal !== false;
+  const canShow = reveal && params.display?.showHostOutput !== false;
+  const lines = result.summary.split('\n');
+  const pairs = lines.map(line => /^词对：平民词「([^「」\n]{1,80})」／卧底词「([^「」\n]{1,80})」$/u.exec(line)).filter(Boolean);
+  const headings = lines.flatMap((line, index) => line === '全员身份：' ? [index] : []);
+  const roles: Record<number, 'civilian' | 'undercover'> = {};
+  let valid = pairs.length === 1 && headings.length === 1;
+  if (valid) {
+    for (const player of params.players) {
+      const prefix = `${player.seatNumber}号 ${player.displayName} — `;
+      const matching = lines.slice(headings[0] + 1).filter(line => line.startsWith(prefix));
+      const match = matching.length === 1 ? /^(平民|卧底)（([^（）\n]{1,80})）$/u.exec(matching[0].slice(prefix.length)) : null;
+      if (!match || match[2] !== (match[1] === '平民' ? pairs[0]![1] : pairs[0]![2]) || roles[player.seatNumber]) { valid = false; break; }
+      roles[player.seatNumber] = match[1] === '平民' ? 'civilian' : 'undercover';
+    }
+  }
   return {
     winner: reveal ? result.winner : 'unknown',
     title: reveal ? (result.winner === 'civilian' ? '平民阵营获胜' : '卧底阵营获胜') : '本局游戏结束',
     summary: reveal && params.display?.showHostOutput !== false ? result.summary : '',
+    reason: reveal ? result.reason : '',
+    reveal: canShow && valid ? { civilianWord: pairs[0]![1], undercoverWord: pairs[0]![2], roles } : undefined,
   };
 }

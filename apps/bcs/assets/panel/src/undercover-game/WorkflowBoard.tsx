@@ -21,176 +21,27 @@ const NODE_W = 164;
 const NODE_H = 62;
 const PAD = 10;
 
-const Board = styled.section<{ $collapsed: boolean }>`
-  margin: 0 0 ${p => (p.$collapsed ? 6 : 10)}px;
-  padding: ${p => (p.$collapsed ? '7px 10px' : '10px 12px 12px')};
-  border: 1px solid #8e6531;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #121f2f 0%, #101b2a 100%);
-  box-shadow: inset 0 0 0 2px #080a10;
-`;
-const BoardHead = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 10px;
-  margin-bottom: 4px;
-`;
-const BoardTitle = styled.h3`
-  margin: 0;
-  color: #f2e7ce;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-`;
-const BoardMeta = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: #8f9aab;
-  font-size: 10px;
-`;
-const RunChip = styled.span<{ $tone: WorkflowStatusTone }>`
-  padding: 1px 7px;
-  border: 1px solid ${p => TONE_COLORS[p.$tone]};
-  border-radius: 4px;
-  color: ${p => TONE_COLORS[p.$tone]};
-  background: #0b0e16;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-`;
-const Toggle = styled.button`
-  flex-shrink: 0;
-  cursor: pointer;
-  border: 1px solid #e8b45e;
-  border-radius: 4px;
-  min-height: 26px;
-  padding: 3px 9px;
-  color: #ffe7b0;
-  background: #0b0e16;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  &:hover { background: #16233a; }
-  &:focus-visible { outline: 2px solid #ffe7b0; outline-offset: 2px; }
-`;
-const Notice = styled.p`
-  margin: 4px 0 0;
-  color: #c9b48c;
-  font-size: 11px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-`;
-const Empty = styled.p`
-  margin: 4px 0 0;
-  color: #8f9aab;
-  font-size: 11px;
-  line-height: 1.6;
-`;
-const Scroller = styled.div<{ $narrow: boolean }>`
-  margin-top: 6px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding-bottom: 2px;
-  max-width: 100%;
-  max-height: min(240px, 30vh);
-  ${p => (p.$narrow ? 'scrollbar-width: thin;' : '')}
-`;
-const Canvas = styled.div`
-  position: relative;
-`;
-const EdgeLayer = styled.svg`
-  position: absolute;
-  left: 0;
-  top: 0;
-  pointer-events: none;
-  overflow: visible;
-`;
-const NodeCard = styled.div<{ $tone: WorkflowStatusTone; $mapped: boolean; $final: boolean }>`
-  position: absolute;
-  z-index: 2;
-  width: ${NODE_W}px;
-  min-height: ${NODE_H}px;
-  box-sizing: border-box;
-  padding: 5px 7px 5px 9px;
-  border: 1px solid ${p => (p.$mapped ? '#8e6531' : '#6e7686')};
-  border-left: 3px solid ${p => TONE_COLORS[p.$tone]};
-  border-radius: 4px;
-  background: ${p => (p.$mapped ? '#16233a' : '#12151d')};
-  color: #f2e7ce;
-  box-shadow: 0 2px 0 #080a10;
-  opacity: ${p => (p.$mapped ? 1 : 0.82)};
-`;
-const NodeTop = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  color: #8f9aab;
-  font-size: 9px;
-  letter-spacing: 0.06em;
-`;
-const NodeKind = styled.span`
-  color: #c9b48c;
-  font-weight: 700;
-`;
-const NodeSeat = styled.span`
-  color: #e8b45e;
-  white-space: nowrap;
-`;
-const NodeName = styled.div`
-  margin-top: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 700;
-  color: #f2e7ce;
-`;
-const NodeId = styled.span`
-  margin-left: 2px;
-  color: #8f9aab;
-  font-size: 9px;
-  font-weight: 500;
-`;
-const NodeStatus = styled.div<{ $tone: WorkflowStatusTone }>`
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 2px;
-  color: ${p => TONE_COLORS[p.$tone]};
-  font-size: 10px;
-  line-height: 1.3;
-  &::before {
-    content: '';
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-`;
-const Attempt = styled.span`
-  margin-left: auto;
-  color: #8f9aab;
-  font-size: 9px;
-`;
-const FinalTag = styled.span`
-  color: #8f9aab;
-  font-size: 9px;
-  letter-spacing: 0.04em;
-`;
-const SrOnly = styled.span`
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-`;
+const Board = styled.section<{ $collapsed: boolean }>`margin: 0 0 ${p => (p.$collapsed ? 6 : 10)}px;padding: ${p => (p.$collapsed ? '7px 10px' : '10px 12px 12px')};border: 1px solid #8e6531;border-radius: 8px;background: linear-gradient(180deg, #121f2f 0%, #101b2a 100%);box-shadow: inset 0 0 0 2px #080a10;`;
+const BoardHead = styled.div`display: flex;flex-wrap: wrap;align-items: center;justify-content: space-between;gap: 6px 10px;margin-bottom: 4px;`;
+const BoardTitle = styled.h3`margin: 0;color: #f2e7ce;font-size: 12px;font-weight: 700;letter-spacing: 0.06em;`;
+const BoardMeta = styled.div`display: flex;flex-wrap: wrap;align-items: center;gap: 6px;color: #8f9aab;font-size: 10px;`;
+const RunChip = styled.span<{ $tone: WorkflowStatusTone }>`padding: 1px 7px;border: 1px solid ${p => TONE_COLORS[p.$tone]};border-radius: 4px;color: ${p => TONE_COLORS[p.$tone]};background: #0b0e16;font-size: 10px;letter-spacing: 0.04em;white-space: nowrap;`;
+const Toggle = styled.button`flex-shrink: 0;cursor: pointer;border: 1px solid #e8b45e;border-radius: 4px;min-height: 26px;padding: 3px 9px;color: #ffe7b0;background: #0b0e16;font: inherit;font-size: 10px;letter-spacing: 0.04em;white-space: nowrap;&:hover{background: #16233a;}&:focus-visible{outline: 2px solid #ffe7b0;outline-offset: 2px;}`;
+const Notice = styled.p`margin: 4px 0 0;color: #c9b48c;font-size: 11px;line-height: 1.6;overflow-wrap: anywhere;`;
+const Empty = styled.p`margin: 4px 0 0;color: #8f9aab;font-size: 11px;line-height: 1.6;`;
+const Scroller = styled.div<{ $narrow: boolean }>`margin-top: 6px;overflow: auto;overscroll-behavior: contain;padding-bottom: 2px;max-width: 100%;max-height: min(240px, 30vh);${p => (p.$narrow ? 'scrollbar-width: thin;' : '')}`;
+const Canvas = styled.div`position: relative;`;
+const EdgeLayer = styled.svg`position: absolute;left: 0;top: 0;pointer-events: none;overflow: visible;`;
+const NodeCard = styled.div<{ $tone: WorkflowStatusTone; $mapped: boolean; $final: boolean }>`position: absolute;z-index: 2;width: ${NODE_W}px;min-height: ${NODE_H}px;box-sizing: border-box;padding: 5px 7px 5px 9px;border: 1px solid ${p => (p.$mapped ? '#8e6531' : '#6e7686')};border-left: 3px solid ${p => TONE_COLORS[p.$tone]};border-radius: 4px;background: ${p => (p.$mapped ? '#16233a' : '#12151d')};color: #f2e7ce;box-shadow: 0 2px 0 #080a10;opacity: ${p => (p.$mapped ? 1 : 0.82)};`;
+const NodeTop = styled.div`display: flex;align-items: center;justify-content: space-between;gap: 6px;color: #8f9aab;font-size: 9px;letter-spacing: 0.06em;`;
+const NodeKind = styled.span`color: #c9b48c;font-weight: 700;`;
+const NodeSeat = styled.span`color: #e8b45e;white-space: nowrap;`;
+const NodeName = styled.div`margin-top: 1px;overflow: hidden;text-overflow: ellipsis;white-space: nowrap;font-size: 12px;font-weight: 700;color: #f2e7ce;`;
+const NodeId = styled.span`margin-left: 2px;color: #8f9aab;font-size: 9px;font-weight: 500;`;
+const NodeStatus = styled.div<{ $tone: WorkflowStatusTone }>`display: flex;align-items: center;gap: 5px;margin-top: 2px;color: ${p => TONE_COLORS[p.$tone]};font-size: 10px;line-height: 1.3;&::before{content: '';width: 7px;height: 7px;border-radius: 50%;background: currentColor;}`;
+const Attempt = styled.span`margin-left: auto;color: #8f9aab;font-size: 9px;`;
+const FinalTag = styled.span`color: #8f9aab;font-size: 9px;letter-spacing: 0.04em;`;
+const SrOnly = styled.span`position: absolute;width: 1px;height: 1px;overflow: hidden;clip-path: inset(50%);white-space: nowrap;`;
 
 function position(node: WorkflowNodeView): { x: number; y: number } {
   return { x: PAD + node.rank * COL_W, y: PAD + node.row * ROW_H };
@@ -250,7 +101,7 @@ export function WorkflowBoard({ board, composition, collapsed = false, runKey }:
       <BoardMeta>
         <RunChip $tone={board.runStatusTone}>{board.runStatusLabel}</RunChip>
         {board.available && <span>{board.nodes.length} 个节点 · {board.edges.length} 条连线</span>}
-        {!showContent ? <span>操作中 · 已收起</span> : (board.lanes.length > 3 || maxRows > 3) && <span>滚动查看全部</span>}
+        {!showContent ? <span>已收起</span> : (board.lanes.length > 3 || maxRows > 3) && <span>滚动查看全部</span>}
         {collapsed && <Toggle type="button" data-region="workflow-toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded((value) => !value)}>{expanded ? '收起流程' : '查看流程'}</Toggle>}
       </BoardMeta>
     </BoardHead>

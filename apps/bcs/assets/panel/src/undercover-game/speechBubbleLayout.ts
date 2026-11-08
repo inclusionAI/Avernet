@@ -1,5 +1,5 @@
 export interface SpeechRect { x:number; y:number; width:number; height:number }
-export interface BubblePlacement extends SpeechRect { side:'left'|'right'|'above'|'below'; tail:number }
+export interface BubblePlacement extends SpeechRect { side:'left'|'right'|'above'|'below'; targetX?:number; targetY?:number }
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 const overlap=(a:SpeechRect,b:SpeechRect)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width+10)-Math.max(a.x,b.x-10))*Math.max(0,Math.min(a.y+a.height,b.y+b.height+10)-Math.max(a.y,b.y-10));
 
@@ -10,8 +10,7 @@ export function placeSpeechBubble(room:SpeechRect,speaker:SpeechRect,obstacles:S
   const candidates:BubblePlacement[]=[];
   for(const width of [...new Set([preferredWidth,132])])for(const height of [96,80,74]){
   const add=(x:number,y:number,side:BubblePlacement['side'])=>{
-    const box={x:clamp(x,10,room.width-width-10),y:clamp(y,10,room.height-height-10),width,height,side,tail:0};
-    box.tail=side==='left'||side==='right'?clamp(head.y-box.y-12,8,height-32):clamp(head.x-box.x-12,8,width-32);
+    const box={x:clamp(x,10,room.width-width-10),y:clamp(y,10,room.height-height-10),width,height,side};
     candidates.push(box);
   };
   const inward=head.x<room.width/2?'right':'left';
@@ -33,5 +32,5 @@ export function placeSpeechBubble(room:SpeechRect,speaker:SpeechRect,obstacles:S
     const dy=Math.max(box.y-head.y,0,head.y-box.y-box.height);
     return collision*1000+Math.hypot(dx,dy)+(box.side===inward?0:8)+(preferredWidth-box.width)*.3+(96-box.height)*.3;
   };
-  return candidates.sort((a,b)=>score(a)-score(b))[0];
+  return {...candidates.sort((a,b)=>score(a)-score(b))[0],targetX:speaker.x+speaker.width/2,targetY:speaker.y+speaker.height/2};
 }

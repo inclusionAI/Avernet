@@ -11,6 +11,7 @@ for(const width of [426,460,524,648,864]){
  const obstacles=[...players,{x:width/2-65,y:10,width:130,height:154}];
  for(const [index,speaker] of players.entries()){
    const bubble=placeSpeechBubble({x:0,y:0,width,height:520},speaker,obstacles);
+   assert.equal(bubble.targetX,speaker.x+speaker.width/2);assert.equal(bubble.targetY,speaker.y+speaker.height/2);
    assert.ok(bubble.x>=0&&bubble.y>=0&&bubble.x+bubble.width<=width&&bubble.y+bubble.height<=520);
    for(const obstacle of obstacles)assert.equal(intersects(bubble,obstacle),0,`${width}px seat ${index+1} must not cover a player or host`);
    assert.deepEqual(bubble,placeSpeechBubble({x:0,y:0,width,height:520},speaker,obstacles));

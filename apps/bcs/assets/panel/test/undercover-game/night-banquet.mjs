@@ -136,6 +136,7 @@ try {
   await act(async () => { panel = mount(base); await settle(10); });
   const seatIds = [...panel.container.querySelectorAll('[data-actor-id]')].map((node) => node.getAttribute('data-actor-id'));
   assert.deepEqual(seatIds, seatOrder, 'seat ring follows params.seatOrder, not a hardcoded roster');
+  assert.ok(panel.container.querySelector('[data-region="workflow-board"]'), 'normal rounds keep the workflow board even when historical players are eliminated');
   assert.match(panel.container.querySelector('[data-actor-id="p-a"] [data-seat-plate]').textContent, /1号 · 夜宴宾客·甲（你）/);
   assert.match(panel.container.querySelector('[data-actor-id="p-d"] [data-seat-plate]').textContent, /4号 · 夜宴宾客·丁/);
   const sceneText = text(panel);

@@ -25,7 +25,7 @@ const Stage = styled.div<{ $composition: RoomComposition }>`
   container-type: inline-size;
   image-rendering: auto;
   @supports (height: 1cqh) {
-    width: min(100cqw, calc(100cqh * ${p => (p.$composition === 'narrow' ? 16 / 7 : 16 / 9)}));
+    width: ${p => (p.$composition === 'narrow' ? 'min(100cqw, calc(100cqh * 16 / 7))' : '100%')};
   }
   &::after {
     content: '';
@@ -70,7 +70,7 @@ const Seat = styled.button<{ $x: number; $y: number; $attention: boolean; $elimi
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  width: clamp(84px, 15cqw, 124px);
+  width: clamp(96px, 16cqw, 150px);
   border: 0;
   padding: 0;
   color: #f2e7ce;
@@ -88,8 +88,8 @@ const Seat = styled.button<{ $x: number; $y: number; $attention: boolean; $elimi
 const PortraitBox = styled.span<{ $attention: boolean; $human: boolean; $selected: boolean; $eliminated: boolean }>`
   position: relative;
   display: block;
-  width: clamp(34px, 7.4cqw, 60px);
-  height: clamp(34px, 7.4cqw, 60px);
+  width: clamp(38px, 8.2cqw, 86px);
+  height: clamp(38px, 8.2cqw, 86px);
   border: 2px solid ${p => (p.$selected ? '#ffe7b0' : p.$human ? '#5fb7a6' : p.$attention ? '#e8b45e' : '#8e6531')};
   background: #101b2a;
   box-shadow: 0 0 0 2px #080a10, 0 3px 0 #080a10, ${p => (p.$selected ? '0 0 14px #e8b45ecc' : 'none')};
@@ -111,12 +111,12 @@ const Portrait = styled.span<{ $sprite: SpriteCoordinate }>`
 `;
 const Plate = styled.span`
   display: block;
-  max-width: clamp(72px, 14cqw, 120px);
-  padding: 2px 5px;
+  max-width: clamp(92px, 18cqw, 190px);
+  padding: 2px 6px;
   border: 1px solid #8e6531;
   background: #1d1811ee;
   box-shadow: 0 2px 0 #080a10;
-  font-size: clamp(8px, 1.5cqw, 10.5px);
+  font-size: clamp(9px, 1.45cqw, 13px);
   line-height: 1.35;
   white-space: normal;
   strong {
@@ -125,14 +125,14 @@ const Plate = styled.span`
     -webkit-line-clamp: 2;
     overflow: hidden;
     overflow-wrap: anywhere;
-    font-size: clamp(9px, 1.7cqw, 11.5px);
+    font-size: clamp(10px, 1.8cqw, 15px);
     font-weight: 700;
     line-height: 1.3;
     color: #f2e7ce;
   }
   span {
     color: #8f9aab;
-    font-size: clamp(8px, 1.35cqw, 9.5px);
+    font-size: clamp(8.5px, 1.3cqw, 11px);
     letter-spacing: 0.04em;
     white-space: nowrap;
   }
@@ -146,8 +146,8 @@ const Marker = styled.span<{ $sprite: SpriteCoordinate }>`
   position: absolute;
   right: -6px;
   top: -6px;
-  width: 22px;
-  height: 22px;
+  width: clamp(22px, 2.6cqw, 30px);
+  height: clamp(22px, 2.6cqw, 30px);
   background: url("${p => spriteUrl(p.$sprite)}") center / 100% 100% no-repeat;
   image-rendering: pixelated;
   filter: drop-shadow(0 1px 0 #080a10);
@@ -395,7 +395,7 @@ export function RoomScene(props: RoomSceneProps) {
       const plate = <Plate data-seat-plate="true"><strong>{pkCandidates.includes(player.actorId) ? 'PK · ' : ''}{player.seatNumber}号 · {player.displayName}{human && player.displayName !== '你' ? '（你）' : ''}</strong><span>{stateLabels[actor.state as PlayerState]}</span></Plate>;
       return <Seat key={player.actorId} data-actor-id={player.actorId} data-player-state={actor.state} data-pk-candidate={pkCandidates.includes(player.actorId) || undefined} data-vote-target={selectedVoteTarget === player.actorId || undefined} $x={slot.x} $y={slot.y} $attention={attention} $eliminated={eliminated} type="button" onClick={(element) => onOpen(player.actorId, 'select-actor', element.currentTarget)} aria-label={`打开 ${player.seatNumber}号 ${player.displayName} 详情，${stateLabels[actor.state as PlayerState]}${human ? '，当前玩家' : ''}`}>
         {composition === 'wide' && slot.labelAbove && plate}
-        <PortraitBox $attention={attention} $human={human} $selected={selectedVoteTarget === player.actorId} $eliminated={eliminated}>
+        <PortraitBox $attention={attention} $human={human} $selected={selectedVoteTarget === player.actorId || player.actorId === expanded?.actor.actorId} $eliminated={eliminated}>
           <Portrait $sprite={nightPortraitSprite(appearances[player.actorId] ?? 0, eliminated)} />
           {marker && <Marker data-state-marker={actor.state} aria-hidden="true" $sprite={marker} />}
           {pkCandidates.includes(player.actorId) && <PkBadge>PK</PkBadge>}
@@ -409,7 +409,8 @@ export function RoomScene(props: RoomSceneProps) {
       if (actor.state !== 'completed_speech' || !actor.latestOutput || actor.latestOutput.pending || voting || player.actorId === expanded?.actor.actorId) return null;
       return <CompactMarker key={`marker-${player.actorId}`} $x={slots[index].x} $y={slots[index].y} type="button" onClick={() => setReviewed(player.actorId)} aria-label={`回看 ${player.seatNumber}号 ${player.displayName} 的发言`} title="点击在角色旁回看发言">•••<span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>{actor.latestOutput.text}</span></CompactMarker>;
     })}
-    {composition === 'wide' && !voting && expanded?.latestOutput && <SpeechBubble key={expanded.actor.actorId} focusOnOpen={reviewed !== null} ready={Boolean(placement)} placement={placement ?? { x: 0, y: 0, width: 216, height: 96, side: 'above', tail: 24 }} name={`${(expanded.actor as PlayerActor).seatNumber}号 ${expanded.actor.displayName}`} text={expanded.latestOutput.text} latest={expanded.actor.actorId === primary} onOpen={(element) => onOpen(expanded.actor.actorId, 'select-bubble', element)} />}
+    {composition === 'wide' && !voting && expanded?.latestOutput && placement?.targetX!==undefined && placement.targetY!==undefined && <svg aria-hidden="true" style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:19}}><line x1={Math.max(placement.x,Math.min(placement.x+placement.width,placement.targetX))} y1={Math.max(placement.y,Math.min(placement.y+placement.height,placement.targetY))} x2={placement.targetX} y2={placement.targetY} stroke="#d2b978" strokeWidth="2" strokeDasharray="4 3"/></svg>}
+    {composition === 'wide' && !voting && expanded?.latestOutput && <SpeechBubble key={expanded.actor.actorId} focusOnOpen={reviewed !== null} ready={Boolean(placement)} placement={placement ?? { x: 0, y: 0, width: 216, height: 96, side: 'above' }} name={`${(expanded.actor as PlayerActor).seatNumber}号 ${expanded.actor.displayName}`} text={expanded.latestOutput.text} latest={expanded.actor.actorId === primary} onOpen={(element) => onOpen(expanded.actor.actorId, 'select-bubble', element)} />}
     {composition === 'narrow' && <VignetteTitle data-region="room-caption">室内圆桌 · {players.find((actor) => actor.state === 'active_speech' || actor.state === 'action_required')?.actor.displayName ?? '等待下一步'}</VignetteTitle>}
   </Stage>;
   const broadcast = host?.latestOutput && showHostOutput
