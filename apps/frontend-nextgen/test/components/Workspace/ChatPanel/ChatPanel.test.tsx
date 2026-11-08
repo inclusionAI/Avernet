@@ -183,6 +183,42 @@ describe('ChatPanel interactive', () => {
     expect(screen.getByTestId('sender')).toBeInTheDocument();
     expect(mockPanelRenders.length).toBeGreaterThanOrEqual(2);
   });
+  it('兼容模式可替换输入提示并完全停用副屏', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'agent:main:session:s-compat',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        composerPlaceholder="请输入你的问题或任务"
+        sidePaneEnabled={false}
+        sidePaneOpen
+        onToggleSidePane={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('sender')).toHaveAttribute('placeholder', '请输入你的问题或任务');
+    expect(screen.queryByTestId('task-linked-session')).not.toBeInTheDocument();
+    expect(mockPanelRenders).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: '收起副屏' })).not.toBeInTheDocument();
+  });
+
   it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
     const onToggleSidePane = jest.fn();
     const { rerender } = render(

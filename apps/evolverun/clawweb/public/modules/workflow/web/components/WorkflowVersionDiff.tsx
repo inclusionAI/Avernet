@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { VersionDiffResult } from '@avernet/clawweb-shared/web/types'
+import SideBySideView from './workflow-version-diff/SideBySideView'
+import { assertLosslessNumbers } from '../editor/losslessNumbers'
 
 interface WorkflowVersionDiffProps {
   workflowId: string
@@ -106,35 +108,24 @@ export function compactDiff(lines: DiffLine[], contextLines = 3): DiffLine[] {
   return compacted
 }
 
-/** Turn stored JSON (or the legacy { content: yaml } wrapper) into readable YAML.
- * The history API deliberately returns the original snapshot; formatting it here
- * keeps the raw snapshot lossless while making line-level diff useful. */
-function stripSyntheticSpecFields(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const { updatedAt: _updatedAt, version: _version, facade: _facade, ...persistedSpec } = value as Record<string, unknown>
-  return persistedSpec
-}
-
-/**
- * Format a deploy-history snapshot in the same persisted-spec shape used for
- * editor comparisons. `updatedAt`, `version`, and `facade` are enriched or
- * synchronized metadata, not deployable workflow content.
- */
+/** Format the complete stored document without interpreting historical fields.
+ * Fall back to exact bytes if parsing would lose data, including duplicate keys
+ * or numbers that JavaScript cannot represent. */
 export function formatSpecForDiff(specJson: string): string {
   try {
-    const parsed = JSON.parse(specJson)
-    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
-      return stringifyYaml(stripSyntheticSpecFields(parseYaml(parsed.content)), { lineWidth: 0 })
-    }
-    return stringifyYaml(stripSyntheticSpecFields(parsed), { lineWidth: 0 })
+    assertLosslessNumbers(specJson)
+    const parsed: unknown = JSON.parse(specJson)
+    // A JSON string could itself be authored data, not an envelope.
+    if (typeof parsed === 'string') return specJson
+    return stringifyYaml(parsed, { lineWidth: 0 })
   } catch {
     return specJson
   }
 }
 
-/** Format the current editor value using the same persisted-spec shape as a deploy snapshot. */
+/** Compare the complete current document; no user field is synthetic by name. */
 export function formatCurrentSpecForDiff(spec: unknown): string {
-  return stringifyYaml(stripSyntheticSpecFields(spec), { lineWidth: 0 })
+  return stringifyYaml(spec, { lineWidth: 0 })
 }
 
 function sortSpecValue(value: unknown): unknown {
@@ -153,9 +144,24 @@ function sortSpecValue(value: unknown): unknown {
 /** Compare parsed specs so YAML field ordering and formatting do not create a false pending deploy. */
 export function specsEqual(fromText: string, toText: string): boolean {
   try {
+    assertLosslessNumbers(fromText)
+    assertLosslessNumbers(toText)
     return JSON.stringify(sortSpecValue(parseYaml(fromText))) === JSON.stringify(sortSpecValue(parseYaml(toText)))
   } catch {
     return fromText === toText
+  }
+}
+
+/** A historical field cannot authenticate its own origin. */
+export function historyComparisonUncertain(text: string): boolean {
+  try {
+    assertLosslessNumbers(text)
+    const value: unknown = parseYaml(text, { uniqueKeys: true, maxAliasCount: 100 })
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return true
+    const document = value as Record<string, unknown>
+    return Object.hasOwn(document, '__clawweb_snapshot_v1') || typeof document.content === 'string'
+  } catch {
+    return true
   }
 }
 
@@ -171,11 +177,6 @@ function topLevelChanges(fromText: string, toText: string): string[] {
   }
 }
 
-function formatTime(epochSec: number): string {
-  if (!epochSec) return '-'
-  return new Date(epochSec * 1000).toLocaleString()
-}
-
 export default function WorkflowVersionDiff({
   workflowId,
   fromDeploy,
@@ -184,14 +185,12 @@ export default function WorkflowVersionDiff({
   const [result, setResult] = useState<VersionDiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showFullContext, setShowFullContext] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
     setResult(null)
-    setShowFullContext(false)
     api.workflows
       .diffHistory(workflowId, fromDeploy, toDeploy)
       .then((r) => {
@@ -220,92 +219,25 @@ export default function WorkflowVersionDiff({
     return null
   }
 
+  const fromRaw = result.from.specJson ?? ''
+  const toRaw = result.to.specJson ?? ''
+  if (historyComparisonUncertain(fromRaw) || historyComparisonUncertain(toRaw)) {
+    return <div className="flex h-full min-h-0 flex-col">
+      <div role="status" className="border-b border-border bg-muted px-3 py-2 text-xs text-foreground">
+        无法确认历史内容的来源或无损解析，无法判断工作流是否相同；以下仅展示未经展开或剥离的原始记录，请人工核对。
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-2 overflow-auto">
+        {[{ label: '旧版本', snapshot: result.from, raw: fromRaw }, { label: '新版本', snapshot: result.to, raw: toRaw }].map(({ label, snapshot, raw }) =>
+          <section key={label} aria-label={`${label} v${snapshot.version} 原始记录`} className="min-w-0 border-r border-border">
+            <div className="border-b border-border bg-muted px-3 py-2 text-xs">{label} · v{snapshot.version} · deploy #{snapshot.deployNumber}</div>
+            <pre className="overflow-auto whitespace-pre p-3 text-xs">{raw}</pre>
+          </section>)}
+      </div>
+    </div>
+  }
+
   const fromText = formatSpecForDiff(result.from.specJson ?? '')
   const toText = formatSpecForDiff(result.to.specJson ?? '')
   const diffLines = unifiedDiff(fromText, toText)
-  const additions = diffLines.filter((l) => l.type === 'add').length
-  const deletions = diffLines.filter((l) => l.type === 'del').length
-  const changedFields = topLevelChanges(fromText, toText)
-  const displayedLines = showFullContext ? diffLines : compactDiff(diffLines)
-
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header: from / to metadata + summary */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-1.5 text-xs">
-        <div className="flex items-center gap-3 text-gray-600">
-          <span>
-            <span className="text-gray-400">from </span>
-            <span className="font-medium text-gray-700">v{result.from.version}</span>
-            <span className="text-gray-400"> (deploy #{result.from.deployNumber}, {result.from.action})</span>
-          </span>
-          <span className="text-gray-400">→</span>
-          <span>
-            <span className="text-gray-400">to </span>
-            <span className="font-medium text-gray-700">v{result.to.version}</span>
-            <span className="text-gray-400"> (deploy #{result.to.deployNumber}, {result.to.action})</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowFullContext((value) => !value)}
-            className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50"
-          >
-            {showFullContext ? '仅看变更' : '完整内容'}
-          </button>
-          <span className="text-green-600">+{additions}</span>
-          <span className="text-red-500">-{deletions}</span>
-        </div>
-      </div>
-
-      {changedFields.length > 0 && (
-        <div className="border-b border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
-          <span className="mr-2 font-medium text-slate-700">变更字段</span>
-          {changedFields.map((field) => (
-            <span key={field} className="mr-1 inline-block rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-blue-700">
-              {field}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Unified diff body */}
-      <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs leading-relaxed">
-        {diffLines.length === 0 && (
-          <div className="p-4 text-gray-400">两个版本内容完全相同</div>
-        )}
-        {displayedLines.map((line, idx) => {
-          if (line.type === 'skip') {
-            return (
-              <div key={`skip-${idx}`} className="border-y border-gray-700 bg-gray-800 px-3 py-1 text-center text-gray-500">
-                {line.text}
-              </div>
-            )
-          }
-          const bg =
-            line.type === 'add'
-              ? 'bg-green-900/30'
-              : line.type === 'del'
-                ? 'bg-red-900/30'
-                : ''
-          const color =
-            line.type === 'add' ? 'text-green-300' : line.type === 'del' ? 'text-red-300' : 'text-gray-300'
-          const sign = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '
-          const ln = line.type === 'del' ? line.fromLine : line.toLine
-          return (
-            <div key={idx} className={`flex ${bg}`}>
-              <span className="w-10 shrink-0 select-none border-r border-gray-700 px-1 text-right text-gray-500">
-                {ln ?? ''}
-              </span>
-              <span className={`shrink-0 select-none px-1 ${color}`}>{sign}</span>
-              <span className={`whitespace-pre px-1 ${color}`}>{line.text}</span>
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="border-t border-gray-200 bg-gray-50 px-3 py-1 text-[10px] text-gray-400">
-        from {formatTime(result.from.gmtCreate)} · to {formatTime(result.to.gmtCreate)}
-      </div>
-    </div>
-  )
+  return <SideBySideView result={result} lines={diffLines} changedFields={topLevelChanges(fromText, toText)} />
 }

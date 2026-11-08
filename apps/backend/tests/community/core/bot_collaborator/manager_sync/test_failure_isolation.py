@@ -47,6 +47,7 @@ def sync_facts(key: SyncKey) -> SyncFacts:
         f"entity-{key.bot_pk}",
         OWNER,
         (CollaboratorFact(MEMBER, "admin", True),),
+        bot_type="service",
     )
 
 

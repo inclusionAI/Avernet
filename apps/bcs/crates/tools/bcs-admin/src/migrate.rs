@@ -758,7 +758,7 @@ pub(crate) fn load_bcs_config(global: &MigrateGlobalArgs) -> Result<BcsConfig> {
 
 fn check_sqlite_migration_definitions() -> String {
     format!(
-        "SQLite migration definitions check ok\ntarget_version={}\nmigrations={}\nnote=SQLite migrations are code-defined in crates/bootstrap/bcs/src/migrations.rs; use --check-db to inspect a SQLite database file",
+        "SQLite migration definitions check ok\ntarget_version={}\nmigrations={}\nnote=SQLite migrations are code-defined in crates/services/bcs-db-migrations/src/lib.rs; use --check-db to inspect a SQLite database file",
         bcs::migrations::sqlite_target_version(),
         bcs::migrations::sqlite_migration_count()
     )

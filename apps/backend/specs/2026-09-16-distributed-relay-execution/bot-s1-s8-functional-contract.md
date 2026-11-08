@@ -663,6 +663,9 @@ class TaskReportCommand:
     task_acceptance_result: AcceptanceResult | None = None
     # Bot 侧执行轨迹；同一 event_id 重试必须原样复用。
     trace: TaskReportTrace | None = None
+    # 终态 PLAN_RESULT(event=null) 必填；写入 TaskExecutionGraph.output[
+    # "final_conclusion"]，仅用于轨迹归因与效果分析，不是产物。
+    final_conclusion: str | None = None
 
 
 class TaskReportStatus(StrEnum):

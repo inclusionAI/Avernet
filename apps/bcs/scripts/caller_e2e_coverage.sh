@@ -21,3 +21,7 @@ LLVM_PROFILE_FILE="$cov_runtime/caller-%m-%p.profraw" \
 LLVM_PROFILE_FILE="$cov_runtime/task-cache-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/task_cache_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e"
+
+LLVM_PROFILE_FILE="$cov_runtime/custom-binding-%m-%p.profraw" \
+  python3 "$bcs_dir/scripts/e2e-test/custom_binding_story.py" \
+    --binary "$cov_runtime/debug/bcs-caller-e2e"

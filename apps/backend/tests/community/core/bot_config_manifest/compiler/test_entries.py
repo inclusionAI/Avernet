@@ -10,7 +10,6 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.identity impo
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
 from agentclaw.community.core.bot_config_manifest.compiler.session import digest_of
-from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig
 from tests.community.core.apply_engine._fakes import oss_source
 from tests.community.core.bot_config_manifest.compiler._rig import rig
 
@@ -35,7 +34,7 @@ def test_mcp_overrides_duplicates_and_missing_codes() -> None:
         ]
     )
     assert [e.server_code for e in declared.entries] == ["gh", "jira", "empty"]
-    assert isinstance(declared.entries[0].override, PreserveMcpConfig)
+    assert declared.entries[0].override is None
     assert declared.entries[1].override.headers == (McpHeader("X", "1"),)
     assert declared.entries[1].override.endpoint_env is McpEndpointEnv.PRE
     assert declared.entries[2].override is None  # an empty mapping is no override, as today

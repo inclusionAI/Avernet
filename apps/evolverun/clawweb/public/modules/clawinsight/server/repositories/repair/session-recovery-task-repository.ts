@@ -40,7 +40,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   async listForMaintenance(limit: number, afterTaskId = ""): Promise<RecoveryStoredTask[]> {
     this.limit(limit);
     const rows = await this.db.query<{ task_id: string }>(
-      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND status IN ('pending','running','waiting_owner','waiting_effect') ORDER BY task_id ASC LIMIT ?", [afterTaskId, limit]);
+      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND (status IN ('pending','running','waiting_owner','waiting_effect') OR config_json LIKE ?) ORDER BY task_id ASC LIMIT ?", [afterTaskId, '%"ownerCardSyncPending":true%', limit]);
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
   async listForReporting(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }> {
@@ -182,11 +182,13 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   private details(value: RecoveryStoredTask) {
     const auditedEvidence = new Set(value.timeline.filter(event => event.payload.raw_tool_call_id).map(event => event.payload.evidence_id));
     return { plan: value.plan, judgment: value.judgment, evidence: value.evidence.filter(item => !auditedEvidence.has(item.evidence_id)),
+      ...(value.ownerRequest ? { ownerRequest: value.ownerRequest } : {}),
       ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = [], stoppedResultDelivery: StoppedResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, plan, delivery: _delivery, judgment: _judgment, ownerRequest, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery,
+      ...(ownerRequest ? { ownerRequest: { requestId: ownerRequest.requestId, revision: ownerRequest.revision, status: ownerRequest.status, reason: ownerRequest.reason, resumePhase: ownerRequest.resumePhase, createdAtMs: ownerRequest.createdAtMs } } : {}),
       ...(stoppedResultDelivery.length ? { stoppedResultDelivery } : {}), plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
     return json;
@@ -232,12 +234,12 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
         const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
         task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
-          tool_call_id: call.callId, request, result: { delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
-            message: result.message, initial_message: result.initial_message, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
+          tool_call_id: call.callId, request, result: { status: result.status, delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
+            message: result.message, initial_message: result.initial_message, finished_at_ms: result.finished_at_ms, owner_request_id: result.owner_request_id, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
       }
       if (calls.length < 500) break;
     }
-    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery, task.timeline);
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {

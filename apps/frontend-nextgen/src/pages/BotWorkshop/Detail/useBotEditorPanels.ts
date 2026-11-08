@@ -20,7 +20,7 @@ export function useBotEditorPanels() {
       additionalTabs: panels.map((panel) => ({
         key: `extension:${panel.id}` as const,
         label: panel.label,
-        icon: createElement(panel.Icon, { className: 'size-3.5 shrink-0' }),
+        icon: createElement(panel.Icon, { className: 'size-4 shrink-0' }),
       })),
     };
   }, [capabilities]);

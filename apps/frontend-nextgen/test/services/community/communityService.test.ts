@@ -20,6 +20,11 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canDelete: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
+    getPostLocation: jest.fn(async () => ({
+      postId: 'post-1',
+      rootPostId: 'post-1',
+      page: 1,
+    })),
     createReply: jest.fn(async () => 'created-reply'),
     createTopic: jest.fn(async (input) => ({
       id: 'created',

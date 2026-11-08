@@ -1132,6 +1132,7 @@ def test_relay_report_declined_with_artifacts_rejected(task_client):
         "event_type": "EXECUTION_RESULT",
         "artifacts": [
             {
+                "artifact_name": "不应携带的文本",
                 "artifact_kind": "text",
                 "task_id": "task-1",
                 "node_id": "task-1",

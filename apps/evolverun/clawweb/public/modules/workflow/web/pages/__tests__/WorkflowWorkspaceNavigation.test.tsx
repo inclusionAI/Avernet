@@ -24,12 +24,21 @@ vi.mock('../../api/hooks', () => ({
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
   useEvolveLessons: queryHooks.lessons,
 }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } }, fetchJson: vi.fn() }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({
+  api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } },
+  fetchJson: async (url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (!match || init?.method !== 'GET') throw new Error(`Unexpected request: ${url}`)
+    const id = decodeURIComponent(match[1])
+    return { workflowId: id, packId: null, specJson: JSON.stringify({ id, title: id, version: '1', nodes: [] }), draftToken: 'a'.repeat(64) }
+  },
+}))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'admin-1', isAdmin: true }) }))
 vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () => <div>运行概览内容</div> }))
 vi.mock('../../components/workflow-workspace/EditorTab', () => ({ default: () => <div>编辑器内容</div> }))
 vi.mock('../../components/workflow-workspace/ManagementTab', () => ({ default: () => <div>管理内容</div> }))
 vi.mock('../../components/workflow-workspace/EvolutionTab', () => ({ default: () => <div>护航内容</div> }))
+vi.mock('../../components/workflow-workspace/ApprovalWorkbench', () => ({ default: () => <div>审批工作台内容</div> }))
 vi.mock('../Dashboard', () => ({ default: () => <div>管理员大盘内容</div> }))
 
 import WorkflowWorkspace from '../WorkflowWorkspace'
@@ -107,7 +116,7 @@ describe('unified task escort navigation', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '数据大盘' }))
 
-    expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard')
+    await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard'))
     expect(screen.getByText('管理员大盘内容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '数据大盘' })).toHaveAttribute('aria-current', 'page')
   })
@@ -171,4 +180,11 @@ it('retains the in-memory draft after an approved workspace route change', async
   const unload = new Event('beforeunload', { cancelable: true })
   window.dispatchEvent(unload)
   expect(unload.defaultPrevented).toBe(true)
+})
+
+ it('navigates to a global workbench independent of the selected workflow', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=overview')
+  await userEvent.click(screen.getByRole('button', { name: '工作台' }))
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=workbench')
+  expect(screen.getByText('审批工作台内容')).toBeInTheDocument()
 })

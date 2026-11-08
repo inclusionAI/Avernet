@@ -10,6 +10,27 @@ through another part of the conversation chain.
 
 ## Catalog contract
 
+### Conversation and discovery avatars (2026-11-04)
+
+`GET /bots`, `GET /bots/collaborations`, `POST /bots/metadata/queries`,
+and `GET /bots/catalog/search` expose the saved display-only `avatar_url`.
+The saved `ext.avatar_url` takes precedence over a legacy top-level URL;
+missing or malformed extension data degrades to an unset avatar. No additional
+owner-only avatar request is required, and no other extension data is exposed.
+Frontend conversation directories and discovery cards preserve and render it.
+
+Catalog Search excludes Backend service Bots whose `online_available` is not
+true, using the same current-environment publication/binding rules below.
+Personal Bots and BCS-native records retain their existing inclusion rules.
+BCS status/connectivity does not substitute for online publication availability.
+BCS still owns visibility, viewer-relative relationships and result ordering.
+The cross-store intersection is counted before public pagination: BCS pages and
+Backend joins are bounded to 100 records per batch; only the requested window
+is retained. Exact totals require scanning the matching BCS catalog, so latency
+scales with matching candidates (not one request/query per Bot). There is no
+full-history read, draft fallback, or unfiltered BCS total in the response.
+The client must not try to implement this by filtering only its current page.
+
 `GET /openapi/v1/bots` and `GET /openapi/v1/bots/collaborations` accept an optional
 `stage=draft|verify|online`. Omission is equivalent to `stage=draft`, as confirmed
 on 2026-10-27. This changes service-Bot inclusion for legacy requests without a

@@ -21,7 +21,6 @@ from agentclaw.community.core.task.task_runner.client.candidate_search import (
 )
 from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
     CatalogKeywordBotDiscover,
-    _credential_ready,
     _DISPATCH_CATALOG_FILTERS,
     _runtime_ready,
 )
@@ -79,11 +78,11 @@ class SemanticKeywordBotDiscover:
         """Use BCSFuse on the passed candidate query before token fallback.
 
         Semantic search is intentionally executed with the same system-view
-        catalog rules as the keyword adapter. Public availability, runtime
-        readiness, and persisted ``agent_code`` are post-filtered so BCSFuse
-        cannot make a non-executable Bot relayable. The semantic backend is
-        capped at the five most similar, ready Bot candidates; token fallback
-        retains its existing keyword limits.
+        catalog rules as the keyword adapter. Public visibility and runtime
+        readiness are post-filtered; Bot lifecycle credentials remain owned by
+        their own domains. The semantic backend is capped at the five most
+        similar, ready Bot candidates; token fallback retains the existing
+        keyword limits.
         """
         normalized = str(query or "").strip()
         if not normalized:
@@ -160,7 +159,6 @@ class SemanticKeywordBotDiscover:
             for item in (raw_items or [])
             if isinstance(item, dict)
             and _runtime_ready(item)
-            and _credential_ready(item)
         ]
         ready_items = _dedupe_candidates(valid_items)[:SEMANTIC_TOP_K]
         bot_ids = tuple(

@@ -14,40 +14,27 @@ internal router does.
 
 from __future__ import annotations
 
-import asyncio
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     EXAMPLE_TRACE_ID,
-    STARTUP_SCRIPT_WRITE_RESPONSES,
     USER_SCOPED_403,
     BotIdPath,
     Deleted,
     Envelope,
-    NameCheck,
-    Page,
-    PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.clusters import (
     ClusterName,
-    cluster_for_engine,
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    StartupScriptUnsupportedError,
     UnsupportedEngineError,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    require_principal,
-)
-from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     OwnerNameDep,
-    ActingCallerDep,
     DelegatedUserDep,
     UserIdDep,
     require_granted_addressed_bot,
@@ -58,24 +45,18 @@ from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
     withdraw_the_creation_grant,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
-from .dependencies_stage_listing import list_stage_bots
-from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
     deleted as deleted_envelope,
     envelope,
     envelope_errors,
-    page,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.bot_management.expert_origin import expert_name_from_ext
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
@@ -87,19 +68,23 @@ from agentclaw.community.core.bot_management.create_flow import (
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
+)
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
+from agentclaw.community.core.bot_copy.status_derive import build_copy_state_summary
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
     generate_bot_id,
     validate_bot_name,
 )
-from agentclaw.community.api.bot_startup_script_service import (
-    SUPPORTED,
-    BotStartupScriptServiceProtocol,
-)
-from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     INTERNAL_ENGINE_TYPES,
@@ -110,61 +95,31 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 
-from agentclaw.community.api.bot_inventory_service import (
-    BotInventoryServiceProtocol,
-)
-from agentclaw.community.core.bot_inventory.errors import (
-    BotInventoryPermissionError,
-)
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
-from agentclaw.community.core.bot_inventory.policies.combo_policy import (
-    assert_service_upgrade,
-)
-from agentclaw.community.core.bot_management.template_public_view import (
-    template_config_for_public,
-)
-from agentclaw.community.core.bot_inventory.types import (
-    DeployMode as CoreDeployMode,
-)
-from agentclaw.community.core.service_bot.errors import (
-    ServicePublicationUnsupportedError,
-)
 
-from agentclaw.community.core.services.engine_config import (
-    engine_config_coords_from_bot,
-)
-from .startup_script_support import (
-    _startup_script_payload,
-    _startup_script_target,
-    _withdraw_the_write_if_the_bot_was_deleted,
-)
-from .converter_inventory import to_inventory_item as _to_inventory_item
 from .schemas import (
     Bot,
-    BotMetadata,
-    BotMetadataQueries,
     BotAuthPending,
     BotAuthStatus,
     BotAuthStatusPoll,
     BotCreate,
-    BotInventoryItem,
     BotQuotaExceededData,
     BotStatus,
     BotType,
     BotSpaceAssignment,
     BotSpaceUpdate,
     BotUpdate,
-    Ceiling,
-    DataInitRequest,
-    DataInitResult,
-    DeployMode,
     Passport,
-    StartupScript,
-    StartupScriptWrite,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+
+from .converter_bot import _require_service_capable_engine, _to_bot
+from .router_listings import router as listings_router
+from .router_listings import list_bots as list_bots, query_bot_metadata as query_bot_metadata
+from .router_runtime import router as runtime_router
+from .router_runtime import _audit_actor as _audit_actor
 
 logger = get_logger()
 
@@ -190,121 +145,6 @@ BOT_QUOTA_CONFLICT_RESPONSES = {
 }
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
-
-
-def _require_service_capable_engine(bot_type: str, engine: str) -> None:
-    if bot_type != "service":
-        return
-    decision = assert_service_upgrade(engine)
-    if not decision.ok:
-        raise ServicePublicationUnsupportedError(
-            decision.reason or "engine cannot be used by a service bot"
-        )
-
-
-def _to_bot(
-    d: dict[str, Any],
-    *,
-    space: dict[str, Any] | None = None,
-    include_template: bool = True,
-) -> Bot:
-    """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema.
-
-    ``template_config`` on the row is the stored engine snapshot, returned
-    verbatim (2026-09-01 passthrough decision — an owner-scoped face echoes
-    the caller's own creation input, secrets included), detached via the core
-    deep-copy helper — gated on a truthy ``template_type`` so the detail path
-    (whose attach is not template-gated) honors the same "null without a
-    template" contract the listings publish. ``space`` is the owner-view
-    summary the listing endpoints resolve and pass in; other callers leave it
-    null.
-
-    ``include_template=False`` is what the 2026-09-01 decision demands once
-    the collaborator-access migration broke its premise: the passthrough was
-    justified by "the query faces are owner-scoped", so a face that is not —
-    a collaborator reading a shared bot's base record or its restart result —
-    must not receive the snapshot, whose ``token`` and ``thetaKey`` would
-    then be somebody else's secret rather than the caller's own input. Those
-    callers pass the owner the comparison resolved, and the field stays null
-    for them rather than growing a parallel redaction model here.
-    """
-    engine = d.get("active_engine") or ""
-    has_template = d.get("template_type") not in (None, "")
-    return Bot(
-        bot_id=d["bot_id"],
-        bot_name=d.get("bot_name") or "",
-        bot_desc=d.get("bot_desc") or "",
-        engine=engine,
-        cluster_name=cluster_for_engine(engine),
-        bot_type=d.get("bot_type") or "",
-        status=d.get("status") or "",
-        owner_entity_id=d.get("owner_id") or "",
-        expert_name=expert_name_from_ext(d.get("ext")),
-        template_type=str(d["template_type"]) if has_template else None,
-        template_config=(
-            template_config_for_public(d.get("template_config"))
-            if has_template and include_template
-            else None
-        ),
-        space=space,
-    )
-
-
-def _to_public_space(ref: Any) -> dict[str, Any] | None:
-    """Flatten a ``BusinessSpaceRef`` for pydantic coercion into ``BusinessSpace``."""
-    if ref is None:
-        return None
-    return {"space_id": ref.space_id, "name": ref.name, "kind": ref.kind}
-
-
-def _resolve_row_spaces(
-    space_context: BusinessSpaceContextProtocol,
-    rows: list[dict[str, Any]],
-    *,
-    owner_id: str,
-) -> dict[str, dict[str, Any] | None]:
-    """Owner-view space summary per distinct ``ac_bots.space_id``.
-
-    Memoized on the raw space_id column: one ``bot_space`` resolution per
-    distinct space per page. This is plain memo caching — the semantics
-    (synthetic ``personal:<user>`` fallback, member-gated None) stay in the
-    core ``BusinessSpaceContextProtocol``. A space the resolver refuses
-    (missing membership row on a legacy record and the like) degrades to
-    ``space: null`` for that row, mirroring how ``_list_cloud_rows`` skips a
-    row the space module rejects: one bad record must not take the whole
-    listing page down.
-    """
-    resolved: dict[str, dict[str, Any] | None] = {}
-    for row in rows:
-        raw = str(row.get("space_id") or "")
-        if raw in resolved:
-            continue
-        try:
-            ref = space_context.bot_space(
-                bot=row, owner_id=owner_id, current_space=None
-            )
-        except BotInventoryPermissionError:
-            ref = None
-        resolved[raw] = _to_public_space(ref)
-    return resolved
-
-
-def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
-    """Project a Bot record onto the deliberately display-only batch contract."""
-    return BotMetadata(
-        bot_id=d["bot_id"],
-        owner_id=d.get("owner_id") or "",
-        bot_name=d.get("bot_name") or "",
-        bot_desc=d.get("bot_desc") or "",
-        engine=d.get("active_engine") or "",
-        bot_type=d.get("bot_type") or "",
-        status=d.get("status") or "",
-        online_available=d.get("online_available"),
-        live_version=d.get("live_version"),
-        conversation_stage=d.get("conversation_stage") or "draft",
-    )
-
-
 
 
 def _auth_status_error(status: str, request: Request) -> JSONResponse:
@@ -571,291 +411,8 @@ async def create_bot(
     return created(_to_bot(outcome.bot), request)
 
 
-@router.get("", response_model=Envelope[Page[Bot]], responses=USER_SCOPED_403)
-@envelope_errors
-async def list_bots(
-    request: Request,
-    page_params: PageParamsDep,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
-    stage: Annotated[RuntimeStage, Query(description="Filter service Bots by runtime stage before pagination; defaults to draft. Other Bot kinds are unchanged.")] = RuntimeStage.DRAFT,
-    keyword: Annotated[
-        str | None,
-        Query(description="Filter: bots whose name contains this text."),
-    ] = None,
-    engine: Annotated[
-        str | None,
-        Query(description="Filter: only bots on this engine, matched exactly."),
-    ] = None,
-    status: Annotated[
-        str | None,
-        Query(
-            description="Filter: only bots in this lifecycle status, matched "
-            "exactly (e.g. 'ACTIVE'; see the Bot schema for the vocabulary)."
-        ),
-    ] = None,
-    bot_repo: BotRepository = Injected(BotRepository),
-    template_port: BotInventoryTemplatePort = Injected(BotInventoryTemplatePort),
-    space_context: BusinessSpaceContextProtocol = Injected(
-        BusinessSpaceContextProtocol
-    ),
-) -> Envelope[Page[Bot]]:
-    """List the caller's bots, narrowed to the caller's authorized scope.
-
-    Human callers see their own bots. Application callers see only owned bots
-    explicitly granted by the delegating user. The grant restriction is passed
-    to the service before pagination.
-
-    An application granted nothing gets an empty page, not an error: naming no
-    bot, this operation has nothing to mask. The complete view of delegated
-    bots, including bots the user does not own, is the authorized-bots listing.
-
-    The keyword, engine, and status filters are applied before pagination.
-    Each row carries the owner-view space of its space assignment and the
-    projected template snapshot. For richer inventory fields such as
-    deployment mode, use GET /openapi/v1/bots/all.
-    """
-    granted = caller.granted_bot_ids(owned_by_delegator=True)
-    if granted is not None and not granted:
-        return page(0, [], request)
-    filters = dict(
-        owner_id=owner_id,
-        bot_name=keyword,
-        engine=engine,
-        status=status,
-        page=page_params.page,
-        page_size=page_params.page_size,
-        bot_ids=sorted(granted) if granted is not None else None,
-    )
-    result = await asyncio.to_thread(
-        list_stage_bots, bot_repo, template_port, stage=stage.value, **filters,
-    )
-    rows = result["items"]
-    # Off the event loop: the resolution issues synchronous space-service
-    # reads, one per distinct space on the page — a page over many spaces
-    # must not stall every other request the handler is interleaved with.
-    row_spaces = await asyncio.to_thread(
-        _resolve_row_spaces, space_context, rows, owner_id=owner_id
-    )
-    items = [
-        _to_bot(b, space=row_spaces.get(str(b.get("space_id") or "")))
-        for b in rows
-    ]
-    return page(result["total"], items, request)
-
-
-@router.post(
-    "/metadata/queries",
-    response_model=Envelope[Page[BotMetadata]],
-    responses=USER_SCOPED_403,
-)
-@envelope_errors
-async def query_bot_metadata(
-    body: BotMetadataQueries,
-    page_params: PageParamsDep,
-    request: Request,
-    user_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-) -> Envelope[Page[BotMetadata]]:
-    """Resolve display metadata for caller-supplied Bot and owner pairs.
-
-    The identifiers may originate from BCN, search, recommendations, persisted
-    client state, or another source. The user_id parameter names the authenticated
-    user performing this tenant-wide metadata lookup; each owner_id in the body
-    is part of a target Bot identity, not the caller identity. The response is
-    intentionally limited to display fields and the owner id the request already
-    named; it never exposes device bindings, runtime configuration, credentials,
-    or extension payloads.
-
-    Unknown identifiers are omitted. Filtering happens in the repository before
-    pagination, so total is the number of matching Bot records.
-    """
-    del user_id  # UserIdDep has already enforced equality with the Principal.
-    pairs = list(dict.fromkeys((item.bot_id, item.owner_id) for item in body.bots))
-    result = await asyncio.to_thread(
-        bot_service.list_bots_by_owner_bot_pairs,
-        page=page_params.page,
-        page_size=page_params.page_size,
-        pairs=pairs,
-    )
-    items = [_to_bot_metadata(item) for item in result["items"]]
-    return page(result["total"], items, request)
-
-
-@router.get(
-    "/check-name",
-    response_model=Envelope[NameCheck],
-    # Authenticated, but not user-scoped. Declared on the route rather than
-    # inherited from ``build_public_router`` so the guard is visible where the
-    # operation is, and so ``test_public_routes_require_principal`` can see it:
-    # that test walks each route's own dependant, which a group-level
-    # dependency does not appear in.
-    dependencies=[Depends(require_principal)],
-)
-@envelope_errors
-async def check_bot_name(
-    name: Annotated[
-        str,
-        Query(
-            description="The bot name to check. Validated with the same rules "
-            "create applies (non-blank, no '@'), so an invalid name is a 400 "
-            "here rather than a false 'available'."
-        ),
-    ],
-    request: Request,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-) -> Envelope[NameCheck]:
-    """Check whether a bot name is available (within the caller's tenant).
-
-    Applies the same validation create and update do, so "available" always
-    means "you could create this". The echoed name is the trimmed form
-    actually checked — a caller that sends " Foo " sees which string the
-    availability answer applies to.
-    """
-    # The same rule as create/update on purpose: the repository lookup alone
-    # answers False for a blank or @-bearing name, which would report a name
-    # as free that the very next request rejects (400). Rejecting here keeps
-    # one answer across the three endpoints.
-    # No ``user_id``: this operation has no user dimension to scope by. Name
-    # uniqueness is checked across the whole tenant — ``check_bot_name_exists``
-    # takes only the name.
-    # An authenticated caller is still required — ``_PUBLIC_AUTH`` in
-    # ``openapi_v1/__init__.py`` — it just has no user-shaped answer to give,
-    # so asking the caller to name one would be asking for a value this handler
-    # cannot use. See "Naming the end user" there.
-    checked = validate_bot_name(name)
-    exists = bot_service.check_bot_name_exists(checked)
-    return envelope(NameCheck(name=checked, exists=exists), request)
-
-
-@router.get("/ceiling", response_model=Envelope[Ceiling], responses=USER_SCOPED_403)
-@envelope_errors
-async def get_bots_ceiling(
-    request: Request,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
-    x_space_id: Annotated[
-        str | None,
-        Header(
-            alias="X-Space-Id",
-            description="Business-space context; omit to use the personal space.",
-        ),
-    ] = None,
-    quota_service: BotQuotaServiceProtocol = Injected(BotQuotaServiceProtocol),
-    space_context: BusinessSpaceContextProtocol = Injected(
-        BusinessSpaceContextProtocol
-    ),
-) -> Envelope[Ceiling]:
-    """Get the Bot ceiling for the selected business Space.
-
-    Personal Space keeps the named user's configured ceiling. Team Space uses
-    its own ceiling and counts Bots created by every member. For an application
-    caller, reading it still requires at least one live delegation from the
-    named user; without one the user is answered as if they did not exist.
-    """
-    # Names no bot, so there is no grant to check against one — but the answer
-    # is still about a person's account, and a stranger application must not be
-    # able to read it by naming a user id. So it is gated on the application
-    # holding some live delegation from that user — a user-level one, or any
-    # bot grant: proof of a relationship, the closest thing this operation has
-    # to a scope. An application with no delegation learns nothing it did not
-    # already know.
-    #
-    if not caller.holds_delegation():
-        # The named user goes to the log bounded and escaped, never into the
-        # exception message: that message reaches a log line verbatim, and
-        # ``user_id`` is declared ``min_length=1`` with no upper bound, so raw
-        # it would let a refused caller forge log lines and choose how many
-        # bytes each refusal costs.
-        logger.warning(
-            "[bots] app holds no delegation from user=%s; refusing the ceiling",
-            for_log(owner_id),
-        )
-        raise BotNotFoundError("no authorization from the named user")
-    current_space = space_context.resolve_current(
-        owner_id=owner_id, header_space_id=x_space_id
-    )
-    snapshot = quota_service.inspect(
-        owner_id=owner_id, space_id=current_space.numeric_id
-    )
-    return envelope(Ceiling(ceiling=snapshot.ceiling), request)
-
-
-# ── Bot inventory card surface ─────────────────────────────────────────────
-# Card list at ``/openapi/v1/bots/all``, declared before the ``/{bot_id}``
-# wildcard so ``all`` matches as a literal rather than a bot_id. Each card already
-# carries its action affordances; the former rich-card detail and standalone
-# actions endpoints were removed. The list aggregates the owner's personal cloud,
-# service, and local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
-# from the ``BotServiceProtocol`` CRUD below); ``_to_inventory_item`` translates
-# the read model to the public schema.
-
-
-@router.get(
-    "/all",
-    response_model=Envelope[Page[BotInventoryItem]],
-    responses=USER_SCOPED_403,
-)
-@envelope_errors
-async def list_inventory(
-    page_params: PageParamsDep,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
-    request: Request,
-    x_space_id: Annotated[
-        str | None,
-        Header(
-            alias="X-Space-Id",
-            description="Business-space context for the inventory; omit to use the personal space.",
-        ),
-    ] = None,
-    keyword: Annotated[
-        str | None,
-        Query(description="Filter inventory items whose bot name contains this text."),
-    ] = None,
-    engine: Annotated[
-        str | None,
-        Query(description="Filter inventory items by engine, matched exactly."),
-    ] = None,
-    deploy_mode: Annotated[
-        DeployMode | None,
-        Query(description="Filter inventory items by cloud or local deployment."),
-    ] = None,
-    is_service: Annotated[
-        bool | None,
-        Query(
-            description=(
-                "Filter by service classification: true returns service Bots, "
-                "false returns non-service Bots, and omission returns both."
-            )
-        ),
-    ] = None,
-    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
-    space_context: BusinessSpaceContextProtocol = Injected(
-        BusinessSpaceContextProtocol
-    ),
-) -> Envelope[Page[BotInventoryItem]]:
-    """List personal cloud, service, and local Bots in the current space."""
-    granted = caller.granted_bot_ids(owned_by_delegator=True)
-    if granted is not None and not granted:
-        return page(0, [], request)
-    current_space = space_context.resolve_current(
-        owner_id=owner_id,
-        header_space_id=x_space_id,
-    )
-    items, total = service.list_items(
-        owner_id=owner_id,
-        space=current_space,
-        keyword=keyword,
-        engine=engine,
-        deploy_mode=CoreDeployMode(deploy_mode) if deploy_mode is not None else None,
-        is_service=is_service,
-        bot_ids=sorted(granted) if granted is not None else None,
-        page=page_params.page,
-        page_size=page_params.page_size,
-    )
-    return page(total, [_to_inventory_item(item) for item in items], request)
-
+# PublicAPIRoute validates full paths at registration; these are already prefixed.
+router.routes.extend(listings_router.routes)
 
 @router.get(
     "/{bot_id}",
@@ -870,14 +427,28 @@ async def get_bot(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
+    apply_repo: BotConfigManifestApplyRepositoryProtocol = Injected(
+        BotConfigManifestApplyRepositoryProtocol
+    ),
 ) -> Envelope[Bot]:
     """Get a bot's details."""
     bot = bot_service.get_bot(bot_id, owner_id)
     # A collaborator reading a shared bot gets the record without the owner's
     # template snapshot — see `_to_bot` for why the passthrough ends here.
-    return envelope(
-        _to_bot(bot, include_template=(user_id == owner_id)), request
+    bot_record = _to_bot(bot, include_template=(user_id == owner_id))
+    # Derive-on-read copy_state: legacy bots (no ac_bot_copy row) → null, so the
+    # additive field does not change their response. entity_id is the dst's apply
+    # key; fall back to owner_id for personal bots whose entity_id equals it.
+    bot_record.copy_state = build_copy_state_summary(
+        bot_copy_repo=bot_copy_repo,
+        apply_repo=apply_repo,
+        env=get_current_env(),
+        entity_id=bot.get("entity_id") or bot.get("owner_id") or owner_id,
+        bot_id=bot_id,
+        bot_status=bot.get("status"),
     )
+    return envelope(bot_record, request)
 
 
 @router.put(
@@ -1237,6 +808,7 @@ async def get_bot_status(
     binding = bot.get("device_binding") or {}
     return envelope(
         BotStatus(
+            ext=resolve_status_ext(bot, response_ext={}),
             status=bot.get("status") or "",
             # Shared policy: an application bot is not ready until its repo
             # checkout reports SUCCEEDED, so ACTIVE alone is not enough.
@@ -1289,232 +861,4 @@ async def get_bot_passport(
     )
 
 
-def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
-    """Who to record as having changed the script.
-
-    For an application caller ``user_id`` is the *delegating* user, not the
-    caller — downstream code cannot tell an admitted application from that user,
-    which is the seam's whole point. That is right for scoping and wrong for an
-    audit field: recording it would have this executable body attributed to a
-    person who did not write it. So an application is named as itself, with the
-    user it acted for kept alongside.
-    """
-    if caller.is_application:
-        return f"app:{caller.app_id}:on-behalf-of:{owner_id}"
-    return owner_id
-
-
-@router.get(
-    "/{bot_id}/startup-script",
-    response_model=Envelope[StartupScript],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
-)
-@envelope_errors
-async def get_bot_startup_script(
-    bot_id: BotIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    startup_script_service: BotStartupScriptServiceProtocol = Injected(
-        BotStartupScriptServiceProtocol
-    ),
-) -> Envelope[StartupScript]:
-    """Read a bot's startup script.
-
-    A bot that has never had one reads as an empty script, not an error. An
-    unsupported bot still answers here — with supported false and a reason —
-    so a caller can discover why before trying to write.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
-    record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
-    return envelope(_startup_script_payload(bot_id, record, state, reason), request)
-
-
-@router.put(
-    "/{bot_id}/startup-script",
-    response_model=Envelope[StartupScript],
-    responses=STARTUP_SCRIPT_WRITE_RESPONSES,
-    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
-)
-@envelope_errors
-async def update_bot_startup_script(
-    bot_id: BotIdPath,
-    body: StartupScriptWrite,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    caller: ActingCallerDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    startup_script_service: BotStartupScriptServiceProtocol = Injected(
-        BotStartupScriptServiceProtocol
-    ),
-) -> Envelope[StartupScript]:
-    """Set or replace a bot's startup script.
-
-    Takes effect the next time the platform composes a start command — a
-    restart or republish of the bot does that. Lower-level restarts and
-    scale-outs reuse the previously composed configuration, so an instance
-    started that way can still run the previously stored script until the bot
-    is next restarted or republished.
-
-    Refused for a bot whose container cannot run one: storing it would be a
-    silent no-op the caller could not distinguish from success.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    # Desktop bots are refused by ``resolve_support`` itself, not by a guard
-    # here: gating only the write made GET answer ``supported: true`` for a bot
-    # whose next PUT was certain to fail, which is precisely the discovery path
-    # GET exists to provide.
-    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
-    if state != SUPPORTED:
-        raise StartupScriptUnsupportedError(reason)
-    record = startup_script_service.put(
-        entity_id=entity_id,
-        bot_id=bot_id,
-        script=body.script,
-        # From the verified caller, never the body — and naming the application
-        # when one is acting, not the user it acted for. The caller, not the
-        # addressed owner: an audit column attributing a collaborator's edit
-        # to the bot's owner is the one thing an audit column must not do.
-        modifier=_audit_actor(caller, user_id),
-    )
-    _withdraw_the_write_if_the_bot_was_deleted(
-        bot_id, entity_id, owner_id, bot_service, startup_script_service
-    )
-    return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
-
-
-@router.delete(
-    "/{bot_id}/startup-script",
-    response_model=Envelope[Deleted],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
-)
-@envelope_errors
-async def delete_bot_startup_script(
-    bot_id: BotIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    startup_script_service: BotStartupScriptServiceProtocol = Injected(
-        BotStartupScriptServiceProtocol
-    ),
-) -> Envelope[Deleted]:
-    """Clear a bot's startup script. Idempotent.
-
-    Takes effect the next time the platform composes a start command — see the
-    PUT for which starts do and do not recompose. Clearing does not reach an
-    already-running container, and does not reach a targeted device restart or
-    a scale-out replica until the bot is next restarted or republished.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id = bot.get("entity_id")
-    if not entity_id:
-        raise BotNotFoundError("bot has no associated entity")
-    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
-    return deleted_envelope(request)
-
-
-def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
-    bot_type = bot.get("bot_type") or ""
-    if bot_type == "desktop":
-        raise BotOperationNotAllowedError(
-            "local bots do not support data initialization"
-        )
-    if bot_type == "service":
-        raise BotOperationNotAllowedError(
-            "service bot data lifecycle is owned by the publish flow"
-        )
-    if bot_type != "personal":
-        raise BotOperationNotAllowedError(
-            f"data initialization is not supported for bot_type: {bot_type or 'unknown'}"
-        )
-
-
-def _observe_data_init_task(task: asyncio.Task[dict[str, str]]) -> None:
-    """Consume a detached task's exception so failures are never unobserved."""
-    if task.cancelled():
-        return
-    error = task.exception()
-    if error is not None:
-        logger.error(
-            "data-init background task failed",
-            exc_info=(type(error), error, error.__traceback__),
-        )
-
-
-@router.get(
-    "/{bot_id}/data-init",
-    response_model=Envelope[DataInitResult],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
-)
-@envelope_errors
-async def get_bot_data_init_status(
-    bot_id: BotIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
-) -> Envelope[DataInitResult]:
-    """Read cold-start initialization state without exposing the bot ext bag."""
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
-    _require_personal_cloud_bot(bot)
-    result = data_init_service.get_status(bot_id, owner_id)
-    return envelope(DataInitResult(**result), request)
-
-
-@router.post(
-    "/{bot_id}/data-init",
-    response_model=Envelope[DataInitResult],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
-)
-@envelope_errors
-async def trigger_bot_data_init(
-    bot_id: BotIdPath,
-    body: DataInitRequest,
-    request: Request,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
-) -> Envelope[DataInitResult]:
-    """Trigger cold-start data initialization for a personal cloud bot.
-
-    The operation returns immediately while work continues in the background.
-    Read this resource with GET to observe the persisted state. Local and
-    service bots are refused with 409.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
-    _require_personal_cloud_bot(bot)
-    _coords = engine_config_coords_from_bot(bot, bot_id=bot_id, owner_id=owner_id)
-    entity_id, entity_type = _coords.entity_id, _coords.entity_type
-
-    # Cookie parsing belongs to the HTTP adapter. The transport-agnostic service
-    # decides whether and when the temporary credential must be persisted.
-    iam_token = request.cookies.get("IAM_TOKEN") or None
-    task = asyncio.create_task(
-        data_init_service.trigger_init(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            entity_id=entity_id,
-            entity_type=entity_type,
-            force=body.force,
-            iam_token=iam_token,
-        )
-    )
-    task.add_done_callback(_observe_data_init_task)
-    return envelope(
-        DataInitResult(
-            bot_id=bot_id,
-            status="in_progress",
-            message="data initialization dispatched",
-        ),
-        request,
-    )
+router.routes.extend(runtime_router.routes)

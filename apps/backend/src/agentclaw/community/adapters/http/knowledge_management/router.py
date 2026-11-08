@@ -266,6 +266,7 @@ def set_grant(
 def available(
     bot_id: str,
     owner_id: str,
+    runtime_stage: Literal["draft", "verify", "online"] = "draft",
     cursor: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=20),
     user: AuthenticatedUser = Depends(get_current_user),
@@ -280,6 +281,7 @@ def available(
             actor_id=user.staffId,
             cursor=cursor,
             limit=limit,
+            runtime_stage=runtime_stage,
         )
 
     return execute(config, operation)
@@ -288,11 +290,13 @@ def available(
 @router.get(
     "/bots/{bot_id}/conversation-knowledge-bases",
     response_model=ConversationKnowledgePage,
+    response_model_exclude_unset=True,
 )
 def conversation_knowledge(
     bot_id: str,
     owner_id: str,
     request: Request,
+    runtime_stage: Literal["draft", "verify", "online"] = "draft",
     cursor: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=20),
     user: AuthenticatedUser = Depends(get_current_user),
@@ -313,6 +317,7 @@ def conversation_knowledge(
             },
             cursor=cursor,
             limit=limit,
+            runtime_stage=runtime_stage,
         )
 
     return execute(config, operation)

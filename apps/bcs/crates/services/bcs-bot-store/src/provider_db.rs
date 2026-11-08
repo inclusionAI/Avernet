@@ -72,6 +72,26 @@ impl ProviderRepoPort for DbProviderStore {
         Ok(())
     }
 
+    async fn pin_a2a_slug(&self, provider_id: &str, slug: &str) -> ServiceResult<()> {
+        let env = resolve_env();
+        self.execute("pin_a2a_slug", DbStatement::with_params(
+            format!("UPDATE bcs_providers SET config = JSON_SET(config, '$.a2a_name_pinned', JSON_EXTRACT('true', '$')), {} WHERE provider_id = ? AND env = ? AND slug = ? AND COALESCE(JSON_EXTRACT(config, '$.a2a_name_pinned'), JSON_EXTRACT('false', '$')) <> JSON_EXTRACT('true', '$')", self.now_modified_clause()),
+            vec![provider_id.into(), env.as_str().into(), slug.into()],
+        )).await?;
+        self.providers.invalidate(&format!("{env}:{provider_id}"));
+        let current = self.get_provider(provider_id).await?;
+        if let Some(provider) = current.filter(|provider| provider.slug.as_deref() == Some(slug)) {
+            let config: serde_json::Value = serde_json::from_str(&provider.config)?;
+            let pinned = &config["a2a_name_pinned"];
+            if pinned == &serde_json::json!(true) || pinned == &serde_json::json!(1) {
+                return Ok(());
+            }
+            Err(ServiceError::InternalError("Provider name reservation was not persisted".into()))
+        } else {
+            Err(ServiceError::Conflict("Provider name changed".into()))
+        }
+    }
+
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>> {
         let env = resolve_env();
         self.providers.get(&format!("{env}:{provider_id}"), || async {
@@ -164,7 +184,13 @@ impl ProviderRepoPort for DbProviderStore {
         let mut params = Vec::new();
         for (column, value) in [("name", name), ("config", config), ("slug", slug)] {
             if let Some(value) = value {
-                assignments.push(format!("{column} = ?"));
+                if column == "config" {
+                    // A stale metadata PATCH must not clear a committed name reservation.
+                    assignments.push("config = CASE WHEN JSON_EXTRACT(config, '$.a2a_name_pinned') = JSON_EXTRACT('true', '$') THEN JSON_SET(?, '$.a2a_name_pinned', JSON_EXTRACT('true', '$')) ELSE ? END".into());
+                    params.push(DbValue::from(value));
+                } else {
+                    assignments.push(format!("{column} = ?"));
+                }
                 params.push(DbValue::from(value));
             }
         }
@@ -189,13 +215,22 @@ impl ProviderRepoPort for DbProviderStore {
             }
         } else { "" };
         if let Some(config) = config { bcs_service_api::ProviderCollaborationScope::from_config(config)?; }
+        let name_guard = if let Some(slug) = slug {
+            params.push(slug.into());
+            " AND (slug = ? OR COALESCE(JSON_EXTRACT(config, '$.a2a_name_pinned'), JSON_EXTRACT('false', '$')) <> JSON_EXTRACT('true', '$'))"
+        } else { "" };
         let affected = self.execute("update_provider_metadata", DbStatement::with_params(format!(
-            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?{guard}{public_guard}",
+            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?{guard}{public_guard}{name_guard}",
             assignments.join(", "),
         ), params)).await?;
         self.providers.invalidate(&format!("{env}:{provider_id}"));
         let updated = self.get_provider(provider_id).await?;
         if affected == 0 {
+            if let (Some(current), Some(slug)) = (&updated, slug) {
+                if current.slug.as_deref() != Some(slug) {
+                    return Err(ServiceError::Conflict("A2A Provider name is immutable".into()));
+                }
+            }
             if let (Some(current), Some(config)) = (&updated, config) {
                 reject_policy_relaxation(&current.config, config)?;
                 if bcs_service_api::ProviderCollaborationScope::from_config(&current.config)? == bcs_service_api::ProviderCollaborationScope::Standard
@@ -415,7 +450,14 @@ impl OrganizationCandidateReadPort for DbProviderStore {
             }));
         }
 
-        let from_sql = " FROM bcs_provider_bot_bindings pb \
+        // Organization membership migrations use unicode_ci while older
+        // Provider tables may inherit MySQL 8's 0900_ai_ci. Coerce the outer
+        // value, leaving the indexed membership columns unwrapped.
+        let (membership_env, membership_bot) = match self.flavor {
+            DbSqlFlavor::Mysql => ("pb.env COLLATE utf8mb4_unicode_ci", "pb.bot_uuid COLLATE utf8mb4_unicode_ci"),
+            DbSqlFlavor::Sqlite => ("pb.env", "pb.bot_uuid"),
+        };
+        let from_sql = format!(" FROM bcs_provider_bot_bindings pb \
             JOIN bcs_providers p \
               ON p.provider_id = pb.provider_id \
              AND p.env = pb.env \
@@ -423,10 +465,10 @@ impl OrganizationCandidateReadPort for DbProviderStore {
               ON b.bot_uuid = pb.bot_uuid \
              AND b.env = pb.env \
             LEFT JOIN bcs_organization_members om \
-              ON om.env = pb.env \
+              ON om.env = {membership_env} \
              AND om.organization_code = ? \
-             AND om.bot_uuid = pb.bot_uuid \
-             AND om.disabled = 0";
+             AND om.bot_uuid = {membership_bot} \
+             AND om.disabled = 0");
         let mut filter_sql = " WHERE pb.env = ? \
               AND pb.disabled = 0 \
               AND p.disabled = 0 \

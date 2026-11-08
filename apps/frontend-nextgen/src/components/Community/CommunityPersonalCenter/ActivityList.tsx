@@ -5,6 +5,7 @@ import { personalCenterActivityToTopic } from '@/domain/community/mapper';
 import type {
   CommunityAuthor,
   CommunityTopic,
+  CommunityTopicOpenTarget,
   InteractionSummary,
   PersonalCenterActivity,
   PersonalCenterTopicContext,
@@ -17,7 +18,7 @@ export interface ActivityListProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  onOpenTopic: (topicId: string) => void;
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
   currentUserId?: string;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
   loadAuthorSummary?: (author: CommunityAuthor) => void;
@@ -65,35 +66,56 @@ function ReplyActivityGroup({
   onOpenTopic,
 }: {
   items: PersonalCenterActivity[];
-  onOpenTopic: (topicId: string) => void;
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
 }) {
   const topicId = items[0]?.topicId;
   const title =
     items[0]?.topicContext?.title ?? items[0]?.bodyPreview ?? `话题 #${topicId ?? ''}`;
+  const openTarget = (item?: PersonalCenterActivity): CommunityTopicOpenTarget | null => {
+    if (!topicId) return null;
+    return {
+      topicId,
+      ...(item?.postId ? { postId: item.postId } : {}),
+    };
+  };
+
   return (
-    <Button
-      variant="outline"
-      className="block h-auto w-full rounded-lg p-3 text-left transition-colors hover:bg-muted/40"
-      onClick={() => topicId && onOpenTopic(topicId)}
-    >
-      <span className="block w-full">
-        <span className="block truncate text-sm font-semibold text-foreground">{title}</span>
-        <span className="mt-2 block space-y-2">
-          {items.map((item) => (
-            <span key={item.postId ?? `${item.target.targetType}:${item.target.id}`} className="block rounded-md bg-muted/40 p-2.5">
-              {item.repliedToPost ? (
-                <span className="mb-1 block truncate text-[11px] text-muted-foreground">
-                  回复 @{item.repliedToPost.authorDisplayName}：{item.repliedToPost.bodyPreview}
-                </span>
-              ) : null}
-              <span className="block truncate text-xs leading-relaxed text-foreground/90">
-                {item.bodyPreview}
+    <div className="w-full rounded-lg border border-border bg-card p-3">
+      {(() => {
+        const target = openTarget();
+        return (
+          <Button
+            variant="outline"
+            className="block h-auto w-full rounded-lg p-0 text-left transition-colors hover:bg-muted/40"
+            onClick={() => target && onOpenTopic(target)}
+          >
+            <span className="block truncate text-sm font-semibold text-foreground">{title}</span>
+          </Button>
+        );
+      })()}
+      <div className="mt-2 space-y-2">
+        {items.map((item) => (
+          <Button
+            key={item.postId ?? `${item.target.targetType}:${item.target.id}`}
+            variant="ghost"
+            className="block h-auto w-full justify-start rounded-md bg-muted/40 p-2.5 text-left"
+            onClick={() => {
+              const target = openTarget(item);
+              if (target) onOpenTopic(target);
+            }}
+          >
+            {item.repliedToPost ? (
+              <span className="mb-1 block truncate text-[11px] text-muted-foreground">
+                回复 @{item.repliedToPost.authorDisplayName}：{item.repliedToPost.bodyPreview}
               </span>
+            ) : null}
+            <span className="block truncate text-xs leading-relaxed text-foreground/90">
+              {item.bodyPreview}
             </span>
-          ))}
-        </span>
-      </span>
-    </Button>
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -179,7 +201,12 @@ export function ActivityList({
                 ? item.bodyPreview
                 : undefined
             }
-            onOpen={() => onOpenTopic(topic.id)}
+            onOpen={() =>
+              onOpenTopic({
+                topicId: topic.id,
+                ...(item.postId ?? item.target.targetType === 'POST' ? { postId: item.postId ?? item.target.id } : {}),
+              })
+            }
             currentUserId={currentUserId}
             getAuthorSummary={getAuthorSummary}
             loadAuthorSummary={loadAuthorSummary}

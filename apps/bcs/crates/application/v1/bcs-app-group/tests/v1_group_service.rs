@@ -939,3 +939,9 @@ mod notify_mode;
 
 #[path = "v1_group_service/originator_v1_policy.rs"]
 mod originator_v1_policy;
+
+#[path = "v1_group_service/avatars.rs"]
+mod avatars;
+
+#[path = "v1_group_service/avatar_budget.rs"]
+mod avatar_budget;

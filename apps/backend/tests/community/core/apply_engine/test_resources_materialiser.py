@@ -53,6 +53,7 @@ from agentclaw.community.core.apply_engine.registry import (
     build_materialisers,
 )
 
+from ._empty_cli_tools import EmptyCliTools
 from ._fakes import (
     EngineRig,
     FakeActivationService,
@@ -602,7 +603,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     _run(m.plan(ctx, resolved.intents))
-    assert svc.listing_calls == [
+    assert svc.clear_calls == [
         {
             "entity_type": "staff",
             "entity_id": "u_owner",
@@ -613,9 +614,8 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     assert svc.exists_probes == []
 
 
-def test_plan_makes_one_root_listing_and_no_presence_probes():
-    """One listing classifies every member and yields the removals; per-member
-    ``exists`` probes are the N round trips the listing replaces."""
+def test_plan_lists_the_root_and_unprotected_subtree_without_presence_probes():
+    """The root and its unprotected subtree provide the snapshot without per-file probes."""
     archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
     svc = FakeResourceFileService()
     svc.record_present("data/wrap/a.txt", "data/stale.md")
@@ -633,7 +633,7 @@ def test_plan_makes_one_root_listing_and_no_presence_probes():
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     plan = _run(m.plan(ctx, resolved.intents))
-    assert len(svc.listing_calls) == 1
+    assert [(call["prefix"], call["recursive"]) for call in svc.list_calls] == [("", False), ("data", True)]
     assert svc.exists_probes == []
     assert len(plan.entries) == 4
     assert plan.removals == ("data/stale.md",)
@@ -693,7 +693,7 @@ def _write_through(m, ctx, entries):
     resolved = _run(m.resolve(ctx, entries))
     assert resolved.ok, [f.reason for f in resolved.failures]
     plan = _run(m.plan(ctx, resolved.intents))
-    return plan, _run(m.write(ctx, plan))
+    return plan, _run(m.write(ctx, plan)).entries
 
 
 def test_write_clears_the_root_then_uploads_every_member():
@@ -711,7 +711,7 @@ def test_write_clears_the_root_then_uploads_every_member():
     # including files the new archive no longer ships and hand-added ones
     # (the ownership rule). The uploads land *after* it, or they would not
     # be present now.
-    assert len(svc.clear_calls) == 1
+    assert len(svc.listing_calls) == 2
     assert svc.deleted == ["data"]  # the root entry, whole
     assert svc.writes == {
         ("data/wrap", "a.txt"): b"AAA",
@@ -834,8 +834,8 @@ def test_a_silently_failed_clear_fails_every_member_and_writes_nothing():
     assert svc.upload_calls == [] and svc.writes == {}
     assert svc.present == {"data/tools/old.md"}
     assert rows.replacements == []
-    # No second listing: the plan's own listing is what tells a refusal from an absent root.
-    assert len(svc.listing_calls) == 1
+    # The write-stage listing confirms what was present when clear ran.
+    assert len(svc.listing_calls) == 2
 
 
 def test_a_clear_that_raises_fails_every_member_in_composed_words():
@@ -882,7 +882,8 @@ def test_an_empty_root_is_already_clear():
     assert [r.outcome.value for r in results] == ["created"]
     assert svc.writes == {("data/tools", "a.md"): b"A"}
     assert plan.removals == ()
-    assert len(svc.listing_calls) == 1 and len(svc.clear_calls) == 1
+    assert len(svc.clear_calls) == 2
+    assert svc.listing_calls == []
     assert svc.delete_dir_calls == [] and svc.delete_calls == []
 
 
@@ -900,7 +901,7 @@ def test_a_refused_clear_over_members_that_were_all_present_is_a_failure():
     assert plan.removals == () and [e.outcome for e in plan.entries] == ["updated"]
     with pytest.raises(ResourcesRootNotCleared):
         _run(m.write(ctx, plan))
-    assert svc.writes == {} and len(svc.listing_calls) == 1
+    assert svc.writes == {} and len(svc.listing_calls) == 2
 
 
 def test_a_file_the_bot_wrote_after_the_plan_listed_an_empty_root_still_fails_a_refused_clear():
@@ -935,7 +936,7 @@ def test_a_plan_whose_listing_fails_aborts_in_the_stages_words_with_the_cause_ch
         _run(m.plan(ctx, resolved.intents))
     assert str(caught.value) == ROOT_NOT_LISTED_REASON and "token" not in str(caught.value)
     assert "token" in str(caught.value.__cause__)
-    assert svc.clear_calls == [] and svc.writes == {}
+    assert svc.listing_calls[1:] == [] and svc.writes == {}
 
 
 def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log():
@@ -992,14 +993,13 @@ def test_write_addresses_the_bot_owner():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.clear_calls == [
-        {
-            "entity_type": "staff",
-            "entity_id": "u_owner",
-            "bot_id": "b_1",
-            "engine_type": "claude_code",
-        }
-    ]
+    assert len(svc.clear_calls) == 2
+    assert all(call == {
+        "entity_type": "staff",
+        "entity_id": "u_owner",
+        "bot_id": "b_1",
+        "engine_type": "claude_code",
+    } for call in svc.clear_calls)
     assert svc.upload_calls == [
         {
             "entity_type": "staff",
@@ -1035,7 +1035,7 @@ def test_write_is_player_setup_convergent():
     assert svc.present == {"data/wrap/a.txt"}
     # The first clear found an empty root; the second removed apply #1's directory whole.
     assert svc.deleted == ["data"]
-    assert len(svc.clear_calls) == 2
+    assert len(svc.clear_calls) == 4
     assert len(rows.replacements) == 2
     assert rows.rows == [WrittenFile("data/wrap/a.txt", 3)]
 
@@ -1120,7 +1120,7 @@ def test_build_materialisers_registers_six():
         content=object(),
         resource_service=object(),
         resource_rows=resource_rows_for()[0],
-        cli_tool_service=object(),
+        cli_tool_service=EmptyCliTools(),
         shared_skills=object(),
     )
     assert Category.RESOURCES in registry
@@ -1252,7 +1252,7 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     # The reason names the offending member inside the declared entry.
     assert "data/tools/run.sh" in resolved.failures[0].reason
     assert "file type" in resolved.failures[0].reason.lower()
-    assert svc.clear_calls == [] and svc.present == {"data/tools/old.md"}
+    assert svc.listing_calls[1:] == [] and svc.present == {"data/tools/old.md"}
 
 
 def test_an_extensionless_inline_file_fails_at_resolve():
@@ -1332,7 +1332,7 @@ def _resources_engine(svc, fetcher, *, resource_rows=None):
             content=content,
             resource_service=svc,
             resource_rows=resource_rows or resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=EmptyCliTools(),
             shared_skills=object(),
         ),
         steps=_arca_steps
@@ -1380,7 +1380,7 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
         )
     )
     # The preview wrote nothing: the root still holds the stale file.
-    assert svc.writes == {} and svc.deleted == [] and svc.clear_calls == []
+    assert svc.writes == {} and svc.deleted == [] and len(svc.clear_calls) == 1
     assert svc.present == {"data/stale.md"}
     assert rows.replacements == []
 
@@ -1426,7 +1426,7 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
             started_at=datetime.now(), dry_run=True,
         )
     )
-    assert svc.deleted == [] and svc.clear_calls == [] and rows.replacements == []
+    assert svc.deleted == [] and len(svc.clear_calls) == 1 and rows.replacements == []
     real = _run(
         engine.apply(
             ctx, document, apply_id="a2", trigger="explicit",
@@ -1545,7 +1545,7 @@ def test_routed_bots_address_the_runtime_engine_workspace():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.clear_calls[0]["engine_type"] == "aicoding"
+    assert svc.clear_calls[1]["engine_type"] == "aicoding"
     assert all(c["engine_type"] == "aicoding" for c in svc.upload_calls)
     assert all(c["engine_type"] == "aicoding" for c in svc.listing_calls)
     assert svc.exists_probes == []
@@ -1567,7 +1567,7 @@ def test_unrouted_bots_keep_the_active_engine():
         _write_through(
             m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
         )
-        assert svc.clear_calls[0]["engine_type"] == "claude_code"
+        assert svc.clear_calls[1]["engine_type"] == "claude_code"
 
     svc = FakeResourceFileService()
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
@@ -1575,7 +1575,7 @@ def test_unrouted_bots_keep_the_active_engine():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.clear_calls[0]["engine_type"] == "openclaw"
+    assert svc.clear_calls[1]["engine_type"] == "openclaw"
 
 
 def test_an_engineless_bot_record_falls_back_to_the_context_engine():
@@ -1589,7 +1589,7 @@ def test_an_engineless_bot_record_falls_back_to_the_context_engine():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.clear_calls[0]["engine_type"] == "openclaw"
+    assert svc.clear_calls[1]["engine_type"] == "openclaw"
 
 
 # --- the apply-time path belt re-asks the schema's own rule (F6) ---
@@ -1887,7 +1887,7 @@ def test_a_member_refused_by_admission_aborts_with_the_root_still_standing():
     assert not resolved.ok
     assert resolved.intents == ()
     assert "bad.exe" in resolved.failures[0].reason
-    assert svc.clear_calls == [] and svc.present == {"data/kb/ok.md"}
+    assert svc.listing_calls[1:] == [] and svc.present == {"data/kb/ok.md"}
 
 
 def test_two_entries_share_one_declared_git_source():

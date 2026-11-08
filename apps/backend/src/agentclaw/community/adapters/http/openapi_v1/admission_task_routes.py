@@ -14,6 +14,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): AdmissionMode.OPEN,
     # Public BBS unified writes. The author is declared explicitly in the
     # request body (``author_type`` + ``author_id``); this is a backend API
     # reached by humans, Bots and app-to-app callers alike, so the surface does
@@ -142,4 +146,8 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # authorizes. Same shape as the other task public operations.
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
+    # task_config match: a typed config probe (spec 2026-11-02). No addressed
+    # bot — any authenticated principal may read. The authorization row beside
+    # it is NoCheck for the same reason.
+    ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
 }

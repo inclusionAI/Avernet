@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
@@ -29,7 +29,7 @@ beforeEach(() => {
   git(repo, 'add', '.'); git(repo, 'commit', '-m', 'base'); base = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'push', 'origin', `HEAD:refs/heads/wf/flow`);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
 it('changes only requested scripts, preserving files and executable mode', async () => {
   const { commit } = await writePackScripts({ ...input(), changes: [
     { path: 'scripts/edit.sh', content: '你好\n' }, { path: 'scripts/new.py', content: 'print(1)\n' }, { path: 'scripts/delete.sh', content: null },
@@ -170,4 +170,46 @@ it('rejects missing manifest and unsafe or unbound workflow paths', async () => 
     writeFileSync(path.join(repo, 'packs/pack/workflow.pack.yaml'), manifest); commitBase();
     await expect(writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] })).rejects.toThrow();
   }
+});
+
+describe('configured temporary parent for pack script writes', () => {
+  const configuredParent = () => {
+    const parent = path.join(root, 'configured-temp'); mkdirSync(parent);
+    return parent;
+  };
+
+  it('stages writes under CLAWWEB_TEMP_DIR', async () => {
+    const parent = configuredParent(); vi.stubEnv('CLAWWEB_TEMP_DIR', parent);
+    const spy = vi.spyOn(gitExecution, 'executeGit');
+    const { commit } = await writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] });
+    const indexFile = spy.mock.calls.map(([, options]) => options?.env?.GIT_INDEX_FILE).find(Boolean);
+    expect(String(indexFile).startsWith(path.join(parent, 'pack-write-'))).toBe(true);
+    expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(commit);
+    expect(readdirSync(parent)).toEqual([]);
+  });
+
+  it('fails without staging or writing when the configured parent is missing', async () => {
+    const parent = configuredParent();
+    vi.stubEnv('CLAWWEB_TEMP_DIR', path.join(parent, 'missing'));
+    const before = git(remote, 'rev-parse', 'refs/heads/wf/flow');
+    await expect(writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] }))
+      .rejects.toThrow('临时目录不可用或配置无效');
+    expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(before);
+    expect(readdirSync(parent)).toEqual([]);
+  });
+});
+
+it('ignores an independent saved ref appearing during the wf push', async () => {
+  const execute = gitExecution.executeGit;
+  const spy = vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
+    const result = await execute(args, options);
+    if (args.includes('push')) git(repo, 'push', 'origin', `${base}:refs/heads/saved/flow`);
+    return result;
+  });
+  try {
+    await expect(writePackScripts({ ...input(), changes: [{ path: 'scripts/edit.sh', content: 'changed' }] })).resolves.toMatchObject({ commit: expect.any(String) });
+    expect(git(remote, 'rev-parse', 'refs/heads/saved/flow')).toBe(base);
+    // Never undo a possibly successful wf push to disguise a cross-ref race.
+    expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).not.toBe(base);
+  } finally { spy.mockRestore(); }
 });

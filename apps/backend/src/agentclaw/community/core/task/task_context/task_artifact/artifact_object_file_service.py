@@ -106,6 +106,7 @@ class TaskArtifactObjectFileServiceProtocol(Protocol):
         payload: bytes,
         creator: str | None = None,
         artifact_name: str | None = None,
+        is_final_artifact: str = "false",
         content_type: str | None = None,
         relay_token: str | None = None,
     ) -> TaskArtifactRecord:
@@ -160,6 +161,7 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
         payload: bytes,
         creator: str | None = None,
         artifact_name: str | None = None,
+        is_final_artifact: str = "false",
         content_type: str | None = None,
         relay_token: str | None = None,
     ) -> TaskArtifactRecord:
@@ -211,6 +213,7 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
             file_type=self._resolve_file_type(file_name, content_type),
             file_name=file_name,
             file_id=None,
+            is_final_artifact=is_final_artifact,
         )
 
         if not self._object_storage.put_object(key, payload):

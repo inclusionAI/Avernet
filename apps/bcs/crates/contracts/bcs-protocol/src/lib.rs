@@ -31,7 +31,7 @@ pub use http::chat_run;
 pub use http::{
     BCN_EVENT_ID_HEADER, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER, BCN_TRANSPORT_HEADER,
     BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER, BCN_TIMESTAMP_HEADER,
-    AdminOnboardRequest, BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BotCapabilities,
+    AdminOnboardRequest, AvatarField, BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BotCapabilities,
     BotContextSummary, BotDynamicStatus, BotInfo, ChatRunCancelResponse, ChatRunResponseContent,
     ChatRunDeliverySummary, ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse, Conflict, ConflictPosition,
     AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,

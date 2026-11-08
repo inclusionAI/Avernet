@@ -96,7 +96,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.getByText('最新回复：2 小时前')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('PRD 风格主题卡片'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-1' });
   });
 
   it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
@@ -208,7 +208,8 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
   });
 
-  it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+  it('keeps liked topic and reply rows separate while distinguishing their source content', async () => {
+    const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'LIKED';
     mockedCenter.activityPage = {
       items: [
@@ -239,15 +240,22 @@ describe('CommunityPersonalCenter', () => {
       total: 2,
     };
 
-    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
+
+    fireEvent.click(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容'));
+    expect(onOpenTopic).toHaveBeenCalledWith({
+      topicId: 'topic-1',
+      postId: 'post-1',
+    });
 
     expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toHaveClass('truncate');
-    expect(screen.getByTitle('这是一个需要完整 hover 展示的比较长回复内容')).toHaveAttribute(
-      'title',
-      '这是一个需要完整 hover 展示的比较长回复内容',
-    );
+    // unify-tooltip-antd：正文预览由统一 Tooltip 悬停承载（原原生 title 迁移）
+    await userEvent.setup().hover(screen.getByRole('heading', { name: `回复：这是一个需要完整 hover 展示的比较长回复内容` }));
+    expect(
+      await screen.findByText(/这是一个需要完整 hover 展示的比较长回复内容/, { selector: '[role="tooltip"]' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('主题标题，主题内容')).toBeInTheDocument();
     expect(screen.getByText('共 2 条')).toBeInTheDocument();
   });
@@ -349,7 +357,7 @@ describe('CommunityPersonalCenter', () => {
       { target: { targetType: 'TOPIC', id: 'topic-2' } },
     ]);
     fireEvent.click(screen.getByText('张三的主题'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
     fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
     expect(onUnfollow).toHaveBeenCalledTimes(1);
   });
@@ -444,6 +452,18 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
 
     fireEvent.click(screen.getByText('误报率怎么压下来'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2' });
+
+    fireEvent.click(screen.getByText('我直接回复帖子本身的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-direct',
+    });
+
+    fireEvent.click(screen.getByText('我回复另一个回复的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-child',
+    });
   });
 });

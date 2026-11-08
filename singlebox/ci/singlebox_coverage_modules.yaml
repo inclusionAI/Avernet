@@ -199,9 +199,10 @@ modules:
     core_paths:
       - src/agentclaw/community/core/bot_management/ownership_sync/
     router_api:
-      status: not_applicable
-      reason: Ownership sync owns no HTTP routes; handoff routes belong to the upstream business module.
-      items: []
+      status: applicable
+      reason: Authenticated administrator repair admits current ownership through the production sync runtime; handoff remains upstream.
+      items:
+        - POST /api/bots/owner-handoffs/bcn-repair
     plugin_api:
       status: applicable
       reason: Real direct BCS ownership delivery and its lifecycle release at stack shutdown.
@@ -220,6 +221,7 @@ modules:
       # e8e970a9f3f8127598cf4d5f1e721c1119fafb91f13dc826e893fbc206c84931
       # Includes repair and error paths; no unit/maintenance-driver coverage.
       core_min_percent: 65.90
+      router_min_percent: 100.0
       plugin_min_percent: 100.0
 
   cron:

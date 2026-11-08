@@ -465,3 +465,6 @@ mod candidates_and_projection;
 
 #[path = "v1_bot_service/mine.rs"]
 mod mine;
+
+#[path = "v1_bot_service/avatars.rs"]
+mod avatars;

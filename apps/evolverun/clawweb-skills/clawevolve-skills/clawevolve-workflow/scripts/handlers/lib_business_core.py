@@ -21,7 +21,18 @@ def select_business_core(args: Any) -> BusinessCore | None:
             or os.environ.get("CLAWEVOLVE_CLAWWEB_URL") or os.environ.get("CLAWWEB_URL"))
     if getattr(args, "skip_clawweb", False) or not base or not getattr(args, "step_id", ""):
         return None
-    context = begin_stage_core(task_id=args.task_id, step_id=args.step_id, clawweb_url=base)
+    try:
+        context = begin_stage_core(task_id=args.task_id, step_id=args.step_id, clawweb_url=base,
+            **({"reference_materials_version": args.reference_materials_version} if getattr(args, "reference_materials_version", "") else {}))
+    except Exception as exc:
+        # Material preparation precedes Optimize's native watchdog. Report a
+        # definite failure here instead of leaving the Step dispatched.
+        if getattr(args, "reference_materials_version", ""):
+            from clawevolve_runtime.runtime import _fail
+            args.clawweb_url = base
+            args.message = f"Reference material preparation failed: {exc}"
+            _fail(args)
+        raise
     if context["selected"]:
         args._business_core = BusinessCore(context)
     return args._business_core

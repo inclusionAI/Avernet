@@ -23,6 +23,39 @@ function msToIso(ms: number): string {
   return Number.isNaN(d.getTime()) ? String(ms) : d.toISOString();
 }
 
+function artifactCreateTimeMs(a: TaskArtifactView): number | null {
+  const raw = a.updatedAt?.trim();
+  if (!raw) return null;
+  const time = Date.parse(raw);
+  if (!Number.isNaN(time)) return time;
+  const numeric = Number(raw);
+  return Number.isNaN(numeric) ? null : numeric;
+}
+
+/**
+ * 产物显示排序:棒次内 gmt_create 正序;同时间反转后端输入序还原 ID 正序。
+ * Descriptor 的 created_at 由后端 gmt_create 折算而来;legacy 产物的 created_at
+ * 仅为展示串,解析失败时排在可解析产物之后,再按可用的输入序或产物 ID 提供稳定顺序。
+ */
+export function compareArtifactsByCreationOrder(
+  a: TaskArtifactView,
+  b: TaskArtifactView,
+): number {
+  const aTime = artifactCreateTimeMs(a);
+  const bTime = artifactCreateTimeMs(b);
+  if (aTime !== bTime) {
+    if (aTime === null) return 1;
+    if (bTime === null) return -1;
+    return aTime - bTime;
+  }
+  if (typeof a.sourceOrder === 'number' && typeof b.sourceOrder === 'number' && a.sourceOrder !== b.sourceOrder) {
+    // 后端读侧按 id 倒序给出列表;反转输入序即可在同 gmt_create 下还原 id 正序。
+    return b.sourceOrder - a.sourceOrder;
+  }
+  // 未携带 sourceOrder 的调用方退回 artifact_id 做稳定兜底。
+  return a.id.localeCompare(b.id, undefined, { numeric: true });
+}
+
 /** kind → legacy type 口径(渲染徽章复用既有 ARTIFACT_TYPE_LABELS) */
 function kindToType(kind: TaskArtifactDescriptorDto['kind']): TaskArtifactView['type'] {
   switch (kind) {
@@ -44,6 +77,7 @@ export function normalizeDescriptor(
   const c: Record<string, unknown> = d.content ?? {};
   const name =
     d.artifact_name ?? (d.kind === 'file' ? str(c.file_name) : null) ?? d.artifact_id;
+  const isFinalArtifact = c.is_final_artifact === 'true';
   const storageType = normalizeStorageType(c.storage_type);
   const storageId = str(c.storage_id);
   const linkUrl = d.kind === 'url_link' ? str(c.url) : null;
@@ -77,6 +111,7 @@ export function normalizeDescriptor(
           }
         : null,
     nodeId: fallbackNodeId,
+    isFinalArtifact,
     owner: d.creator ?? null,
     updatedAt: msToIso(d.created_at),
     fileRef,
@@ -110,15 +145,19 @@ export function mergeArtifactLists(
   fallbackNodeId: string | null,
 ): TaskArtifactView[] {
   const merged = new Map<string, TaskArtifactView>();
-  for (const d of descriptors ?? []) {
-    merged.set(d.artifact_id, normalizeDescriptor(d, fallbackNodeId));
+  for (const [sourceOrder, d] of (descriptors ?? []).entries()) {
+    merged.set(d.artifact_id, { ...normalizeDescriptor(d, fallbackNodeId), sourceOrder });
   }
-  for (const a of legacy ?? []) {
+  const descriptorCount = descriptors?.length ?? 0;
+  for (const [index, a] of (legacy ?? []).entries()) {
     if (!merged.has(a.artifact_id)) {
-      merged.set(a.artifact_id, legacyToView(a, fallbackNodeId));
+      merged.set(a.artifact_id, {
+        ...legacyToView(a, fallbackNodeId),
+        sourceOrder: descriptorCount + index,
+      });
     }
   }
-  return [...merged.values()];
+  return [...merged.values()].sort(compareArtifactsByCreationOrder);
 }
 
 /**

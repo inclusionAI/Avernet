@@ -1,5 +1,9 @@
 import { serializeConversationRoute } from '@/domain/conversation';
 import type { BotDomain } from '@/services/botWorkshop';
+import {
+  buildDraftOrPrestableServiceCodingBotChatHref,
+  isDraftOrPrestableServiceCodingBot,
+} from '@/services/botWorkshop/botPolicy';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { workspaceService } from '@/services/workspace';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -17,6 +21,13 @@ export function useBotWorkshopNavigation() {
     history.push(`/bot-workshop/detail?${params.toString()}`);
   }, []);
   const openConversation = useCallback((bot: BotDomain) => {
+    // Draft/verify service Coding Bots are absent from TeamClaw's online chat
+    // directory. Route to AIXCoding's standalone app, which owns the
+    // non-online service runtime.
+    if (isDraftOrPrestableServiceCodingBot(bot)) {
+      history.push(buildDraftOrPrestableServiceCodingBotChatHref(bot));
+      return;
+    }
     const current = useWorkspaceStore.getState();
     const user = current.identities.find((identity) => identity.kind === 'user');
     if (!user) {

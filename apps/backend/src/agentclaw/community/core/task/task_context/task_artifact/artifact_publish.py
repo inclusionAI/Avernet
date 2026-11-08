@@ -167,10 +167,11 @@ def capture_write_point(graph, node, *, patch, now_ms: int) -> None:
 
 
 class TaskArtifactPublishService:
-    """发布点 capture:文本双轨派生 + 报文 patch 逐条 → 构造记录并 stage。
+    """发布点 capture:可控制 output 文本派生 + 报文 patch 逐条 → 记录并 stage。
 
-    纯函数式(无依赖注入、无 IO);capture 发生在图变更闭包内 fold 之后,
-    从提交前快照取值,保证版本重放安全。
+    纯函数式(无依赖注入、无 IO)。Relay 通道传入
+    ``derive_text_from_output=False``,产物只来自显式 ``artifact_patch``,
+    避免把 ``output_patch.result`` 再额外挂成一条 text 台账。
     """
 
     def capture_node(
@@ -180,6 +181,7 @@ class TaskArtifactPublishService:
         *,
         artifact_patch: "list[ArtifactReportItem] | None",
         now_ms: int,
+        derive_text_from_output: bool = True,
     ) -> list[TaskArtifactRecord]:
         task_id = node.task_id or graph.task_id
         node_id = node.node_id
@@ -188,39 +190,40 @@ class TaskArtifactPublishService:
         creator = node.run_info.assignee or "system"
 
         records: list[TaskArtifactRecord] = []
-        # 文本双轨:fold 后 output 派生,两类各至多 1 条(§5.1);
-        # 与 relay 投影(``_relay_output_value``)是超集分叉,互不影响。
-        text_value = artifact_text_value(node.run_info.output or {})
-        if text_value is not None:
-            records.append(
-                self._record(
-                    task_id=task_id,
-                    node_id=node_id,
-                    attempt=attempt,
-                    scope_session_id=session_id,
-                    kind=ArtifactKind.TEXT,
-                    content=TextContent(text=text_value),
-                    artifact_name=None,
-                    creator=creator,
-                    now_ms=now_ms,
+        if derive_text_from_output:
+            # 文本双轨:fold 后 output 派生,两类各至多 1 条(§5.1);
+            # 与 relay 投影(``_relay_output_value``)是超集分叉,互不影响。
+            text_value = artifact_text_value(node.run_info.output or {})
+            if text_value is not None:
+                records.append(
+                    self._record(
+                        task_id=task_id,
+                        node_id=node_id,
+                        attempt=attempt,
+                        scope_session_id=session_id,
+                        kind=ArtifactKind.TEXT,
+                        content=TextContent(text=text_value),
+                        artifact_name=None,
+                        creator=creator,
+                        now_ms=now_ms,
+                    )
                 )
-            )
-        elif self._is_control_signal(node.run_info.output or {}):
-            records.append(
-                self._record(
-                    task_id=task_id,
-                    node_id=node_id,
-                    attempt=attempt,
-                    scope_session_id=session_id,
-                    kind=ArtifactKind.TEXT,
-                    content=TextContent(
-                        text=canonical_json(node.run_info.output or {})
-                    ),
-                    artifact_name=None,
-                    creator=creator,
-                    now_ms=now_ms,
+            elif self._is_control_signal(node.run_info.output or {}):
+                records.append(
+                    self._record(
+                        task_id=task_id,
+                        node_id=node_id,
+                        attempt=attempt,
+                        scope_session_id=session_id,
+                        kind=ArtifactKind.TEXT,
+                        content=TextContent(
+                            text=canonical_json(node.run_info.output or {})
+                        ),
+                        artifact_name=None,
+                        creator=creator,
+                        now_ms=now_ms,
+                    )
                 )
-            )
 
         # 报文 patch 逐条:attempt 与图上快照交叉校验,失配即拒整个回调(§4 规则 4)。
         for item in artifact_patch or []:

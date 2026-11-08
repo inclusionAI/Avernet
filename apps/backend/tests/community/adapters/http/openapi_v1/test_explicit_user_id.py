@@ -288,6 +288,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
+    # The Bot overview carries only non-user data, identical for every caller.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/overview"),
     # The minimal classification is tenant-wide, not owner-scoped.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
@@ -325,6 +327,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts/{{post_id}}/location",
+    ),
     # BBS Browse-Loop per-owner list: filtered by the explicit ``owner_id``
     # query, never by a ``user_id`` axis -- a backend read keyed on the
     # declared owner, so it sits in the no-user-dimension set.
@@ -387,6 +393,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Catalogue profile is readable exactly when BCS returns the bot for the
+    # addressed bot_uuid: catalogue membership is itself the authorization
+    # decision, so there is no caller-supplied user scope on the wire.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/profile/{{bot_uuid}}"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
@@ -418,6 +428,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
+    # task_config match is a typed-config probe: env is resolved server-side
+    # and the probed value (a bot id) arrives in the body, so the operation
+    # names no caller-supplied user dimension.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/config/match"),
     # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
@@ -621,7 +635,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
-_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 139}
+# The non-user Bot overview adds one Bot-path operation with no user_id.
+# The task_config match probe adds one operation without a path/query bot_id.
+# Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 143}
 
 
 def _schema() -> dict:
@@ -832,7 +849,7 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 289
+    assert len(taking) == 291
 
 
 def test_the_exempt_operations_take_none():

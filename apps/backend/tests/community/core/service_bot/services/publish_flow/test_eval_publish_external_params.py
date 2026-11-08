@@ -20,8 +20,15 @@ from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mix
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
-def _record(*, ext=None, status=None) -> BotPublishRecord:
+_DEFAULT_EXT = object()
+
+
+def _record(*, ext=_DEFAULT_EXT, status=None) -> BotPublishRecord:
+    """Build a publish record; ``ext=None`` must remain explicit, not defaulted."""
     now = datetime.now()
+    ext_value = (
+        {"migration_path": "/arca/snapshot"} if ext is _DEFAULT_EXT else ext
+    )
     return BotPublishRecord(
         id=42,
         source_bot_pk=1,
@@ -33,7 +40,7 @@ def _record(*, ext=None, status=None) -> BotPublishRecord:
         version=1,
         env="dev",
         status=status or PublishStatus.BUILT.value,
-        ext=ext or {"migration_path": "/arca/snapshot"},
+        ext=ext_value,
         gmt_create=now,
         gmt_modified=now,
     )
@@ -83,9 +90,25 @@ class _FakeEvalPublishService(EvalPublishMixin):
         return "baas"
 
 
+def _capture_release(svc):
+    """Make the fake operation runner execute the BaaS release callback."""
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+    return svc._build_service.release_async
+
+
 _TEARDOWN_PATCH = (
     "agentclaw.community.core.service_bot.services.publish_flow.tasks"
     ".enqueue_eval_teardown"
+)
+_EXTRA_ENVS_PATCH = (
+    "agentclaw.community.core.service_bot.services.publish_flow."
+    "eval_publish_mixin.service_publish_extra_envs"
 )
 
 
@@ -216,3 +239,121 @@ async def test_eval_publish_rejects_non_positive_device_count() -> None:
         match="device_count must be at least 1",
     ):
         await svc.eval_publish(42, "tester", device_count=0)
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_survives_none_publish_ext_with_external_artifact() -> None:
+    """生产形态：publish_record.ext=None 不再触发 NoneType.get 异常。"""
+    record = _record(ext=None)
+    artifact_ext = {
+        "migration_path": "/arca/current-build",
+        "skills_manifest": {"active_layout": "pool_active"},
+    }
+    svc = _FakeEvalPublishService(publish_record=record)
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH), patch(
+        _EXTRA_ENVS_PATCH, return_value={"AGENTCLAW_SKILLS_LAYOUT": "pool_active"}
+    ) as extra_envs:
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            migration_path="/external/current-build",
+            artifact_ext=artifact_ext,
+        )
+
+    assert result["success"] is True
+    assert record.ext is None
+    assert svc._ext_state.commit_built_artifact.call_count == 0
+    release_kwargs = release_async.await_args.kwargs
+    assert release_kwargs["migration_path"] == "/external/current-build"
+    assert (
+        release_kwargs["ext_info"]["skills_manifest"]
+        == artifact_ext["skills_manifest"]
+    )
+    assert (
+        release_kwargs["extra_envs"]["AGENTCLAW_SKILLS_LAYOUT"] == "pool_active"
+    )
+    assert (
+        extra_envs.call_args.args[0]["skills_manifest"]
+        == artifact_ext["skills_manifest"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_current_artifact_manifest_overrides_stored_manifest() -> None:
+    """DRAFT eval 必须使用本次构建 manifest，而不是 DB ext 里的旧 manifest。"""
+    stale_manifest = {"active_layout": "legacy_active"}
+    current_manifest = {"active_layout": "pool_active"}
+    record = _record(
+        ext={"migration_path": "/arca/old", "skills_manifest": stale_manifest}
+    )
+    artifact_ext = {
+        "migration_path": "/arca/current-build",
+        "skills_manifest": current_manifest,
+    }
+    svc = _FakeEvalPublishService(publish_record=record)
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH), patch(_EXTRA_ENVS_PATCH, return_value={}):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            artifact_ext=artifact_ext,
+        )
+
+    assert result["success"] is True
+    assert record.ext["skills_manifest"] == stale_manifest
+    release_kwargs = release_async.await_args.kwargs
+    assert release_kwargs["migration_path"] == "/arca/current-build"
+    assert release_kwargs["ext_info"]["skills_manifest"] is current_manifest
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_current_artifact_without_manifest_does_not_reuse_stored() -> None:
+    """本次构建没有 manifest 时，不能回退 ac_bot_publish.ext 里的旧 manifest。"""
+    stale_manifest = {"active_layout": "legacy_active"}
+    record = _record(
+        ext={"migration_path": "/arca/old", "skills_manifest": stale_manifest}
+    )
+    artifact_ext = {"migration_path": "/arca/current-build"}
+    svc = _FakeEvalPublishService(publish_record=record)
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH), patch(_EXTRA_ENVS_PATCH, return_value={}) as extra_envs:
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            artifact_ext=artifact_ext,
+        )
+
+    assert result["success"] is True
+    release_kwargs = release_async.await_args.kwargs
+    assert "skills_manifest" not in release_kwargs["ext_info"]
+    assert extra_envs.call_args.args[0]["skills_manifest"] is None
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_without_artifact_ext_falls_back_to_stored_manifest() -> None:
+    """非 DRAFT-build 调用方不传 artifact_ext 时保留 DB ext 兼容语义。"""
+    stored_manifest = {"active_layout": "pool_active"}
+    record = _record(
+        ext={
+            "migration_path": "/arca/snapshot",
+            "skills_manifest": stored_manifest,
+        }
+    )
+    svc = _FakeEvalPublishService(publish_record=record)
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH), patch(_EXTRA_ENVS_PATCH, return_value={}):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+        )
+
+    assert result["success"] is True
+    assert (
+        release_async.await_args.kwargs["ext_info"]["skills_manifest"]
+        is stored_manifest
+    )

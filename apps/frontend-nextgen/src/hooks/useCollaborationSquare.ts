@@ -15,7 +15,6 @@ import { useSquareGroupMembers } from '@/hooks/useSquareGroupMembers';
 import {
   CollaborationSquareError,
   collaborationSquareBotService,
-  collaborationSquareService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import {
@@ -81,16 +80,19 @@ export function useCollaborationSquare(resource: SquareResource) {
       store.setSelectedBotId(bot.id);
       store.setDetailLoading(true);
       try {
-        store.setBotProfile(await collaborationSquareService.getBotProfile(bot.id));
-      } catch (error) {
-        if (error instanceof CollaborationSquareError && error.code === 'target_invalid')
-          handleTargetInvalid('bot', bot.id);
-        else notifyError(getCollaborationSquareErrorMessage(error));
+        // 画像走 bot-catalog profile 真实端点（CollaborationSquareApiAdapter）；
+        // 原 mock fixture 链路已废弃——公开能力列表只有后端画像端点能给出。
+        store.setBotProfile(await collaborationSquareBotService.getBotProfile(bot.id));
+      } catch {
+        // 画像/已公开能力详情拉取失败（bot_uuid 不在公开目录、网络异常等）不做目标失效：
+        // 卡片保留、申请弹窗保持打开，按「无已公开能力」版式（dmore artboard-003）展示摘要并发起申请。
+        // 失败不弹 toast——404 被映射为 target_invalid，对列表中可见的卡片误报“已取消公开”更糟。
+        store.setBotProfile(null);
       } finally {
         store.setDetailLoading(false);
       }
     },
-    [handleTargetInvalid, store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
+    [store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
   );
 
   const openGroupMembers = useSquareGroupMembers(

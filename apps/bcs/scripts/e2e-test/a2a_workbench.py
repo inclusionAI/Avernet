@@ -47,7 +47,10 @@ def abort_task(base, owner, group, session, bot):
                     continue
                 result = json.loads(payload)
                 if result.get("id") == method:
-                    assert result.get("ok"), f"Workbench rejected {method}"
+                    assert result.get("ok"), (
+                        f"Workbench rejected {method}: code={result.get('error', {}).get('code')}; "
+                        f"failures={[failure.get('code') for failure in (result.get('error', {}).get('details') or {}).get('failures', [])]}"
+                    )
                     return result
             raise AssertionError("Workbench did not return " + method)
 

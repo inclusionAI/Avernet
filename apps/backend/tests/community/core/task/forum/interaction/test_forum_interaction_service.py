@@ -37,6 +37,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicAnalysisRecord,
     ForumTopicRecord,
 )
+from agentclaw.community.core.work_orders.models import WorkOrderEventType
 
 
 _NOW = datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc)
@@ -125,6 +126,19 @@ class FakeRepository(ForumInteractionRepositoryProtocol):
 
     def batch_get_actor_target_summaries(self, pairs):
         return {pair: ForumStatsRecord(like_count=7) for pair in pairs}
+
+
+def test_record_interaction_rejects_bare_default_bot_actor():
+    service = ForumInteractionService(FakeRepository(), FakeVerifier(), FakeAuthorStatsService())
+    with pytest.raises(ValidationError, match="default:<work_no>"):
+        service.record_interaction(
+            actor_type="BOT",
+            actor_id="default",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id="default:149844",
+            active=1,
+        )
 
 
 class FakeVerifier(ForumInteractionTargetVerifierProtocol):
@@ -490,3 +504,122 @@ def test_actor_dimension_counts_only_follow_events_and_author_production():
         result.stats.accepted_reply_count,
     ) == (8, 9, 10)
     assert stats.single_actors == []
+
+
+class FakeNotificationPublisher:
+    def __init__(self) -> None:
+        self.notices: list[dict] = []
+
+    def notify(self, **kwargs):
+        self.notices.append(dict(kwargs))
+
+
+def _notifying_service(
+    *,
+    repository=None,
+    verifier=None,
+    publisher=None,
+):
+    from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+        NotifyingForumInteractionService,
+    )
+
+    return NotifyingForumInteractionService(
+        repository or FakeRepository(),
+        verifier or FakeVerifier(),
+        FakeAuthorStatsService(),
+        publisher or FakeNotificationPublisher(),
+    )
+
+
+def test_notifying_interaction_deactivation_and_other_actions_do_not_notify():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=-1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+
+    assert publisher.notices == []
+
+
+def test_notifying_interaction_emits_notices_for_identity_and_post_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(publisher=publisher)
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-b",
+        active=1,
+    )
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert [notice["event_type"] for notice in publisher.notices] == [
+        WorkOrderEventType.BBS_FOLLOWED,
+        WorkOrderEventType.BBS_LIKED,
+    ]
+    assert publisher.notices[0]["recipient_type"] == "BOT"
+    assert publisher.notices[1]["recipient_type"] == "HUMAN"
+    assert publisher.notices[1]["topic_title"] == "Topic"
+
+
+def test_notifying_interaction_recipient_handles_missing_post_or_topic_targets():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=None, post=None), publisher=publisher
+    )
+
+    post_result = service._recipient(
+        target=ForumInteractionTargetType.POST,
+        target_id="post-missing",
+    )
+    topic_result = service._recipient(
+        target=ForumInteractionTargetType.TOPIC,
+        target_id="topic-missing",
+    )
+
+    assert post_result == ("POST", "post-missing", None, "post-missing", None)
+    assert topic_result == ("TOPIC", "topic-missing", "topic-missing", None, None)
+
+
+def test_notifying_interaction_uses_post_topic_title_when_available():
+    publisher = FakeNotificationPublisher()
+    service = _notifying_service(
+        verifier=FakeVerifier(topic=_topic(topic_type="HELP"), post=_post()),
+        publisher=publisher,
+    )
+
+    service.record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FAVORITE",
+        target_type="POST",
+        target_id="post-1",
+        active=1,
+    )
+
+    assert publisher.notices[0]["event_type"] == WorkOrderEventType.BBS_FAVORITED
+    assert publisher.notices[0]["topic_title"] == "Topic"

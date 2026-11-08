@@ -568,6 +568,14 @@ class TaskReportCommand:
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResult | None = None
     trace: TaskReportTrace | None = None
+    # 终态 PLAN_RESULT(event=null) 的最终产物列表。EXECUTION_RESULT 的节点产物
+    # 仍放在 TaskNodePatch.artifact_patch;这个命令级字段只用于最后一棒任务收口。
+    # 元素类型为 task_context/task_artifact/report_item.ArtifactReportItem,
+    # domain 包不 import task_context(层向纪律),注解按裸 list 保留。
+    artifact_patch: list | None = None
+    # 终态任务级结论文本。它写入 TaskExecutionGraph.output["final_conclusion"],
+    # 只用于轨迹归因与效果分析,不是产物,也不进入 task_artifact 台账。
+    final_conclusion: str | None = None
 
 
 @dataclass(frozen=True)

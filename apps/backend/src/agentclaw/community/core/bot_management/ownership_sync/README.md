@@ -11,6 +11,7 @@ purpose: Read current committed Bot ownership and submit bounded best-effort del
 provides:
   - BotOwnershipSyncService
   - OwnershipSyncRepairService
+  - OwnershipSyncOperations
   - notify_bot_ownership_sync
   - DisabledBotOwnershipSync
   - DisabledOwnershipSyncRepair
@@ -20,6 +21,9 @@ consumes:
   - OwnershipSyncReadRepository
   - BcsOwnershipPlugin
 internal_dependencies:
+  - agentclaw.community.core.bot_management.bcn_identity
+  - agentclaw.community.core.repository.protocols.bot
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.api.bot_ownership_sync
   - agentclaw.community.core.bot_collaborator.manager_sync.diagnostics
   - agentclaw.community.core.bot_collaborator.manager_sync.repair
@@ -46,8 +50,8 @@ binds the notifier to the existing managers dispatcher and lifecycle; admission
 is memory-only, never a delivery receipt. Owner delivery consumes Plugin API v1
 and the independent v1 ownership reader; no manager roster or Space query is a
 prerequisite. Each attempt reads fresh facts using tenant/env/PK, addresses BCS
-with immutable `bot_id:entity_id`, and sends current `owner_id` as personnel.
-Invalid/missing identity fails closed; no Owner fallback substitutes for entity.
+with the established BCN address (service entity or retained conversion reference), and sends current `owner_id` as personnel.
+Invalid/missing identity fails closed; service addressing never substitutes the mutable Owner for entity.
 
 `BotOwnershipSyncService.sync_once(key)` returns `CONFIRMED`,
 `BOT_MISSING_NOOP`, `DRIFT`, or `FAILED`. Only matching, confirmed Owner delivery
@@ -58,7 +62,8 @@ or cross-replica ordering guarantee. A failed round never freezes later work.
 `OwnershipSyncRepairService.request_bot(key: SyncKey) -> SubmissionResult` and
 `request_page(*, avernet_tenant: str, env: str, after_pk: int, limit: int) -> RepairPage`
 submit current facts through
-ordinary admission without an arbitrary Owner override. They add no public route.
+ordinary admission without an arbitrary Owner override. They remain internal. The administrator-only operations adapter admits a single
+service Bot by PK; it cannot override the Owner and never claims delivery confirmation.
 The exact signatures, lifecycle requirements, risk, and deployment steps are in
 [the operations guide](../../../../../../docs/bot-ownership-sync-operations.md).
 Consumer conformance is `tests/community/contracts/test_bcs_ownership.py`, using

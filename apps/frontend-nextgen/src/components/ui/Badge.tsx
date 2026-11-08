@@ -1,8 +1,8 @@
 import { cn } from '@/utils/cn';
 import React from 'react';
 
-type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'outline' | 'purple';
-const tones: Record<Tone, string> = {
+export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'outline' | 'purple';
+const tones: Record<BadgeTone, string> = {
   // D3: token 迁到 shadcn 软色模式 (bg-X/10 text-X)，保历史软徽章观感；沿用 `tone` API 零 callsite 改动。
   neutral: 'bg-muted text-muted-foreground',
   primary: 'bg-primary/10 text-primary',
@@ -17,7 +17,7 @@ export function Badge({
   tone = 'neutral',
   className,
   ...props
-}: React.HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
+}: React.HTMLAttributes<HTMLSpanElement> & { tone?: BadgeTone }) {
   return (
     <span
       className={cn(

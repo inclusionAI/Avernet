@@ -35,7 +35,7 @@ export function ParticipantRow({ bot, selected, recommendActive, isOriginator, c
       disabled={unavailable}
       aria-pressed={selected}
       className={cn(
-        'h-auto min-w-0 w-full max-w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
+        'h-auto min-h-16 min-w-0 w-full max-w-full justify-start gap-3 rounded-none border-0 px-3 py-3 text-left',
         unknown
           ? 'cursor-not-allowed bg-muted/40 text-muted-foreground'
           : cardMode
@@ -49,18 +49,18 @@ export function ParticipantRow({ bot, selected, recommendActive, isOriginator, c
       )}
       onClick={() => onToggle(bot.id)}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-sm font-medium text-muted-foreground">
         {avatarText(bot.name)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-xs font-semibold text-foreground">{bot.name}</span>
+          <span className="truncate text-sm font-medium text-foreground">{bot.name}</span>
           {isOriginator && (
             <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
               发起方
             </span>
           )}
-          <Badge tone={unavailable ? 'neutral' : 'primary'} className="flex shrink-0 items-center gap-1">
+          <Badge tone="neutral" className="flex shrink-0 items-center gap-1 border-0 bg-transparent px-0 font-normal">
             <i className={cn('h-1.5 w-1.5 rounded-full', bot.online ? 'bg-success' : 'bg-muted')} />
             {unknown ? '未知' : bot.online ? '在线' : '隐身'}
           </Badge>
@@ -71,7 +71,7 @@ export function ParticipantRow({ bot, selected, recommendActive, isOriginator, c
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                  <Sparkles className="h-3 w-3 shrink-0 text-amber-400" aria-hidden />
+                  <Sparkles className="h-3 w-3 shrink-0 text-warning" aria-hidden />
                   <span className="truncate">{shortProfile}</span>
                 </span>
               </TooltipTrigger>

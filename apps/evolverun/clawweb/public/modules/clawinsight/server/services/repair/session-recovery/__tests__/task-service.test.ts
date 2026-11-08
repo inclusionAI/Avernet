@@ -13,7 +13,7 @@ const request = { event_id: "evt", tc_fault_label: "TC.MCP.CALL", delivery_key: 
 const actor = { userId: "owner", isAdmin: false };
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
 afterEach(() => vi.restoreAllMocks());
-function setup(callbackFails = false) {
+function setup(callbackFails = false, now = () => 100) {
   const records = new Map<string, RecoveryStoredTask>();
   const store: RecoveryTaskStore = {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
@@ -36,11 +36,124 @@ function setup(callbackFails = false) {
   const notifier = { notify: vi.fn().mockResolvedValue(undefined) };
   const reporter = { report: callbackFails ? vi.fn().mockRejectedValue(new Error("callback offline")) : vi.fn().mockResolvedValue(undefined) };
   const deps: ConstructorParameters<typeof SessionRecoveryTaskService>[0] = { controlPlaneEnvironment: "pre", tasks: store, agent, notifier, reporter,
-    observationMs: 3600000, now: () => 100 };
+    observationMs: 3600000, now };
   return { records, delivery, agent, notifier, reporter, deps, service: new SessionRecoveryTaskService(deps) };
 }
 
 describe("self-healing task orchestration", () => {
+  it("reconciles a crashed card send with bounded updates of the same instance, retaining unknown delivery", async () => {
+    let now = 40000;
+    const { service, records, deps } = setup(false, () => now);
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.status = "waiting_owner";
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    const key = "owner-card-r1-pending-waiting_owner-assess";
+    task.timeline.push({ event_id: `${key}-0`, at_ms: 1, kind: "notification", actor: "service", summary: "发送中", payload: { channel: "owner_card", notification_key: key, state: "sending", operation: "create", owner_request_id: "r1" } });
+    const notify = vi.fn().mockResolvedValue(true); deps.notifier.notifyOwnerRequest = notify;
+    await service.maintenance(); await flush();
+    expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ updateOnly: true }));
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ state: "unconfirmed", sent: false, synced: true });
+    await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledOnce();
+    now = 200000; await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledTimes(2);
+    now = 400000; await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledTimes(2);
+  });
+  it("repairs a late old card write with the latest request instead of leaving a stale button", async () => {
+    const { service, records, deps } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!; task.status = "waiting_owner";
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "文档权限不足", instructions: "请申请原文档权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    let finishOld!: (value: boolean) => void;
+    const notify = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finishOld = resolve; })).mockResolvedValue(true);
+    deps.notifier.notifyOwnerRequest = notify;
+    await service.maintenance(); await flush();
+    records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "仍缺写权限" };
+    await service.maintenance(); await flush();
+    finishOld(true); await flush();
+    expect(notify).toHaveBeenCalledTimes(3);
+    expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "仍缺写权限" } } });
+  });
+  it("saves Owner feedback before asynchronously waking the same task, with Owner and control-plane checks", async () => {
+    const { service, records, agent, deps } = setup();
+    const { task_id } = await service.create(request, actor); await flush(); agent.start.mockClear();
+    const task = records.get(task_id)!;
+    task.execution = { executionId: "exec", stepId: "step", ticketDigest: "digest", jobId: "job", ccSessionId: null,
+      state: "running", leaseExpiresAt: 1000, decisionDeadlineAt: null, lastHeartbeatAt: 1, invalidatedAt: null };
+    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺文档权限" }];
+    await service.requestOwner(task_id, task.version, { reason: "permission", summary: "缺文档权限", instructions: "申请原文档读取权限", evidence_ids: ["read"], executionId: "exec" });
+    const pending = records.get(task_id)!;
+    expect(pending).toMatchObject({ status: "waiting_owner", plan: null, pending_results: [] });
+    const id = pending.ownerRequest!.requestId;
+    await expect(service.confirmOwner(task_id, id, { userId: "forged", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+    records.get(task_id)!.controlPlaneEnvironment = "prod";
+    await expect(service.confirmOwner(task_id, id, actor)).rejects.toMatchObject({ status: 409 });
+    records.get(task_id)!.controlPlaneEnvironment = "pre";
+    const update = deps.tasks.update;
+    deps.tasks.update = async () => { throw new Error("storage unavailable"); };
+    await expect(service.confirmOwner(task_id, id, actor)).rejects.toThrow("storage unavailable");
+    expect(agent.start).not.toHaveBeenCalled();
+    deps.tasks.update = update;
+    await service.confirmOwner(task_id, id, actor);
+    expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", ownerRequest: { status: "confirmed" } });
+    expect(agent.start).not.toHaveBeenCalled();
+    await flush(); expect(agent.start).toHaveBeenCalledOnce();
+    await service.confirmOwner(task_id, id, actor); await flush();
+    expect(agent.start).toHaveBeenCalledOnce();
+  });
+
+  it("maintenance resumes confirmed cooperation after a restart and expired execution without ending the request", async () => {
+    const { service, records, agent } = setup();
+    const { task_id } = await service.create(request, actor); await flush(); agent.start.mockClear();
+    const task = records.get(task_id)!;
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "confirmed", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1, feedback: { userId: "owner", text: "", atMs: 2 } };
+    task.requiresFreshObservation = true;
+    task.execution = undefined;
+    await service.maintenance();
+    expect(agent.start).toHaveBeenCalledOnce();
+    expect(records.get(task_id)?.status).toBe("running");
+  });
+  it("returns a post-plan Owner verification to verify and preserves the one-plan boundary", async () => {
+    const { service, records } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "权限已处理，原操作需核验" }];
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "confirmed", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: ["read"], resumePhase: "verify", createdAtMs: 1 };
+    task.plan = { summary: "原方案", basis: "b", scope: "s", verification: "v", actions: [], owner_cooperation: [], digest: "d", approvedAt: 1 };
+    await expect(service.assess(task_id, task.version, { decision: "environment", summary: "再建一套方案", evidence_ids: ["read"] })).rejects.toMatchObject({ status: 409 });
+    await service.assess(task_id, task.version, { decision: "observe", summary: "核验既有方案和权限后的效果", evidence_ids: ["read"] });
+    expect(records.get(task_id)).toMatchObject({ phase: "verify", plan: { digest: "d", approvedAt: 1 } });
+  });
+  it("cannot accept a post-feedback recovery claim from pre-feedback evidence", async () => {
+    const { service, records } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.evidence = [{ evidence_id: "old", tool_call_id: "call", source: "session_read", location: "original", excerpt: "反馈前的现场" }];
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "confirmed", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: ["old"], resumePhase: "assess", createdAtMs: 1 };
+    task.requiresFreshObservation = true;
+    await expect(service.assess(task_id, task.version, { decision: "observe", summary: "Owner说好了", evidence_ids: ["old"] })).rejects.toMatchObject({ status: 409 });
+    task.phase = "observe";
+    await expect(service.observe(task_id, task.version, { delivery: "unconfirmed", response: "none", effect: "recovered", summary: "Owner说好了", evidence_ids: ["old"] }, [])).rejects.toMatchObject({ status: 409 });
+    task.execution = { executionId: "exec", stepId: "step", ticketDigest: "digest", jobId: "job", ccSessionId: null,
+      state: "running", leaseExpiresAt: 1000, decisionDeadlineAt: null, lastHeartbeatAt: 1, invalidatedAt: null };
+    await expect(service.finishForOwnerHandoff(task_id, task.version, { summary: "Owner说好了，已恢复仅剩建议", evidence_ids: ["old"], executionId: "exec", effect: "recovered" })).rejects.toMatchObject({ status: 409 });
+    expect(records.get(task_id)?.status).toBe("running");
+  });
+  it("passes the frozen Bot and target environment to Owner notification policy without recording a disabled send", async () => {
+    const { service, records, notifier } = setup();
+    notifier.notify.mockResolvedValue(false);
+    const ack = await service.create(request, actor); await flush();
+    const task = records.get(ack.task_id)!;
+    task.phase = "plan";
+    task.level = "approval";
+    await service.plan(task.taskId, task.version, { summary: "需要 Owner 开通权限", basis: "已核实权限受限", scope: "目标服务权限",
+      verification: "权限恢复后核查原任务", actions: [], owner_cooperation: [{ request: "申请服务权限", basis: "服务明确拒绝访问" }] });
+    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
+      taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: "需要 Owner 开通权限" });
+    const saved = records.get(task.taskId)!;
+    expect(saved.status).toBe("waiting_owner");
+    expect(saved.timeline.some(event => event.kind === "notification")).toBe(false);
+  });
+
   it("counts a failed creation once without exposing diagnosis or credentials or replacing the error", async () => {
     const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps } = setup();
@@ -363,4 +476,38 @@ it("clears a paused summary when the same task resumes observation", async () =>
   await service.resume(task_id);
   expect(records.get(task_id)!).toMatchObject({ status: "running", requiresFreshObservation: true });
   expect(records.get(task_id)!.final_summary).toBeUndefined();
+});
+
+
+it.each(["observe", "verify"] as const)("preserves recovery at maintenance expiry after waiting for delivery in %s", async phase => {
+  let now = 100;
+  const { service, records, agent } = setup(false, () => now);
+  const { task_id } = await service.create(request, actor); await flush();
+  await service.recordDelivery(task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
+    result_text: "accepted", started_at_ms: 1, finished_at_ms: 2, error: null } });
+  const task = records.get(task_id)!; task.phase = phase;
+  task.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "runtime_inspect", location: "files", excerpt: "原失败步骤已成功" }];
+  const deadline = task.observationDeadlineAt!;
+  await service.observe(task_id, task.version, { delivery: "unconfirmed", response: "unknown", effect: "recovered",
+    summary: "原任务已恢复，等待触达证据", evidence_ids: ["proof"] }, [], "不应提前保存的最终总结");
+  expect(records.get(task_id)).toMatchObject({ status: "running", phase, pending_results: [], observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
+  expect(records.get(task_id)?.final_summary).toBeUndefined();
+  expect(agent.release).not.toHaveBeenCalled();
+  now = deadline;
+  await service.maintenance();
+  expect(records.get(task_id)).toMatchObject({ status: "completed", phase, observationDeadlineAt: deadline,
+    judgment: { effect: "recovered", delivery: "unconfirmed", evidence_ids: ["proof"] },
+    pending_results: [expect.objectContaining({ effect: "recovered", intervention_status: "unknown" })] });
+  expect(agent.release).toHaveBeenCalledOnce();
+});
+
+
+it("retains confirmed business recovery when an execution ends before delivery is confirmed", async () => {
+  const { service, records } = setup();
+  const { task_id } = await service.create(request, actor); await flush();
+  const task = records.get(task_id)!; task.phase = "observe";
+  task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务产物已恢复，等待触达证据", evidence_ids: [] };
+  await service.executionFailure(task_id, "AIS execution timed out");
+  expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" },
+    pending_results: [expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" })] });
 });

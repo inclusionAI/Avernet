@@ -42,7 +42,7 @@ async def classify_scope(engine, request, rule_version):
         )
         data.pop("candidate_action", None)
         data.pop("candidate_summary", None)
-        async with asyncio.timeout(40):
+        async with asyncio.timeout(70):
             return HostingScope.model_validate(
                 await engine.classify_scope(data, SCOPE_CONTRACT)
             )

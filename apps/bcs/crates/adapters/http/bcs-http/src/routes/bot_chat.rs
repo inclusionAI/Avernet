@@ -442,7 +442,7 @@ fn resolve_session_key(
     }
 }
 
-async fn resolve_bot_caller(
+pub(super) async fn resolve_bot_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
 ) -> Result<String, LegacyChatError> {

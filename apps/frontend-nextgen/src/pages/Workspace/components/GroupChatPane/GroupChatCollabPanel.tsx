@@ -41,6 +41,7 @@ export function GroupChatCollabPanel({
           <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">
             <GroupChatActiveRuns
               key={`manager-${session.sessionId}`}
+              managerMode
               messages={managerMessages}
               participants={managers}
               abortingBotIds={abortingBotIds}

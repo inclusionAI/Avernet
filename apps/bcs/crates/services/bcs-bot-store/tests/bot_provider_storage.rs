@@ -137,7 +137,7 @@ async fn read_source_is_explicit_and_does_not_change_gateway_writes() {
     let legacy = ProviderBindingProjection::new(store.clone(), store.clone(), DownlinkDetectionSource::Binding);
     let bots = ProviderBindingProjection::new(store.clone(), store.clone(), DownlinkDetectionSource::BotConnectionMode);
     store.create_provider_bot(record("upstream", BotConnectionMode::Plugin), caps(), "owner-a", "test-source-upstream").await.unwrap();
-    store.create_provider_bot(record("gateway", BotConnectionMode::Gateway), caps(), "owner-a", "test-source-gateway").await.unwrap();
+    store.create_provider_bot(record("gateway", BotConnectionMode::Gateway), BotCapabilities {name:Some("Gateway Bot".into()),..caps()}, "owner-a", "test-source-gateway").await.unwrap();
     for reader in [&legacy, &bots] {
         assert!(reader.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
         assert!(reader.get_binding_by_bot_uuid("gateway").await.unwrap().is_some());
@@ -149,4 +149,23 @@ async fn read_source_is_explicit_and_does_not_change_gateway_writes() {
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name) VALUES ('unmigrated', ?, 'Old')", vec![env.into()])).await.unwrap();
     assert!(legacy.get_binding_by_bot_uuid("unmigrated").await.unwrap().is_none());
     assert!(bots.get_binding_by_bot_uuid("unmigrated").await.is_err());
+}
+
+#[tokio::test]
+async fn registration_name_preflight_is_scoped_fresh_and_has_no_partial_writes() {
+    let db=sqlite().await;let store=DbProviderStore::sqlite(db.clone());
+    let env=bcs_config::resolve_env_str();
+    store.create_provider_bot(record("first-name",BotConnectionMode::Plugin),caps(),"owner","test-name-first").await.unwrap();
+    let candidate=record("new-name",BotConnectionMode::Gateway);
+    let error=store.create_provider_bot(candidate.clone(),caps(),"different-owner","test-name-second").await.unwrap_err();
+    assert!(matches!(error,bcs_service_api::ServiceError::Conflict(_)));
+    assert!(store.get_provider_bot("new-name").await.unwrap().is_none());
+    assert!(store.get_binding_by_bot_uuid("new-name").await.unwrap().is_none());
+    // Other Provider/environment and deleted rows must not reserve this name.
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET is_deleted=1 WHERE bot_uuid='first-name' AND env=?",vec![env.clone().into()])).await.unwrap();
+    db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,name,provider_id) VALUES ('other-provider',?,'Provider Bot','another-provider'),('other-env','another-environment','Provider Bot','provider-a')",vec![env.clone().into()])).await.unwrap();
+    store.create_provider_bot(candidate,caps(),"owner","test-name-second").await.unwrap();
+    assert!(store.get_provider_bot("new-name").await.unwrap().is_some());
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET name='Renamed' WHERE bot_uuid='new-name' AND env=?",vec![env.into()])).await.unwrap();
+    store.create_provider_bot(record("after-rename",BotConnectionMode::Plugin),caps(),"owner","test-name-third").await.unwrap();
 }

@@ -39,17 +39,18 @@ def _facts(
 ) -> SyncFacts:
     return SyncFacts(
         SyncKey("tenant-a", "dev", 7),
-        "default",
+        "service-bot",
         entity_id,
         owner_id,
         collaborators,
+        bot_type="service",
     )
 
 
 def test_all_explicit_roles_but_not_owner_or_revoked_member():
     facts = SyncFacts(
         SyncKey("tenant-a", "dev", 7),
-        "default",
+        "service-bot",
         "stable-entity",
         "new-owner",
         (
@@ -58,16 +59,17 @@ def test_all_explicit_roles_but_not_owner_or_revoked_member():
             CollaboratorFact("new-owner", "admin", True),
             CollaboratorFact("revoked", "member", False),
         ),
+        bot_type="service",
     )
     result = build_snapshot(facts)
-    assert result.bcs_bot_id == "default:stable-entity"
+    assert result.bcs_bot_id == "service-bot:stable-entity"
     assert result.manager_user_ids == ("admin", "member")
 
 
 def test_empty_collaborators_project_empty_manager_set():
     result = build_snapshot(_facts(()))
     assert result.manager_user_ids == ()
-    assert result.bcs_bot_id == "default:stable-entity"
+    assert result.bcs_bot_id == "service-bot:stable-entity"
 
 
 def test_duplicate_rows_dedupe_and_sort():
@@ -148,7 +150,7 @@ def test_owner_change_keeps_bcs_identity_and_excludes_new_owner():
             owner_id="new-owner",
         )
     )
-    assert old_owner.bcs_bot_id == new_owner.bcs_bot_id == "default:stable-entity"
+    assert old_owner.bcs_bot_id == new_owner.bcs_bot_id == "service-bot:stable-entity"
     assert old_owner.manager_user_ids == ("admin",)
     assert new_owner.manager_user_ids == ("admin",)
 

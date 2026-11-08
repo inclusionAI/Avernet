@@ -9,7 +9,7 @@ import type { TaskNodeView, TaskView } from '@/assets/TaskPanel/types';
 import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution';
 import { TaskOverviewV2, type TaskOverviewV2Props } from '@/assets/TaskPanel/v2/TaskOverviewV2';
 import type { TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from '@jest/globals';
 
 const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
@@ -89,6 +89,7 @@ const task = {
           url: 'https://yuque.example/doc1',
           linkRef: { url: 'https://yuque.example/doc1', type: 'dima需求' },
           owner: 'group-902',
+          isFinalArtifact: true,
           updatedAt: '2026-10-20T08:53:20.000Z',
         },
         {
@@ -154,8 +155,8 @@ const props = (overrides?: Partial<TaskOverviewV2Props>): TaskOverviewV2Props =>
 describe('TaskOverviewV2(L1)', () => {
   it('节点视图默认:卡片渲染执行体 pill/返工徽章/HITL 徽章/完成划线', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('需求澄清与规划')).toBeTruthy();
-    expect(screen.getByText('并行调研执行')).toBeTruthy();
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.getByText('第2棒 并行调研执行')).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
     expect(screen.getByText('点击查看会话')).toBeTruthy();
     // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
@@ -164,7 +165,7 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('第 0 次返工')).toBeNull();
     expect(screen.getByText('人工处理')).toBeTruthy();
     // demo 语义:完成态(present done/merged)节点标题划线
-    const doneTitle = screen.getByText('需求澄清与规划');
+    const doneTitle = screen.getByText('第1棒 需求澄清与规划');
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
@@ -172,12 +173,12 @@ describe('TaskOverviewV2(L1)', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
-    fireEvent.click(screen.getByText('需求澄清与规划'));
+    fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
     expect(nav.calls.root).toEqual(['n-solo']);
     expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
-    fireEvent.click(screen.getByText('并行调研执行'));
+    fireEvent.click(screen.getByText('第2棒 并行调研执行'));
     expect(nav.calls.select).toHaveLength(1);
     expect(nav.calls.select[0][0]).toBe('n-group');
     expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
@@ -192,7 +193,7 @@ describe('TaskOverviewV2(L1)', () => {
 
   it('DAG 视图入口隐藏,总览始终展示节点视图', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('需求澄清与规划')).toBeTruthy();
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'DAG视图' })).toBeNull();
     expect(screen.queryByTitle('切换到 DAG 视图')).toBeNull();
     expect(screen.queryByTitle('当前为 DAG 视图')).toBeNull();
@@ -204,6 +205,18 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByTitle('产物计数').textContent).toBe('4 项');
     expect(screen.getByText('需求说明书')).toBeTruthy();
     expect(screen.getByText('任务根产物')).toBeTruthy();
+    // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
+    // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
+    const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
+    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
+    const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
+    expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
+    expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
+    const finalArtifact = within(finalArtifactRow);
+    const stageLabelElement = finalArtifact.getByTestId('artifact-stage');
+    expect(finalArtifact.getByText('链接').compareDocumentPosition(stageLabelElement)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     // kind 徽章
     expect(screen.getByText('链接')).toBeTruthy();
     expect(screen.getByText('代码')).toBeTruthy();

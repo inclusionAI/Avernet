@@ -147,7 +147,7 @@ def test_disabled_repair_has_no_resource_dependencies_or_success_page():
 @pytest.mark.asyncio
 async def test_repair_dispatcher_delivers_owner_changed_after_admission():
     reader = Mock(spec=OwnershipSyncReadRepository)
-    reader.read_facts.return_value = OwnershipFacts(KEY, "bot", "stable", "old")
+    reader.read_facts.return_value = OwnershipFacts(KEY, "bot", "stable", "old", bot_type="service")
     plugin = RecordingBcsOwnershipPlugin()
     owner_service = BotOwnershipSyncService(reader, plugin)
     managers = Mock(sync_once=AsyncMock(return_value=SyncOutcome.CONFIRMED))
@@ -182,7 +182,7 @@ async def test_repair_delivers_owner_committed_in_separate_sql_session(world: Wo
     )
     reader = SqlOwnershipSyncReadRepository(db)
     before = reader.read_facts(key)
-    assert before == OwnershipFacts(key, "bot-stable", "stable", "B")
+    assert before == OwnershipFacts(key, "bot-stable", "stable", "B", bot_type="service")
     plugin = RecordingBcsOwnershipPlugin()
     managers = Mock(sync_once=AsyncMock(return_value=SyncOutcome.CONFIRMED))
     dispatcher = BotManagerSyncDispatcher(

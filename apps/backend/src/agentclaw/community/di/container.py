@@ -41,12 +41,14 @@ from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
+from agentclaw.community.di.modules.bot_copy_module import BotCopyModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.bot_message_feedback_module import (
     BotMessageFeedbackModule,
 )
+from agentclaw.community.di.modules.bot_overview_module import BotOverviewModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
@@ -123,6 +125,7 @@ from agentclaw.community.di.modules.task_artifact_config_module import (
 )
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
@@ -217,6 +220,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        BotCopyModule(),
         ExecutionIdentityModule(),
         OwnerHandoffModule(),
         DigitalEmployeeModule(),
@@ -232,9 +236,11 @@ def build_injector(
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        BotOverviewModule(),
         BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),
+        TaskConfigModule(),
         DevicesModule(),
         McpModule(),
         BotMessageFeedbackModule(),

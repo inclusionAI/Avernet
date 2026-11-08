@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { FileCheck2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { UseParticipantBindingResult } from '../../hooks/useParticipantBinding';
 import { ParticipantBindingPanel } from './ParticipantBindingPanel';
@@ -38,7 +39,6 @@ export function BindingSlot({ visible, binding, botNameResolver, summaryAction }
     yamlValidation,
     participantBindings,
     activeParticipantKey,
-    boundCount,
     setActiveParticipantKey,
     handleUnbind,
   } = binding;
@@ -47,34 +47,33 @@ export function BindingSlot({ visible, binding, botNameResolver, summaryAction }
   const validated = yamlValidation.isValidated;
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="space-y-6">
       {validated && (
         <>
           <CollaborationValidationNotices warnings={yamlValidation.warnings} />
-          <div className={cn('grid grid-cols-1 gap-3', summaryAction && 'sm:grid-cols-2')}>
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-foreground">协同剧本</span>
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+          <div className={cn('grid grid-cols-1 gap-5', summaryAction && 'sm:grid-cols-2 sm:gap-4')}>
+            <div className="min-w-0">
+              <span className="mb-2 block text-sm font-medium text-foreground">协同剧本</span>
+              <div className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-lg border border-input bg-muted/30 px-3">
+                <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                  <FileCheck2 className="size-4 shrink-0 text-success" aria-hidden />
                   已解析 {yamlValidation.participantDefinitions.length} 个角色
                 </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 border-0 px-1 text-xs text-primary"
+                  onClick={() => {
+                    binding.reset();
+                  }}
+                >
+                  重新编辑
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  binding.reset();
-                }}
-              >
-                重新编辑
-              </Button>
             </div>
             {summaryAction && <div className="min-w-0">{summaryAction}</div>}
           </div>
-          <span className="text-xs text-muted-foreground">
-            已绑定 {boundCount} / {yamlValidation.participantDefinitions.length} 个角色
-          </span>
         </>
       )}
       {validated && yamlValidation.participantDefinitions.length > 0 && (

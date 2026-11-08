@@ -2,9 +2,9 @@
 // 展开区按 section/origin 分流:
 // - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
 // - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
-// 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
 import { Button } from '@/components/ui';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
+import { formatCodingOtherSessionTitle } from '@/domain/conversation/codingSessionOwnership';
 import type {
   ConversationBotSection,
   ConversationOrigin,
@@ -12,17 +12,16 @@ import type {
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
-import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { ChevronDown } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
+import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationBotItemActions } from './ConversationBotItemActions';
-import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
-import { ConversationBotRuntimeBadge } from './ConversationBotRuntimeBadge';
 import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
+import { ConversationBotRuntimeBadge } from './ConversationBotRuntimeBadge';
+import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
 import { ConversationSessionList } from './ConversationSessionList';
 
@@ -34,8 +33,9 @@ export interface ConversationBotItemProps {
   expanded: boolean;
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
-  /** 该 Bot 是否为当前舞台所属 Bot(跨 section 判定由装配层完成):名称点亮品牌蓝作行锚点,
-   *  与其下会话胶囊形成「Bot → 会话」两级选中语义(2026-10-22 体验精修)。 */
+  /** 该 Bot 是否为当前舞台所属 Bot(跨 section 判定由装配层完成):名称点亮 #09090B
+   *  (text-foreground)作行锚点——收起时其下选中会话不可见,Bot 名顶位承载选中语义,
+   *  与其下会话的灰阶选中胶囊形成「Bot → 会话」两级中性层次(2026-11-02 稿)。 */
   botSelected?: boolean;
   origin: ConversationOrigin;
   /** 生效读取范围(managed mine 用;friend 读 scopeByFriendBotId)。 */
@@ -46,6 +46,8 @@ export interface ConversationBotItemProps {
   sessions?: ConversationSessionListState;
   /** 仅 managed 传入:others 好友分组区数据。 */
   others?: ConversationBotItemOthers;
+  /** Coding Bot 的 others 直接使用按 sessionId 分流后的扁平会话列表。 */
+  flatCodingOthers?: boolean;
   onToggle(): void;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
@@ -76,6 +78,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   sessionKey,
   sessions,
   others,
+  flatCodingOthers = false,
   onToggle,
   onOriginChange,
   onScopeChange,
@@ -111,12 +114,40 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 操作区渲染门控:可用行走既有会话入口(hasSessionControls);不可用 Bot 仅保留
   // 常驻「更多操作」(运维直达,2026-10-21),无菜单项则整区不渲染。
   const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu);
+  // 展开态的收起入口并入右侧操作组。发布分支已将渐隐区收紧 10px：
+  // 3/4/5 个按钮分别预留 86/112/138px（按钮 24px + 间隙 2px）。
+  const actionButtonCount =
+    (expanded ? 1 : 0) +
+    (!isOthers ? 1 : 0) +
+    (searchVisible ? 1 : 0) +
+    (showFilter ? 1 : 0) +
+    (showMenu ? 1 : 0);
+  const pinnedActionsPadding =
+    actionButtonCount >= 5 ? 'pr-[138px]' : actionButtonCount >= 4 ? 'pr-[112px]' : 'pr-[86px]';
+  const hoverActionsPadding =
+    actionButtonCount >= 4
+      ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px]'
+      : 'group-hover:pr-[86px] group-focus-within:pr-[86px]';
   // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
+  const visibleSessions = React.useMemo(() => {
+    if (!flatCodingOthers || !sessions) return sessions;
+    return {
+      ...sessions,
+      items: sessions.items.map((session) => ({
+        ...session,
+        title: formatCodingOtherSessionTitle(session.sessionId, session.title),
+      })),
+    };
+  }, [flatCodingOthers, sessions]);
   // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
-  const { scope: instanceScope, row: instanceRow, inputDisabled: instanceInputDisabled, marked: searchMarked } =
-    useConversationInstanceRow(bot, searchActive);
+  const {
+    scope: instanceScope,
+    row: instanceRow,
+    inputDisabled: instanceInputDisabled,
+    marked: searchMarked,
+  } = useConversationInstanceRow(bot, searchActive);
   const handleSearchToggle = () => {
     if (!expanded) onToggle();
     setSearchInputOpen((current) => !current);
@@ -127,7 +158,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     onToggle();
   };
 
-/* 一级行与协作群统一为 40px：固定头像槽位，引擎徽章与名称同行跟随(2026-10-20 设计稿还原)。 */
+  /* 一级行与协作群统一为 40px：固定头像槽位，引擎徽章与名称同行跟随(2026-10-20 设计稿还原)。 */
   const row = (
     <div
       aria-disabled={unavailable || undefined}
@@ -137,110 +168,94 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         unavailable && 'opacity-60',
       )}
     >
-        <Button
-          variant="ghost"
-          aria-label={bot.displayName}
-          aria-expanded={interactive && !unavailable ? expanded : false}
-          onClick={handleToggle}
+      <Button
+        variant="ghost"
+        aria-label={bot.displayName}
+        aria-expanded={interactive && !unavailable ? expanded : false}
+        onClick={handleToggle}
+        className={cn(
+          'flex h-auto min-h-10 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-0.5 text-left hover:bg-transparent',
+          (!interactive || unavailable) && 'cursor-not-allowed',
+          !interactive && 'opacity-50',
+        )}
+      >
+        {/* 头像 24px(2026-10-26 回退 #2990 紧凑单行形态):槽位保持 36px 不动 →
+              会话行 ml-[52px]+pl-2 的 60px 标题起点几何契约不受影响。 */}
+        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+          <AvatarTile
+            src={bot.avatarUrl}
+            label={bot.displayName}
+            className="h-6 w-6 rounded-full"
+            fallbackContent={
+              <span className="text-[10px] font-semibold leading-none tracking-[0.06em]">
+                {bot.displayName.slice(0, 1)}
+              </span>
+            }
+          />
+          {/* 在线信号点已移除(随上游 #2990 收起竖轨同款裁决):metadata status 对
+                已删除 Bot 仍残留 ACTIVE,绿点失真误导;待后端好友关系/元数据同步修复后再恢复。 */}
+        </span>
+        <div
           className={cn(
-'flex h-auto min-h-10 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-0.5 text-left hover:bg-transparent',
-            (!interactive || unavailable) && 'cursor-not-allowed',
-            !interactive && 'opacity-50',
+            // 名称/tag 以扣除操作区让位后的内容盒为响应基准；沿用发布分支的紧凑 gap-1。
+            'flex min-w-0 flex-1 items-center gap-1 @container/conversation-bot-title',
+            // 发布分支已把渐隐区由 20px 收紧到 10px。收起按钮并入操作组后，
+            // 4/5 个按钮分别预留 112/138px；收起态 3/4 个按钮分别为 86/112px。
+            stripVisible
+              ? unavailable
+                ? 'pr-9'
+                : actionsPinned
+                  ? pinnedActionsPadding
+                  : hoverActionsPadding
+              : false,
           )}
         >
-          {/* 头像 24px(2026-10-26 回退 #2990 紧凑单行形态):槽位保持 36px 不动 →
-              会话行 ml-[52px]+pl-2 的 60px 标题起点几何契约不受影响。 */}
-          <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-            <AvatarTile
-              src={bot.avatarUrl}
-              label={bot.displayName}
-              className="h-6 w-6 rounded-full"
-              fallbackContent={
-                <span className="text-[10px] font-semibold leading-none tracking-[0.06em]">
-                  {bot.displayName.slice(0, 1)}
-                </span>
-              }
-            />
-            {/* 在线信号点已移除(随上游 #2990 收起竖轨同款裁决):metadata status 对
-                已删除 Bot 仍残留 ACTIVE,绿点失真误导;待后端好友关系/元数据同步修复后再恢复。 */}
-          </span>
-          <div
+          <span
             className={cn(
-              // 名称与引擎徽章同行跟随(2026-10-20 设计稿还原,#2990 紧凑单行)。
-              'flex min-w-0 flex-1 items-center gap-1.5',
-              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
-              // 无「更多操作」入口时 3 按钮 96px(pr-24);有入口时 4 按钮 122px(pr-[122px])
-              // (#2990 还原,菜单打开期间 data-state=open 同样让位、鼠标离行不塌缩)。
-              // 不可用 Bot 仅剩常驻「…」(20 渐隐区+单按钮+右内边距)让位恒定 52px;
-              // 非钉住时仅悬停/键盘聚焦临时让位。
-              stripVisible
-                ? unavailable
-                  ? 'pr-[52px]'
-                  : actionsPinned
-                    ? showMenu
-                      ? 'pr-[122px]'
-                      : 'pr-24'
-                    : showMenu
-                      ? 'group-hover:pr-[122px] group-focus-within:pr-[122px] group-has-[[data-state=open]]:pr-[122px]'
-                      : 'group-hover:pr-24 group-focus-within:pr-24'
-                : false,
+              // 名称是主信息，保留最小可视宽；tag 使用剩余空间并优先收缩。
+              'min-w-12 truncate text-[13px] font-normal leading-[18px] tracking-[-0.08px] text-content-strong',
+              // 发布分支选中态回归中性深色，与会话选中胶囊保持一致。
+              botSelected && !unavailable && 'text-foreground',
             )}
           >
-            <span
-              className={cn(
-                // 名称 13px 常规字重:与会话标题同规格(13px/18px),去 Bot 名的
-                // 加粗强调——层级交由头像/缩进/选中态承载,列表更静;
-                // 选中态 text-primary 依旧经由 botSelected 后发覆盖。
-                'min-w-0 truncate text-[13px] font-normal leading-[18px] tracking-[-0.08px] text-content-strong',
-                // 舞台所属 Bot 名称点亮品牌蓝(与 shell 主导航激活态同语言,2026-10-22);
-                // 不可用行维持灰名,不与禁用态打架。
-                botSelected && !unavailable && 'text-primary',
-              )}
-            >
-              {bot.displayName}
-            </span>
-            <ConversationBotRuntimeBadge bot={bot} />
-            {/* 展开折叠角标(2026-10-20 设计稿还原):仅展开的 Bot 显示收起角标,默认紧跟
-                引擎徽章右侧;收起态不渲染(展开由主按钮承载)。角标为纯鼠标入口:span 不进
-                Tab 序、对读屏隐藏,点击先截断冒泡再转发同一 toggle(避免与主按钮双触发)。 */}
-            {hasSessionControls && !unavailable && expanded && (
-              <span
-                role="presentation"
-                aria-hidden="true"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleToggle();
-                }}
-                className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-              </span>
-            )}
-          </div>
-        </Button>
-        {stripVisible && (
-          <ConversationBotItemActions
+            {bot.displayName}
+          </span>
+          {/* 操作区出现时沿用发布分支的名称优先策略；静默态仍按自然宽度展示长 tag。 */}
+          <ConversationBotRuntimeBadge
             bot={bot}
-            isOthers={isOthers}
-            unavailable={unavailable}
-            actionsPinned={actionsPinned}
-            searchVisible={searchVisible}
-            searchMarked={searchMarked}
-            showFilter={showFilter}
-            supportsOrigin={isManaged}
-            supportsFavorites={canFavorite}
-            othersDisabled={section === 'team'}
-            origin={origin}
-            scope={scope}
-            onOriginChange={onOriginChange}
-            onScopeChange={onScopeChange}
-            onCreateSession={onCreateSession}
-            onSearchToggle={handleSearchToggle}
-            showMenu={showMenu}
-            onOpenBotManagement={onOpenBotManagement}
+            className={cn(
+              stripVisible &&
+                'group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden [@media(hover:none)]:hidden',
+              stripVisible && (actionsPinned || unavailable) && 'hidden',
+            )}
           />
-        )}
-      </div>
+        </div>
+      </Button>
+      {stripVisible && (
+        <ConversationBotItemActions
+          bot={bot}
+          expanded={expanded}
+          isOthers={isOthers}
+          unavailable={unavailable}
+          actionsPinned={actionsPinned}
+          searchVisible={searchVisible}
+          searchMarked={searchMarked}
+          showFilter={showFilter}
+          supportsOrigin={isManaged}
+          supportsFavorites={canFavorite}
+          othersDisabled={section === 'team' && !bot.isAgentCodingBot}
+          origin={origin}
+          scope={scope}
+          onOriginChange={onOriginChange}
+          onScopeChange={onScopeChange}
+          onCollapse={handleToggle}
+          onCreateSession={onCreateSession}
+          onSearchToggle={handleSearchToggle}
+          showMenu={showMenu}
+          onOpenBotManagement={onOpenBotManagement}
+        />
+      )}
+    </div>
   );
   return (
     <div>
@@ -262,18 +277,20 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               />
             </>
           )}
-          {isOthers ? (
+          {isOthers && !flatCodingOthers ? (
             <OthersArea others={others} />
           ) : (
             <ConversationSessionList
-              actions={sessionActions}
-              sessions={sessions}
+              actions={isOthers ? undefined : sessionActions}
+              sessions={visibleSessions}
               selectedSessionId={selectedSessionId}
               onSelectSession={onSelectSession}
               onLoadMore={onLoadMore}
-              onToggleFavorite={canFavorite ? onToggleFavorite : undefined}
+              onToggleFavorite={!isOthers && canFavorite ? onToggleFavorite : undefined}
               isFavoritePending={isFavoritePending}
               replyingSessionId={replyingSessionId ?? null}
+              emptyTitle={isOthers ? '暂无他人发起的会话' : undefined}
+              showCreateHint={!isOthers}
             />
           )}
         </div>

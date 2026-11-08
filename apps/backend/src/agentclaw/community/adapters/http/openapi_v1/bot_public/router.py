@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -18,18 +18,26 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.responses import error_response, page
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope, error_response, page
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
+    BotCatalogProfileNotFoundError,
     BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
-from .schemas import DiscoveredPublicBot, PublicBot, RuntimeState
+from .schemas import (
+    DiscoveredPublicBot,
+    PublicBot,
+    PublicBotCapability,
+    PublicBotProfile,
+    RuntimeState,
+)
+from agentclaw.community.core.bot_management.avatar import bot_avatar_url
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
@@ -149,6 +157,7 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
     # COSEC: Explicitly project only catalog fields and approved BCS metadata so
     # service records cannot expose bindings, device data, credentials, or environment data.
     return PublicBot(
+        avatar_url=bot_avatar_url(record),
         bot_id=str(record.get("bot_id") or ""),
         bot_uuid=record.get("bot_uuid"),
         entity_id=str(record.get("entity_id") or record.get("owner_id") or ""),
@@ -331,3 +340,83 @@ async def discover_public_bots(
         return error_response(502, "Recommendation service unavailable", request)
     _log_result("discover", request, count=len(items))
     return page(int(result.get("total", 0)), items, request)
+
+
+def _public_bot_profile(profile: Mapping[str, Any]) -> PublicBotProfile:
+    """Project one service profile dict into the public response model."""
+    capabilities = profile.get("capabilities")
+    capability_items: list[PublicBotCapability] = []
+    if isinstance(capabilities, Sequence) and not isinstance(capabilities, (str, bytes)):
+        for capability in capabilities:
+            if not isinstance(capability, Mapping):
+                continue
+            capability_id = str(capability.get("capability_id") or "").strip()
+            display_name = str(capability.get("display_name") or "").strip()
+            if capability_id and display_name:
+                capability_items.append(
+                    PublicBotCapability(
+                        capability_id=capability_id, display_name=display_name
+                    )
+                )
+    return PublicBotProfile(
+        bot_id=str(profile.get("bot_id") or ""),
+        bot_uuid=str(profile.get("bot_uuid") or ""),
+        bot_name=str(profile.get("bot_name") or ""),
+        owner_name=str(profile.get("owner_name") or "").strip() or None,
+        description=str(profile.get("description") or ""),
+        engine_name=str(profile.get("engine_name") or ""),
+        capabilities=capability_items,
+    )
+
+
+@router.get(
+    "/profile/{bot_uuid}",
+    response_model=Envelope[PublicBotProfile],
+    response_model_exclude_none=True,
+    responses={
+        404: {
+            "model": ErrorEnvelope,
+            "description": "Public bot profile not found",
+            **error_example(404, "Public bot profile not found"),
+        },
+        502: {
+            "model": ErrorEnvelope,
+            "description": "Catalog service unavailable",
+            **error_example(502, "Catalog service unavailable"),
+        },
+    },
+)
+async def get_public_bot_profile(
+    request: Request,
+    principal: PrincipalDep,
+    bot_uuid: str = Path(min_length=1, description="Catalog Bot UUID."),
+    service: BotPublicServiceProtocol = Injected(BotPublicServiceProtocol),
+) -> Envelope[PublicBotProfile]:
+    try:
+        profile = service.get_catalog_public_bot_profile(
+            bot_uuid,
+            caller=BotCatalogCaller(
+                tenant_id=principal.tenant,
+                user_id=principal.user_id or None,
+                app_id=principal.app_id,
+            ),
+            request_id=_request_id(request),
+        )
+        if not isinstance(profile, Mapping):
+            _log_failure("profile", request, "invalid_service_result")
+            return error_response(500, "Internal Server Error", request)
+        projected = _public_bot_profile(profile)
+    except BotCatalogProfileNotFoundError:
+        _log_failure("profile", request, "not_found")
+        return error_response(404, "Public bot profile not found", request)
+    except BotCatalogSearchUnavailableError:
+        _log_failure("profile", request, "bcs_unavailable")
+        return error_response(502, "Catalog service unavailable", request)
+    except Exception:  # noqa: BLE001 - the public error must remain fixed
+        _log_failure("profile", request, "service_failure")
+        return error_response(500, "Internal Server Error", request)
+    if not projected.bot_id or not projected.bot_uuid:
+        _log_failure("profile", request, "invalid_service_result")
+        return error_response(500, "Internal Server Error", request)
+    _log_result("profile", request, count=len(projected.capabilities))
+    return envelope(projected, request)

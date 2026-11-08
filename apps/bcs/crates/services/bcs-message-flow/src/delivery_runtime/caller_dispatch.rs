@@ -18,7 +18,24 @@ impl DeliveryRuntime {
         // converges failed before any context read, exactly like the
         // digest guard.
         tracing::debug!(delivery_id = %row.delivery_id, stage = "resolve", "caller protected dispatch stage");
-        let Some(context) = self.preparation.resolve_caller_dispatch(row).await else {
+        // Stage liveness (spec 2026-11-03 §3.2): resolve runs before StartSend,
+        // so a lapsed bound converges exactly like a resolve refusal — the row
+        // reverts to Queued semantics via PreparationFailed, no identity
+        // consumed. Resolves the same ordinary-prepare io_timeout the
+        // non-caller branch budgets its preparation with.
+        let resolved = tokio::time::timeout(
+            self.config.io_timeout,
+            self.preparation.resolve_caller_dispatch(row),
+        )
+        .await;
+        let Some(context) = resolved.unwrap_or_else(|_| {
+            tracing::warn!(
+                delivery_id = %row.delivery_id,
+                stage = "resolve",
+                "caller protected dispatch stage timed out; converging preparation-failed"
+            );
+            None
+        }) else {
             tracing::warn!(
                 delivery_id = %row.delivery_id,
                 bot_id = %row.target_bot_id,
@@ -191,7 +208,29 @@ impl DeliveryRuntime {
         // session seq, strictly before this message), membership from the
         // bound explicit id list, digest from the canonical manifest.
         let history_header = if started.semantic_projection_json.get("caller_required").is_some() {
-            let contexts = self.service.bounded_contexts(&started.delivery_id, 25).await;
+            // Stage liveness (spec 2026-11-03 §3.2): Post-StartSend read bound
+            // by the same io_timeout; a lapse refuses the history header the
+            // same way a read failure does (fail closed, never fabricate).
+            let contexts = match tokio::time::timeout(
+                self.config.io_timeout,
+                self.service.bounded_contexts(&started.delivery_id, 25),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!(
+                        delivery_id = %started.delivery_id,
+                        stage = "history_read",
+                        "caller protected dispatch stage timed out; refusing the history header"
+                    );
+                    Err(ManagedDeliveryError::Repository(
+                        bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(
+                            "history read timed out".into(),
+                        ),
+                    ))
+                }
+            };
             // A read failure refuses the history header rather than
             // fabricating an empty manifest (fail closed, retryable later).
             let Ok(contexts) = contexts else {

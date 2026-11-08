@@ -105,22 +105,23 @@ export const SessionItem = React.memo(function SessionItem({
   return (
     <>
       <div className="group/row relative flex min-h-8 items-center">
-        {/* 行背景胶囊：hover 与选中同几何（对齐对话行）。 */}
-        {/* 行背景胶囊：hover 与选中同几何（对齐对话行）。选中升级品牌蓝 bg-primary/10
-            （2026-10-22 精修，与对话侧同轮裁决）：原 bg-selected 灰底与 hover muted/60 几乎
-            不可辨，且割裂 shell 主导航已定稿的品牌蓝激活语言；几何槽位契约原样保留。 */}
+        {/* 行背景胶囊：hover 与选中同几何（对齐对话行）。
+            选中回归中性深 #09090B0F（2026-11-02 稿，与对话侧同轮裁决）：≈ foreground 6%
+            即 bg-foreground/[6%]，与目录灰阶层次一致；几何槽位契约原样保留。 */}
         <span
           aria-hidden="true"
           className={cn(
             'absolute inset-y-0 left-2 right-2 rounded-md',
             selected
-              ? 'bg-primary/10'
+              ? 'bg-foreground/[6%]'
               : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
           )}
         />
         <Button
           variant="ghost"
           aria-current={selected ? 'page' : undefined}
+          data-group-session-id={session.sessionId}
+          data-group-id={session.groupId}
           onClick={() => onSelectSession(session.sessionId)}
           className={cn(
             'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
@@ -138,8 +139,9 @@ export const SessionItem = React.memo(function SessionItem({
           <span
             className={cn(
               'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
-              // 选中行标题点亮品牌蓝（twMerge 后发覆盖）：与蓝胶囊共同构成选中锚点，不加粗。
-              selected && 'text-primary',
+              // 选中行标题点亮 #09090B（twMerge 后发覆盖）：与 6% 灰阶胶囊共同构成
+              // 选中锚点，不加粗（2026-11-02 稿，与对话侧同轮裁决）。
+              selected && 'text-foreground',
             )}
           >
             {session.title}

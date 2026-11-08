@@ -513,6 +513,53 @@ describe('ConversationSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
     expect(sessions.toggleBot).toHaveBeenCalledWith('coding-bot:2088', 'managed');
   });
+  it('renders managed Coding Bot others as a flat session list instead of friend groups', () => {
+    const codingBot: ConversationBotView = {
+      bot: {
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        ownerId: '2088',
+        displayName: 'AgentCoding Bot',
+        online: true,
+        chatable: true,
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const sessionId = 'user:400001:session:shared:agent:coding-bot';
+    const store = seedStore((s) => {
+      s.setExpandedBot(codingBot.bot.botId, true);
+      s.setManagedBotOrigin(codingBot.bot.botId, 'others');
+      s.setManagedBotCache(codingBot.bot.botId, {
+        botId: codingBot.bot.botId,
+        origin: 'others',
+        scope: 'all',
+        sessions: {
+          ...emptyList(),
+          items: [sessionOf(sessionId, codingBot.bot.botId)],
+          total: 1,
+        },
+        friendDirectory: { items: [], loading: false, error: null },
+        friendGroups: {},
+      });
+    });
+
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          store,
+          managedBots: [codingBot],
+          friendBots: [],
+          directory: directoryModel({ managedBots: [codingBot], friendBots: [] }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: `400001: 会话 ${sessionId}` })).toBeInTheDocument();
+    expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
+  });
+
   it.each(['mine', 'others'] as const)('ends the %s session list before pagination and errors', (origin) => {
     const list = {
       ...emptyList(),

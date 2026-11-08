@@ -9,6 +9,7 @@ pub mod caller_lineage;
 pub mod caller_relay;
 pub mod caller_relay_ledger;
 mod caller_delegation;
+mod native_task;
 pub mod observe_index;
 pub mod observe_sync;
 mod observe_guard;

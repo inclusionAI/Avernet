@@ -66,6 +66,10 @@ GroupsPath:
           the authenticated User. Both items and total are scoped before
           pagination. An authorized View Actor with no matching Group relation
           receives an empty page.
+          Each item carries a lightweight `participants` array in stored member
+          order: `name` is the Group-membership snapshot verbatim (may be
+          null) and `avatar_url` is the current Bot avatar (null when absent
+          or for Human actors). No detail-only control fields are included.
         content:
           application/json:
             schema:
@@ -131,6 +135,8 @@ GroupsPath:
           an initial responder run, initial_session_id identifies its Session
           and initial_run exposes the Driver run for a chat group or the Manager
           run for a manager-worker group, including its current dispatch state.
+          Participant rows carry `avatar_url` under the same semantics as the
+          Group detail read.
         content:
           application/json:
             schema:
@@ -229,6 +235,10 @@ PublicGroupsPath:
           strategy and label substring query, then paginated with offset/limit.
           Items carry membership=none because the catalog is caller-agnostic;
           participation is evaluated when a session is instantiated.
+          Each item reuses the same `participants` summary shape as the
+          authenticated Group list, bounded by the public Group's own member
+          rows: membership name snapshots verbatim (may be null) plus current
+          Bot avatars.
         content:
           application/json:
             schema:
@@ -266,7 +276,10 @@ GroupPath:
       - $ref: ../shared.yaml#/GroupIdPath
     responses:
       "200":
-        description: Group detail.
+        description: >-
+          Group detail. Every participant row keeps its full control fields
+          and additionally carries `avatar_url` — the current Bot display
+          avatar, null when absent and always null for Human participants.
         content:
           application/json:
             schema:
@@ -339,7 +352,9 @@ GroupPath:
             $ref: "#/UpdateGroup"
     responses:
       "200":
-        description: Updated group detail.
+        description: >-
+          Updated group detail. Participant rows carry `avatar_url` under the
+          same semantics as the Group detail read.
         content:
           application/json:
             schema:
@@ -718,7 +733,10 @@ AddGroupParticipantPath:
             $ref: "#/AddGroupParticipantRequest"
     responses:
       "200":
-        description: Added participant.
+        description: >-
+          Added participant. The shared Participant model carries the current
+          `avatar_url` — null when the Bot has none and always null for Human
+          participants.
         content:
           application/json:
             schema:
@@ -797,7 +815,10 @@ GroupParticipantPath:
             $ref: "#/UpdateGroupParticipantRequest"
     responses:
       "200":
-        description: Updated participant with its effective persisted scope.
+        description: >-
+          Updated participant with its effective persisted scope and the
+          current `avatar_url` (null when the Bot has none, always null for
+          Human participants).
         content:
           application/json:
             schema:

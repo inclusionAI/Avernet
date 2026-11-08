@@ -341,6 +341,80 @@ it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
   expect(result.current.canOpenConversation(restrictedBot)).toBe(false);
 });
 
+it('服务化 Coding Bot 草稿无需普通 chat action 即可进入独立 Coding Chat', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({ activeIdentityId: 'u2' });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  const base = {
+    serviceMode: 'service' as const,
+    lifecycle: 'draft' as const,
+    runtime: { isAgentCodingBot: true },
+  };
+  const ownerBot = {
+    ...base,
+    id: 'owner-draft-coding',
+    ownerId: 'u2',
+    actions: ['view'],
+  } as unknown as BotDomain;
+  const collaboratorBot = {
+    ...base,
+    id: 'collaborator-draft-coding',
+    ownerId: 'owner-1',
+    actions: ['view', 'edit'],
+  } as unknown as BotDomain;
+  const viewerBot = {
+    ...base,
+    id: 'viewer-draft-coding',
+    ownerId: 'owner-1',
+    actions: ['view'],
+  } as unknown as BotDomain;
+
+  expect(result.current.canOpenConversation(ownerBot)).toBe(true);
+  expect(result.current.canOpenConversation(collaboratorBot)).toBe(true);
+  expect(result.current.canOpenConversation(viewerBot)).toBe(false);
+});
+
+it('服务化 Coding Bot 草稿跳转 AIXCoding 独立路由', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  act(() => {
+    result.current.openConversation({
+      id: 'draft-coding-bot',
+      ownerId: 'owner-1',
+      serviceMode: 'service',
+      lifecycle: 'draft',
+      runtime: { isAgentCodingBot: true },
+    } as unknown as BotDomain);
+  });
+
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=draft-coding-bot&ownerId=owner-1');
+});
+
+it('服务化 Coding Bot 预发跳转 AIXCoding verify 运行时', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  act(() => {
+    result.current.openConversation({
+      id: 'verify-coding-bot',
+      ownerId: 'owner-1',
+      serviceMode: 'service',
+      lifecycle: 'prestable',
+      harnessContext: { entityId: 'e1', botPublishId: '42' },
+      runtime: { isAgentCodingBot: true },
+    } as unknown as BotDomain);
+  });
+
+  expect(history.push).toHaveBeenCalledWith(
+    '/coding/coding-chat?botId=verify-coding-bot&ownerId=owner-1&publishId=42&stage=verify',
+  );
+});
+
 it('Coding Bot 点击去使用时进入统一对话页，并携带 canonical Bot ID', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });

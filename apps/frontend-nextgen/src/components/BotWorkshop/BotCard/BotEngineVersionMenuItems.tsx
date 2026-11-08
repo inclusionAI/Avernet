@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { supportsEngineVersion, type EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
 import type { BotDomain } from '@/domain/botWorkshop';
+import { Cpu } from 'lucide-react';
 import { actionIcon } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
 
@@ -18,9 +19,15 @@ export function BotEngineVersionMenuItems({ bot, availability, onOpenInfo, onUpd
   const disabledReason = availability?.disabledReason ?? '当前版本状态不可确认';
 
   return (
-    <MenuSection divider>
+    <MenuSection>
       {onOpenInfo ? (
-        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => onOpenInfo(bot)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start"
+          leftIcon={<Cpu className="size-4" />}
+          onClick={() => onOpenInfo(bot)}
+        >
           引擎信息
         </Button>
       ) : null}

@@ -69,3 +69,40 @@ it.each([null, { ...bot, ownerId: undefined }, { ...bot, botType: 'desktop' }])(
     expect(screen.getByText('normal input')).toBeVisible();
   },
 );
+
+it('keeps team chat entity addressing separate from the actual knowledge Owner', () => {
+  let observed: ConversationComposerProps['context'] | undefined;
+  function Extension({ context, children, ...value }: ConversationComposerProps) {
+    observed = context;
+    return children(value);
+  }
+  extendCapabilities({ getConversationComposer: () => ({ status: 'available', value: Extension }) });
+  render(
+    <ConversationComposerHost
+      bot={{ ...bot, botType: 'service', isTeamBot: true, ownerId: 'team-entity', engineOwnerId: 'actual-owner' }}
+      session={session}
+      onSend={send}
+    >
+      {() => <span>normal input</span>}
+    </ConversationComposerHost>,
+  );
+  expect(observed?.ownerId).toBe('team-entity');
+  expect(observed?.knowledgeOwnerId).toBe('actual-owner');
+  expect(screen.getByText('normal input')).toBeVisible();
+});
+
+it('does not guess a team knowledge Owner from the native chat entity', () => {
+  const Extension = jest.fn(() => <span>extension</span>);
+  extendCapabilities({ getConversationComposer: () => ({ status: 'available', value: Extension }) });
+  render(
+    <ConversationComposerHost
+      bot={{ ...bot, botType: 'service', isTeamBot: true, ownerId: 'team-entity' }}
+      session={session}
+      onSend={send}
+    >
+      {() => <span>normal input</span>}
+    </ConversationComposerHost>,
+  );
+  expect(Extension).not.toHaveBeenCalled();
+  expect(screen.getByText('normal input')).toBeVisible();
+});

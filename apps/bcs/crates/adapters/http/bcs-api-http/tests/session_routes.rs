@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier, VerifiedRequestIdentity, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, BotRegistration, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, FriendRequest,
@@ -191,13 +191,13 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity::pin(self.caller.clone(), "test-double", CredentialKind::GatewayPrincipalHeader))
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -511,6 +511,7 @@ impl SessionService for FakeSessionService {
             actor_id: command.bot_uuid,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -536,6 +537,7 @@ impl SessionService for FakeSessionService {
             actor_kind,
             actor_id: command.bot_uuid,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: command
@@ -648,6 +650,7 @@ fn session_summary() -> SessionSummary {
         created_at: 1,
         updated_at: 2,
         collected: None,
+        participants: Vec::new(),
     }
 }
 
@@ -656,6 +659,7 @@ fn session_participant() -> SessionParticipant {
         actor_id: "bot-1".into(),
         actor_kind: ActorKind::Bot,
         name: Some("Bot 1".into()),
+        avatar_url: None,
         role: ParticipantRole::Driver,
         tags: Vec::new(),
         mode: ParticipantMode::Auto,

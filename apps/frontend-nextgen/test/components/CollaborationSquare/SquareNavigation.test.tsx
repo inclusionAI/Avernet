@@ -12,7 +12,8 @@ test('发现导航保留公开Bot/群并提供专家市场', () => {
   const { rerender } = render(<SquareNavigation active="bot" />);
   const bot = screen.getByRole('link', { name: '公开Bot' });
   const group = screen.getByRole('link', { name: '公开协作群' });
-  expect(bot).toHaveClass('rounded-lg', 'bg-primary/10', 'text-primary');
+  // dmore Frame 1：选中 pill 为 6px 圆角 + 主色软底；非选中无底色。
+  expect(bot).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary', 'h-8', 'px-3', 'text-[13px]');
   expect(bot).toHaveAttribute('aria-current', 'page');
   expect(bot.querySelector('[aria-hidden]')).toBeNull();
   expect(group).not.toHaveClass('bg-primary/10');
@@ -25,11 +26,20 @@ test('发现导航保留公开Bot/群并提供专家市场', () => {
   expect(bot).not.toHaveAttribute('aria-current');
 });
 
-
 test('专家市场使用独立可访问路由与选中状态', () => {
   render(<SquareNavigation active="expert" />);
   const expert = screen.getByRole('link', { name: '专家市场' });
   expect(expert).toHaveAttribute('href', '/collaboration-square/experts');
   expect(expert).toHaveAttribute('aria-current', 'page');
   expect(screen.getByRole('link', { name: '公开Bot' })).not.toHaveAttribute('aria-current');
+});
+
+test('页头右侧 actions 槽位仅在透传时渲染工具区', () => {
+  const actions = <button type="button">工具</button>;
+  const { rerender, container } = render(<SquareNavigation active="bot" actions={actions} />);
+  expect(screen.getByRole('button', { name: '工具' })).toBeInTheDocument();
+  // 页头为 60px 单行，工具区贴右。
+  expect(container.querySelector('nav > div')).toHaveClass('h-15', 'justify-between', 'px-5');
+  rerender(<SquareNavigation active="bot" />);
+  expect(container.querySelector('nav > div')).not.toContainHTML('工具');
 });

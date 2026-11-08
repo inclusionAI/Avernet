@@ -20,6 +20,8 @@ import { evolveBotOptionKey } from '../components/evolveBotIdentity'
 import EvolveModelFields, { EVOLVE_CUSTOM_MODEL } from '../components/EvolveModelFields'
 import { useEvolveModelConfig } from '../hooks/useEvolveModelConfig'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
+import { TaskReferenceMaterialsField, TaskReferenceMaterialsDetail } from '../components/TaskReferenceMaterials'
+import { useTaskReferenceMaterials } from '../hooks/useTaskReferenceMaterials'
 import SkillEvolutionFields, {
   type StageExtensionDraft,
   type StageSelectionDraft,
@@ -338,6 +340,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const modelConfig = useEvolveModelConfig()
   const navigate = useNavigate()
   const { user, authState } = useClientUser()
+  const { enabled: adminMode, ownerUserId: adminOwnerUserId, setOwnerUserId: setAdminOwnerUserId } = useEvolveAdminScope()
   const [searchParams, setSearchParams] = useSearchParams()
   const fixedSkillAssetId = searchParams.get('target') === 'skill' ? searchParams.get('assetId')?.trim() ?? '' : ''
   const [fixedSkill, setFixedSkill] = useState<{
@@ -445,7 +448,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     && activeHandoff?.improvement.adminReviewStatus === 'TRUSTED'
   const fixedSkillReady = Boolean(fixedSkill && fixedSkill.assetId === fixedSkillAssetId
     && fixedSkill.actorId === currentUserId && fixedSkill.taskType === taskType)
-  const evolveUserId = fixedSkillAssetId ? (fixedSkillReady ? fixedSkill!.userId : '') : currentUserId
+  const canSelectOwner = adminMode && taskType === 'full' && !improvementSource
+    && !fixedSkillAssetId && searchParams.get('target') !== 'skill'
+  const evolveUserId = fixedSkillAssetId ? (fixedSkillReady ? fixedSkill!.userId : '')
+    : canSelectOwner ? adminOwnerUserId.trim() : currentUserId
   const visibleHandoffError = improvementSource && rawImprovementId !== '' && improvementId === null
     ? '改进项 ID 必须是正整数，无法读取 Insight Center 交接信息。'
     : handoffError
@@ -579,11 +585,14 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
       if (!active) return
       setBotsLoading(true)
       setBotsOwnerId('')
+      setBots([]); setBotId(''); setBotEnv(''); setBotSelectionKey('')
       setBotsError('')
       void api.bots.list({ ownerId: evolveUserId, status: 'all' })
         .then((result) => {
           if (!active) return
-          const availableBots = result.bots
+          const availableBots = canSelectOwner
+            ? result.bots.filter((bot) => !bot.ownerId || bot.ownerId === evolveUserId)
+            : result.bots
           setBots(availableBots)
           setBotsOwnerId(evolveUserId)
           const sourceBot = sourceBotId
@@ -606,7 +615,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
         })
     })
     return () => { active = false }
-  }, [activeHandoff?.improvement.botId, activeHandoff?.improvement.botOwnerUserId, evolveUserId, fixedSkillAssetId, currentUserId])
+  }, [activeHandoff?.improvement.botId, activeHandoff?.improvement.botOwnerUserId, evolveUserId, fixedSkillAssetId, currentUserId, canSelectOwner])
 
   useEffect(() => {
     if (taskType !== 'optimize' || !evolveUserId || !botId) return
@@ -702,7 +711,9 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
       : stageSelection
   const diagnoseEnabled = taskType === 'diagnose'
     || (taskType === 'full' && !improvementSource && effectiveStageSelection.diagnose)
-  const selectedBot = bots.find((bot) => bot.botId === botId && (bot.env ?? '') === botEnv)
+  const selectedBot = botsOwnerId === evolveUserId
+    ? bots.find((bot) => bot.botId === botId && (bot.env ?? '') === botEnv)
+    : undefined
   const fixedTargetReady = !fixedSkillAssetId || Boolean(fixedSkillReady && fixedSkill
     && !fixedSkillError && !botsError && botsOwnerId === fixedSkill.userId
     && botId === fixedSkill.botId && targetSkillAssetId === fixedSkill.assetId
@@ -727,6 +738,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   })
   const isSkillEvolution = (taskType === 'full' || taskType === 'diagnose' || taskType === 'hardening')
     && !improvementSource && searchParams.get('target') === 'skill'
+  const materialsEnabled = !improvementSource && (taskType === 'hardening' || taskType === 'full')
+  const referenceMaterials = useTaskReferenceMaterials(materialsEnabled)
 
   useEffect(() => {
     if (diagnoseEnabled && serviceRuntimeSelected && diagnoseSessionSource !== 'service_export') {
@@ -933,16 +946,29 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
           <section>
             <h2 className="text-sm font-semibold text-gray-900">进化对象</h2>
             <div className="mt-3">
-              <label><span className="mb-1.5 block text-xs font-medium text-gray-600">用户空间 user_id</span><input className={inputClass} value={authState === 'loading' ? '正在识别当前用户…' : evolveUserId} readOnly /></label>
+              <label>
+                <span className="mb-1.5 block text-xs font-medium text-gray-600">用户空间 user_id</span>
+                <input className={inputClass} value={authState === 'loading' ? '正在识别当前用户…' : evolveUserId}
+                  readOnly={!canSelectOwner} maxLength={128}
+                  list={canSelectOwner ? 'evolve-admin-owner-options' : undefined}
+                  placeholder={canSelectOwner ? '输入目标 Bot 的 Owner 工号' : undefined}
+                  onChange={(event) => {
+                    if (!canSelectOwner) return
+                    setAdminOwnerUserId(event.target.value.trim())
+                    setBotsOwnerId(''); setBots([]); setBotId(''); setBotEnv(''); setBotSelectionKey('')
+                    setSubmitError('')
+                  }} />
+              </label>
+              {canSelectOwner && <p className="mt-2 text-xs text-amber-700">管理员模式：输入 Owner 工号后选择该用户的 Bot，任务将创建在该 Owner 下。</p>}
               <div className="mt-4">
                 <span className="mb-1.5 block text-xs font-medium text-gray-600">目标 Bot</span>
                 <EvolveBotPicker
-                  bots={bots}
+                  bots={botsOwnerId === evolveUserId ? bots : []}
                   value={botSelectionKey}
-                  disabled={botsLoading || !evolveUserId || Boolean(fixedSkillAssetId)}
-                  emptyText={botsLoading ? '正在加载 Bot…' : '当前用户没有可用 Bot'}
+                  disabled={botsLoading || botsOwnerId !== evolveUserId || !evolveUserId || Boolean(fixedSkillAssetId)}
+                  emptyText={!evolveUserId ? '请先输入目标 Owner 工号' : botsLoading ? '正在加载 Bot…' : '当前用户没有可用 Bot'}
                   onChange={(key, bot) => {
-                    if (fixedSkillAssetId) return
+                    if (fixedSkillAssetId || botsOwnerId !== evolveUserId) return
                     setBotSelectionKey(key)
                     setBotId(bot.botId)
                     setBotEnv(bot.env ?? '')
@@ -1095,6 +1121,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             <label className="mt-3 block max-w-xs"><span className="mb-1.5 block text-xs font-medium text-gray-600">最大优化轮数 <span className="font-normal text-gray-400">（上限 100 轮）</span></span><input className={inputClass} type="number" min={1} max={100} step={1} inputMode="numeric" value={maxRounds} onChange={(event) => setMaxRounds(event.target.value)} placeholder="请输入 1 到 100" /></label>
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
+          {materialsEnabled && <TaskReferenceMaterialsField state={referenceMaterials} disabled={submitting} />}
           {!openVersion && taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
           {capabilities.stageCustomization && !improvementSource && (taskType === 'diagnose' || taskType === 'hardening' || taskType === 'full') && <SkillEvolutionFields
             botId={botId}
@@ -1123,10 +1150,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
         <div className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-6 py-4">
           {submitError && <p className="mr-auto text-xs text-red-600">{submitError}</p>}
           <button className={secondaryButton} onClick={() => navigate(createReturnTo)}>取消</button>
-          <button disabled={submitting || !fixedTargetReady || botsLoading || restorePacksLoading || !currentUserId || !evolveUserId || !botId || !isOpenClawBot(selectedBot) || (taskType === 'pack_restore' && !selectedRestorePack) || (improvementSource && !activeHandoff) || (crossBotTarget && !crossBotConfirmed)} className={`${primaryButton} disabled:opacity-50`} onClick={async () => {
+          <button disabled={submitting || referenceMaterials.blocked || !fixedTargetReady || botsOwnerId !== evolveUserId || botsLoading || restorePacksLoading || !currentUserId || !evolveUserId || !botId || !isOpenClawBot(selectedBot) || (taskType === 'pack_restore' && !selectedRestorePack) || (improvementSource && !activeHandoff) || (crossBotTarget && !crossBotConfirmed)} className={`${primaryButton} disabled:opacity-50`} onClick={async () => {
             if (!taskName.trim()) { setSubmitError('请输入任务名称'); return }
             if (!currentUserId) { setSubmitError('无法识别当前用户，请重新登录'); return }
-            if (!botId) { setSubmitError('请选择目标 Bot'); return }
+            if (!botId || botsOwnerId !== evolveUserId) { setSubmitError('请选择当前 Owner 的目标 Bot'); return }
             if (!isOpenClawBot(selectedBot)) { setSubmitError(`当前仅支持 OpenClaw 引擎，所选 Bot 为 ${selectedBot?.activeEngine}`); return }
             if (diagnoseEnabled && arcaSelected && effectiveJudgeBackend === 'api') { setSubmitError('ARCA 模式只支持 Agent Judge，不支持传入 API Key'); return }
             if (diagnoseEnabled && diagnoseSessionSource === 'service_export' && !serviceSourceAvailable) { setSubmitError('所选 Bot 没有可导出的服务态 Session'); return }
@@ -1183,7 +1210,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             }
             setSubmitting(true); setSubmitError('')
             try {
-              const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined }
+              const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined,
+                ...(referenceMaterials.uploadId ? { referenceMaterialsUploadId: referenceMaterials.uploadId } : {}) }
               const payloadStartDate = taskType === 'diagnose' ? dateValue(-parsedLookbackDays) : startDate
               const payloadEndDate = taskType === 'diagnose' ? dateValue() : endDate
               const fullNodeCommandYamls = customCommands
@@ -2224,6 +2252,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
         </div>
 
         <aside className="min-w-0 space-y-4">
+          {Boolean(task.config.reference_materials) && <TaskReferenceMaterialsDetail taskId={task.task_id} />}
           {logArchives.length > 0 && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div><h2 className="text-sm font-semibold text-gray-900">任务日志</h2><p className="mt-1 text-xs text-gray-500">独立归档，不影响任务节点和运行状态。</p></div>
             <div className="mt-4 space-y-3">
@@ -3229,7 +3258,7 @@ function EvolveShell({ children, version }: { children: ReactNode; version: Evol
             <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-amber-600" />
           </label>
           {enabled && <>
-            <p className="mt-2 text-[10px] leading-4 text-amber-700">可按工号查看数据；Repair 创建页可选择该用户的 Bot，其他操作仍按各页面权限校验。</p>
+            <p className="mt-2 text-[10px] leading-4 text-amber-700">可按工号查看数据；Bot 自进化和 Repair 创建页可选择该用户的 Bot，其他操作仍按各页面权限校验。</p>
             <input
               aria-label="按工号筛选"
               list="evolve-admin-owner-options"

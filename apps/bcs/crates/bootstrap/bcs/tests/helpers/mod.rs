@@ -87,6 +87,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
             invite_code_gate_enabled: false,
             public_claim_enabled: false,
             public_claim_max_count: 1_000,
+            issuer_user_ids: Vec::new(),
             default_ttl_seconds: 3600,
             base_url: None,
             group_link_url: None,

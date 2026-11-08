@@ -25,10 +25,13 @@ installed plus an ``old`` server the document no longer declares::
         removals=("old",),
     )
 
-    # 3. write(ctx, plan) -> Sequence[EntryResult]
+    # 3. write(ctx, plan) -> CategoryWriteResult
     #    Executes it. "unchanged" calls nothing; removals are deactivated.
-    (EntryResult(Category.MCP, "gh", EntryOutcome.UNCHANGED),
-     EntryResult(Category.MCP, "slack", EntryOutcome.CREATED))
+    CategoryWriteResult(
+        entries=(EntryResult(Category.MCP, "gh", EntryOutcome.UNCHANGED),
+                 EntryResult(Category.MCP, "slack", EntryOutcome.CREATED)),
+        removals=("old",),
+    )
 
 Had ``slack`` been unpermitted, ``resolve`` would have answered
 ``ResolveResult(intents=(...gh...), failures=(ResolveFailure("slack", "this
@@ -91,6 +94,14 @@ from agentclaw.community.core.apply_engine.outcomes import (
 
 class ConfirmedPartialWriteError(RuntimeError):
     """A materialiser knows an earlier durable step committed before failure."""
+
+
+@dataclass(frozen=True)
+class CategoryWriteResult:
+    """Entry results and removals confirmed by a successful category write."""
+
+    entries: tuple[EntryResult, ...]
+    removals: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -293,7 +304,7 @@ class Materialiser(Protocol[E]):
 
     The currencies, in order: the construct's typed desired entries in
     (``core/apply_engine/desired_state``), :class:`ResolveResult`,
-    :class:`CategoryPlan`, ``Sequence[EntryResult]`` out. This module's own
+    :class:`CategoryPlan`, ``CategoryWriteResult`` out. This module's own
     docstring works one category through all three.
 
     Six ship: ``script``, ``mcp``, ``identity``, ``skills``, ``resources`` and
@@ -346,14 +357,14 @@ class Materialiser(Protocol[E]):
     @abstractmethod
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Execute the plan, and answer one :class:`~...outcomes.EntryResult`
         per planned entry.
 
-        Removals are performed but produce **no** result rows: they are carried
-        on :attr:`CategoryPlan.removals` and reported through
-        ``CategoryResult.removals`` instead, because a removal has no declared
-        entry to attach an outcome to.
+        Return entry outcomes and confirmed removals together. Writers that
+        execute the planned removals return :attr:`CategoryPlan.removals`
+        after success. Writers that re-observe their area return the removals
+        confirmed during the write. A removal has no declared entry row.
 
         Reached only when ``resolve`` produced no failures. A plan that is
         ``is_noop`` must perform no write at all — that absence is what the
@@ -469,6 +480,7 @@ class ChecksSetSupply(Protocol):
 
 __all__ = [
     "CategoryPlan",
+    "CategoryWriteResult",
     "ChecksSetSupply",
     "ConfirmedPartialWriteError",
     "Intent",

@@ -2,7 +2,7 @@ import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
 import { getBcnCapability, getServiceBotCapability } from './agentCodingTemplateService';
 import { resolveBotLifecycle } from './botLifecycleResolver';
-import type { BotDomain, BotRuntimeDomain } from './types';
+import type { BotCopyStateSummary, BotCopyStatus, BotDomain, BotRuntimeDomain } from './types';
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'hermes', 'teclaw']);
 const INTERNAL_ENGINES = new Set(['claude_code', 'aicoding', 'claudeCode', 'applicationCoding']);
@@ -11,6 +11,38 @@ const asString = (value: unknown) => (typeof value === 'string' && value.trim() 
 const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const asRecord = (value: unknown): BackendUnknownRecord =>
   value && typeof value === 'object' ? (value as BackendUnknownRecord) : {};
+
+const COPY_STATUSES: readonly BotCopyStatus[] = [
+  'INITIAL',
+  'CREATED',
+  'AUTH_PENDING',
+  'CONFIG_COPIED',
+  'FILE_SYNCED',
+  'BOT_STARTED',
+  'CAPSET_SYNCED',
+  'CONVERGED',
+  'FAILED',
+];
+const COPY_STATUS_SET = new Set<string>(COPY_STATUSES);
+
+/**
+ * 后端 `copy_state` derive-on-read 字段镜像:仅复制流程创建的 dst bot 携带。
+ * CONVERGED 时后端返回 null(此处镜像为 null);未走复制流程的字段缺省(undefined)。
+ * 任一字段缺失或 status 越界 → undefined,避免 FE 渲染出半残的状态徽标。
+ */
+function copyStateFrom(dto: BackendUnknownRecord): BotCopyStateSummary | null | undefined {
+  if (!('copy_state' in dto) || dto.copy_state === null) {
+    // null 是合法值(CONVERGED);缺省(undefined)表示非复制 bot。
+    return dto.copy_state === null ? null : undefined;
+  }
+  const raw = asRecord(dto.copy_state);
+  const operationId = asString(raw.operation_id);
+  const statusRaw = asString(raw.status);
+  const sourceBotId = asString(raw.source_bot_id);
+  if (!operationId || !statusRaw || !sourceBotId) return undefined;
+  if (!COPY_STATUS_SET.has(statusRaw)) return undefined;
+  return { operationId, status: statusRaw as BotCopyStatus, sourceBotId };
+}
 
 function templateConfigFrom(dto: BackendUnknownRecord) {
   const engineProperties = asRecord(dto.engine_properties);
@@ -105,6 +137,20 @@ function lifecycle(dto: BackendUnknownRecord, warnings: string[]) {
   return resolveBotLifecycle(dto, isService, warnings);
 }
 
+function mapBotPublishId(dto: BackendUnknownRecord): string | undefined {
+  const publishId =
+    asNumber(dto.publication_id) ??
+    asNumber(dto.bot_publish_id) ??
+    asNumber(dto.publish_id) ??
+    // Compatibility with string-only or nested legacy payloads.
+    asNumber(Number(asString(dto.bot_publish_id))) ??
+    asNumber(Number(asString(dto.publish_id))) ??
+    asNumber(asRecord(dto.publish).id);
+  return typeof publishId === 'number' && Number.isSafeInteger(publishId) && publishId > 0
+    ? String(publishId)
+    : undefined;
+}
+
 export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, currentUserId?: string) {
   const warnings: string[] = [];
   // 详情接口的内部运行时 bot_id 可能为 "default"；网关子资源必须继续使用
@@ -177,7 +223,10 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
       ? {
           entityType: entityType ?? (ownership === 'team' ? 'team' : 'staff'),
           entityId,
-          botPublishId: asString(dto.bot_publish_id) ?? asString(dto.publish_id) ?? asString(asRecord(dto.publish).id),
+          // The inventory OpenAPI returns a numeric publication id. Historical
+          // sources may use bot_publish_id/publish_id; accept both numbers and
+          // non-empty numeric strings before falling back to publish.id.
+          botPublishId: mapBotPublishId(dto),
         }
       : undefined,
     healthScore: asNumber(dto.health_score),
@@ -200,6 +249,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
         : undefined,
     completeness: warnings.length ? 'partial' : 'complete',
     warnings,
+    copyState: copyStateFrom(dto),
     actions: Array.isArray(dto.actions)
       ? dto.actions.filter((value): value is string => typeof value === 'string')
       : [],

@@ -572,7 +572,8 @@ it('inline Bot 触发按钮展示引擎名称', () => {
   render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={jest.fn()} layout="inline" />);
   const trigger = screen.getByRole('button', { name: '当前协作身份：协作 Bot' });
   expect(trigger).toHaveTextContent('OpenClaw');
-  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-md', 'bg-muted', 'text-foreground');
+  // dmore artboard-002 页头身份触发器：引擎为 10px 软底小标签。
+  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-[4px]', 'bg-foreground/10', 'text-muted-foreground');
   expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
 });
 
@@ -582,6 +583,6 @@ it('inline 用户触发按钮展示蓝色用户标签', () => {
   const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
   const label = screen.getByText('用户');
   expect(trigger).toContainElement(label);
-  expect(label).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary');
+  expect(label).toHaveClass('rounded-[4px]', 'bg-primary/10', 'text-primary');
   expect(trigger).not.toHaveTextContent('引擎类型暂无');
 });

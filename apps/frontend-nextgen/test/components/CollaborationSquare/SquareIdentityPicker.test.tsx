@@ -54,11 +54,12 @@ describe('SquareIdentityPicker', () => {
     expect(props.headerLabel).toBeUndefined();
     expect(props.headerTooltip).toBeUndefined();
     expect(props.layout).toBe('inline');
-    expect(props.triggerClassName).toContain('bg-background');
-    // 弹层文案定制:公开Bot Tab 为模块级身份,标题/副提示写本 Tab 实际用途,说明图标隐藏。
-    expect(props.popoverTitle).toBe('切换协作身份');
-    expect(props.popoverHint).toBe('选择浏览公开Bot与发起好友申请的身份');
-    expect(props.hidePopoverInfo).toBe(true);
+    // dmore artboard-002：inline 布局自带搜索 + 用户/Bot 分组compact弹层与页头触发器样式，
+    // 不再透传 popover 文案与触发器样式覆写。
+    expect(props.popoverTitle).toBeUndefined();
+    expect(props.popoverHint).toBeUndefined();
+    expect(props.hidePopoverInfo).toBeUndefined();
+    expect(props.triggerClassName).toBeUndefined();
   });
 
   it('模块级选择 Bot 身份后选中项切换为该 Bot', () => {

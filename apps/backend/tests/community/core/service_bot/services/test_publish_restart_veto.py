@@ -63,9 +63,10 @@ async def test_real_fastdisk_veto_persists_failure_and_finishes_task(published, 
     queue = Mock()
     handler = PublishRestartHandler(flow=svc, task_queue_service=queue)
     assert isinstance(await handler._run(1, 'online', 'operator'), Fail)
-    assert record.status == PublishStatus.FAILED.value
-    assert '快盘' in record.ext['error_message']
-    assert record.ext['source_status'] == PublishStatus.SUCCESS.value
+    assert record.status == PublishStatus.SUCCESS.value
+    assert '快盘' in record.ext['restart']['message']
+    assert 'error_message' not in record.ext
+    assert 'source_status' not in record.ext
     assert 'restarting' not in record.ext['restart']
     assert record.ext['binding'] == {'online': 42}
     assert record.ext['unrelated'] == {'keep': True}
@@ -147,3 +148,44 @@ async def test_published_partial_backup_passes_enabled_guard_without_failure_fie
     assert 'phase=verify status=partial_success' in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
     assert execute.call_count == 3  # Detect, start, then verify the partial receipt.
+
+
+@pytest.mark.asyncio
+async def test_published_nonblocking_failure_keeps_warning_until_completion(published, monkeypatch):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_engine_provisioning_registry, resolve_published_status_ext,
+    )
+    svc, _, baas, build, record = published
+    engine = svc._bot_service.get_bot_by_address.return_value['active_engine']
+    config = Mock()
+    config.get_value.return_value = False
+    monkeypatch.setattr(get_engine_provisioning_registry().resolve(engine), '_common_config_provider', lambda: config)
+    operation = svc.restart_bot(1, 'operator')['ext']['aicoding']['restart']['operation_id']
+    execute = executor([response('failed', operation_id=operation)])
+    baas.post_bots_api = Mock(side_effect=lambda **kw: execute(kw['payload']['cmd']))
+    build.upgrade_async = AsyncMock(return_value={'success': True, 'publish_id': 902})
+
+    result = await svc.execute_restart(1, 'online', 'operator', operation_id=operation)
+
+    assert result['success'] is True
+    build.upgrade_async.assert_awaited_once()
+    progress = resolve_published_status_ext(record, public=True)['aicoding']['restart']
+    assert progress['status'] == 'RUNNING'
+    assert progress['phase'] == 'WAITING_READY'
+    assert progress['warning']['code'] == 'backup_failed_continue'
+    assert '数据丢失风险' in progress['warning']['message']
+    assert record.status == 'success'
+    assert record.ext['unrelated'] == {'keep': True}
+
+    svc.get_baas_publish_progress = Mock(return_value={'status': 'SUCCESS'})
+    svc._activate_binding = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+    svc.refresh_publish_handle = Mock()
+    completed = svc.sync_restart_progress(1).ext['aicoding']['restart']
+    assert completed['status'] == 'SUCCEEDED'
+    assert completed['warning'] == progress['warning']
+    assert resolve_published_status_ext(record, public=True)['aicoding']['restart']['warning'] == progress['warning']
+    # An explicit new attempt does not inherit the preceding warning.
+    again = svc.restart_bot(1, 'operator')['ext']['aicoding']['restart']
+    assert again['operation_id'] != operation
+    assert 'warning' not in again

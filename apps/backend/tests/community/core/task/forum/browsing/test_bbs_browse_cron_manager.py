@@ -31,7 +31,7 @@ from agentclaw.community.core.task.forum.browsing.messages import (
 
 _BACKEND_URL = "http://127.0.0.1:8888"
 expected_bbs_cron_command = browse_cron_message(
-    bot_id="bot-a", backend_base_url=_BACKEND_URL
+    bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
 )
 
 
@@ -102,8 +102,14 @@ def test_openclaw_cron_cadence_is_hourly():
     assert BBS_BROWSE_LOOP_CRON_EXPR == "0 * * * *"
 
 
+def test_openclaw_cron_timeout_is_55_minutes():
+    assert BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS == 3300
+
+
 def test_cron_body_is_fixed_deterministic():
-    body = bbs_browse_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
+    body = bbs_browse_loop_cron_body(
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
+    )
     assert body == {
         "name": BBS_BROWSE_LOOP_CRON_NAME,
         "schedule": BBS_BROWSE_LOOP_CRON_EXPR,
@@ -116,12 +122,18 @@ def test_cron_body_is_fixed_deterministic():
 
 
 def test_cron_trigger_carries_trusted_backend_not_a_bcs_url():
-    command = bbs_browse_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)[
-        "command"
-    ]
+    command = bbs_browse_loop_cron_body(
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
+    )["command"]
     assert BBS_BROWSE_RUN_TRIGGER.startswith("[BBS-BROWSE]")
     assert f'"backend": "{_BACKEND_URL}"' in command
     assert '"bot_id": "bot-a"' in command
+    default_command = bbs_browse_loop_cron_body(
+        bot_id="default",
+        owner_user_id="149844",
+        backend_base_url=_BACKEND_URL,
+    )["command"]
+    assert '"bot_id": "default:149844"' in default_command
     assert '"subscription_mode": "openclaw"' in command
     assert "/api/v1/collaboration/tasks/bbs/topics" not in command
     assert "21000" not in command
@@ -130,13 +142,13 @@ def test_cron_trigger_carries_trusted_backend_not_a_bcs_url():
 def test_cron_command_uses_environment_selected_skill(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "dev")
     dev_command = bbs_browse_loop_cron_body(
-        bot_id="bot-a", backend_base_url=_BACKEND_URL
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
     )["command"]
     assert f"使用当前 Bot 已激活的 {browse_skill_name('dev')} Skill" in dev_command
 
     monkeypatch.setenv("SERVER_ENV", "prod")
     prod_command = bbs_browse_loop_cron_body(
-        bot_id="bot-a", backend_base_url=_BACKEND_URL
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
     )["command"]
     assert f"使用当前 Bot 已激活的 {browse_skill_name('prod')} Skill" in prod_command
 
@@ -149,7 +161,7 @@ async def test_ensure_cron_creates_canonical_when_absent():
     creates = [c for op, c in relay.calls if op == "create"]
     assert len(creates) == 1
     assert creates[0]["body"] == bbs_browse_loop_cron_body(
-        bot_id="bot-a", backend_base_url=_BACKEND_URL
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
     )
     assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME]
 
@@ -179,7 +191,7 @@ async def test_ensure_cron_updates_canonical_when_present_no_duplicate():
     creates = [c for op, c in relay.calls if op == "create"]
     assert len(updates) == 1 and updates[0]["task_id"] == "t-can"
     assert updates[0]["body"] == bbs_browse_loop_cron_body(
-        bot_id="bot-a", backend_base_url=_BACKEND_URL
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
     )
     assert creates == []
     assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME]
@@ -282,11 +294,15 @@ def test_digest_cron_cadence_is_environment_selected():
 
 def test_digest_cron_body_is_fixed_and_environment_selected(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "dev")
-    dev_body = bbs_digest_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
+    dev_body = bbs_digest_loop_cron_body(
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
+    )
     assert dev_body == {
         "name": BBS_DIGEST_LOOP_CRON_NAME,
         "schedule": "0 * * * *",
-        "command": digest_cron_message(bot_id="bot-a", backend_base_url=_BACKEND_URL),
+        "command": digest_cron_message(
+            bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
+        ),
         "timezone": "Asia/Shanghai",
         "enabled": True,
         "timeout_secs": BBS_DIGEST_LOOP_CRON_TIMEOUT_SECS,
@@ -299,7 +315,9 @@ def test_digest_cron_body_is_fixed_and_environment_selected(monkeypatch):
     assert FORUM_DIGEST_RUN_TRIGGER == "[FORUM-DIGEST-COLLECT]"
 
     monkeypatch.setenv("SERVER_ENV", "prod")
-    prod_body = bbs_digest_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
+    prod_body = bbs_digest_loop_cron_body(
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
+    )
     assert prod_body["schedule"] == "0 20 * * *"
     assert BBS_DIGEST_RUN_TRIGGER == "[BBS-DIGEST-COLLECT]"
     assert prod_body["command"] == (
@@ -317,7 +335,7 @@ async def test_ensure_digest_cron_creates_canonical_when_absent(monkeypatch):
     creates = [c for op, c in relay.calls if op == "create"]
     assert len(creates) == 1
     assert creates[0]["body"] == bbs_digest_loop_cron_body(
-        bot_id="bot-a", backend_base_url=_BACKEND_URL
+        bot_id="bot-a", owner_user_id="149844", backend_base_url=_BACKEND_URL
     )
     assert relay.task_names() == [BBS_DIGEST_LOOP_CRON_NAME]
 

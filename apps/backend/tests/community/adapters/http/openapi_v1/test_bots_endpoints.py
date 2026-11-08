@@ -271,6 +271,21 @@ def client(
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
             binder.bind(ServicePublicationFacadeProtocol, to=service_publication)
             binder.bind(BusinessSpaceContextProtocol, to=space)
+            # copy_state derive-on-read: GET /bots/{bot_id} pulls these via
+            # Injected; with no ac_bot_copy row build_copy_state_summary returns
+            # None, so the legacy-bot assertions stay unchanged.
+            from agentclaw.community.core.bot_copy.repository.protocol import (
+                BotCopyRepositoryProtocol,
+            )
+            from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+                BotConfigManifestApplyRepositoryProtocol,
+            )
+            _bot_copy_repo = MagicMock()
+            _bot_copy_repo.get_by_dst_bot_id.return_value = None
+            binder.bind(BotCopyRepositoryProtocol, to=_bot_copy_repo)
+            binder.bind(
+                BotConfigManifestApplyRepositoryProtocol, to=MagicMock()
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -347,6 +362,21 @@ def collaborator_client(
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
             binder.bind(ServicePublicationFacadeProtocol, to=service_publication)
             binder.bind(BusinessSpaceContextProtocol, to=space)
+            # copy_state derive-on-read: GET /bots/{bot_id} pulls these via
+            # Injected; with no ac_bot_copy row build_copy_state_summary returns
+            # None, so the legacy-bot assertions stay unchanged.
+            from agentclaw.community.core.bot_copy.repository.protocol import (
+                BotCopyRepositoryProtocol,
+            )
+            from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+                BotConfigManifestApplyRepositoryProtocol,
+            )
+            _bot_copy_repo = MagicMock()
+            _bot_copy_repo.get_by_dst_bot_id.return_value = None
+            binder.bind(BotCopyRepositoryProtocol, to=_bot_copy_repo)
+            binder.bind(
+                BotConfigManifestApplyRepositoryProtocol, to=MagicMock()
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -516,6 +546,7 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
             {
                 "bot_id": "b1",
                 "owner_id": "u1",
+                "bcn_bot_id": "b1:u1",
                 "bot_name": "N",
                 "bot_desc": "D",
                 "engine": "teclaw",
@@ -524,6 +555,7 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
                 "online_available": None,
                 "live_version": None,
                 "conversation_stage": "draft",
+                "avatar_url": None,
             }
         ],
     }

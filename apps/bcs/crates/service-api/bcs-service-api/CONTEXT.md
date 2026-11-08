@@ -1,5 +1,28 @@
 # bcs-service-api Context
 
+## Version 3.0.0: Bot response avatars
+
+`PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
+struct literals must supply this field, requiring a major Service API version
+change. Workspace consumers rebuild together; external constructors should use
+`None` for an unset avatar and for Humans. JSON responses always include the
+nullable key, while serde still accepts older payloads without it. All V1 Bot
+projections share this shape, including mine, get, query, update and candidates.
+The application reuses `BotRegistryCoreService::avatar_urls`; no Plugin API,
+storage schema, HTTP route version, or configuration changes are needed.
+
+## Version 2.0.0: avatar source compatibility
+
+The avatar extension adds fields to public Rust structs, including
+`AdminBotOnboardCommand`, `RegisterProviderBotCommand`, `Actor`, `Participant`,
+`SessionParticipant` and Group/Session summaries. Existing external struct
+literals must supply the new fields, so this is a major Rust API version change
+even though the JSON fields are additive and serde accepts their omission.
+Consumers should use `AvatarChange::Keep` for omitted write intent, `None` for
+unknown display avatars, and construct the new participant summary vectors.
+All workspace consumers use path dependencies and rebuild together. HTTP clients
+retain the existing v1 routes, and no additional database migration is required.
+
 `A2aBotManagementService::register_provider_bot` orchestrates Provider-admin
 Card-aware creation using the existing Provider command/response. Its
 `A2aProviderRegistrationCoreService` dependency owns reauthorization and the
@@ -538,13 +561,23 @@ connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mod
 is an internal optional claim copied only from a verified Token, not an HTTP
 parameter. The core checks a present value against current Provider configuration
 before mutations; None preserves historical v2 compatibility. Consumers and test
-fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
+fakes must rebuild against 1.0.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
 binding fallback and then performs channel cleanup; it never accesses the metadata
 repository directly. A missing metadata identity returns None, but storage and
 authorization errors propagate and must not trigger the fallback.
+
+`BotRepoPort` adds the existing-only Bot profile contracts (bot-avatar
+plan, Task 3): `update_profile_existing`/`update_avatar_existing`
+(`ExistingProfileUpdate` over `AvatarChange` Keep/Clear/Set, classified as
+`ProfileWrite::Updated|Missing`) and the bounded `read_avatar_batch`
+(≤256 deduplicated ids, `BotAvatarMap`) for display-face reads. The
+compatibility defaults fail closed ("not configured"); the Memory and
+persistent bot stores implement them over the record's dedicated avatar
+field, with `AvatarChange::Keep` never reaching a storage SET clause and
+tombstoned identities refusing every write.
 
 BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
 for this flow. It is atomic, preserves existing active/deleted identities and
@@ -680,3 +713,90 @@ within a trusted scope. Repository CAS returns the committed projection and
 fences both run and shared Task revisions. Pending input is Task-owned; budgets
 and local states remain run-owned. Run-scoped cancellation rejects a shared Task
 with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+## Strict atomic auth session repository
+
+`AuthSessionRepoPort` is the strict, environment-scoped login-session
+persistence contract for the V1 API auth plugin chain. `AuthSessionScope`
+includes `env`, and scope values come from trusted configuration plus an
+already-verified identity, never from unverified JWT claims. Session versions
+CAS on a revision that advances by `checked_add(1)` within SQL signed BIGINT
+bounds. Install and rotate are compare-and-swap writes returning
+`Applied`/`Conflict`; a conflict is a lost race, never a persistence error,
+and callers restart the login batch or fail authentication instead of writing
+unconditionally. Revoking bumps the revision and clears the token hash, so a
+revoked or rotated-out hash no longer resolves; repeating a revoke reports
+`NotCurrent`. Reads separate absence (`None` for a missing session), the
+current revision, and persistence failure through the closed two-category
+`AuthSessionStoreError` whose display text never carries SQL, endpoint, or
+credential material. The port is independent of `UserIdentityRepoPort`: an
+implementation may implement both, but the strict trait has no default
+methods delegating to the legacy Option-returning lookups, and a session
+write never auto-creates a missing identity row. Snapshot display fields are
+joined from the identity row. Concrete implementations prove conformance
+against the shared `bcs-test-support` harness
+(`auth_session_repo_port_contract_tests`), which takes any
+`AuthSessionRepoPort` trait object and a scope.
+
+## V1 auth application ports and AuthService
+
+`port::oauth` is the ONLY surface the auth application layer consumes for
+login, transport-neutral by construction: `OAuthProviderPort` (chain-ordered
+provider names, authorize-URL build with the exact per-provider callback,
+one-time code exchange whose third-party errors are lowered to stable
+`ApplicationError` categories, never raw provider text), `OAuthSessionPort`
+(atomic install for a completed browser-bound login, rotation, and
+idempotent session-instance revoke), and `PendingOAuthLoginPort` (the
+issue/consume mirror of plugin-api's `PendingOAuthLoginStore`, with the
+byte-identical `{callback_base}/{provider}` join on both sides). `application::v1::AuthService`
+orchestrates them for the OpenAPI V1 facade (`login_urls`, `complete_login`,
+`current_user`, `refresh_session`, `logout`): its `AuthFlowReply` carries
+transport-neutral cookie instructions — one `SetLoginChallenge` on URL
+discovery, session-install plus challenge-clear on callback success — plus
+the failure classes the API chain pins (lost login race → 409, lost rotation
+race → 401, dependency outage → 503 `auth_dependency_unavailable`, and
+logout never reports success after a failed revoke). No delivery type crosses
+into this contract; the HTTP adapter encodes `BrowserCookieChange` into
+separate `Set-Cookie` headers and the rest of BCS keeps consuming
+`AuthenticatedCaller` unchanged. Wire contract:
+`api-contracts/v1/authentication/contract.md`.
+
+## Invite-code issuance caller
+
+`InitInviteCodes` requires the verified `AuthenticatedCaller`; application
+implementations must authorize issuance before repository access. The bootstrap
+allowlist uses exact user IDs and defaults to denying all callers. Gateway or
+OAuth authentication, a binding and non-user identities do not implicitly grant
+issuance. HTTP request bodies remain count-only; Rust callers must provide the
+caller when rebuilding. No persistence schema changes are required.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## Native task Service API compatibility
+
+`MessageFlowService::handle_native_task_dispatch(request_id, command)` is the
+inbound entry for authenticated native task requests without a wire parent key.
+The production Caller-aware implementation correlates accepted starts and checks
+BCS-owned parent identity; request IDs and model arguments never grant authority.
+The additive entry is versioned as bcs-service-api 3.1.0 on top of the 3.0.0 API.
+Workspace consumers rebuild together; existing implementations retain source
+compatibility with the 3.0.0 API.
+The additive default strips delegation and retains ordinary task dispatch only,
+not Caller inheritance. There is no identity Plugin API or task wire change.
+Bounded replay and composition semantics are specified in
+`apps/bcs/docs/native-task-caller.md` and exercised through the real task and
+protected-delivery application seams.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.

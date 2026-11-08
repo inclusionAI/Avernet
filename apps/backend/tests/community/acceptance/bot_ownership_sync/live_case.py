@@ -201,10 +201,10 @@ class OwnershipCase:
         return sum(f"event={event} " in line and f" bot_pk={self.bot_pk} " in line
                    and " kind=ownership " in line for line in lines)
 
-    def wait_business_event(self, event):
+    def wait_business_event(self, event, *, after_count=0):
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
-            if self.business_event_count(event):
+            if self.business_event_count(event) > after_count:
                 return
             time.sleep(0.25)
         raise AssertionError(f"business ownership diagnostic absent: {event}")
@@ -227,6 +227,27 @@ class OwnershipCase:
     def assert_no_new_business_confirmation(self, before):
         time.sleep(2)
         assert self.business_event_count("send_confirmed") == before
+
+    def request_operations_repair(self, *, actor="100000", bot_pk=None):
+        # Synthetic super_admin from application-singlebox.yaml. The normal
+        # HTTP auth dependency and production operations service remain real.
+        return self.backend.post(
+            "/api/bots/owner-handoffs/bcn-repair",
+            headers={"x-user-id": actor},
+            json={"bot_pk": self.bot_pk if bot_pk is None else bot_pk},
+        )
+
+    def operations_repair(self):
+        response = self.request_operations_repair()
+        _assert_status(response, 202, "Backend ownership repair admission")
+        body = response.json()
+        assert body["success"]
+        data = body["data"]
+        assert data["bot_pk"] == self.bot_pk
+        assert data["bcn_bot_id"] == self.target
+        assert data["submission"] in {"queued", "coalesced"}
+        assert data["delivery_confirmed"] is False
+        return data
 
     def manual_repair(self):
         env = maintenance_environment(self.database)

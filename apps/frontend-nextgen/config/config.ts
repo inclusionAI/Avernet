@@ -19,6 +19,9 @@ export default defineConfig({
       path.resolve(__dirname, '../../../packages/a2a-chat-client/src/testing.ts'),
   },
   npmClient: 'npm',
+  // 首屏骨架屏注入（见 config/plugins/boot-splash.ts）：HTML 空窗期给用户品牌级反馈，
+  // React mount 时骨架自动退场；Open Core 与内部组装共用本插件。
+  plugins: ['./config/plugins/boot-splash'],
   headScripts: [{ src: '/runtime-config.js' }],
   extraPostCSSPlugins: [tailwindcss()],
   antd: false,

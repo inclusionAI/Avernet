@@ -35,8 +35,8 @@ export function useGroupSidebarProps({
   const sessionTabsByGroup = useWorkspaceStore((s) => s.sessionTabsByGroup);
   const setSessionTabForGroup = useWorkspaceStore((s) => s.setSessionTabForGroup);
 
-  const handleCreateSession: GroupSidebarProps['onCreateSession'] = (groupId, scope) =>
-    void sessions.createSessionIn(groupId, undefined, undefined, scope);
+  const handleCreateSession: GroupSidebarProps['onCreateSession'] = (groupId, scope, contextDelivery) =>
+    void sessions.createSessionIn(groupId, undefined, undefined, scope, contextDelivery);
   const handleCreateGroup = () => createGroupDialog.openModal();
   // 侧栏「…」菜单：群管理（选中该群并打开管理面板；详情由主组件 effect 按需补拉）。
   const handleManageGroup = (groupId: string) => {
@@ -44,8 +44,11 @@ export function useGroupSidebarProps({
     setActivePanel('manage');
   };
   const handleManageSession = (groupId: string, sessionId: string) => {
-    void ws.onSelectGroup(groupId);
-    sessions.openSession(groupId, sessionId);
+    // 管理当前会话只补拉详情，不重新进入会话（openSession 会刷新历史与 manifest）。
+    // 非当前会话由 openSession 自行切群，避免重复 selectGroup 清空选中会话。
+    if (ws.selectedGroupId !== groupId || sessions.selectedSessionId !== sessionId) {
+      sessions.openSession(groupId, sessionId);
+    }
     // 打开管理面板前补拉会话详情（participants），列表接口可能只返回 participant_count。
     void sessionService.getSessionDetail(sessionId).then((res) => {
       if (res.ok) sessions.applySessionUpdate(sessionId, res.data);

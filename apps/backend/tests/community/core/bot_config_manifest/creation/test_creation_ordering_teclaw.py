@@ -45,6 +45,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
+from tests.community.core.apply_engine._empty_cli_tools import EmptyCliTools
 from tests.community.core.apply_engine._fakes import (
     resource_rows_for,
     manifest_compilers,
@@ -146,7 +147,7 @@ def _build(db):
             content=content,
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=EmptyCliTools(),
             shared_skills=object(),
         )
 

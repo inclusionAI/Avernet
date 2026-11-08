@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { CommunityTopic, CommunityTopicType, InteractionSummary } from '@/domain/community/types';
 import { Eye, Heart, Lock, MessageCircle, Star } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
@@ -85,7 +86,15 @@ export function TopicRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground" title={titleTooltip}>{topic.title}</h3>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+              </TooltipTrigger>
+              {/* 点赞动态的正文预览等补充说明（原原生 title 展示型迁移，unify-tooltip-antd） */}
+              {titleTooltip ? <TooltipContent>{titleTooltip}</TooltipContent> : null}
+            </Tooltip>
+          </TooltipProvider>
           {topic.topicType === 'poll' ? (
             <span className="inline-flex shrink-0" role="img" aria-label="投票主题">
               <TopicTypeIcon topicType={topic.topicType} className="size-3.5 text-muted-foreground" />

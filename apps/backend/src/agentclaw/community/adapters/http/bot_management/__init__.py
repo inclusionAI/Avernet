@@ -2,5 +2,7 @@
 
 from . import router
 from .owner_handoff import router as owner_handoff_router
+from .ownership_repair import router as ownership_repair_router
 
 router.router.include_router(owner_handoff_router)
+router.router.include_router(ownership_repair_router)

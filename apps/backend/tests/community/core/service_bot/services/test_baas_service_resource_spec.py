@@ -339,6 +339,7 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
         "B1",
         "U1",
         "",
+        engine_type="aicoding",
         extra_properties=None,
     )
 

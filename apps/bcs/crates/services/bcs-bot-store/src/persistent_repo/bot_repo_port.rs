@@ -2,10 +2,9 @@
 //!
 //! Moved verbatim from `lib.rs` during the crate split.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
-use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
@@ -14,12 +13,11 @@ use bcs_db_api::{
 };
 use bcs_service_api::{
     BotCapabilities, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult,
-    is_mock_token,
 };
 
 use bcs_service_api::port::repo::BotRepoPort;
 use super::PersistentBotRepo;
-use crate::{BotConnection, BotInfo, RegisteredBotInner, is_legacy_namespace, log_bot_cache_source};
+use crate::{BotInfo, log_bot_cache_source};
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
@@ -84,82 +82,7 @@ impl BotRepoPort for PersistentBotRepo {
     // ===== Registration & Discovery =====
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
-        info!(bot_id = %bot_id, name = ?capabilities.name, "register: received registration request");
-
-        // Sync binding channel index
-        self.sync_binding_channel_index(&bot_id, &capabilities)
-            .await;
-
-        // Get token from memory for DB insert
-        let session_token: Option<String> = {
-            let bots = self.bots.read().await;
-            bots.get(&bot_id).and_then(|b| b.session_token.clone())
-        };
-
-        // Save to the configured database (include token if available)
-        self.save_to_db(&bot_id, &capabilities, session_token.as_deref(), None)
-            .await
-            .map_err(|e| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %e, "Failed to save bot to database during register");
-                e
-            })?;
-
-        // Update memory
-        let mut bots = self.bots.write().await;
-
-        if let Some(existing) = bots.get_mut(&bot_id) {
-            existing.last_heartbeat = Instant::now();
-            if capabilities.name.is_some() {
-                existing.capabilities.name = capabilities.name;
-            }
-            if capabilities.summary.is_some() {
-                existing.capabilities.summary = capabilities.summary;
-            }
-            if !capabilities.domains.is_empty() {
-                existing.capabilities.domains = capabilities.domains;
-            }
-            if !capabilities.skills.is_empty() {
-                existing.capabilities.skills = capabilities.skills;
-            }
-            if !capabilities.scopes.is_empty() {
-                existing.capabilities.scopes = capabilities.scopes;
-            }
-            if !capabilities.visibility.is_empty() {
-                existing.capabilities.visibility = capabilities.visibility;
-            }
-            if capabilities.agent_code.is_some() {
-                existing.capabilities.agent_code = capabilities.agent_code;
-            }
-            if capabilities.agent_token.is_some() {
-                existing.capabilities.agent_token = capabilities.agent_token;
-            }
-            info!(bot_id = %bot_id, "register: updated existing bot");
-        } else {
-            // Normalize: empty visibility defaults to "private" for new bots
-            let mut caps = capabilities;
-            if caps.visibility.is_empty() {
-                caps.visibility = "private".to_string();
-            }
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_uuid: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities: caps,
-                    ws_connection: None,
-                    protocol_version: 1,
-                    session_token: None,
-                    env: Some(resolve_env()),
-                    hidden: false,
-                    status: bcs_service_api::ActorStatus::Online,
-                    actor_kind: bcs_service_api::ActorKind::Bot,
-                    created_by: None,
-                },
-            );
-            info!(bot_id = %bot_id, "register: inserted new bot");
-        }
-
-        Ok(())
+        self.register_impl(bot_id, capabilities).await
     }
 
     async fn update_capabilities(
@@ -213,84 +136,7 @@ impl BotRepoPort for PersistentBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
-        info!(bot_id = %bot_id, name = ?capabilities.name, "register_with_owner_and_token: received registration request");
-
-        self.save_to_db(&bot_id, &capabilities, Some(token), Some(created_by))
-            .await
-            .map_err(|e| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %e, "Failed to save bot to database during register_with_owner_and_token");
-                e
-            })?;
-
-        self.sync_binding_channel_index(&bot_id, &capabilities)
-            .await;
-
-        let previous_token = {
-            let mut bots = self.bots.write().await;
-
-            if let Some(existing) = bots.get_mut(&bot_id) {
-                existing.last_heartbeat = Instant::now();
-                if capabilities.name.is_some() {
-                    existing.capabilities.name = capabilities.name.clone();
-                }
-                if capabilities.summary.is_some() {
-                    existing.capabilities.summary = capabilities.summary.clone();
-                }
-                if !capabilities.domains.is_empty() {
-                    existing.capabilities.domains = capabilities.domains.clone();
-                }
-                if !capabilities.skills.is_empty() {
-                    existing.capabilities.skills = capabilities.skills.clone();
-                }
-                if !capabilities.scopes.is_empty() {
-                    existing.capabilities.scopes = capabilities.scopes.clone();
-                }
-                if !capabilities.visibility.is_empty() {
-                    existing.capabilities.visibility = capabilities.visibility.clone();
-                }
-                if capabilities.agent_code.is_some() {
-                    existing.capabilities.agent_code = capabilities.agent_code.clone();
-                }
-                if capabilities.agent_token.is_some() {
-                    existing.capabilities.agent_token = capabilities.agent_token.clone();
-                }
-                if existing.created_by.is_none() {
-                    existing.created_by = Some(created_by.to_string());
-                }
-                existing.session_token.replace(token.to_string())
-            } else {
-                let mut caps = capabilities;
-                if caps.visibility.is_empty() {
-                    caps.visibility = "private".to_string();
-                }
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_uuid: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: caps,
-                        ws_connection: None,
-                        protocol_version: 1,
-                        session_token: Some(token.to_string()),
-                        env: Some(resolve_env()),
-                        hidden: false,
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        created_by: Some(created_by.to_string()),
-                    },
-                );
-                None
-            }
-        };
-
-        let mut token_to_bot = self.token_to_bot.write().await;
-        if let Some(previous_token) = previous_token.filter(|previous| previous != token) {
-            token_to_bot.remove(&previous_token);
-        }
-        token_to_bot.insert(token.to_string(), bot_id.clone());
-
-        info!(bot_id = %bot_id, "register_with_owner_and_token: completed");
-        Ok(())
+        self.register_with_owner_and_token_impl(bot_id, capabilities, created_by, token).await
     }
 
     async fn update_status(&self, bot_id: &str) -> bool {
@@ -336,7 +182,7 @@ impl BotRepoPort for PersistentBotRepo {
         let bots = bcs_observability::observe_value("bot.memory_lock.wait", self.bots.read()).await;
 
         if let Some(bot) = bots.get(bot_id) {
-            if !bot.is_expired() {
+            if !bot.is_expired() && self.use_cached_metadata(bot_id).await {
                 log_bot_cache_source("memory_hit");
                 return Ok(Some(bot.to_registered_bot()));
             }
@@ -380,7 +226,7 @@ impl BotRepoPort for PersistentBotRepo {
             let bots = self.bots.read().await;
             for bot_id in bot_ids {
                 match bots.get(bot_id) {
-                    Some(bot) if !bot.is_expired() => {
+                    Some(bot) if !bot.is_expired() && self.use_cached_metadata(bot_id).await => {
                         found.insert(bot_id.clone(), bot.to_registered_bot());
                     }
                     _ => missing.push(bot_id.clone()),
@@ -432,7 +278,7 @@ impl BotRepoPort for PersistentBotRepo {
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
         let bots = self.bots.read().await;
         if let Some(bot) = bots.get(bot_id) {
-            if !bot.is_expired() {
+            if !bot.is_expired() && self.use_cached_metadata(bot_id).await {
                 return Some(bot.to_registered_bot());
             }
         }
@@ -842,6 +688,29 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
+    async fn update_profile_existing(
+        &self,
+        bot_id: &str,
+        update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_profile_existing_impl(bot_id, update).await
+    }
+
+    async fn update_avatar_existing(
+        &self,
+        bot_id: &str,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_avatar_existing_impl(bot_id, avatar).await
+    }
+
+    async fn read_avatar_batch(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::BotAvatarMap> {
+        self.read_avatar_batch_impl(bot_ids).await
+    }
+
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
         let env = resolve_env();
         let visibility_value = if visibility.is_empty() {
@@ -944,149 +813,12 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
-    /// Ensure a Human Actor row exists in `bcs_bots` — Task O.3.
-    ///
-    /// Idempotent INSERT IGNORE: if `bot_uuid = "human_{staff_no}"` already
-    /// exists, nothing is done (in particular, `name` is preserved per
-    /// Requirement 3.1#4).
-    ///
-    /// On first INSERT, writes:
-    /// - `bot_uuid = "human_{staff_no}"`
-    /// - `actor_kind = 'human'`
-    /// - `status = 'online'`
-    /// - `visibility = 'protected'`
-    /// - `name = nick_name`
-    /// - `session_token = UUID v4`
-    /// - `created_by = staff_no`
     async fn ensure_human_actor(
         &self,
         staff_no: &str,
         nick_name: &str,
     ) -> ServiceResult<bcs_service_api::EnsureHumanResult> {
-        let env = resolve_env();
-        let bot_uuid = format!("human_{}", staff_no);
-        let default_summary = "写点什么介绍自己";
-
-        // Fast path: already present → backfill missing fields, then return.
-        if self.exists_in_db(&bot_uuid).await {
-            // Deserialize current bot_info into BotInfo struct (missing fields get defaults).
-            let existing_json = self
-                .read_bot_info_json(&bot_uuid)
-                .await
-                .unwrap_or_else(|| serde_json::json!({}));
-            let mut bot_info: BotInfo =
-                serde_json::from_value(existing_json.clone()).unwrap_or_default();
-
-            // Check if summary needs backfill.
-            let needs_summary = bot_info.summary.as_deref().map_or(true, |s| s.is_empty());
-            if needs_summary {
-                bot_info.summary = Some(default_summary.to_string());
-            }
-
-            // Re-serialize and compare to detect if anything actually changed.
-            let merged_str = serde_json::to_string(&bot_info).unwrap_or_default();
-            let needs_backfill = merged_str != existing_json.to_string();
-
-            if needs_backfill {
-                let sql = "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(
-                    sql,
-                    vec![
-                        Value::from(merged_str.as_str()),
-                        Value::from(bot_uuid.as_str()),
-                        Value::from(env.as_str()),
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        bot_uuid = %bot_uuid,
-                        error = %e,
-                        "ensure_human_actor: failed to backfill bot_info"
-                    );
-                    ServiceError::InternalError(format!(
-                        "ensure_human_actor: failed to backfill bot_info for {}: {}",
-                        bot_uuid, e
-                    ))
-                })?;
-
-                // Sync in-memory cache so subsequent reads (e.g. /bots/query)
-                // reflect the updated fields without waiting for a full reload.
-                {
-                    let mut bots = self.bots.write().await;
-                    if let Some(bot) = bots.get_mut(&bot_uuid) {
-                        if needs_summary {
-                            bot.capabilities.summary = Some(default_summary.to_string());
-                        }
-                    }
-                }
-
-                debug!(
-                    bot_uuid = %bot_uuid,
-                    "ensure_human_actor: backfilled missing bot_info fields"
-                );
-            } else {
-                debug!(
-                    bot_uuid = %bot_uuid,
-                    "ensure_human_actor: row already exists, preserving existing fields"
-                );
-            }
-            return Ok(bcs_service_api::EnsureHumanResult { created: false });
-        }
-
-        let session_token = uuid::Uuid::new_v4().to_string();
-        let initial_bot_info = BotInfo {
-            summary: Some(default_summary.to_string()),
-            ..Default::default()
-        };
-        let bot_info_str = serde_json::to_string(&initial_bot_info).unwrap_or_default();
-        let visibility = "protected";
-        let actor_kind = "human";
-        let status = "online";
-
-        let sql = format!(
-            "{} INTO bcs_bots \
-             (bot_uuid, actor_kind, name, bot_info, session_token, created_by, visibility, status, env, registered_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-            self.flavor.insert_or_ignore()
-        );
-        let affected = self
-            .db_execute_affected(
-                &sql,
-                vec![
-                    Value::from(bot_uuid.as_str()),
-                    Value::from(actor_kind),
-                    Value::from(nick_name),
-                    Value::from(bot_info_str.as_str()),
-                    Value::from(session_token.as_str()),
-                    Value::from(staff_no),
-                    Value::from(visibility),
-                    Value::from(status),
-                    Value::from(env.as_str()),
-                ],
-            )
-            .await
-            .map_err(|e| {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_uuid = %bot_uuid,
-                    error = %e,
-                    "ensure_human_actor: INSERT IGNORE failed"
-                );
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        let created = affected > 0;
-        info!(
-            bot_uuid = %bot_uuid,
-            staff_no = %staff_no,
-            nick_name = %nick_name,
-            env = %env,
-            created = %created,
-            "ensure_human_actor: INSERT IGNORE completed"
-        );
-        Ok(bcs_service_api::EnsureHumanResult { created })
+        self.ensure_human_actor_impl(staff_no, nick_name).await
     }
 
     async fn list_legacy_bots_for_owner(
@@ -1094,157 +826,11 @@ impl BotRepoPort for PersistentBotRepo {
         staff_no: &str,
         env: &str,
     ) -> ServiceResult<Vec<RegisteredBot>> {
-        // Rule (a): bots with `created_by = staff_no`
-        // Rule (b): bots with `created_by IS NULL` whose `bot_uuid` ends with `:{staff_no}`
-        //           (filtered in Rust by `is_legacy_namespace` whitelist)
-        let like_pattern = format!("%:{}", staff_no);
-        let sql = "SELECT bot_uuid, actor_kind, name, bot_info, session_token, \
-                   visibility, status, created_by \
-                   FROM bcs_bots \
-                   WHERE env = ? AND actor_kind = 'bot' AND ( \
-                       created_by = ? \
-                       OR (created_by IS NULL AND bot_uuid LIKE ?) \
-                   ) AND COALESCE(is_deleted, 0) = 0 \
-                   ORDER BY gmt_create DESC";
-
-        let rows = self
-            .db_query(
-                sql,
-                vec![
-                    Value::from(env),
-                    Value::from(staff_no),
-                    Value::from(like_pattern.as_str()),
-                ],
-            )
-            .await
-            .map_err(|e| {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    staff_no = %staff_no,
-                    env = %env,
-                    error = %e,
-                    "list_legacy_bots_for_owner: query failed"
-                );
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        let results: Vec<RegisteredBot> = rows
-            .iter()
-            .filter_map(|row| {
-                let bot_uuid: String = db_get_column_opt(row, "bot_uuid").ok().flatten()?;
-                let actor_kind_str: String = db_get_column_opt(row, "actor_kind")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "bot".to_string());
-                if actor_kind_str != "bot" {
-                    return None;
-                }
-                let created_by: Option<String> =
-                    db_get_column_opt(row, "created_by").ok().flatten();
-
-                // For rule (b): apply whitelist filter
-                if created_by.is_none() && !is_legacy_namespace(&bot_uuid, staff_no) {
-                    return None;
-                }
-
-                let actor_kind = bcs_service_api::ActorKind::Bot;
-                let status_str: String = db_get_column_opt(row, "status")
-                    .ok()
-                    .flatten()
-                    .filter(|v: &String| !v.is_empty())
-                    .unwrap_or_else(|| "online".to_string());
-                let hidden = status_str == "hidden";
-                let status = match status_str.as_str() {
-                    "hidden" => bcs_service_api::ActorStatus::Hidden,
-                    _ => bcs_service_api::ActorStatus::Online,
-                };
-                let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
-                    .ok()
-                    .flatten()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
-                let visibility: String = db_get_column_opt(row, "visibility")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "private".to_string());
-
-                Some(RegisteredBot {
-                    bot_uuid,
-                    capabilities: BotCapabilities {
-                        name,
-                        summary: bot_info.summary,
-                        domains: bot_info.domains,
-                        skills: bot_info.skills,
-                        scopes: bot_info.scopes,
-                        binding_channels: bot_info.binding_channels,
-                        hidden,
-                        visibility,
-                        // SECURITY: 敏感字段置空，防止通过常规接口泄露
-                        agent_code: None,
-                        agent_token: None,
-                    },
-                    env: Some(env.to_string()),
-                    created_by,
-                    actor_kind,
-                    status,
-                })
-            })
-            .collect();
-
-        info!(
-            staff_no = %staff_no,
-            env = %env,
-            count = results.len(),
-            "list_legacy_bots_for_owner: query completed"
-        );
-        Ok(results)
+        self.list_legacy_bots_for_owner_impl(staff_no, env).await
     }
 
-    /// Repair a Human actor's `name` column — used by the `/debug/whoami`
-    /// debug endpoint to backfill the real `nick_name` after onboard fell
-    /// back to writing `staff_no` (because the auth SDK didn't return
-    /// `nick_name` at the time).
     async fn update_human_name(&self, staff_no: &str, new_name: &str) -> ServiceResult<()> {
-        let env = resolve_env();
-        let bot_uuid = format!("human_{}", staff_no);
-
-        let sql = "UPDATE bcs_bots SET name = ? WHERE bot_uuid = ? AND env = ?";
-        self.db_execute_affected(
-            sql,
-            vec![
-                Value::from(new_name),
-                Value::from(bot_uuid.as_str()),
-                Value::from(env.as_str()),
-            ],
-        )
-        .await
-        .map_err(|e| {
-            warn!(
-                request_id = %bcs_observability::CurrentRequestId,
-                bot_uuid = %bot_uuid,
-                error = %e,
-                "update_human_name: failed to update database"
-            );
-            ServiceError::InternalError(e.to_string())
-        })?;
-
-        // Update in-memory mirror if the row is cached.
-        {
-            let mut bots = self.bots.write().await;
-            if let Some(existing) = bots.get_mut(&bot_uuid) {
-                existing.capabilities.name = Some(new_name.to_string());
-            }
-        }
-
-        info!(
-            bot_uuid = %bot_uuid,
-            staff_no = %staff_no,
-            new_name = %new_name,
-            env = %env,
-            "update_human_name: human actor name updated"
-        );
-        Ok(())
+        self.update_human_name_impl(staff_no, new_name).await
     }
 
     async fn has_been_onboarded(&self, bot_id: &str) -> bool {
@@ -1257,75 +843,19 @@ impl BotRepoPort for PersistentBotRepo {
         created_by: &str,
         overwrite: bool,
     ) -> ServiceResult<()> {
-        // Update in-memory (respects overwrite flag)
-        {
-            let mut bots = self.bots.write().await;
-            if let Some(bot) = bots.get_mut(bot_id) {
-                if overwrite || bot.created_by.is_none() {
-                    bot.created_by = Some(created_by.to_string());
-                }
-            }
-        }
-
-        // Update in database (conditional based on overwrite)
-        self.update_created_by_in_db(bot_id, created_by, overwrite)
-            .await
+        self.save_created_by_impl(bot_id, created_by, overwrite).await
     }
 
     async fn save_token(&self, bot_id: &str, token: &str) -> ServiceResult<()> {
-        self.save_token_to_db(bot_id, token).await
+        self.save_token_impl(bot_id, token).await
     }
 
     async fn load_token(&self, bot_id: &str) -> Option<String> {
-        // Check memory first
-        {
-            let bots = self.bots.read().await;
-            if let Some(bot) = bots.get(bot_id) {
-                if let Some(ref token) = bot.session_token {
-                    return Some(token.clone());
-                }
-            }
-        }
-
-        // Load from database
-        self.load_token_from_db(bot_id).await
+        self.load_token_impl(bot_id).await
     }
 
     async fn find_bot_by_token(&self, token: &str) -> Option<String> {
-        // Check memory cache first (fast path)
-        {
-            let token_to_bot = self.token_to_bot.read().await;
-            if let Some(bot_id) = token_to_bot.get(token) {
-                let bot_id = bot_id.clone();
-                drop(token_to_bot);
-                if self.get(&bot_id).await.is_some() {
-                    return Some(bot_id);
-                }
-                return None;
-            }
-        }
-
-        // Check memory by iterating bots
-        let memory_candidate = {
-            let bots = self.bots.read().await;
-            bots.iter()
-                .find(|(_, bot)| bot.session_token.as_deref() == Some(token))
-                .map(|(bot_id, _)| bot_id.clone())
-        };
-        if let Some(bot_id) = memory_candidate {
-            if self.get(&bot_id).await.is_some() {
-                return Some(bot_id);
-            }
-            return None;
-        }
-
-        // Fall back to database indexed lookup
-        let result = self.find_bot_by_token_in_db(token).await;
-        if result.is_none() {
-            let prefix = &token[..8.min(token.len())];
-            warn!(request_id = %bcs_observability::CurrentRequestId, token_prefix = %prefix, "find_bot_by_token: token not found in memory or database");
-        }
-        result
+        self.find_bot_by_token_impl(token).await
     }
 
     async fn query_agent_bots(
@@ -1344,28 +874,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {
-        if agent_code.is_empty() {
-            return None;
-        }
-
-        // Fast path: scan in-memory bots for a matching agent_code.
-        let memory_candidate = {
-            let bots = self.bots.read().await;
-            bots.iter()
-                .find(|(_, bot)| {
-                    bot.capabilities.agent_code.as_deref() == Some(agent_code)
-                })
-                .map(|(bot_id, _)| bot_id.clone())
-        };
-        if let Some(bot_id) = memory_candidate {
-            if self.get(&bot_id).await.is_some() {
-                return Some(bot_id);
-            }
-            return None;
-        }
-
-        // Fall back to the database indexed lookup (idx_agent_code).
-        self.find_bot_by_agent_code_in_db(agent_code).await
+        self.find_bot_by_agent_code_impl(agent_code).await
     }
 
     async fn find_bot_by_binding_channel(
@@ -1373,10 +882,7 @@ impl BotRepoPort for PersistentBotRepo {
         channel: &str,
         binding_key: &str,
     ) -> Option<String> {
-        let index = self.binding_channel_index.read().await;
-        index
-            .get(&(channel.to_string(), binding_key.to_string()))
-            .cloned()
+        self.find_bot_by_binding_channel_impl(channel, binding_key).await
     }
 
     // ===== Streaming Connection Management =====
@@ -1385,376 +891,47 @@ impl BotRepoPort for PersistentBotRepo {
         &self,
         bot_id: String,
     ) -> Result<String, ConnectStreamError> {
-        // Decide the branch from the registry's authoritative current token
-        // (memory → DB fallback via load_token) and existence (memory or DB),
-        // before taking the write lock, so a DB-only bot after a BCS restart is
-        // still located and a previously-registered bot (even with no token) is
-        // refused rather than silently overwritten.
-        let existing_token = self.load_token(&bot_id).await;
-        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
-        let bot_exists = {
-            let in_mem = self.bots.read().await.get(&bot_id).is_some();
-            in_mem || existing_token.is_some() || self.exists_in_db(&bot_id).await
-        };
-        // ws_connection presence and connected state are only meaningful in
-        // memory; a DB-only entry has no live connection.
-        let in_memory_connected = {
-            let bots = self.bots.read().await;
-            bots.get(&bot_id)
-                .map(|bot| bot.ws_connection.is_some())
-                .unwrap_or(false)
-        };
-        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
-
-        match (bot_exists, is_mock, in_memory_connected) {
-            // truly new (no record anywhere) → create with a real token
-            (false, _, _) => {
-                let session_token = uuid::Uuid::new_v4().to_string();
-                let mut bots = self.bots.write().await;
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_uuid: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: BotCapabilities::default(),
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        ws_connection: Some(BotConnection {
-                            session_token: session_token.clone(),
-                            connected_at: Instant::now(),
-                        }),
-                        protocol_version: 1,
-                        session_token: Some(session_token.clone()),
-                        env: Some(resolve_env()),
-                        hidden: false,
-                        created_by: None,
-                    },
-                );
-                self.token_to_bot
-                    .write()
-                    .await
-                    .insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "create",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: create"
-                );
-                Ok(session_token)
-            }
-            // pre-registered plugin bot, not yet attached → promote MOCK → real
-            (true, true, _) => {
-                let previous_mock = existing_token.clone();
-                let session_token = uuid::Uuid::new_v4().to_string();
-                // Persist FIRST: if this fails, surface the error before any
-                // in-memory mutation, so memory and DB never split into a
-                // "real-token in memory, MOCK in DB" half-state that only
-                // surfaces as a stale-MOCK reconnect after a BCS restart.
-                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        bot_id = %bot_id,
-                        error = %err,
-                        "connect_or_promote_streaming: promote_mock DB persist failed; refusing ws"
-                    );
-                    return Err(ConnectStreamError::InternalError(format!(
-                        "promote_mock: failed to persist promoted token: {err}"
-                    )));
-                }
-                let mut bots = self.bots.write().await;
-                if let Some(bot) = bots.get_mut(&bot_id) {
-                    bot.ws_connection = Some(BotConnection {
-                        session_token: session_token.clone(),
-                        connected_at: Instant::now(),
-                    });
-                    bot.session_token = Some(session_token.clone());
-                    bot.last_heartbeat = Instant::now();
-                } else {
-                    // DB-only after restart: hydrate the entry with the new real
-                    // token so subsequent connects see a real-token bot.
-                    bots.insert(
-                        bot_id.clone(),
-                        RegisteredBotInner {
-                            bot_uuid: bot_id.clone(),
-                            last_heartbeat: Instant::now(),
-                            capabilities: BotCapabilities::default(),
-                            status: bcs_service_api::ActorStatus::Online,
-                            actor_kind: bcs_service_api::ActorKind::Bot,
-                            ws_connection: Some(BotConnection {
-                                session_token: session_token.clone(),
-                                connected_at: Instant::now(),
-                            }),
-                            protocol_version: 1,
-                            session_token: Some(session_token.clone()),
-                            env: Some(resolve_env()),
-                            hidden: false,
-                            created_by: None,
-                        },
-                    );
-                }
-                let mut token_to_bot = self.token_to_bot.write().await;
-                if let Some(prev) = previous_mock {
-                    token_to_bot.remove(&prev);
-                }
-                token_to_bot.insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "promote_mock",
-                    previous_token_kind = "mock",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: promote_mock"
-                );
-                Ok(session_token)
-            }
-            // real token, already connected → reject
-            (true, false, true) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_connected",
-                    "connect_or_promote_streaming: real-token bot already connected"
-                );
-                Err(ConnectStreamError::AlreadyConnected(bot_id))
-            }
-            // real token, not connected → anti-hijack: refuse an empty/stale-token
-            // claim of a real-token bot. (Reconnect by the real token still works
-            // via the existing reconnect_streaming(token) path.)
-            (true, false, false) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_registered",
-                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
-                );
-                Err(ConnectStreamError::AlreadyRegistered(bot_id))
-            }
-        }
+        self.connect_or_promote_streaming_impl(bot_id).await
     }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
-        info!(bot_id = %bot_id, "register_streaming_connection: registering new connection");
-
-        let mut bots = self.bots.write().await;
-
-        // Check if bot is already connected
-        if let Some(bot) = bots.get(&bot_id) {
-            if bot.ws_connection.is_some() {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot already has an active streaming connection");
-                return Err(());
-            }
-        }
-
-        // Generate session token
-        let session_token = uuid::Uuid::new_v4().to_string();
-
-        // Update or create bot entry
-        if let Some(bot) = bots.get_mut(&bot_id) {
-            bot.ws_connection = Some(BotConnection {
-                session_token: session_token.clone(),
-                connected_at: Instant::now(),
-            });
-            bot.session_token = Some(session_token.clone());
-            bot.last_heartbeat = Instant::now();
-        } else {
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_uuid: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities: BotCapabilities::default(),
-                    status: bcs_service_api::ActorStatus::Online,
-                    actor_kind: bcs_service_api::ActorKind::Bot,
-                    ws_connection: Some(BotConnection {
-                        session_token: session_token.clone(),
-                        connected_at: Instant::now(),
-                    }),
-                    protocol_version: 1,
-                    session_token: Some(session_token.clone()),
-                    env: Some(resolve_env()),
-                    hidden: false,
-                    created_by: None,
-                },
-            );
-        }
-
-        // Store token mapping in memory
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(session_token.clone(), bot_id.clone());
-
-        // Note: Token is NOT persisted to DB here. It will be saved during onboard
-        // when save_to_db is called with the session_token.
-
-        let token_preview = format!("{}...", &session_token[..4]);
-        info!(bot_id = %bot_id, token_preview = %token_preview, "register_streaming_connection: connection registered (token in memory only, will persist on onboard)");
-
-        Ok(session_token)
+        self.register_streaming_connection_impl(bot_id).await
     }
 
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()> {
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
-        info!(token_preview = %token_preview, "reconnect_streaming: attempting reconnect");
-
-        // Find bot by token (memory -> database)
-        let bot_id = self.find_bot_by_token(&existing_token).await.ok_or(())?;
-
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
-        info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: found bot by token");
-
-        let mut bots = self.bots.write().await;
-
-        // Check if bot is already connected
-        if let Some(bot) = bots.get(&bot_id) {
-            if bot.ws_connection.is_some() {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot already has an active connection");
-                return Err(());
-            }
-        }
-
-        // Update or create bot entry (reuse the existing write lock)
-        if let Some(bot) = bots.get_mut(&bot_id) {
-            bot.ws_connection = Some(BotConnection {
-                session_token: existing_token.clone(),
-                connected_at: Instant::now(),
-            });
-            bot.last_heartbeat = Instant::now();
-            info!(bot_id = %bot_id, "reconnect_streaming: updated existing bot in memory");
-        } else {
-            // Bot not in memory - load persistent registration details from the database
-            drop(bots);
-
-            // Code-Review fix #1: capture actor_kind/status from the database so the
-            // reconnected entry reflects the true actor type and lifecycle
-            // status (Human reconnects must not silently downgrade to Bot/Online).
-            let (capabilities, env, _hidden, created_by, actor_kind, actor_status) =
-                self.load_from_db(&bot_id, false).await.unwrap_or((
-                    BotCapabilities::default(),
-                    Some(resolve_env()),
-                    false,
-                    None,
-                    bcs_service_api::ActorKind::Bot,
-                    bcs_service_api::ActorStatus::Online,
-                ));
-
-            info!(bot_id = %bot_id, caps_loaded = capabilities.name.is_some(), "reconnect_streaming: loaded capabilities from storage");
-
-            let mut bots = self.bots.write().await;
-            bots.insert(
-                bot_id.clone(),
-                RegisteredBotInner {
-                    bot_uuid: bot_id.clone(),
-                    last_heartbeat: Instant::now(),
-                    capabilities,
-                    ws_connection: Some(BotConnection {
-                        session_token: existing_token.clone(),
-                        connected_at: Instant::now(),
-                    }),
-                    protocol_version: 1,
-                    session_token: Some(existing_token.clone()),
-                    env,
-                    hidden: false,
-                    status: actor_status,
-                    actor_kind,
-                    created_by,
-                },
-            );
-        }
-
-        // Store token mapping
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(existing_token.clone(), bot_id.clone());
-
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
-        info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: connection re-established");
-
-        Ok((bot_id, existing_token))
+        self.reconnect_streaming_impl(existing_token).await
     }
 
     async fn disconnect_streaming(&self, bot_id: &str) {
-        let mut bots = self.bots.write().await;
-
-        if let Some(bot) = bots.get_mut(bot_id) {
-            if let Some(conn) = bot.ws_connection.take() {
-                // DO NOT remove token_to_bot mapping - token persists for reconnection
-                info!(
-                    bot_id = %bot_id,
-                    token = %conn.session_token,
-                    duration_ms = conn.connected_at.elapsed().as_millis() as u64,
-                    "Bot streaming connection removed (token preserved for reconnection)"
-                );
-            }
-        } else {
-            debug!(bot_id = %bot_id, "Bot not found for disconnect");
-        }
+        self.disconnect_streaming_impl(bot_id).await
     }
 
     async fn is_connected(&self, bot_id: &str) -> bool {
-        let bots = self.bots.read().await;
-        bots.get(bot_id)
-            .map(|b| b.ws_connection.is_some())
-            .unwrap_or(false)
+        self.is_connected_impl(bot_id).await
     }
 
     async fn send_frame(&self, bot_id: &str, _frame: String) -> Result<(), ()> {
-        warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
-        Err(())
+        self.send_frame_impl(bot_id, _frame).await
     }
 
     async fn list_connected(&self) -> Vec<String> {
-        let bots = self.bots.read().await;
-        bots.iter()
-            .filter(|(_, b)| b.ws_connection.is_some())
-            .map(|(id, _)| id.clone())
-            .collect()
+        self.list_connected_impl().await
     }
 
     async fn store_token_mapping(&self, token: String, bot_id: String) {
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(token.clone(), bot_id.clone());
-        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+        self.store_token_mapping_impl(token, bot_id).await
     }
 
     async fn get_protocol_version(&self, bot_id: &str) -> u32 {
-        let bots = self.bots.read().await;
-        bots.get(bot_id)
-            .map(|bot| bot.protocol_version)
-            .unwrap_or(1)
+        self.get_protocol_version_impl(bot_id).await
     }
 
     async fn set_protocol_version(&self, bot_id: &str, version: u32) {
-        let mut bots = self.bots.write().await;
-        if let Some(bot) = bots.get_mut(bot_id) {
-            bot.protocol_version = version;
-        }
+        self.set_protocol_version_impl(bot_id, version).await
     }
 
     async fn register_http_connection(&self, bot_id: String, token: String) -> String {
-        // Create a minimal bot entry if it doesn't exist
-        {
-            let mut bots = self.bots.write().await;
-            if !bots.contains_key(&bot_id) {
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_uuid: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: BotCapabilities::default(),
-                        ws_connection: None,
-                        protocol_version: 1,
-                        session_token: Some(token.clone()),
-                        env: Some(resolve_env()),
-                        hidden: false,
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        created_by: None,
-                    },
-                );
-                info!(bot_id = %bot_id, "Created minimal bot entry for HTTP connection");
-            }
-        }
-        // Store token mapping
-        self.store_token_mapping(token.clone(), bot_id.clone())
-            .await;
-        token
+        self.register_http_connection_impl(bot_id, token).await
     }
 
     async fn send_request(
@@ -1764,45 +941,10 @@ impl BotRepoPort for PersistentBotRepo {
         params: serde_json::Value,
         timeout_ms: u64,
     ) -> Result<serde_json::Value, String> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let frame = serde_json::json!({
-            "type": "req",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        });
-        let frame_str = serde_json::to_string(&frame).map_err(|e| e.to_string())?;
-
-        let (tx, rx) = oneshot::channel::<serde_json::Value>();
-        {
-            let mut pending = self.pending_requests.write().await;
-            pending.insert(request_id.clone(), tx);
-        }
-
-        if self.send_frame(bot_id, frame_str).await.is_err() {
-            let mut pending = self.pending_requests.write().await;
-            pending.remove(&request_id);
-            return Err(format!("Bot '{}' not connected", bot_id));
-        }
-
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
-            Ok(Ok(payload)) => Ok(payload),
-            Ok(Err(_)) => Err("Request channel closed".to_string()),
-            Err(_) => {
-                let mut pending = self.pending_requests.write().await;
-                pending.remove(&request_id);
-                Err(format!(
-                    "Request to bot '{}' timed out after {}ms",
-                    bot_id, timeout_ms
-                ))
-            }
-        }
+        self.send_request_impl(bot_id, method, params, timeout_ms).await
     }
 
     async fn resolve_pending_request(&self, request_id: &str, response: serde_json::Value) {
-        let mut pending = self.pending_requests.write().await;
-        if let Some(tx) = pending.remove(request_id) {
-            let _ = tx.send(response);
-        }
+        self.resolve_pending_request_impl(request_id, response).await
     }
 }

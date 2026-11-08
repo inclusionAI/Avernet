@@ -23,9 +23,11 @@ use serde_json::{json, Value};
 mod terminal_publication;
 #[path="support/message_context.rs"]
 mod message_context;
+#[path="support/poll_delivery.rs"]
+mod poll_delivery;
 
 #[derive(Clone, Copy)]
-enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, MessageContext { first: &'static str, next: Option<&'static str> }, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
+enum Mode { Anonymous, Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, MessageContext { first: &'static str, next: Option<&'static str> }, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
 struct Agent {
     mode: Mode, sequence: AtomicUsize, requests: Mutex<Vec<Value>>, tasks: Mutex<HashMap<String, Value>>,
     cancels: Mutex<Vec<String>>,
@@ -96,8 +98,10 @@ async fn send(State(agent): State<Arc<Agent>>, headers: HeaderMap, Json(body): J
     if matches!(agent.mode, Mode::Wait | Mode::CancelDenied) { Sse::new(stream.chain(stream::pending()).boxed()).into_response() }
     else { Sse::new(stream.boxed()).into_response() }
 }
-async fn task(State(agent): State<Arc<Agent>>, Path(id): Path<String>) -> Response {
+async fn task(State(agent): State<Arc<Agent>>, Path(id): Path<String>, headers:HeaderMap) -> Response {
+    if matches!(agent.mode,Mode::Anonymous) {assert!(!headers.contains_key("authorization"));}
     let query=agent.queries.fetch_add(1,Ordering::SeqCst);
+    if matches!(agent.mode,Mode::HttpError(_)) { return StatusCode::SERVICE_UNAVAILABLE.into_response(); }
     if matches!(agent.mode,Mode::RecoverGet) && query==0 { return StatusCode::SERVICE_UNAVAILABLE.into_response(); }
     Json(agent.tasks.lock().unwrap().get(&id).unwrap().clone()).into_response()
 }
@@ -153,6 +157,7 @@ async fn fixture(mode: Mode) -> Fixture {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/a2a/bots/demo", listener.local_addr().unwrap());
     let router = Router::new().route("/a2a/bots/demo/message:stream", post(send))
+        .route("/a2a/bots/demo/message:send",post(poll_delivery::send))
         .route("/a2a/bots/demo/tasks/{id}", get(task).post(task_post)).with_state(agent.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
@@ -499,3 +504,6 @@ async fn empty_successful_subscriptions_do_not_reset_consecutive_failure_budget(
     assert_eq!(f.runs.get("empty-recoveries").await.unwrap().unwrap().state,A2aRunState::Canceled);
     assert_eq!(f.ingest.events.lock().unwrap().iter().filter(|e|e.state==ChatEventState::Error).count(),1);
 }
+
+#[path="support/custom_binding.rs"]
+mod custom_binding;

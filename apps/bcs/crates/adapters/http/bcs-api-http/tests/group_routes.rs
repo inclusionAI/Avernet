@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier, VerifiedRequestIdentity, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, BotRegistration, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, FriendRequest,
@@ -44,13 +44,13 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity::pin(self.caller.clone(), "test-double", CredentialKind::GatewayPrincipalHeader))
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -193,6 +193,7 @@ impl GroupService for FakeGroupService {
             actor_id: command.actor_id,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -212,6 +213,7 @@ impl GroupService for FakeGroupService {
             actor_id: command.actor_id,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: command.mode.unwrap_or(ParticipantMode::Auto),
@@ -442,6 +444,7 @@ fn group_detail() -> GroupDetail {
             actor_id: "bot-1".into(),
             actor_kind: ActorKind::Bot,
             name: Some("Bot 1".into()),
+            avatar_url: None,
             role: ParticipantRole::Driver,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -509,6 +512,7 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             driver_bot_uuid: "bot-1".into(),
             driver_bot_name: Some("Bot 1".into()),
             strategy: GroupStrategy::Chat,
+            participants: Vec::new(),
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
             created_at: 1,
             updated_at: 2,
@@ -524,6 +528,7 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             originator_actor_id: "bot-1".into(),
             participant_count: 2,
             peer_actor: None,
+            participants: Vec::new(),
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::DriverBotOnly,
             created_at: 1,
             updated_at: 2,

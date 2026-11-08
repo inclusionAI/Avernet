@@ -90,7 +90,7 @@ export const api = {
     getSkillTaskDefaults(assetId: string): Promise<EvolveSkillTaskDefaults> {
       return fetchJson(`/api/evolve/skill-assets/${encodeURIComponent(assetId)}/task-defaults`)
     },
-    createTask(input: EvolveCreateTaskInput, idempotencyKey?: string): Promise<{ task_id: string; status: string }> {
+    createTask(input: EvolveCreateTaskInput & { referenceMaterialsUploadId?: string }, idempotencyKey?: string): Promise<{ task_id: string; status: string }> {
       return fetchJson('/api/evolve/tasks', {
         method: 'POST',
         ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),

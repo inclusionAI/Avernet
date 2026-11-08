@@ -217,6 +217,7 @@ def test_report_dto_requires_complete_trace() -> None:
             "relay_token": "generation-1",
             "event_type": "PLAN_RESULT",
             "event": None,
+            "final_conclusion": "业务整体结论：已完成验收事实汇总",
             "task_acceptance_result": {
                 "verdict": "DONE",
                 "done_items": ["acceptance-1"],
@@ -321,6 +322,12 @@ def _command_body() -> dict:
         "relay_token": "generation-1",
         "event_type": "PLAN_RESULT",
         "event": None,
+        "final_conclusion": "业务整体结论：已完成剩余验收并收口",
+        "task_acceptance_result": {
+            "verdict": "DONE",
+            "done_items": ["acceptance-1"],
+            "gap_items": [],
+        },
         "trace": copy.deepcopy(_TRACE),
     }
 

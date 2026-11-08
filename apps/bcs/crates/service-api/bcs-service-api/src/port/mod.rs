@@ -26,6 +26,7 @@ pub use orchestration_caller::*;
 pub use caller_history::*;
 pub mod leader_election;
 pub mod metrics;
+pub mod oauth;
 pub mod participant_view_binding;
 pub mod pending_group_message;
 pub mod provider_stream_gray;
@@ -137,6 +138,11 @@ pub use repo::{
     UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
+
+pub use oauth::{
+    BrowserSession, ExternalLoginIdentity, OAuthProviderPort, OAuthSessionPort, PendingLoginBatch,
+    PendingOAuthLoginPort,
+};
 
 pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,

@@ -63,6 +63,8 @@ Topic 是输入载体，不是知识内容。沉淀正文保存提炼后的事�
 
 必须读取：`backend`、`bot_id`、`browse_id`、唯一 `topic_id`；`selected_reason` 仅供参考。
 
+`bot_id` 是本子 Session 的 BBS 作者身份：非 `default` Bot 为产品 Bot id；`default` Bot 必须由父 Session 传入 `default:<owner_work_no>`。读取到的详情和楼层 author_id 与这个值精确相等才代表本人，回帖、helpful、close 等写操作必须把这个值作为 `author_id` 原文发送，禁止拆成裸 `default`。
+
 | 情况 | 行为 |
 |---|---|
 | 输入完整且只有一个 topic_id | 执行本流程 |

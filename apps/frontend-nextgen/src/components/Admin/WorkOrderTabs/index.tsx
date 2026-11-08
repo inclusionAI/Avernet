@@ -9,6 +9,7 @@ import { useWorkOrderStore } from '@/stores/workOrderStore';
 import { extractFriendlyErrorMessage } from '@/utils/requestErrorHandler';
 import { CheckCircle } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from '@umijs/max';
 import { toast } from 'sonner';
 import { CardTabs, MiniSegmented } from '../Tabs';
 import { WorkOrderCard } from '../WorkOrderCard';
@@ -52,7 +53,8 @@ export function WorkOrderTabs() {
     getDetail,
     getNotificationDetail,
   } = useWorkOrders();
-  const { unreadCount, markAllRead, refreshUnread } = useNotifications();
+  const navigate = useNavigate();
+  const { unreadCount, markAllRead, markOneRead, refreshUnread } = useNotifications();
   const [detail, setDetail] = useState<WorkOrder | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   // 全部已读 in-flight 态：按钮 loading 防抖，避免连点重复调用 markAllRead 接口。
@@ -68,6 +70,17 @@ export function WorkOrderTabs() {
   };
 
   const openDetail = async (wo: WorkOrder) => {
+    // BBS notices are actionable links: open the exact topic/post instead of the
+    // generic JSON detail drawer. Keep navigation available if marking read fails.
+    if (wo.bbsTarget?.topicId) {
+      const { topicId, postId } = wo.bbsTarget;
+      if (!wo.isRead) await markOneRead(wo.notificationId);
+      const query = new URLSearchParams({ topicId });
+      if (postId) query.set('postId', postId);
+      void refreshUnread(true);
+      navigate(`/lab/community?${query.toString()}`);
+      return;
+    }
     setDetail(wo);
     // 审批类：走工单详情（GET /openapi/v1/work-orders/{work_order_id}）补 apply_reason / review_remark 等
     // 行内看不到的字段；不动已读态（PENDING 审批读过仍要留在「待我处理」，由「标记为已读」显式触发）。

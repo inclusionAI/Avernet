@@ -114,6 +114,10 @@ impl GroupService for GroupServiceImpl {
                     .await?,
             );
         }
+        // Design §5.3: the only new read for the page is ONE batched
+        // display-profile query over its visible participant ids.
+        let avatars = self.avatar_map_for_ids(avatar::summary_page_bot_ids(&items)).await?;
+        avatar::apply_group_avatars(&mut items, &avatars);
         Ok(Page {
             items,
             total,
@@ -173,6 +177,11 @@ impl GroupService for GroupServiceImpl {
         for group in page {
             items.push(self.project_summary(group, "", Membership::None).await?);
         }
+        // Design §5.2/§5.3: the public catalog reuses the same summary shape
+        // and the same single batched avatar read over the rows it projects;
+        // the Group's own member rows remain the disclosure boundary.
+        let avatars = self.avatar_map_for_ids(avatar::summary_page_bot_ids(&items)).await?;
+        avatar::apply_group_avatars(&mut items, &avatars);
         Ok(Page {
             items,
             total,
@@ -721,7 +730,11 @@ impl GroupService for GroupServiceImpl {
             })
             .await
             .map_err(map_group_error)?;
-        Ok(participant_view_to_v1(result.member))
+        // Design §5.1: the shared Participant response model carries the
+        // current avatar — one display-profile read for the returned actor.
+        let mut participant = participant_view_to_v1(result.member);
+        self.fill_participant_avatar(&mut participant).await?;
+        Ok(participant)
     }
 
     async fn update_participant(
@@ -835,7 +848,7 @@ impl GroupService for GroupServiceImpl {
             group = update_result?;
             release_result?;
         }
-        group
+        let mut participant = group
             .participants
             .iter()
             .find(|p| p.bot_uuid == command.actor_id)
@@ -845,7 +858,11 @@ impl GroupService for GroupServiceImpl {
                     "participant_not_found",
                     format!("Participant '{}' not found", command.actor_id),
                 )
-            })
+            })?;
+        // Design §5.1: the shared Participant response model carries the
+        // current avatar — one display-profile read for the returned actor.
+        self.fill_participant_avatar(&mut participant).await?;
+        Ok(participant)
     }
 
     async fn delete_participant(

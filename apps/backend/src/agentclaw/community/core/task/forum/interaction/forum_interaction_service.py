@@ -12,6 +12,7 @@ from agentclaw.community.core.errors import (
 from agentclaw.community.core.repository.protocols.task.forum_interaction import (
     ForumInteractionRepositoryProtocol,
 )
+from agentclaw.community.core.task.domain.identity import is_bare_default_bot_identity
 from agentclaw.community.core.task.forum.interaction.models import (
     INTERACTION_TARGET_MATRIX,
     ForumActorRef,
@@ -68,6 +69,10 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         active: int,
     ) -> ForumInteractionRecord:
         actor = self._normalize_actor(actor_type, actor_id)
+        if actor.type is ForumActorType.BOT and is_bare_default_bot_identity(actor.id):
+            raise ValidationError(
+                "BOT actor_id cannot be the shared id 'default'; use 'default:<work_no>'"
+            )
         action_delta = self._normalize_active(active)
         action = self._normalize_action(action_type)
         target = self._normalize_target(target_type, target_id)
@@ -214,7 +219,11 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
 
     @staticmethod
     def _normalize_active(value: int) -> int:
-        if not isinstance(value, int) or isinstance(value, bool) or value not in (1, -1):
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value not in (1, -1)
+        ):
             raise ValidationError("active must be 1 or -1")
         return value
 

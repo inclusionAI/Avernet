@@ -228,3 +228,111 @@ credential reissue/retirement, ALC→AEC invalidation, or device update acceptan
 Real BCS readback, complete singlebox gates, and real-device/AAC acceptance are
 separate evidence. Record the exact command/build/result; do not borrow older
 manager validation evidence as proof of ownership delivery or external rollout.
+
+## 2026-11-02 compatibility rollout and operations admission
+
+The shared TeamClaw reference resolver now supplies **both** ownership and
+managers projections. Service Bots use `bot_id:entity_id`, except conversions
+with an established `ext.bcn_provider_bot_ref`, which keep that reference.
+Personal, desktop and `default` Bots retain their registered `bot_id:owner_id`
+address. No provider ref or BCN UUID is rewritten during handoff.
+
+Bot list/detail, collaboration lists and display metadata add `bcn_bot_id`.
+`owner_entity_id` / `owner_id` continue to identify the current personnel Owner.
+New clients prefer the explicit BCN address; old servers remain supported by
+client fallback. Batch display lookups accept entity/current-Owner locators and
+exact retained conversion references, then query the resolved Bot's current
+record. Ambiguous addresses fail closed. Display lookup does not grant access
+to configuration, credentials or runtime operations.
+
+### Administrator handoff for a departed Owner
+
+The existing authenticated `POST /api/bots/owner-handoffs` accepts:
+
+```json
+{"bot_pk": 123, "new_owner_id": "target-staff-id", "request_key": "one-operation-uuid"}
+```
+
+The current Owner **or an administrator configured in
+`user_config.admin.super_admin`** can initiate it. Use the administrator's own
+login; never impersonate the departed Owner or supply an `actor_id` in JSON.
+The journal records the administrator as `actor_id` and the original Owner as
+`old_owner_id`. Old Owner presence/approval is not required. Service-Bot,
+Space membership, active approval, execution identity and credential checks
+remain in force; administrators cannot bypass those checks. The target identity
+must still pass staff validation. Reuse the same `request_key` only when
+retrying the same transfer.
+
+### Single-Bot BCN repair admission
+
+Authenticated **super administrators only** may call:
+
+```http
+POST /api/bots/owner-handoffs/bcn-repair
+Content-Type: application/json
+
+{"bot_pk": 123}
+```
+
+The body forbids other fields. Tenant comes from the trusted request context;
+environment comes from the configured sync deployment. The operation reads a
+live service Bot by PK, validates its established reference, and submits current
+ownership through the existing bounded runtime. It never accepts a target Owner,
+changes Backend ownership, scans historical Bots, or initializes missing BCN Bots.
+
+HTTP 202 means admission (`queued` or `coalesced`), **not successful repair**:
+
+```json
+{"success":true,"data":{"bot_pk":123,"bcn_bot_id":"bot:stable","submission":"queued","delivery_confirmed":false}}
+```
+
+Unauthorized callers receive 403, missing/wrong-environment Bots 404,
+non-service/default Bots 409, and disabled/unavailable/rejected admission 503.
+Admission logs record actor, tenant, environment, PK and outcome, without
+credentials. Verify dispatcher `CONFIRMED` and authorized BCN readback before
+closing an incident. Ownership confirmation triggers a fresh managers sync.
+A retry after lost admission is safe: every send reads current committed facts.
+There is no durable delivery or ordering guarantee across replicas.
+
+### Deployment and acceptance sequence
+
+1. Merge Backend/address and both frontend compatibility changes; no database
+   migration is required. Deploy BCN/BCS trust before enabling Backend writes.
+2. OCB prepub overlay enables `bot_manager_sync.ownership_enabled`; the production
+   overlay remains off. The BCS trusted Backend app allows `ownership:sync` and
+   `managers:sync`; verify the deployed config and existing principal signing key.
+3. On a test service Bot, transfer A→B using the existing operations handoff API.
+   Confirm Backend success, unchanged entity/provider ref, B as BCN Owner, and
+   the expected collaborators. Exercise old/new list, group/session, friend
+   metadata, chat and lifecycle controls. Include a personal/default control
+   and a personal-to-service conversion.
+4. Deploy the repair admission capability only. **Do not run historical repair**
+   as part of deployment. When an incident warrants it, an authorized operator
+   submits the affected PK and verifies remote readback. Production enablement
+   follows prepub acceptance separately.
+
+Rollback: disable only `ownership_enabled` to stop further Owner sync admission;
+retain managers and handoff recovery posture. Rollback does not undo a committed
+handoff or a confirmed BCN ownership update.
+
+### Local implementation validation (2026-11-02)
+
+- Backend affected Bot-management/repository/BCN contracts/HTTP/architecture
+  selection: **3,465 passed**. Additional final address/legacy-NULL projections
+  and reader regressions: **113 passed**; default-locator compatibility: **5 passed**.
+  These selections overlap and must not be added together.
+- New frontend affected service tests: **55 passed**; TypeScript `--noEmit` passed.
+- Old frontend persisted BCN-reference test: **5 passed**, using the available
+  Jest runtime and a temporary TypeScript transformer. The full old frontend
+  build was not run because this checkout lacks its installed toolchain.
+- OCB corporate configuration overlay tests: **34 passed**; TOML trust and
+  prepub-on/production-off assertions passed.
+- Changed Python blocking lint, added-line secret scans for both repositories,
+  and `git diff --check` passed. Existing oversized legacy source files were
+  kept to narrow edits; no new source file exceeds 1,000 lines or adds a waiver.
+- No real remote BCN/AAC/device acceptance, full product build, full Backend CI,
+  or unified Singlebox coverage run was performed. No deployment, historical
+  repair, database mutation, commit, or push was performed in this change.
+- OCB's pre-existing Avernet gitlink checkout difference was preserved. After
+  the public code is committed, release integration must point OCB's gitlink
+  at that commit before these local Backend/frontend changes can be deployed.

@@ -1,7 +1,7 @@
+import { getCapabilities } from '@/capabilities';
 import type { ConversationBotView, ConversationSessionScope } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { botSessionService } from '@/services/workspace/botSessionService';
-import { getCapabilities } from '@/capabilities';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
@@ -33,11 +33,13 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
       }
       const started = generation.current;
       const selectionAtStart = useConversationStore.getState();
-      const codingHost = view.bot.isAgentCodingBot
-        ? getCapabilities().getCodingBotConversationHost().value
-        : null;
+      const codingHost = view.bot.isAgentCodingBot ? getCapabilities().getCodingBotConversationHost().value : null;
       let result;
-      if (view.bot.isAgentCodingBot && codingHost?.createSession) {
+      if (view.bot.isAgentCodingBot) {
+        if (!codingHost?.createSession) {
+          toast.error('当前部署未提供 Coding Bot 会话创建能力。');
+          return;
+        }
         result = await codingHost.createSession({
           botId: view.bot.realBotId,
           userId: userIdNow,
@@ -45,7 +47,11 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
           title: '新对话',
         });
         if (!result.ok) {
-          if (userIdRef.current === userIdNow && generation.current === started) {
+          if (
+            result.code !== 'RUNTIME_CANCELLED' &&
+            userIdRef.current === userIdNow &&
+            generation.current === started
+          ) {
             toast.error(result.message);
           }
           return;

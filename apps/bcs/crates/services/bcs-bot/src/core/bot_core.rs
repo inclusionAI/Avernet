@@ -2,6 +2,8 @@
 mod delivery;
 #[path = "bot_coordination.rs"]
 mod coordination;
+#[path = "bot_profile.rs"]
+mod profile;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -49,7 +51,7 @@ pub struct BotCore {
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
     pub(super) bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
-    a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
+    pub(super) a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
     a2a_url_guard:bcs_route_security::OutboundUrlGuard,
     a2a_grpc_urls:Vec<String>,
 }
@@ -97,6 +99,9 @@ impl BotCore {
             a2a_grpc_urls:vec![],
         }
     }
+
+    /// Compatibility builder; admitted anonymous Cards no longer need a runtime opt-in.
+    pub fn with_a2a_anonymous(self,_allow:bool)->Self {self}
 
     pub fn with_a2a_route_policy(mut self, guard:bcs_route_security::OutboundUrlGuard, grpc_urls:Vec<String>)->Self {
         self.a2a_url_guard=guard;self.a2a_grpc_urls=grpc_urls;self
@@ -570,6 +575,29 @@ impl BotRegistryCoreService for BotCore {
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
         self.repo.update_visibility(bot_id, visibility).await
+    }
+
+    async fn update_profile_existing(
+        &self,
+        bot_id: &str,
+        update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_profile_existing_impl(bot_id, update).await
+    }
+
+    async fn update_avatar_existing(
+        &self,
+        bot_id: &str,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_avatar_existing_impl(bot_id, avatar).await
+    }
+
+    async fn avatar_urls(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::BotAvatarMap> {
+        self.avatar_urls_impl(bot_ids).await
     }
 
     #[allow(deprecated)]

@@ -60,6 +60,11 @@ export class CommunityService {
     return this.gateway.createReply(normalized, signal);
   }
 
+  getPostLocation(topicId: string, postId: string, pageSize: number, signal?: AbortSignal) {
+    if (!topicId.trim() || !postId.trim()) throw new Error('缺少回复定位参数');
+    return this.gateway.getPostLocation(topicId, postId, pageSize, signal);
+  }
+
   setPostHelpful(
     topicId: string,
     postId: string,

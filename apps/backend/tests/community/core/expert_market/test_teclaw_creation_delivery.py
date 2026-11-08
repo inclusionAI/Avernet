@@ -59,9 +59,8 @@ def test_native_expert_identity_is_present_in_the_first_teclaw_draft_artifact(
         document=compiled.document, engine_type="teclaw", bot_type=bot_type,
         validate=validate, materialised=frozenset({Category.IDENTITY}),
     )
-    monkeypatch.setattr(first, "_DOCUMENT", compiled.document)
     monkeypatch.setitem(first._RECORD, "bot_type", bot_type)
-    applies, provisioner, baas, store = first._build(world)
+    applies, provisioner, baas, store = first._build(world, compiled.document)
     accepted = applies.start_apply(
         entity_id=first._ENTITY, bot_id=first._BOT, bot=dict(first._RECORD),
         owner_id=first._OWNER, actor_id=first._OWNER, state=MANIFEST_STATE,

@@ -157,16 +157,18 @@ class McporterComposer:
         md: dict[str, Any],
     ) -> McpServerRef:
         """Emit the remote form: selected endpoint with the credential inlined."""
-        endpoint, transport = self._select_endpoint(
-            server_code,
-            md,
-            item.endpoint_env,
-            item.transport_protocol,
-            item.network_priority,
-            item.strict_transport_protocol,
-        )
         if item.url_override:
             endpoint = item.url_override
+            transport = "http" if item.transport_protocol == "STREAMABLE_HTTP" else "sse"
+        else:
+            endpoint, transport = self._select_endpoint(
+                server_code,
+                md,
+                item.endpoint_env,
+                item.transport_protocol,
+                item.network_priority,
+                item.strict_transport_protocol,
+            )
         endpoint, headers = self._inline_secrets(endpoint, item.api_key, item.headers)
 
         return McpServerRef(
@@ -281,7 +283,7 @@ class McporterComposer:
             if ep.get("networkType") in ("OFFICE", "INTERNET")
             and ep.get("env") == endpoint_env
         ]
-        if not valid:
+        if not valid and endpoints and endpoint_env:
             raise McporterComposeError(
                 f"MCP {server_code}: no usable {endpoint_env} endpoint "
                 "(OFFICE/INTERNET network)."

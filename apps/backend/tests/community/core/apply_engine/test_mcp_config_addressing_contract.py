@@ -501,7 +501,7 @@ async def test_scoped_same_account_duplicate_bot_id_is_refused_without_changing_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("copy_kind", ["deepcopy", "pickle"])
-async def test_copied_preserve_declaration_keeps_saved_override(copy_kind):
+async def test_copied_clear_declaration_clears_saved_override(copy_kind):
     import copy
     import pickle
 
@@ -517,4 +517,4 @@ async def test_copied_preserve_declaration_keeps_saved_override(copy_kind):
         else pickle.loads(pickle.dumps(declaration))
     )
     await world.apply_state(DesiredState(mcp=copied))
-    assert (await world.state_reader.mcp_servers(world.ref))[0].override == saved
+    assert (await world.state_reader.mcp_servers(world.ref))[0].override is None

@@ -6,8 +6,8 @@ returned payload; nothing here writes it anywhere).
 
 Rules (fixed by the Task 1 type dictionary):
 
-- identity: ``bcs_bot_id`` is ``"<bot_id>:<entity_id>"`` — the stable
-  identity that survives an owner handoff. Missing identity raises
+- identity: use the established TeamClaw registration reference, retaining
+  conversion addresses and personal/default legacy identities. Missing identity raises
   ``SnapshotUnavailable``; an unknown collaborator role or an empty
   ``user_id`` is a hard ``ValueError`` — never silently projected as a
   member.
@@ -18,6 +18,7 @@ Rules (fixed by the Task 1 type dictionary):
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.kernel.bot_manager_sync import (
     ManagerSnapshot,
     SnapshotTooLarge,
@@ -63,7 +64,20 @@ def build_snapshot(facts: SyncFacts) -> ManagerSnapshot:
     if len(user_ids) > MAX_MANAGER_USER_IDS:
         raise SnapshotTooLarge()
 
-    bcs_bot_id = f"{facts.bot_id}:{facts.entity_id}"
+    if facts.bot_type is not None and not isinstance(facts.bot_type, str):
+        raise SnapshotUnavailable("invalid_bot_type")
+    try:
+        bcs_bot_id = bcn_bot_reference(
+            {
+                "bot_id": facts.bot_id,
+                "entity_id": facts.entity_id,
+                "owner_id": facts.owner_id,
+                "bot_type": facts.bot_type,
+                "ext": {"bcn_provider_bot_ref": facts.bcn_provider_bot_ref},
+            }
+        )
+    except ValueError as exc:
+        raise SnapshotUnavailable("invalid_bcn_identity") from exc
     return ManagerSnapshot(
         key=facts.key,
         bcs_bot_id=bcs_bot_id,

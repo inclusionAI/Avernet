@@ -117,6 +117,24 @@ describe('useManagedBotOthers', () => {
     expect(loadFriendUsers).not.toHaveBeenCalled();
   });
 
+  it('does not use the ordinary friend directory for a managed Coding Bot in others', async () => {
+    const codingBot: ConversationBotView = {
+      ...managedBot,
+      bot: {
+        ...managedBot.bot,
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+    };
+    renderHook(() => useManagedBotOthers({ userId: '327325', managedBots: [codingBot], enabled: true }));
+
+    enableOthers();
+    await act(async () => Promise.resolve());
+
+    expect(loadFriendUsers).not.toHaveBeenCalled();
+    expect(listOtherSessions).not.toHaveBeenCalled();
+  });
+
   it('loads the friend-user directory once for an expanded managed Bot in others', async () => {
     loadFriendUsers.mockResolvedValue(okUsers(['447147', '447148']));
     const { result } = renderHook(() =>

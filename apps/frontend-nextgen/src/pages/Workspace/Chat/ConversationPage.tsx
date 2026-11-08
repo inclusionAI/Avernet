@@ -2,33 +2,33 @@
 // 组合:useHumanIdentity(Task 4 定式:固定登录 Human 身份,经页边界注入)+
 // Task 4 会话 Hook(目录/会话/他人只读/URL 同步)+ Task 6 对话侧栏 +
 // 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
+import { getCapabilities } from '@/capabilities';
+import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
-import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
-import { history } from '@umijs/max';
-import { getCapabilities } from '@/capabilities';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
+import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
+import { CodingBotConversationStage } from './CodingBotConversationStage';
+import { StandardConversationStageContainer } from './StandardConversationStageContainer';
 import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import { ConversationSidebar, type ConversationSidebarProps } from './components/ConversationSidebar';
-import { CodingBotStageBoundary } from './CodingBotStageBoundary';
-import { StandardConversationStageContainer } from './StandardConversationStageContainer';
+import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
+import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
 import { useConversationMobileSidebar } from './hooks/useConversationMobileSidebar';
 import { useConversationSelection } from './hooks/useConversationSelection';
-import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
-import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
-import { useManagedBotOthers } from './hooks/useManagedBotOthers';
 import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
+import { useManagedBotOthers } from './hooks/useManagedBotOthers';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -63,6 +63,7 @@ export default function ConversationPage(): JSX.Element {
   const hydrated = !directory.managedLoading && !directory.teamLoading && !directory.friendLoading;
   const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession } =
     useConversationSelection({
+      userId,
       managedBots: managedAndTeamBots,
       friendBots: directory.friendBots,
       hydrated,
@@ -111,14 +112,13 @@ export default function ConversationPage(): JSX.Element {
 
   // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
   // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就开始预载 qiankun 入口资产。
-  const selectedCodingBot = useMemo(
-    () =>
-      managedAndTeamBots.find(
-        (view) => view.section === store.selectedSection && view.bot.botId === store.selectedBotId,
-      )?.bot ?? null,
-    [managedAndTeamBots, store.selectedBotId, store.selectedSection],
-  );
-  const shouldPreloadCodingBot = selectedCodingBot?.isAgentCodingBot === true;
+  const selectedCodingBot = useMemo(() => {
+    const selectedBot = managedAndTeamBots.find(
+      (view) => view.section === store.selectedSection && view.bot.botId === store.selectedBotId,
+    )?.bot;
+    return selectedBot?.isAgentCodingBot === true ? selectedBot : null;
+  }, [managedAndTeamBots, store.selectedBotId, store.selectedSection]);
+  const shouldPreloadCodingBot = selectedCodingBot !== null;
 
   useEffect(() => {
     if (shouldPreloadCodingBot) codingBotPreload?.();
@@ -133,7 +133,7 @@ export default function ConversationPage(): JSX.Element {
   );
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
-  const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
+  const selectionIsReadonly = origin === 'others' && selectedCodingBot === null && store.selectedBotId !== null;
   const readonlyHistory = useConversationHistory({
     bot: selectionIsReadonly ? readonly.bot : null,
     friendUserId: selectionIsReadonly ? store.selectedFriendUserId : null,
@@ -170,7 +170,7 @@ export default function ConversationPage(): JSX.Element {
   const handleStandardChatRequestingChange = useCallback((isRequesting: boolean) => {
     setStandardChatRequesting(isRequesting);
   }, []);
-  const replyingSessionId = standardChatRequesting ? (selectedSession?.sessionId ?? null) : null;
+  const replyingSessionId = standardChatRequesting ? selectedSession?.sessionId ?? null : null;
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
     teamBots: directory.teamBots,
@@ -218,14 +218,20 @@ export default function ConversationPage(): JSX.Element {
               onLoadMore={() => void readonlyHistory.loadMore()}
               onOpenSessionList={() => setMobileListOpen(true)}
             />
+          ) : selectedCodingBot &&
+            (placeholder?.status === 'empty' || (!placeholder && isCodingBot && selectedSession)) ? (
+            // 确认无会话时仍保持 AIXCoding 控制面挂载，在上层覆盖 TeamClaw 统一空态；
+            // 创建成功后同一舞台只更新 sessionId，不重新挂载 qiankun 子应用。
+            <CodingBotConversationStage
+              bot={selectedCodingBot}
+              session={placeholder?.status === 'empty' ? null : selectedSession}
+              human={human}
+              emptyPlaceholder={placeholder?.status === 'empty' ? placeholder : null}
+              onOpenSessionList={() => setMobileListOpen(true)}
+            />
           ) : placeholder ? (
-            // 展开 Bot 后目标尚无选中会话:占位(加载/失败/空态/无效指定),
-            // 不挂载任何消息 Runtime。
+            // 其他加载/失败/筛选空态继续由宿主占位，不启动消息 Runtime。
             <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
-          ) : isCodingBot ? (
-            selectedSession && (
-              <CodingBotStageBoundary bot={interactiveBot} session={selectedSession} human={human} />
-            )
           ) : selectedBotPending ? (
             <section aria-label="加载 Bot 会话" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
               <ChatMessageSkeleton ariaLabel="加载 Bot 会话" />

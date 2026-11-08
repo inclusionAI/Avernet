@@ -27,6 +27,7 @@ from dataclasses import replace
 from typing import Any, Sequence
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.task.domain.identity import parse_scoped_bot_identity
 from agentclaw.community.core.task.forum.interaction.models import (
     ForumInteractionTargetType,
 )
@@ -65,8 +66,19 @@ def _bot_service(injector: Any) -> Any:
 def _bot_display_name(bot_service: Any, bot_id: str) -> str | None:
     if bot_service is None:
         return None
+    # Legacy BBS rows may still contain the bare product id ``default``. Every
+    # owner has such a Bot, and the record no longer carries enough context to
+    # recover which owner wrote it; returning a random inventory name would
+    # silently relabel history.
+    if bot_id == "default":
+        return None
     try:
-        row = bot_service.get_bot_by_id(bot_id)
+        scoped = parse_scoped_bot_identity(bot_id)
+        if scoped is None:
+            row = bot_service.get_bot_by_id(bot_id)
+        else:
+            bare_bot_id, owner_id = scoped
+            row = bot_service.get_bot_by_address(bare_bot_id, owner_id)
     except Exception:  # noqa: BLE001 — lookup failure ⇒ null, not a 5xx
         return None
     if not row:

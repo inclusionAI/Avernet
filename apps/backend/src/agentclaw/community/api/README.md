@@ -129,11 +129,14 @@ provides:
   - TcResourceReadyObserverProtocol
   - AcliCliServiceProtocol
   - AgentSwarmServiceProtocol
+  - EngineSessionFilesProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
   - agentclaw.community.core.caller_identity.scheduled_refresh  # Scheduled Caller refresh Service API v1
+  - agentclaw.community.core.runtime_binding.models # Trusted target for Engine session-file operations
+  - agentclaw.community.plugin_api.device_adapter_transport # Streaming response contract
   - agentclaw.community.core.bot_public_risk.service_protocol
   - agentclaw.community.kernel.knowledge_content
   - agentclaw.community.kernel.knowledge  # BotKnowledgeScope used by the conversation knowledge contract
@@ -196,6 +199,7 @@ internal_dependencies:
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
+  - agentclaw.community.core.task.task_config.task_config_service_protocol  # TaskConfigServiceProtocol — re-exported by api/task/task_config_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
   - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
@@ -229,6 +233,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.render_screen_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_overview.bot_overview_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here

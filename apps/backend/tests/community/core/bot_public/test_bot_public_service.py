@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataPage,
     BotCatalogMetadataUnavailableError,
+    BotCatalogProfileNotFoundError,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
@@ -1535,7 +1536,7 @@ class TestSearchPublicBotsByKeyword:
 
         result = svc.search_catalog_public_bots_by_keyword(
             search="agent",
-            page=3,
+            page=1,
             page_size=20,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
@@ -1558,8 +1559,8 @@ class TestSearchPublicBotsByKeyword:
         }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
-            page=3,
-            page_size=20,
+            page=1,
+            page_size=100,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
         )
@@ -1613,7 +1614,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"][1]["bot_desc"] == "BCS fallback"
         assert result["items"][1]["entity_id"] == "BCS-owner"
 
-    def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
+    def test_catalog_search_counts_actual_catalog_rows_instead_of_stale_bcs_total(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = _metadata_page(
             [BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot")],
@@ -1633,7 +1634,7 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-bcs-total",
         )
 
-        assert result["total"] == 21
+        assert result["total"] == 1
         assert len(result["items"]) == 1
 
     def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
@@ -1768,7 +1769,7 @@ class TestSearchPublicBotsByKeyword:
             caller=BotCatalogCaller("tenant-1", None, 7), request_id="trace-2"
         )
 
-        assert result["total"] == 3
+        assert result["total"] == 2
         assert [bot["entity_id"] for bot in result["items"]] == [
             "entity-a",
             "entity-b",
@@ -2227,6 +2228,182 @@ class TestUpdateBotExt:
         update_data = bot_repo.update_by_owner.call_args[0][2]
         assert update_data["ext"]["existing"] == "value"
         assert update_data["ext"]["new_key"] == "new_val"
+
+
+# ---------------------------------------------------------------------------
+# get_catalog_public_bot_profile – 公开 Bot 画像（好友申请弹窗）
+# ---------------------------------------------------------------------------
+
+class TestGetCatalogPublicBotProfile:
+    """BCS 精确裁决公开性；Backend 记录补摘要；能力清单来自能力集 MCP。"""
+
+    @staticmethod
+    def _metadata(bot_uuid="bot-1:owner-1"):
+        return BotCatalogMetadata(
+            BotCatalogAddress("bot-1", "owner-1"),
+            "bot",
+            bot_uuid=bot_uuid,
+            name="BCS Name",
+            summary="BCS summary",
+            created_by="owner-1",
+            status="online",
+        )
+
+    def _backend_bot(self):
+        bot = _make_catalog_bot("bot-1", "owner-1")
+        bot["bot_desc"] = "Backend description"
+        bot["active_engine"] = "openclaw"
+        return bot
+
+    def _metadata_service(self, items):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = _metadata_page(items)
+        return metadata
+
+    def test_profile_joins_backend_record_and_dedupes_mcp_capabilities(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        skill_set_service = MagicMock()
+        skill_set_service.get_all_skill_sets_with_mcps.return_value = [
+            {
+                "name": "能力集A",
+                "is_active": True,
+                "mcps": [
+                    {"id": "m1", "name": "AntV 可视化图表"},
+                    {"server_code": "m2", "name": "Dima MCP"},
+                    {"id": "m1", "name": "AntV 可视化图表"},
+                    {"id": "  ", "name": "   "},
+                ],
+            },
+            {"name": "坏集合", "mcps": "not-a-list"},
+        ]
+        factory = MagicMock()
+        factory.create.return_value = skill_set_service
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            " bot-1:owner-1 ",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-profile",
+        )
+
+        assert result == {
+            "bot_id": "bot-1",
+            "bot_uuid": "bot-1:owner-1",
+            "bot_name": "TestBot",
+            "owner_name": "owner_nick",
+            "description": "Backend description",
+            "engine_name": "openclaw",
+            "capabilities": [
+                {"capability_id": "m1", "display_name": "AntV 可视化图表"},
+                {"capability_id": "m2", "display_name": "Dima MCP"},
+            ],
+        }
+        metadata.search_public_bot_metadata.assert_called_once_with(
+            search=None,
+            page=1,
+            page_size=1,
+            bot_uuids=("bot-1:owner-1",),
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-profile",
+        )
+        repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
+            [("bot-1", "owner-1")], page=1, page_size=1
+        )
+        factory.create.assert_called_once_with(entity_id="owner-1", bot_id="bot-1")
+        skill_set_service.get_all_skill_sets_with_mcps.assert_called_once_with(
+            user_id="owner-1", bolt_id="bot-1"
+        )
+
+    def test_profile_bcs_only_bot_falls_back_to_metadata_and_empty_capabilities(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (0, [])
+        factory = MagicMock()
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        assert result == {
+            "bot_id": "bot-1",
+            "bot_uuid": "bot-1:owner-1",
+            "bot_name": "BCS Name",
+            "owner_name": None,
+            "description": "BCS summary",
+            "engine_name": "",
+            "capabilities": [],
+        }
+        factory.create.assert_not_called()
+
+    def test_profile_missing_from_catalog_is_not_found(self):
+        metadata = self._metadata_service([])
+        svc = _make_service(catalog_metadata_service=metadata)
+
+        with pytest.raises(BotCatalogProfileNotFoundError):
+            svc.get_catalog_public_bot_profile(
+                "bot-missing:owner-1",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_blank_identifier_is_not_found(self):
+        svc = _make_service()
+
+        with pytest.raises(BotCatalogProfileNotFoundError):
+            svc.get_catalog_public_bot_profile(
+                "   ",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_metadata_failure_fails_closed_as_search_unavailable(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.side_effect = (
+            BotCatalogMetadataUnavailableError()
+        )
+        svc = _make_service(catalog_metadata_service=metadata)
+
+        with pytest.raises(BotCatalogSearchUnavailableError):
+            svc.get_catalog_public_bot_profile(
+                "bot-1:owner-1",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_capability_failure_degrades_to_empty_list(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        factory = MagicMock()
+        factory.create.side_effect = RuntimeError("skill set source down")
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        assert result["capabilities"] == []
+        assert result["bot_name"] == "TestBot"
+        assert result["engine_name"] == "openclaw"
 
 
 # ---------------------------------------------------------------------------

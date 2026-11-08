@@ -11,15 +11,17 @@ use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 
 pub(super) fn build_card_management(
     db: Arc<dyn DbPlugin>, flavor:bcs_db_api::DbSqlFlavor, bots: Arc<dyn BotProviderRepoPort>,
-    providers: Arc<dyn ProviderCoreService>, guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+    providers: Arc<dyn ProviderCoreService>, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>,
+    registry_repo: Arc<bcs_bot_store::PersistentBotRepo>,
+    guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
 ) -> crate::Result<(Arc<dyn A2aBotManagementService>, Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>)> {
-    let cards = Arc::new(DbA2aBotStore::new(db, crate::env::resolve_env(), flavor));
+    let cards = Arc::new(DbA2aBotStore::new(db, crate::env::resolve_env(), flavor).with_registry(&registry_repo));
     let registration = Arc::new(bcs_bot::core::a2a_provider_registration::A2aProviderRegistrationCore::new(providers.clone(), bots.clone()));
     let core = Arc::new(A2aBotCore::new(cards, bots));
     let mut fetcher = HttpA2aCardFetcher::new(guard, vec![bcs_a2a_http::tools::EXTENSION.into(),
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
-    Ok((Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration)), core))
+    Ok((Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration, registry)), core))
 }
 
 pub(super) fn build_delivery(
@@ -67,4 +69,16 @@ pub(super) fn start_card_refresh(service: Arc<dyn A2aBotManagementService>) -> C
             }
         }
     }))
+}
+
+pub(super) fn build_bot_core(
+    repo:Arc<bcs_bot_store::PersistentBotRepo>,providers:&super::resource_builders::ProviderRepoBundle,
+    db:Arc<dyn DbPlugin>,flavor:bcs_db_api::DbSqlFlavor,config:&crate::BcsConfig,guard:OutboundUrlGuard,
+)->Arc<bcs_bot::BotCore> {
+    Arc::new(bcs_bot::BotCore::with_provider_repos(repo,providers.provider_repo.clone(),
+        providers.provider_credentials.clone(),providers.provider_bindings.clone())
+        .with_bot_provider_repo(providers.bot_providers.clone())
+        .with_a2a_anonymous(config.a2a_allow_anonymous)
+        .with_a2a_route_policy(guard,config.a2a_grpc.as_ref().map(|mesh|mesh.routes.iter().map(|route|route.interface_url.clone()).collect()).unwrap_or_default())
+        .with_a2a_cards(Arc::new(DbA2aBotStore::new(db,crate::env::resolve_env(),flavor))))
 }

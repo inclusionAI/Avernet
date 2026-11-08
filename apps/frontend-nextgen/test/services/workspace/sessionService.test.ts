@@ -369,3 +369,27 @@ it('getSessionDetail 失败：取消协议层全局错误提示（读侧静默�
   expect(items.some((it) => it.toastKey === 'k-detail-1' && it.cancelled)).toBe(true);
   useErrorNotifyStore.getState().reset();
 });
+
+it.each(['send', 'inject'] as const)(
+  'createNewSession forwards context_delivery=%s with message scope',
+  async (delivery) => {
+    sc.createSession.mockResolvedValue({
+      data: {
+        session_id: 'g1:s11',
+        group_id: 'g1',
+        status: 'running',
+        participants: [],
+        created_at: 1,
+        updated_at: 1,
+      },
+    });
+    await sessionService.createNewSession('g1', undefined, undefined, 'participant', delivery);
+    expect(sc.createSession).toHaveBeenCalledWith(
+      'g1',
+      expect.objectContaining({
+        context_delivery: delivery,
+        message_view_scope: 'participant',
+      }),
+    );
+  },
+);

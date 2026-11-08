@@ -1,44 +1,53 @@
 use std::sync::Arc;
 use async_trait::async_trait;
-use bcs_service_api::{ProviderCoreService, ServiceError, ServiceResult};
+use bcs_service_api::{BotRegistryCoreService, ProviderCoreService, ServiceError, ServiceResult};
 use bcs_service_api::application::a2a_bot::{A2aBotManagementService, ConfigureA2aBotCommand};
 use bcs_service_api::core::a2a_bot::A2aBotCoreService;
 use bcs_service_api::port::{a2a_card::A2aCardPort, repo::a2a_bot::A2aBotRecord};
 use bcs_service_api::types::a2a_bot::A2aCardSource;
 mod registration;
+mod names;
+mod management;
 
 #[derive(Default)]
 struct RefreshRound {cursor:Option<String>,next_round_ms:Option<i64>}
+struct ProviderRegistration {
+    core:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>,
+    registry:Arc<dyn BotRegistryCoreService>,
+}
 pub struct A2aBotManagement {
     providers:Arc<dyn ProviderCoreService>,core:Arc<dyn A2aBotCoreService>,fetcher:Arc<dyn A2aCardPort>,
-    registration:Option<Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>>,
+    registration:Option<ProviderRegistration>,
     refresh_round:tokio::sync::Mutex<RefreshRound>,
 }
 impl A2aBotManagement {
     pub fn new(providers:Arc<dyn ProviderCoreService>,core:Arc<dyn A2aBotCoreService>,fetcher:Arc<dyn A2aCardPort>)->Self {
         Self {providers,core,fetcher,registration:None,refresh_round:Default::default()}
     }
-    pub fn with_registration(mut self,registration:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>)->Self {
-        self.registration=Some(registration);self
+    pub fn with_registration(mut self,registration:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>,
+        registry:Arc<dyn BotRegistryCoreService>)->Self {
+        self.registration=Some(ProviderRegistration {core:registration,registry});self
     }
     async fn authorize(&self,provider_id:&str,token: &str) -> ServiceResult<()> {
         if self.providers.get_provider(provider_id,token).await?.disabled {return Err(ServiceError::Forbidden("provider_disabled".into()));}Ok(())
     }
     async fn load_card(&self,provider_id:&str,source:A2aCardSource)->ServiceResult<(Option<String>,bcs_service_api::port::a2a_card::ValidatedA2aCard)> {
-        let credential=self.providers.get_downlink_credential(provider_id).await?;
-        if credential.disabled || credential.secret_value.trim().is_empty() || credential.credential_kind!="downlink_bcs_to_provider" {
-            return Err(ServiceError::Forbidden("A2A downlink credential unavailable".into()));
-        }
-        match source {
-            A2aCardSource::Url(url)=>{if url.trim().is_empty() || url!=url.trim() {return Err(ServiceError::InvalidOperation {message:"invalid Card URL".into(),request_id:None});}let card=self.fetcher.fetch(&url,true).await?;Ok((Some(url),card))},
-            A2aCardSource::Inline(raw)=>Ok((None,self.fetcher.validate(raw,true).await?)),
-        }
+        // Fetch public declarations first; credential material is never sent to the Card URL.
+        let (url,card)=match source {
+            A2aCardSource::Url(url)=>{if url.trim().is_empty() || url!=url.trim() {return Err(ServiceError::InvalidOperation {message:"invalid Card URL".into(),request_id:None});}
+                let card=self.fetcher.fetch(&url,true).await?;(Some(url),card)},
+            A2aCardSource::Inline(raw)=>(None,self.fetcher.validate(raw,true).await?),
+        };
+        self.providers.a2a_authentication(provider_id,&card.raw).await?;
+        Ok((url,card))
     }
     async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64,skip_unchanged:bool)->ServiceResult<A2aBotRecord> {
         let binding=self.core.provider_binding(&provider_id,&bot_uuid).await?;
         let (agent_card_url,card)=self.load_card(&provider_id,source).await?;
         if skip_unchanged {
             if let Some(current)=self.core.get_card(&bot_uuid).await? {
+                let policy=&bcs_service_api::types::a2a_bot::a2a_management::validate_management_card;
+                if policy(&current.agent_card).is_ok() {policy(&card.raw)?;}
                 if current.revision==expected && current.provider_id==provider_id
                     && current.provider_bot_ref==binding.provider_bot_ref
                     && current.agent_card_url==agent_card_url && current.agent_card==card.raw {
@@ -64,6 +73,50 @@ impl A2aBotManagement {
 }
 #[async_trait]
 impl A2aBotManagementService for A2aBotManagement {
+    async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)
+        ->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.public_register(command).await}
+    async fn get_agent(&self,token:&str,name:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_get(token,name).await
+    }
+    async fn update_agent(&self,token:&str,name:&str,source:A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_update(token,name,Some(source),None).await
+    }
+    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_update(token,name,source,visibility).await
+    }
+    async fn refresh_agent(&self,token:&str,name:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_refresh(token,name).await
+    }
+
+    async fn resolve_named_target(&self,provider:&str,bot:&str)->ServiceResult<String> {
+        if !bcs_service_api::types::a2a_names::valid_provider_name(provider) {
+            return Err(ServiceError::InvalidOperation {message:"invalid provider_name".into(),request_id:None});
+        }
+        let provider=self.providers.get_provider_by_slug(provider).await?
+            .filter(|value|value.enabled).ok_or_else(||ServiceError::ProviderNotFound(provider.into()))?;
+        let record=self.core.get_by_name(&provider.provider_id,bot).await?
+            .ok_or_else(||ServiceError::BotNotFound(bot.into()))?;
+        self.core.provider_binding(&provider.provider_id,&record.bot_uuid).await?;
+        // Failed target lookups must not mutate another Provider. The pin still
+        // checks the resolved identity and slug to fence a concurrent rename.
+        self.providers.pin_a2a_provider_name(&provider.provider_id,&provider.slug).await?;
+        Ok(record.bot_uuid)
+    }
+    async fn register_named(&self,command:bcs_service_api::application::a2a_bot::RegisterNamedA2aBotCommand)
+        ->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aRegistration> {self.register_by_name(command).await}
+    async fn get_named(&self,provider:&str,token:&str,bot:&str)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
+        let record=self.named_record(provider,token,bot).await?;self.named_projection(provider,record)
+    }
+    async fn configure_named(&self,provider:&str,token:&str,bot:&str,source:A2aCardSource,now_ms:i64)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
+        let old=self.named_record(provider,token,bot).await?;
+        let record=self.configure(ConfigureA2aBotCommand {provider_id:old.provider_id,provider_admin_token:token.into(),bot_uuid:old.bot_uuid,source,expected_revision:None,now_ms}).await?;
+        self.named_projection(provider,record)
+    }
+    async fn refresh_named(&self,provider:&str,token:&str,bot:&str,now_ms:i64)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
+        let old=self.named_record(provider,token,bot).await?;
+        let record=self.refresh(&old.provider_id,token,&old.bot_uuid,now_ms).await?;self.named_projection(provider,record)
+    }
+
     async fn register_provider_bot(&self,command:bcs_service_api::RegisterProviderBotCommand,source:A2aCardSource,now_ms:i64)
         ->ServiceResult<bcs_service_api::RegisterProviderBotOutcome> {self.register_admin(command,source,now_ms).await}
     async fn get(&self,provider_id:&str,token:&str,bot_uuid:&str)->ServiceResult<Option<A2aBotRecord>> {
@@ -71,7 +124,13 @@ impl A2aBotManagementService for A2aBotManagement {
     }
     async fn configure(&self,command:ConfigureA2aBotCommand)->ServiceResult<A2aBotRecord> {
         self.authorize(&command.provider_id,&command.provider_admin_token).await?;
-        self.commit(command.provider_id,command.bot_uuid,command.source,command.expected_revision,false).await
+        if let Some(expected)=command.expected_revision {
+            return self.commit(command.provider_id,command.bot_uuid,command.source,expected,false).await;
+        }
+        let binding=self.core.provider_binding(&command.provider_id,&command.bot_uuid).await?;
+        let (agent_card_url,card)=self.load_card(&command.provider_id,command.source).await?;
+        self.core.replace_card(A2aBotRecord {bot_uuid:command.bot_uuid,provider_id:command.provider_id,
+            provider_bot_ref:binding.provider_bot_ref,agent_card_url,agent_card:card.raw,revision:0}).await
     }
     async fn refresh(&self,provider_id:&str,token:&str,bot_uuid:&str,_now_ms:i64)->ServiceResult<A2aBotRecord> {
         self.authorize(provider_id,token).await?;self.core.provider_binding(provider_id,bot_uuid).await?;

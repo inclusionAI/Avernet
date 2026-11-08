@@ -259,7 +259,11 @@ pub async fn wire_with_caller_assembly(
                 3_600_000,
             )
             .with_managed_commit(service.clone())
-            .with_bot_registry(flow.registry.clone());
+            .with_bot_registry(flow.registry.clone())
+            // Stage liveness (spec 2026-11-03 §3.2): same source as the
+            // ordinary runtime's io_timeout below — one deployment
+            // constant bounds every stage and the ordinary deliver alike.
+            .with_stage_timeout(Duration::from_secs(30));
             // Review-VI P1: the pipeline carries the master-term token so
             // its detached effects fence across delivery-master boundaries.
             let pipeline = pipeline.with_delivery_term(caller_term_token.clone());

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::group::{DeleteResult, Page};
+use super::group::{DeleteResult, Page, ParticipantSummary};
 use super::{ApplicationError, AuthenticatedCaller};
 use crate::StateMachineRunView;
 
@@ -22,6 +22,11 @@ pub struct SessionParticipant {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when the participant has none. Human
+    /// participants resolve null and retained members of soft-deleted Bots
+    /// keep their stored face (design §5.2/§5.3).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: ParticipantRole,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -55,6 +60,12 @@ pub struct SessionSummary {
     /// gating (collected is meaningful only relative to a named viewer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collected: Option<bool>,
+    /// Lightweight summaries of every current Session member in stored order,
+    /// including session-only dynamic members: `name` is THIS Session's own
+    /// member snapshot verbatim (null allowed, never backfilled for the list)
+    /// and `avatar_url` is the current Bot display avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

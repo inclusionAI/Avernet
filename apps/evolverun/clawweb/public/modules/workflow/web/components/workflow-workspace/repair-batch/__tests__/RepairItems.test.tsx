@@ -51,7 +51,7 @@ describe('readable repair candidates', () => {
     expect(copyControl).not.toHaveTextContent('复制目标值')
     await user.click(copyControl)
     expect(copy).toHaveBeenCalledWith(value)
-    expect(screen.getByRole('status')).toHaveTextContent('已复制')
+    expect(await screen.findByRole('status')).toHaveTextContent('已复制')
     expect(screen.getByText('技术详情（来源标识与完整载荷）').closest('details')).not.toHaveAttribute('open')
   })
   it('reports clipboard denial without claiming success', async () => {
@@ -60,7 +60,7 @@ describe('readable repair candidates', () => {
     const candidate = item({ proposal: { operations: [{ path: '/executor/timeoutMs', value: 600000 }] } })
     render(<RepairItemDetail item={candidate} detail={candidate} selected={false} onToggle={() => {}} canEdit limitReached={false} onLoad={() => {}} onDisposition={() => {}} />)
     await user.click(screen.getByRole('button', { name: '复制目标值' }))
-    expect(screen.getByRole('status')).toHaveTextContent('复制失败')
+    expect(await screen.findByRole('status')).toHaveTextContent('复制失败')
     expect(screen.queryByText('已复制')).not.toBeInTheDocument()
   })
 })

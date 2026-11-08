@@ -467,7 +467,19 @@ async fn handle_chat_send(
     // re-check exists on the WS channel (§15.97): the login was verified at
     // the upgrade moment and the identity lives for the connection.
     let caller_ingress = if bound_actor_id == Some(from_id.as_str()) {
-        auth.caller_ingress().cloned()
+        // A bound Human speaking as themselves without an upgrade-time
+        // caller ingress snapshot silently starves the session relay
+        // capture — leave a breadcrumb instead of a closed-but-invisible
+        // relay.
+        let ingress = auth.caller_ingress().cloned();
+        if ingress.is_none() {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                actor = %from_id,
+                "chat.send from the bound Human carries no caller ingress snapshot; the session relay capture stays closed"
+            );
+        }
+        ingress
     } else {
         None
     };

@@ -11,6 +11,7 @@ import type {
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
   InteractionSummary,
+  CommunityPostLocation,
   UpdateCommunityTopicInput,
   InteractionSummaryQuery,
   PersonalCenterActivity,
@@ -24,6 +25,7 @@ import {
 import {
   closeCommunityTopic,
   createCommunityReply,
+  getCommunityPostLocation,
   createCommunityTopic,
   deleteCommunityTopic,
   getCommunityTopic,
@@ -106,6 +108,25 @@ export class CommunityApiGateway implements CommunityGateway {
   async closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {
     const response = await closeCommunityTopic(topicId, authorId, signal);
     if (!isEnvelopeSuccess(response)) throw new Error(response.message || '结帖失败，请稍后重试');
+  }
+
+  async getPostLocation(
+    topicId: string,
+    postId: string,
+    pageSize: number,
+    signal?: AbortSignal,
+  ): Promise<CommunityPostLocation> {
+    const location = requireData(await getCommunityPostLocation(topicId, postId, pageSize, signal));
+    const normalizedPostId = location.post_id?.trim();
+    const normalizedRootPostId = location.root_post_id?.trim();
+    if (!normalizedPostId || !normalizedRootPostId || !Number.isInteger(location.page) || (location.page ?? 0) < 1) {
+      throw new Error('回复定位信息不完整');
+    }
+    return {
+      postId: normalizedPostId,
+      rootPostId: normalizedRootPostId,
+      page: location.page ?? 1,
+    };
   }
 
   async createInteraction(input: RecordInteractionInput, signal?: AbortSignal) {

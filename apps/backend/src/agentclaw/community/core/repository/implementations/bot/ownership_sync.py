@@ -6,6 +6,8 @@ or Space state is read, no facts are cached, and no sync state is written.
 
 from __future__ import annotations
 
+import json
+
 from injector import inject
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -42,7 +44,20 @@ class SqlOwnershipSyncReadRepository(OwnershipSyncReadRepository):
                     )
                     if bot is None:
                         raise SnapshotUnavailable("bot_not_found")
-                    return OwnershipFacts(key, bot.bot_id, bot.entity_id, bot.owner_id)
+                    try:
+                        ext = json.loads(bot.ext or "{}")
+                    except ValueError as exc:
+                        raise SnapshotUnavailable("invalid_bot_ext") from exc
+                    if not isinstance(ext, dict):
+                        raise SnapshotUnavailable("invalid_bot_ext")
+                    return OwnershipFacts(
+                        key,
+                        bot.bot_id,
+                        bot.entity_id,
+                        bot.owner_id,
+                        bot_type=bot.bot_type,
+                        bcn_provider_bot_ref=ext.get("bcn_provider_bot_ref"),
+                    )
             except SQLAlchemyError as exc:
                 raise SnapshotUnavailable("read_error") from exc
 

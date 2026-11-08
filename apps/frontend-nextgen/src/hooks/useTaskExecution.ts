@@ -22,9 +22,13 @@ import { splitBotId } from '@/services/workspace/botSessionService';
 import { useTaskStore } from '@/stores/taskStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useWorkflowList } from './useWorkflowList';
+
+function taskSkillCacheKey(context: TaskComposerContext): string {
+  return `${context.sourceType}:${context.ownerBotId}:${context.ownerUserId}`;
+}
 
 export interface UseTaskExecutionOptions {
   panelRef: React.RefObject<PanelHandle | null>;
@@ -73,6 +77,7 @@ export function useTaskExecution({
   const { workflows, workflowsLoading, loadWorkflows } = useWorkflowList(context);
   const [dynamicTaskEnabled, setDynamicTaskEnabled] = useState(false);
   const [dynamicTaskChecking, setDynamicTaskChecking] = useState(Boolean(context));
+  const taskSkillCacheRef = useRef(new Map<string, boolean>());
 
   useEffect(() => {
     if (!context?.ownerBotId || !context.ownerUserId) {
@@ -80,14 +85,37 @@ export function useTaskExecution({
       setDynamicTaskChecking(false);
       return undefined;
     }
+    const cacheKey = taskSkillCacheKey(context);
+    const cachedSkill = taskSkillCacheRef.current.get(cacheKey);
+    if (cachedSkill !== undefined) {
+      // Same driver Bot + same initiator means the Skill capability is unchanged;
+      // switching sessions should not trigger another Skills request.
+      setDynamicTaskEnabled(cachedSkill);
+      setDynamicTaskChecking(false);
+      return undefined;
+    }
     let cancelled = false;
     setDynamicTaskChecking(true);
     const { realBotId, ownerId } = splitBotId(context.ownerBotId);
     void botSkillService
-      .listSkillsForBotId(realBotId, context.ownerUserId, ownerId, 1, 100)
+      .hasTaskIntentSkillForBot({
+        realBotId,
+        botUuid: context.ownerBotId,
+        ownerId,
+        currentUserId: context.ownerUserId,
+      })
       .then((result) => {
         if (cancelled) return;
-        setDynamicTaskEnabled(result.ok && botSkillService.hasTaskIntentSkill(result.data));
+        const enabled = result.ok && result.data;
+        taskSkillCacheRef.current.set(cacheKey, enabled);
+        setDynamicTaskEnabled(enabled);
+      })
+      .catch(() => {
+        // 技能探测只决定任务入口是否可点；意外失败需安全降级为不可点，
+        // 不产生未处理 Promise，也不触发全局错误提示。
+        if (cancelled) return;
+        taskSkillCacheRef.current.set(cacheKey, false);
+        setDynamicTaskEnabled(false);
       })
       .finally(() => {
         if (!cancelled) setDynamicTaskChecking(false);

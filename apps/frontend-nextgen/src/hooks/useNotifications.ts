@@ -48,6 +48,23 @@ export function useNotifications() {
     setRecent(r.data ?? []);
   }, [setRecent, setLoadingRecent]);
 
+  const markOneRead = useCallback(async (notificationId: number | string) => {
+    const r = await notificationService.markOneRead(notificationId);
+    if (r.error) {
+      toast.error(r.error.message);
+      return false;
+    }
+    setRecent((items) =>
+      items.map((item) =>
+        String(item.notificationId) === String(notificationId)
+          ? { ...item, isRead: true }
+          : item,
+      ),
+    );
+    void refreshUnread(true);
+    return true;
+  }, [refreshUnread, setRecent]);
+
   const markAllRead = useCallback(async () => {
     const r = await notificationService.markAllRead();
     if (r.error) {
@@ -101,5 +118,6 @@ export function useNotifications() {
     refreshUnread,
     loadRecent,
     markAllRead,
+    markOneRead,
   };
 }

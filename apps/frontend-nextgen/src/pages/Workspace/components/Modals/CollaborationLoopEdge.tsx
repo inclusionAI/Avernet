@@ -24,10 +24,10 @@ export default function CollaborationLoopEdge(props: EdgeProps<LoopEdge>) {
       label={data?.returnEdge ? undefined : label} labelX={bypass ? sideX : centerX}
       labelY={(data?.returnEdge ? (sourceY + targetY) / 2 : bypass ? sourceY + 16 : centerY) + (data!.labelLane || 0) * 22}
       style={{ stroke: color, strokeWidth: secondary ? 1.25 : 2, strokeDasharray: secondary ? '5 4' : undefined }}
-      labelStyle={{ fill: color, fontSize: secondary ? 10 : 11, fontWeight: secondary ? 400 : 700 }}
+      labelStyle={{ fill: color, fontSize: 14, fontWeight: 500 }}
       labelBgStyle={{ fill: 'hsl(var(--background))', fillOpacity: 0.95 }} labelBgPadding={[5, 3]} labelBgBorderRadius={5} />
     {data?.returnEdge && <text x={returnLabelX} y={(sourceY + targetY) / 2 - 5}
-      textAnchor="middle" fill={color} fontSize={10} fontWeight={500}>
+      textAnchor="middle" fill={color} fontSize={14} fontWeight={500}>
       {label}
     </text>}
   </g>;

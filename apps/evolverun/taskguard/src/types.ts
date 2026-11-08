@@ -1,3 +1,5 @@
+import type { FanoutConfig, FanoutState, FanoutChildRequest } from "./executors/subworkflow-fanout-types.js";
+
 // ── YAML Workflow Spec Types ──
 
 export type WorkflowActor = {
@@ -463,6 +465,8 @@ export type LoopGroupExecutor = {
 
 export type SubworkflowExecutor = {
   type: "subworkflow";
+  version?: "pinned";
+  fanout?: FanoutConfig;
   workflowId: string;
   packId?: string;
   params?: Record<string, string>;
@@ -1171,7 +1175,17 @@ export type WorkflowNotifications = {
 
 // ── Workflow Spec ──
 
+/** Immutable published content; version belongs to the release record, not saved YAML. */
+export type PinnedWorkflowDependency = {
+  workflowId: string;
+  publishedVersion: number;
+  releaseId: string;
+  digest: string;
+  spec: WorkflowSpec;
+};
+
 export type WorkflowSpec = {
+  subworkflowDependencies?: Record<string, PinnedWorkflowDependency>;
   id: string;
   version?: number;
   title: string;
@@ -1541,6 +1555,7 @@ export type DynamicTemplateRuntimeState = {
 };
 
 export type SubworkflowFlowMeta = {
+  fanout?: Pick<FanoutChildRequest, "groupExecutionId" | "itemId" | "itemIndex" | "attemptNumber" | "childFlowId">;
   parentFlowId: string;
   parentNodeId: string;
   depth: number;
@@ -1571,6 +1586,10 @@ export type FlowState = {
   dynamicTemplates?: Record<string, DynamicTemplateRuntimeState>;
   runtimeNodeMeta?: Record<string, LoopRuntimeNodeMeta>;
   subworkflowMeta?: SubworkflowFlowMeta;
+  subworkflowFanouts?: Record<string, FanoutState>;
+  subworkflowDependencies?: Record<string, PinnedWorkflowDependency>;
+  runInitiator?: WorkflowRuntimeUser;
+  fanoutRuntimeContext?: { stateDir: string; launchIdempotencyKey: string; sessionKey: string };
   auditLog: AuditLogEntry[];
   flowEvents?: FlowEvent[];
   usage?: WorkflowUsage;

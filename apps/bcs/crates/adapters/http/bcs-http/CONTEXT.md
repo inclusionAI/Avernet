@@ -101,6 +101,20 @@ encode caller identity; route policy declares allowed principals explicitly.
 
 Provider Bot registration and list responses expose the saved optional webhook_url. PATCH maps omitted/null/string to the application endpoint change contract; the application rejects mixing URL and capability writes. URL inheritance is decided in BotCore, not the HTTP adapter.
 
+## Bot avatar wire mapping (bot-avatar plan)
+
+`mapping/bot_profile.rs` translates the protocol presence-aware
+`AvatarField` into the service-api `AvatarChange` transitions: omitted →
+Keep, `""` → Clear, string → Set; wire rejection of `null`/non-strings
+happens at deserialization, in the adapter's DTOs, not in the
+application. Legacy surface freeze (design §5.1): no legacy route
+serializes participant avatars — the PATCH `/groups/{id}` response maps
+the shared V1 `GroupDetail` through an explicit legacy participant DTO
+(`routes/groups/projections.rs`), so the avatar column and any future V1
+participant field cannot leak into legacy JSON; list/detail keep their
+pre-avatar projections. V1 surfaces under `/openapi/v1/collaboration`
+are served by `bcs-api-http` and do carry `avatar_url`.
+
 ## Service Session policy retirement
 
 Service Sessions retain creation, authorization, completion, completion events,
@@ -130,3 +144,12 @@ returns the registered source Card, or 404 for a legacy Bot. It does not adverti
 BCS as an A2A server. Detail, discovery, search and batched query views carry the
 full optional `agent_card` alongside existing fields; legacy responses omit it.
 Legacy Bot JSON projections are isolated in routes/bot_views.rs.
+
+
+## OAuth challenge transport
+
+Legacy login challenge issuance, callback extraction and cleanup derive their
+mode from the configured OAuth public base URL scheme. The legacy
+`cookie_secure` override controls session cookies only; it cannot downgrade
+an HTTPS challenge or turn an HTTP challenge into a Secure `__Host-` cookie.
+Application cookie instructions and response shapes are unchanged.

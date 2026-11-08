@@ -1,7 +1,7 @@
 // URL 深链会话冷启动兜底：选中态只记录 bot/sessionId，不负责按 sessionId 精确加载会话。
 // 当列表页没有覆盖该会话时，这里主动拉取详情并写入选择快照，避免深链页面由于
 // 列表缓存不可见而无法解析会话。
-import type { ConversationBotView } from '@/domain/conversation/types';
+import { resolveCodingSessionOrigin, type ConversationBotView } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { botSessionService } from '@/services/workspace/botSessionService';
@@ -23,14 +23,18 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
   const selectedSection = useConversationStore((state) => state.selectedSection);
   const selectedOrigin = useConversationStore((state) => state.selectedOrigin);
   const selectedScope = useConversationStore((state) => state.selectedScope);
+  const selectedFriendUserId = useConversationStore((state) => state.selectedFriendUserId);
   const selectedSessionId = useConversationStore((state) => state.selectedSessionId);
   const selectedSnapshot = useConversationStore((state) => state.selectedSessionSnapshot);
   const sessionList = useConversationStore((state) => {
     const botId = state.selectedBotId;
     if (!botId) return null;
     if (state.selectedSection === 'friend') return state.friendBotSessionsByBotId[botId] ?? null;
-    if (isManagedConversationSection(state.selectedSection) && state.selectedOrigin === 'mine') {
-      return state.sessionsByBotId[botId]?.sessions ?? null;
+    if (!isManagedConversationSection(state.selectedSection)) return null;
+    const cache = state.sessionsByBotId[botId];
+    if (cache?.origin === state.selectedOrigin && cache.scope === state.selectedScope) return cache.sessions;
+    if (state.selectedOrigin === 'others') {
+      return cache?.friendGroups[state.selectedFriendUserId ?? '']?.sessions ?? null;
     }
     return null;
   });
@@ -44,31 +48,39 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
 
   const completedRef = useRef<Set<string>>(new Set());
 
-  // 空选中/未提交目录/非 mine 深链不处理；others 的只读会话走原有专用链路。
+  // 普通 Bot 的 others 仍走好友分组只读链路；Coding Bot 的来源由 sessionId 判定，
+  // mine/others 都允许精确拉详情并交给 Embedded Stage。
   useEffect(() => {
-    if (!hydrated || !userId || !selectedBotId || !selectedSection || !selectedSessionId || selectedOrigin !== 'mine') {
-      return;
-    }
-    if (!isManagedConversationSection(selectedSection) && selectedSection !== 'friend') {
-      return;
-    }
+    if (!hydrated || !userId || !selectedBotId || !selectedSection || !selectedSessionId) return;
+    if (!isManagedConversationSection(selectedSection) && selectedSection !== 'friend') return;
+
+    const bot = botById.get(selectedBotId);
+    if (!bot || (selectedOrigin === 'others' && !bot.isAgentCodingBot)) return;
 
     const identity = {
       botId: selectedBotId,
       section: selectedSection,
       origin: selectedOrigin,
       scope: selectedScope,
-      friendUserId: null,
+      friendUserId: selectedOrigin === 'others' ? selectedFriendUserId : null,
       sessionId: selectedSessionId,
     };
     if (selectedSnapshotMatches(selectedSnapshot, identity)) return;
     if (sessionList?.items.some((item) => item.sessionId === selectedSessionId)) return;
 
-    const requestKey = `${userId}:${selectedBotId}:${selectedSection}:${selectedScope}:${selectedSessionId}`;
-    if (completedRef.current.has(requestKey)) return;
+    const inferredOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(selectedSessionId, userId) : 'mine';
+    if (inferredOrigin && inferredOrigin !== selectedOrigin) return;
 
-    const bot = botById.get(selectedBotId);
-    if (!bot) return;
+    const requestKey = [
+      userId,
+      selectedBotId,
+      selectedSection,
+      selectedOrigin,
+      selectedScope,
+      selectedFriendUserId ?? '',
+      selectedSessionId,
+    ].join(':');
+    if (completedRef.current.has(requestKey)) return;
 
     completedRef.current.add(requestKey);
     void botSessionService.getSessionDetail(bot, userId, selectedSessionId).then((result) => {
@@ -78,7 +90,7 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
         section: selectedSection,
         origin: selectedOrigin,
         scope: selectedScope,
-        friendUserId: null,
+        friendUserId: selectedOrigin === 'others' ? selectedFriendUserId : null,
         sessionId: selectedSessionId,
       };
       if (selectedSnapshotMatches(store.selectedSessionSnapshot, currentIdentity)) return;
@@ -87,6 +99,7 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
         store.selectedSection !== selectedSection ||
         store.selectedOrigin !== selectedOrigin ||
         store.selectedScope !== selectedScope ||
+        store.selectedFriendUserId !== currentIdentity.friendUserId ||
         store.selectedSessionId !== selectedSessionId
       ) {
         return;
@@ -99,12 +112,14 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
       ) {
         return;
       }
+      const detailOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(result.data.sessionId, userId) : 'mine';
+      if (detailOrigin && detailOrigin !== selectedOrigin) return;
       store.setSelectedSessionSnapshot({
         section: selectedSection,
         botId: selectedBotId,
         origin: selectedOrigin,
         scope: selectedScope,
-        friendUserId: null,
+        friendUserId: currentIdentity.friendUserId,
         session: result.data,
         friend: null,
       });
@@ -115,6 +130,7 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
     selectedSection,
     selectedOrigin,
     selectedScope,
+    selectedFriendUserId,
     selectedSessionId,
     selectedSnapshot,
     botById,

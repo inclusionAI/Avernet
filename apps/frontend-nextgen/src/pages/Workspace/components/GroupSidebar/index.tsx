@@ -1,6 +1,14 @@
 import { Button, Empty, Input } from '@/components/ui';
-import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
+import type {
+  GroupContextDelivery,
+  GroupView,
+  IdentityView,
+  MessageViewScope,
+  SessionView,
+} from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
+import type { GroupSessionLocation } from '@/pages/Workspace/hooks/useGroupSessionLocation';
+import { useGroupSidebarLocation } from '@/pages/Workspace/hooks/useGroupSidebarLocation';
 import { Search } from 'lucide-react';
 import { CollaborationIdentityHeader } from '../CollaborationIdentityHeader';
 import { ListErrorState } from '../ListErrorState';
@@ -17,6 +25,8 @@ export type SessionTab = 'all' | 'favorite';
 export type { KindFilter, Membership };
 
 export interface GroupSidebarProps {
+  location?: GroupSessionLocation;
+  onDismissLocation?: () => void;
   /** 单群入口不展示身份切换或跨群工具。 */
   restricted?: boolean;
   /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
@@ -52,7 +62,7 @@ export interface GroupSidebarProps {
   selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectSession: (groupId: string, sessionId: string) => void;
-  onCreateSession: (groupId: string, scope?: MessageViewScope) => void;
+  onCreateSession: (groupId: string, scope?: MessageViewScope, contextDelivery?: GroupContextDelivery) => void;
   onToggleFavorite: (sessionId: string) => void;
   onClearSessionFilter: () => void;
   onCreateGroup: () => void;
@@ -78,20 +88,15 @@ export interface GroupSidebarProps {
 export function GroupSidebarList(props: GroupSidebarProps) {
   const {
     viewerKind,
-    groups,
     isLoading,
     groupsError,
     onRetryGroups,
-    onSelectGroup,
     groupSearchText,
     onSearchTextChange,
     kindFilter,
     onKindFilterChange,
     membership,
     onMembershipChange,
-    expandedGroupIds,
-    onToggleGroupExpanded,
-    sessionsByGroupId,
     hasMoreSessionsByGroupId = {},
     totalSessionsByGroupId = {},
     isLoadingMoreSessionsByGroupId = {},
@@ -120,9 +125,10 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onShareGroup,
     onDissolveGroup,
   } = props;
+  const { rootRef, groups, sessionsByGroupId, expandedGroupIds, onToggleGroupExpanded } = useGroupSidebarLocation(props);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0">
         <CollaborationIdentityHeader readOnly={props.restricted} />
       </div>
@@ -194,19 +200,21 @@ export function GroupSidebarList(props: GroupSidebarProps) {
           <div className="overflow-hidden">
             {groups.map((group) => {
               const sessions = sessionsByGroupId[group.groupId];
+              // 群是否挂着舞台选中会话（双命中才算）：不依赖会话列表是否已加载，
+              // 深链/身份恢复后未展开过的群也能正确点亮群名。
+              const hasSelectedSession = selectedGroupId === group.groupId && selectedSessionId !== null;
               return (
                 <GroupItem
                   key={group.groupId}
                   group={group}
                   viewerKind={viewerKind}
                   expanded={!!expandedGroupIds[group.groupId]}
+                  hasSelectedSession={hasSelectedSession}
                   sessions={sessions}
                   sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
                   onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
                   favoriteSessionIds={favoriteSessionIds}
-                  selectedGroupId={selectedGroupId}
                   selectedSessionId={selectedSessionId}
-                  onSelectGroup={onSelectGroup}
                   onToggleGroupExpanded={onToggleGroupExpanded}
                   onSelectSession={onSelectSession}
                   onToggleFavorite={onToggleFavorite}
@@ -241,6 +249,7 @@ export function GroupSidebar(props: GroupSidebarProps) {
   return (
     <ResizableWorkspaceSidebar
       ariaLabel="协作群列表"
+      expandRequest={props.location?.request}
       collapsedContent={(expand) => (
         // 4.2 群头像竖轨：头像直达 = 选中该群并展开侧栏；顶部 + 发起协作、底部展开。
         <GroupSidebarCollapsedRail

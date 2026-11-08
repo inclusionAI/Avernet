@@ -1,4 +1,4 @@
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -177,6 +177,7 @@ export async function listGroupSessions(
 }
 
 export interface CreateSessionRequest {
+  context_delivery?: GroupContextDelivery;
   title?: string;
   kind?: SessionKind;
   acting_bot_id?: string;

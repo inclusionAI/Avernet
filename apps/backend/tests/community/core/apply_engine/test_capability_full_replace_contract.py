@@ -379,6 +379,7 @@ def _rig(*, overlap: bool):
             steps=ArcaDelivery(lambda: None).steps_for,
         ),
         manifest_compiler(content=content, resolver=fetcher),
+        only={Category.SKILLS, Category.MCP},
     )
     digest = "sha256:" + hashlib.sha256(package).hexdigest()
     document = f"""schema_version: 1

@@ -21,12 +21,13 @@ class EngineRuntimeRelayProtocol(Protocol):
     def resolve_bot(self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts:
         """Return the addressed bot's facts, or raise ``BotNotFoundError``.
 
-        Resolves ``(bot_id, owner_id)``, then adjudicates whether
+        Resolves ``bot_id`` plus the legacy entity/current-Owner locator within
+        repository scope, refusing ambiguous matches, then adjudicates whether
         ``caller_id`` may operate the resolved bot — its owner, or a
         collaborator at member level or above; anyone else gets the same
         masked ``BotNotFoundError`` an absent bot raises. ``caller_id`` must
-        come from the authenticated principal; ``owner_id`` is the owner the
-        request addresses and may name someone else.
+        come from the authenticated principal; ``owner_id`` is a resource locator,
+        while the returned facts carry the Bot's current Owner.
 
         Exposed because handlers must branch on bot facts *before* deciding
         whether to forward at all — the sessions group reads ``bot_type``, the

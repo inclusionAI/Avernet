@@ -23,6 +23,26 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** Bot 画像（好友申请弹窗）读取错误映射：404＝不在公开目录（target_invalid，由弹窗降级为无能力版式）。 */
+export function mapProfileError(error: unknown): never {
+  if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') throw error;
+  if (error instanceof CollaborationSquareError) throw error;
+  if (isAceLoginRedirectError(error)) {
+    throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
+  }
+  if (error instanceof PublicBotCatalogError) {
+    throw new CollaborationSquareError(
+      error.code,
+      error.code === 'unauthenticated' ? '登录状态已失效，请重新登录后重试' : 'Bot 画像接口返回了无法识别的数据',
+    );
+  }
+  if (error instanceof BackendRequestError) {
+    if (error.status === 401) throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
+    if (error.status === 404) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
+  }
+  throw new CollaborationSquareError('network', 'Bot 画像加载失败，请稍后重试');
+}
+
 export { isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 
 export function splitBotId(botId: string): { realBotId: string; ownerId?: string } {

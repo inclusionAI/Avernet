@@ -193,7 +193,7 @@ def test_a_declared_skill_is_unpacked_into_the_store_and_recorded() -> None:
 
     plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
 
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     # Every package file, under the teclaw local-skill prefix, named by the skill.
     assert _indexed(store) == [
         ("quality-check", "workspace/skills-local/quality-check/SKILL.md"),
@@ -224,7 +224,7 @@ def test_the_second_apply_fully_replaces_the_package() -> None:
     _run(_apply(materialiser, _ctx(), [_declared()]))
     plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
 
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     assert len(skills.updates) == 1 and len(skills.creates) == 1
     assert activation.skill_activations == [
         skills.creates[0]["id"], skills.creates[0]["id"]
@@ -240,7 +240,7 @@ def test_a_changed_package_is_replaced_in_place() -> None:
     objects.put(OSS_BUCKET, QC_KEY, QZ_V2)
     plan, written = _run(_apply(materialiser, _ctx(), [_declared(body=QZ_V2)]))
 
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     rows = {r.rel_path: r for r in store.list(_SCOPE, category=CATEGORY_SKILLS)}
     assert oss.objects[rows["workspace/skills-local/quality-check/scripts/run.sh"].store_key] == b"echo v2\n"
     # The same row, updated in place — no second create; Direct is reasserted.

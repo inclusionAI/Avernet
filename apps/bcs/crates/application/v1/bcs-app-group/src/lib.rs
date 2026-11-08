@@ -15,7 +15,8 @@ use bcs_service_api::application::v1::{
     GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
     InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter,
-    NormalGroupSummary, Page, Participant as V1Participant, PreparedGroupEventSubscriptions,
+    NormalGroupSummary, Page, Participant as V1Participant, ParticipantSummary,
+    PreparedGroupEventSubscriptions,
     Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
@@ -41,6 +42,8 @@ use bcs_service_api::{
 use serde_json::Value;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+use bcs_service_api::types::bot_profile::BotAvatarMap;
 
 use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 
@@ -385,6 +388,7 @@ impl GroupProvisioningReconciler {
 }
 
 mod authorization;
+mod avatar;
 mod create;
 mod projections;
 mod service;
@@ -490,6 +494,7 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         actor_id: participant.bot_uuid.clone(),
         actor_kind: participant.actor_kind,
         name: participant.bot_name.clone(),
+        avatar_url: None,
         role: participant.role,
         mode: participant.effective_mode(),
         tags: participant.tags.clone(),
@@ -506,6 +511,7 @@ fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
         actor_id: view.bot_uuid,
         actor_kind: view.actor_kind,
         name: view.bot_name,
+        avatar_url: None,
         role: parse_participant_role(&view.role),
         mode: view
             .mode

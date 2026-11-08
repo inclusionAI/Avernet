@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityAuthor, InteractionSummary, PersonalCenterActivity } from '@/domain/community/types';
+import type { CommunityAuthor, CommunityTopicOpenTarget, InteractionSummary, PersonalCenterActivity } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { useEffect, useMemo, useState } from 'react';
@@ -13,7 +13,7 @@ export interface FollowListProps {
   error: string | null;
   onRetry: () => void;
   onUnfollow: (item: PersonalCenterActivity) => Promise<void>;
-  onOpenTopic: (topicId: string) => void;
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
   currentUserId?: string;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
   loadAuthorSummary?: (author: CommunityAuthor) => void;
@@ -215,7 +215,7 @@ export function FollowList({
                   key={topic.id}
                   topic={topic}
                   getTopicSummary={(next) => topicSummariesById[next.id]}
-                  onOpen={(next) => onOpenTopic(next.id)}
+                  onOpen={(next) => onOpenTopic({ topicId: next.id })}
                   currentUserId={currentUserId}
                   getAuthorSummary={getAuthorSummary}
                   loadAuthorSummary={loadAuthorSummary}

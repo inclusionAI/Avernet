@@ -7,12 +7,16 @@ import type { ComponentType } from 'react';
 import type { ConversationComposerProps } from './conversationComposer';
 
 export interface BotEditorPanelContext {
-  botId: string; ownerId: string; spaceId: string; editable: boolean;
+  botId: string;
+  ownerId: string;
+  spaceId: string;
+  editable: boolean;
   serviceMode: import('@/domain/botWorkshop').BotServiceMode;
   runtimeStage?: 'draft' | 'verify' | 'online';
 }
 export interface BotEditorPanelExtension {
-  id: string; label: string;
+  id: string;
+  label: string;
   Icon: ComponentType<{ className?: string }>;
   Panel: ComponentType<BotEditorPanelContext>;
 }
@@ -416,9 +420,16 @@ export interface CodingBotSessionCreateInput {
   title?: string;
 }
 
+export type CodingBotSessionActionErrorCode =
+  | 'RUNTIME_TIMEOUT'
+  | 'RUNTIME_CANCELLED'
+  | 'RUNTIME_MISMATCH'
+  | 'RUNTIME_INIT_FAILED'
+  | 'CREATE_FAILED';
+
 export type CodingBotSessionActionResult =
   | { ok: true; session?: CodingBotSessionSummary; favorite?: boolean }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: CodingBotSessionActionErrorCode };
 
 /**
  * Coding Bot 对话工作区宿主能力。Open Core 默认 null;internal overlay 注入
@@ -435,7 +446,7 @@ export interface CodingBotConversationHost {
   /**
    * Coding Bot 会话创建/写操作委托给已挂载的 AIXCoding runtime。该 runtime
    * 继续持有 model/runtime、git author、内部会话列表与消息状态等原路由语义；
-   * 未注入该桥接的旧 Stage 可回退 generic OpenAPI。
+   * Coding Bot 不允许回退 generic OpenAPI；桥接未就绪时必须显式失败。
    */
   createSession?: (input: CodingBotSessionCreateInput) => Promise<CodingBotSessionActionResult>;
   runSessionAction?: (input: CodingBotSessionActionInput) => Promise<CodingBotSessionActionResult>;
@@ -616,9 +627,10 @@ export interface AppCapabilities {
   /** Deployment-owned DSH guide link; null hides the optional link, preserving inline steps. */
   getDeepSeekHarnessRegistrationGuideUrl: () => CapabilityResult<string | null>;
   /** Optional deployment-owned complete DSH onboarding command. */
-  getDeepSeekHarnessOnboardingCommand: () => CapabilityResult<((input: {
-    token: string; botName: string; profile: string; bcsEndpoint: string; environment: string;
-  }) => string) | null>;
+  getDeepSeekHarnessOnboardingCommand: () => CapabilityResult<
+    | ((input: { token: string; botName: string; profile: string; bcsEndpoint: string; environment: string }) => string)
+    | null
+  >;
   /** Additional deployment-owned onboarding panels; public deployments default to none. */
   getAdditionalBotRegistrationPanels: () => CapabilityResult<
     {

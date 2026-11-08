@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import yaml
@@ -100,7 +100,7 @@ def _engine(
             content=content,
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
-            cli_tool_service=object(),
+            cli_tool_service=SimpleNamespace(list=lambda _ctx: [], replace_all=AsyncMock(return_value=[])),
             shared_skills=object(),
         ),
         steps=_arca_steps
@@ -121,6 +121,10 @@ async def _apply(engine, document, *, ctx=None, dry_run=False, phase=None):
         dry_run=dry_run,
         phase=phase,
     )
+
+
+def _category(report, construct):
+    return next(category for category in report.categories if category.construct == construct)
 
 
 def _outcomes(report):
@@ -219,8 +223,8 @@ manifest:
     }
     assert activations.writes == 0
     assert activations.installed == {"already-here"}
-    assert report.categories[0].aborted is True
-    assert report.categories[0].removals == ()
+    assert _category(report, Category.MCP).aborted is True
+    assert _category(report, Category.MCP).removals == ()
     assert report.status is ApplyStatus.FAILED
 
 
@@ -266,54 +270,17 @@ async def test_a_permission_outage_reads_as_denied_not_as_permitted():
     assert activations.writes == 0
 
 
-# ── overwrite: [] empties, absence does not (§3.2) ──────────────────────────
+# ── overwrite ─────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_an_empty_category_empties_its_area_and_absence_does_not():
-    """Two behaviours that look opposite and are one rule, pinned together.
-
-    ``mcp: []`` is a declaration that the set is empty, so the area is emptied.
-    A document that does not mention ``mcp`` declares nothing about it, so it is
-    untouched — which is also why deleting a manifest deletes nothing: a bot
-    with no document declares no category at all.
-    """
-    # Declared empty ⇒ emptied.
-    emptying = FakeActivationService(installed={"gh", "other"})
-    report = await _apply(
-        _engine(activations=emptying), "schema_version: 1\nmanifest:\n  mcp: []\n"
-    )
-    assert emptying.installed == set()
-    assert sorted(report.categories[0].removals) == ["gh", "other"]
+@pytest.mark.parametrize("document", ["schema_version: 1\n", "schema_version: 1\nmanifest:\n  mcp: []\n"])
+async def test_empty_and_omitted_mcp_clear_the_same_area(document):
+    activations = FakeActivationService(installed={"gh", "other"})
+    report = await _apply(_engine(activations=activations), document)
+    assert activations.installed == set()
+    assert _category(report, Category.MCP).removals == ("gh", "other")
     assert report.entries == ()
-
-    # Not declared ⇒ untouched, and not even reported.
-    untouched = FakeActivationService(installed={"gh", "other"})
-    report = await _apply(
-        _engine(activations=untouched),
-        'schema_version: 1\nscript:\n  body: "echo hi"\n',
-    )
-    assert untouched.installed == {"gh", "other"}
-    assert untouched.writes == 0
-    assert [c.construct for c in report.categories] == [Section.SCRIPT]
-
-
-@pytest.mark.asyncio
-async def test_deleting_the_manifest_deletes_nothing():
-    """A cleared manifest is an empty document, and empties nothing.
-
-    This is the same rule as the test above, reached from the other side: an
-    absent document declares no category, so no area is overwritten.
-    """
-    activations = FakeActivationService(installed={"gh"})
-    scripts = FakeStartupScriptService(body="echo hi")
-
-    report = await _apply(_engine(scripts, activations), "schema_version: 1\n")
-
-    assert activations.installed == {"gh"}
-    assert scripts.body == "echo hi"
-    assert (scripts.writes, activations.writes) == (0, 0)
-    assert report.categories == ()
     assert report.status is ApplyStatus.SUCCEEDED
 
 
@@ -328,7 +295,7 @@ async def test_a_declared_category_removes_what_it_does_not_declare():
 
     assert activations.installed == {"keep"}
     assert activations.deactivated == ["drop"]
-    assert report.categories[0].removals == ("drop",)
+    assert _category(report, Category.MCP).removals == ("drop",)
     assert _outcomes(report) == {"keep": EntryOutcome.UNCHANGED}
 
 
@@ -355,7 +322,7 @@ manifest:
 
 
 @pytest.mark.asyncio
-async def test_bare_mcp_entry_preserves_an_existing_bot_override():
+async def test_bare_mcp_entry_clears_an_existing_bot_override():
     activations = FakeActivationService(installed={"gh"})
     activations.mcp_overrides["gh"] = {"url": "https://old.example/mcp"}
 
@@ -364,13 +331,13 @@ async def test_bare_mcp_entry_preserves_an_existing_bot_override():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
     )
 
-    assert _outcomes(report) == {"gh": EntryOutcome.UNCHANGED}
-    assert activations.mcp_overrides["gh"] == {"url": "https://old.example/mcp"}
-    assert activations.configured == []
+    assert _outcomes(report) == {"gh": EntryOutcome.UPDATED}
+    assert activations.mcp_overrides == {}
+    assert activations.configured == [("gh", None)]
 
 
 @pytest.mark.asyncio
-async def test_new_bare_mcp_entry_uses_a_saved_override_without_installation():
+async def test_new_bare_mcp_entry_clears_a_saved_override_without_installation():
     activations = FakeActivationService()
     activations.mcp_overrides["gh"] = {"url": "https://orphan.example/mcp"}
 
@@ -381,8 +348,8 @@ async def test_new_bare_mcp_entry_uses_a_saved_override_without_installation():
 
     assert _outcomes(report) == {"gh": EntryOutcome.CREATED}
     assert activations.installed == {"gh"}
-    assert activations.configured == []
-    assert activations.mcp_overrides == {"gh": {"url": "https://orphan.example/mcp"}}
+    assert activations.configured == [("gh", None)]
+    assert activations.mcp_overrides == {}
 
 
 @pytest.mark.asyncio
@@ -475,7 +442,7 @@ manifest:
 
     assert report.status is ApplyStatus.FAILED
     assert _outcomes(report) == {"new-first": EntryOutcome.SKIPPED, "owned": EntryOutcome.FAILED}
-    assert "skill sets" in next(e.reason for e in report.categories[0].entries if e.identity == "owned")
+    assert "skill sets" in next(e.reason for e in _category(report, Category.MCP).entries if e.identity == "owned")
     assert activations.writes == 0 and activations.installed == {"owned"}
 
 
@@ -498,7 +465,7 @@ async def test_dependency_retained_mcp_clears_explicit_supply_without_removed_re
         "schema_version: 1\nmanifest:\n  mcp: []\n",
     )
 
-    category = report.categories[0]
+    category = _category(report, Category.MCP)
     assert category.removals == ()
     assert _outcomes(report) == {"mcp.dependency": EntryOutcome.UPDATED}
     assert "Skill dependency" in (category.entries[0].note or "")
@@ -559,7 +526,7 @@ async def test_an_omitted_set_supplied_mcp_is_left_alone():
     )
 
     assert report.status is ApplyStatus.SUCCEEDED
-    assert activations.deactivated == [] and report.categories[0].removals == ()
+    assert activations.deactivated == [] and _category(report, Category.MCP).removals == ()
     assert activations.installed == {"keep", "owned"}
 
 
@@ -567,8 +534,7 @@ async def test_an_omitted_set_supplied_mcp_is_left_alone():
 
 
 @pytest.mark.asyncio
-async def test_applying_one_category_leaves_the_others_alone():
-    """The area is scoped per category, never globally."""
+async def test_applying_only_mcp_clears_an_omitted_startup_script():
     scripts = FakeStartupScriptService(body="do not touch me")
     activations = FakeActivationService()
     engine = _engine(scripts, activations)
@@ -577,8 +543,8 @@ async def test_applying_one_category_leaves_the_others_alone():
         engine, "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n"
     )
 
-    assert scripts.body == "do not touch me"
-    assert scripts.writes == 0
+    assert not scripts.body
+    assert scripts.writes == 1
 
 
 # ── no materialiser yet ─────────────────────────────────────────────────────
@@ -748,8 +714,8 @@ async def test_both_phases_together_preserve_the_declared_order():
     """
     report = await _apply(_engine(), _MCP_AND_SCRIPT)
     assert [c.construct for c in report.categories] == [
-        Section.SCRIPT,
-        Category.MCP,
+        Section.SCRIPT, Category.IDENTITY, Category.RESOURCES,
+        Category.SKILLS, Category.MCP, Category.CLI_TOOLS,
     ]
 
 
@@ -776,16 +742,8 @@ async def test_a_raising_materialiser_is_reported_as_written_nothing():
     )
 
     assert _outcomes(report) == {"gh": EntryOutcome.FAILED}
-    assert report.categories[0].aborted is True
+    assert _category(report, Category.MCP).aborted is True
     assert report.status is ApplyStatus.FAILED
-
-
-@pytest.mark.asyncio
-async def test_a_bot_with_no_manifest_applies_nothing_without_erroring():
-    """Not an error — the rule that makes an absent manifest an empty document."""
-    report = await _apply(_engine(), "schema_version: 1\n")
-    assert report.entries == ()
-    assert report.status is ApplyStatus.SUCCEEDED
 
 
 # ── the report carries no secret ────────────────────────────────────────────
@@ -886,7 +844,7 @@ async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
 
     assert activations.installed == {"ordinary"}
     assert activations.configured == []
-    assert report.categories[0].aborted is False
+    assert _category(report, Category.MCP).aborted is False
 
 
 @pytest.mark.asyncio
@@ -902,7 +860,7 @@ async def test_an_omitted_platform_default_is_left_alone():
     )
 
     assert report.status is ApplyStatus.SUCCEEDED
-    assert activations.deactivated == [] and report.categories[0].removals == ()
+    assert activations.deactivated == [] and _category(report, Category.MCP).removals == ()
     assert "a-default" in activations.installed
 
 
@@ -921,7 +879,7 @@ async def test_an_unanswerable_set_supply_lookup_refuses_the_apply_and_writes_no
     )
 
     assert activations.writes == 0
-    assert report.status is ApplyStatus.FAILED and report.categories[0].aborted is True
+    assert report.status is ApplyStatus.FAILED and _category(report, Category.MCP).aborted is True
 
 
 # ── an aborted category must never read as success ──────────────────────────
@@ -951,7 +909,7 @@ async def test_a_declared_empty_category_that_fails_is_not_reported_successful()
         "schema_version: 1\nmanifest:\n  mcp: []\n",
     )
 
-    category = report.categories[0]
+    category = _category(report, Category.MCP)
     assert category.aborted is True
     assert category.entries == (), "a declared-empty category declares no entries"
     assert report.status is ApplyStatus.FAILED, (
@@ -1003,7 +961,7 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
     )
 
-    category = report.categories[0]
+    category = _category(report, Category.MCP)
     assert category.aborted is True
     assert category.partially_written is True
     assert category.as_dict()["partially_written"] is True
@@ -1030,7 +988,7 @@ async def test_a_later_mcp_failure_after_a_committed_claim_reports_partial():
 
     assert report.status is ApplyStatus.PARTIAL
     assert activations.installed == {"first"}
-    assert report.categories[0].partially_written is True
+    assert _category(report, Category.MCP).partially_written is True
 
 
 @pytest.mark.asyncio
@@ -1131,7 +1089,7 @@ async def test_failed_local_asset_cleanup_reports_partial_and_no_removal():
         "schema_version: 1\nmanifest:\n  skills: []\n",
     )
 
-    category = report.categories[0]
+    category = _category(report, Category.SKILLS)
     assert report.status is ApplyStatus.PARTIAL
     assert category.partially_written is True
     assert category.removals == ()
@@ -1145,7 +1103,7 @@ async def test_an_abort_before_the_write_says_nothing_changed():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: nope\n",
     )
 
-    category = report.categories[0]
+    category = _category(report, Category.MCP)
     assert category.aborted is True
     assert category.partially_written is False
 
@@ -1234,9 +1192,8 @@ script:
 
     # skills delivered, after identity per APPLY_ORDER position (1 < 3).
     assert [c.construct for c in report.categories] == [
-        Section.SCRIPT,
-        Category.IDENTITY,
-        Category.SKILLS,
+        Section.SCRIPT, Category.IDENTITY, Category.RESOURCES,
+        Category.SKILLS, Category.MCP, Category.CLI_TOOLS,
     ]
     assert outcomes["quality-check"] is EntryOutcome.CREATED
     assert uploads.uploads[0]["name"] == "quality-check"

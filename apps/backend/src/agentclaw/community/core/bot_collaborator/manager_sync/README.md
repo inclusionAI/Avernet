@@ -25,8 +25,8 @@ sync state and uses no task queue.
 `build_snapshot` includes explicit `admin` and `member` collaborators, excludes the
 current Backend Owner before applying the 1,000-ID bound in both reader and
 projector, applies the existing Team Space eligibility rule, deduplicates
-and sorts IDs. An explicit Owner row does not consume manager capacity. The stable BCS identity uses the Bot's
-`entity_id`, not its Owner.
+and sorts IDs. An explicit Owner row does not consume manager capacity. The stable BCS address uses the shared TeamClaw reference resolver: service
+entity or retained conversion reference; personal/default Bots keep legacy Owner addresses.
 
 Passport and device credentials remain admin-only; their filtered admin list is not
 the BCS roster.
@@ -95,6 +95,7 @@ consumes:
   - ManagerSyncReadRepository
   - BcsManagersPlugin
 internal_dependencies:
+  - agentclaw.community.core.bot_management.bcn_identity
   - agentclaw.community.core.bot_management.ownership_sync.service
   - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.api.bot_manager_sync

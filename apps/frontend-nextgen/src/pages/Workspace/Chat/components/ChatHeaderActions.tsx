@@ -17,7 +17,9 @@ export interface ChatHeaderActionsProps {
   onTogglePanel: (kind: ChatHeaderPanelKind) => void;
   fileDrawerOpen: boolean;
   onToggleFileDrawer: () => void;
+  showResourceManager?: boolean;
   sidePaneOpen: boolean;
+  showSidePane?: boolean;
   /** 会话无 <AixUI type="panel"> 副屏内容时禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
   sidePaneDisabled?: boolean;
   onToggleSidePane: () => void;
@@ -59,7 +61,9 @@ export function ChatHeaderActions({
   onTogglePanel,
   fileDrawerOpen,
   onToggleFileDrawer,
+  showResourceManager = true,
   sidePaneOpen,
+  showSidePane = true,
   sidePaneDisabled,
   onToggleSidePane,
   notice,
@@ -87,19 +91,23 @@ export function ChatHeaderActions({
         active={openPanel === 'history'}
         onClick={() => onTogglePanel('history')}
       />
-      <HeaderIcon
-        label="资源管理"
-        icon={<FolderOpen className="size-4" />}
-        active={fileDrawerOpen}
-        onClick={onToggleFileDrawer}
-      />
-      <HeaderIcon
-        label="副屏"
-        icon={<Monitor className="size-4" />}
-        active={sidePaneOpen}
-        disabled={sidePaneDisabled}
-        onClick={onToggleSidePane}
-      />
+      {showResourceManager ? (
+        <HeaderIcon
+          label="资源管理"
+          icon={<FolderOpen className="size-4" />}
+          active={fileDrawerOpen}
+          onClick={onToggleFileDrawer}
+        />
+      ) : null}
+      {showSidePane ? (
+        <HeaderIcon
+          label="副屏"
+          icon={<Monitor className="size-4" />}
+          active={sidePaneOpen}
+          disabled={sidePaneDisabled}
+          onClick={onToggleSidePane}
+        />
+      ) : null}
     </div>
   );
 }

@@ -25,6 +25,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
     ChecksSetSupply,
@@ -41,7 +42,6 @@ from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
 from agentclaw.community.core.mcp.config_comparison import comparable_config
-from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -65,7 +65,10 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(Intent("gh", {"headers": {}}), "updated"),),
                        removals=("old",))
-        write   -> (EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),),
+            removals=("old",),
+        )
 
     ``plan`` compares both the installed set and persisted override, so it can
     answer ``created``, ``updated`` or ``unchanged``.
@@ -102,13 +105,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     )
                 )
                 continue
-            preserve = isinstance(entry.override, PreserveMcpConfig)
-            if preserve:
-                normalized_config = self._activation.get_mcp_overrides(
-                    bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
-                ).get(server_code)
-            else:
-                normalized_config = entry.override.as_config() if entry.override is not None else None
+            normalized_config = entry.override.as_config() if entry.override is not None else None
             verdict = self._mcp_config.validate_bot_override(
                 user_id=ctx.owner_id,
                 server_code=server_code,
@@ -122,12 +119,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     )
                 )
                 continue
-            intents.append(
-                Intent(
-                    server_code,
-                    PreserveMcpConfig() if preserve else normalized_config,
-                )
-            )
+            intents.append(Intent(server_code, normalized_config))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
@@ -208,18 +200,13 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     if intent.identity not in effective_current
                     else (
                         EntryOutcome.UNCHANGED.value
-                        if isinstance(intent.value, PreserveMcpConfig)
-                        or comparable_config(overrides.get(intent.identity))
+                        if comparable_config(overrides.get(intent.identity))
                         == comparable_config(intent.value)
                         else EntryOutcome.UPDATED.value
                     )
                 ),
-                requires_write=(
-                    intent.identity not in direct
-                    # An explicit value must also consume legacy aliases even
-                    # when its public effective outcome is unchanged.
-                    or not isinstance(intent.value, PreserveMcpConfig)
-                ),
+                # Clearing or replacing also consumes equivalent legacy aliases.
+                requires_write=True,
             )
             for intent in intents
         )
@@ -249,7 +236,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Apply Direct claims, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
         confirmed_write = False
@@ -318,7 +305,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                 ) from None
             raise
 
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 __all__ = ["McpMaterialiser"]

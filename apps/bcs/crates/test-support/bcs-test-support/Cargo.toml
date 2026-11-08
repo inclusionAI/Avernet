@@ -29,6 +29,8 @@ bcs-app-register = { workspace = true }
 bcs-route-security = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-auth-api    = { workspace = true }
+bcs-auth-oauth  = { workspace = true }
+bcs-jwt         = { workspace = true }
 bcs-cache-api   = { workspace = true }
 bcs-db-api      = { workspace = true }
 bcs-llm-api     = { workspace = true }

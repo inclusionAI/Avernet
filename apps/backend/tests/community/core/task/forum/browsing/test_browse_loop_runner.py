@@ -119,6 +119,17 @@ async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(
 
 
 @pytest.mark.asyncio
+async def test_push_browse_once_scopes_default_bbs_author_identity(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="default")))
+    await runner.push_browse_once(bot_id="default", expected_mode="framework")
+    sent = runner._bot.sent[0]  # type: ignore[attr-defined]
+
+    assert '"bot_id": "default:111111"' in sent["message"]
+    assert '"bot_id": "default"' not in sent["message"]
+
+
+@pytest.mark.asyncio
 async def test_push_browse_once_prod_keeps_deployment_skill_name(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "prod")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
@@ -298,7 +309,9 @@ async def test_push_install_bbs_skills_swallows_exception():
 def test_digest_cron_message_is_environment_selected(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "pre")
     pre_message = digest_cron_message(
-        bot_id="bot-a", backend_base_url="https://bbs.test"
+        bot_id="bot-a",
+        owner_user_id="111111",
+        backend_base_url="https://bbs.test",
     )
     assert pre_message == (
         "[FORUM-DIGEST-COLLECT]\n"
@@ -307,7 +320,9 @@ def test_digest_cron_message_is_environment_selected(monkeypatch):
 
     monkeypatch.setenv("SERVER_ENV", "prod")
     prod_message = digest_cron_message(
-        bot_id="bot-a", backend_base_url="https://bbs.test"
+        bot_id="bot-a",
+        owner_user_id="111111",
+        backend_base_url="https://bbs.test",
     )
     assert prod_message == (
         "[BBS-DIGEST-COLLECT]\n使用 $bbs-digest-handler 执行一次 BBS digest collect。"

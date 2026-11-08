@@ -26,7 +26,7 @@ from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipError
 
 
 def _facts() -> OwnershipFacts:
-    return OwnershipFacts(SyncKey("tenant-a", "dev", 7), "bot", "stable", "owner")
+    return OwnershipFacts(SyncKey("tenant-a", "dev", 7), "bot", "stable", "owner", bot_type="service")
 
 
 def test_owner_changes_do_not_change_bcs_address():
@@ -134,3 +134,44 @@ def test_work_kinds_and_outcomes_preserve_existing_values():
         "FAILED": "failed",
         "BOT_MISSING_NOOP": "bot_missing_noop",
     }
+
+
+@pytest.mark.parametrize(
+    "bot_type,bot_id,reference,expected",
+    [
+        ("personal", "bot", None, "bot:owner"),
+        (None, "bot", None, "bot:owner"),
+        ("desktop", "bot", None, "bot:owner"),
+        ("service", "default", None, "default:owner"),
+        ("service", "bot", None, "bot:stable"),
+        ("service", "bot", "bot:original-owner", "bot:original-owner"),
+    ],
+)
+def test_owner_and_managers_use_registration_identity(
+    bot_type, bot_id, reference, expected
+):
+    from agentclaw.community.core.bot_collaborator.manager_sync.projector import (
+        build_snapshot as managers,
+    )
+    from agentclaw.community.kernel.bot_manager_sync import SyncFacts
+
+    facts = replace(
+        _facts(), bot_type=bot_type, bot_id=bot_id, bcn_provider_bot_ref=reference
+    )
+    assert build_snapshot(facts).bcs_bot_id == expected
+    manager_facts = SyncFacts(
+        facts.key,
+        facts.bot_id,
+        facts.entity_id,
+        facts.owner_id,
+        (),
+        facts.bot_type,
+        facts.bcn_provider_bot_ref,
+    )
+    assert managers(manager_facts).bcs_bot_id == expected
+
+
+@pytest.mark.parametrize("reference", ["other:old", "bot:", 123])
+def test_invalid_retained_reference_never_sends(reference):
+    with pytest.raises(SnapshotUnavailable, match="invalid_bcn_identity"):
+        build_snapshot(replace(_facts(), bcn_provider_bot_ref=reference))

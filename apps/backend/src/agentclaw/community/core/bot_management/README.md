@@ -128,6 +128,7 @@ internal_dependencies:
   - agentclaw.community.utils.secret_utils
   - agentclaw.community.core.access.policy_service_protocol  # Service API Protocol consumed by this module
   - agentclaw.community.plugin_api.bot_create_extension  # the businessless create/delete lifecycle seam the flow drives
+  - agentclaw.community.plugin_api.bot_template_write_extension  # the businessless template-write validation seam
 ```
 
 ### Change impact
@@ -181,16 +182,19 @@ This requires no database migration and does not backfill historical Bot rows.
 
 Only explicit `aicoding` / `claude_code` strategies durably admit ordinary restart
 requests. `engines/aicoding/restart_task.py` owns the queue handler and admission;
-`restart_state.py` owns the ext journal and mutation fence. Failures persist existing `ext.start_status` / `ext.start_message` using
-ext-only CAS, then write Bot `FAILED` using `update_by_owner`.
-Both status routes use the original `get_bot` and error extraction, with no
-restart-specific projection or queue lookup. Runtime callbacks are unchanged;
-the journal is an audit/recovery record, not a public status override.
+`restart_state.py` owns the ext journal and mutation fence. Admission and
+pre-mutation failure preserve the current runtime status, binding and startup
+markers; failure belongs to the restart journal. Only the mutation owner enters
+PENDING. Actual post-mutation failures retain the existing status/startup-error
+contract. Both status routes project optional `data.ext.aicoding.restart` through the engine
+strategy; runtime fields and callbacks remain authoritative. Published backup
+vetoes likewise preserve the release record and expose operation-only failure.
+See `engines/aicoding/restart-backup.md` for the public field contract.
 
 The existing async entrypoint only supplies neutral dependencies to the strategy.
 The synchronous restart, stop/start and provider upgrade flows are unchanged. The queue
 and Bot repository provide dedup and ext CAS primitives. Repository contracts and implementations are unchanged. Journal and status
-writes are separate; lifecycle-field CAS is not provided. No table or frontend migration is needed.
+writes are separate; lifecycle-field CAS is not provided. No table migration is needed; frontend consumers must distinguish restart progress from runtime readiness.
 See the 2026-10-08 durable-restart spec for recovery and query limitations.
 
 ### Restart backup scope
@@ -237,9 +241,9 @@ See `engines/aicoding/restart-backup.md` for the operator curl and data-loss war
 
 With blocking enabled, ordinary durable restarts persist positive target confirmations monotonically in
 `ext.coding_restart.fastdisk_targets`, so redelivery cannot downgrade them. A
-failure reuses `status`, `ext.start_status` and `ext.start_message`. Published
-restarts translate the terminal engine veto to the existing publish FAILED and
-`ext.error_message` fields using status/ext CAS, preserve the old binding, and
+pre-mutation failure is recorded only in the restart journal. Published
+restarts preserve the release status and record terminal engine vetoes in
+`ext.restart` using status/ext CAS, preserve the old binding, and
 finish the task without issuing a provider workflow. All veto classification,
 operation failure, guard ownership, replay checks and failure persistence live in
 `engines/aicoding/restart_backup.py`; there is no shared backup exception or
@@ -255,11 +259,16 @@ are supplied as `PublishedRestartServices`; only the strategy interprets its
 restart metadata. Default strategies add no probing, metadata or status writes.
 The operation runner accepts an acquisition callback, preserves the exact operation
 identity and workflow adoption, and knows nothing about coding or backup failures.
-No HTTP endpoint, frontend, database schema or container-script change is needed.
+The existing HTTP status surfaces add engine-namespaced operation progress through
+`EngineProvisioningStrategy.project_status_ext`; shared schemas and handlers know
+only the generic `ext` envelope. AICoding creates its own admission identity and
+backup-only result, while default engines add no task/response fields. Frontend
+restart consumers must handle the extension. No database schema or container-script
+change is required.
 The internal `published_restart_scope` hook replaces the callback-based
 `execute_published_restart` hook; deploy the common flow, base strategy and coding
 strategy together. Third-party overrides of the former hook must implement the
-scope contract instead. Ordinary Bot restart hooks and task payloads are unchanged.
+scope contract instead. Published task payloads optionally carry a per-invocation operation_id; legacy queued payloads remain supported.
 
 The scripts may retain a maintenance barrier after partial backup, and a timed-out
 backup worker may still be running. Backend does **not** delete that barrier.

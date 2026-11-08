@@ -17,6 +17,22 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
+- Admin onboard (`BotOnboarding`) applies an optional `AvatarChange`
+  together with the merged capabilities through the single existing-only
+  profile write (bot-avatar plan Task 5). BotCore applies the existing Provider
+  identity protection before that composite write: an omitted `agent_code`
+  retains the persisted parent, and an explicit reparent is rejected before
+  either capabilities or avatar can change. If identity validation rejects an
+  unavailable Bot, a strict repository read confirms absence before classifying
+  it as `Missing`; read failures propagate. A missing or soft-deleted target
+  — including one that slips away between the precheck and the write —
+  returns the legacy `onboarded=false` shape and persists no row. Independently
+  of that application-layer guard, the store implementations treat the runtime
+  AgentPass identity (`agent_code`/`agent_token`) as registry-owned: the
+  profile write covers profile fields only and preserves the live identity in
+  both the durable record and the in-memory publication (PR-3488 review — the
+  merged profile snapshot carries no credentials, and publishing it wholesale
+  would silently disable the Bot's outbound interceptor chain).
 
 ## Consumes
 
@@ -76,6 +92,13 @@ nonblank secret. Credential read failures propagate; issuance and upstream never
 read or require that credential. Bot creation and gateway projection are atomic in SQL;
 Human/owner-edge writes follow and failures propagate, without journal-based resume.
 Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
+New Provider registrations also preflight the active name within the current
+Provider/environment, including non-A2A Bots. Legacy Provider-admin registration
+uses BotProviderRepoPort before registry writes; trusted atomic registration
+performs the same fresh lookup in its store. Existing binding replay retains its
+idempotent behavior. The additional lookup returns at most one identifier and does
+not provide a cross-process uniqueness guarantee; a DB index is deferred pending
+production data repair. Lookup failures propagate rather than allowing registration.
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
 Both flows derive ordinary AgentPass Bot `agent_code` from `provider_bot_ref`.
@@ -155,3 +178,5 @@ Provider identity, preserves a delegated owner and audits the actual Provider.
 Duplicates, tombstones and concurrent collisions fail without credential replay.
 The transaction is the existing composite; no migration or second partial Bot
 write is introduced. Admission adds bounded per-request reads, no registry scan.
+
+Custom AgentCard bindings use the deployment-installed bcs-a2a-binding-api registry for pure route selection. No transport or plugin implementation is imported by core.

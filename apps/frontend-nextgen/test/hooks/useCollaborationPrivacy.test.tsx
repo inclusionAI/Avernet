@@ -3,6 +3,7 @@ import type { CollaborationPrivacyLoadScope } from '@/domain/collaborationPrivac
 import type { CollaborationBot, CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import * as identityModule from '@/hooks/useHumanIdentity';
+import * as riskController from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { workspaceService } from '@/services/workspace/workspaceService';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
@@ -374,5 +375,29 @@ describe('useCollaborationPrivacy fixedBotId（BotWorkshop 通用配置弹窗形
       isExternalBot: true,
     });
     await waitFor(() => expect(result.current.publicationEditor).toBeNull());
+  });
+});
+
+describe('useCollaborationPrivacy 外部 Bot 不查询公开风险', () => {
+  it.each([true, false])('通用配置打开、重载及编辑对 Bot 可见性（isExternalBot=%s）', async (isExternalBot) => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
+    const currentRisk = jest
+      .spyOn(riskController, 'getCurrentBotPublicRiskCheck')
+      .mockResolvedValue({ code: 20000, data: null });
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-2', isExternalBot }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.visibleBots).toHaveLength(1));
+    act(() => result.current.openPublicationEditor(overviewWithBots.bots[1], 'bot'));
+    await act(async () => {
+      await result.current.load();
+    });
+
+    const expectedCalls = isExternalBot ? [] : [['bot-2', '900004', { public_scope: 'user' }]];
+    expect(currentRisk.mock.calls).toEqual(expectedCalls);
   });
 });

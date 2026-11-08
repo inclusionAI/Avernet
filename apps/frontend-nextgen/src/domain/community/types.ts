@@ -104,6 +104,19 @@ export interface CommunityTopicPage {
   total: number;
 }
 
+/** 指向一个 Topic；postId 存在时表示要继续定位到具体楼层/楼中楼。 */
+export interface CommunityTopicOpenTarget {
+  topicId: string;
+  postId?: string;
+}
+
+/** 后端解析出的具体回帖所在页与楼层组。 */
+export interface CommunityPostLocation {
+  postId: string;
+  rootPostId: string;
+  page: number;
+}
+
 /** 回帖分页；total 只计数一级楼层，children 跟随当前页所属楼层返回。 */
 export interface CommunityReplyPage {
   items: CommunityReply[];

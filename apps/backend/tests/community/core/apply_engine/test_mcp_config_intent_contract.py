@@ -6,6 +6,7 @@ import json
 import pytest
 from sqlalchemy import event
 
+from agentclaw.community.core.apply_engine.constructs import Category
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus, EntryOutcome
 from agentclaw.community.core.models.mcp import BotMCPConfig, BotMCPInstallation
 from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import ScopedMCPConfigRepository
@@ -14,8 +15,13 @@ from .test_capability_full_replace_contract import _context, _rig
 from ._mcp_config_support import McpWorld
 
 
+def _mcp_entry(report):
+    category = next(item for item in report.categories if item.construct == Category.MCP)
+    return next(entry for entry in category.entries if entry.identity == "mcp.explicit")
+
+
 @pytest.mark.asyncio
-async def test_bare_manifest_preserves_the_installed_bots_configuration():
+async def test_bare_manifest_clears_the_installed_bots_configuration():
     db, _reader, _runtime, _uploads, engine, _parsed, bot, _skill = _rig(overlap=False)
     with db.transactional_orm_session() as session:
         session.add(BotMCPConfig(
@@ -30,16 +36,15 @@ async def test_bare_manifest_preserves_the_installed_bots_configuration():
     )
 
     assert report.status is ApplyStatus.SUCCEEDED
-    entry = next(e for e in report.categories[0].entries if e.identity == "mcp.explicit")
-    assert entry.outcome is EntryOutcome.UNCHANGED
+    entry = _mcp_entry(report)
+    assert entry.outcome is EntryOutcome.UPDATED
     with db.orm_session() as session:
-        saved = session.query(BotMCPConfig).filter_by(server_code="mcp.explicit").one()
-        assert saved.config == '{"endpoint_env":"PRE","headers":{"X-Project":"saved"}}'
+        assert session.query(BotMCPConfig).filter_by(server_code="mcp.explicit").count() == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("config", [None, {"endpoint_env": "PRE"}])
-async def test_bare_manifest_can_establish_direct_supply_without_replacing_saved_configuration(config):
+async def test_bare_manifest_can_establish_direct_supply_and_clear_saved_configuration(config):
     db, _reader, _runtime, _uploads, engine, _parsed, bot, _skill = _rig(overlap=False)
     with db.transactional_orm_session() as session:
         session.query(BotMCPInstallation).filter_by(server_code="mcp.explicit").delete()
@@ -56,12 +61,12 @@ async def test_bare_manifest_can_establish_direct_supply_without_replacing_saved
             apply_id=f"preserve-{attempt}", trigger="explicit", started_at=datetime.now(),
         )
         assert report.status is ApplyStatus.SUCCEEDED
-        entry = next(e for e in report.categories[0].entries if e.identity == "mcp.explicit")
+        entry = _mcp_entry(report)
         assert entry.outcome is (EntryOutcome.CREATED if attempt == 0 else EntryOutcome.UNCHANGED)
         with db.orm_session() as session:
             assert session.query(BotMCPInstallation).filter_by(server_code="mcp.explicit").count() == 1
             saved = session.query(BotMCPConfig).filter_by(server_code="mcp.explicit").one_or_none()
-            assert (json.loads(saved.config) if saved else None) == config
+            assert saved is None
 
 
 @pytest.mark.asyncio
@@ -80,7 +85,7 @@ async def test_explicit_configuration_clears_or_completely_replaces_the_override
             apply_id=f"configure-{attempt}", trigger="explicit", started_at=datetime.now(),
         )
         assert report.status is ApplyStatus.SUCCEEDED
-        entry = next(e for e in report.categories[0].entries if e.identity == "mcp.explicit")
+        entry = _mcp_entry(report)
         assert entry.outcome is (EntryOutcome.UPDATED if attempt == 0 else EntryOutcome.UNCHANGED)
         with db.orm_session() as session:
             saved = session.query(BotMCPConfig).filter_by(server_code="mcp.explicit").one_or_none()
@@ -89,7 +94,7 @@ async def test_explicit_configuration_clears_or_completely_replaces_the_override
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("saved_valid", [True, False])
-async def test_bare_manifest_validates_the_saved_override_instead_of_inherited_configuration(saved_valid):
+async def test_bare_manifest_validates_inherited_configuration_instead_of_saved_override(saved_valid):
     world = McpWorld()
     with world.db.transactional_orm_session() as session:
         session.add(BotMCPConfig(
@@ -104,12 +109,12 @@ async def test_bare_manifest_validates_the_saved_override_instead_of_inherited_c
     )
     assert inherited["valid"] is not saved_valid
     report = await world.apply_manifest([{"server_code": "mcp.explicit"}])
-    assert report.status is (ApplyStatus.SUCCEEDED if saved_valid else ApplyStatus.FAILED)
-    assert world.saved() == {"mcp.explicit": {"endpoint_env": "PRE"}}
+    assert report.status is (ApplyStatus.FAILED if saved_valid else ApplyStatus.SUCCEEDED)
+    assert world.saved() == ({"mcp.explicit": {"endpoint_env": "PRE"}} if saved_valid else {})
 
 
 @pytest.mark.asyncio
-async def test_preserve_does_not_restore_the_value_read_before_a_concurrent_scoped_edit():
+async def test_clear_removes_the_override_written_before_the_manifest_claim():
     world = McpWorld()
     with world.db.transactional_orm_session() as session:
         session.add(BotMCPConfig(
@@ -118,7 +123,7 @@ async def test_preserve_does_not_restore_the_value_read_before_a_concurrent_scop
         ))
 
     def edit_while_center_is_read():
-        # This external port callback runs after resolve read the old value;
+        # This external port callback writes the override before the claim;
         # configuration validation and persistence remain their real services.
         ScopedMCPConfigRepository(world.db).replace(
             user_id="owner", server_code="mcp.explicit", headers={},
@@ -129,7 +134,7 @@ async def test_preserve_does_not_restore_the_value_read_before_a_concurrent_scop
     world.center.on_detail = edit_while_center_is_read
     report = await world.apply_manifest([{"server_code": "mcp.explicit"}])
     assert report.status is ApplyStatus.SUCCEEDED
-    assert world.saved() == {"mcp.explicit": {"headers": {"X-Project": "new"}}}
+    assert world.saved() == {}
     assert world.direct.list_installed_mcps(bot_id="bot-1", owner_id="owner", actor_id="owner") == {"mcp.explicit"}
 
 
@@ -152,7 +157,8 @@ async def test_failed_explicit_configuration_write_rolls_back_the_direct_claim_a
         )
     finally:
         event.remove(db.engine, "before_cursor_execute", reject_config_insert)
-    assert report.status is ApplyStatus.FAILED
+    assert report.status is ApplyStatus.PARTIAL  # Omitted skills cleared successfully.
+    assert _mcp_entry(report).outcome is EntryOutcome.FAILED
     with db.orm_session() as session:
         assert session.query(BotMCPInstallation).filter_by(server_code="mcp.explicit").count() == 0
         assert session.query(BotMCPConfig).filter_by(server_code="mcp.explicit").count() == 0

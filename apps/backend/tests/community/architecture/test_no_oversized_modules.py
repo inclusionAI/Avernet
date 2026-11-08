@@ -59,8 +59,6 @@ _MAX_LINES = 1000
 _ALLOWLIST: dict[str, str] = {
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py": "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
-    "adapters/http/openapi_v1/bots/router.py": "~1137 lines — TC revamp public bots surface; CRUD + /all list + dormant + "
-    "data-init + startup-script + passport + engine-config",
     "core/bot_management/services/bot_service.py": "~2894 lines — central bot service; handles create/get/update/delete + engine resolution.",
     "core/bot_management/services/data_init_service.py": "~1111 lines — bot data initialization service.",
     # ── skill_center cluster ─────────────────────────────────────────
@@ -91,7 +89,6 @@ _ALLOWLIST: dict[str, str] = {
     # ── other ────────────────────────────────────────────────────────
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
-    "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
     "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer inherited from origin/dev.",
 }
 

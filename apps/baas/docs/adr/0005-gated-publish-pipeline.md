@@ -44,6 +44,15 @@ stage-gate approvals:
   `all` or only `unhealthy` devices (`RestartScope`).
 - The admin/audit surface (`_admin_service.py`) exposes submit/approve/
   reject/revoke so gates are enforceable through the API.
+- **Terminal-eligible devices**: `DESTROY` and `STOP` target every
+  non-`RELEASED` device (`terminal_eligible_devices`), not only `ACTIVE`
+  ones. A `PENDING`, `FAILED`, `STOPPED`, `OFFLINE`, or `UPDATING` device may
+  still hold a sandbox or provider record, so it is a teardown target rather
+  than a blocker; residue left by an earlier failed publish must not prevent
+  a later `DESTROY`. A `DESTROY` whose devices are all `RELEASED` completes as
+  an idempotent no-op; `STOP` does not take that no-op path. `CREATE`,
+  `UPDATE`, `UPDATE_DEVICE`, `SCALE_UP`, and `SCALE_DOWN` keep their stricter
+  `ACTIVE`-only eligibility.
 
 ## Consequences
 

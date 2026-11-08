@@ -1,27 +1,27 @@
-import { GroupIdentityDisplay } from './GroupIdentityDisplay';
 import { CreateGroupSessionModal } from '@/components/CollaborationSquare/CreateGroupSessionModal';
-import GroupCard from '@/components/CollaborationSquare/GroupCard';
+import GroupCard, { GroupCardSkeleton } from '@/components/CollaborationSquare/GroupCard';
 import { GroupMembersModal } from '@/components/CollaborationSquare/GroupMembersModal';
-import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
+import { ShareGroupDialog } from '@/components/CollaborationSquare/ShareGroupDialog';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
+import type { PublicGroup } from '@/domain/collaborationSquare/types';
 import { RefreshCw } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 
 const LOAD_MORE_PRELOAD_DISTANCE = 420;
 
+/** 群卡栅格（dmore artboard-004）：16px 间距，1440 视口下 4 列（卡片 268px 宽节奏）。 */
+const GROUP_GRID = 'grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+
 function GroupLoadingState() {
   return (
-    <div aria-label="正在加载公开协作群" className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      {[0, 1, 2].map((item) => (
-        <Card key={item}>
-          <Skeleton.Card />
-        </Card>
+    <div aria-label="正在加载公开协作群" className={GROUP_GRID}>
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => (
+        <GroupCardSkeleton key={item} />
       ))}
     </div>
   );
@@ -42,6 +42,8 @@ export interface PublicGroupSquareSectionProps {
  */
 export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }: PublicGroupSquareSectionProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // 分享协作群弹窗（dmore artboard-006）：点击卡片分享按钮打开，弹窗内完成复制。
+  const [shareTarget, setShareTarget] = useState<PublicGroup | null>(null);
 
   useEffect(() => {
     const root = scrollRootRef.current;
@@ -61,17 +63,6 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
 
   return (
     <>
-      <div className="flex flex-col items-end gap-3 md:flex-row md:items-center md:justify-end">
-        <SquareSearchBar
-          resource="group"
-          query={square.groupQuery}
-          onQueryChange={(query) => square.setQuery('group', query)}
-          className="w-full md:max-w-md"
-        />
-        <div className="w-full max-w-[280px] md:w-[280px] md:shrink-0">
-          <GroupIdentityDisplay />
-        </div>
-      </div>
       {square.loading && <GroupLoadingState />}
       {!square.loading && square.error && (
         <Card>
@@ -92,7 +83,7 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
         </Card>
       )}
       {!square.loading && !square.error && square.visibleGroups.length > 0 && (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className={GROUP_GRID}>
           {square.visibleGroups.map((group) => (
             <GroupCard
               key={group.id}
@@ -102,7 +93,7 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
                 Tracert.click(Points.collabSquare.openGroupCard, { group_id: item.id });
                 void square.openGroupMembers(item);
               }}
-              onShare={(item) => square.share('group', item.id)}
+              onShare={(item) => setShareTarget(item)}
               onCreateSession={(item) => {
                 Tracert.click(Points.collabSquare.joinGroup, { group_id: item.id });
                 square.createGroupSession(item);
@@ -142,6 +133,7 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
         onClose={square.closeCreateSessionModal}
         onSubmit={square.submitCreateSession}
       />
+      <ShareGroupDialog open={Boolean(shareTarget)} group={shareTarget} onClose={() => setShareTarget(null)} />
     </>
   );
 }

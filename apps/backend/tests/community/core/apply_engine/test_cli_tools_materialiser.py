@@ -124,7 +124,9 @@ def _entry(**kwargs) -> dict:
 async def _apply(mat, ctx, entries):
     resolved = await mat.resolve(ctx, entries)
     plan = await mat.plan(ctx, resolved.intents)
-    results = await mat.write(ctx, plan)
+    written = await mat.write(ctx, plan)
+    assert written.removals == plan.removals
+    results = written.entries
     return resolved, plan, results
 
 

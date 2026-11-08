@@ -20,6 +20,7 @@ const mockedCreateFriendConnectionRequest = jest.spyOn(friendConnectionControlle
 const mockedCreateBotSession = jest.spyOn(botSessionController, 'createBotSession');
 const mockedCreateGroupSession = jest.spyOn(sessionController, 'createSession');
 const mockedListBbsTasks = jest.spyOn(bbsTaskController, 'listBbsTasks');
+const mockedGetPublicBotProfile = jest.spyOn(publicBotController, 'getPublicBotProfile');
 const humanContext = { actorId: 'human_900003', userId: '900003' };
 
 beforeEach(() => {
@@ -33,6 +34,7 @@ beforeEach(() => {
   mockedCreateBotSession.mockReset();
   mockedCreateGroupSession.mockReset();
   mockedListBbsTasks.mockReset();
+  mockedGetPublicBotProfile.mockReset();
 });
 
 describe('CollaborationSquareApiAdapter', () => {
@@ -873,10 +875,14 @@ describe('CollaborationSquareApiAdapter', () => {
     );
   });
 
-  it('keeps deferred Bot detail explicitly unsupported; listGroupMembers resolves via group detail', async () => {
+  it('listGroupMembers resolves via group detail; Bot 画像已接入 profile 端点（覆盖见 getBotProfile 组）', async () => {
     const adapter = new CollaborationSquareApiAdapter();
 
-    await expect(adapter.getBotProfile('bot-1')).rejects.toMatchObject({ code: 'unsupported' });
+    mockedGetPublicBotProfile.mockResolvedValue({
+      code: 200000,
+      data: { bot_id: 'bot-1', bot_name: 'Bot', capabilities: [] },
+    });
+    await expect(adapter.getBotProfile('bot-1')).resolves.toMatchObject({ id: 'bot-1' });
   });
 
   it('listGroupMembers 调 getGroup 详情并映射 participants → PublicGroupMember[]', async () => {
@@ -1187,6 +1193,79 @@ describe('CollaborationSquareApiAdapter', () => {
     it('getPublicTask 仍为 unsupported（详情改用列表项，不发请求）', async () => {
       await expect(new CollaborationSquareApiAdapter().getPublicTask('bbs-1')).rejects.toMatchObject({
         code: 'unsupported',
+      });
+    });
+  });
+
+  describe('getBotProfile（bot-catalog profile 端点）', () => {
+    it('映射画像字段：id 优先 bot_uuid、能力改写 id/name', async () => {
+      mockedGetPublicBotProfile.mockResolvedValue({
+        code: 200000,
+        data: {
+          bot_id: '20260413_uhup5rb8',
+          bot_uuid: '20260413_uhup5rb8:246864',
+          bot_name: '虾摸鱼',
+          owner_name: '风太',
+          description: '个人提效助手',
+          engine_name: 'OpenClaw',
+          capabilities: [
+            { capability_id: 'antv', display_name: 'AntV 可视化图表' },
+            { capability_id: 'dima', display_name: 'Dima MCP' },
+          ],
+        },
+      });
+
+      await expect(new CollaborationSquareApiAdapter().getBotProfile('20260413_uhup5rb8:246864')).resolves.toEqual({
+        id: '20260413_uhup5rb8:246864',
+        name: '虾摸鱼',
+        ownerName: '风太',
+        description: '个人提效助手',
+        engine: 'OpenClaw',
+        capabilities: [
+          { id: 'antv', name: 'AntV 可视化图表' },
+          { id: 'dima', name: 'Dima MCP' },
+        ],
+      });
+      expect(mockedGetPublicBotProfile).toHaveBeenCalledWith('20260413_uhup5rb8:246864', undefined);
+    });
+
+    it('BCS-only 画像（null/缺省字段）回退：owner 未公开、引擎缺省', async () => {
+      mockedGetPublicBotProfile.mockResolvedValue({
+        code: 200000,
+        data: {
+          bot_id: 'bot-1',
+          bot_name: 'Native Bot',
+          owner_name: null,
+          description: null,
+          engine_name: null,
+          capabilities: [],
+        },
+      });
+
+      await expect(new CollaborationSquareApiAdapter().getBotProfile('bot-1:owner-1')).resolves.toMatchObject({
+        id: 'bot-1',
+        ownerName: '未公开',
+        description: '',
+        engine: undefined,
+        capabilities: [],
+      });
+    });
+
+    it('404 映射为 target_invalid（弹窗按无能力版式降级）', async () => {
+      mockedGetPublicBotProfile.mockRejectedValue(
+        new BackendRequestError('not found', { status: 404, apiPath: '/openapi/v1/bots/catalog/profile/x:1' }),
+      );
+      await expect(new CollaborationSquareApiAdapter().getBotProfile('x:1')).rejects.toMatchObject({
+        code: 'target_invalid',
+      });
+    });
+
+    it('协议错误映射为 protocol_error', async () => {
+      mockedGetPublicBotProfile.mockRejectedValue(
+        new PublicBotCatalogError('protocol_error', 'Invalid Bot Catalog profile response'),
+      );
+      await expect(new CollaborationSquareApiAdapter().getBotProfile('x:1')).rejects.toMatchObject({
+        code: 'protocol_error',
       });
     });
   });

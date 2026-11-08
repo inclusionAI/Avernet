@@ -201,15 +201,15 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         """Return the addressed bot's usable sockets for one stage.
 
         ``caller_id`` must be the authenticated principal; ``owner_id`` is the
-        owner the request addresses and may name someone else. The bot is
-        resolved ``(bot_id, owner_id)``-scoped, then the shared operator
+        legacy locator (permanent entity or current Owner). The scoped Bot is
+        resolved first, then the shared operator
         adjudication decides whether the caller may hold the channel.
         ``DeviceService.get_device_connection`` applies a permission model of
         its own — one that also admits any caller to a *public* bot — and
         adjudicating first with the stricter rule means that model can never
         widen this surface.
         """
-        bot = self._bot_service.get_bot(bot_id, owner_id)
+        bot = self._bot_service.get_bot_by_address(bot_id, owner_id)
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         resolved_id = facts.bot_id
         resolved_owner = facts.owner_id
@@ -237,7 +237,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         engine = facts.active_engine
 
         binding_id = self._stage_binding_id(
-            bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
+            bot_pk=bot_pk, bot_id=resolved_id, owner_id=resolved_owner, stage=stage
         )
         if device_uuid is not None:
             binding = self._binding_repository.get_by_id(binding_id)

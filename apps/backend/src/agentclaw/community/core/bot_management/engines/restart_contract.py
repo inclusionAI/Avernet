@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
@@ -31,3 +31,11 @@ class PublishedRestartServices:
     get_record: Callable[[int], BotPublishRecord | None]
     mutate_ext: Callable[..., dict]
     update_status: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class RestartAdmission:
+    """Engine-owned admission; default engines add no task or response fields."""
+
+    operation_id: str | None = None
+    ext: dict[str, Any] = field(default_factory=dict)

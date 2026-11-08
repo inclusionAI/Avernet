@@ -76,8 +76,10 @@ class BotFacts:
         grant record where it must name a real owner. Its rule is stricter on
         purpose and is not folded in here.
 
-        ``record`` must come from an **owner-scoped** ``(bot_id, owner_id)``
-        read. ``bot_id`` carries no unique constraint and every user's first bot
+        ``record`` must come from a scoped, uniquely resolved Bot address.
+        A legacy entity/Owner locator must be resolved before this projection;
+        downstream ownership checks use the row's current Owner. ``bot_id`` carries
+        no unique constraint and every user's first bot
         is called ``default``, so a row fetched by ``bot_id`` alone can belong to
         another owner.
 

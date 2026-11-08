@@ -50,6 +50,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
 )
+from ._empty_cli_tools import EmptyCliTools
 from ._fakes import (
     FakeGitClient,
     FakeStartupScriptService,
@@ -181,10 +182,9 @@ def world():
         bot_repository=_FakeBotRepository(_BOT_RECORD),
         # The delivery seam, assembled the way the composition root
         # assembles it: a bundle of device-backed ports, one strategy
-        # over it, and a lookup. The categories this suite's document
-        # does not declare are never reached, but their ports must
-        # exist for the registry to register them.
-        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
+        # over it, and a lookup. The document clears omitted supported
+        # categories, so the ports also model their initially empty areas.
+        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts, cli_tool_service=EmptyCliTools())),
         # The Manifest compiler over the same document fake and apply
         # repository (its git baselines). W7's git transport: this suite's
         # document declares no ``sources``, so the client is never *used* —

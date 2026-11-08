@@ -6,7 +6,12 @@ import {
   ModalHeader,
   ModalTitle,
 } from '@/components/ui/Modal';
-import type { BotCopyInput, BotCreateAuthorization, BotCreateSpace, BotDomain } from '@/services/botWorkshop';
+import type {
+  BotCopyInput,
+  BotCreateAuthorization,
+  BotCreateSpace,
+  BotDomain,
+} from '@/services/botWorkshop';
 import { useExcludeFileTree } from '@/hooks/useExcludeFileTree';
 import { cn } from '@/utils/cn';
 import { Check, Copy as CopyIcon } from 'lucide-react';
@@ -20,6 +25,10 @@ interface CopyBotModalProps {
   /** 复制时归属空间列表(用于第 2 步只读展示源 Bot 空间名)。 */
   spaces: BotCreateSpace[];
   copying: boolean;
+  /**
+   * AgentPass 授权视图(复制 auth_required 分支)。与创建同款处理:复用
+   * `useBotCreateAuthorization` 轮询 dst bot 的 auth-status,ISSUED 后自动收敛。
+   */
   authorization?: BotCreateAuthorization & { message?: string; error?: string };
   onClose: () => void;
   onSubmit: (input: BotCopyInput) => Promise<void>;
@@ -77,7 +86,8 @@ const CopyBotModal: React.FC<CopyBotModalProps> = ({
     setValues((current) => ({ ...current, excludes: [...excludeTree.excluded] }));
   }, [excludeTree.excluded]);
 
-  // AgentPass 授权进入时复用 CreateBotModal 同款 iframe 全屏承载。
+  // AgentPass 授权进入时复用 CreateBotModal 同款 iframe 全屏承载;与创建一致,
+  // 由 useBotCreateAuthorization 轮询 auth-status,ISSUED 后自动收敛。
   if (authorization) return <AuthorizationPanel authorization={authorization} />;
 
   const stepIndex = STEP_LABELS.findIndex((item) => item.key === step);

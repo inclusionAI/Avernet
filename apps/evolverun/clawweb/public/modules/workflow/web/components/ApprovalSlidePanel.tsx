@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import StatusBadge from './StatusBadge'
-import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
+import { formatTime, formatDuration } from '../utils/time'
 import { approvalDisplay, type ApprovalDisplay } from '../../shared/approval-display'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import type { ApprovalCardSummary } from '@avernet/clawweb-shared/web/api/client'
@@ -65,6 +65,7 @@ type ApprovalData = {
   note?: string | null
   detail?: Record<string, unknown>
   isApprover?: boolean
+  canAct?: boolean
 }
 
 type ResolveResult = {
@@ -80,8 +81,8 @@ type ResolveResult = {
 
 // ── API helpers ────────────────────────────────────────────────────────
 
-async function fetchApproval(id: number): Promise<ApprovalData> {
-  const res = await fetch(`/api/approval/${id}`)
+async function fetchApproval(id: number, workbench = false): Promise<ApprovalData> {
+  const res = await fetch(workbench ? `/api/approval/workbench/${id}` : `/api/approval/${id}`)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message || `HTTP ${res.status}`)
@@ -163,13 +164,14 @@ function buildDetailPayload(
 // ── Component ──────────────────────────────────────────────────────────
 
 interface ApprovalSlidePanelProps {
-  card: ApprovalCardSummary
-  run: FlowRun
+  card: Pick<ApprovalCardSummary, 'id'>
+  run: Pick<FlowRun, 'flow_id' | 'workflow_title' | 'workflow_id'> & Partial<Pick<FlowRun, 'status'>>
+  workbench?: boolean
   onClose: () => void
   onResolved?: () => void
 }
 
-export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: ApprovalSlidePanelProps) {
+export default function ApprovalSlidePanel({ card, run, onClose, onResolved, workbench = false }: ApprovalSlidePanelProps) {
   const [data, setData] = useState<ApprovalData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -186,7 +188,7 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchApproval(card.id)
+    fetchApproval(card.id, workbench)
       .then((d) => {
         if (cancelled) return
         setData(d)
@@ -217,19 +219,19 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [card.id])
+  }, [card.id, workbench])
 
   // Poll for status updates when pending
   useEffect(() => {
     if (!data || data.status !== 'pending') return
     const timer = setInterval(async () => {
       try {
-        const fresh = await fetchApproval(card.id)
+        const fresh = await fetchApproval(card.id, workbench)
         setData(fresh)
       } catch { /* ignore poll errors */ }
     }, 5000)
     return () => clearInterval(timer)
-  }, [card.id, data?.status])
+  }, [card.id, data?.status, workbench])
 
   // Close on Escape
   useEffect(() => {
@@ -256,7 +258,7 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
         const res = await resolveApproval(card.id, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
-          const fresh = await fetchApproval(card.id)
+          const fresh = await fetchApproval(card.id, workbench)
           setData(fresh)
           onResolved?.()
         }
@@ -266,12 +268,12 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
         setActionLoading(false)
       }
     },
-    [card.id, data, comment, isSectionMode, sectionSelection, onResolved],
+    [card.id, data, comment, isSectionMode, sectionSelection, onResolved, workbench],
   )
 
   const copy = data ? approvalDisplay(data.approvalType, data.display) : null
   const isResolved = data?.status === 'approved' || data?.status === 'rejected'
-  const canAct = data?.status === 'pending'
+  const canAct = data?.status === 'pending' && (!workbench || data.canAct === true)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
@@ -288,7 +290,7 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
             </div>
             <div className="mt-1 flex items-center gap-3">
               <span className="font-mono text-white/70 text-xs">{run.flow_id}</span>
-              <StatusBadge status={run.status} />
+              {run.status && <StatusBadge status={run.status} />}
             </div>
             <div className="mt-1 flex items-center gap-4 text-white/60 text-xs">
               <span>{run.workflow_title || run.workflow_id}</span>

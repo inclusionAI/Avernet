@@ -400,6 +400,15 @@ POST /api/v1/skill-center/refresh-bot: missing [happy, error]
 POST /api/v1/skill-center/sync-categories: missing [happy, error]
 POST /api/v1/skill-center/sync: missing [happy, error]
 POST /api/v1/token/exchange: missing [happy, error]
+# 2026-11-03: bot-copy v1 (Route B manifest-reuse). The router was mounted
+# ahead of its happy/error coverage: a real case seeds a source bot, mocks the
+# manifest seam / passport / bot_copy ledger / startup-script service, and mints
+# a gateway-signed principal the way tests/community/endpoints/
+# test_openapi_create_with_manifest.py does. Backfill when the FE feature gate
+# (BOT_COPY_FEATURE_ENABLED) flips on; until then the contract wiring is held by
+# tests/community/http/test_copy_retry.py and the schema/admission/path gates.
+POST /openapi/v1/bots/copy: missing [happy, error]
+POST /openapi/v1/bots/copy/{bot_id}/retry: missing [happy, error]
 POST /openapi/v1/bots/sessions/{bot_id}: missing [happy, error]
 PUT /api/aicoding/{entity_type}/{entity_id}/bot/{bot_id}/aicoding.bindings.json: missing [happy, error]
 PUT /api/bot-render-screens/{record_id}: missing [happy, error]

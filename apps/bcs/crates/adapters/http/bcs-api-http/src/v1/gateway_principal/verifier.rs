@@ -15,7 +15,7 @@ use super::wire::{
     GatewayAccessKeyPrincipal, GatewayAppPrincipal, GatewayBotPrincipal, GatewayClaims,
     GatewayPrincipal, GatewayUserPrincipal,
 };
-use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
+use crate::v1::common::{CredentialKind, PrincipalVerificationError, PrincipalVerifier, VerifiedRequestIdentity};
 
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const GATEWAY_PRINCIPAL_HEADER: &str = "x-avernet-principal";
@@ -251,7 +251,7 @@ impl PrincipalVerifier for GatewayPrincipalTokenVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         let mut values = headers.get_all(GATEWAY_PRINCIPAL_HEADER).iter();
         let value = values.next().ok_or(PrincipalVerificationError::Missing)?;
         if values.next().is_some() {
@@ -269,11 +269,23 @@ impl PrincipalVerifier for GatewayPrincipalTokenVerifier {
                 "Gateway Principal header is empty or padded".into(),
             ));
         }
-        GatewayPrincipalTokenVerifier::verify(self, token).map_err(|_| {
+        let caller = GatewayPrincipalTokenVerifier::verify(self, token).map_err(|_| {
             PrincipalVerificationError::Invalid("Gateway Principal token is invalid".into())
-        })
+        })?;
+        // Provenance is pinned here, by the trusted wrapper: source and
+        // credential kind are constants of this verifier and can never be
+        // supplied by request headers (V1 API auth plan, spec §7.4).
+        Ok(VerifiedRequestIdentity::pin(
+            caller,
+            GATEWAY_SOURCE_NAME,
+            CredentialKind::GatewayPrincipalHeader,
+        ))
     }
 }
+
+/// The registered source name for the Gateway principal header, fixed by
+/// this wrapper (never derived from request content).
+pub const GATEWAY_SOURCE_NAME: &str = "gateway";
 
 fn validate_times(iat: u64, exp: u64, now: u64) -> Result<(), GatewayPrincipalVerificationError> {
     let latest_allowed_iat = now.saturating_add(CLOCK_SKEW_SECONDS);

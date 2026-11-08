@@ -73,7 +73,7 @@ export function ManagerWorkerTasks({ session, messages, connected = true }: { se
           ref={trigger}
           type="button"
           aria-label={`${summary}，查看任务`}
-          className="flex h-auto min-h-9 w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-md py-1 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-auto min-h-8 w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-md px-0 py-0 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex min-w-0 items-center gap-2" role="status">
             {running.length ? (
@@ -87,7 +87,7 @@ export function ManagerWorkerTasks({ session, messages, connected = true }: { se
             )}
             {summary}
           </span>
-          <span className="flex items-center gap-2">
+          <span className="flex shrink-0 items-center gap-2 px-2">
             {model.unread.length > 0 ? (
               <span className="text-foreground">{model.unread.length} 个任务有新结果</span>
             ) : null}

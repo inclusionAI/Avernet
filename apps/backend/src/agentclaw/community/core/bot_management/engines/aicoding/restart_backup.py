@@ -150,6 +150,7 @@ class RestartBackupBlocked(RestartBackupError):
             'helper_missing': '快盘容器缺少重启备份能力',
             'mount_changed': '快盘挂载状态发生变化',
             'target_changed': '快盘备份目标容器发生变化',
+            'warning_unavailable': '快盘备份风险提示保存失败',
         }.get(reason, '快盘备份结果无法确认')
         super().__init__(reason, f'{detail}，本次重启已终止，旧容器未执行销毁或替换')
 
@@ -351,7 +352,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     return verify
 
 
-def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None):
+def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None, on_degraded=None):
     """Downgrade only backup I/O/result failures, never lifecycle writes/fences.
 
     No raw exception/output is logged: platform errors can contain credentials.
@@ -370,12 +371,14 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id
         phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
         arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
     )
+    if on_degraded is not None:
+        on_degraded()  # Persistence failures must escape the best-effort catch.
     return None
 
 
-def _backup_policy(callback, *, required, physical_targets=(), **identity):
+def _backup_policy(callback, *, required, physical_targets=(), on_degraded=None, **identity):
     if not required:
-        return _best_effort(callback, **identity)
+        return _best_effort(callback, on_degraded=on_degraded, **identity)
     try:
         return callback()
     except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
@@ -424,6 +427,15 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
     known = _confirmed_targets()
     fastdisk = identity['target_id'] in known or _detect_fastdisk(kwargs['execute'], **identity)
     required = fastdisk and blocking_enabled()
+    def warn():
+        from .restart_state import record_nonblocking_backup_warning
+        try:
+            record_nonblocking_backup_warning(identity['operation_id'])
+        except RestartSuperseded:
+            raise
+        except Exception as error:
+            raise RestartBackupBlocked('warning_unavailable') from error
+    on_degraded = warn if fastdisk and not required else None
     if required and execution is not None and identity['target_id'] not in known:
         try:
             execution.state.update({'BACKING_UP'}, fastdisk_targets=[identity['target_id']])
@@ -433,12 +445,12 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
             raise RestartBackupBlocked('confirmation_unavailable') from error
     verify = _backup_policy(
         lambda: prepare_backup(**kwargs, require_backup=fastdisk, block_on_failure=required),
-        required=required, phase='prepare', **identity,
+        required=required, phase='prepare', on_degraded=on_degraded, **identity,
     )
 
     def check():
         if verify is not None:
-            _backup_policy(verify, required=required, phase='verify_receipt', **identity)
+            _backup_policy(verify, required=required, phase='verify_receipt', on_degraded=on_degraded, **identity)
     return _PreparedBackup(required=required, verify=check)
 
 
@@ -582,39 +594,99 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
+    def get_restart_status(self, *, ext, published=False, progress=None, public=False):
+        from .restart_state import restart_status
+        return restart_status(ext, published=published, progress=progress, public=public)
+
+    def project_status_ext(self, *, ext, response_ext, published=False, progress=None, public=False):
+        from .restart_state import project_status_ext
+        return project_status_ext(ext, response_ext=response_ext, published=published,
+                                  progress=progress, public=public)
+
+    def published_restart_result(self, *, record):
+        from .restart_state import published_restart_result
+        return published_restart_result(record)
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        result = self.get_restart_status(ext=record.ext or {}, published=True, progress=progress)
+        if result is None or result['status'] not in {'SUCCEEDED', 'FAILED'}:
+            return
+        def complete(ext):
+            state = ext.get('restart') or {}
+            if (state.get('operation_id') == result['operation_id']
+                    and state.get('phase') == 'WAITING_READY'):
+                state.update(status=result['status'], message=result['message'])
+        mutate_ext(publish_id=record.id, mutator=complete)
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage):
+        from ..restart_contract import RestartAdmission
+        operation_id = uuid.uuid4().hex
+        def accept(ext):
+            restart = ext.setdefault('restart', {})
+            restart.update(engine=ctx.active_engine, operation_id=operation_id,
+                           stage=stage, status='RUNNING', phase='QUEUED', message=None)
+            restart.pop('backup_warning', None)
+            restart.pop('precondition_error', None)
+            restart.pop('restarting', None)
+            restart.pop('guard', None)
+        ext = services.mutate_ext(publish_id=publish_id, mutator=accept)
+        return RestartAdmission(
+            operation_id=operation_id,
+            ext=self.project_status_ext(ext=ext, response_ext={}, published=True, public=True),
+        )
+
     @contextmanager
     def published_restart_scope(
         self, ctx, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
     ) -> Iterator[dict]:
         if str(ctx.active_engine or "").strip().lower() not in ENGINES:
             yield {}
             return
 
-        from agentclaw.community.core.service_bot.repository.models import PublishStatus
-
         record = services.get_record(publish_id)
         if record is None:
             raise RuntimeError(f"Publish record not found: {publish_id}")
         blocked = ((record.ext or {}).get("restart") or {}).get("precondition_error") or {}
-        if record.status == PublishStatus.FAILED.value and blocked.get("stage") == stage:
+        previous = (record.ext or {}).get('restart') or {}
+        if (operation_id and previous.get('operation_id') != operation_id
+                and previous.get('phase') == 'QUEUED'):
+            yield {'success': False, 'message': '本次重启已被更新的请求替代'}
+            return
+        if (blocked.get('stage') == stage and (
+                operation_id is None or previous.get('operation_id') == operation_id)):
             # A queue redelivery must not forget a terminal backup veto.
             yield {"success": False, "message": blocked["message"]}
             return
 
+        from .restart_state import published_backup_warning, published_warning_reporter
         guard_id = uuid.uuid4().hex
 
         def claim(ext: dict) -> None:
             state = ext.setdefault("restart", {})
+            if state.get('operation_id') != (operation_id or guard_id):
+                state.pop('backup_warning', None)
             state["guard"] = {
                 "id": guard_id, "binding_id": binding_id, "status": source_status,
             }
+            state.update(engine=ctx.active_engine, operation_id=operation_id or guard_id,
+                         stage=stage, status='RUNNING', phase='BACKING_UP', message=None)
+            state.pop('failure_phase', None)
             state.pop("precondition_error", None)
 
         services.mutate_ext(publish_id=publish_id, mutator=claim)
+        warning_scope = published_backup_warning.set(published_warning_reporter(
+            services, publish_id=publish_id, guard_id=guard_id,
+        ))
         outcome = {}
         try:
             yield outcome
+            def submitted(ext):
+                state = ext.get('restart') or {}
+                if (state.get('guard') or {}).get('id') == guard_id:
+                    state['phase'] = 'WAITING_READY'
+            services.mutate_ext(publish_id=publish_id, mutator=submitted)
         except RestartBackupBlocked as error:
             log_restart_failure(error, bot_id=ctx.bot_id, phase="published_restart", owner_id=ctx.owner_id,
                                 publish_id=publish_id, binding_id=binding_id)
@@ -623,6 +695,8 @@ class AicodingRestartBackupMixin:
                 guard_id=guard_id, message=str(error),
             )
             outcome.update(success=False, message=str(error))
+        finally:
+            published_backup_warning.reset(warning_scope)
 
     @staticmethod
     def _persist_published_restart_veto(
@@ -646,12 +720,11 @@ class AicodingRestartBackupMixin:
         restart.pop("restarting", None)
         restart.pop("guard", None)
         restart["precondition_error"] = {"stage": stage, "message": message}
+        restart.update(status='FAILED', phase='BACKING_UP', message=message)
         ext.pop("retry", None)
-        ext["error_message"] = message
-        ext["source_status"] = record.status
         # Persistence/CAS errors propagate: never claim the failure was saved.
         services.update_status(
-            publish_id=publish_id, target_status=PublishStatus.FAILED,
+            publish_id=publish_id, target_status=PublishStatus(record.status),
             source_status=PublishStatus(record.status), ext=ext,
             expected_ext=expected_ext,
         )

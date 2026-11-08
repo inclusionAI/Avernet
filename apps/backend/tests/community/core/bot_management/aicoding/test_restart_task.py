@@ -204,10 +204,10 @@ async def test_admission_returns_pending_without_executing_restart(setup, engine
     s.repo.bot["active_engine"] = engine
     s.repo.conflict = True
     result = await submit(s)
-    assert result["status"] == "PENDING"
+    assert result["status"] == "ACTIVE"
     assert result["binding_id"] == 7
     assert result["restart_in_progress"]
-    assert s.repo.bot["status"] == "PENDING"
+    assert s.repo.bot["status"] == "ACTIVE"
     assert s.repo.bot["ext"]["unrelated"] == {"keep": True}
     assert s.repo.bot["ext"]["concurrent"] == 1
     s.service.restart_bot.assert_not_called()
@@ -242,12 +242,12 @@ async def test_enqueue_failure_leaves_pending_and_allows_retry(setup, original_s
     setup.queue.fail = True
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await submit(setup)
-    assert setup.repo.bot["status"] == "PENDING"
+    assert setup.repo.bot["status"] == original_status
     assert KEY not in setup.repo.bot["ext"]
     assert task(setup) is None
     setup.service.restart_bot.assert_not_called()
     setup.queue.fail = False
-    assert (await submit(setup))["status"] == "PENDING"
+    assert (await submit(setup))["status"] == original_status
     assert task(setup) is not None
     mock_lifecycle(setup)
     assert isinstance(setup.handler.handle(task(setup).payload), Reschedule)
@@ -278,14 +278,14 @@ async def test_backup_failure_persists_existing_status_and_startup_error_fields(
     result = s.handler.handle(task(s).payload)
     assert isinstance(result, Fail)
     view = s.service.get_bot("b", "o")
-    assert view["status"] == "FAILED"
-    assert "旧容器未销毁" in view["ext"]["start_message"]
-    assert "secret" not in view["ext"]["start_message"]
+    assert view["status"] == "ACTIVE"
+    assert "旧容器未销毁" in journal(view)["error_message"]
+    assert "secret" not in journal(view)["error_message"]
     assert s.binding["status"] == "ACTIVE"
     assert s.repo.bot["binding_id"] == 7
-    assert s.repo.bot["status"] == "FAILED"
-    assert s.repo.bot["ext"]["start_status"] == "FAILED"
-    assert s.repo.bot["ext"]["start_message"] == view["ext"]["start_message"]
+    assert s.repo.bot["status"] == "ACTIVE"
+    assert s.repo.bot["ext"]["start_status"] == "SUCCEEDED"
+    assert "start_message" not in s.repo.bot["ext"]
     assert current_restart.get() is None
 
 
@@ -295,7 +295,7 @@ async def test_backup_timeout_has_actionable_reason(setup):
     await submit(s)
     mock_lifecycle(s, backup_error=TimeoutError("secret"))
     assert isinstance(s.handler.handle(task(s).payload), Fail)
-    assert "备份超时" in s.service.get_bot("b", "o")["ext"]["start_message"]
+    assert "备份超时" in journal(s.service.get_bot("b", "o"))["error_message"]
 
 
 @pytest.mark.asyncio
@@ -438,7 +438,7 @@ async def test_queue_terminal_status_is_not_inferred_by_bot_read(setup):
     await submit(s)
     task(s).status = TaskStatus.TIMED_OUT
     view = s.service.get_bot("b", "o")
-    assert view["status"] == "PENDING"
+    assert view["status"] == "ACTIVE"
     assert "start_message" not in view["ext"]
 
 
@@ -508,9 +508,9 @@ async def test_status_http_response_keeps_existing_failure_fields(setup):
         bot_service=s.service,
     )
     assert response.success
-    assert response.data["bot_status"] == "FAILED"
-    assert response.data["is_ready"] is False
-    assert "备份超时" in response.data["error_message"]
+    assert response.data["bot_status"] == "ACTIVE"
+    assert response.data["is_ready"] is True
+    assert "备份超时" in response.data["ext"]["aicoding"]["restart"]["message"]
 
 
 @pytest.mark.asyncio
@@ -570,7 +570,7 @@ async def test_retry_clears_existing_failure_fields_atomically(setup):
     assert isinstance(s.handler.handle(task(s).payload), Fail)
     task(s).status = TaskStatus.FAILED
     await submit(s)
-    assert s.repo.bot["status"] == "PENDING"
+    assert s.repo.bot["status"] == "ACTIVE"
     assert "start_status" not in s.repo.bot["ext"]
     assert "start_message" not in s.repo.bot["ext"]
     assert s.repo.bot["ext"]["unrelated"] == {"keep": True}
@@ -582,10 +582,10 @@ async def test_runtime_report_behavior_is_unchanged_without_read_projection(setu
     await submit(s)
     mock_lifecycle(s, backup_error=TimeoutError())
     s.handler.handle(task(s).payload)
-    failure = s.repo.bot["ext"]["start_message"]
+    failure = journal(s.repo.bot)["error_message"]
     s.repo.bot["ext"].update(start_status="SUCCEEDED", start_message="late report")
     view = s.service.get_bot("b", "o")
-    assert view["status"] == "FAILED"
+    assert view["status"] == "ACTIVE"
     assert view["ext"]["start_status"] == "SUCCEEDED"
     assert view["ext"]["start_message"] == "late report"
     assert journal(s.repo.bot)["error_message"] == failure
@@ -817,7 +817,7 @@ async def test_immediate_worker_cannot_repeat_pending_or_be_reset_by_admission(s
     enqueue = s.queue.enqueue
     with patch.object(s.repo, "update_by_owner", wraps=s.repo.update_by_owner) as update:
         def wake_worker(*args, **kwargs):
-            assert s.repo.bot["status"] == "PENDING"
+            assert s.repo.bot["status"] == "ACTIVE"
             result = enqueue(*args, **kwargs)
             assert isinstance(s.handler.handle(result.record.payload), Reschedule)
             s.repo.bot["status"] = "ACTIVE"
@@ -832,8 +832,6 @@ async def test_immediate_worker_cannot_repeat_pending_or_be_reset_by_admission(s
 @pytest.mark.asyncio
 @pytest.mark.parametrize("write_applied", [False, True])
 async def test_empty_pending_update_keeps_existing_failure_contract(setup, monkeypatch, write_applied):
-    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-
     s = setup
     update = s.repo.update_by_owner
 
@@ -843,10 +841,9 @@ async def test_empty_pending_update_keeps_existing_failure_contract(setup, monke
         return None
 
     monkeypatch.setattr(s.repo, "update_by_owner", empty_result)
-    with pytest.raises(BotServiceError, match="Bot not found while preparing restart: b"):
-        await submit(s)
-    assert task(s) is None
-    assert s.repo.bot["status"] == ("PENDING" if write_applied else "ACTIVE")
+    accepted = await submit(s)
+    assert task(s) is not None
+    assert accepted['status'] == s.repo.bot['status'] == 'ACTIVE'
     s.service.restart_bot.assert_not_called()
 
 
@@ -862,7 +859,7 @@ async def test_enqueue_lost_response_keeps_pending_and_worker_recovery(setup, mo
     monkeypatch.setattr(s.queue, "enqueue", lost_response)
     with pytest.raises(ConnectionError, match="response lost"):
         await submit(s)
-    assert s.repo.bot["status"] == "PENDING"
+    assert s.repo.bot["status"] == "ACTIVE"
     assert task(s) is not None and KEY not in s.repo.bot["ext"]
     mock_lifecycle(s)
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
@@ -884,9 +881,9 @@ async def test_retry_after_exit_before_enqueue_is_not_stuck_in_orphan_journal(se
     with pytest.raises(AdmissionExit):
         await submit(s)
     assert task(s) is None and KEY not in s.repo.bot["ext"]
-    assert s.repo.bot["status"] == "PENDING"
+    assert s.repo.bot["status"] == "ACTIVE"
     monkeypatch.setattr(s.queue, "enqueue", enqueue)
-    assert (await submit(s))["status"] == "PENDING"
+    assert (await submit(s))["status"] == "ACTIVE"
     assert task(s) is not None
 
 

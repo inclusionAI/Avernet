@@ -1,4 +1,5 @@
 import { backendRequest } from '../httpClient';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 import { userScopedParams } from './botController';
 import type { ChannelDto } from './botEditorChannelDtos';
@@ -363,13 +364,15 @@ export const botEditorController = {
       page_size: 20,
       owner_id: ownerId,
     }),
-  listIdentityFiles: (botId: string, ownerId?: string) =>
+  listIdentityFiles: (botId: string, ownerId?: string, stage?: BotRuntimeStage) =>
     request<{ bot_id: string; files: IdentityFileInfoDto[] }>(path(botId, 'identity'), 'GET', {
       owner_id: ownerId,
+      stage,
     }),
-  getIdentityFile: (botId: string, type: string) => request<IdentityFileDto>(path(botId, `identity/${type}`)),
-  updateIdentityFile: (botId: string, type: string, content: string) =>
-    request(path(botId, `identity/${type}`), 'PUT', {}, { content }),
+  getIdentityFile: (botId: string, type: string, ownerId?: string, stage?: BotRuntimeStage) =>
+    request<IdentityFileDto>(path(botId, `identity/${type}`), 'GET', { owner_id: ownerId, stage }),
+  updateIdentityFile: (botId: string, type: string, content: string, ownerId?: string) =>
+    request(path(botId, `identity/${type}`), 'PUT', { owner_id: ownerId, stage: 'draft' }, { content }),
   listChannels: (botId: string, ownerId?: string) =>
     request<ChannelDto[] | BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', {
       page: 1,

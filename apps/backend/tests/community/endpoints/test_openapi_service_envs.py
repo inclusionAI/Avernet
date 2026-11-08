@@ -8,7 +8,9 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from tests.community.adapters.http.quality.test_quality_router import FakeQualityTaskService
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
+from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.utils.env_utils import get_current_env
@@ -47,8 +49,10 @@ def _auth(world):
 
 
 async def _publish(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
+    global _last_publish_biz_id
     assert resource_spec is None
-    assert (publish_id, operator, biz_id, device_count) == (1, "operator-1", "task-1", 1)
+    assert (publish_id, operator, device_count) == (1, "operator-1", 1)
+    _last_publish_biz_id = biz_id
     return {"success": True, "publish_id": 1, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
 
 
@@ -60,6 +64,19 @@ def _progress(self, *, baas_publish_id, include_devices):
 def _teardown(self, bot_uuid, *, operator, publish_id):
     assert (bot_uuid, operator, publish_id) == ("eval-1", "operator-1", 1)
     return {"success": True, "bot_uuid": bot_uuid, "default_tag": "eval", "message": "enqueued"}
+
+
+_quality_tasks: FakeQualityTaskService | None = None
+_last_publish_biz_id: str | None = None
+
+
+def _bind_fake_quality_tasks(world):
+    """Bind the test-quality double so the seeded public publish call can
+    exercise the endpoint's new task-linking dependency without real BaaS flow.
+    """
+    global _quality_tasks
+    _quality_tasks = FakeQualityTaskService()
+    bind_overrides(world, QualityTaskServiceProtocol, {"create_task": _quality_tasks.create_task})
 
 
 def _seed(world):
@@ -74,12 +91,27 @@ def _seed(world):
     bind_overrides(world, PublishFlowServiceProtocol, {
         "eval_publish": _publish, "get_baas_publish_progress": _progress, "eval_teardown": _teardown,
     })
+    _bind_fake_quality_tasks(world)
+
+
+def _assert_publish_linked_quality_task(response, _world):
+    assert _quality_tasks is not None
+    task = _quality_tasks.get_task_by_uuid(response.json()["data"]["quality_task_uuid"])
+    assert task is not None
+    assert task.id == response.json()["data"]["quality_task_id"]
+    assert task.uuid == _last_publish_biz_id
+    assert response.json()["data"]["quality_task_uuid"] == _last_publish_biz_id
+    assert task.ext == {
+        "publish_id": 1, "bot_uuid": "eval-1", "baas_publish_id": 42,
+        "operator": "operator-1",
+    }
 
 
 @endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_ok", seed=_seed,
     input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
-        query_params={"owner_id": _OWNER, "operator": "operator-1", "biz_id": "task-1"}, headers=_headers()),
-    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True, "baas_publish_id": 42}}))
+        query_params={"owner_id": _OWNER, "operator": "operator-1"}, headers=_headers()),
+    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True, "baas_publish_id": 42}}),
+    extra_assertions=(_assert_publish_linked_quality_task,))
 def publish_ok():
     pass
 
@@ -152,7 +184,7 @@ def publish_resources():
 
 async def _publish_device_count(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
     assert resource_spec is None
-    assert (publish_id, operator, biz_id, device_count) == (1, "operator-1", "task-1", 3)
+    assert (publish_id, operator, device_count) == (1, "operator-1", 3)
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
 
 
@@ -163,7 +195,7 @@ def _seed_device_count(world):
 
 @endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_device_count", seed=_seed_device_count,
     input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
-        query_params={"owner_id": _OWNER, "operator": "operator-1", "biz_id": "task-1", "device_count": 3},
+        query_params={"owner_id": _OWNER, "operator": "operator-1", "device_count": 3},
         headers=_headers()),
     expect=ExpectSuccess(status=202, json_contains={"data": {"success": True}}))
 def publish_device_count():

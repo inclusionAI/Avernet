@@ -1,8 +1,10 @@
 import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
+import { assertEditorWorkflowReadable } from '../editor/workflowWriteGuard'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
 import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
+import ApprovalWorkbench from '../components/workflow-workspace/ApprovalWorkbench'
 import Sidebar, { type WorkspaceView } from '../components/workflow-workspace/Sidebar'
 import OverviewTab from '../components/workflow-workspace/OverviewTab'
 import EditorTab from '../components/workflow-workspace/EditorTab'
@@ -20,7 +22,7 @@ import { checkpointOtherPackSessions, hasAnyPackVersionUpload, packVersionsRevis
 import { useEditorStore } from '../editor/store'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const VIEW_META: Record<Exclude<WorkspaceView, 'dashboard'>, { title: string; description: string }> = {
+const VIEW_META: Record<Exclude<WorkspaceView, 'dashboard' | 'workbench'>, { title: string; description: string }> = {
   overview: { title: '运行概览', description: '查看当前工作流的运行状态与近期表现' },
   diagnosis: { title: '问题与优化', description: '从异常证据到建议、应用与效果验证' },
   remedies: { title: '可复用经验', description: '查看经过边界审核、可复用的知识与修法' },
@@ -31,7 +33,7 @@ const VIEW_META: Record<Exclude<WorkspaceView, 'dashboard'>, { title: string; de
 function viewFromSearch(params: URLSearchParams, isAdmin: boolean): WorkspaceView {
   const tab = params.get('tab')
   if (tab === 'dashboard') return isAdmin ? 'dashboard' : 'diagnosis'
-  if (tab === 'overview' || tab === 'editor' || tab === 'management') return tab
+  if (tab === 'overview' || tab === 'editor' || tab === 'management' || tab === 'workbench') return tab
   if (tab === 'evolution') {
     const section = params.get('evoTab')
     if (section === 'remedies') return section
@@ -266,7 +268,7 @@ export default function WorkflowWorkspace() {
   const changeView = useCallback((view: WorkspaceView) => {
     const next = new URLSearchParams(searchParams)
     if (selectedWorkflow) next.set('workflowId', selectedWorkflow.workflow_id)
-    if (view === 'dashboard' || view === 'overview' || view === 'editor' || view === 'management') {
+    if (view === 'dashboard' || view === 'workbench' || view === 'overview' || view === 'editor' || view === 'management') {
       next.set('tab', view)
       next.delete('evoTab')
     } else {
@@ -309,6 +311,7 @@ export default function WorkflowWorkspace() {
 
   const handleCreate = useCallback(async (input: { workflowId: string; spec: WorkflowSpec; facade?: { command?: string; remark?: string } }) => {
     if (!user?.userId) throw new Error('无法获取用户信息，请重新登录')
+    assertEditorWorkflowReadable(input.workflowId)
     const request = ++transitionRequest.current
     const sourceLocation = locationRef.current
     const approval = beginWorkflowTransition()
@@ -342,21 +345,20 @@ export default function WorkflowWorkspace() {
     }
   }, [createMutation, refetch, searchParams, setSearchParams, user?.userId])
 
-  if (isError) return <div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>
 
   return <WorkspacePopPendingContext.Provider value={pendingWorkspacePop}><div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-50">
     <Sidebar compact={activeView === 'editor'} activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} />
 
     <main className="flex min-w-0 flex-1 flex-col bg-slate-50">
       {transitionError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{transitionError}</p>}
-      {activeView === 'dashboard' && isAdmin ? (
+      {activeView === 'workbench' ? (<div className="min-h-0 flex-1 overflow-y-auto"><ApprovalWorkbench isAdmin={isAdmin} userId={user?.userId} /></div>) : isError ? (<div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>) : activeView === 'dashboard' && isAdmin ? (
         <div className="min-h-0 flex-1 overflow-y-auto"><Dashboard embedded /></div>
       ) : selectedWorkflow ? (
         <>
           <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-7 py-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <h1 className="truncate text-lg font-semibold tracking-tight text-slate-950">{VIEW_META[activeView as Exclude<WorkspaceView, 'dashboard'>].title}</h1>
+                <h1 className="truncate text-lg font-semibold tracking-tight text-slate-950">{VIEW_META[activeView as Exclude<WorkspaceView, 'dashboard' | 'workbench'>].title}</h1>
                 <span className="text-xs text-slate-300">/</span>
                 <WorkflowPicker workflows={workflows ?? []} selectedId={selectedWorkflow.workflow_id} onSelect={selectWorkflow} loading={isLoading} />
                 <button
@@ -372,7 +374,7 @@ export default function WorkflowWorkspace() {
                 </button>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                <span>{VIEW_META[activeView as Exclude<WorkspaceView, 'dashboard'>].description}</span><span>·</span><span className="font-mono">{selectedWorkflow.workflow_id}</span><span>·</span><span>{selectedWorkflow.run_count} 次运行</span><StatusBadge status={(selectedWorkflow.last_status as import('@avernet/clawweb-shared/web/types').NodeStatus) ?? 'pending'} />
+                <span>{VIEW_META[activeView as Exclude<WorkspaceView, 'dashboard' | 'workbench'>].description}</span><span>·</span><span className="font-mono">{selectedWorkflow.workflow_id}</span><span>·</span><span>{selectedWorkflow.run_count} 次运行</span><StatusBadge status={(selectedWorkflow.last_status as import('@avernet/clawweb-shared/web/types').NodeStatus) ?? 'pending'} />
               </div>
             </div>
             <div className="relative flex shrink-0 items-center gap-3">

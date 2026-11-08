@@ -14,18 +14,23 @@ use serde::Serialize;
 
 use super::common::{
     Envelope, ErrorResponse, PrincipalVerificationState, PrincipalVerifier, RequestId,
-    application_error_response, verify_principal,
+    TrustedBrowserOrigins, application_error_response, verify_principal,
 };
 
 #[derive(Clone)]
 struct GroupSessionConnectionHttpState {
     service: Arc<dyn GroupSessionConnectionService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    trusted_browser_origins: Option<TrustedBrowserOrigins>,
 }
 
 impl PrincipalVerificationState for GroupSessionConnectionHttpState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }
 
@@ -35,14 +40,19 @@ struct GroupSessionConnectionTokenResponse {
     expires_at: i64,
 }
 
-/// Build only the authenticated session-token issuance slice.
+/// Build only the authenticated session-token issuance slice. The per-
+/// actual-source CSRF gate covers this router too (spec §7.4/S2); bootstrap
+/// passes the same trusted browser origins it composed for the main V1
+/// chain (Task 12 wires the real cookie sources).
 pub fn group_session_connection_router(
     service: Arc<dyn GroupSessionConnectionService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    trusted_browser_origins: Option<TrustedBrowserOrigins>,
 ) -> Router {
     let state = GroupSessionConnectionHttpState {
         service,
         principal_verifier,
+        trusted_browser_origins,
     };
     Router::new()
         .route(

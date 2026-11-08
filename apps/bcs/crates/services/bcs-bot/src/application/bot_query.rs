@@ -44,6 +44,7 @@ impl BotQueryService for Bot {
 
         let mut detail = self.bot_to_detail(bot).await;
         detail.agent_card = self.cards_for_ids(&[detail.bot_uuid.clone()]).await?.remove(&detail.bot_uuid);
+        if let Some(name)=detail.agent_card.as_ref().and_then(|card|card.get("name")).and_then(serde_json::Value::as_str) {detail.capabilities.name=Some(name.into());}
         Ok(detail)
     }
 

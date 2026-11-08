@@ -237,7 +237,12 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if isinstance(value, ast.Attribute):
             return safe(value.value)
         if isinstance(value, ast.Subscript):
-            return safe(value.value) and safe(value.slice)
+            # A conventional snake_case field label is a lookup key, like a
+            # Dict key, rather than the credential returned by the lookup.
+            field_key = (isinstance(value.slice, ast.Constant)
+                         and isinstance(value.slice.value, str)
+                         and re.fullmatch(r"[a-z]+(?:_[a-z]+)+", value.slice.value))
+            return safe(value.value) and (bool(field_key) or safe(value.slice))
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.JoinedStr):
@@ -317,6 +322,20 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
     if suspicious:
         return False, True
     if RUST_TYPE_FIELD_RE.fullmatch(content):
+        return True, False
+    # Borrowed optional string parameters are types, not bare credential values.
+    if re.fullmatch(r"\s*\w+\s*:\s*Option<\s*&(?:'[A-Za-z_]\w*\s+)?str\s*>\s*,\s*", content):
+        return True, False
+    # Compact declarations can contain several credential-named arguments or
+    # fields. Only recognize declaration-only lines; literals were checked above.
+    declaration = content.strip()
+    visibility = r"(?:pub(?:\([^)]*\))?\s+)?"
+    if "=" not in declaration and (
+        re.match(r"^" + visibility + r"(?:async\s+)?fn\s+\w+\s*[<(]", declaration)
+        and declaration.endswith("{")
+        or re.match(r"^" + visibility + r"struct\s+\w+\s*\{", declaration)
+        and declaration.endswith("}")
+    ):
         return True, False
     # Require a path/member access or call: an arbitrary bare high-entropy
     # identifier must never be mistaken for a runtime expression.

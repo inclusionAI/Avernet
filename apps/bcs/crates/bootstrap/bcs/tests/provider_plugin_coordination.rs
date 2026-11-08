@@ -208,6 +208,7 @@ async fn provider_bot(http: &reqwest::Client, addr: SocketAddr, state: &bcs::ser
         provider_bot_ref:"qwenwork-desktop".into(), webhook_url:None,
         domains:vec![], skills:vec![], scopes:vec![], bot_uuid:None,
         reject_existing_bot_uuid:false, connection_mode:bcs_service_api::ProviderBotConnectionMode::Plugin,
+        avatar:bcs_service_api::types::bot_profile::AvatarChange::Keep,
     }).await.unwrap();
     (provider,json!({"bot_uuid":bot.bot_uuid,"bot_runtime_token":bot.bot_runtime_token}))
 }

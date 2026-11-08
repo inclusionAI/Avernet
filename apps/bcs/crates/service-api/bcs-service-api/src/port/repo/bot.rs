@@ -351,6 +351,70 @@ pub trait BotRepoPort: Send + Sync {
     async fn cleanup_expired(&self);
     async fn load_from_storage(&self, bot_id: &str) -> Option<BotCapabilities>;
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()>;
+
+    /// Existing-only Bot profile write (bot-authority spec, bot-avatar plan
+    /// Task 3): atomically replace the live record's stored capabilities and
+    /// apply `update.avatar` to the record's dedicated avatar field in the
+    /// same write/transaction boundary.
+    ///
+    /// The write targets an already-existing live record only — no INSERT
+    /// and no upsert: a missing or soft-deleted target returns
+    /// [`ProfileWrite::Missing`] and leaves storage untouched, and existing
+    /// owner/token fields are never part of the statement. The runtime
+    /// registry identity (`agent_code`/`agent_token`) is never part of the
+    /// statement either and keeps its current stored and published values.
+    /// `AvatarChange::Keep`
+    /// must not appear in the storage `SET` clause, so a capabilities
+    /// replacement cannot clear the stored avatar. Backends where an
+    /// unchanged value reports zero affected rows (MySQL without
+    /// found-rows semantics) must not misclassify those writes as `Missing`.
+    async fn update_profile_existing(
+        &self,
+        _bot_id: &str,
+        _update: crate::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<crate::types::bot_profile::ProfileWrite> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot profile update is not configured".into(),
+        ))
+    }
+
+    /// Existing-only avatar write: apply one avatar transition to the live
+    /// record's dedicated avatar field without touching any other field.
+    ///
+    /// Same existing-only contract as
+    /// [`update_profile_existing`](Self::update_profile_existing):
+    /// `Missing` writes nothing, `Keep` writes nothing for the avatar and
+    /// only confirms the live record, and a `Set`/`Clear` of an already
+    /// stored value still reports [`ProfileWrite::Updated`].
+    async fn update_avatar_existing(
+        &self,
+        _bot_id: &str,
+        _avatar: crate::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<crate::types::bot_profile::ProfileWrite> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot avatar update is not configured".into(),
+        ))
+    }
+
+    /// Batched avatar read (display face): the stored avatar URL for every
+    /// requested Bot id, keyed in one map.
+    ///
+    /// The input is deduplicated and bounded (at most 256 distinct ids;
+    /// more is an `InvalidOperation` error and an empty input queries
+    /// nothing). The read keeps the repository's current environment
+    /// isolation, excludes Human actor rows, and retains live and
+    /// soft-deleted (tombstone display) Bot rows: a present `None` value is
+    /// a record without an avatar, while an absent key resolved to no
+    /// record.
+    async fn read_avatar_batch(
+        &self,
+        _bot_ids: &[String],
+    ) -> ServiceResult<crate::types::bot_profile::BotAvatarMap> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot avatar batch read is not configured".into(),
+        ))
+    }
+
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()>;
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()>;
 

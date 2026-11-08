@@ -1,4 +1,5 @@
 pub mod admission;
+pub mod avatar;
 pub mod bots;
 pub mod chat_run;
 pub mod friends;
@@ -8,6 +9,7 @@ pub mod onboard;
 pub mod organizations;
 pub mod provider;
 
+pub use avatar::AvatarField;
 pub use bots::{
     BotCapabilities, BotDynamicStatus, BotInfo, BotSearchEntry, BotSearchQuery, DiscoverBotEntry,
     DiscoverBotProviderInfo, DiscoverBotsExtendedResponse, DiscoverBotsResponse,

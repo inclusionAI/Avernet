@@ -1,3 +1,4 @@
+import type { GroupContextDelivery } from '@/domain/collaboration/types';
 import {
   createChannelBinding,
   deleteChannelBinding,
@@ -15,6 +16,7 @@ export type DingTalkGroupChatScope = 'per_sender' | 'conversation_shared';
 export type DingTalkOutboundVisibility = 'full_transcript' | 'lead_only';
 
 export interface GroupDingTalkConfig {
+  groupContextDelivery: GroupContextDelivery;
   robotCode: string;
   appKey: string;
   appSecret: string;
@@ -56,6 +58,7 @@ export function buildDingTalkConfigPayload(cfg: GroupDingTalkConfig): DingTalkCo
     // app_secret 不 trim，避免误改密钥字符。
     client_secret: cfg.appSecret,
     send_mode,
+    group_context_delivery: cfg.groupContextDelivery,
   };
 }
 
@@ -102,6 +105,7 @@ export function mapBindingToView(dto: ChannelBindingDto): DingTalkBindingView {
     isRecord(rawSendMode) && rawSendMode.mode === 'streaming_card' && typeof rawSendMode.card_template_id === 'string';
   const accountRef = safeString(dto.account_ref);
   const config: GroupDingTalkConfig = {
+    groupContextDelivery: rawConfig.group_context_delivery === 'inject' ? 'inject' : 'send',
     robotCode: safeString(rawConfig.robot_code, accountRef),
     appKey: safeString(rawConfig.client_id),
     appSecret: '',

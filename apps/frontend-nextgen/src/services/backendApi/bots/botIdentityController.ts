@@ -1,4 +1,5 @@
 import { backendRequest } from '../httpClient';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { BackendApiEnvelope, BackendUnknownRecord } from '../types';
 
 export const BOT_IDENTITY_ENDPOINTS = {
@@ -9,22 +10,23 @@ export const BOT_IDENTITY_ENDPOINTS = {
 };
 
 // 查询 Bot 身份状态。
-export function getBotIdentity(bot_id: string) {
+export function getBotIdentity(bot_id: string, ownerId?: string, stage?: BotRuntimeStage) {
   return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(BOT_IDENTITY_ENDPOINTS.identity(bot_id), {
     method: 'GET',
+    params: { owner_id: ownerId, stage },
   });
 }
 // 查询 Bot 身份文件。
-export function getBotIdentityFile(bot_id: string, file_type: string) {
+export function getBotIdentityFile(bot_id: string, file_type: string, ownerId?: string, stage?: BotRuntimeStage) {
   return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(
     BOT_IDENTITY_ENDPOINTS.identityFile(bot_id, file_type),
-    { method: 'GET' },
+    { method: 'GET', params: { owner_id: ownerId, stage } },
   );
 }
 // 更新 Bot 身份文件。
-export function updateBotIdentityFile(bot_id: string, file_type: string, body: BackendUnknownRecord) {
+export function updateBotIdentityFile(bot_id: string, file_type: string, body: BackendUnknownRecord, ownerId?: string) {
   return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(
     BOT_IDENTITY_ENDPOINTS.identityFile(bot_id, file_type),
-    { method: 'PUT', data: body },
+    { method: 'PUT', params: { owner_id: ownerId, stage: 'draft' }, data: body },
   );
 }

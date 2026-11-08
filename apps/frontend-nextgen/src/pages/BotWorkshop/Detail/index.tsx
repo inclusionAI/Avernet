@@ -13,6 +13,7 @@ import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdenti
 import { useDesktopFolder } from '@/hooks/useDesktopFolder';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
+import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { cn } from '@/utils/cn';
 import React, { useEffect, useState } from 'react';
@@ -49,9 +50,10 @@ const BotWorkshopDetailPage: React.FC = () => {
   const advanced = useBotAdvancedConfig(
     id,
     requestIdentity.ready && !!detail.bot,
-    ownerId,
+    addressedOwnerId,
     desktopPolicy.markdown,
     desktopPolicy.channels,
+    detail.bot?.serviceMode === 'service' ? runtimeStage ?? resolveBotRuntimeStage(detail.bot.lifecycle) : 'draft',
   );
   const { panels, additionalTabs } = useBotEditorPanels();
   const { tab, setTab, more, setMore, hostingAllowed, visibleMainTabs } = useHostingTabs(

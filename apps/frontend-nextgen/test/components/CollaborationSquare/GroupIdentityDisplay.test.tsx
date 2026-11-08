@@ -12,7 +12,8 @@ test('公开群固定显示用户、浅灰背景且不提供身份切换，悬�
   const user = userEvent.setup();
   render(<GroupIdentityDisplay />);
   const identity = screen.getByRole('group', { name: '当前协作身份：测试用户' });
-  expect(identity).toHaveClass('bg-muted', 'h-9');
+  // dmore Frame 2：页头身份展示与搜索栏同高（32px），浅灰底、无描边。
+  expect(identity).toHaveClass('h-8', 'bg-muted');
   expect(identity).toHaveAttribute('aria-disabled', 'true');
   expect(screen.getByText('用户')).toHaveClass('text-primary');
   expect(screen.queryByRole('button')).not.toBeInTheDocument();

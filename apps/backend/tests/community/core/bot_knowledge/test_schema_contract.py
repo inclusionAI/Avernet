@@ -26,6 +26,7 @@ def test_binding_model_matches_reviewed_columns_types_and_indexes():
         "space_id",
         "kb_id",
         "enabled",
+        "online_enabled",
         "revision",
         "updated_by",
     }

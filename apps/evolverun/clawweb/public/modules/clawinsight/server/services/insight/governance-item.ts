@@ -1,3 +1,4 @@
+import { managementProjection } from "./management/projection.js";
 export type GovernanceActionType = "DIRECT_EVOLUTION" | "ASSIGN_OWNER";
 
 export type ImprovementSourceType =
@@ -172,5 +173,6 @@ export function parseGovernanceGuidance(text: string | null) {
     verificationNewSessionCount: Number(eventValue(verificationEvent, "新Session数") ?? 0) || 0,
     verificationLastRecurrenceAt: eventValue(verificationEvent, "最后再现"),
     resolvedSource: eventValue(verificationEvent, "关闭来源"),
+    ...managementProjection(text),
   };
 }

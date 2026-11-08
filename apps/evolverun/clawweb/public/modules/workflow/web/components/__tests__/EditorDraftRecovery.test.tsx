@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import { stringify } from 'yaml'
@@ -274,7 +274,7 @@ describe('restored baseline and owner metadata', () => {
     await enter('PUSH'); click('YAML')
     expect(screen.getByLabelText('工作流 YAML')).toHaveValue(yamlDraft)
     click('校验并应用')
-    expect(screen.getByRole('alert')).toHaveTextContent('工作流已切换')
+    expect(within(screen.getByRole('region', { name: 'YAML 编辑器' })).getByRole('alert')).toHaveTextContent('工作流已切换')
     expect(mocks.validate).not.toHaveBeenCalled()
     expect(state().pendingEdits).toHaveProperty('yaml')
     expect(state().spec!.id).toBe('different-owner')

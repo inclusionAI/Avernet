@@ -5,7 +5,6 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use tokio::fs;
 use tracing::debug;
 
 use bcs_config::resolve_env_str as resolve_env;
@@ -13,7 +12,7 @@ use bcs_service_api::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, ServiceError,
+    BotControlPlaneRecord, BotControlPlaneRepoPort,
     ServiceResult, UserVisibility,
 };
 use bcs_service_api::port::repo::bot_control_plane::{
@@ -378,7 +377,7 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
-        let _patch_guard = self.control_plane_patch_lock.lock().await;
+        let _patch_guard = self.record_write_lock.lock().await;
         if patch.user_visibility.is_some()
             || patch.friend_ext.is_some()
             || patch.friend_check_in_strategy.is_some()
@@ -480,11 +479,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             friend_check_in_strategy,
         };
         let path = self.bot_info_path(bot_id);
-        let directory = path.parent().ok_or_else(|| {
-            ServiceError::InternalError(format!("Invalid path for bot: {bot_id}"))
-        })?;
-        fs::create_dir_all(directory).await?;
-        fs::write(&path, serde_json::to_string_pretty(&persisted)?).await?;
+        // 普通存储写入保留头像字段 (bot-avatar Task 3): the control-plane
+        // attribute rewrite keeps the record's stored avatar unchanged.
+        let stored = super::profile::StoredBotProfile {
+            record: persisted,
+            avatar_url: super::profile::stored_avatar_at(&path).await,
+        };
+        self.write_stored_profile(bot_id, &stored).await?;
 
         {
             let mut bots = self.bots.write().await;

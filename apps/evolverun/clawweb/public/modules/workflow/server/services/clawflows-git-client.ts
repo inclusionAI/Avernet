@@ -2,20 +2,20 @@
  * ClawFlowsGitClient — isolated temporary-directory git operations for AutoHeal.
  *
  * ClawMind owns packsRoot and the long-lived pack repos. AutoHeal clones a
- * fresh temporary copy for every save/deploy so it never competes with local
- * Pack state. Branch names, tag names and annotations match ClawMind exactly:
+ * fresh temporary repository for every operation so it never competes with
+ * local Pack state. Saves initialize an empty repo and fetch only wf; the clone
+ * primitive remains for callers that explicitly need a checkout. Ref names:
  *
- *   saved branch: saved/{workflowId}
- *   deploy branch: wf/{workflowId}
+ *   saved Pack branch: wf/{workflowId}
  *   deploy tag:   deploy/{workflowId}/#N
  *   annotation:   version=N\naction=deploy\nworkflowIds={workflowId}
  */
 import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
+import { createConfiguredTemporaryDirectory } from "@avernet/clawweb-shared/server/env";
 import { packVersionGitEnvironment } from "./pack-version-git-env.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { TextDecoder } from "node:util";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { stringify as stringifyYaml, parse as parseYaml, parseDocument, isSeq, isAlias, isNode, visit } from "yaml";
 import { normalizeWorkflowSpec, type WorkflowSpec } from "../workflow.js";
@@ -112,23 +112,8 @@ async function writeCredentials(authDir: string, contents: string): Promise<stri
   return credentialHelper(credentialsPath);
 }
 
-function getTempRepoPrefix(): string {
-  const configured = process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || tmpdir();
-  return path.join(configured, "cw-autoheal-");
-}
-
 export async function createTempRepo(): Promise<string> {
-  const prefix = getTempRepoPrefix();
-  const parent = path.dirname(prefix);
-  if (!existsSync(parent)) {
-    throw new Error(`临时 git 目录的父路径不存在: ${parent} (CLAWWEB_TEMP_DIR/TMPDIR=${process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || ""})`);
-  }
-  try {
-    return await mkdtemp(prefix);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`无法创建临时 git 目录: ${message} (prefix=${prefix})`);
-  }
+  return createConfiguredTemporaryDirectory("cw-autoheal");
 }
 
 export async function removeTempRepo(repoDir: string): Promise<void> {
@@ -499,14 +484,34 @@ export function resolvePackPaths(
     assertNoGitlink(repoDir, [file], links);
     if (!candidates.includes(file)) candidates.push(file);
   }
+  // A repository-root manifest is authoritative when it identifies this Pack and
+  // declares the workflow. In that case, everything below packs/ is an ordinary
+  // resource and its nested manifests are not parsed or treated as candidates.
+  // If the root does not match, retain the old fail-closed discovery behavior.
   let manifestBytes = 0;
-  const inspected = candidates.map(file => {
+  const inspectedByFile = new Map<string, { file: string; text: string; value: Record<string, unknown>; id: string; size: number }>();
+  const inspect = (file: string) => {
+    const existing = inspectedByFile.get(file);
+    if (existing) return existing;
     const found = readBoundedManifest(repoDir, file);
     manifestBytes += found.size;
     if (manifestBytes > 8 * 1024 * 1024) throw new Error("Pack manifest discovery limit exceeded");
-    return { file, ...found };
-  });
-  const matchingCandidates = inspected.filter(candidate => candidate.id === packId);
+    const candidate = { file, ...found };
+    inspectedByFile.set(file, candidate);
+    return candidate;
+  };
+  const rootPackCandidate = rootExists ? inspect(root) : undefined;
+  const rootDeclaresWorkflow = Array.isArray(rootPackCandidate?.value.workflows)
+    ? (rootPackCandidate!.value.workflows as unknown[]).some(item =>
+      typeof item === "string" ? item === workflowId
+        : !!item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).id === workflowId)
+    : false;
+  const selectedFiles = rootPackCandidate?.id === packId && rootDeclaresWorkflow
+    ? candidates.filter(file => file === root || !path.relative(repoDir, file).startsWith("packs/"))
+    : candidates;
+  for (const file of selectedFiles) inspect(file);
+  const selectedCandidates = selectedFiles.map(file => inspectedByFile.get(file)!);
+  const matchingCandidates = selectedCandidates.filter(candidate => candidate.id === packId);
   if (matchingCandidates.length > 1) throw new Error("Pack manifest conflict");
 
   let filePath: string;
@@ -585,7 +590,7 @@ export function resolvePackPaths(
   }
   // Different identities are independent only when their declared resources
   // do not own the files this operation will change.
-  for (const otherPack of inspected) {
+  for (const otherPack of selectedCandidates) {
     if (otherPack.file === filePath) continue;
     const collision = (otherPack.value.workflows as unknown[]).some(item => {
       const id = typeof item === "string" ? item : (item as Record<string, unknown>).id;
@@ -855,31 +860,11 @@ export async function prepareBranchBase(
   return "default";
 }
 
+/** @deprecated No DB-first callback or immutable lease. Use withPreparedWorkflowSpec. */
 export async function commitAndPushSaved(
-  repoDir: string,
-  workflowId: string,
-  note: string,
-  author: GitAuthor,
+  _repoDir: string, _workflowId: string, _note: string, _author: GitAuthor,
 ): Promise<SaveGitResult> {
-  const branch = `saved/${workflowId}`;
-
-  // The branch base is prepared by prepareBranchBase before the spec/manifest writes
-  // (see AutoHealSaveService.save), so the saved snapshot inherits the previous full
-  // Pack content. This reset is a no-op when the base was prepared, and a
-  // default-HEAD fallback for legacy callers that skip prepareBranchBase. The old
-  // --orphan reset discarded the base and published a scripts-less snapshot.
-  await git(repoDir, ["checkout", "-B", branch]);
-
-  await git(repoDir, ["add", "."]);
-
-  const message = `[auto-heal] save ${workflowId}: ${note || "auto"}`;
-  await git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
-
-  const commit = await git(repoDir, ["rev-parse", "HEAD"]);
-
-  await git(repoDir, ["push", "--force-with-lease", "origin", branch]);
-
-  return { branch, commit };
+  throw new Error('Legacy saved writer retired; use the prepared DB-first save core');
 }
 
 export async function getMaxDeployNumberFromGitTags(repoDir: string, workflowId: string): Promise<number> {

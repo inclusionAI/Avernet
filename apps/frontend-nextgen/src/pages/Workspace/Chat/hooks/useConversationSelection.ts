@@ -37,12 +37,13 @@ export interface UseConversationSelectionResult {
 }
 
 export function useConversationSelection(options: {
+  userId?: string | null;
   managedBots: ConversationBotView[];
   friendBots: ConversationBotView[];
   /** 目录 hydration 是否完成(完成后才按目录重解析未决 section)。 */
   hydrated: boolean;
 }): UseConversationSelectionResult {
-  const { managedBots, friendBots, hydrated } = options;
+  const { userId, managedBots, friendBots, hydrated } = options;
   const store = useConversationStore();
 
   const botById = useMemo(() => {
@@ -53,6 +54,14 @@ export function useConversationSelection(options: {
   // 目录 key 变化才触发重解析 effect(数组引用每次渲染都变)。
   const managedBotIdKey = useMemo(() => managedBots.map((v) => `${v.section}=${v.bot.botId}`).join('|'), [managedBots]);
   const friendBotIdKey = useMemo(() => friendBots.map((v) => v.bot.botId).join('|'), [friendBots]);
+  const managedCodingBotIdKey = useMemo(
+    () =>
+      managedBots
+        .filter((view) => view.bot.isAgentCodingBot)
+        .map((view) => `${view.section}=${view.bot.botId}`)
+        .join('|'),
+    [managedBots],
+  );
 
   const selectedInDirectory =
     store.selectedSection === 'friend'
@@ -87,10 +96,12 @@ export function useConversationSelection(options: {
     origin,
   });
   const onRouteSelection = useConversationRouteResolver({
+    userId,
     managedBots,
     friendBots,
     hydrated,
     managedBotIdKey,
+    managedCodingBotIdKey,
     friendBotIdKey,
     selectedInDirectory,
     selection,

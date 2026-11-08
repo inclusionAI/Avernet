@@ -280,6 +280,10 @@ class _BotRepo:
         self._record = record
         self.calls = []
 
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [] if row is None else [{"entity_id": locator, **row}]
+
     def get_by_id_and_owner(self, bot_id, owner_id):
         self.calls.append((bot_id, owner_id))
         return self._record

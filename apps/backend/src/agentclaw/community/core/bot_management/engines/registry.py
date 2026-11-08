@@ -600,6 +600,36 @@ def resolve_restart_strategy(bot):
     )
 
 
+def resolve_status_ext(bot: dict, *, response_ext: dict, public=False) -> dict:
+    """Delegate response extension projection to the registered engine policy."""
+    _, strategy = resolve_restart_strategy(bot)
+    return strategy.project_status_ext(
+        ext=bot.get('ext') or {}, response_ext=response_ext, public=public,
+    )
+
+
+def _published_restart_strategy(record):
+    """Select the policy captured when the published restart was admitted."""
+    engine = ((record.ext or {}).get('restart') or {}).get('engine')
+    return get_engine_provisioning_registry().resolve(normalize_engine_type(engine))
+
+
+def resolve_published_status_ext(record, *, progress=None, public=False) -> dict:
+    return _published_restart_strategy(record).project_status_ext(
+        ext=record.ext or {}, response_ext={}, published=True, progress=progress, public=public,
+    )
+
+
+def resolve_published_restart_result(record):
+    return _published_restart_strategy(record).published_restart_result(record=record)
+
+
+def observe_published_restart_status(record, *, progress, mutate_ext):
+    _published_restart_strategy(record).observe_published_restart(
+        record=record, progress=progress, mutate_ext=mutate_ext,
+    )
+
+
 async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any,
                                   operation_id: str | None = None,
                                   restart_key: str | None = None) -> None:
@@ -618,6 +648,10 @@ async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime:
 
 __all__ = [
     "prepare_instance_restart",
+    "resolve_status_ext",
+    "resolve_published_status_ext",
+    "resolve_published_restart_result",
+    "observe_published_restart_status",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",

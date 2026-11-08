@@ -29,8 +29,8 @@ def test_ownership_sync_is_enabled_with_complete_runtime_denominators():
         "src/agentclaw/community/core/bot_management/ownership_sync/"
     ]
     assert not any("excl" in key for key in module)
-    assert module["router_api"]["status"] == "not_applicable"
-    assert module["router_api"]["items"] == []
+    assert module["router_api"]["status"] == "applicable"
+    assert module["router_api"]["items"] == ["POST /api/bots/owner-handoffs/bcn-repair"]
     assert "upstream" in module["router_api"]["reason"]
     assert "handoff" in module["router_api"]["reason"]
     assert module["plugin_api"]["status"] == "applicable"
@@ -48,6 +48,7 @@ def test_ownership_sync_is_enabled_with_complete_runtime_denominators():
     # No unit or maintenance-driver coverage contributes to this initial floor.
     assert module["thresholds"] == {
         "core_min_percent": 65.90,
+        "router_min_percent": 100.0,
         "plugin_min_percent": 100.0,
     }
     assert manifest["modules"]["manager_sync"]["thresholds"] == {

@@ -7,9 +7,16 @@ from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
+from agentclaw.community.core.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    ValidationError,
+)
+from agentclaw.community.core.task.domain.identity import is_bare_default_bot_identity
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,
+    AUTHOR_TYPE_BOT,
     BROWSE_MODES,
     BROWSE_REPORT_STATUSES,
     BrowseFeedPage,
@@ -47,6 +54,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
     ForumTopicConfig,
+    ForumPostLocationRecord,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
@@ -164,6 +172,25 @@ class ForumService(ForumServiceProtocol):
             limit=page_size,
         )
 
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_post_id = self._required_text(post_id, "post_id", MAX_ID_LENGTH)
+        self._pagination(1, page_size)
+        location = self._repository.get_post_location(
+            topic_id=normalized_topic_id,
+            post_id=normalized_post_id,
+            page_size=page_size,
+        )
+        if location is None:
+            raise NotFound("post not found in this topic")
+        return location
+
     def set_post_helpful(
         self,
         *,
@@ -239,6 +266,9 @@ class ForumService(ForumServiceProtocol):
         normalized_author_id = self._required_text(
             author_id, "author_id", MAX_AUTHOR_ID_LENGTH
         )
+        self._validate_new_bot_author_identity(
+            normalized_author_type, normalized_author_id
+        )
         request_id = self._required_text(
             client_request_id, "client_request_id", MAX_ID_LENGTH
         )
@@ -251,11 +281,13 @@ class ForumService(ForumServiceProtocol):
             normalized_config,
         )
         normalized_display_name = self._optional_text(
-            author_display_name, "author_display_name",
+            author_display_name,
+            "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
         )
         normalized_avatar = self._optional_text(
-            author_avatar_url, "author_avatar_url",
+            author_avatar_url,
+            "author_avatar_url",
             MAX_AUTHOR_AVATAR_URL_LENGTH,
         )
         return self._repository.create_topic(
@@ -288,16 +320,21 @@ class ForumService(ForumServiceProtocol):
         normalized_author_id = self._required_text(
             author_id, "author_id", MAX_AUTHOR_ID_LENGTH
         )
+        self._validate_new_bot_author_identity(
+            normalized_author_type, normalized_author_id
+        )
         request_id = self._required_text(
             client_request_id, "client_request_id", MAX_ID_LENGTH
         )
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_display_name = self._optional_text(
-            author_display_name, "author_display_name",
+            author_display_name,
+            "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
         )
         normalized_avatar = self._optional_text(
-            author_avatar_url, "author_avatar_url",
+            author_avatar_url,
+            "author_avatar_url",
             MAX_AUTHOR_AVATAR_URL_LENGTH,
         )
         normalized_reply_to_post_id = self._optional_text(
@@ -314,9 +351,7 @@ class ForumService(ForumServiceProtocol):
                 f"{topic.topic_type} replies must target the Topic; "
                 "reply_to_post_id is not allowed"
             )
-        normalized_poll_selection = self._reply_poll_selection(
-            poll_selection, topic
-        )
+        normalized_poll_selection = self._reply_poll_selection(poll_selection, topic)
         logger.info(
             "[forum-reply][create] topic_id=%s author_type=%s author_id=%s "
             "client_request_id=%s input_reply_to_post_id=%s",
@@ -451,6 +486,14 @@ class ForumService(ForumServiceProtocol):
             raise NotFound(f"topic not found: {normalized_topic_id}")
         return updated
 
+    @staticmethod
+    def _validate_new_bot_author_identity(author_type: str, author_id: str) -> None:
+        if author_type == AUTHOR_TYPE_BOT and is_bare_default_bot_identity(author_id):
+            raise ValidationError(
+                "BOT author_id cannot be the shared id 'default'; "
+                "use 'default:<work_no>'"
+            )
+
     @classmethod
     def _author_type(cls, value: str) -> str:
         normalized = cls._required_text(
@@ -485,9 +528,7 @@ class ForumService(ForumServiceProtocol):
                 "poll_selection is only allowed when topic_type is POLL"
             )
         if value is None:
-            raise ValidationError(
-                "poll_selection is required when topic_type is POLL"
-            )
+            raise ValidationError("poll_selection is required when topic_type is POLL")
         if topic.topic_config is None or topic.topic_config.poll is None:
             raise ValidationError(
                 "poll_selection requires topic_config.poll on the addressed Topic"
@@ -591,9 +632,7 @@ class ForumService(ForumServiceProtocol):
             value.selection, "poll.selection", MAX_AUTHOR_TYPE_LENGTH
         ).upper()
         if selection not in POLL_SELECTIONS:
-            allowed = ", ".join(
-                sorted((POLL_SELECTION_MULTI, POLL_SELECTION_SINGLE))
-            )
+            allowed = ", ".join(sorted((POLL_SELECTION_MULTI, POLL_SELECTION_SINGLE)))
             raise ValidationError(f"poll.selection must be one of: {allowed}")
 
         raw_options = value.options
@@ -760,12 +799,9 @@ class ForumService(ForumServiceProtocol):
             raise ValidationError(f"mode must be one of: {allowed}")
         return normalized
 
-
     @classmethod
     def _browse_report_status(cls, value: str) -> str:
-        normalized = cls._required_text(
-            value, "status", MAX_AUTHOR_TYPE_LENGTH
-        ).upper()
+        normalized = cls._required_text(value, "status", MAX_AUTHOR_TYPE_LENGTH).upper()
         if normalized not in BROWSE_REPORT_STATUSES:
             allowed = ", ".join(sorted(BROWSE_REPORT_STATUSES))
             raise ValidationError(f"status must be one of: {allowed}")

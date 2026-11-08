@@ -51,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     # next option so both transports have identical Handler semantics.
     parser.add_argument("--goal", nargs="*", default=[])
     parser.add_argument("--model", default="")
+    parser.add_argument("--reference-materials-version", choices=["1"], default="")
     parser.add_argument("--clawweb-url", required=True)
     return parser
 
@@ -75,6 +76,7 @@ def _builtin_context(args: argparse.Namespace, business_input: dict[str, Any] | 
     result_file.unlink(missing_ok=True)
     return {
         "implementationSkill": str(SKILL_ROOT / "core" / "SKILL.md"),
+        **({"reference_materials": business_input["reference_materials"]} if business_input and business_input.get("reference_materials") else {}),
         "validationUrl": runtime._step_url(args, "validate-output"),
         "inputFile": str(input_file),
         "resultFile": str(result_file),
@@ -109,6 +111,7 @@ def run_handler(args: argparse.Namespace) -> dict[str, Any]:
     args.target = str(runtime._runtime_path(args.target))
     selection = core_dispatcher.begin_stage_core(
         task_id=args.task_id, step_id=args.step_id, clawweb_url=args.clawweb_url,
+        **({"reference_materials_version": args.reference_materials_version} if getattr(args, "reference_materials_version", "") else {}),
     )
     business_input = (runtime._read_json(Path(selection["inputFile"]), strict=True)
                       if selection.get("selected") else selection.get("businessInput", {}))

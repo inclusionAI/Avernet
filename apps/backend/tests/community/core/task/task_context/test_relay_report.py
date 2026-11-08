@@ -23,6 +23,11 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     NodeAction,
 )
+from agentclaw.community.core.task.task_context import relay_report
+from agentclaw.community.core.task.task_context.task_artifact.models import UrlLinkContent
+from agentclaw.community.core.task.task_context.task_artifact.report_item import (
+    ArtifactReportItem,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -376,6 +381,121 @@ def test_declined_execution_recovery_projects_capability_failure_reason() -> Non
     assert context.accepted_execution_patch is not None
     assert context.accepted_execution_patch.execution_decision == "DECLINED"
 
+
+def _final_artifact_item() -> ArtifactReportItem:
+    return ArtifactReportItem(
+        artifact_name="最终报告链接",
+        artifact_kind="url_link",
+        session_id=None,
+        task_id="task-1",
+        node_id="task-1",
+        attempt=0,
+        content=UrlLinkContent(
+            url="https://example.com/final-report",
+            type="最终报告链接",
+            is_final_artifact="true",
+        ),
+    )
+
+
+def _capture_node_calls(monkeypatch):
+    calls = []
+
+    class CaptureService:
+        def capture_node(
+            self,
+            graph,
+            node,
+            *,
+            artifact_patch,
+            now_ms,
+            derive_text_from_output=True,
+        ):
+            calls.append((node.node_id, artifact_patch))
+            return []
+
+    monkeypatch.setattr(
+        relay_report, "default_publish_service", lambda: CaptureService()
+    )
+    return calls
+
+
+def test_terminal_completion_captures_final_artifacts(monkeypatch) -> None:
+    captured = _capture_node_calls(monkeypatch)
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    final_item = _final_artifact_item()
+    command = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-complete-final",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
+        task_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+        artifact_patch=[final_item],
+        final_conclusion="业务整体结论：主因已确认并完成处理",
+    )
+
+    result = service.apply_relay_report(command)
+
+    assert result.task_completed
+    assert captured[-1] == ("task-1", [final_item])
+    assert service.query_task_dashboard("task-1").output["final_conclusion"] == (
+        "业务整体结论：主因已确认并完成处理"
+    )
+
+def test_terminal_hung_captures_final_artifacts(monkeypatch) -> None:
+    captured = _capture_node_calls(monkeypatch)
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    final_item = _final_artifact_item()
+    command = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-hung-final",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
+        failure_reason="relay_no_candidate",
+        artifact_patch=[final_item],
+        final_conclusion="业务整体结论：已确认事实与下一步建议",
+    )
+
+    result = service.apply_relay_report(command)
+
+    assert result.task_hung
+    assert captured[-1] == ("task-1", [final_item])
+    assert service.query_task_dashboard("task-1").output["final_conclusion"] == (
+        "业务整体结论：已确认事实与下一步建议"
+    )
+
+def test_successor_plan_result_rejects_final_artifacts(monkeypatch) -> None:
+    captured = _capture_node_calls(monkeypatch)
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    planned = TaskNode(
+        node_id=None,
+        task_id="task-1",
+        status=None,
+        task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
+        run_info=RuntimeInfo(run_mode="single_bot", assignee="bot-2"),
+        node_run_graph=None,
+    )
+    command = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-successor-final",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
+        artifact_patch=[_final_artifact_item()],
+    )
+
+    with pytest.raises(TaskStateError, match="successor PLAN_RESULT"):
+        service.apply_relay_report(command)
+
+    assert captured[-1] == ("task-1", None)
 
 def test_report_completion_is_idempotent_and_does_not_create_node() -> None:
     service = _graph_service()

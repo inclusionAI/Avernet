@@ -1,0 +1,18 @@
+/* Semantic color fallbacks are scoped to the new material controls. */
+.task-reference-materials {
+  color: hsl(var(--foreground, 222.2 47.4% 11.2%));
+  background-color: hsl(var(--background, 0 0% 100%));
+}
+.task-reference-materials,
+.task-reference-materials .border-input {
+  border-color: hsl(var(--border, 214.3 31.8% 91.4%));
+}
+.task-reference-materials .text-foreground {
+  color: hsl(var(--foreground, 222.2 47.4% 11.2%));
+}
+.task-reference-materials .text-muted-foreground {
+  color: hsl(var(--muted-foreground, 215.4 16.3% 46.9%));
+}
+.task-reference-materials .text-destructive {
+  color: hsl(var(--destructive, 0 72.2% 50.6%));
+}

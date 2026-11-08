@@ -4,7 +4,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.api.bot_knowledge_service import (
+    BotKnowledgeServiceProtocol,
+)
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
     BotKnowledgeAgentsMdSync,
 )

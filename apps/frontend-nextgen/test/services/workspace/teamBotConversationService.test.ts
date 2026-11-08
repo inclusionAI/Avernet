@@ -310,3 +310,14 @@ test.each(['service', 'personal'])('团队 %s 目录映射给出正确会话阶�
     data: [{ botType, isTeamBot: true, runtimeStage: botType === 'service' ? 'online' : 'draft' }],
   });
 });
+
+test('uses established BCN address separately from resource locator and current Owner', async () => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({
+    bot_type: 'service', bcn_bot_id: 'shared:original-personal-owner',
+    entity_id: 'staff_original', owner_id: 'new-owner',
+  })], total: 1 } });
+  expect(await teamBotConversationService.listBots('new-owner')).toMatchObject({
+    ok: true, data: [{ botId: 'shared:original-personal-owner',
+      ownerId: 'staff_original', engineOwnerId: 'new-owner' }],
+  });
+});

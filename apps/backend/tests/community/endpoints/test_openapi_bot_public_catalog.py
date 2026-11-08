@@ -9,6 +9,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogProfileNotFoundError
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -164,3 +165,72 @@ def discover_app_only_catalog():
 )
 def discover_missing_keyword():
     """Discovery still requires a non-empty keyword."""
+
+
+def _seed_profile(world) -> None:
+    _boot_verifier()
+
+    def _profile(_self, bot_uuid: str, **_kwargs):
+        if bot_uuid == "missing-bot:owner-1":
+            raise BotCatalogProfileNotFoundError(bot_uuid)
+        return {
+            "bot_id": "catalog-bot",
+            "bot_uuid": bot_uuid,
+            "bot_name": "Catalog Bot",
+            "owner_name": "Owner",
+            "description": "A public catalog entry",
+            "engine_name": "openclaw",
+            "capabilities": [
+                {"capability_id": "antv", "display_name": "AntV 可视化图表"}
+            ],
+        }
+
+    bind_overrides(
+        world,
+        BotPublicServiceProtocol,
+        {"get_catalog_public_bot_profile": _profile},
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/catalog/profile/{bot_uuid}",
+    scenario="profile",
+    seed=_seed_profile,
+    input=CaseInput(
+        path_params={"bot_uuid": "catalog-bot:owner-1"},
+        headers={PRINCIPAL_HEADER: _principal()},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "bot_id": "catalog-bot",
+                "bot_uuid": "catalog-bot:owner-1",
+                "bot_name": "Catalog Bot",
+                "engine_name": "openclaw",
+                "capabilities": [
+                    {"capability_id": "antv", "display_name": "AntV 可视化图表"}
+                ],
+            },
+        },
+    ),
+)
+def profile_catalog():
+    """The friend-request dialog reads the public profile from the catalogue."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/catalog/profile/{bot_uuid}",
+    scenario="profile_not_found",
+    seed=_seed_profile,
+    input=CaseInput(
+        path_params={"bot_uuid": "missing-bot:owner-1"},
+        headers={PRINCIPAL_HEADER: _principal()},
+    ),
+    expect=ExpectError(status=404, json_contains={"code": 404000}),
+)
+def profile_not_found():
+    """A bot outside the caller-visible catalogue keeps an enveloped 404."""

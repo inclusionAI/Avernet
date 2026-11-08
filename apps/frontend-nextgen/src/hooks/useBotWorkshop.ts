@@ -13,6 +13,7 @@ import {
   getInventoryActionAvailability,
 } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
+import { canOpenDraftOrPrestableServiceCodingBot } from '@/services/botWorkshop/botPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -121,6 +122,7 @@ export function useBotWorkshop() {
     spaceId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
     canOpenConversation: (bot: BotDomain) =>
+      canOpenDraftOrPrestableServiceCodingBot(bot, currentOpenApiUserId) ||
       Boolean(currentOpenApiUserId && bot.actions.includes('chat') && !bot.disabledActions?.chat),
     canEnterDetail,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,

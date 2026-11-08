@@ -262,8 +262,8 @@ class ApplyOrchestrator:
 
         return CategoryResult(
             construct=construct,
-            entries=tuple(written),
-            removals=plan.removals,
+            entries=written.entries,
+            removals=written.removals,
             aborted=False,
         )
 

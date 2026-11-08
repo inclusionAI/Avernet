@@ -128,6 +128,48 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
         missing.append(field_name)
 
 
+# Codes that mean the sandbox can be treated as gone on a destroy/stop path.
+#
+# DEVICE_NOT_FOUND is the Arca SDK's typed NotFoundException, which the SDK
+# plugin translates to ArcaSandboxNotFoundError and _arca_paas_service maps
+# deterministically to DEVICE_NOT_FOUND.
+#
+# DEVICE_UNAVAILABLE is included because a device whose sandbox has already
+# gone down surfaces as "not reachable" rather than "not found".
+#
+# DEVICE_DESTROY_FAILED is the default code for destroy/stop and is what the
+# remaining provider failures arrive as. Arca's connect_sync_sandbox collapses
+# every connect failure - transport error, not-running status, even a 404 - into
+# a bare SandboxException that _translate_sdk_exception maps to
+# ArcaSandboxError, which the adapter then reports as DEVICE_DESTROY_FAILED.
+# A sandbox that cannot be connected to is a sandbox whose teardown is done, so
+# that landing here is folded into the same idempotent success.
+#
+# Collectively these make every destroy/stop path report success: the device
+# record is released and soft-deleted regardless, and a warning logs the code
+# and message so a sandbox that turns out to be alive stays traceable in logs
+# and CDO. CREATE / UPDATE / RESTART / SCALE paths are unaffected; they do not
+# use this classifier.
+_ABSENT_SANDBOX_CODES = frozenset(
+    {
+        ErrorCode.DEVICE_NOT_FOUND,
+        ErrorCode.DEVICE_UNAVAILABLE,
+        ErrorCode.DEVICE_DESTROY_FAILED,
+    }
+)
+
+
+def _is_absent_sandbox_error(error_code: ErrorCode | None) -> bool:
+    """Return True when a PaaS destroy/stop error counts as a completed teardown.
+
+    Classification is by error code only, never by message text, so an
+    absence-sounding message under an unrelated code cannot release a device
+    that may still be running. See ``_ABSENT_SANDBOX_CODES`` for why each code
+    qualifies.
+    """
+    return error_code in _ABSENT_SANDBOX_CODES
+
+
 def _build_arca_detail_config(
     deploy_config: Any,
     oss_mount_id: str | None,
@@ -2115,6 +2157,7 @@ class DefaultDeviceService(DeviceService):
         device_uuid: str,
         modifier: str,
         for_restart: bool = False,
+        allow_residue_success: bool = False,
     ) -> DestroyDeviceResponse:
         """
         Destroy device by UUID: terminates PaaS container, soft-deletes DB record.
@@ -2155,11 +2198,23 @@ class DefaultDeviceService(DeviceService):
             device_uuid, tenant=tenant, env=env
         )
         if not record:
-            logger.warning(f"Device not found: {device_uuid}")
-            return DestroyDeviceResponse(
-                success=True,  # Per D-05: already destroyed is success
-                error_message=None,
-                hook_result=None,
+            # A STOPPED device was already torn down in the provider at stop
+            # time but keeps its record for restart (ADR-0004). DESTROY must
+            # still release that record, otherwise the bot keeps a dangling
+            # binding forever. Mirror stop_device_by_uuid's fallback and let
+            # the provider report the absence, which the error classifier
+            # below treats as success.
+            record = repo.get_by_device_uuid_only(device_uuid=device_uuid)
+            if not record or record.status != DeviceStatus.STOPPED.value:
+                logger.warning(f"Device not found: {device_uuid}")
+                return DestroyDeviceResponse(
+                    success=True,  # Per D-05: already destroyed is success
+                    error_message=None,
+                    hook_result=None,
+                )
+            logger.info(
+                f"[destroy_device] device {device_uuid} is STOPPED; releasing "
+                "its preserved record"
             )
 
         logger.info(
@@ -2245,21 +2300,29 @@ class DefaultDeviceService(DeviceService):
                 await self._paas_facade.destroy_device(record.provider_device_id)
                 logger.info(f"Device destroyed: {record.provider_device_id}")
             except DeviceFacadeException as e:
-                # Handle NOT_FOUND as success per D-04 (idempotent destroy)
-                # Use getattr with defaults for safer attribute access
+                # A teardown whose sandbox is already gone is an idempotent
+                # success, but only where that is the expected outcome. DESTROY
+                # and STOP pass allow_residue_success; SCALE_DOWN does not,
+                # because there the bot keeps running and a failure reported as
+                # success would hide a container that is still up.
                 original_error = getattr(e, "original_error", None)
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
-                if error_code == ErrorCode.DEVICE_NOT_FOUND:
-                    logger.warning(f"Device already destroyed in PaaS: {device_uuid}")
+                message = getattr(getattr(e, "original_error", None), "message", str(e))
+                is_resolved_by_absence = _is_absent_sandbox_error(error_code) and (
+                    allow_residue_success or error_code is ErrorCode.DEVICE_NOT_FOUND
+                )
+                if is_resolved_by_absence:
+                    logger.warning(
+                        f"Device already destroyed in PaaS: {device_uuid} "
+                        f"(code={error_code}, message={message}, "
+                        f"allow_residue_success={allow_residue_success})"
+                    )
                 else:
                     # Capture error but continue with DB cleanup per D-04
                     paas_destroy_success = False
                     code_str = error_code.value if error_code else "UNKNOWN"
-                    message = getattr(
-                        getattr(e, "original_error", None), "message", str(e)
-                    )
                     error_msg = f"{code_str} - {message}"
                     error_parts.append(f"PaaS destroy failed: {error_msg}")
                     logger.error(
@@ -2408,14 +2471,15 @@ class DefaultDeviceService(DeviceService):
                 error_code = (
                     getattr(original_error, "code", None) if original_error else None
                 )
-                if error_code == ErrorCode.DEVICE_NOT_FOUND:
-                    logger.warning(f"Device already destroyed in PaaS: {device_uuid}")
+                message = getattr(getattr(e, "original_error", None), "message", str(e))
+                if _is_absent_sandbox_error(error_code):
+                    logger.warning(
+                        f"Device already destroyed in PaaS: {device_uuid} "
+                        f"(code={error_code}, message={message})"
+                    )
                 else:
                     paas_destroy_success = False
                     code_str = error_code.value if error_code else "UNKNOWN"
-                    message = getattr(
-                        getattr(e, "original_error", None), "message", str(e)
-                    )
                     error_msg = f"{code_str} - {message}"
                     error_parts.append(f"PaaS destroy failed: {error_msg}")
                     logger.error(

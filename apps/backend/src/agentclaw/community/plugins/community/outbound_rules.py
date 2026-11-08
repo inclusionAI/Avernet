@@ -48,6 +48,7 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         owner_id: str = "",
         agent_pass_token: str = "",
         agent_code: str = "",
+        engine_type: str = "",
         bot_type_resolver: Callable[[str, str], str | None] | None = None,
         extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:

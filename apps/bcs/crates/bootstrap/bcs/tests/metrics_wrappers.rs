@@ -185,6 +185,47 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 }
 
 #[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+#[serial]
+async fn metrics_wrapper_preserves_native_task_dispatch_and_rejections() {
+    let runtime = install_runtime();
+    let flow = InstrumentedMessageFlowService::new(
+        Arc::new(MessageFlowFake), Arc::from("native-task-wrapper"),
+    );
+    let outcome = flow
+        .handle_native_task_dispatch("native-request", native_task_dispatch_cmd())
+        .await
+        .expect("native dispatch");
+    assert_eq!(outcome.task_id, "native-task");
+    assert_eq!(outcome.status, "queued");
+    assert_eq!(outcome.real_run_id.as_deref(), Some("native-run"));
+    assert!(outcome.bot_deliveries.is_empty());
+    assert!(outcome.frontend_deliveries.is_empty());
+
+    let error = flow
+        .handle_native_task_dispatch("native-rejected", native_task_dispatch_cmd())
+        .await
+        .expect_err("native rejection must not fall back to ordinary dispatch");
+    assert!(matches!(error, ServiceError::InvalidOperation { message, request_id }
+        if message == "native parent missing" && request_id.as_deref() == Some("native-rejected")));
+
+    let body = runtime.render();
+    for result in ["success", "error"] {
+        let expected = format!(
+            "bcs_message_flow_requests_total{{env=\"native-task-wrapper\",source=\"bot_ws\",operation=\"task_dispatch\",result=\"{result}\"}} 1",
+        );
+        assert!(body.lines().any(|line| line == expected), "missing metric: {expected}\n{body}");
+    }
+}
+
+fn native_task_dispatch_cmd() -> TaskDispatchCommand {
+    let mut cmd = task_dispatch_cmd();
+    cmd.target_bot_name = Some("Native Worker".to_string());
+    cmd.payload = serde_json::json!({"message": "native assignment", "toolCallId": "native-call"});
+    cmd
+}
+
+#[cfg(feature = "prometheus-metrics")]
 fn install_runtime() -> Arc<MetricsRuntime> {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
@@ -414,6 +455,34 @@ impl MessageFlowService for MessageFlowFake {
             frontend_deliveries: vec![],
             real_run_id: None,
 })
+    }
+
+    async fn handle_native_task_dispatch(
+        &self,
+        request_id: &str,
+        cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        let expected = native_task_dispatch_cmd();
+        assert_eq!(cmd.driver_bot_id, expected.driver_bot_id);
+        assert_eq!(cmd.group_id, expected.group_id);
+        assert_eq!(cmd.target_bot_id, expected.target_bot_id);
+        assert_eq!(cmd.target_bot_name, expected.target_bot_name);
+        assert_eq!(cmd.payload, expected.payload);
+        assert_eq!(cmd.caller_delegation, expected.caller_delegation);
+        if request_id == "native-rejected" {
+            return Err(ServiceError::InvalidOperation {
+                message: "native parent missing".to_string(),
+                request_id: Some(request_id.to_string()),
+            });
+        }
+        assert_eq!(request_id, "native-request");
+        Ok(TaskDispatchOutcome {
+            task_id: "native-task".to_string(),
+            status: "queued".to_string(),
+            real_run_id: Some("native-run".to_string()),
+            bot_deliveries: vec![],
+            frontend_deliveries: vec![],
+        })
     }
 
     async fn handle_task_complete(

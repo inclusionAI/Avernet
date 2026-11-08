@@ -63,6 +63,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_knowledge.protocols import BotKnowledgePublicationSelectionProtocol
     from agentclaw.community.core.service_bot.services.publish_approval_service import (
         PublishApprovalService,
     )
@@ -205,13 +206,16 @@ def build_restart_payload(
 
 def enqueue_restart(
     task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str,
-    in_place: bool = False,
+    in_place: bool = False, operation_id: str | None = None,
 ) -> None:
+    payload = build_restart_payload(
+        publish_id=publish_id, stage=stage, operator=operator, in_place=in_place,
+    )
+    if operation_id is not None:
+        payload['operation_id'] = operation_id
     task_queue_service.enqueue(
         RESTART_TASK,
-        build_restart_payload(
-            publish_id=publish_id, stage=stage, operator=operator, in_place=in_place
-        ),
+        payload,
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
@@ -310,6 +314,13 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
     idempotency guard that keeps the create/release from re-running.
     """
 
+    def __init__(
+        self, *, flow: "PublishFlowService", task_queue_service: TaskQueueService,
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
+    ) -> None:
+        super().__init__(flow=flow, task_queue_service=task_queue_service)
+        self._selection_provider = selection_provider
+
     @property
     def task_type(self) -> str:
         return VERIFY_FLOW_TASK
@@ -328,6 +339,12 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
         # (FAILED + ext.error_message); the Fail outcome mirrors it onto the task
         # so the queue row is semantically honest (FAILED, not SUCCEEDED).
         if status == PublishStatus.BUILDING:
+            # Optional display data, independent of native state/transactions.
+            # The outer guard also isolates lazy provider-construction failures.
+            try:
+                self._selection_provider().record_build_selection(publication_id=publish_id)
+            except Exception:
+                logger.exception("Knowledge observation failed: publication_id=%s", publish_id)
             build_result = await self._flow.execute_build_phase(record, operator)
             if build_result.status != PublishStatus.BUILT:
                 return Fail(
@@ -419,11 +436,13 @@ class PublishRestartHandler(_PublishTaskBase):
         stage = _require_str(payload, "stage")
         operator = _require_str(payload, "operator")
         return asyncio.run(self._run(
-            publish_id, stage, operator, in_place=(payload or {}).get("in_place", False)
+            publish_id, stage, operator, in_place=(payload or {}).get("in_place", False),
+            operation_id=(payload or {}).get("operation_id"),
         ))
 
     async def _run(
-        self, publish_id: int, stage: str, operator: str, in_place: bool = False
+        self, publish_id: int, stage: str, operator: str, in_place: bool = False,
+        operation_id: str | None = None,
     ) -> TaskOutcome:
         # Redelivery guard. The queue is at-least-once and ``execute_restart``
         # COMPLETEs its ledger op before returning, so past that point a second
@@ -439,6 +458,7 @@ class PublishRestartHandler(_PublishTaskBase):
         result = await self._flow.execute_restart(
             publish_id=publish_id, stage=stage, operator=operator,
             **({"in_place": True} if in_place else {}),
+            **({"operation_id": operation_id} if operation_id else {}),
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
@@ -573,6 +593,26 @@ class PublishApprovalTriggerHandler:
         return Complete()
 
 
+def _observe_online_selection(provider, publish_id):
+    # Failure here must not prevent native sync from running.
+    try:
+        return provider().observe_online_selection(publication_id=publish_id)
+    except Exception:
+        logger.exception("Optional knowledge identity read failed: publish_id=%s", publish_id)
+        return None
+
+
+def _project_online_selection(provider, publish_id, observed):
+    # Native sync has already completed. This optional, separate transaction
+    # cannot change its outcome and must never wrap the native call itself.
+    if observed is None:
+        return
+    try:
+        provider().project_online_selection(publication_id=publish_id, observed=observed)
+    except Exception:
+        logger.exception("Optional knowledge projection failed: publish_id=%s", publish_id)
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -581,10 +621,12 @@ class PublishProgressPollHandler(_PublishTaskBase):
         *,
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
         poll_delay_seconds: float = _POLL_DELAY_SECONDS,
     ) -> None:
         super().__init__(flow=flow, task_queue_service=task_queue_service)
         self._poll_delay = poll_delay_seconds
+        self._selection_provider = selection_provider
 
     @property
     def task_type(self) -> str:
@@ -600,7 +642,13 @@ class PublishProgressPollHandler(_PublishTaskBase):
 
         # advance_publish_progress advances on BaaS SUCCESS/FAILED (and internally
         # redirects a retry record to restart-sync); a no-op on PENDING.
+        observed = (_observe_online_selection(self._selection_provider, publish_id)
+                    if status == PublishStatus.ONLINE_PUB else None)
         sync_result = self._flow.advance_publish_progress(publish_id)
+
+        if (getattr(sync_result, "status", None) == PublishStatus.SUCCESS
+                and (getattr(sync_result, "data", None) or {}).get("status") == "SUCCESS"):
+            _project_online_selection(self._selection_provider, publish_id, observed)
 
         _record, status = self._status(publish_id)
         if status in _POLL_ACTIVE_STATES:
@@ -746,16 +794,19 @@ class PublishTaskLifecycle(LifecycleBase):
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
         approval_service_provider: Callable[[], "PublishApprovalService"],
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
     ) -> None:
         self._registry = registry
         self._flow = flow
         self._task_queue_service = task_queue_service
         self._approval_service_provider = approval_service_provider
+        self._selection_provider = selection_provider
 
     async def bootstrap(self) -> None:
         self._registry.register(
             PublishVerifyFlowHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service
+                flow=self._flow, task_queue_service=self._task_queue_service,
+                selection_provider=self._selection_provider,
             )
         )
         self._registry.register(
@@ -785,7 +836,8 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishProgressPollHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service
+                flow=self._flow, task_queue_service=self._task_queue_service,
+                selection_provider=self._selection_provider
             )
         )
         self._registry.register(

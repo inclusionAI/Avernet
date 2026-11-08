@@ -4,6 +4,14 @@ pub async fn handle_task_dispatch(
     flow: &BcsMessageFlow,
     cmd: TaskDispatchCommand,
 ) -> ServiceResult<TaskDispatchOutcome> {
+    dispatch(flow, cmd, false).await
+}
+
+pub(crate) async fn dispatch_native(flow: &BcsMessageFlow, cmd: TaskDispatchCommand) -> ServiceResult<TaskDispatchOutcome> {
+    dispatch(flow, cmd, true).await
+}
+
+async fn dispatch(flow: &BcsMessageFlow, mut cmd: TaskDispatchCommand, native: bool) -> ServiceResult<TaskDispatchOutcome> {
     let (group_id, manager_session_id) = task_dispatch_scope(&cmd.group_id, &cmd.payload);
     let mut group = flow
         .group
@@ -85,6 +93,21 @@ pub async fn handle_task_dispatch(
     };
     let message = task_message(&cmd.payload);
     let manager_session_id = manager_session_id.unwrap_or_else(|| group_id.clone());
+    // Read failures cannot select Owner. Resolve the canonical target first;
+    // model names, arbitrary parent fields and the latest session speaker
+    // never supply Caller authority.
+    let native_caller_enabled = if native {
+        match flow.caller_admission.as_ref() {
+            Some(deps) => deps.control_plane.get_caller_configuration(
+                &target_bot_id, &bcs_config::resolve_env_str()).await?
+                .and_then(|v| v.snapshot).is_some_and(|v| v.caller_identity.enabled),
+            None => false,
+        }
+    } else { false };
+    if native_caller_enabled {
+        cmd.caller_delegation = Some(flow.native_tasks.assignment(flow, &cmd,
+            &group_id, &manager_session_id, &target_bot_id).await?);
+    }
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = now_ms();
 
@@ -146,17 +169,15 @@ pub async fn handle_task_dispatch(
             // Caller-enabled Worker → Execution identity; an absent or
             // disabled config → DelegationOnly middle-hop — never a
             // blanket purpose either way.
-            let target_caller_enabled = match flow.caller_admission.as_ref() {
+            let target_caller_enabled = if native_caller_enabled { true } else { match flow.caller_admission.as_ref() {
                 Some(deps) => deps
                     .control_plane
                     .get_caller_configuration(&target_bot_id, &bcs_config::resolve_env_str())
-                    .await
-                    .ok()
-                    .flatten()
+                    .await?
                     .and_then(|config| config.snapshot)
                     .is_some_and(|snapshot| snapshot.caller_identity.enabled),
                 None => false,
-            };
+            }};
             let purpose = if target_caller_enabled { "execution" } else { "delegation_only" };
             for target in admission.targets.iter_mut() {
                 if let Value::Object(map) = &mut target.semantic_projection_json {
@@ -215,7 +236,7 @@ pub async fn handle_task_dispatch(
         // stays fail-closed exactly like relay-disabled deployments (the
         // row converges IdentityUnavailable later, nothing upgrades it).
         if let Some(relay) = flow.caller_relay.as_ref() {
-            if cmd.caller_delegation.is_some()
+            if !native && cmd.caller_delegation.is_some()
                 && relay.allows_relay_edge(&cmd.driver_bot_id, &target_bot_id)
             {
                 match (flow.caller_admission.as_ref(), committed_row.as_ref(),

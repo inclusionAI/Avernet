@@ -14,8 +14,12 @@ mod delivery_admission;
 mod file;
 mod group_context_access;
 mod authorization;
+mod avatar;
 mod participant;
 mod message;
+mod projections;
+#[cfg(test)]
+mod tests;
 
 pub use connection::GroupSessionConnectionServiceImpl;
 pub use delivery_admission::{DeliveryAdmissionServiceImpl, ERROR_INTERNAL_READ};
@@ -30,7 +34,7 @@ use bcs_service_api::application::session::{SessionManagementService, SessionUse
 use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, IdentityPolicy, Page,
-    Principal, resolve_authorized_principal,
+    ParticipantSummary, Principal, resolve_authorized_principal,
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human, select_principal,
     session::{
@@ -45,6 +49,7 @@ use bcs_service_api::core::SessionAuthorizationCoreService;
 use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
+use bcs_service_api::types::bot_profile::BotAvatarMap;
 use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
@@ -56,6 +61,10 @@ use bcs_service_api::{
     SessionHistoryCommand, SessionKind, SessionLaunchError, SessionLaunchRequest,
     SessionLaunchService, SessionStatus as DomainSessionStatus, StateMachineRunView,
     SystemMessageEvent, backfill_participant_names,
+};
+
+use projections::{
+    map_status_to_domain, project_participant, project_status, project_summary,
 };
 
 /// OpenAPI v1 Session facade.
@@ -321,10 +330,19 @@ impl SessionService for SessionServiceImpl {
         } else {
             HashSet::new()
         };
+        // Design §5.3: after the final pagination, collect THIS page's own
+        // Session member ids and read their display profiles through ONE
+        // batched query (the core dedupes and chunks at ≤ ceil(U / 256)
+        // batches). The new summary `name` is the Session member snapshot
+        // verbatim, so the list adds no registry name read; read failures
+        // surface as service errors — never a page of null avatars.
+        let avatars = self
+            .avatar_map_for_ids(avatar::session_page_bot_ids(&sessions))
+            .await?;
         let items = sessions
             .iter()
             .map(|s| {
-                let mut summary = project_summary(s);
+                let mut summary = project_summary(s, &avatars);
                 if command.view_bot_id.is_some() {
                     summary.collected = Some(collected_set.contains(&s.id));
                 }
@@ -750,55 +768,6 @@ fn merge_participant_state_machine_snapshot(
     )
 }
 
-fn project_participant(participant: &Participant) -> SessionParticipant {
-    // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`
-    // through verbatim so a Human participant inserted by the legacy
-    // invitation-accept path (`actor_kind: Human, mode: Present`) is surfaced
-    // as-is, not boot-truncated to `Auto`. Client-input Bot participants still
-    // round-trip `Auto`/`Muted` because `build_participant` / `add_participant`
-    // map the V1 input mode into the domain mode before persistence.
-    SessionParticipant {
-        actor_id: participant.bot_uuid.clone(),
-        actor_kind: participant.actor_kind,
-        name: participant.bot_name.clone(),
-        role: participant.role,
-        tags: participant.tags.clone(),
-        mode: participant.effective_mode(),
-        message_view_scope: participant.message_view_scope,
-        joined_at: None,
-    }
-}
-
-fn project_status(status: DomainSessionStatus) -> V1SessionStatus {
-    match status {
-        DomainSessionStatus::Running => V1SessionStatus::Running,
-        DomainSessionStatus::Completed => V1SessionStatus::Completed,
-    }
-}
-
-fn map_status_to_domain(status: V1SessionStatus) -> DomainSessionStatus {
-    match status {
-        V1SessionStatus::Running => DomainSessionStatus::Running,
-        V1SessionStatus::Completed => DomainSessionStatus::Completed,
-    }
-}
-
-fn project_summary(session: &Session) -> SessionSummary {
-    SessionSummary {
-        session_id: session.id.clone(),
-        version: session.group_version.unwrap_or(1),
-        group_id: session.group_id.clone(),
-        status: project_status(session.status),
-        title: session.session_title.clone(),
-        participant_count: Some(session.participants.len()),
-        caller_principal: session.caller_principal.clone(),
-        created_by: session.created_by.clone(),
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        collected: None,
-    }
-}
-
 // ── error mappers ─────────────────────────────────────────────────────
 
 fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
@@ -906,163 +875,5 @@ fn map_group_use_case_error(error: GroupUseCaseError) -> ApplicationError {
         ),
         GroupUseCaseError::Service(service_error) => map_service_error(service_error),
         other => ApplicationError::internal(other.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_use_case_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_session_error(SessionUseCaseError::NotFound("s1".into())).code(),
-            "session_not_found"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::InvalidParams("bad".into())).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::Conflict("running".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::Internal(
-                ServiceError::SessionNotFound("s2".into())
-            ))
-            .code(),
-            "session_not_found"
-        );
-    }
-
-    #[test]
-    fn service_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_service_error(ServiceError::GroupNotFound("g1".into())).code(),
-            "group_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::BotNotFound("b1".into())).code(),
-            "bot_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::ParticipantNotFound("b2".into())).code(),
-            "participant_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::Conflict("dup".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::SessionInvalidParams("x".into())).code(),
-            "invalid_request"
-        );
-    }
-
-    #[test]
-    fn session_history_errors_preserve_authentication_and_authorization_categories() {
-        assert!(matches!(
-            map_group_use_case_error(GroupUseCaseError::Unauthorized("missing".into())),
-            ApplicationError::Unauthenticated
-        ));
-        assert!(matches!(
-            map_group_use_case_error(GroupUseCaseError::Forbidden("denied".into())),
-            ApplicationError::Forbidden(_)
-        ));
-        assert_eq!(
-            map_group_use_case_error(GroupUseCaseError::InvalidHistoryLimit(0)).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_group_use_case_error(GroupUseCaseError::InvalidGroupId("bad".into())).code(),
-            "internal_error"
-        );
-    }
-
-    #[test]
-    fn runtime_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Unauthenticated).code(),
-            "unauthenticated"
-        );
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Forbidden("denied".into())).code(),
-            "forbidden"
-        );
-        for error in [
-            CollaborationRuntimeError::InvalidDefinition("invalid definition".into()),
-            CollaborationRuntimeError::InvalidParticipantBinding("invalid binding".into()),
-            CollaborationRuntimeError::InvalidRequest("invalid request".into()),
-        ] {
-            assert_eq!(map_runtime_error(error).code(), "invalid_request");
-        }
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Conflict("running".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::JudgeUnavailable(
-                "offline".into()
-            ))
-            .code(),
-            "internal_error"
-        );
-    }
-
-    #[test]
-    fn project_participant_preserves_human_present_mode() {
-        // Vey7i: a legacy invitation-accept inserts a Human participant with
-        // `actor_kind: Human, mode: Present`. The V1 projection must NOT map
-        // that into the Bot-only `Auto`/`Muted` vocabulary; it must pass
-        // `actor_kind` and `effective_mode()` through verbatim so `GET session`
-        // surfaces the real membership.
-        let human = Participant {
-            bot_uuid: "human_staff-1".into(),
-            bot_name: Some("Alice".into()),
-            kind: None,
-            role: ParticipantRole::Consultant,
-            actor_kind: ActorKind::Human,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: Some(ParticipantMode::Present),
-        };
-        let projected = project_participant(&human);
-        assert_eq!(projected.actor_id, "human_staff-1");
-        assert_eq!(projected.actor_kind, ActorKind::Human);
-        assert_eq!(projected.role, ParticipantRole::Consultant);
-        assert_eq!(projected.mode, ParticipantMode::Present);
-        assert_eq!(projected.name.as_deref(), Some("Alice"));
-
-        // `mode: None` falls back to the actor-kind default; for a Human that
-        // is `Absent`, and the projection must surface that verbatim too.
-        let absent = Participant {
-            bot_uuid: "human_staff-2".into(),
-            bot_name: None,
-            kind: None,
-            role: ParticipantRole::Observer,
-            actor_kind: ActorKind::Human,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: None,
-        };
-        let projected_absent = project_participant(&absent);
-        assert_eq!(projected_absent.actor_kind, ActorKind::Human);
-        assert_eq!(projected_absent.mode, ParticipantMode::Absent);
-
-        // No regression for Bot participants: Auto/Muted pass through as-is.
-        let bot = Participant {
-            bot_uuid: "bot-1".into(),
-            bot_name: None,
-            kind: None,
-            role: ParticipantRole::Driver,
-            actor_kind: ActorKind::Bot,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: Some(ParticipantMode::Muted),
-        };
-        let projected_bot = project_participant(&bot);
-        assert_eq!(projected_bot.actor_kind, ActorKind::Bot);
-        assert_eq!(projected_bot.mode, ParticipantMode::Muted);
     }
 }
