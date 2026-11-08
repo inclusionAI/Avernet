@@ -394,12 +394,15 @@ engine's extension features, never the common API.
 1. **Frontend call path.** Do frontends call `/api/ext/...` through the same
    gateway route they use for the adapter today, or do we expose a dedicated
    gateway domain? (Proposed: same route, no gateway change.)
-2. **Principal handling in the adapter.** (a) Inbound: the adapter needs the
-   gateway's verification key to check `X-Avernet-Principal`. (b) Outbound:
-   re-sign for `aud=ext:{engine}` (needs signer access in the adapter, or a
-   gateway token-exchange endpoint) vs. forward the inbound token unchanged
-   (simpler, weaker isolation). Proposed: verify inbound; re-sign via gateway
-   token exchange.
+2. **Principal handling in the adapter.** Forwarding the inbound token
+   unchanged is **not** an option: its `principals` claim carries platform
+   credentials (§7.3). The open choices are: (a) Inbound: the adapter verifies
+   `X-Avernet-Principal` the same way other platform components behind the
+   gateway do (the verification key stays inside the platform and is never
+   given to upstreams). (b) Outbound: who mints the §7.3 credential-free
+   token — a gateway token-exchange endpoint (adapter holds no `ext:*`
+   signing key) or the adapter itself (adapter holds the asymmetric `ext:*`
+   key). Proposed: gateway token exchange.
 3. **Config source.** Static YAML per deployment (phase 1) vs. a Backend-owned
    registry so owners can self-register upstreams (later).
 4. **Secrets.** Whether phase 1 needs a secret-store / mTLS backend beyond
