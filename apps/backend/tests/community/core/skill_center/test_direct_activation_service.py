@@ -370,7 +370,7 @@ async def test_mcp_direct_deactivation_needs_no_marketplace_permission():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method_name", ["activate_mcp", "deactivate_mcp"])
-async def test_platform_default_mcp_refuses_direct_control(method_name: str):
+async def test_direct_mcp_commands_pass_complete_policy_to_transactional_guard(method_name: str):
     repository = _Repository()
     mcp_center = _McpCenter(allowed=True)
     policy = _PlatformDefaultMcpPolicy("mcp.policy")
@@ -380,20 +380,13 @@ async def test_platform_default_mcp_refuses_direct_control(method_name: str):
         platform_default_mcp_policy=policy,
     )
 
-    with pytest.raises(
-        SkillSetControlPlaneConflictError,
-        match="RESOURCE_MANAGED_BY_PLATFORM_POLICY",
-    ):
-        await getattr(service, method_name)(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            actor_id="true-owner",
-            server_code="mcp.policy",
-        )
+    await getattr(service, method_name)(
+        bot_id="bot-1", owner_id="true-owner", actor_id="true-owner", server_code="mcp.policy",
+    )
     assert policy.bots[0]["bot_id"] == "bot-1"
-    assert repository.install_mcp_calls == []
-    assert repository.uninstall_mcp_calls == []
-    assert mcp_center.calls == []
+    calls = repository.install_mcp_calls if method_name == "activate_mcp" else repository.uninstall_mcp_calls
+    assert calls[0]["platform_default_codes"] == frozenset({"mcp.policy"})
+
 
 
 @pytest.mark.asyncio

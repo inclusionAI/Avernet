@@ -596,32 +596,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
             except Exception:  # noqa: BLE001 - audit logging is non-authoritative
                 pass
 
-    def _platform_default_codes(
-        self, bot: dict, server_code: str
-    ) -> frozenset[str]:
-        return self._platform_default_mcp_policy.require_direct_control_allowed(
-            bot=bot,
-            server_code=server_code,
-        )
+    def _platform_default_codes(self, bot: dict, server_code: str) -> frozenset[str]:
+        # Keep the complete policy; the UoW filters actual scoped exclusions
+        # under its existing locks before deciding whether Direct is allowed.
+        return self._platform_default_mcp_policy.server_codes_for(bot)
 
-    def _platform_codes_for_existing_direct(
-        self, bot: dict, server_code: str
-    ) -> frozenset[str]:
-        codes = self._platform_default_mcp_policy.server_codes_for(bot)
-        if server_code not in codes:
-            return codes
-        if self._repository.manifest_direct_mcp_exists(
-            bot_id=str(bot["bot_id"]),
-            owner_id=stable_resource_owner_id(bot),
-            server_code=server_code,
-            platform_default_codes=codes,
-            engine_type=bot_engine_type(bot),
-            default_engine_types=bot_default_engine_types(bot),
-        ):
-            return codes
-        return self._platform_default_mcp_policy.require_direct_control_allowed(
-            bot=bot, server_code=server_code
-        )
+    def _platform_codes_for_existing_direct(self, bot: dict, server_code: str) -> frozenset[str]:
+        return self._platform_default_codes(bot, server_code)
 
     def _bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:
         """Resolve the exact addressed Bot; the MCP wire's error vocabulary."""

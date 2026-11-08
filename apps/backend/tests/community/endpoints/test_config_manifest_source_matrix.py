@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.core.apply_engine.constructs import CURRENT_CATEGORIES
 from agentclaw.community.core.apply_engine.capabilities import (
     Category,
 )
@@ -272,8 +273,9 @@ def test_the_capabilities_endpoint_publishes_the_same_table(
         (cell["category"], cell["protocol"]): cell
         for cell in response.json()["data"]["source_matrix"]
     }
-    assert len(published) == len(MATRIX)
-    for (category, kind), refusal in MATRIX.items():
+    active = {key: value for key, value in MATRIX.items() if key[0] in CURRENT_CATEGORIES}
+    assert len(published) == len(active)
+    for (category, kind), refusal in active.items():
         cell = published[(category.value, kind.value)]
         assert cell["supported"] is (refusal is None), cell
         if refusal is not None:

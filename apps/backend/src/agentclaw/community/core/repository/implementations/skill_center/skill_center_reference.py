@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from injector import inject
 from sqlalchemy import func
+
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
+)
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill_center_reference import (
@@ -17,6 +23,7 @@ from agentclaw.community.core.repository.protocols.skill_center_reference import
 )
 from agentclaw.community.core.repository.skill_center_reference_types import (
     MaterializedPublicCenterAsset,
+    PublicCenterReferenceAsset,
     PublicCenterVersionTarget,
     SkillCenterReferenceWorkBatch,
     SkillCenterReferenceWorkItem,
@@ -230,9 +237,101 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
             session.flush()
             return self._work_item(row)
 
+    def find_public_asset(
+        self, *, env: str, locator: str
+    ) -> PublicCenterReferenceAsset | None:
+        tenant = get_current_avernet_tenant()
+        with self._db.orm_session() as session:
+            candidates = (
+                session.query(Skill)
+                .filter(
+                    Skill.avernet_tenant == tenant,
+                    Skill.env == env,
+                    Skill.git_path == locator,
+                )
+                .all()
+            )
+            exact = [row for row in candidates if row.git_path == locator]
+            if not exact:
+                return None
+            if len(exact) != 1 or not exact[0].is_public:
+                raise ValueError("SC Public locator has conflicting asset identities")
+            skill = exact[0]
+            binding = (
+                session.query(SkillSpaceBinding)
+                .filter(
+                    SkillSpaceBinding.avernet_tenant == tenant,
+                    SkillSpaceBinding.env == env,
+                    SkillSpaceBinding.skill_id == skill.id,
+                )
+                .first()
+            )
+            if binding is not None or not skill.skill_uuid:
+                raise ValueError(
+                    "SC Public locator has a conflicting governed identity"
+                )
+            return PublicCenterReferenceAsset(
+                skill_id=int(skill.id), skill_uuid=skill.skill_uuid
+            )
+
     def ensure_public_version(
         self,
         *,
+        env: str,
+        actor_id: str,
+        locator: str,
+        skill_uuid: str,
+        skill_name: str,
+        description: str | None,
+        sc_skill_id: int,
+        sc_version_number: str,
+        sc_version_id: int,
+    ) -> PublicCenterVersionTarget:
+        return self._ensure_public_version(
+            env=env,
+            actor_id=actor_id,
+            locator=locator,
+            skill_uuid=skill_uuid,
+            skill_name=skill_name,
+            description=description,
+            sc_skill_id=sc_skill_id,
+            sc_version_number=sc_version_number,
+            sc_version_id=sc_version_id,
+            guard=None,
+        )
+
+    def ensure_apply_public_version(
+        self,
+        *,
+        expected_name: str,
+        expected_mcp_dependencies: frozenset[str],
+        env: str,
+        actor_id: str,
+        locator: str,
+        skill_uuid: str,
+        skill_name: str,
+        description: str | None,
+        sc_skill_id: int,
+        sc_version_number: str,
+        sc_version_id: int,
+    ) -> PublicCenterVersionTarget:
+        return self._ensure_public_version(
+            env=env,
+            actor_id=actor_id,
+            locator=locator,
+            skill_uuid=skill_uuid,
+            skill_name=skill_name,
+            description=description,
+            sc_skill_id=sc_skill_id,
+            sc_version_number=sc_version_number,
+            sc_version_id=sc_version_id,
+            guard=(expected_name, expected_mcp_dependencies),
+        )
+
+    def _ensure_public_version(
+        self,
+        *,
+        guard: tuple[str, frozenset[str]] | None,
         env: str,
         actor_id: str,
         locator: str,
@@ -248,6 +347,24 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
             skill = self._find_public_skill(
                 session, tenant=tenant, env=env, locator=locator
             )
+            if guard is not None:
+                candidates = (
+                    session.query(Skill)
+                    .filter(
+                        Skill.avernet_tenant == tenant,
+                        Skill.env == env,
+                        Skill.git_path == locator,
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                if any(
+                    row.git_path == locator and (skill is None or row.id != skill.id)
+                    for row in candidates
+                ):
+                    raise ValueError(
+                        "SC Public locator has a conflicting asset identity"
+                    )
             if skill is None:
                 skill = Skill(
                     name=skill_name,
@@ -279,6 +396,55 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                         raise
             elif skill.skill_uuid != skill_uuid:
                 raise RuntimeError("SC Public locator has a conflicting identity")
+
+            if guard is not None:
+                if skill.offline_at is not None:
+                    raise ValueError("SC Public Skill is offline")
+                published = (
+                    session.query(SkillVersion)
+                    .filter(
+                        SkillVersion.avernet_tenant == tenant,
+                        SkillVersion.env == env,
+                        SkillVersion.skill_id == int(skill.id),
+                        SkillVersion.status == "PUBLISHED",
+                    )
+                    .order_by(SkillVersion.version_ordinal.desc())
+                    .with_for_update()
+                    .first()
+                )
+                if published is not None:
+                    metadata = json.loads(published.metadata_json or "null")
+                    if not isinstance(metadata, dict) or not isinstance(
+                        metadata.get("mcp_dependencies"), list
+                    ):
+                        raise ValueError("Ready Skill has unknown dependencies")
+                    if (
+                        published.name != guard[0]
+                        or frozenset(mcp_dependency_codes(metadata["mcp_dependencies"]))
+                        != guard[1]
+                    ):
+                        raise ValueError(
+                            "Ready Skill name or dependencies changed since preview"
+                        )
+                    return PublicCenterVersionTarget(
+                        skill_id=int(skill.id),
+                        skill_version_id=int(published.id),
+                        status="PUBLISHED",
+                    )
+                competing = (
+                    session.query(SkillVersion)
+                    .filter(
+                        SkillVersion.avernet_tenant == tenant,
+                        SkillVersion.env == env,
+                        SkillVersion.skill_id == int(skill.id),
+                        SkillVersion.sc_version_number != sc_version_number,
+                    )
+                    .first()
+                )
+                if competing is not None:
+                    raise RuntimeError(
+                        "another public Version is preparing; retry Apply later"
+                    )
 
             # The first exact package may converge the provisional market
             # display name to ``SKILL.md.name`` before PUBLISHED.  Every later

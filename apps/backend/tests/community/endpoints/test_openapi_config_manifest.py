@@ -11,6 +11,9 @@ from __future__ import annotations
 import time
 
 import jwt
+import pytest
+import yaml
+from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.repository.protocols.bot import (
@@ -424,6 +427,77 @@ def delete_config_manifest_unknown_bot():
 )
 def get_config_manifest_capabilities_ok():
     """The read path's half of "one function, two entry points"."""
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "deepseek_harness"])
+def test_capabilities_publish_skill_reference_verdicts(app_with_testing_modules, world, engine):
+    """Reference support survives the response independently of transport support."""
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_BOT_ID, engine=engine)
+    client = TestClient(app_with_testing_modules)
+    response = client.get(
+        f"/openapi/v1/bots/{_BOT_ID}/config-manifest/capabilities",
+        params=_QUERY,
+        headers=_HEADERS,
+    )
+    assert response.status_code == 200, response.json()
+    data = response.json()["data"]
+    assert [row["reference"] for row in data["skill_references"]] == [
+        "package", "repo_path", "skill_uuid", "skill_code",
+    ]
+    assert data["skill_references"][:2] == [
+        {"reference": "package", "supported": True, "reason": ""},
+        {"reference": "repo_path", "supported": True, "reason": ""},
+    ]
+    center_supported = engine != "deepseek_harness"
+    assert data["skill_references"][2:] == [
+        {
+            "reference": reference,
+            "supported": center_supported,
+            "reason": "" if center_supported else "deepseek_harness does not deliver Center skills",
+        }
+        for reference in ("skill_uuid", "skill_code")
+    ]
+    categories = {row["name"] for row in data["constructs"] if row["kind"] == "category"}
+    assert "capabilities" in categories
+    assert not {"skills", "mcp"} & categories
+    assert {row["category"] for row in data["source_matrix"]} == categories
+    assert any(
+        row["category"] == "capabilities" and row["protocol"] == "git" and row["supported"]
+        for row in data["source_matrix"]
+    )
+
+
+@pytest.mark.parametrize("reference,value", [
+    ("skill_uuid", "12345678-1234-5678-1234-567812345678"),
+    ("skill_code", "public-review"),
+])
+@pytest.mark.parametrize("in_set", [False, True], ids=["direct", "set"])
+def test_center_reference_refusals_match_discovery_for_direct_and_sets(
+    app_with_testing_modules, world, reference, value, in_set
+):
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_BOT_ID, engine="deepseek_harness")
+    client = TestClient(app_with_testing_modules)
+    path = f"/openapi/v1/bots/{_BOT_ID}/config-manifest"
+    data = client.get(f"{path}/capabilities", params=_QUERY, headers=_HEADERS).json()["data"]
+    verdict = next(row for row in data["skill_references"] if row["reference"] == reference)
+    assert verdict["supported"] is False
+    skill = {"name": "review", "origin": "center", reference: value}
+    target = (
+        {"skill_sets": [{"name": "reviewers", "is_active": True, "skills": [skill], "mcp": []}]}
+        if in_set else {"skills": [skill]}
+    )
+    response = client.put(
+        path, params=_QUERY, headers=_HEADERS,
+        json={"document": yaml.safe_dump({"schema_version": 1, "manifest": {"capabilities": target}})},
+    )
+    assert response.status_code == 422, response.json()
+    violations = response.json()["data"]["violations"]
+    assert any(
+        row["code"] == "unsupported_skill_reference" and row["message"] == verdict["reason"]
+        for row in violations
+    ), violations
 
 
 @endpoint_test(

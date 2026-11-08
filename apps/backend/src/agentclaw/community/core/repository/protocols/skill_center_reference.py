@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.skill_center_reference_types import (
         MaterializedPublicCenterAsset,
+        PublicCenterReferenceAsset,
         PublicCenterVersionTarget,
         SkillCenterReferenceWorkBatch,
         SkillCenterReferenceWorkItem,
@@ -59,9 +60,33 @@ class SkillCenterReferenceRepositoryProtocol(Protocol):
     ) -> SkillCenterReferenceWorkItem: ...
 
     @abstractmethod
+    def find_public_asset(
+        self, *, env: str, locator: str
+    ) -> PublicCenterReferenceAsset | None:
+        """Read exact locator; reject conflicting identities, never lock or write."""
+        ...
+
+    @abstractmethod
     def ensure_public_version(
         self,
         *,
+        env: str,
+        actor_id: str,
+        locator: str,
+        skill_uuid: str,
+        skill_name: str,
+        description: str | None,
+        sc_skill_id: int,
+        sc_version_number: str,
+        sc_version_id: int,
+    ) -> PublicCenterVersionTarget: ...
+
+    @abstractmethod
+    def ensure_apply_public_version(
+        self,
+        *,
+        expected_name: str,
+        expected_mcp_dependencies: frozenset[str],
         env: str,
         actor_id: str,
         locator: str,

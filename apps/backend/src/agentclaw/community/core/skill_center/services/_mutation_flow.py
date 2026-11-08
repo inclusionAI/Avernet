@@ -101,10 +101,10 @@ def mcp_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
 
 
 def mcp_release_scope(result: DesiredStateMutation) -> ProjectionScope:
-    """Release removed installs and refresh overrides that fell back to defaults."""
+    """Remove retired configuration or refresh it if effective supply remains."""
     return ProjectionScope(
         mcp=bool(result.mcp_codes or result.updated_mcp_codes),
-        released_mcp=result.mcp_codes,
+        released_mcp=result.mcp_codes | result.updated_mcp_codes,
         updated_mcp=result.updated_mcp_codes,
     )
 

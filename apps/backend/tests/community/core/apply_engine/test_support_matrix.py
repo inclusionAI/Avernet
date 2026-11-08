@@ -97,6 +97,8 @@ def test_the_matrix_is_the_contract_the_spec_publishes():
         (Category.RESOURCES, SourceKind.GIT),
         (Category.SKILLS, SourceKind.OSS),
         (Category.SKILLS, SourceKind.GIT),
+        (Category.CAPABILITIES, SourceKind.OSS),
+        (Category.CAPABILITIES, SourceKind.GIT),
         (Category.CLI_TOOLS, SourceKind.OSS),
         (Category.CLI_TOOLS, SourceKind.GIT),
     }

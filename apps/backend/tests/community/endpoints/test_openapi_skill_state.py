@@ -156,10 +156,9 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "engine_type": "openclaw",
             }
         )
-        # A direct-controlled Local Skill: no Set membership. A Set-managed
-        # member — the Default included, excluded or not — refuses the
-        # Skill-level command (R1, no exclusion carve-out); the dedicated
-        # 409 case below pins that.
+        # A direct-controlled Local Skill has no Set membership. Unexcluded
+        # Default members reject direct control; excluded members release
+        # that source and permit explicit Direct commands.
         world.get(SkillRepository).create(
             {
                 "name": "state-skill",
@@ -205,14 +204,44 @@ def _seed_runtime_failure(world) -> None:
     _seed_state(world, runtime_success=False)
 
 
-def _seed_excluded_default_member(world) -> None:
-    """The Bot's Default Set holds the Skill, and the owner excluded it."""
+def _seed_default_member(world) -> None:
+    """The applicable unexcluded Default still controls the Skill."""
     _seed_state(world, runtime_success=True)
     with avernet_tenant_scope(_TENANT):
         sets = world.get(SkillSetRepository)
         default_set = sets.get_default(user_id=_OWNER, bolt_id=_BOT_ID)
         sets.add_skill_to_set(default_set["id"], "1", user_id=_OWNER)
+
+
+def _seed_excluded_default_member(world) -> None:
+    _seed_default_member(world)
+    with avernet_tenant_scope(_TENANT):
+        sets = world.get(SkillSetRepository)
+        default_set = sets.get_default(user_id=_OWNER, bolt_id=_BOT_ID)
         sets.add_default_skill_exclusion(_OWNER, _BOT_ID, int(default_set["id"]), 1)
+
+
+def _seed_excluded_default_direct_member(world) -> None:
+    _seed_excluded_default_member(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).install_skill(
+            bot_id=_BOT_ID, owner_id=_OWNER, skill_id="1", engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        )
+
+
+def _assert_default_membership_and_exclusion_retained(_response, world) -> None:
+    from agentclaw.community.core.skill_center.skill_set_management_service_protocol import (
+        SkillSetManagementServiceProtocol,
+    )
+
+    with avernet_tenant_scope(_TENANT):
+        snapshot = world.get(SkillSetManagementServiceProtocol).read_apply_snapshot(
+            bot_id=_BOT_ID, owner_id=_OWNER, actor_id=_OWNER
+        )
+    default = next(item for item in snapshot.sets if item.is_default)
+    assert default.skill_ids == (1,)
+    assert snapshot.skill_exclusions == frozenset({(default.id, 1)})
 
 
 def _assert_skill_remains_inactive(_response, world) -> None:
@@ -273,21 +302,20 @@ def activate_local_skill_runtime_failure_is_publicly_safe():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
-    scenario="excluded_default_member_refuses_direct_control",
+    scenario="default_member_refuses_direct_control",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
-    seed=_seed_excluded_default_member,
+    seed=_seed_default_member,
     expect=ExpectError(
         status=409,
         json_contains={"code": 409202},
     ),
 )
-def excluded_default_member_stays_set_managed():
-    """R1 with no exclusion carve-out: re-activation removes the exclusion
-    through the Set wire, never the Skill-level command."""
+def unexcluded_default_member_stays_set_managed():
+    """An unexcluded Default member remains protected from Direct control."""
 
 
 @endpoint_test(
@@ -344,7 +372,7 @@ def deactivate_local_skill_runtime_failure_is_publicly_safe():
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
-    seed=_seed_excluded_default_member,
+    seed=_seed_default_member,
     expect=ExpectError(status=409, json_contains={"code": 409202}),
 )
 def deactivate_set_managed_skill_is_refused():
@@ -411,7 +439,7 @@ def legacy_activate_runtime_failure_is_publicly_safe():
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
-    seed=_seed_excluded_default_member,
+    seed=_seed_default_member,
     expect=ExpectError(status=409, json_contains={"code": 409202}),
 )
 def legacy_activate_set_managed_skill_is_refused():
@@ -472,8 +500,84 @@ def legacy_deactivate_runtime_failure_is_publicly_safe():
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
-    seed=_seed_excluded_default_member,
+    seed=_seed_default_member,
     expect=ExpectError(status=409, json_contains={"code": 409202}),
 )
 def legacy_deactivate_set_managed_skill_is_refused():
     """The legacy address preserves the canonical ownership restriction."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
+    scenario="excluded_default_member_allows_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER}, headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"changed": True, "skill": {"active": True}}},
+    ),
+    extra_assertions=(_assert_default_membership_and_exclusion_retained,),
+)
+def activate_excluded_default_member_keeps_original_relationship():
+    """Explicit Direct control retains Default membership and its exclusion."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
+    scenario="excluded_default_member_allows_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER}, headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_direct_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"changed": True, "skill": {"active": False}}},
+    ),
+    extra_assertions=(_assert_default_membership_and_exclusion_retained,),
+)
+def deactivate_excluded_default_member_keeps_original_relationship():
+    """Explicit Direct control retains Default membership and its exclusion."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    scenario="excluded_default_member_allows_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER}, headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"changed": True, "skill": {"active": True}}},
+    ),
+    extra_assertions=(_assert_default_membership_and_exclusion_retained,),
+)
+def legacy_activate_excluded_default_member_keeps_original_relationship():
+    """Explicit Direct control retains Default membership and its exclusion."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    scenario="excluded_default_member_allows_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER}, headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_direct_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"changed": True, "skill": {"active": False}}},
+    ),
+    extra_assertions=(_assert_default_membership_and_exclusion_retained,),
+)
+def legacy_deactivate_excluded_default_member_keeps_original_relationship():
+    """Explicit Direct control retains Default membership and its exclusion."""

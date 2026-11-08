@@ -56,7 +56,7 @@ def test_empty_directories_are_previewed_and_confirmed_even_when_a_skill_fails()
         ))
         assert _resources_category(report).as_dict()["removed"] == ["data/", "data/empty/"]
         assert report.status.value == "PARTIAL"
-        assert any(entry.construct.value == "skills" and entry.outcome.value == "failed" for entry in report.entries)
+        assert any(entry.construct.value == "capabilities" and entry.outcome.value == "failed" for entry in report.entries)
         assert ("data/empty" in workspace.directories) is dry_run
         assert "skills/keep" in workspace.directories
 

@@ -48,7 +48,7 @@ def _ports(tag: str) -> MaterialiserPorts:
     return MaterialiserPorts(
         script_service=tag, activation_service=tag, mcp_auth_service=tag,
         mcp_config_service=tag,
-        identity_service=tag, upload_service=tag, capability_reader=tag,
+        identity_service=tag, upload_service=tag, skill_references=tag, skill_sets=tag,
         package_validator=tag, content=tag, resource_service=tag, resource_rows=tag,
         cli_tool_service=tag,
         shared_skills=tag,

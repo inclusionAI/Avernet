@@ -125,7 +125,9 @@ def test_create_replays_the_original_batch_and_rejects_key_reuse() -> None:
     }
 
 
-def test_collection_detail_survive_terminal_transition_without_live_set_lookup() -> None:
+def test_collection_detail_survive_terminal_transition_without_live_set_lookup() -> (
+    None
+):
     repo = SkillCenterReferenceRepository(_Database())
     with avernet_tenant_scope("teamclaw"):
         created = repo.create_or_get_batch(
@@ -182,7 +184,9 @@ def test_collection_detail_survive_terminal_transition_without_live_set_lookup()
     assert detail.error_code is None
 
 
-def test_public_code_reuses_its_center_locator_without_reusing_same_name_local() -> None:
+def test_public_code_reuses_its_center_locator_without_reusing_same_name_local() -> (
+    None
+):
     db = _Database()
     repo = SkillCenterReferenceRepository(db)
     with avernet_tenant_scope("teamclaw"), db.orm_session() as session:
@@ -268,9 +272,7 @@ def test_group4_ddl_declares_durable_identity_and_collection_indexes() -> None:
         / "sql"
     )
     ddl = (sql_dir / "2026_08_30_phase2_group4_reference.sql").read_text()
-    verify = (
-        sql_dir / "2026_08_30_phase2_group4_reference_verify.sql"
-    ).read_text()
+    verify = (sql_dir / "2026_08_30_phase2_group4_reference_verify.sql").read_text()
 
     assert "uk_sc_reference_idempotency" in ddl
     assert "uk_sc_reference_code" in ddl
@@ -348,3 +350,103 @@ def test_sync_inventory_excludes_unready_assets_and_space_published_skills() -> 
     assert [(asset.skill_id, asset.skill_code) for asset in assets] == [
         (public.skill_id, "public-ready")
     ]
+
+
+def test_apply_preparation_reuses_ready_and_refuses_a_competing_unpublished_version():
+    from agentclaw.community.core.repository.implementations.skill_center.skill_version import (
+        SkillVersionRepository,
+    )
+
+    db = _Database()
+    repo = SkillCenterReferenceRepository(db)
+    facts = dict(
+        env="pre",
+        actor_id="actor",
+        locator="center://weather",
+        skill_uuid=PublicCenterSkillIdentity.derive(
+            tenant="teamclaw", env="pre", skill_code="weather"
+        ).skill_uuid,
+        skill_name="weather",
+        description=None,
+        sc_skill_id=7,
+    )
+    with avernet_tenant_scope("teamclaw"):
+        first = repo.ensure_public_version(
+            **facts, sc_version_number="2.0", sc_version_id=20
+        )
+        with pytest.raises(RuntimeError, match="preparing"):
+            repo.ensure_apply_public_version(
+                **facts,
+                sc_version_number="1.0",
+                sc_version_id=10,
+                expected_name="weather",
+                expected_mcp_dependencies=frozenset({"mcp.weather"}),
+            )
+        SkillVersionRepository(db).publish_materialized(
+            env="pre",
+            skill_id=first.skill_id,
+            skill_version_id=first.skill_version_id,
+            name="weather",
+            description=None,
+            metadata_json='{"mcp_dependencies":[{"code":"mcp.weather"}]}',
+        )
+        reused = repo.ensure_apply_public_version(
+            **facts,
+            sc_version_number="1.0",
+            sc_version_id=10,
+            expected_name="weather",
+            expected_mcp_dependencies=frozenset({"mcp.weather"}),
+        )
+        assert reused == type(first)(
+            skill_id=first.skill_id,
+            skill_version_id=first.skill_version_id,
+            status="PUBLISHED",
+        )
+        with pytest.raises(ValueError, match="changed"):
+            repo.ensure_apply_public_version(
+                **facts,
+                sc_version_number="1.0",
+                sc_version_id=10,
+                expected_name="weather",
+                expected_mcp_dependencies=frozenset(),
+            )
+        assert (
+            len(
+                SkillVersionRepository(db).list_latest_published(
+                    env="pre", skill_ids=(first.skill_id,)
+                )
+            )
+            == 1
+        )
+
+
+def test_apply_preparation_refuses_locator_that_became_private_after_preview():
+    db = _Database()
+    repo = SkillCenterReferenceRepository(db)
+    with avernet_tenant_scope("teamclaw"):
+        with db.orm_session() as session:
+            session.add(
+                Skill(
+                    name="weather",
+                    git_path="center://weather",
+                    is_public=False,
+                    user_id="another-owner",
+                    env="pre",
+                    avernet_tenant="teamclaw",
+                    skill_uuid="00000000-0000-4000-8000-000000000009",
+                )
+            )
+        with pytest.raises(ValueError, match="conflicting"):
+            repo.ensure_apply_public_version(
+                env="pre",
+                actor_id="actor",
+                locator="center://weather",
+                skill_uuid="00000000-0000-4000-8000-000000000010",
+                skill_name="weather",
+                description=None,
+                sc_skill_id=7,
+                sc_version_number="1.0",
+                sc_version_id=10,
+                expected_name="weather",
+                expected_mcp_dependencies=frozenset(),
+            )

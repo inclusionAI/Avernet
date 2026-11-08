@@ -4200,17 +4200,17 @@
           "categories": [
             {
               "aborted": false,
-              "category": "mcp",
+              "category": "capabilities",
               "removed": [
-                "mcp.old"
+                "mcp/mcp.old"
               ]
             }
           ],
           "entries": [
             {
               "action": "created",
-              "category": "mcp",
-              "name": "mcp.ant.homistudio.meetmcp"
+              "category": "capabilities",
+              "name": "mcp/mcp.docs"
             }
           ],
           "finished_at": "2026-08-31T09:12:06+00:00",
@@ -4354,7 +4354,7 @@
             "type": "boolean"
           },
           "removed": {
-            "description": "Entries that existed in this category's area and are no longer declared, so overwriting removed them. Reported separately from `entries` because a removal has no declared entry.",
+            "description": "Entries that existed in this category's area and are no longer declared, so overwriting removed them. Reported separately from `entries` because a removal has no declared entry. Current capabilities use the same `skills/`, `skill_sets/` and `mcp/` prefixes as entries.",
             "items": {
               "type": "string"
             },
@@ -4395,7 +4395,7 @@
             "title": "Error"
           },
           "name": {
-            "description": "How the entry names itself — a skill `name`, an identity `type`, a resource `path`, an mcp `server_code`.",
+            "description": "Entry identity. Current capabilities use `skills/<name>`, `skill_sets/<name>` or `mcp/<code>`; other categories use their own identity or path. Historical reports retain their original names.",
             "title": "Name",
             "type": "string"
           },
@@ -4536,7 +4536,7 @@
           "constructs": [
             {
               "kind": "category",
-              "name": "identity",
+              "name": "capabilities",
               "reason": "",
               "supported": true
             },
@@ -4547,9 +4547,31 @@
               "supported": false
             }
           ],
-          "engine_type": "openclaw",
+          "engine_type": "teclaw",
           "schema_versions": [
             1
+          ],
+          "skill_references": [
+            {
+              "reason": "",
+              "reference": "package",
+              "supported": true
+            },
+            {
+              "reason": "",
+              "reference": "repo_path",
+              "supported": true
+            },
+            {
+              "reason": "",
+              "reference": "skill_uuid",
+              "supported": true
+            },
+            {
+              "reason": "",
+              "reference": "skill_code",
+              "supported": true
+            }
           ],
           "source_matrix": [
             {
@@ -4559,7 +4581,7 @@
               "supported": true
             },
             {
-              "category": "skills",
+              "category": "capabilities",
               "protocol": "content",
               "reason": "a skills entry is a package (SKILL.md + the files it names) — inline content cannot be one; declare a source with 'protocol: git' or 'protocol: oss'",
               "supported": false
@@ -4598,8 +4620,16 @@
             "title": "Schema Versions",
             "type": "array"
           },
+          "skill_references": {
+            "description": "The four Skill reference forms for this bot and engine. Direct and SkillSet entries use the same verdict. Asset access and availability are checked during resolution. Git package transport support does not imply shared Repo reference support.",
+            "items": {
+              "$ref": "#/components/schemas/ManifestSkillReference"
+            },
+            "title": "Skill References",
+            "type": "array"
+          },
           "source_matrix": {
-            "description": "Every (category, protocol) combination, supported or not. Additive alongside `constructs`, which keeps its exact shape and meaning: a construct row says whether a *form* can be resolved at all, and a matrix cell says whether a *combination* is delivered.",
+            "description": "Every current (category, protocol) combination, supported or not. For capabilities this describes Local Skill package transport, not shared Repo or Center reference support. Additive alongside `constructs`, which keeps its exact shape and meaning: a construct row says whether a *form* can be resolved at all, and a matrix cell says whether a *combination* is delivered.",
             "items": {
               "$ref": "#/components/schemas/ManifestSourceCell"
             },
@@ -18719,7 +18749,7 @@
         "description": "One thing a manifest can declare, and whether this bot accepts it.",
         "properties": {
           "kind": {
-            "description": "`category` (one of the six under `manifest`), `section` (a top-level section such as `script`), or `source` (how an entry names its content).",
+            "description": "`category` (a current execution category under `manifest`), `section` (a top-level section such as `script`).",
             "title": "Kind",
             "type": "string"
           },
@@ -18752,7 +18782,7 @@
         "description": "One (category, protocol) combination, and whether this bot accepts it.\n\nThe cartesian view `constructs` structurally cannot express: its rows carry\none verdict per construct, so \"which categories work with which sources\" had\nno representation at all and callers discovered the answer from a 422 — or,\nworse, from a failed apply. Read this to decide what to write before writing\nit.",
         "properties": {
           "category": {
-            "description": "One of the six categories under `manifest`.",
+            "description": "A current execution category under `manifest`.",
             "title": "Category",
             "type": "string"
           },
@@ -18779,6 +18809,39 @@
           "reason"
         ],
         "title": "ManifestSourceCell",
+        "type": "object"
+      },
+      "ManifestSkillReference": {
+        "description": "Support for one Skill reference form, shared by Direct and SkillSet entries.",
+        "properties": {
+          "reason": {
+            "description": "Empty when supported; otherwise the validator's refusal.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "reference": {
+            "description": "Local package, shared Repo path, Center UUID, or public Center code.",
+            "enum": [
+              "package",
+              "repo_path",
+              "skill_uuid",
+              "skill_code"
+            ],
+            "title": "Reference",
+            "type": "string"
+          },
+          "supported": {
+            "description": "False when this bot refuses the reference form.",
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reference",
+          "supported",
+          "reason"
+        ],
+        "title": "ManifestSkillReference",
         "type": "object"
       },
       "MarketFavoriteItem": {
@@ -72934,7 +72997,7 @@
     },
     "/openapi/v1/bots/{bot_id}/config-manifest/capabilities": {
       "get": {
-        "description": "Which manifest constructs this bot accepts, and why not when it does not.\n\nAnswered by the same resolver `PUT` refuses with, so this can never claim\nsupport for something the next write rejects. A construct is a category or\na top-level section (`script`). Which (category, protocol) pairs are open\nis the separate `source_matrix` field: a pair with no resolver fails the\nway an unsupported category does, and the matrix is where a\ncategory-aware reason can live.\n\nAn unrecognised engine supports nothing.",
+        "description": "Which manifest constructs this bot accepts, and why not when it does not.\n\nAnswered by the same resolver `PUT` and creation validation use. Current\nexecution categories include one aggregate `capabilities` construct for\nDirect Skills, SkillSets/Default and MCP; historical `skills` and `mcp`\ncategories are not advertised separately.\n\n`source_matrix` describes content transport, including Local Skill\npackages. `skill_references` separately lists `package`, `repo_path`,\n`skill_uuid` and `skill_code`, each with `supported` and `reason` for this\nbot and engine. Direct and SkillSet entries share those verdicts. Git\npackage transport support does not imply shared Repo reference support.\nAsset access and availability are checked during resolution.\n\nAn unrecognised engine supports nothing.",
         "operationId": "get_bot_config_manifest_capabilities",
         "parameters": [
           {

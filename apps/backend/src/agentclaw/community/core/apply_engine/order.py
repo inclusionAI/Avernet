@@ -103,8 +103,7 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     ApplyStep(Section.SCRIPT, 0),
     ApplyStep(Category.IDENTITY, 1),
     ApplyStep(Category.RESOURCES, 2),
-    ApplyStep(Category.SKILLS, 3),
-    ApplyStep(Category.MCP, 4),
+    ApplyStep(Category.CAPABILITIES, 3),
     ApplyStep(Category.ENGINE_CONFIG, 5),
     ApplyStep(Category.CLI_TOOLS, 6),
 )

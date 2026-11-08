@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 import logging
 import time
 from urllib.parse import urlsplit
 
+from agentclaw.community.core.apply_engine.fetch_budget import current_fetch_budget
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersion,
     CanonicalCenterVersionIdentity,
@@ -17,6 +18,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
+    ValidatedExactSkillPackage,
     PublishedMaterializedSkillVersion,
     SkillVersionMaterializationError,
     SkillVersionMaterializationRequest,
@@ -133,8 +135,38 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         self._validator = validator
         self._store = store
 
+    def preview_exact(
+        self, request: SkillCenterExactDownloadRequest
+    ) -> ValidatedExactSkillPackage:
+        """Validate without creating versions or writing canonical content."""
+        try:
+            return self._download_exact(
+                request, lambda _stage: None, lambda *_args: None
+            )
+        except SkillVersionMaterializationError:
+            raise
+        except Exception as exc:
+            raise SkillVersionMaterializationError(
+                "Exact package preview failed"
+            ) from exc
+
+    def materialize_verified(
+        self,
+        request: SkillVersionMaterializationRequest,
+        content: ValidatedExactSkillPackage,
+    ) -> PublishedMaterializedSkillVersion:
+        """Publish validated exact content without refetching."""
+        return self._materialize(request, content)
+
     def materialize(
         self, request: SkillVersionMaterializationRequest
+    ) -> PublishedMaterializedSkillVersion:
+        return self._materialize(request, None)
+
+    def _materialize(
+        self,
+        request: SkillVersionMaterializationRequest,
+        content: ValidatedExactSkillPackage | None,
     ) -> PublishedMaterializedSkillVersion:
         stage = "target_read"
         started_at = time.perf_counter()
@@ -154,7 +186,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         download_host: str | None = None
         download_path: str | None = None
         response: object | None = None
-        package_bytes: bytes | None = None
         package: ValidatedSkillPackage | None = None
         try:
             target = self._versions.get_materialization_target(
@@ -190,65 +221,37 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 )
                 return published
 
-            advance_stage("exact_download")
-            exact = self._gateway.get_exact_download(
-                SkillCenterExactDownloadRequest(
-                    skill_code=target.skill_code,
-                    version_number=target.sc_version_number,
-                    scope=request.scope,
-                    team_id=request.team_id,
-                )
-            )
-            if (
-                exact.skill_code != target.skill_code
-                or exact.version_number != target.sc_version_number
-                or not exact.download_url
-            ):
-                raise ValueError("Skill Center returned a different exact Version")
-            download_host, download_path = _safe_url_parts(exact.download_url)
-            expected_digest = exact.sha256.lower()
-            advance_stage("package_download")
-            response = self._http.get(exact.download_url, timeout=30.0)
-            response.raise_for_status()
-            package_bytes = bytes(response.content)
-            advance_stage("digest_verify")
-            if hashlib.sha256(package_bytes).hexdigest() != expected_digest:
-                raise ValueError("downloaded package digest does not match SC")
+            def capture(url: str, result: object) -> None:
+                nonlocal download_host, download_path, response
+                download_host, download_path = _safe_url_parts(url)
+                response = result
 
-            advance_stage("package_validate")
-            # SC exact downloads wrap the Skill files in an opaque transport
-            # directory (commonly the skillCode/UUID) for both Public and Team
-            # reads.  It is not a runtime name and must not participate in the
-            # TeamClaw name invariant below.
-            package = self._validator.validate_skill_center_exact_zip(package_bytes)
+            if content is None:
+                content = self._download_exact(
+                    SkillCenterExactDownloadRequest(
+                        skill_code=target.skill_code,
+                        version_number=target.sc_version_number,
+                        scope=request.scope,
+                        team_id=request.team_id,
+                    ),
+                    advance_stage,
+                    capture,
+                )
+            if (
+                content.skill_code != target.skill_code
+                or content.version_number != target.sc_version_number
+            ):
+                raise ValueError(
+                    "validated content addresses a different exact Version"
+                )
+            package = content.package
             advance_stage("name_match")
             if (
                 request.scope is not SkillCenterReadScope.PUBLIC
                 and package.name != target.name
             ):
                 raise ValueError("materialized SKILL.md name changed")
-            advance_stage("metadata_build")
-            dependencies = _dependencies(
-                tuple(
-                    {
-                        "code": item.server_code,
-                        "name": item.name,
-                        "icon_url": item.icon_url,
-                        "description": item.description,
-                    }
-                    for item in exact.mcp_services
-                ),
-            )
-            metadata_json = json.dumps(
-                {
-                    "config": [_json_value(item) for item in package.config],
-                    "mcp_dependencies": dependencies,
-                    "risk_tags": [],
-                },
-                ensure_ascii=True,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+            metadata_json = content.metadata_json
             version = CanonicalCenterVersion.from_files(identity, dict(package.files))
             advance_stage("canonical_write")
             written = self._store.write_version(version)
@@ -270,7 +273,7 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 target=target,
                 duration_ms=_duration_ms(started_at),
                 stage_durations_ms=stage_durations_ms,
-                package_bytes=len(package_bytes),
+                package_bytes=content.download_size,
                 package_file_count=len(package.files),
                 already_published=False,
             )
@@ -305,6 +308,86 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 stage_durations_ms=stage_durations_ms,
             )
             raise SkillVersionMaterializationError(str(exc), stage=stage) from exc
+
+    def _download_exact(
+        self,
+        request: SkillCenterExactDownloadRequest,
+        advance_stage: Callable[[str], None],
+        capture: Callable[[str, object], None],
+    ) -> ValidatedExactSkillPackage:
+        advance_stage("exact_download")
+        exact = self._gateway.get_exact_download(
+            SkillCenterExactDownloadRequest(
+                skill_code=request.skill_code,
+                version_number=request.version_number,
+                scope=request.scope,
+                team_id=request.team_id,
+            )
+        )
+        if (
+            exact.skill_code != request.skill_code
+            or exact.version_number != request.version_number
+            or not exact.download_url
+        ):
+            raise ValueError("Skill Center returned a different exact Version")
+        expected_digest = exact.sha256.lower()
+        advance_stage("package_download")
+        budget = current_fetch_budget()
+        if budget is not None and (reason := budget.expired()):
+            raise SkillVersionMaterializationError(reason, stage="package_download")
+        response = self._http.get(exact.download_url, timeout=30.0)
+        capture(exact.download_url, response)
+        if budget is not None:
+            # HttpClient.get eagerly consumes even an error response body.
+            package_bytes = bytes(response.content)
+            budget.charge(len(package_bytes))
+            response.raise_for_status()
+            if reason := budget.expired():
+                raise SkillVersionMaterializationError(reason, stage="package_download")
+        else:
+            # Preserve the Reference/Sync caller's historical error ordering.
+            response.raise_for_status()
+            package_bytes = bytes(response.content)
+        advance_stage("digest_verify")
+        if hashlib.sha256(package_bytes).hexdigest() != expected_digest:
+            raise ValueError("downloaded package digest does not match SC")
+
+        advance_stage("package_validate")
+        # SC exact downloads wrap the Skill files in an opaque transport
+        # directory (commonly the skillCode/UUID) for both Public and Team
+        # reads.  It is not a runtime name and must not participate in the
+        # TeamClaw name invariant below.
+        package = self._validator.validate_skill_center_exact_zip(package_bytes)
+        advance_stage("metadata_build")
+        dependencies = _dependencies(
+            tuple(
+                {
+                    "code": item.server_code,
+                    "name": item.name,
+                    "icon_url": item.icon_url,
+                    "description": item.description,
+                }
+                for item in exact.mcp_services
+            ),
+        )
+        metadata_json = json.dumps(
+            {
+                "config": [_json_value(item) for item in package.config],
+                "mcp_dependencies": dependencies,
+                "risk_tags": [],
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return ValidatedExactSkillPackage(
+            skill_code=request.skill_code,
+            version_number=request.version_number,
+            sha256=expected_digest,
+            package=package,
+            metadata_json=metadata_json,
+            download_size=len(package_bytes),
+        )
 
     @staticmethod
     def _log_failure(

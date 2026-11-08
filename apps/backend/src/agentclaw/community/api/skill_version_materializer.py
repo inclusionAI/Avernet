@@ -7,6 +7,7 @@ see its resulting PUBLISHED Version through ``SkillVersionResolver``.
 
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
+    ValidatedExactSkillPackage,
     SkillVersionMaterializationError,
     SkillVersionMaterializationRequest,
     SkillVersionMaterializerProtocol,
@@ -14,6 +15,7 @@ from agentclaw.community.core.skill_center.materialization_contract import (
 
 __all__ = [
     "PublishedMaterializedSkillVersion",
+    "ValidatedExactSkillPackage",
     "SkillVersionMaterializationError",
     "SkillVersionMaterializationRequest",
     "SkillVersionMaterializerProtocol",

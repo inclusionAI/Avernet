@@ -100,7 +100,7 @@ async def test_missing_bound_document_refuses_but_ordinary_apply_can_use_updated
         await compiler.compile(make_context(), bound_manifest_state(manifest_digest(DOCUMENT)))
     compiler._manifests._document = 'schema_version: 1\nmanifest:\n  mcp:\n    - server_code: updated\n'
     result = await compiler.compile(make_context(), MANIFEST_STATE)
-    assert result.state.mcp.entries[0].server_code == "updated"
+    assert result.state.capabilities.entries[0].mcp.entries[0].server_code == "updated"
 
 
 def test_binding_preserves_canonical_semantics_and_rejects_execution_scope_mismatch():
@@ -155,15 +155,14 @@ async def test_a_stored_document_compiles_to_a_complete_state() -> None:
     assert state.script.entries[0].body == "echo dev"
     assert [e.type for e in state.identity.entries] == ["CLAUDE.md"]
     assert [e.path for e in state.resources.entries] == ["data/faq.csv"]
-    assert [e.name for e in state.skills.entries] == ["quality-check"]
-    assert [e.server_code for e in state.mcp.entries] == ["gh"]
+    assert [e.name for e in state.capabilities.entries[0].skills.entries] == ["quality-check"]
+    assert [e.server_code for e in state.capabilities.entries[0].mcp.entries] == ["gh"]
     assert state.engine_config is None and state.cli_tools.entries == ()
     assert state.declared == (
         Section.SCRIPT,
         Category.IDENTITY,
         Category.RESOURCES,
-        Category.SKILLS,
-        Category.MCP,
+        Category.CAPABILITIES,
         Category.CLI_TOOLS,
     )
     for digest in (state.identity.entries[0].content.digest, state.resources.entries[0].content.digest):
@@ -176,11 +175,12 @@ async def test_version_only_manifest_clears_every_supported_category(engine) -> 
     ctx = make_context(engine_type=engine)
     compiler, _ = _compiler("schema_version: 1\n")
     state = (await compiler.compile(ctx, MANIFEST_STATE)).state
-    expected = (Category.IDENTITY, Category.RESOURCES, Category.SKILLS, Category.MCP, Category.CLI_TOOLS)
+    expected = (Category.IDENTITY, Category.RESOURCES, Category.CAPABILITIES, Category.CLI_TOOLS)
     if engine == "claude_code":
         expected = (Section.SCRIPT, *expected)
     assert state.declared == expected
-    assert all(state.declaration(construct).entries == () for construct in expected)
+    assert all(state.declaration(construct).entries == () for construct in expected if construct is not Category.CAPABILITIES)
+    assert all(child.entries == () for _, child in state.capabilities.entries[0].children())
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_compile_document_takes_a_parsed_document_as_is() -> None:
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n  engine_config:\n    config:\n      model: fast\n"
     )
     state = (await compiler.compile_document(make_context(), parsed)).state
-    assert state.mcp.entries[0].server_code == "gh" and state.script.entries == ()
+    assert state.capabilities.entries[0].mcp.entries[0].server_code == "gh" and state.script.entries == ()
     assert state.engine_config.entries[0].config["model"] == "fast"
 
 

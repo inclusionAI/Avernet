@@ -35,7 +35,7 @@ from agentclaw.community.core.bot_config_manifest.schema.validator import (
 _LANDED = frozenset(
     {
         Section.SCRIPT,
-        Category.MCP,
+        Category.CAPABILITIES,
         Category.IDENTITY,
         Category.SKILLS,
     }
@@ -159,4 +159,4 @@ def test_declared_constructs_follows_apply_order():
         bot_type="personal",
     ).parsed
     names = [c.value for c in declared_constructs(parsed)]
-    assert names == ["script", "mcp"], names
+    assert names == ["script", "capabilities"], names

@@ -73,10 +73,32 @@ from agentclaw.community.core.skill_center.services.track_latest_event_listener 
     TrackLatestPublishedVersionListener,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
     SkillCenterGatewayServiceProtocol,
+)
+
+from agentclaw.community.core.skill_center.skill_reference_contract import (
+    SkillReferenceServiceProtocol,
+)
+from agentclaw.community.core.skill_center.services.skill_reference_service import (
+    SkillReferenceService,
+)
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillRepository,
+    SkillVersionRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.skill_query_service_protocol import (
+    SkillQueryServiceProtocol,
+)
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolverProtocol,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionStore,
 )
 
 
@@ -91,6 +113,33 @@ class SkillCenterGroup4Module(Module):
             TrackLatestRepositoryProtocol,
             to=TrackLatestRepository,
             scope=singleton,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def skill_reference_service(
+        self,
+        skills: SkillRepository,
+        query: SkillQueryServiceProtocol,
+        versions: SkillVersionRepositoryProtocol,
+        resolver: SkillVersionResolverProtocol,
+        store: CanonicalCenterVersionStore,
+        references: SkillCenterReferenceRepositoryProtocol,
+        gateway: SkillCenterGatewayServiceProtocol,
+        materializer: SkillVersionMaterializerProtocol,
+        track_latest: TrackLatestServiceProtocol,
+    ) -> SkillReferenceServiceProtocol:
+        return SkillReferenceService(
+            skills=skills,
+            query=query,
+            versions=versions,
+            resolver=resolver,
+            store=store,
+            references=references,
+            gateway=gateway,
+            materializer=materializer,
+            track_latest=track_latest,
         )
 
     @singleton

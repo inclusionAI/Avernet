@@ -11,6 +11,7 @@ import pytest
 import agentclaw.community.core.apply_engine.capabilities as capabilities_module
 
 from agentclaw.community.core.apply_engine.capabilities import (
+    CURRENT_CATEGORIES,
     ConstructKind,
     Category,
     Section,
@@ -39,7 +40,7 @@ def test_every_construct_in_the_vocabulary_has_a_verdict():
     """
     caps = _resolve()
     ruled_on = {c.construct for c in caps.constructs}
-    expected = {*Category, *Section}
+    expected = {*CURRENT_CATEGORIES, *Section}
     assert ruled_on == expected
 
 
@@ -62,9 +63,8 @@ def test_an_unsupported_construct_always_carries_a_reason():
 @pytest.mark.parametrize(
     "category",
     [
-        Category.MCP,
+        Category.CAPABILITIES,
         Category.RESOURCES,
-        Category.SKILLS,
         Category.IDENTITY,
         # W9: materialised through ``CliToolService`` — the one component the
         # management API installs through too.
@@ -135,7 +135,7 @@ def test_teclaw_still_supports_the_declarative_categories():
     """Only ``script`` is engine-gated; teclaw takes the manifest itself."""
     caps = _resolve(engine="teclaw")
     assert caps.supports(Category.IDENTITY)
-    assert caps.supports(Category.SKILLS)
+    assert caps.supports(Category.CAPABILITIES)
 
 
 def test_a_desktop_bot_supports_nothing():
@@ -192,4 +192,4 @@ def test_the_payload_is_flat_and_names_what_it_answered_for():
     assert payload["schema_versions"] == [1]
     first = payload["constructs"][0]
     assert {"kind", "name", "supported", "reason"} == set(first)
-    assert first["kind"] == "category" and first["name"] == "mcp"
+    assert first["kind"] == "category" and first["name"] == "capabilities"

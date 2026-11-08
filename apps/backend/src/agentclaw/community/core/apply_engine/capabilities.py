@@ -54,6 +54,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Protocol, runtime_checkable
 
 from agentclaw.community.core.apply_engine.constructs import (
+    CURRENT_CATEGORIES,
     Construct,
     ConstructKind,
     Category,
@@ -181,6 +182,16 @@ class SourceCell:
 
 
 @dataclass(frozen=True)
+class SkillReferenceSupport:
+    reference: str
+    supported: bool
+    reason: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"reference": self.reference, "supported": self.supported, "reason": self.reason}
+
+
+@dataclass(frozen=True)
 class Capabilities:
     """Every construct's verdict for one (engine type, bot type) pair."""
 
@@ -191,6 +202,14 @@ class Capabilities:
     #: Every cell of (category × protocol), intersected with this bot's own
     #: verdicts. Additive: ``constructs`` keeps its exact shape and meaning.
     source_matrix: tuple[SourceCell, ...] = ()
+
+    skill_references: tuple[SkillReferenceSupport, ...] = ()
+
+    def skill_reference(self, reference: str) -> SkillReferenceSupport:
+        for verdict in self.skill_references:
+            if verdict.reference == reference:
+                return verdict
+        return SkillReferenceSupport(reference, False, "no skill reference resolver is configured")
 
     def cell(
         self, category: Category, protocol: SourceKind
@@ -234,6 +253,7 @@ class Capabilities:
             "schema_versions": list(self.schema_versions),
             "constructs": [c.as_dict() for c in self.constructs],
             "source_matrix": [cell.as_dict() for cell in self.source_matrix],
+            "skill_references": [entry.as_dict() for entry in self.skill_references],
         }
 
 
@@ -292,6 +312,7 @@ def resolve_capabilities(
         return Capability(construct, True, "")
 
     blocked: dict[Construct, str | None] = {
+        Category.CAPABILITIES: None,
         Category.MCP: None,
         # Materialised since W6, through the one write chain
         # (`ResourceFileService`'s dispatcher) with tree-replacement
@@ -333,16 +354,31 @@ def resolve_capabilities(
             return SourceCell(category, protocol, False, refusal.reason)
         return SourceCell(category, protocol, True, "")
 
+    def skill_reference(reference: str) -> SkillReferenceSupport:
+        group = capability(Category.CAPABILITIES, None)
+        if not group.supported:
+            return SkillReferenceSupport(reference, False, group.reason)
+        if engine == "deepseek_harness" and reference in ("skill_uuid", "skill_code"):
+            return SkillReferenceSupport(reference, False, "deepseek_harness does not deliver Center skills")
+        # The shared SkillCenter module binds repository and Center reference
+        # services in both community and enterprise composition roots. Market
+        # data/asset visibility is checked at resolve, never by admission.
+        return SkillReferenceSupport(reference, True, "")
+
     return Capabilities(
         engine_type=engine,
         bot_type=bot,
         schema_versions=SUPPORTED_SCHEMA_VERSIONS,
         source_matrix=tuple(
             cell(category, protocol)
-            for category in Category
+            for category in CURRENT_CATEGORIES
             for protocol in SourceKind
         ),
-        # Every member of every construct enum, in declaration order. Built by
+        skill_references=tuple(
+            skill_reference(reference)
+            for reference in ("package", "repo_path", "skill_uuid", "skill_code")
+        ),
+        # Every current construct, in declaration order. Built by
         # iterating the enums rather than by listing them again, so a construct
         # added to the vocabulary without a verdict is a KeyError here — at
         # import of the first call — instead of a silent "unsupported".
@@ -355,7 +391,7 @@ def resolve_capabilities(
 
 def _all_constructs() -> Iterable[Construct]:
     """Every construct, categories first, then sections."""
-    yield from Category
+    yield from CURRENT_CATEGORIES
     yield from Section
 
 

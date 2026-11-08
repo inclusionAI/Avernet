@@ -15,10 +15,21 @@ through `DesiredStateCompiler`:
   in the content store;
 - the **Genome Registry** (`core/bot_genome/compile.py`) compiles a revision.
 
-The engine never reads a Manifest document and never fetches: every file in
-a desired state is already in the content store, named by digest. That is
-what lets a revision be delivered with no Manifest document in between
-(RSI-04) and what keeps a grammar change out of the materialisers.
+The engine never reads a Manifest document. A compiled file names content
+already in the content store by digest; a first public Center reference may
+need read-only preview during capability resolution. The private
+`fetch_budget` leaf owns one 500 MiB / 300 second allowance per execution.
+`ApplyRunService` opens it across compile, orchestration and delivery finish
+(and across compile and plan for dry-run). `CompileSession` reuses it; a
+standalone compile creates its own bounded ledger. Public preview consumers
+check `current_fetch_budget()` before acquisition, charge actual downloaded
+bytes and check exhaustion again. Ready references require no download and
+consume no bytes. Nested executions get a fresh allowance, then restore
+their caller; sibling asyncio executions stay isolated and `to_thread`
+shares the active ledger. No budget travels in DesiredState, ApplyContext
+or persisted reports. Manifest's old budget and total-limit imports remain
+compatibility re-exports. A revision still needs no Manifest document
+(RSI-04), and grammar remains outside the materialisers.
 
 A producer can also subscribe to how its applies end (`completion.py`): a
 second map keyed by state kind, beside the compilers. Every terminal path of
@@ -35,19 +46,37 @@ bot still locked. The one exception is the give-up hook: the queue has
 already retired the task, so it unlocks regardless, and a subscriber that
 raises there is logged and not retried. The genome subscribes; the Manifest does not.
 
-A desired Center skill is found by name and a shared-repository skill by
-path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
-skill.
+`CapabilitiesMaterialiser` converges Direct Skills, ordinary SkillSets/Default
+and Direct MCP as one category. It resolves a single aggregate declaration
+into one private intent and plan, including empty participating subtargets;
+`None` subtargets preserve current ownership. Local packages, shared Repo
+paths, existing Center UUIDs, public codes and legacy Genome Center names use
+one source resolver. Public exact previews are read-only; every necessary
+shared preparation precedes Bot Local uploads, then one Set/Default UoW,
+Direct Skills, actual dependency reads, MCP configuration and safe Local
+cleanup. Set Local uploads never establish temporary Direct claims.
 
-The skills and MCP materialisers speak only for the bot's Direct entries:
-what the bot's skill sets supply — an active ordinary set, the Default less
-its exclusions, the platform's default MCP servers — is never counted as
-current and never removed, for every compiler alike. Declaring a
-set-supplied entry is a conflict: before writing anything, the orchestrator
-asks each such materialiser (`ChecksSetSupply.set_conflicts`) and, on any
-conflict, refuses the whole apply — every declared category aborted, nothing
-written. The repository's claims refuse the same entries under their own
-lock, so Direct and set supply never share an Installation row.
+Ownership, current Direct names and final runtime names are checked in
+capability resolve. Any capability compile/resolve failure aborts that group;
+other constructs continue through the ordinary orchestrator loop. The former
+outer Set conflict hook is removed. Repository commands retain transactional
+scope and ownership guards. A control-plane failure stops later capability
+steps. Confirmed Bot writes use the existing partial-error contract; shared
+publication alone is not a confirmed Bot write. Device and Platform
+`SkillSetApplyPort` delegates choose `project=True` / `False` outside the
+materialiser. Reads use the SkillCenter Apply snapshot without reconciliation.
+The snapshot's asset catalog stays keyed by actual asset ID. Historical Center
+membership aliases are resolved within each Set by UUID; Default exclusions
+still use that Set's raw membership key. Aliases never shadow Direct assets.
+An unchanged Direct Skill installation still reaches the claim flow so Device
+delivery can retry runtime projection. The report keeps `unchanged` and exposes
+any pending/degraded projection; Platform delegates retain their no-projection
+behavior, and dry-run performs no writes or projection.
+Explicit active ordinary Sets and applicable Default references also retry the
+existing projection flow on unchanged desired state. Inactive unchanged Set
+declarations remain no-ops. Set replacement tracks resolved prior supply and
+recorded Set-owned installations separately from historical raw membership keys,
+so cleanup cannot retire an unrelated Direct or unknown-source installation.
 
 An MCP entry carries a configuration action separately from its supply:
 Manifest treats an absent `config` and an explicit `{}` as clearing the
@@ -67,15 +96,28 @@ starts from.
 ## Context Boundary
 
 ```yaml
-purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the six materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome) and never by a document or a fetch.
+purpose: Converge one bot to a typed desired state — the DesiredState model, the materialiser contract and the five registered materialisers, the orchestrator, the delivery strategies and their narrow ports, and the apply run (lock, task, persisted report) — fed by compilers (Manifest, Genome), with an execution-scoped content-fetch allowance and no document parsing.
 provides:
+  - CapabilityDeclaration  # one aggregate target, prefixed child report identities
+  - DesiredCapabilities
+  - CapabilitiesMaterialiser
+  - SkillSetApplyPort
+  - DeviceSkillSetApply
+  - PlatformSkillSetApply
+  - DesiredSkillSet
+  - DefaultSkillSetRef
+  - CenterSkillRef
+  - CenterSkillByCode
+  - CURRENT_CATEGORIES  # active vocabulary; historical Skills/MCP are decode-only
+  - ApplyFetchBudget  # fetch_budget leaf: execution-scoped content allowance
+  - current_fetch_budget
   - DesiredState  # the typed input; one Declaration per construct, None when not declared
   - Declaration
   - EntryFailure
   - ContentRef
   - DesiredScript
   - DesiredIdentityFile
-  - DesiredSkill  # LocalSkillPackage | CenterSkillByName | RepoSkillPath
+  - DesiredSkill  # LocalSkillPackage | RepoSkillPath | CenterSkillRef | CenterSkillByCode | legacy CenterSkillByName
   - DesiredResourceFile
   - DesiredResourceTree
   - DesiredMcpServer  # McpOverride, McpHeader, McpTransport, McpEndpointEnv
@@ -127,7 +169,7 @@ provides:
 consumes:
   - "ContentStoreProtocol (core.content_store) — the bytes every desired entry names, read by digest"
   - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort, SharedSkillPort (core.ports) — the narrow ports the materialisers call"
-  - "BotCapabilityStateReaderProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — the skills and MCP area state and the package gate"
+  - "SkillReferenceServiceProtocol, SkillSetManagementServiceProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — shared references, read-only Apply facts, bulk Set commands and existing package/Direct gates"
   - "MCPAuthServiceProtocol, MCPConfigServiceProtocol (core.mcp) — the MCP permission and override checks"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the script row"
   - "ResourceFileService, ResourceService (core.services, core.resources) — the resources root and its rows"

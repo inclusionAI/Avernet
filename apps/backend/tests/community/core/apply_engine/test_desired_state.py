@@ -128,9 +128,9 @@ def test_state_declares_per_construct_and_none_means_untouched() -> None:
         resources=Declaration((DesiredResourceFile("data/a.txt", ContentRef(DIGEST)),)),
     )
     assert state.declaration(Section.SCRIPT).entries[0].body == "echo hi"
-    assert state.declaration(Category.MCP).entries == ()
-    assert state.declaration(Category.SKILLS) is None
-    assert state.declared == (Section.SCRIPT, Category.RESOURCES, Category.MCP)
+    assert state.capabilities.entries[0].mcp.entries == ()
+    assert state.capabilities.entries[0].skills is None
+    assert state.declared == (Section.SCRIPT, Category.RESOURCES, Category.CAPABILITIES)
     assert DesiredState.EMPTY.declared == ()
     # A section has one fixed identity, so a second entry is a duplicate by construction.
     with pytest.raises(ValueError, match="duplicate entry 'script'"):
@@ -213,8 +213,8 @@ def test_only_keeps_the_named_constructs_declared_and_undeclares_the_rest() -> N
         identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef(DIGEST)),)),
         mcp=Declaration(()),
     )
-    half = state.only({Section.SCRIPT, Category.MCP})
-    assert half.declared == (Section.SCRIPT, Category.MCP)
-    assert half.script == state.script and half.mcp == state.mcp and half.identity is None
+    half = state.only({Section.SCRIPT, Category.CAPABILITIES})
+    assert half.declared == (Section.SCRIPT, Category.CAPABILITIES)
+    assert half.script == state.script and half.capabilities is state.capabilities and half.identity is None
     assert state.only(()) == DesiredState.EMPTY
     assert state.only(state.declared) == state

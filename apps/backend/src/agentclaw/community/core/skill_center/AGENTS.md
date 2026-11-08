@@ -99,22 +99,44 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 ## 3. Bot 有效态：统一 Reader / Writer
 
-修改激活、成员、默认项时，先读 `services/skill_set_management_service.py`、`services/direct_activation_service.py`、`community/core/repository/implementations/skill_center/capability_desired_state.py` 和其 `tables/` 子包。
+修改激活、成员、默认项时，先读 `services/skill_set_management_service.py`、`services/_skill_set_membership_commands.py`（成员批量变更与 Default 排除/恢复路由）、`services/direct_activation_service.py`、`community/core/repository/implementations/skill_center/capability_desired_state.py` 和其 `tables/` 子包。
 
 - `CapabilityDesiredStateRepository` 是 Set state、membership、Default exclusion 与 Skill/MCP Installation 的事务写入入口；表级 SQL owner 使用同一个事务 Session。
 - 普通 Set 新建默认 `is_active=True`。active Set 增删成员同步维护 Installation；inactive Set 编辑不要求 Runtime 投影。
 - Bot MCP 配置按稳定 entity 寻址；旧 scoped owner-key 只在当前 Bot 可唯一归属时兼容读取，canonical 整值（含空对象）优先，读不迁移。replace/clear/卸载/父级清理/删除同事务消费安全别名，防止复活；未来 owner handoff 在切换前归并，未知过去 owner 孤立行不猜恢复。
 - Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
+- Manifest bulk Set 替换把提交前后受影响的 MCP 同时作为 claim/release 候选，Runtime Projector 按提交后有效供应保护仍有来源的配置，并删除已退出的设备配置；它不删除 Bot override。Manifest 后续 MCP Replace 清除仅剩 override 时，updated code 同样作为 release 候选；仍由 Skill 依赖供应的 code 只刷新继承配置。
+- 普通 Default 恢复仅在实际成员或当前 policy 重新供应时检查 Direct/普通集占用；冲突保留 exclusion，过期 exclusion 清理不抢占现有供应。MCP 恢复命令必须显式接收调用方解析的当前 platform policy。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。
-- `policies/capability_ownership.py` 统一判定：Set 成员（含 inactive Set 和 excluded Default member）由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个 reaching Set（含 Default）。已排除的 Default Skill/MCP 可转入同一 Bot 的普通 Set；此例外只适用于加入普通 Set，不放宽 Direct 控制。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
-- Default member 被 exclusion 后仍属于 Default；普通操作重新启用走 un-exclude。Manifest Apply 的显式声明是唯一例外：exclusion + Installation 表达 Direct claim，Reader/flush 必须保留；该状态移除 Installation 时保留 exclusion，不能恢复历史来源。
-- Apply 的 Direct claim 命令（`claim_apply_skill` / `remove_apply_skill` / `claim_apply_mcp` / `remove_apply_mcp`，实现于 `repository/implementations/skill_center/apply_claim_commands.py`）属于 apply 引擎，服务所有编译器产出的期望态（Bot Config Manifest 与 Genome 修订），不再以 Manifest 命名；审计 action 字符串（`skill_manifest_direct_claim` 等）为保持历史可查而不改。`claim_apply_skill` 的目标可以是本 Bot 的 `local://` 包，也可以是共享的 `center://` 或 `git://` 资产（Genome 修订按名称引用 Center Skill、按路径引用 Repo Skill）；共享资产的使用权限由调用方 `DirectActivationService._resolve_skill` 先行校验，资产本身被直接认领，绝不复制为 Bot 自有内容。按名称/路径查找可用资产由 `SkillQueryService` 实现的 `core/ports/shared_skill_port.py::SharedSkillPort` 回答（沿用 `resolve_skill` 的可见性规则；无匹配或同名多个 Center 资产时拒绝，不猜测，也不触发市场导入）。apply 只管理 Bot 的 Direct Skill/MCP：Skill Set 供给的内容（活动的普通 Set、扣除排除项的 Default Set、平台默认 MCP，见 `set_supplied_capabilities`）不计入当前状态、也不会被移除；这些 claim 命令不再拆除 Set 成员关系或写 Default 排除项，而是在事务内拒绝 Set 供给的条目（`SkillSetControlPlaneConflictError`，`APPLY_SET_SUPPLIED`），apply 编排器也会在写入任何内容前先检查并整体拒绝。
-- Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。普通激活仍拒绝 Platform Default MCP；Manifest 可先 exclusion 再建立 Direct Installation，已存在的特殊 Direct 可由普通更新/删除操作管理。
+- `policies/capability_ownership.py` 统一判定：普通 Set 成员（含 inactive Set）与未排除的适用 Default 成员由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个有效 Set 来源。已排除的 Default Skill/MCP 可按原有权限和资产归属显式 Direct 控制或加入同一 Bot 的普通 Set。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
+- Default 原始成员引用在 exclusion 后保留；恢复 Default 走 un-exclude，并检查当前 Direct/普通集占用。显式 Direct 安装保留 exclusion，Reader/flush 必须保留 Direct；移除 Direct Installation 也不恢复历史 Default 来源。
+- Apply 写前的 Set 供应守卫在 UUID 解析前按 Default 原始成员 ID 过滤 exclusion；不能从解析后的实际资产 ID 集合中减去历史 raw ID，否则会误拒绝已排除成员的 Direct 重试。
+- Apply 普通集加入及 Default 恢复的占用守卫也按成员稳定身份核对：先过滤 Default 的原始排除键，Center 引用比较 UUID，仅无 UUID 的成员比较 raw ID；不得把其他 Center 成员的历史 raw 别名算作目标资产占用。
+- 普通 Direct Skill 激活/停用同样先匹配真实成员身份，再逐个锁定其原始 exclusion 键；同一 Default 中任一匹配引用未排除时仍受 Set 控制，其他资产的 raw ID 排除不得释放目标资产。资产或稳定身份缺失时保留原有保守 raw-ID 守卫。
+- Apply 的 Direct claim 命令（`claim_apply_skill` / `remove_apply_skill` / `claim_apply_mcp` / `remove_apply_mcp`，实现于 `repository/implementations/skill_center/apply_claim_commands.py`）属于 apply 引擎，服务所有编译器产出的期望态（Bot Config Manifest 与 Genome 修订），不再以 Manifest 命名；审计 action 字符串（`skill_manifest_direct_claim` 等）为保持历史可查而不改。`claim_apply_skill` 的目标可以是本 Bot 的 `local://` 包，也可以是共享的 `center://` 或 `git://` 资产（Genome 修订按名称引用 Center Skill、按路径引用 Repo Skill）；共享资产的使用权限由调用方 `DirectActivationService._resolve_skill` 先行校验，资产本身被直接认领，绝不复制为 Bot 自有内容。按名称/路径查找可用资产由 `SkillQueryService` 实现的 `core/ports/shared_skill_port.py::SharedSkillPort` 回答（沿用 `resolve_skill` 的可见性规则；无匹配或同名多个 Center 资产时拒绝，不猜测，也不触发市场导入）。Direct claim/remove 只管理 Direct 供应，不拆除 Set 成员关系或写 Default 排除项，并在事务内拒绝 Set 供给的条目（`SkillSetControlPlaneConflictError`，`APPLY_SET_SUPPLIED`）。共用 Apply 由单个 capabilities Materialiser 统一解析、规划及按序写入 Direct、普通集/Default 和 MCP；来源冲突只中止能力组，其他类别仍执行，不再由 Orchestrator 做全 Apply Set 冲突拒绝。
+- Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。Direct 命令接收完整 policy codes，在事务内按实际适用 Default exclusion 判断占用；已排除的 policy MCP 可显式安装和管理。
 - `SkillSetManagementService.list_resources()` 对 Default Set 只以当前 AgentPassport 的同一次快照补全已有 MCP 投影的 `name`/`description`，并同时读取 CLI；它不得以 Passport 增删成员、绕过 exclusion，或覆盖普通 Set 写入时固化的 MCP Center 展示快照。Passport 查询失败时保留 MCP 投影并返回空 CLI。
-- 普通技能集添加 MCP 时，Service 严格解析 Engine/template 默认 codes；UoW 在事务内核对同一 owner、Bot、Default Set、MCP code 的排除记录。代码型默认项或 Default 显式成员已被排除时允许加入普通 Set，并保留排除；未排除的代码型默认项仍返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`，未排除的显式成员仍按 Set 占用拒绝。Direct 安装/停用限制不变。取消排除时若普通 Set 已持有该 MCP，返回 `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`；重复排除不得清除 active 普通 Set 的 Installation 或 Bot MCP 配置。添加与取消排除按精确排除记录先锁后核对，避免并发恢复两种来源。
-- 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
+- 普通技能集添加 MCP 时，Service 严格解析 Engine/template 默认 codes；UoW 在事务内核对同一 owner、Bot、Default Set、MCP code 的排除记录。代码型默认项或 Default 显式成员已被排除时允许加入普通 Set，并保留排除；未排除的代码型默认项仍返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`，未排除的显式成员仍按 Set 占用拒绝。Direct 安装/停用同样按实际适用 Default exclusions 判断占用。取消排除时若普通 Set 已持有该 MCP，返回 `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`；重复排除不得清除 active 普通 Set 的 Installation 或 Bot MCP 配置。添加与取消排除按精确排除记录先锁后核对，避免并发恢复两种来源。
+- 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；普通增添、Default 恢复和 Apply 批量命令均按重新授权的 Bot 当前 Owner 读取用户默认，按稳定 entity 读取并合并已有 Bot override，且不修改配置；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
+
+Apply 的批量集合命令由 `services/skill_set_apply_service.py` 经正式管理服务暴露，
+`repository/implementations/skill_center/apply_skill_set_commands.py` 在单个事务内按名称
+替换普通集、成员、计划的 Default exclusion 键及 Installation，并保留 Bot override。
+删除仅覆盖计划名称，执行时重新解析当前同 scope 的集合；事务内守卫先检查当前来源，
+不借删除遗漏集合转移归属。`default` 为保留名，普通管理 create/rename 拒绝使用。
+`read_apply_snapshot` 只读原始成员、适用 exclusions/policy、Installation 与资产依赖，
+不执行 flush；缺失或不可解析的资产元数据保留可诊断状态。Local 清理使用所有持久
+成员引用（含 inactive、非当前 engine 和 excluded Default），实际删除仍由原守卫复核。
+本批量事务沿用已有行锁和 Apply 互斥，不增加跨普通管理入口的共同锁、CAS 或唯一索引。
+批量 Set 事务的旧供应使用解析后的真实资产 ID，不能将历史 raw 成员别名并入供应。
+不可用成员的遗留安装清理仅使用已记录且属于本次适用 active Set 的来源；Direct、
+其他 Set 与来源未知的安装不得因 raw 别名被撤销。显式 active 普通集及 Default
+重复 Apply 仍进入既有投影流程，业务事实未变时保留 `unchanged`，并返回实际投影警告。
+Apply Direct claim 的正常结果通过既有 mutation details 返回事务内计算的 outcome；
+聚合 writer 使用此确认值，不复制计划 action。仅归并等价 MCP 配置别名可产生
+changed=true、outcome=unchanged；Local 内容上传使用真实 operation 合并 created/updated。
 
 `services/_mutation_flow.py::MutationProjectionFlow` 先提交 DB，再尽力投影；Runtime 不可达、PENDING、DEGRADED 不补偿回滚已提交的 Installation。DB/权限/领域校验失败仍返回失败。响应中的 `runtime_projection` 由 `runtime_projection_contract.py` 定义，不能把接口成功解释成全部设备文件已收敛。
 
@@ -124,11 +146,20 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 一次 MCP 投影通过 Reader `active_capabilities` 同步一次 Installation，返回精确 Skill 与 installed MCP 的 `BotCapabilitySnapshot`，供 Skill Plan 和唯一 Effective MCP collector 共用。快照不包括 Policy MCP、不保证跨表事务快照隔离，不能跨变更、重试或请求缓存；Skill-only 仍使用独立 Skill 读取。Default/exclusion 与完整回刷模式均保留。MCP 配置、移除和完整白名单下发在同一次 `project_mcps` 内复用一个解析后的 `DeviceSync`；不改变下发顺序、失败处理、POST-conflict-update 或 Passport 语义。
 
-Manifest MCP 条目省略 `config` 编译为显式 preserve 指令，事务 claim 只维护供应、
-不重写配置；`config: {}` 清除 override，非空对象完整替换。resolve 校验实际保留值。
-Genome 无 override 的完整快照仍编译为明确清除。父 Replace 沿既有 Direct-only 范围
-清理 Installation 与 override（含非 Set 的暂存配置），继续保留全 Apply 冲突预检及
-仓储持锁供应复核。配置表读取用 stable entity，权限和用户默认配置仍用真实 Owner。
+Manifest MCP 条目省略 `config` 与空对象均清除 Bot override，非空对象完整替换。
+Genome 无 override 的完整快照同样清除。单独 Set/Default 事务保留 override；
+同次 Apply 的后续 Direct MCP Replace 按更新后的供应清理非 Set 暂存配置，
+保护仍有效的 Set/Default。派生依赖保留 MCP 能力时，受管 override 仍可清除。
+配置表读取用 stable entity，权限和用户默认配置仍用真实 Owner。
+
+Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计划可区分本次
+普通集 Replace 释放的引用与 Default、inactive 保留目标及其它 engine/scope 的引用。
+实际清理在所有控制面步骤成功后再次只读检查原始引用、安装及归属，并沿原删除守卫。
+批量事务的 `default_changed` / `default_removed` 是实际 SQL 操作及 Default 安装修复
+的私有确认摘要，不能用计划或事务外前后读取差值代替；异常仍沿原保守失败合同。
+批量 Set 命令与 Direct 命令一样捕获 Repository 提交回执：实际发生变更后，
+审计或 Runtime 恢复记录等后置步骤失败时抛出 `ApplyDesiredStateCommittedError`，
+使 Apply 报告已确认的部分写入；无变更或提交前失败不得使用该标记。
 
 ## 4. Local、Repo、Center 的内容身份
 
@@ -173,6 +204,14 @@ DB 冻结/Attempt 创建与 `TaskQueueService.enqueue()` 当前不是一个跨�
 ## 6. Center 物化、异步引用、巡检
 
 `services/skill_version_materializer.py` 是 Public/Team SC 精确下载的统一物化入口。它核对 exact code/version、下载 SHA-256、包结构，调用 `validate_skill_center_exact_zip`，写并验证 Canonical Store，然后发布 Version。
+
+Manifest Direct 与 Set 来源共用 `skill_reference_contract.py` 的窄 Service API；
+UUID 只解析当前 scope 的已准备资产，公开 code 优先使用实际存储 UUID 和最新
+PUBLISHED Version。首次公开引用通过 Materializer 的 `preview_exact` 只读校验
+exact 包；实际下载字节数留在私有内容值，供整次 Apply 预算计费。真实 write
+使用同一已验证内容，经 `prepare_public_reference` 发布并确保 Track Latest。
+首次准备的 Ready 复用/名称依赖复核/其他准备中版本拒绝，与版本分配处于同一个
+已有 Skill 锁事务；该守卫只覆盖 Apply，不重定义异步 Reference/Sync 的合同。
 
 SC 下载物化不调用本地 Scanner。MCP 信息来自精确下载响应的 `mcp_services`，持久化在 `ac_skill_version.metadata_json.mcp_dependencies`；不要只更新主 Skill 字段。Local/Repo 自有扫描链路仍按各自合同执行。外部 MCP 字段的 null/缺失兼容由 Gateway adapter 归一化；修改时检查 adapter 和 conformance tests。
 

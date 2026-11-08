@@ -96,12 +96,18 @@ class ApplyClaimCommands:
             default_engine_types=default_engine_types,
             locked=locked,
         ):
-            members = set_member_skill_ids(self._scope, session, skill_set_id=int(row.id))
-            codes = set_member_mcp_codes(self._scope, session, skill_set_id=int(row.id))
-            if row.is_default:
-                members -= default_exclusions.excluded_skill_ids(
+            excluded_raw_ids = (
+                default_exclusions.excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
+                if row.is_default else frozenset()
+            )
+            members = set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(excluded_raw_ids),
+            )
+            codes = set_member_mcp_codes(self._scope, session, skill_set_id=int(row.id))
+            if row.is_default:
                 excluded = default_exclusions.excluded_mcp_codes(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
@@ -239,6 +245,13 @@ class ApplyClaimCommands:
             )
             if server_code in supplied:
                 self._refuse_set_supplied("MCP server", server_code)
+            effective_before = server_code in old.mcp_installations or any(
+                server_code in skill_projection_mcp_dependency_codes(session, skill)
+                for skill in self._scope(session.query(Skill), Skill)
+                .filter(Skill.id.in_(sorted(old.installations)))
+                .with_for_update()
+                .all()
+            )
             installed = mcp_installations.install(
                 session,
                 bot_id=bot_id,
@@ -246,20 +259,22 @@ class ApplyClaimCommands:
                 env=get_current_env(),
                 server_code=server_code,
             )
-            override_changed = bot_mcp_configs.replace(
+            config_written, override_changed = bot_mcp_configs.replace_apply(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 env=get_current_env(),
                 server_code=server_code,
                 config=config,
-                preserve_equivalent=True,
             )
             session.flush()
             return DesiredStateMutation(
                 {},
-                installed or override_changed,
+                installed or config_written,
                 old,
+                details={
+                    "outcome": "created" if not effective_before else "updated" if override_changed else "unchanged"
+                },
                 mcp_codes=frozenset({server_code}) if installed else frozenset(),
                 updated_mcp_codes=(
                     frozenset({server_code})
@@ -395,6 +410,13 @@ class ApplyClaimCommands:
                 {},
                 removed or installed,
                 old,
+                details={
+                    "outcome": (
+                        "updated" if removed
+                        else "created" if int(target.id) not in installed_before
+                        else "unchanged"
+                    )
+                },
                 mcp_codes=frozenset(dependencies),
                 source_transitions=(
                     (("none", "direct"),) if installed and int(target.id) not in installed_before else ()

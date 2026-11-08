@@ -47,8 +47,9 @@ class ConfigManifestApplyEntry(BaseModel):
 
     category: str = Field(description="The category or section this entry is in.")
     name: str = Field(
-        description="How the entry names itself — a skill `name`, an identity "
-        "`type`, a resource `path`, an mcp `server_code`."
+        description="Entry identity. Current capabilities use `skills/<name>`, "
+        "`skill_sets/<name>` or `mcp/<code>`; other categories use their own "
+        "identity or path. Historical reports retain their original names."
     )
     action: str = Field(
         description="`created` / `updated` / `unchanged` / `skipped` / `failed`. "
@@ -129,7 +130,8 @@ class ConfigManifestApplyCategory(BaseModel):
         default_factory=list,
         description="Entries that existed in this category's area and are no "
         "longer declared, so overwriting removed them. Reported separately from "
-        "`entries` because a removal has no declared entry.",
+        "`entries` because a removal has no declared entry. Current capabilities "
+        "use the same `skills/`, `skill_sets/` and `mcp/` prefixes as entries.",
     )
 
 
@@ -161,12 +163,12 @@ class ConfigManifestApply(BaseModel):
                 "state": {"kind": "manifest", "reference": None},
                 "sources": [],
                 "categories": [
-                    {"category": "mcp", "aborted": False, "removed": ["mcp.old"]}
+                    {"category": "capabilities", "aborted": False, "removed": ["mcp/mcp.old"]}
                 ],
                 "entries": [
                     {
-                        "category": "mcp",
-                        "name": "mcp.ant.homistudio.meetmcp",
+                        "category": "capabilities",
+                        "name": "mcp/mcp.docs",
                         "action": "created",
                         "error": None,
                         "note": None,

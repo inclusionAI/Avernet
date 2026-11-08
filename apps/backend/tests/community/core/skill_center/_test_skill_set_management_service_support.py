@@ -413,10 +413,13 @@ class _McpAuth:
         return {"success": True, "process_url": None, "error": None}
 
 class _McpConfig:
+    def get_bot_override(self, **_kwargs) -> None:
+        return None
+
     def build_mcp_sync_payload(self, **_kwargs) -> tuple[None, dict[str, str], str, None]:
         return None, {}, "PROD", None
 
-class _OwnerSensitiveMcpConfig:
+class _OwnerSensitiveMcpConfig(_McpConfig):
     def __init__(self) -> None:
         self.user_ids: list[str] = []
 
@@ -943,7 +946,10 @@ class _DefaultTargetRepository(_Repository):
         self.exclusion_calls.append(("exclude_default_mcp", kwargs))
         return replace(self._mutation(), mcp_codes=frozenset({kwargs["server_code"]}))
 
-    def unexclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
+    def unexclude_default_mcp(
+        self, *, platform_default_codes: frozenset[str], **kwargs
+    ) -> DesiredStateMutation:
+        kwargs["platform_default_codes"] = platform_default_codes
         self.exclusion_calls.append(("unexclude_default_mcp", kwargs))
         return replace(self._mutation(), mcp_codes=frozenset({kwargs["server_code"]}))
 

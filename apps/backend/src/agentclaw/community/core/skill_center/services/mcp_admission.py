@@ -34,6 +34,8 @@ def require_mcp_delivery_eligibility(
     mcp_config: MCPConfigServiceProtocol,
     engine_type: str,
     owner_id: str,
+    bot_id: str,
+    entity_id: str,
     server_code: str,
     detail: dict[str, Any],
 ) -> None:
@@ -45,6 +47,9 @@ def require_mcp_delivery_eligibility(
         user_id=owner_id,
         mcp_data=detail,
         engine_type=engine_type,
+        bot_override=mcp_config.get_bot_override(
+            bot_id=bot_id, owner_id=entity_id, server_code=server_code
+        ),
     )
     try:
         select_mcp_endpoint(

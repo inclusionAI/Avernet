@@ -101,9 +101,8 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServic
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
-)
+from agentclaw.community.core.skill_center.skill_reference_contract import SkillReferenceServiceProtocol
+from agentclaw.community.core.apply_engine.skill_set_apply_port import SkillSetApplyPort
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.apply_engine.order import (
     APPLY_ORDER,
@@ -187,7 +186,8 @@ class MaterialiserPorts:
     mcp_auth_service: MCPAuthServiceProtocol
     identity_service: IdentityFilePort
     upload_service: SkillPackageUploadPort
-    capability_reader: BotCapabilityStateReaderProtocol
+    skill_references: SkillReferenceServiceProtocol
+    skill_sets: SkillSetApplyPort
     package_validator: SkillPackageValidator
     #: The engine's one read port onto the content store: every desired file is there by digest.
     content: ContentReader
@@ -213,7 +213,8 @@ class MaterialiserPorts:
             "mcp_auth_service": self.mcp_auth_service,
             "identity_service": self.identity_service,
             "upload_service": self.upload_service,
-            "capability_reader": self.capability_reader,
+            "skill_references": self.skill_references,
+            "skill_sets": self.skill_sets,
             "package_validator": self.package_validator,
             "content": self.content,
             "resource_service": self.resource_service,
@@ -367,8 +368,7 @@ _ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
     Section.SCRIPT: ApplyPhase.PRE_CONTAINER,
     Category.IDENTITY: ApplyPhase.ON_CONTAINER,
     Category.RESOURCES: ApplyPhase.ON_CONTAINER,
-    Category.SKILLS: ApplyPhase.ON_CONTAINER,
-    Category.MCP: ApplyPhase.ON_CONTAINER,
+    Category.CAPABILITIES: ApplyPhase.ON_CONTAINER,
     Category.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,
     Category.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
 })

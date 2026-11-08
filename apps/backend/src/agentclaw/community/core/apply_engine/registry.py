@@ -82,9 +82,8 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.mcp.mcp_config_service_protocol import (
         MCPConfigServiceProtocol,
     )
-    from agentclaw.community.core.skill_center.capability_state_contract import (
-        BotCapabilityStateReaderProtocol,
-    )
+    from agentclaw.community.core.skill_center.skill_reference_contract import SkillReferenceServiceProtocol
+    from agentclaw.community.core.apply_engine.skill_set_apply_port import SkillSetApplyPort
     from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyConstruct,
@@ -381,7 +380,8 @@ def build_materialisers(
     mcp_config_service: MCPConfigServiceProtocol,
     identity_service: IdentityFilePort,
     upload_service: SkillPackageUploadPort,
-    capability_reader: BotCapabilityStateReaderProtocol,
+    skill_references: SkillReferenceServiceProtocol,
+    skill_sets: SkillSetApplyPort,
     package_validator: SkillPackageValidator,
     content: ContentReader,
     resource_service: ResourceFilePort,
@@ -393,14 +393,13 @@ def build_materialisers(
 
         {
             Section.SCRIPT:          ScriptMaterialiser(...),
-            Category.MCP:            McpMaterialiser(...),
+            Category.CAPABILITIES:   CapabilitiesMaterialiser(...),
             Category.IDENTITY:       IdentityMaterialiser(...),
-            Category.SKILLS:         SkillsMaterialiser(...),
             Category.RESOURCES:      ResourcesMaterialiser(...),
             Category.CLI_TOOLS:      CliToolsMaterialiser(...),
         }
 
-    Six keys, and ``Category.ENGINE_CONFIG`` deliberately absent: a
+    Five keys, and ``Category.ENGINE_CONFIG`` deliberately absent: a
     document declaring it takes the orchestrator's no-materialiser path, which
     is an expected state rather than a gap.
 
@@ -427,8 +426,8 @@ def build_materialisers(
     from agentclaw.community.core.apply_engine.materialisers.identity import (
         IdentityMaterialiser,
     )
-    from agentclaw.community.core.apply_engine.materialisers.mcp import (
-        McpMaterialiser,
+    from agentclaw.community.core.apply_engine.materialisers.capabilities import (
+        CapabilitiesMaterialiser,
     )
     from agentclaw.community.core.apply_engine.materialisers.resources import (
         ResourcesMaterialiser,
@@ -436,26 +435,14 @@ def build_materialisers(
     from agentclaw.community.core.apply_engine.materialisers.script import (
         ScriptMaterialiser,
     )
-    from agentclaw.community.core.apply_engine.materialisers.skills import (
-        SkillsMaterialiser,
-    )
 
     materialisers: tuple[Materialiser, ...] = (
         ScriptMaterialiser(script_service),
-        McpMaterialiser(
-            activation_service,
-            mcp_auth_service,
-            mcp_config_service,
-            capability_reader,
-        ),
         IdentityMaterialiser(identity_service, content),
-        SkillsMaterialiser(
-            upload_service,
-            activation_service,
-            capability_reader,
-            package_validator,
-            content,
-            shared_skills,
+        CapabilitiesMaterialiser(
+            upload_service, activation_service, package_validator, content,
+            shared_skills, skill_references, skill_sets,
+            mcp_auth_service, mcp_config_service,
         ),
         ResourcesMaterialiser(resource_service, content, resource_rows),
         CliToolsMaterialiser(cli_tool_service),
@@ -463,25 +450,9 @@ def build_materialisers(
     return {m.construct: m for m in materialisers}
 
 
-@runtime_checkable
-class ChecksSetSupply(Protocol):
-    """A materialiser whose area the bot's skill sets also supply (today ``skills`` and ``mcp``).
-
-    An apply speaks only for the bot's Direct entries. Before anything is written, the orchestrator asks each
-    such materialiser which declared entries a set supplies; any answer refuses the whole apply, so a Direct
-    claim never has to touch a set and the bot is left exactly as it was.
-    """
-
-    @abstractmethod
-    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[Any]) -> tuple[ResolveFailure, ...]:
-        """One failure per declared entry the bot's skill sets supply; read-only."""
-        ...
-
-
 __all__ = [
     "CategoryPlan",
     "CategoryWriteResult",
-    "ChecksSetSupply",
     "ConfirmedPartialWriteError",
     "Intent",
     "Materialiser",

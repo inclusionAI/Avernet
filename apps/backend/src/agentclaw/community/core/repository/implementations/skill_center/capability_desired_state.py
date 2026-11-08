@@ -74,7 +74,11 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 
 
+from .apply_skill_set_commands import ApplySkillSetCommands
+
+
 class CapabilityDesiredStateRepository(
+    ApplySkillSetCommands,
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,
@@ -173,6 +177,8 @@ class CapabilityDesiredStateRepository(
         description: str | None,
         engine_type: str | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             duplicate = (
                 self._scope(session.query(SkillSet), SkillSet)
@@ -212,6 +218,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,

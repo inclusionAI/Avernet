@@ -29,9 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     ServiceChecked,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.apply_engine.registry import (
-    build_materialisers,
-)
+from tests.community.core.apply_engine._capability_facts import build_test_materialisers as build_materialisers
 
 APPLY = ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply")
 
@@ -41,9 +39,13 @@ APPLY = ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply")
 #: ``script``'s own endpoints are ``OWNER_SCOPED``, which is scaffolding rather
 #: than a ``Check`` — handled below.
 _CATEGORY_WRITE_PATHS: dict[str, tuple[str, ...]] = {
-    "mcp": (
+    "capabilities": (
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate",
+        "/openapi/v1/bots/{bot_id}/skills",
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}",
+        "/openapi/v1/bots/{bot_id}/skill-sets",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}",
     ),
     "script": (
         "/openapi/v1/bots/{bot_id}/startup-script",
@@ -51,10 +53,6 @@ _CATEGORY_WRITE_PATHS: dict[str, tuple[str, ...]] = {
     # Registered by W5/W6. Named now so that the moment a materialiser appears
     # for one, this test already knows where its endpoints are — the failure a
     # missing entry produces is loud and immediate.
-    "skills": (
-        "/openapi/v1/bots/{bot_id}/skills",
-        "/openapi/v1/bots/{bot_id}/skills/{skill_id}",
-    ),
     "identity": ("/openapi/v1/bots/{bot_id}/identity/{file_type}",),
     "resources": (
         "/openapi/v1/bots/{bot_id}/resources/upload",

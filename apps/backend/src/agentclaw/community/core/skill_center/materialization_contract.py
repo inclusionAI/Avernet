@@ -9,7 +9,22 @@ from typing import Literal, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterReadScope,
+    SkillCenterExactDownloadRequest,
 )
+
+from agentclaw.community.core.skill_center.skill_package import ValidatedSkillPackage
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedExactSkillPackage:
+    """Read-only exact content; never serialize into Apply reports."""
+
+    skill_code: str
+    version_number: str
+    sha256: str
+    package: ValidatedSkillPackage
+    metadata_json: str
+    download_size: int
 
 
 class SkillVersionMaterializationError(RuntimeError):
@@ -82,6 +97,18 @@ class SkillVersionMaterializerProtocol(Protocol):
     """Consumer-first seam reused by future Publication and Reference flows."""
 
     @abstractmethod
+    def preview_exact(
+        self, request: SkillCenterExactDownloadRequest
+    ) -> ValidatedExactSkillPackage: ...
+
+    @abstractmethod
+    def materialize_verified(
+        self,
+        request: SkillVersionMaterializationRequest,
+        content: ValidatedExactSkillPackage,
+    ) -> PublishedMaterializedSkillVersion: ...
+
+    @abstractmethod
     def materialize(
         self, request: SkillVersionMaterializationRequest
     ) -> PublishedMaterializedSkillVersion: ...
@@ -89,6 +116,7 @@ class SkillVersionMaterializerProtocol(Protocol):
 
 __all__ = [
     "MaterializingSkillVersion",
+    "ValidatedExactSkillPackage",
     "PublishedMaterializedSkillVersion",
     "SkillVersionMaterializationError",
     "SkillVersionMaterializationRequest",

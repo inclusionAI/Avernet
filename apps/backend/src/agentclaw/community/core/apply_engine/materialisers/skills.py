@@ -3,8 +3,7 @@
 The declaration speaks only for Direct skills: a runtime name the bot's skill
 sets supply (an active ordinary set, the Default less its exclusions) is
 outside it — never counted as current, never removed. Declaring such a name is
-a conflict (``set_conflicts``), which refuses the whole apply before anything
-is written, so a claim never has to touch a set.
+a conflict handled by the aggregate capability resolver before its writes.
 
 Every declared local package is validated and fully written through the normal
 Local package road, then claimed Direct. Existing Direct names report
@@ -45,7 +44,6 @@ from agentclaw.community.core.apply_engine.registry import (
     CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
-    ChecksSetSupply,
     Materialiser,
     PlannedEntry,
     ResolveFailure,
@@ -121,7 +119,7 @@ def _without(assets: dict[str, Any], supplied: frozenset[str]) -> dict[str, Any]
     return {name: asset for name, asset in assets.items() if name not in supplied}
 
 
-class SkillsMaterialiser(Materialiser, ChecksSetSupply):
+class SkillsMaterialiser(Materialiser):
     """Converges the bot's active skills toward the declared package set.
 
     ``identity`` is the entry's ``name``, e.g. ``"quality-check"``, and
@@ -384,18 +382,6 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
         if ctx.bot is None:
             return frozenset()
         return frozenset(int(skill_id) for skill_id in self._reader.member_skill_ids(bot=ctx.bot))
-
-    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> tuple[ResolveFailure, ...]:
-        supplied = self._set_supplied(ctx)
-        return tuple(
-            ResolveFailure(
-                entry.name,
-                "a skill of this name is supplied by one of the bot's skill sets; declare it there or remove it "
-                "from the set",
-            )
-            for entry in entries
-            if entry.name in supplied
-        )
 
     def _refresh_actual_dependency_codes(self, ctx: ApplyContext) -> None:
         """Never let a failed write leave the Dry-run projection in context."""

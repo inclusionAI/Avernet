@@ -17,6 +17,8 @@ bind-agentswarm-host-bot-platform):
   creations this adapter submitted — the HTTP poll's W8 sequence machinery
   (ordinary creates, record-first engines, later explicit applies) is out of
   scope here, and the unit tests pin every branch of the narrow table.
+  A creation Apply still marked RUNNING stays PROVISIONING until its terminal
+  report decides readiness or failure, even when the container is already UP.
 - delete is phase-aware and best-effort: discard the pending creation when no
   bot exists, soft-delete the bot when one does, and never raise in
   teardown once a per-call owner is present — teardown must not change
@@ -433,6 +435,8 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             return BotState.CREATE_FAILED.value
         report = self._apply_service.last_apply(entity_id=owner, bot_id=bot_id)
         if report is not None and report.trigger in _CREATION_TRIGGERS:
+            if report.status is ApplyStatus.RUNNING:
+                return BotState.PROVISIONING.value
             # The creation's own apply outranks job liveness: the
             # post-container phase runs while the job is still live, so
             # READY/APPLY_FAILED are answerable from the report even then
