@@ -407,24 +407,6 @@ describe("ClawFlowsGitClient pack content inheritance", () => {
     });
   });
 
-  it("repairs a missing workflow file declared by a legacy Pack manifest", async () => {
-    await withClonedWork(async (work) => {
-      const packRoot = path.join(work, packId);
-      mkdirSync(packRoot, { recursive: true });
-      writeFileSync(path.join(packRoot, "workflow.pack.yaml"), [
-        `id: ${packId}`,
-        "workflows:",
-        `  - ${workflowId}`,
-        "",
-      ].join("\n"));
-
-      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
-
-      expect(readFileSync(path.join(packRoot, "workflows", `${workflowId}.yaml`), "utf8"))
-        .toContain(`id: ${workflowId}`);
-    });
-  });
-
   it("rejects a polluted base without deleting either pack", async () => {
     seedBranch(`wf/${workflowId}`, {
       ...fullPackFiles,

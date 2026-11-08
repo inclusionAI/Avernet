@@ -548,9 +548,7 @@ export function resolvePackPaths(
         assertNotResource(manifest, relative, repoDir, path.dirname(filePath), links);
         const member = path.join(path.dirname(filePath), relative);
         assertNoGitlink(repoDir, [member], links);
-        // The requested legacy workflow is allowed to be recreated at its
-        // canonical path; every other declared member must already exist.
-        assertWorkflowFile(repoDir, member, id, id !== workflowId || relative !== `workflows/${workflowId}.yaml`);
+        assertWorkflowFile(repoDir, member, id, true);
       }
     }
     const includesWorkflow = workflows.some(item => typeof item === "string" ? item === workflowId
@@ -574,7 +572,7 @@ export function resolvePackPaths(
   assertNoGitlink(repoDir, [target], links);
   // Custom paths are only writable when the existing file proves it is the
   // declared workflow. Never turn a missing or unrelated resource into a spec.
-  assertWorkflowFile(repoDir, target, workflowId, matches.length > 0 && relativeFile !== `workflows/${workflowId}.yaml`);
+  assertWorkflowFile(repoDir, target, workflowId, matches.length > 0 && (legacy || relativeFile !== `workflows/${workflowId}.yaml`));
   let targetStat: ReturnType<typeof lstatSync> | undefined;
   try { targetStat = lstatSync(target); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
