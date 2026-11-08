@@ -377,6 +377,39 @@ class DeviceRepository(
                 bindings.append(record)
             return bindings
 
+    def list_active_caller_refresh_bindings(
+        self, *, bot_id: str, entity_id: str, env: str,
+    ) -> list[DeviceBindingRecord]:
+        fields = {"bot_id": bot_id, "entity_id": entity_id, "env": env, "providers": ("baas", "arca")}
+        logger.info("caller_refresh_bindings_requested fields=%s", fields)
+        try:
+            with self._db.orm_session() as db:
+                rows = (
+                    db.query(EntityDeviceBinding)
+                    .filter(
+                        EntityDeviceBinding.env == env,
+                        EntityDeviceBinding.entity_id == entity_id,
+                        EntityDeviceBinding.entity_type == "staff",
+                        EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
+                        EntityDeviceBinding.device_provider.in_(("baas", "arca")),
+                        EntityDeviceBinding.apply_reason == f"caller_instance:{bot_id}",
+                    )
+                    .order_by(EntityDeviceBinding.id.desc())
+                    .all()
+                )
+                bindings: list[DeviceBindingRecord] = []
+                seen_devices: set[str] = set()
+                for row in rows:
+                    record = _to_record(row)
+                    if record is not None and record.device_id not in seen_devices:
+                        bindings.append(record)
+                        seen_devices.add(record.device_id)
+            logger.info("caller_refresh_bindings_succeeded fields=%s binding_count=%s", fields, len(bindings))
+            return bindings
+        except Exception as exc:
+            logger.warning("caller_refresh_bindings_failed fields=%s error_type=%s", fields, type(exc).__name__)
+            raise
+
     def count_non_released_bindings(
         self,
         *,
