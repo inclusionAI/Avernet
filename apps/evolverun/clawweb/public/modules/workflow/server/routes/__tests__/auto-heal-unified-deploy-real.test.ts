@@ -87,6 +87,20 @@ it('saves DB and wf, then deploys the exact candidate with real SQLite and a loc
   expect(raw.prepare('SELECT is_active, spec_json FROM workflow_deploy_history WHERE workflow_id = ?').get('flow')).toMatchObject({ is_active: 1, spec_json: expect.stringContaining('repaired') });
 });
 
+it('rejects snapshot-v2 deployment when the DB draft differs from the saved Git candidate', async () => {
+  const changed = { ...original, title: 'DB-only changes' };
+  raw.prepare('UPDATE workflow_specs SET spec_json = ?, title = ? WHERE workflow_id = ?').run(JSON.stringify(changed), changed.title, 'flow');
+  const before = raw.prepare('SELECT * FROM workflow_specs WHERE workflow_id = ?').get('flow');
+  const token = (await draft.read('flow', 'editor')).draftToken;
+  const refs = git('show-ref');
+  const result = await post('editor-deploy/snapshot-v2', { workflowId: 'flow', packId: 'pack', candidateCommit: initialCommit,
+    expectedDraftToken: token, snapshotProtocol: 'saved-tree-v2', expectedActiveCommit: '', confirmedFileDiff: true, autoRun: false });
+  expect(result).toMatchObject({ status: 409, body: { code: 'SNAPSHOT_DB_MISMATCH' } });
+  expect(git('show-ref')).toBe(refs);
+  expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+  expect(raw.prepare('SELECT * FROM workflow_specs WHERE workflow_id = ?').get('flow')).toEqual(before);
+});
+
 it('retains execute-only access to legacy deploy while snapshot-v2 denies it', async () => {
   raw.prepare('UPDATE bot_workflow_permissions SET can_execute = 1, can_edit = 0 WHERE bot_owner_id = ?').run('editor');
   const denied = await post('editor-deploy/snapshot-v2', { workflowId: 'flow', candidateCommit: initialCommit,

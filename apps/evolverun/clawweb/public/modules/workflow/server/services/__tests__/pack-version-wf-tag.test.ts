@@ -80,3 +80,20 @@ it('does not fall back to saved when wf is absent, while the active tag stays re
   expect((await readPackVersionFromRemote(input('current'))).baseCommit).toBe(published);
   expect(refs()).toBe(before);
 });
+
+it('returns a complete draft inventory when its manifest-declared workflow YAML is malformed', async () => {
+  const yaml = 'id: flow\ntitle: [broken\n';
+  writeFileSync(path.join(seed, 'workflows/flow.yaml'), yaml);
+  git('add', '.'); git('commit', '-m', 'malformed draft'); draft = git('rev-parse', 'HEAD');
+  git('push', remote, 'HEAD:refs/heads/wf/flow');
+  const snapshot = await readPackVersionFromRemote(input('draft'));
+  expect(snapshot).toMatchObject({ baseCommit: draft, draftHead: draft, packId: 'pack' });
+  expect(snapshot.versionFiles).toContainEqual({ path: 'workflows/flow.yaml', mode: '100644', contentBase64: Buffer.from(yaml).toString('base64') });
+  expect(snapshot.versionFiles).toContainEqual({ path: 'scripts/run.py', mode: '100644', contentBase64: Buffer.from('print("draft")\n').toString('base64') });
+});
+
+it('continues to reject a draft whose parseable workflow ID conflicts with the manifest', async () => {
+  writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: another\nnodes: []\n');
+  git('add', '.'); git('commit', '-m', 'wrong workflow'); git('push', remote, 'HEAD:refs/heads/wf/flow');
+  await expect(readPackVersionFromRemote(input('draft'))).rejects.toThrow('Workflow identity mismatch');
+});

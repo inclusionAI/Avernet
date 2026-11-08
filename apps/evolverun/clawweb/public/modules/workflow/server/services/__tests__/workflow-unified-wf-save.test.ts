@@ -76,3 +76,44 @@ it('does not write DB when legacy read priority selects a tree missing wf notify
   expect(await service().save({ ...req, sourceCommit: legacy }, 'editor')).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
   expect(row()).toBe(before); expect(rg('rev-parse', 'refs/heads/wf/flow')).toBe(base); expect(rg('rev-parse', 'refs/heads/saved/flow')).toBe(legacy);
 });
+
+it.each(['workflows/flow.yaml', 'custom/flow.yaml'])('replaces malformed Git YAML at manifest-declared %s with the DB editor projection', async workflowPath => {
+  if (workflowPath.startsWith('custom/')) {
+    mkdirSync(path.join(seed, 'custom'));
+    git(seed, 'rm', 'workflows/flow.yaml');
+    writeFileSync(path.join(seed, 'workflow.pack.yaml'), `id: pack\nversion: 1\nworkflows:\n  - id: flow\n    file: ${workflowPath}\n`);
+  }
+  writeFileSync(path.join(seed, workflowPath), 'id: flow\ntitle: [broken\n');
+  chmodSync(path.join(seed, workflowPath), 0o755);
+  git(seed, 'add', '.'); git(seed, 'commit', '-m', 'malformed workflow');
+  base = git(seed, 'rev-parse', 'HEAD'); git(seed, 'push', remote, `${base}:refs/heads/wf/flow`);
+  const req = await request();
+  const result = await service().save(req, 'editor');
+  expect(result.outcome).toBe('confirmed');
+  expect(projectWorkflowSnapshotYaml('flow', rg('show', `${result.evidence.commit}:${workflowPath}`)).specJson).toBe(row());
+  expect(rg('ls-tree', result.evidence.commit!, workflowPath)).toMatch(/^100755/);
+  for (const file of ['scripts/notify.sh', 'asset.bin', 'workflow.pack.yaml']) {
+    expect(rg('ls-tree', result.evidence.commit!, file)).toBe(rg('ls-tree', base, file));
+  }
+});
+
+it.each(['id: another\nnodes: []\n', 'id: flow\ntitle: [broken\0\n'])('does not replace a wrong identity or binary workflow source', async source => {
+  writeFileSync(path.join(seed, 'workflows/flow.yaml'), source);
+  git(seed, 'add', '.'); git(seed, 'commit', '-m', 'unsafe workflow');
+  base = git(seed, 'rev-parse', 'HEAD'); git(seed, 'push', remote, `${base}:refs/heads/wf/flow`);
+  const before = row();
+  expect(await service().save(await request(), 'editor')).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
+  expect(row()).toBe(before); expect(rg('rev-parse', 'refs/heads/wf/flow')).toBe(base);
+});
+
+it('does not repair malformed YAML using a stale DB token or stale Git lease', async () => {
+  writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\ntitle: [broken\n');
+  git(seed, 'add', '.'); git(seed, 'commit', '-m', 'malformed workflow');
+  base = git(seed, 'rev-parse', 'HEAD'); git(seed, 'push', remote, `${base}:refs/heads/wf/flow`);
+  const req = await request(), before = row();
+  expect(await service().save({ ...req, expectedDraftToken: 'f'.repeat(64) }, 'editor')).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
+  git(seed, 'commit', '--allow-empty', '-m', 'concurrent save');
+  const changed = git(seed, 'rev-parse', 'HEAD'); git(seed, 'push', remote, `${changed}:refs/heads/wf/flow`);
+  expect(await service().save(req, 'editor')).toMatchObject({ outcome: 'rejected', evidence: { db: 'not_started', git: 'not_started' } });
+  expect(row()).toBe(before); expect(rg('rev-parse', 'refs/heads/wf/flow')).toBe(changed);
+});

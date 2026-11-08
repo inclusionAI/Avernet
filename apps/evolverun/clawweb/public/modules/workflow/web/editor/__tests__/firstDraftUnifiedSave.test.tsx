@@ -85,12 +85,12 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-async function setup({ script = true, mismatch = false } = {}) {
+async function setup({ script = true, mismatch = false, malformed = false } = {}) {
   const source = await readEditorWorkflowSource(id)
   useEditorStore.getState().loadSpec(source.spec, source.databaseSpec, source.activeDeployNumber)
   useEditorStore.getState().updateSpecField('title', 'Edited')
   const session = sessionFor(id), base = structuredClone(saved) as any
-  if (mismatch) base.versionFiles.find((f: { path: string }) => f.path === `workflows/${id}.yaml`).contentBase64 = btoa(stringify({ ...spec, title: 'Other baseline' }))
+  if (mismatch || malformed) base.versionFiles.find((f: { path: string }) => f.path === `workflows/${id}.yaml`).contentBase64 = btoa(malformed ? `id: ${id}\nnodes: [` : stringify({ ...spec, title: 'Other baseline' }))
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions,
     draft: { snapshot: base, files: structuredClone(base.versionFiles), loading: false, error: null, blocked: false, notice: null } } })
   if (script) updateVersion(session, 'draft', { files: base.versionFiles.map((f: { path: string }) => f.path === 'scripts/a.sh' ? { ...f, contentBase64: btoa('new') } : f) })
@@ -130,10 +130,37 @@ it.each(['cap-error', 'changed-db', 'changed-session'] as const)('does not dispa
   expect(session.state.versions.draft.files.find(f => f.path === 'scripts/a.sh')!.contentBase64).toBe(btoa('new'))
 })
 
-it('rejects a Git tree from a different active baseline before database or Git writes', async () => {
-  const { hook } = await setup({ mismatch: true })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('Git 工作流 YAML') })
+it('uses the edited active DB document when the first draft Git baseline differs', async () => {
+  const { hook, session } = await setup({ mismatch: true })
+  expect(hook.result.current.baselineComparison).toBe('unavailable')
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified', commit: resultCommit }) })
+  expect(payloads).toHaveLength(2)
+  expect(JSON.parse(payloads[1].body.specJson).title).toBe('Edited')
+  expect(payloads[1].body.expectedDraftToken).toBe(draftToken)
+  expect(payloads[1].body.expectedSavedHead).toBe(originalCommit)
+  expect(session.state.versions.draft.snapshot?.baseCommit).toBe(resultCommit)
+})
+
+it('attempts first-draft publication from a malformed source without treating comparison as approval', async () => {
+  const { hook } = await setup({ malformed: true })
+  expect(hook.result.current.baselineComparison).toBe('unavailable')
+  await act(async () => { await expect(hook.result.current.save()).resolves.toMatchObject({ mode: 'unified', commit: resultCommit }) })
+  expect(payloads).toHaveLength(2)
+  expect(JSON.parse(payloads[1].body.specJson).title).toBe('Edited')
+  expect(payloads[1].body).toMatchObject({ sourceCommit: originalCommit, expectedSavedHead: originalCommit, expectedDraftToken: draftToken })
+})
+
+it('does not create a first draft when divergent YAML file edits would be lost', async () => {
+  const { hook, session } = await setup({ mismatch: true })
+  act(() => {
+    const v = session.state.versions.draft
+    updateVersion(session, 'draft', { files: v.files.map(f => f.path === `workflows/${id}.yaml`
+      ? { ...f, contentBase64: btoa(stringify({ ...spec, title: 'File edit' })) } : f) })
+  })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('画布和文件同时修改') })
   expect(payloads).toHaveLength(0); expect(stored).toBeNull()
+  expect(useEditorStore.getState().spec?.title).toBe('Edited')
+  expect(atob(session.state.versions.draft.files.find(f => f.path === `workflows/${id}.yaml`)!.contentBase64)).toContain('File edit')
 })
 
 it('preserves candidate files and quarantines an uncertain unified result', async () => {

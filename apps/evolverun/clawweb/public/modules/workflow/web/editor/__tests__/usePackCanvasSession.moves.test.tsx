@@ -104,9 +104,9 @@ it('refuses an existing destination and preserves both workflow files', async ()
   expect(ctx.session.state.versions.draft.files.find(f => f.path === ctx.path)?.contentBase64).toBe(ctx.baseline)
   expect(ctx.session.state.versions.draft.files.find(f => f.path === destination)?.contentBase64).toBe(btoa(stringify(edited)))
 })
-it('rejects a mismatched destination workflow identity before writing either store', async () => {
+it('rejects an unsupported move with a mismatched destination identity before writes', async () => {
   const ctx = setup(); act(() => move(ctx, btoa(stringify({ ...ctx.spec, id: 'different' }))))
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('身份与当前画布不一致') })
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('Pack manifest') })
   expect(fetchJson).not.toHaveBeenCalled(); expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true)
 })
 it('does not send a moved candidate even if the database transport would be lost', async () => {

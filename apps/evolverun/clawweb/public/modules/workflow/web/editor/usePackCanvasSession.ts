@@ -1,5 +1,5 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { stringify } from 'yaml'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { parse, stringify } from 'yaml'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { editorDraftDocument, readEditorDraftCas, type EditorDraftCas } from '../api/editorDraftCas'
@@ -11,8 +11,9 @@ import { useEditorStore, validateSpec, prepareWorkflowSession } from './store'
 import { sessionFor, load, releaseCleanSession, publish, updateVersion, dirty, diff, validateSnapshot, type Snapshot, type Version } from './packVersionSession'
 import { currentVersionSaveConflict, legacyPackCandidate, savePackVersion } from './packVersionSave'
 import { packVersionWritesEnabled } from './packVersionWritePolicy'
-import { packWorkflow, packWorkflowBaseline } from './packCanvas'
+import { packManifest, packWorkflow, packWorkflowBaseline } from './packCanvas'
 import { normalizationChanges } from './yamlDraft'
+import { compareGitDatabase } from './workflowBaselineComparison'
 import { saveVerifiedWorkflowDocument, verifyDatabaseBaseline, WorkflowDocumentAcknowledgedError } from './workflowDocumentSave'
 import { assertEditorWorkflowReadable, editorWorkflowReadIsCurrent, beginEditorWorkflowWrite, finishEditorWorkflowWrite, abandonEditorWorkflowWrite } from './workflowWriteGuard'
 import { createDeploymentId } from './deploymentGuard'
@@ -25,6 +26,27 @@ export class PackCanvasPartialSaveError extends Error {
   constructor(readonly workflowId: string, message: string, readonly stages?: { db: 'confirmed' | 'unchanged' | 'unknown'; git: 'not-started' | 'confirmed' | 'unknown'; commit?: string }) { super(message); this.name = 'PackCanvasPartialSaveError' }
 }
 
+/** Read Pack identity and the selected file without interpreting its YAML. */
+function workflowLocation(files: Snapshot['versionFiles'], id: string, expectedPackId?: string) {
+  const location = packManifest(files, id)
+  if (expectedPackId !== undefined && location.packId !== expectedPackId) throw new Error('Pack manifest 身份与 Git 基线不一致。')
+  const file = files.find(item => item.path === location.path)
+  if (!file) throw new Error('manifest 指向的工作流 YAML 不在完整版本中。')
+  return { ...location, file }
+}
+
+/** Preserve a known identity mismatch as a client guard. If decoding or parsing
+ * fails, the server must make its own identity decision before either write. */
+function assertKnownSourceIdentity(file: Snapshot['versionFiles'][number], id: string) {
+  let value: unknown
+  try {
+    const bytes = Uint8Array.from(atob(file.contentBase64), c => c.charCodeAt(0))
+    value = parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  } catch { return }
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'id')
+    && (value as { id?: unknown }).id !== id) throw new Error('工作流 YAML 身份与当前画布不一致。')
+}
+
 /** Existing drafts use one candidate for DB, projected YAML and Pack files. */
 export function usePackCanvasSession(id: string | null, _databaseSpec?: WorkflowSpec | null, { enabled = true }: { enabled?: boolean } = {}) {
   const session = id ? sessionFor(id) : null
@@ -33,6 +55,8 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   const editor = useEditorStore()
   if (session) session.canvasDirty = editor.isDirty || editor.isLayoutDirty || Object.keys(editor.pendingEdits ?? {}).length > 0
   const version = state?.version ?? 'draft', current = state?.versions[version], snapshot = current?.snapshot
+  const baselineComparison = useMemo(() => compareGitDatabase(snapshot, id, editor._databaseSpec === undefined ? editor._savedSpec : editor._databaseSpec),
+    [snapshot, id, editor._databaseSpec, editor._savedSpec])
   const busy = useRef(false)
   useEffect(() => {
     if (enabled && session && id && !current?.snapshot && !current?.files.length && !current?.loading && !current?.error) load(session, id, version)
@@ -55,15 +79,13 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     if (!live.spec || live.spec.id !== id || !live._savedSpec || live._databaseSpec == null || live._databasePackId === undefined
       || live._databasePackId !== row.packId || row.workflowId !== id || sessionFor(id) !== session
       || !base || base.packId !== (row.packId ?? id) || source.loading || source.readFailure || source.blocked
-      || session.state.uploading || session.state.reconciliation || session.state.deployment || session.state.uncertainRename || session.state.postSaveVerificationError
-      || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors.length) throw new Error('审阅基线或编辑状态不可用；未发送保存。')
+      || session.state.uploading || session.state.reconciliation || session.state.deployment || session.state.uncertainRename || session.state.postSaveVerificationError) throw new Error('审阅基线或编辑状态不可用；未发送保存。')
     const other = selected === 'draft' ? 'current' : 'draft', otherState = session.state.versions[other]
     if (otherState.loading || dirty(otherState) || !otherState.snapshot && otherState.files.length) throw new Error('另一个版本有未保存文件或正在读取；未发送保存。')
     const conflict = currentVersionSaveConflict(selected, base)
     if (conflict) throw new Error(conflict)
-    const original = packWorkflowBaseline(base.versionFiles, id, base.packId), candidate = packWorkflowBaseline(source.files, id)
-    const originalFile = base.versionFiles.find(file => file.path === original.path)!
-    const candidateFile = source.files.find(file => file.path === candidate.path)!
+    const original = workflowLocation(base.versionFiles, id, base.packId), candidate = workflowLocation(source.files, id)
+    const originalFile = original.file, candidateFile = candidate.file
     if (candidate.packId !== base.packId || candidate.path !== original.path || candidateFile.mode !== originalFile.mode
       || diff(base.versionFiles.filter(f => f.path === 'workflow.pack.yaml'), source.files.filter(f => f.path === 'workflow.pack.yaml')).length) {
       throw new Error('统一保存暂不支持修改 Pack manifest、工作流路径或 YAML 文件模式；本地草稿仍保留。')
@@ -150,11 +172,24 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
         if (base.packId !== live._databasePackId) throw new Error('Git Pack 与生效版本 Pack 身份不一致；数据库和 Git 均未写入。')
         const conflict = currentVersionSaveConflict(selected, base)
         if (conflict) throw new Error(conflict)
-        const original = packWorkflowBaseline(base.versionFiles, id, base.packId)
-        if (!original.spec || normalizationChanges(original.spec, live._savedSpec).length) throw new Error('Git 工作流 YAML 与生效版本基线不一致；数据库和 Git 均未写入。')
+        const original = workflowLocation(base.versionFiles, id, base.packId)
+        assertKnownSourceIdentity(original.file, id)
+        const candidate = workflowLocation(files, id)
+        if (candidate.packId !== base.packId || candidate.path !== original.path || candidate.file.mode !== original.file.mode
+          || diff(base.versionFiles.filter(f => f.path === 'workflow.pack.yaml'), files.filter(f => f.path === 'workflow.pack.yaml')).length) {
+          throw new Error('统一保存暂不支持修改 Pack manifest、工作流路径或 YAML 文件模式；本地草稿仍保留。')
+        }
+        if (candidate.file.contentBase64 !== original.file.contentBase64) {
+          const candidateSpec = packWorkflow(files, id).spec
+          const errors = validateSpec(candidateSpec)
+          if (errors.length) throw new Error(`文件 YAML 验证失败：${errors[0].message}；本地草稿仍保留。`)
+          if ((compareGitDatabase(base, id, live._savedSpec) !== 'same'
+            || normalizationChanges(live.spec, live._savedSpec).length > 0 || live.isLayoutDirty)
+            && normalizationChanges(candidateSpec, live.spec).length) throw new Error('画布和文件同时修改了工作流 YAML，请先统一内容；草稿仍保留。')
+        }
       }
       let gitFiles = files
-      if (fileDirty && base) {
+      if (databaseBaseline !== null && fileDirty && base) {
         if (source.loading || source.readFailure || source.blocked) throw new Error('Git 版本文件不可用；本地草稿仍保留。')
         if (base.packId !== (live._databasePackId ?? id)) throw new Error('Git Pack 与数据库 Pack 身份不一致；本地草稿仍保留。')
         const conflict = currentVersionSaveConflict(selected, base)
@@ -296,18 +331,18 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     if (base.packId !== (live._databasePackId ?? id)) throw new Error('Git Pack 与数据库 Pack 身份不一致；本地草稿仍保留。')
     const conflict = currentVersionSaveConflict(selected, base)
     if (conflict) throw new Error(conflict)
-    const original = packWorkflowBaseline(base.versionFiles, id, base.packId)
-    if ((!original.spec || normalizationChanges(original.spec, first?.activeSpec ?? databaseBaseline).length) && !approval) throw new Error('Git 工作流 YAML 与数据库基线不一致或不可比较；当前安全协议要求先合并并核对，未发送统一保存。')
-    const candidate = packWorkflowBaseline(source.files, id)
-    const originalFile = base.versionFiles.find(f => f.path === original.path)!
-    const candidateFile = source.files.find(f => f.path === candidate.path)!
+    const original = workflowLocation(base.versionFiles, id, base.packId)
+    assertKnownSourceIdentity(original.file, id)
+    const baselineComparison = compareGitDatabase(base, id, first?.activeSpec ?? databaseBaseline)
+    const candidate = workflowLocation(source.files, id)
+    const originalFile = original.file, candidateFile = candidate.file
     const manifestChange = diff(base.versionFiles.filter(f => f.path === 'workflow.pack.yaml'), source.files.filter(f => f.path === 'workflow.pack.yaml'))
     if (candidate.packId !== base.packId || candidate.path !== original.path || manifestChange.length || candidateFile.mode !== originalFile.mode) throw new Error('统一保存暂不支持修改 Pack manifest、工作流路径或 YAML 文件模式；本地草稿仍保留。')
     const fileChanged = candidateFile.contentBase64 !== originalFile.contentBase64
     const candidateSpec = fileChanged ? packWorkflow(source.files, id).spec : null
     const canvasChanged = normalizationChanges(live.spec, live._savedSpec).length > 0 || live.isLayoutDirty
     const yamlOnly = !!candidateSpec && !canvasChanged && normalizationChanges(candidateSpec, live.spec).length > 0
-    if (candidateSpec && canvasChanged && normalizationChanges(candidateSpec, live.spec).length && !approval) throw new Error('画布和文件同时修改了工作流 YAML，请先统一内容；草稿仍保留。')
+    if (candidateSpec && (canvasChanged || baselineComparison !== 'same') && normalizationChanges(candidateSpec, live.spec).length && !approval) throw new Error('画布和文件同时修改了工作流 YAML，请先统一内容；草稿仍保留。')
     if (candidateSpec) {
       const errors = validateSpec(candidateSpec)
       if (errors.length) throw new Error(`文件 YAML 验证失败：${errors[0].message}；本地草稿仍保留。`)
@@ -361,7 +396,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
       if (!isCurrent()) throw new Error('核对期间草稿变化；未发送保存。')
       // Only a saved-tree baseline already equal to the verified DB document can
       // be a no-op. Current-only or first-draft paths still have to publish.
-      if (!first && !approval && selected === 'draft' && !fileChanged && !changes.length
+      if (!first && !approval && baselineComparison === 'same' && selected === 'draft' && !fileChanged && !changes.length
         && !normalizationChanges(databaseBaseline, requestSpec).length) {
         return { mode: 'legacy', dbSaved: false, gitSaved: false, commit: null, remainingFileChanges: false }
       }
@@ -495,5 +530,6 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   // Legacy pack-version canWrite is not a unified-save capability. Until the
   // host exposes one, never advertise unified write availability in this hook.
   return { save: () => performSave(), prepareReconciliation, currentReconciliation, cancelReconciliation, saveReconciled: (approval: ReconciliationApproval) => performSave(undefined, approval), error: state?.uncertainRename ?? state?.postSaveVerificationError ?? current?.error ?? null, versionError: current?.error ?? null,
-    loading: !!current?.loading, canWrite: false, saving: !!state?.saving, snapshot }
+    loading: !!current?.loading, canWrite: false, saving: !!state?.saving, snapshot,
+    baselineComparison: current?.loading || current?.readFailure || current?.blocked ? 'unavailable' as const : baselineComparison }
 }

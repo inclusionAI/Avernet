@@ -107,6 +107,16 @@ describe('exact wf candidate deployment', () => {
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
   });
 
+  it('fails closed for an unparseable DB draft on v2 without touching the tag or active history', async () => {
+    raw.prepare('UPDATE workflow_specs SET spec_json = ?').run('{not valid json');
+    const beforeRefs = remoteGit('show-ref');
+    const beforeDraft = raw.prepare('SELECT * FROM workflow_specs').get();
+    await expect(editorDeploy()).rejects.toMatchObject({ status: 400, code: 'INVALID_WORKFLOW' });
+    expect(remoteGit('show-ref')).toBe(beforeRefs);
+    expect(raw.prepare('SELECT * FROM workflow_specs').get()).toEqual(beforeDraft);
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+  });
+
   it('uses the active history tag as production while wf contains a newer draft', async () => {
     const production = candidate;
     activateProduction(production);

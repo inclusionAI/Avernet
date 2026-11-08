@@ -28,6 +28,7 @@ const DISCOVERY_BATCH_SIZE = 128;
 const DISCOVERY_BATCH_BYTES = 16 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 type Entry = { mode: string; type: string; oid: string; name: string };
+class MalformedSnapshotYamlError extends Error {}
 
 function validId(value: string): boolean {
   return /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(value)
@@ -35,7 +36,7 @@ function validId(value: string): boolean {
 }
 
 /** Read an authorized caller's already-cloned repository. Lazy fetching is disabled where Git supports it. */
-export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean; activeTag?: string }): Promise<PackScriptSnapshot> {
+export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean; activeTag?: string; allowMalformedDraftWorkflow?: boolean }): Promise<PackScriptSnapshot> {
   if (version !== undefined && version !== 'current' && version !== 'draft') throw new Error('Invalid snapshot version');
   if (!validId(workflowId) || !validId(packId)) throw new Error('Invalid workflowId or packId');
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
@@ -111,10 +112,15 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     const bytes = await git(['cat-file', 'blob', entry.oid], FILE_LIMIT + 1);
     try {
       if (bytes.includes(0)) throw new Error('binary');
-      const value: unknown = parseYaml(decoder.decode(bytes));
+      const text = decoder.decode(bytes);
+      let value: unknown;
+      try { value = parseYaml(text); } catch { throw new MalformedSnapshotYamlError(`Invalid ${label}`); }
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object');
       return value as Record<string, unknown>;
-    } catch { throw new Error(`Invalid ${label}`); }
+    } catch (error) {
+      if (error instanceof MalformedSnapshotYamlError) throw error;
+      throw new Error(`Invalid ${label}`);
+    }
   };
   const root = await list(baseCommit);
   const rootManifest = root.find(e => e.name === 'workflow.pack.yaml');
@@ -238,8 +244,15 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
   }
   const workflowEntry = workflowEntries.find(entry => entry.name === parts[parts.length - 1]);
   if (!workflowEntry) throw new Error('Workflow file not found');
-  const workflowValue = await readYamlObject(workflowEntry, 'workflow file');
-  if (workflowValue.id !== workflowId) throw new Error('Workflow identity mismatch');
+  try {
+    const workflowValue = await readYamlObject(workflowEntry, 'workflow file');
+    if (workflowValue.id !== workflowId) throw new Error('Workflow identity mismatch');
+  } catch (error) {
+    // Full draft inventory is informational; the manifest and regular file path
+    // remain authoritative only for a later, separately authorized unified save.
+    if (!(version === 'draft' && options?.includeVersionFiles && options.allowMalformedDraftWorkflow
+      && error instanceof MalformedSnapshotYamlError)) throw error;
+  }
   // An inventory is complete or unavailable: never silently omit file modes or
   // binary resources. The legacy scripts-only response remains unchanged.
   if (options?.includeVersionFiles) {

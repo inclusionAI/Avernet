@@ -59,10 +59,12 @@ async function setup(source: 'draft' | 'current' = 'draft', fresh = false, exist
 }
 beforeEach(() => localStorage.clear())
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllMocks() })
-it('blocks deployment of unsaved canvas without issuing a request', async () => {
+it('allows deployment confirmation without including unsaved canvas edits', async () => {
   await setup(); await act(async () => {}); act(() => useEditorStore.getState().updateSpecField('title', 'Unsaved'))
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
-  expect(screen.getByText(/画布有未保存改动/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
+  await screen.findByRole('button', { name: '确认部署' })
+  expect(screen.getByText(/未保存的修改，本次部署不包含这些修改/)).toBeInTheDocument()
+  expect(mocks.deploy).not.toHaveBeenCalled()
 })
 it('deploys the saved files and DB draft even when Git YAML differs', async () => {
   const { id } = await setup()

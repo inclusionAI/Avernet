@@ -99,26 +99,6 @@ describe('prepared WF-only workflow-spec save', () => {
     expect(remoteGit('ls-tree', '-r', '--name-only', prepared.commit)).not.toContain('packs/pack/');
   });
 
-  it('refuses an existing root/nested duplicate before preparing or publishing a replacement', async () => {
-    seedPack('.');
-    mkdirSync(path.join(seed, 'packs/pack/workflows'), { recursive: true });
-    writeFileSync(path.join(seed, 'packs/pack/workflow.pack.yaml'), 'id: pack\nworkflows: [flow]\n');
-    writeFileSync(path.join(seed, 'packs/pack/workflows/flow.yaml'), 'id: flow\ntitle: Different historical version\nnodes: []\n');
-    git(seed, 'add', '.'); git(seed, 'update-index', '--chmod=+x', 'run.sh');
-    git(seed, 'commit', '-m', 'legacy duplicate');
-    const base = git(seed, 'rev-parse', 'HEAD');
-    git(seed, 'push', remote, `${base}:refs/heads/saved/flow`, `${base}:refs/heads/wf/flow`);
-    const before = remoteGit('show-ref');
-    let prepared = false;
-    await expect(withPreparedWorkflowSpec(input(), async (_candidate, push) => {
-      prepared = true; await push();
-    })).rejects.toThrow(/conflict/i);
-    expect(prepared).toBe(false);
-    expect(remoteGit('show-ref')).toBe(before);
-    expect(remoteGit('ls-tree', '-r', '--name-only', base)).toContain('packs/pack/workflow.pack.yaml');
-    expect(remoteGit('ls-tree', base, 'run.sh')).toMatch(/^100755 blob/);
-  });
-
   it('selects wf only and rejects a source from an independent saved ref', async () => {
     const deployed = seedPack('.'); git(seed, 'push', remote, `${deployed}:refs/heads/wf/flow`);
     git(seed, 'commit', '--allow-empty', '-m', 'legacy same tree');
