@@ -664,8 +664,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # none 156 -> 157. The standard evaluation workflow adds seven Bot-path-addressed
 # user-scoped operations under /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 157}
 # Read-only Caller status adds one Bot-path operation: 234 -> 235.
+# Dedicated recycle operation query adds one OWNER-only Bot-path read: 235 -> 236.
+_BOT_ID_PLACEMENT = {"path": 236, "query": 2, "none": 157}
 
 
 
@@ -890,7 +891,8 @@ def test_the_pinned_number_of_operations_take_it():
     # destroy, and result save: 309 -> 316.
     # Admin Caller expiry correction keeps the verified actor user_id: 316 -> 317.
     # Read-only Caller status adds one user-taking operation: 317 -> 318.
-    assert len(taking) == 318
+    # Dedicated recycle operation query adds one OWNER-only read: 318 -> 319.
+    assert len(taking) == 319
 
 
 def test_the_exempt_operations_take_none():

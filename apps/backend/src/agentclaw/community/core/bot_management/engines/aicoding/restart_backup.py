@@ -25,6 +25,7 @@ from urllib.parse import quote
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
+from .backup_operation import BackupPersistenceError, current_backup, backup_deadline
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
 from .fastdisk_probe import (
@@ -222,18 +223,9 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    strict_deadline: float | None = None, block_on_failure: bool = True) -> Callable[[], None]:
     """Wait and validate the final receipt once; preserve the caller hook contract."""
     started = time.monotonic()
-    # Ordinary durable operations share one budget across task redeliveries and
-    # all physical targets. Published/Caller paths retain their existing budget.
-    from .restart_state import BACKUP_TIMEOUT, current_restart
-    execution = current_restart.get()
-    remaining = (BACKUP_TIMEOUT - (time.time() - execution.payload["started_at"])
-                 if execution is not None else DEADLINE_SECONDS)
-    deadline = started + remaining
-    if require_backup:
-        strict_remaining = (FASTDISK_TIMEOUT - (time.time() - execution.payload["started_at"])
-                            if execution is not None else FASTDISK_TIMEOUT)
-        deadline = min(deadline, started + strict_remaining,
-                       strict_deadline if strict_deadline is not None else float('inf'))
+    deadline = backup_deadline(started=started, ordinary_budget=DEADLINE_SECONDS,
+                               fastdisk_budget=FASTDISK_TIMEOUT, required=require_backup,
+                               strict_deadline=strict_deadline)
     action, boot, last_status = 'start', None, None
     last_log = started
     observed_status = 'unknown'
@@ -336,7 +328,7 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id
     """
     try:
         return callback()
-    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
+    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded, BackupPersistenceError):
         raise
     except Exception as error:
         failure = error
@@ -357,7 +349,7 @@ def _backup_policy(callback, *, required, physical_targets=(), on_degraded=None,
         return _best_effort(callback, on_degraded=on_degraded, event=event, **identity)
     try:
         return callback()
-    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
+    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded, BackupPersistenceError):
         raise
     except Exception as error:
         if not hasattr(error, "_coding_restart_log_context"):
@@ -370,6 +362,9 @@ def _detect_fastdisk(execute, **identity):
     def detect():
         from .restart_state import BACKUP_TIMEOUT, current_restart
         execution = current_restart.get()
+        backup = current_backup.get()
+        if backup is not None and time.time() - backup.started_at >= BACKUP_TIMEOUT:
+            raise TimeoutError("detection budget exhausted")
         if execution is not None and time.time() - execution.payload['started_at'] >= BACKUP_TIMEOUT:
             raise TimeoutError('detection budget exhausted')
         return parse_detection_result(execute(detection_command()))['status'] == 'run'
@@ -378,6 +373,9 @@ def _detect_fastdisk(execute, **identity):
 
 
 def _confirmed_targets():
+    backup = current_backup.get()
+    if backup is not None:
+        return set(backup.confirmed)
     from .restart_state import current_restart, journal
 
     execution = current_restart.get()
@@ -405,7 +403,13 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
     if not fastdisk:
         return _PreparedBackup(required=False, verify=lambda: None)
     required = blocking_enabled()
+    backup = current_backup.get()
+    if backup is not None:
+        backup.confirm(identity["target_id"])
     def warn():
+        if backup is not None:
+            backup.warn()
+            return
         from .restart_state import record_nonblocking_backup_warning
         try:
             record_nonblocking_backup_warning(identity['operation_id'])

@@ -260,3 +260,21 @@ def test_positive_fastdisk_targets_merge_across_concurrent_cas(persisted):
         list(pool.map(confirm, ['p1', 'p2', 'p1', 'p3']))
     assert journal(state.read())['fastdisk_targets'] == ['p1', 'p2', 'p3']
     assert state.read()['ext']['unrelated'] == 1
+
+
+def test_recycle_winning_enqueue_gap_rejects_restart_without_changing_runtime(persisted):
+    """Recycle may commit after restart read, but before restart journal CAS."""
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartState
+
+    p = persisted
+    old = p.repo.get_by_id_and_owner("bot", "owner")
+    p.repo.update_by_owner("bot", "owner", {"ext": {
+        **old["ext"], "recycle": {"operation_id": "recycle-winner", "phase": "BACKING_UP"},
+    }})
+    state = RestartState(p.repo, "bot", "owner", "restart-loser")
+    result = state.ensure({"engine": "claude_code", "binding_id": 7,
+                           "previous_status": "ACTIVE", "started_at": 1}, 7)
+    assert result["ext"][KEY]["phase"] == "FAILED"
+    assert result["ext"]["recycle"]["phase"] == "BACKING_UP"
+    assert result["status"] == "ACTIVE" and result["binding_id"] == 7
+    assert "start_status" not in result["ext"]

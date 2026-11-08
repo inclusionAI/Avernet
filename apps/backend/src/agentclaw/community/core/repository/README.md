@@ -165,6 +165,8 @@ imports in the finite set of legacy writers. There is no new CI exemption.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - RecycleRepository
+  - BotRecycleRepositoryProtocol
   - OwnershipSyncReadRepository
   - SqlOwnershipSyncReadRepository
   - CollaborationRepairReadRepository
@@ -397,6 +399,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.base  # Declarative ORM base for Todo persistence models
   - agentclaw.community.utils.avernet_tenant_guard  # Tenant column guard for Todo ORM models
+  - agentclaw.community.core.bot_dormant
   - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
   - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
   - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim

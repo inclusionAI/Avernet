@@ -7,6 +7,7 @@ handoff; this strategy must not unlock a successfully spawned allocation.
 from __future__ import annotations
 
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.bot_management.services.resource_mutation import held_resource_lock
 
 from .restart_arca import RestartBackupTargetChanged
 
@@ -47,6 +48,7 @@ class AicodingArcaRestart:
         if lock is None:
             return state.read()  # No mutation fence: the worker can retry.
         handed_off = False
+        resource_token = held_resource_lock.set((env, entity_id, state.bot_id, state.owner_id))
         try:
             verify()
             if bot.get("bot_type") == "service":
@@ -75,6 +77,7 @@ class AicodingArcaRestart:
                 result["restart_warning"] = "旧设备释放可能失败，如后续出现设备限制问题，请联系管理员"
             return result
         finally:
+            held_resource_lock.reset(resource_token)
             if not handed_off:
                 service._restart_lock_repo.release(
                     env, entity_id, state.bot_id, lock.lock_token,
