@@ -116,7 +116,6 @@ class SkillSetApplyService:
                 actor_id=actor_id,
                 action="skill_sets_apply_replace",
                 runtime_required=project,
-                skip_projection_when_unchanged=True,
                 scope_from_result=lambda mutation: ProjectionScope(
                     skills=True,
                     mcp=bool(mutation.mcp_codes),

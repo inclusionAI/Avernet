@@ -244,6 +244,15 @@ class ApplySkillSetCommands:
                 platform_default_codes,
                 allow_unavailable=True,
             )
+            # Unavailable members may no longer resolve. Only recorded Set
+            # ownership confirms that their installations belong to this scope.
+            active_set_ids = {item.id for item in facts if item.is_active}
+            for skill_id, (kind, set_id) in old.installation_sources.items():
+                if kind in (
+                    SkillInstallationSourceKind.DEFAULT,
+                    SkillInstallationSourceKind.SKILL_SET,
+                ) and set_id in active_set_ids:
+                    before_skills[skill_id] = (SkillInstallationSourceKind(kind), set_id)
             self._validate_default_restore(
                 session,
                 scope,
@@ -492,10 +501,9 @@ class ApplySkillSetCommands:
                         or str(error) != "CENTER_MEMBERSHIP_IDENTITY_MISSING"
                     ):
                         raise
-                    ids = set(item.skill_ids) - excluded
-                if allow_unavailable:
-                    ids |= set(item.skill_ids) - excluded
-                else:
+                    # Raw aliases do not establish ownership of an installation.
+                    ids = set()
+                if not allow_unavailable:
                     resolved = {}
                     center_uuids = set()
                     for skill_id in sorted(ids):

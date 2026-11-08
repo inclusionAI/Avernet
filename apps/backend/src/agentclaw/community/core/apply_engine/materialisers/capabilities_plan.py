@@ -109,7 +109,8 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 PlannedEntry(
                     Intent("skill_sets/default"),
                     "updated" if default_changed or missing else "unchanged",
-                    requires_write=default_changed or missing,
+                    # A declared active Default may still need runtime retry.
+                    requires_write=default_changed or missing or bool(defaults),
                 )
             )
         elif default_removed:
@@ -139,7 +140,8 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 or bool(set(group.mcp) - snapshot.installed_mcp_codes)
             )
             required = (
-                not same
+                group.is_active
+                or not same
                 or missing_installation
                 or any(
                     s.package is not None or s.preview is not None for s in group.skills

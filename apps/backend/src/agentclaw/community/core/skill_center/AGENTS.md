@@ -128,6 +128,10 @@ Apply 的批量集合命令由 `services/skill_set_apply_service.py` 经正式�
 不执行 flush；缺失或不可解析的资产元数据保留可诊断状态。Local 清理使用所有持久
 成员引用（含 inactive、非当前 engine 和 excluded Default），实际删除仍由原守卫复核。
 本批量事务沿用已有行锁和 Apply 互斥，不增加跨普通管理入口的共同锁、CAS 或唯一索引。
+批量 Set 事务的旧供应使用解析后的真实资产 ID，不能将历史 raw 成员别名并入供应。
+不可用成员的遗留安装清理仅使用已记录且属于本次适用 active Set 的来源；Direct、
+其他 Set 与来源未知的安装不得因 raw 别名被撤销。显式 active 普通集及 Default
+重复 Apply 仍进入既有投影流程，业务事实未变时保留 `unchanged`，并返回实际投影警告。
 Apply Direct claim 的正常结果通过既有 mutation details 返回事务内计算的 outcome；
 聚合 writer 使用此确认值，不复制计划 action。仅归并等价 MCP 配置别名可产生
 changed=true、outcome=unchanged；Local 内容上传使用真实 operation 合并 created/updated。

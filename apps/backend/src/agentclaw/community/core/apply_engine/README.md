@@ -72,6 +72,11 @@ An unchanged Direct Skill installation still reaches the claim flow so Device
 delivery can retry runtime projection. The report keeps `unchanged` and exposes
 any pending/degraded projection; Platform delegates retain their no-projection
 behavior, and dry-run performs no writes or projection.
+Explicit active ordinary Sets and applicable Default references also retry the
+existing projection flow on unchanged desired state. Inactive unchanged Set
+declarations remain no-ops. Set replacement tracks resolved prior supply and
+recorded Set-owned installations separately from historical raw membership keys,
+so cleanup cannot retire an unrelated Direct or unknown-source installation.
 
 An MCP entry carries a configuration action separately from its supply:
 Manifest treats an absent `config` and an explicit `{}` as clearing the
