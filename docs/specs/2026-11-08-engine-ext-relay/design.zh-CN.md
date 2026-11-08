@@ -71,10 +71,11 @@ AICoding、Claude Code、Hermes 以及未来的引擎——暴露同一套 HTTP/
    引擎适配器 :20003
    ├── /api/sessions, /api/chat, /api/mcp, ...      ← 通用 API（不变）
    └── /api/ext/{engine}/{path}                     ← 新增：扩展中继
+            │ 0. 校验身份（任何查找之前，失败即 401）
             │ 1. engine == 当前激活引擎？
             │ 2. 是否配置了上游？         （ExtRelayRegistry）
             │ 3. 路由是否在白名单？
-            │ 4. 校验身份，构造出站请求头
+            │ 4. 构造出站请求头
             │ 5. 转发并流式回传          （ExtRelayService）
             ▼
    扩展上游（Owner 运营，可部署在任何可达位置）
@@ -150,7 +151,7 @@ ext_relay:
         - { methods: [GET],        path: "/events", stream: true, read_timeout_s: 600 }
       manifest_path: /.well-known/avernet-ext.json
     hermes:
-      base_url: http://hermes-ext.internal:9000
+      base_url: https://hermes-ext.example.com
       auth: { type: none }
       routes:
         - { methods: [GET, POST], path: "/memory/**" }
@@ -179,7 +180,7 @@ ext_relay:
 | `engine` | 必须等于适配器当前激活引擎。 |
 | `path` | 规范化并通过白名单后拼接到 `base_url`。 |
 | `query` | 原样转发。 |
-| 请求体 | 原样流式转发，受 `max_request_body_mb` 限制。 |
+| 请求体 | 原样流式转发，受 `max_request_body_mb` 限制。例外：`hmac` 上游需缓冲请求体（同一上限）以计算签名（§7.3）。 |
 | 响应 | 上游状态码、响应头（经过滤，§7.4）和响应体原样返回；`text/event-stream` 和 chunked 响应以流式回传。 |
 
 示例：
@@ -245,7 +246,7 @@ GET /api/ext/{engine}/_manifest
 | 连接或读取超时 | 504 | `upstream_timeout` |
 | 上游已应答（任意状态码） | 上游状态码 | —（不带该头） |
 
-不在白名单的路径返回 404（而不是 403），避免暴露存在哪些路由。
+不在白名单的路径返回 404（而不是 403），避免暴露存在哪些路由。各项检查按 §4 的流水线顺序执行：身份校验最先进行，未鉴权的调用方一律得到 401，无法探测激活引擎、上游配置或白名单。
 
 ## 7. 安全
 
@@ -269,7 +270,8 @@ Bot 沙箱网络访问）。由于中继是适配器上第一个把流量*向外
 
 1. **服务凭证**（`auth.type`）：证明调用方是*中继*。`bearer` →
    `Authorization: Bearer <secret>`；`hmac` → 对方法、路径、时间戳和请求体哈希签名；
-   `mtls` → 客户端证书。
+   `mtls` → 客户端证书。由于请求体哈希必须在发送请求头之前算出，`hmac` 上游会缓冲
+   请求体（受 `max_request_body_mb` 限制）而不是流式转发；响应仍然流式回传。
 2. **终端用户身份**（`forward_principal: true`）：中继在 `X-Avernet-Principal`
    中转发一个面向上游受众（`aud = ext:{engine}`）的身份令牌，并附带
    `X-Avernet-Bot-Id` 与 `X-Avernet-Engine`。上游使用平台公开的验签密钥 / JWKS 校验。

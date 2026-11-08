@@ -80,10 +80,11 @@ Frontend / Backend / CLI
    Engine adapter :20003
    ├── /api/sessions, /api/chat, /api/mcp, ...      ← common API (unchanged)
    └── /api/ext/{engine}/{path}                     ← NEW: Extension Relay
+            │ 0. verify principal (401 before any lookup)
             │ 1. engine == active engine?
             │ 2. upstream configured?        (ExtRelayRegistry)
             │ 3. route allow-listed?
-            │ 4. verify principal, build outbound headers
+            │ 4. build outbound headers
             │ 5. forward + stream back       (ExtRelayService)
             ▼
    Extension upstream (owner-operated, anywhere reachable)
@@ -162,7 +163,7 @@ ext_relay:
         - { methods: [GET],        path: "/events", stream: true, read_timeout_s: 600 }
       manifest_path: /.well-known/avernet-ext.json
     hermes:
-      base_url: http://hermes-ext.internal:9000
+      base_url: https://hermes-ext.example.com
       auth: { type: none }
       routes:
         - { methods: [GET, POST], path: "/memory/**" }
@@ -192,7 +193,7 @@ Rules:
 | `engine` | Must equal the adapter's active engine. |
 | `path` | Appended to `base_url` after normalization and allow-list match. |
 | `query` | Forwarded verbatim. |
-| body | Streamed through verbatim, bounded by `max_request_body_mb`. |
+| body | Streamed through verbatim, bounded by `max_request_body_mb`. Exception: `hmac` upstreams buffer the body (same bound) to compute the signature (§7.3). |
 | response | Upstream status, headers (filtered, §7.4) and body returned verbatim; `text/event-stream` and chunked bodies are streamed. |
 
 Example:
@@ -263,7 +264,9 @@ configured, so the frontend can decide whether to call `_manifest` at all.
 | Upstream answered (any status) | upstream's | — (absent) |
 
 Not-allow-listed paths return 404 (not 403) so the relay does not reveal which
-routes exist.
+routes exist. Checks run in the pipeline order of §4: principal verification
+comes first, so an unauthenticated caller always gets 401 and cannot probe
+the active engine, the upstream configuration, or the allow-list.
 
 ## 7. Security
 
@@ -291,7 +294,10 @@ Two independent things are sent upstream:
 
 1. **Service credential** (`auth.type`): proves *the relay* is calling. `bearer`
    → `Authorization: Bearer <secret>`; `hmac` → signature over method, path,
-   timestamp and body hash; `mtls` → client certificate.
+   timestamp and body hash; `mtls` → client certificate. Because the body
+   hash must be known before headers are sent, `hmac` upstreams buffer the
+   request body (bounded by `max_request_body_mb`) instead of streaming it;
+   responses still stream.
 2. **End-user principal** (`forward_principal: true`): the relay forwards a
    principal token scoped to the upstream audience (`aud = ext:{engine}`) in
    `X-Avernet-Principal`, plus `X-Avernet-Bot-Id` and `X-Avernet-Engine`.
