@@ -26,6 +26,8 @@ check.
 - [`rsi/evaluation-data-boundaries.md`](rsi/evaluation-data-boundaries.md): a
   research boundary for training, development evaluation, and independent
   acceptance data.
+- [`benchmark-question-meta.md`](benchmark-question-meta.md): how canonical
+  question metadata is projected separately to the Actor and Judge.
 
 - [`benchmark/environment-reproducibility.md`](benchmark/environment-reproducibility.md):
   reproducible environment boundaries, actor-visible evidence, and future
