@@ -1,5 +1,7 @@
 import { IconButton } from '@/components/ui';
 import { Plus } from 'lucide-react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 interface WorkspaceActionButtonProps {
   /** 发起协作（创建协作群），沿用现有 CreateGroupModal 链路。 */
@@ -17,7 +19,10 @@ export function WorkspaceActionButton({ onCreateGroup, className }: WorkspaceAct
       className={`h-8 w-8 shrink-0 rounded-lg border border-input bg-background text-muted-foreground hover:bg-muted hover:text-foreground ${
         className ?? ''
       }`}
-      onClick={onCreateGroup}
+      onClick={() => {
+        Tracert.click(Points.workspaceCollab.createGroup);
+        onCreateGroup();
+      }}
     />
   );
 }

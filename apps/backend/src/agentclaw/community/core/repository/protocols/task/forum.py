@@ -9,14 +9,19 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
+        ForumTopicConfig,
+        ForumPollProjectionCalculator,
+        ForumPollSelection,
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
         ForumPostPage,
+        ForumPostRecord,
         ForumReplyCreateResult,
         ForumTopicCreateResult,
         ForumTopicPage,
         ForumTopicRecord,
+        ForumTopicViewerRecord,
     )
 
 
@@ -42,7 +47,52 @@ class ForumRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
-        """List replies after confirming the Topic is visible."""
+        """Page first-level replies after confirming the Topic is visible.
+
+        ``offset``/``limit`` and the returned total apply only to direct
+        Topic replies. Descendant replies belonging to visible parents are
+        included on the parent record's read-only ``children`` tuple.
+        """
+
+    @abstractmethod
+    def get_post(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Return one Post under a visible Topic, or ``None``."""
+
+    @abstractmethod
+    def update_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+    ) -> Optional[ForumPostRecord]:
+        """Set or clear the HELP reply marker and return the refreshed Post.
+
+        The write is scoped through the visible Topic's tenant/environment.
+        ``None`` means the Topic or Post no longer exists. Domain eligibility
+        and authorisation are decided by the service layer.
+        """
+
+    @abstractmethod
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Update helpful and append the ACCEPT event in one transaction.
+
+        The method must not emit an ACCEPT when the marker was already true or
+        is being cleared. Infrastructure failure rolls back the marker update.
+        """
 
     @abstractmethod
     def create_topic(
@@ -54,8 +104,16 @@ class ForumRepositoryProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
+        topic_config: ForumTopicConfig | None = None,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
-        """Create a Topic, or replay the first request."""
+        """Create a Topic, or replay the first request.
+
+        ``topic_config`` is the Topic-type-specific structured configuration.
+        POLL uses ``poll``, HELP may use ``help``, and SHARE plus the other
+        Topic types reject structured configuration.
+        """
 
     @abstractmethod
     def create_reply(
@@ -66,12 +124,87 @@ class ForumRepositoryProtocol(Protocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: Optional[str] = None,
+        poll_selection: Optional[ForumPollSelection] = None,
     ) -> ForumReplyCreateResult:
-        """Append a reply to a Topic, or replay the first request."""
+        """Append a reply to a Topic, or replay the first request.
+
+        ``reply_to_post_id`` is optional for DISCUSSION and SHARE Topics.
+        The service rejects it for POLL and HELP Topics: both require a direct
+        Topic reply. POLL Topics also
+        allow at most one reply per author; the write path rejects new votes
+        after the configured deadline while idempotent replays return the
+        original reply. ``poll_selection`` carries structured POLL vote choices;
+        the service validates it against the addressed Topic before persistence.
+        """
 
     @abstractmethod
     def get_topic(self, topic_id: str) -> Optional[ForumTopicRecord]:
-        """Return one Topic in the current tenant/environment, or ``None``."""
+        """Return one Topic with derived Topic tags and POLL aggregate.
+
+        A POLL Topic with no persisted aggregate yields zero-vote option rows.
+        ``analysis.result`` is always populated from the one-column derived
+        projection; missing summary/tag results become ``None`` and ``()``.
+        """
+
+    @abstractmethod
+    def get_topic_viewer_state(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> Optional[ForumTopicViewerRecord]:
+        """Return one viewer's derived state for a visible Topic.
+
+        The result is personalized and read-only; it is not part of the Topic's
+        persisted analysis. ``None`` means the Topic was concurrently removed
+        or is outside the current tenant/environment.
+        """
+
+    @abstractmethod
+    def advance_poll_projection(
+        self,
+        *,
+        topic_id: str,
+        calculator: "ForumPollProjectionCalculator",
+        batch_limit: int,
+    ) -> int:
+        """Advance one POLL Topic's derived aggregate by new Post rows.
+
+        The implementation locks the Topic row, reads Post rows after the
+        persisted poll cursor, invokes the transport-agnostic calculator, and
+        stores the returned analysis projection in one transaction. The return
+        value is the number of Post rows consumed.
+
+        This method is intended for backend tasks. The public reply write path
+        never calls it, and vote counts are never inferred from text.
+        """
+
+
+    @abstractmethod
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> Optional[ForumTopicRecord]:
+        """Update one Topic's title and body atomically.
+
+        Returns the refreshed Topic, or ``None`` when no Topic is visible or
+        its status no longer matches ``expected_status``. The caller maps the
+        latter case back to a domain conflict.
+        """
+
+    @abstractmethod
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete one visible Topic and all of its replies.
+
+        A LOCKED Topic is not deleted and returns ``False``. The caller maps a
+        still-visible LOCKED Topic back to a domain conflict.
+        """
 
     @abstractmethod
     def update_topic_status(

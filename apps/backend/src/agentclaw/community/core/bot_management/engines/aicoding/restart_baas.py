@@ -1,8 +1,8 @@
 """Ordinary coding BaaS restart orchestration; never called by other engines.
 
 Own the backup -> prepare -> submit boundary rather than inserting callbacks
-into BotService or the BaaS client. Published/Caller and direct-provider paths
-continue to use their existing entrypoints. All shared services are reused as
+into BotService or the BaaS client. Published/Caller paths retain their existing
+entrypoints; bound Arca coding tasks use the sibling Arca lifecycle executor. All shared services are reused as
 collaborators, never monkey-patched or reconfigured per request.
 """
 
@@ -164,7 +164,7 @@ class AicodingBaasRestart:
             ctx,
             binding_id=bot["binding_id"],
             device_service_provider=service._device_service_provider,
-            target_runtime_provider=service._baas_service_provider,
+            restart_dependencies=service._restart_backup_dependencies,
             bot_repository=service._repository,
         )
         env, entity_id = get_current_env(), bot["entity_id"]

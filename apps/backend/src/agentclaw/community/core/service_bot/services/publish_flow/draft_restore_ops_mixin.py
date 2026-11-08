@@ -136,7 +136,7 @@ class DraftRestoreOpsMixin:
 
             source_ext = copy.deepcopy(source.ext or {})
             owner_id = self._get_owner_id(draft)
-            bot = self._bot_service.get_bot(
+            bot = self._bot_service.get_bot_by_address(
                 bot_id=draft.source_bot_id,
                 user_id=owner_id,
             )

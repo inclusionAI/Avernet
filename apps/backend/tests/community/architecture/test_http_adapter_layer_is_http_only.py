@@ -68,6 +68,10 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
     "authorization_rules_task.py",
+    # The genome-registry half of that table, split from authorization_rules
+    # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_genome.py",
     "__init__.py",
 })
 
@@ -169,6 +173,10 @@ def _is_endpoint_file(file: pathlib.Path) -> bool:
     stem = file.stem
     for pattern in _NON_ENDPOINT_NAME_PATTERNS:
         if stem == pattern or stem.startswith(pattern + "_"):
+            return False
+        if pattern == "schemas" and stem.endswith("_schemas"):
+            # Covers schema splits named by their topic, such as
+            # interaction_schemas and personal_center_schemas.
             return False
     return True
 

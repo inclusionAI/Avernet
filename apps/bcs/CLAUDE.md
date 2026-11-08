@@ -13,7 +13,7 @@ BCS (Bot Coordination Service) is a Rust service for multi-bot collaboration. It
 ## Design Principles
 
 ### P1: Zero-Friction Startup
-Groups activate immediately after user confirms the proposal. No setup, no configuration required.
+Groups activate immediately upon creation. No setup, no configuration required.
 
 ### P2: WhatsApp/WeChat Mental Model
 - All messages broadcast to all participants (所有人看到所有消息)
@@ -116,11 +116,11 @@ Layer rules:
 Application/core/port rules:
 
 - Application layer traits use `*Service` or entry-oriented names, for example
-  `GroupMessageService`, `BotDiscoveryService`, `FriendService`, `FusionService`, and
-  `GroupProposalService`.
+  `GroupMessageService`, `BotDiscoveryService`, `FriendService`, `FusionService`,
+  and `GroupManagementService`.
 - Core layer traits use `*CoreService`, for example
-  `MessageFlowCoreService`, `FusionCoreService`, `ProposalCoreService`,
-  `GroupCoreService`, `BotRegistryCoreService`, and `RoutingCoreService`.
+  `MessageFlowCoreService`, `FusionCoreService`, `GroupCoreService`,
+  `BotRegistryCoreService`, and `RoutingCoreService`.
 - `application::*Service` is route-facing use-case orchestration. It may call
   `core::*CoreService` and non-repo `port::*Port`.
 - `core::*CoreService` is core business capability. It must not call business
@@ -180,7 +180,7 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 
 ### Protected Endpoints (write operations)
 - `DELETE /bots/{id}`, `POST /bots/status`, `POST /bots/{id}/chat-async`
-- `POST /groups/request`, `POST /groups`, `POST /groups/{id}/members`, `PATCH /groups/{id}`
+- `POST /groups`, `POST /groups/{id}/members`, `PATCH /groups/{id}`
 - `DELETE /groups/{id}`, `POST /groups/{id}/chat`
 - `POST /sessions/{id}/state-machine-runs` requires an authenticated Bot and
   delegates current-session authorization to the collaboration runtime
@@ -286,7 +286,6 @@ crates/
 mix/
 ├── bcs-fuse-client/            - (sunset 2026-09-01, Demo Worker)
 ├── bcs-fusion/                 - (sunset 2026-09-01, Demo Worker)
-├── bcs-proposal/               - (sunset 2026-09-01, Demo Worker)
 └── README.md
 
 submodules/
@@ -298,10 +297,9 @@ submodules/
 ## Core Components
 
 - **BotRegistry**: Token→bot_id mapping, capabilities, WS connections, heartbeat (5 min TTL)
-- **SessionStore**: In-memory group sessions with transcript and workspace
+- **SessionStore**: In-memory group sessions with transcript
 - **MessageRouter**: Broadcast + @mention routing
 - **FusionEngine**: Merges bot contexts (IDENTITY, SOUL, RULES, MEMORY)
-- **ProposalStore**: Temporary proposals with token-based confirmation URLs (10 min expiry)
 
 ## Service Trait Architecture
 
@@ -316,7 +314,7 @@ submodules/
 Existing and upcoming service traits should be classified by that split. For
 example, HTTP routes should call application use cases such as
 `GroupManagementService`; those use cases may call core contracts for bot,
-group, routing, fusion, and proposal behavior, plus outbound ports for bot
+group, routing, and fusion behavior, plus outbound ports for bot
 delivery or run-channel integration.
 
 Repo/store placement:
@@ -356,7 +354,7 @@ Repo/store placement:
 
 Bots integrate with BCS via the `bcs-coordination` skill located at `crates/tools/bcs-cli/bcs-coordination/SKILL.md`:
 - `bcs-cli onboard` - Register bot capabilities
-- `bcs-cli request-group-help --topic "协作主题"` - Request group collaboration
+- `bcs-cli discover --collaborate-bot "<bot_uuid>"` - Find eligible collaborators
 - `bcs-cli fuse` - Fuse contexts from participants
 
 **Note**: `BOT_DATA_DIR` is not yet automatically set by BCN plugin. For standalone testing, set it manually:
@@ -394,8 +392,6 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/friends/requests` | GET | Query friend request list |
 | `/friends/requests/{id}/accept` | POST | Accept friend request |
 | `/friends/requests/{id}/reject` | POST | Reject friend request |
-| `/groups/request` | POST | Request group proposal |
-| `/groups/{token}/confirm` | POST | Confirm proposal and create group |
 | `/groups` | POST | Create group directly |
 | `/collaboration/definitions/validate` | POST | Validate custom collaboration YAML |
 | `/sessions/{id}/state-machine-permission` | GET | Query whether the authenticated Bot may run a one-shot state machine in the current session |
@@ -409,7 +405,6 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/{id}/chat` | POST | Send group chat message |
 | `/groups/{id}/messages` | POST | Send a persistent group message |
 | `/groups/{id}/fuse` | POST | Fuse participant contexts |
-| `/groups/{id}/workspace` | GET/PUT | Get/update workspace |
 
 ## Port Assignments
 
@@ -519,12 +514,6 @@ bcs-cli accept-friend <request_id>               # Accept friend request
 bcs-cli reject-friend <request_id>               # Reject friend request
 bcs-cli friends <bot_uuid>                       # View friend list
 bcs-cli visibility <bot_uuid>                    # View/set visibility
-
-# Request group help
-bcs-cli request-group-help --gap-type skill --description "需要数据库死锁排查专家"
-
-# Confirm a proposal
-bcs-cli confirm-group-help --url http://localhost:21000/groups/<token>/confirm
 
 # Create a group directly
 bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"

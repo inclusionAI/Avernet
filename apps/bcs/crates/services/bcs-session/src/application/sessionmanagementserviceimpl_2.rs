@@ -4,6 +4,10 @@ use super::*;
 
 #[async_trait]
 impl SessionManagementService for SessionManagementServiceImpl {
+    async fn authorize_collaboration(&self, session_id: &str, actor_id: &str) -> Result<(), SessionUseCaseError> {
+        let session = self.repo.try_get(session_id).await?.ok_or_else(|| SessionUseCaseError::NotFound(session_id.into()))?;
+        self.check_provider_scope(&session.group_id, &[actor_id.into()], &session.participants).await
+    }
     async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> {
         self.repo.validate_session_registry().await.map_err(SessionUseCaseError::from)
     }
@@ -19,6 +23,13 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         cmd: CreateOrReactivateCommand,
     ) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> {
+        let callers = cmd.params.caller_id.iter().cloned().collect::<Vec<_>>();
+        let existing = match cmd.session_id.as_deref() { Some(id) => self.repo.try_get(id).await?, None => None };
+        if existing.as_ref().is_some_and(|session| session.group_id != cmd.group_id) {
+            return Err(SessionUseCaseError::InvalidParams("session does not belong to the supplied group".into()));
+        }
+        let members = existing.as_ref().map(|s| s.participants.as_slice()).unwrap_or(&cmd.params.participants);
+        self.check_provider_scope(&cmd.group_id, &callers, members).await?;
         if let Some(sid) = cmd.session_id.as_deref() {
             // Pre-check the existing session status so the HTTP layer can
             // return 409 (legacy `session_is_running_cannot_invoke`,
@@ -162,95 +173,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .await?)
     }
 
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(self.repo.count_running_service(group_id).await)
-    }
-
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self.repo.list_running_service(offset, limit).await)
-    }
-
     async fn list_running_service_after(
         &self, cursor: Option<&str>, limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         Ok(self.repo.list_running_service_after(cursor, limit).await?)
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self
-            .repo
-            .list_recoverable_callbacks(now_ms, after_session_id, limit)
-            .await?)
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(self.repo.update_callback_status(session_id, status).await?)
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        if command.expected_activation_count < 1
-            || command.lease_owner.is_empty()
-            || command.lease_until_ms <= command.now_ms
-        {
-            return Err(SessionUseCaseError::InvalidParams(
-                "callback claim requires a positive activation, non-empty owner, and future lease"
-                    .to_string(),
-            ));
-        }
-        Ok(self
-            .repo
-            .claim_callback(ClaimSessionCallback {
-                session_id: command.session_id,
-                expected_activation_count: command.expected_activation_count,
-                lease_owner: command.lease_owner,
-                now_ms: command.now_ms,
-                lease_until_ms: command.lease_until_ms,
-            })
-            .await?
-            .map(|claim| ClaimSessionCallbackOutcome {
-                lease_token: claim.lease_token,
-            }))
-    }
-
-    async fn complete_callback(
-        &self,
-        command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        if !matches!(
-            command.terminal_status.as_str(),
-            "succeeded" | "partial_failed" | "failed" | "not_applicable"
-        ) {
-            return Err(SessionUseCaseError::InvalidParams(format!(
-                "invalid terminal callback status: {}",
-                command.terminal_status
-            )));
-        }
-        Ok(self
-            .repo
-            .complete_callback(CompleteSessionCallback {
-                session_id: command.session_id,
-                expected_activation_count: command.expected_activation_count,
-                lease_owner: command.lease_owner,
-                lease_token: command.lease_token,
-                terminal_status: command.terminal_status,
-            })
-            .await?)
     }
 
     async fn complete_if_running(
@@ -300,6 +226,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
             std::slice::from_ref(&participant),
         )
         .await?;
+        self.check_provider_scope(&session.group_id, &[participant.bot_uuid.clone()], &session.participants).await?;
         if session
             .participants
             .iter()
@@ -554,6 +481,14 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .repo
             .try_list_group_ids_by_session_participant(bot_uuid)
             .await?)
+    }
+
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> Result<bool, SessionUseCaseError> {
+        Ok(self.repo.has_group_session_participant(group_id, actor_ids).await?)
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {

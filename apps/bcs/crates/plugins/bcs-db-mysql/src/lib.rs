@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
-    DbTransactionStepResult, DbValue,
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
+    DbTransactionOptions, DbTransactionStep, DbTransactionStepResult, DbValue,
 };
 use mysql_async::{consts::ColumnFlags, Column as MysqlColumn, Row as MysqlRow, Value as MysqlValue};
 
@@ -74,7 +74,22 @@ impl DbPlugin for MysqlDbPlugin {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.transaction_with_options(steps, DbTransactionOptions::unbounded())
+            .await
+    }
+
+    async fn transaction_with_options(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
         steps.iter().try_for_each(DbTransactionStep::validate)?;
+        // Between-step deadline (Task-0 方案 A). Execution is
+        // CI-verified (`conformance_db_plugin` runs this contract
+        // under BCS_TEST_MYSQL_URL); a single statement that is
+        // still running is not interruptible by the deadline.
+        let deadline = options.deadline();
+        let started = std::time::Instant::now();
         let steps = steps
             .into_iter()
             .map(PreparedTransactionStep::from)
@@ -110,6 +125,11 @@ impl DbPlugin for MysqlDbPlugin {
                                     last_insert_id: result.last_insert_id,
                                 }));
                                 if stop {
+                                    // Early success skips the
+                                    // REMAINING steps only; the
+                                    // pre-commit deadline check
+                                    // below still gates this commit
+                                    // path like any other.
                                     break;
                                 }
                             }
@@ -124,6 +144,21 @@ impl DbPlugin for MysqlDbPlugin {
                                     last_insert_id: result.last_insert_id,
                                 }));
                             }
+                        }
+                        if let Some(deadline) = deadline {
+                            if started.elapsed() > deadline {
+                                return Err(DbError::Timeout);
+                            }
+                        }
+                    }
+                    // Pre-commit deadline check (plugin contract:
+                    // "between two steps and before commit"):
+                    // every success path — including a
+                    // stop-on-no-rows early exit — commits only
+                    // inside the deadline.
+                    if let Some(deadline) = deadline {
+                        if started.elapsed() > deadline {
+                            return Err(DbError::Timeout);
                         }
                     }
                     Ok(results)

@@ -50,10 +50,6 @@ pub enum BcsError {
     #[error("Invalid session configuration: {0}")]
     InvalidConfig(String),
 
-    /// Proposal not found or expired.
-    #[error("Proposal not found or expired: {0}")]
-    ProposalNotFound(String),
-
     /// Bot not registered.
     #[error("Bot '{0}' is not registered or has expired")]
     BotNotRegistered(String),
@@ -177,7 +173,6 @@ impl BcsError {
             Self::RoutingFailed { .. } => "RoutingFailed",
             Self::RouterError(_) => "RouterError",
             Self::InvalidConfig(_) => "InvalidConfig",
-            Self::ProposalNotFound(_) => "ProposalNotFound",
             Self::BotNotRegistered(_) => "BotNotRegistered",
             Self::BotAlreadyConnected(_) => "BotAlreadyConnected",
             Self::InvalidSessionToken => "InvalidSessionToken",
@@ -232,12 +227,6 @@ mod tests {
     fn test_bot_not_registered_display() {
         let err = BcsError::BotNotRegistered("unregistered-bot".to_string());
         assert_eq!(err.to_string(), "Bot 'unregistered-bot' is not registered or has expired");
-    }
-
-    #[test]
-    fn test_proposal_not_found_display() {
-        let err = BcsError::ProposalNotFound("token-abc".to_string());
-        assert_eq!(err.to_string(), "Proposal not found or expired: token-abc");
     }
 
     #[test]

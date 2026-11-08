@@ -28,6 +28,10 @@ class TestConfigKeyConstants:
             (ConfigKey.BOT_SERVICE_CONNECT_TIMEOUT, "bot_service.connect_timeout"),
             (ConfigKey.BOT_SERVICE_REQUEST_TIMEOUT, "bot_service.request_timeout"),
             (
+                ConfigKey.BOT_SERVICE_CALLER_TOKEN_DOMAINS,
+                "bot_service.caller_token_domains",
+            ),
+            (
                 ConfigKey.HEALTH_CHECK_TIMEOUT,
                 "bot_health_checker.health_check.timeout_seconds",
             ),
@@ -131,6 +135,7 @@ class TestBotServiceConfigDataclass:
         assert cfg.connect_timeout == 10.0
         assert cfg.request_timeout == 30.0
         assert cfg.ws_path == "/ws"
+        assert cfg.caller_token_domains == []
 
     def test_partial_override(self):
         cfg = BotServiceConfig(proxy_base_url="http://proxy:9090", adapter_port=20003)
@@ -146,10 +151,12 @@ class TestBotServiceConfigDataclass:
             connect_timeout=5.0,
             request_timeout=15.0,
             ws_path="/custom/ws",
+            caller_token_domains=["caller.example.test"],
         )
         assert cfg.adapter_port == 20003
         assert cfg.connect_timeout == 5.0
         assert cfg.ws_path == "/custom/ws"
+        assert cfg.caller_token_domains == ["caller.example.test"]
 
 
 class TestBotHealthCheckerConfigDataclass:

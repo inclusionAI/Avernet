@@ -48,6 +48,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_context import task_graph_support
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import capture_write_point, discard_published, drain_published
 
 _LOG = logging.getLogger(__name__)
 
@@ -205,12 +206,15 @@ class TaskGraphService:
                 self._task_info_repo.update_status(
                     graph.task_id, graph.effective_status
                 )
+            discard_published(graph)  # 缺席态不发布:暂存随闭包丢弃(§5.2/取舍 #10)
             return
         expected = self._graph_versions.get(graph.task_id, 0)
         # 乙' c+R2:图级有效态只读派生根态(与既有 root 派生等价,单源化)。
         runtime_status = graph.effective_status
         # Attach the inbound callback audit to this mutation's transaction (spec §12).
         callback_audit = _pending_callback_audit(graph.task_id)
+        # 产物行同事务消费(§5.3 查重吸收重放;§5.2 不吞失败)。
+        published = drain_published()
         try:
             version = self._graph_repo.save_graph(
                 graph,
@@ -218,6 +222,7 @@ class TaskGraphService:
                 runtime_status=runtime_status,
                 action_events=events,
                 callback_audit=callback_audit,
+                published_artifacts=published or None,
             )
         except Exception:
             # Never leave a dirty cache after a failed shared-store write. Keep
@@ -743,6 +748,7 @@ class TaskGraphService:
                 node.run_info.end_time = None
             if new_status is not None:
                 node.status = new_status
+            capture_write_point(graph, node, patch=patch, now_ms=int(time.time() * 1000))  # 产物发布点(§5.1)
             return (
                 NodeOpResult(
                     task_id=patch.task_id,

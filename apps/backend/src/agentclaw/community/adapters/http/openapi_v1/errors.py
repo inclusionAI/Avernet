@@ -7,6 +7,8 @@ error → HTTP/envelope mapping lives in ``responses.py``.
 
 from __future__ import annotations
 
+from agentclaw.community.plugin_api.staff_dept import DeptLookupError as DeptLookupError
+
 
 class ClusterMismatchError(Exception):
     """Raised when a request's ``engine`` and ``cluster_name`` violate the rule.
@@ -145,19 +147,6 @@ class StartupScriptUnsupportedError(Exception):
     design exists to prevent, and the caller would reasonably read a 200 as
     "my provisioning is in place". The *reason* is served by GET rather than in
     this refusal, because the surface's messages are fixed by contract.
-    """
-
-
-class DeptLookupError(Exception):
-    """The staff directory could not answer a department lookup (→ 502).
-
-    Distinct from "no dept" (a 200 with null ``dept_*``): this is infrastructure
-    failure — the backing master-data service was unreachable, errored, or a
-    needed secret could not be resolved. ``StaffDeptPlugin.get_dept_by_work_no``
-    raises it on those, and the ``org/user`` whoami surfaces it as a 5xx so an
-    operator can tell "directory down" from "person has no dept" from "not
-    authenticated" (401). Fixed message: the specific cause is logged, never
-    returned, mirroring how ``MissingPrincipalError`` keeps its reason off the wire.
     """
 
 

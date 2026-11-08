@@ -3,6 +3,7 @@
  * 任务副屏前端视图模型 —— 由 taskPanelMapper 从 TaskDashboardResponse 映射而来。
  * 字段命名对齐 TeamClaw-v3 PRD demo 的渲染模型，便于 UI 一致。
  */
+import type { ExecDagEdge, ExecDagStep, PresentEdgeSemantics, PresentNodeStatus } from './statusDerivation';
 
 export type TaskStatus = 'DRAFTING' | 'DEFINED' | 'EXECUTING' | 'REVIEWING' | 'DONE' | 'FAILED' | 'CANCELLED';
 
@@ -13,9 +14,34 @@ export interface TaskArtifactView {
   id: string;
   name: string;
   type: 'document' | 'report' | 'link' | 'file' | 'other';
+  /** V2 产物形态(Descriptor 口径);legacy 产物为 null */
+  kind?: 'text' | 'file' | 'url_link' | 'code' | null;
   url?: string | null;
   summary?: string | null;
+  /** url_link 形态的完整业务信息；url 继续保留给既有外链入口。 */
+  linkRef?: {
+    url: string | null;
+    type: string | null;
+  } | null;
+  /** code 形态的完整代码库 / PR 信息；url、summary 继续兼容既有消费方。 */
+  codeRef?: {
+    codeBaseName: string | null;
+    codeBaseAddress: string | null;
+    pullRequestUrl: string | null;
+    description: string | null;
+  } | null;
+  /** 归属节点(产物区按 node 过滤用);legacy 回落入参 nodeId */
+  nodeId?: string | null;
+  /** 产出者(Descriptor.creator);legacy 为 null */
+  owner?: string | null;
   updatedAt: string; // ISO 或格式化后的展示串
+  /** file 形态的存储寻址(使用既有资源/会话文件服务读取,后端不给现成 URL) */
+  fileRef?: {
+    storageType: 'bot_workspace' | 'session_file' | 'object_file';
+    storageId: string;
+    fileId?: string | null;
+    fileType?: string | null;
+  } | null;
 }
 
 export interface StepTraceView {
@@ -33,6 +59,19 @@ export interface TaskNodeView {
   name: string;
   sequence: number;
   status: NodeStatus;
+  /** V2 PRD 展示态派生(rework/merged 等,spec §3.3);老渲染层继续用 status */
+  present?: PresentNodeStatus;
+  /** 返工次数(action_log[].attempt 聚合) */
+  attemptCount?: number;
+  /** 节点级 HITL 徽章 */
+  needsHitl?: boolean;
+  /** 可下钻(协作群/bbs 节点) */
+  drillable?: boolean;
+  /** 节点内部执行流程(action_log 派生) */
+  execDag?: { nodes: ExecDagStep[]; edges: ExecDagEdge[] };
+  /** 原始毫秒时间戳(P4 时间窗定位用;startedAt/endAt 为展示串) */
+  startedAtMs?: number | null;
+  endAtMs?: number | null;
   executor?: string | null;
   executorColor?: string | null;
   runMode?: string | null;
@@ -77,11 +116,20 @@ export interface DagNodeView {
   x: number;
   y: number;
   isCurrent: boolean;
+  /** V2 派生展示态/下钻热区/短标题(面包屑与 DAG 用) */
+  present?: PresentNodeStatus;
+  drillable?: boolean;
+  needsHitl?: boolean;
+  short?: string;
 }
 export interface DagEdgeView {
   from: string;
   to: string;
   label?: string;
+  /** V2 边语义派生(spec §3.3):rework/split_work/none… */
+  semantics?: PresentEdgeSemantics;
+  /** rework 边的返工原因(来自 action_log 事件描述) */
+  reason?: string;
 }
 
 export interface TaskOutputDimension {
@@ -102,6 +150,8 @@ export interface TaskView {
   sourceLabel: string;
   ownerBotName: string;
   ownerBotId: string;
+  /** 资源归属用户；读取 bot_workspace 产物时作为 owner_id 传给既有资源接口。 */
+  ownerUserId: string;
   createdAt: string;
   finishedAt: string | null;
   loopRound: number;
@@ -110,6 +160,12 @@ export interface TaskView {
   template?: string | null;
   parentTaskId?: string | null;
   mainSessionName?: string | null;
+  /** 主会话 id(P4 节点→会话跳转的最重要兜底) */
+  mainSessionId?: string | null;
+  /** 任务来源群 id */
+  sourceGroupId?: string | null;
+  /** 派生会话 id 列表(coop_group/bbs 节点定位候选) */
+  derivedSessionIds?: string[];
   /** 任务根节点(data.tasks[0].run_info)产物的渲染源：剥 HTTP 信封后按 markdown 渲染，用于「产物」Tab。 */
   rootOutputRender?: string | null;
   /** 根节点 output 按顶层维度拆分的可读内容(结构化产物展示为多张维度卡片)。 */

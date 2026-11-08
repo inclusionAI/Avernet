@@ -9,20 +9,9 @@ from __future__ import annotations
 from agentclaw.community.core.errors import (
     Conflict,
     DomainError,
-    InternalError,
     NotFound,
     ValidationError,
 )
-
-
-class AcliCliAlreadyGrantedError(Conflict):
-    def __init__(self, cli_code: str) -> None:
-        super().__init__(f"CLI {cli_code!r} is already granted to this bot")
-
-
-class AcliCliNotGrantedError(NotFound):
-    def __init__(self, cli_code: str) -> None:
-        super().__init__(f"CLI {cli_code!r} is not granted to this bot")
 
 
 class AcliDefaultCliError(Conflict):
@@ -67,6 +56,17 @@ class AcliBotNotRunningError(AcliContainerError):
     """The bot has no running container to run acli in."""
 
 
+class AcliEngineOutdatedError(AcliContainerError):
+    """The bot's engine type supports acli, but its engine lacks the endpoints.
+
+    An install, uninstall, cancel or listing got a 404: a build that predates
+    the endpoints, or an engine serving its own API that does not implement
+    them. Nothing ran in the container, and a retry gets the same answer.
+    Updating the engine fixes it, so this is a state of the bot's engine, not
+    ``AcliEngineUnsupportedError`` (an engine type with no acli at all).
+    """
+
+
 class AcliRequestRejectedError(AcliContainerError):
     """acli rejected the request itself — most often a name the market lacks."""
 
@@ -75,32 +75,42 @@ class AcliOperationFailedError(AcliContainerError):
     """acli or the hop to the container failed for a reason outside the request."""
 
 
-class AcliGrantSyncError(DomainError):
-    """The Passport grant could not be written; nothing was left changed."""
+class AcliGrantSyncError(AcliContainerError):
+    """The Passport grant could not be written before the install; nothing was installed."""
+
+
+class AcliOperationCancelledError(AcliContainerError):
+    """The add or remove was cancelled, and the runtime is as it was before it."""
+
+
+class AcliStageNotAllowedError(ValidationError):
+    """A ``stage`` was named for a bot that has only one runtime."""
 
     def __init__(self) -> None:
-        super().__init__("the CLI grant could not be synchronized")
+        super().__init__("only service bots take a stage; omit it for this bot")
 
 
-class AcliRollbackFailedError(InternalError):
-    """Undoing the first step of an add or remove failed too.
+class AcliOperationInProgressError(Conflict):
+    """Another add or remove is running in this runtime; try again once it ends.
 
-    ``state`` names where the bot was left: ``installed_not_granted``,
-    ``revoked_still_installed``, ``revoked_install_unknown`` (revoked, and
-    the container's answer to the uninstall never arrived), or
-    ``install_unknown_not_granted`` (never granted; the install's answer never
-    arrived and the cleanup uninstall failed too), ``grant_unknown_installed``
-    or ``revoke_unknown_installed`` (the Passport write failed and Passport
-    could not be re-read, so the grant's state is unknown and the program was
-    left in place).
+    ``operation`` is the one in progress (an ``AcliOperation``).
     """
 
-    def __init__(self, cli_code: str, state: str) -> None:
-        super().__init__(
-            f"CLI {cli_code!r} was left {state.replace('_', ' ')}; "
-            "the change could not be rolled back"
-        )
-        self.state = state
+    def __init__(self, operation: object) -> None:
+        super().__init__("another CLI operation is in progress for this bot runtime")
+        self.operation = operation
+
+
+class AcliOperationNotActiveError(Conflict):
+    """A cancel found no add or remove of that CLI running to cancel."""
+
+    def __init__(self, message: str = "no such CLI operation is running") -> None:
+        super().__init__(message)
+
+
+class AcliOperationNotFoundError(NotFound):
+    def __init__(self, operation_id: str) -> None:
+        super().__init__(f"CLI operation {operation_id!r} not found")
 
 
 class AcliMarketNotConfiguredError(DomainError):
@@ -119,16 +129,19 @@ class AcliMarketUnavailableError(DomainError):
 
 __all__ = [
     "AcliBotNotRunningError",
-    "AcliCliAlreadyGrantedError",
     "AcliCliNameMismatchError",
-    "AcliCliNotGrantedError",
     "AcliContainerError",
     "AcliDefaultCliError",
+    "AcliEngineOutdatedError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
     "AcliMarketNotConfiguredError",
     "AcliMarketUnavailableError",
+    "AcliOperationCancelledError",
     "AcliOperationFailedError",
+    "AcliOperationInProgressError",
+    "AcliOperationNotActiveError",
+    "AcliOperationNotFoundError",
     "AcliRequestRejectedError",
-    "AcliRollbackFailedError",
+    "AcliStageNotAllowedError",
 ]

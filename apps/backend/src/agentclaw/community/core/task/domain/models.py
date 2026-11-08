@@ -268,6 +268,9 @@ class TaskContext:
     gaps: list[str]
     task_id: str | None = None
     node_id: str | None = None
+    # Current node execution attempt. S1 projects this value from the authoritative
+    # ``harness_retries`` snapshot so artifact reports can align with the server.
+    attempt: int = 0
     root_task_spec: TaskSpec | None = None
     current_task_spec: TaskSpec | None = None
     # Runtime-only S3 outputs. S1 projects them as empty on a fresh attempt
@@ -494,6 +497,10 @@ class TaskNodePatch:
         None  # Relay 节点局部验收事实，不直接驱动终态
     )
     execution_decision: str | None = None  # ACCEPTED | DECLINED
+    # 上报产物列表:元素类型为 task_context/task_artifact/report_item.ArtifactReportItem。
+    # domain 包不 import task_context(层向纪律),类型注解按裸 list;
+    # None=未上报(relay 以外通道恒 None),[]=明确空(spec 2026-10-20-task-artifact-domain §4)。
+    artifact_patch: list | None = None
 
 
 @dataclass(frozen=True)

@@ -44,6 +44,8 @@ its Protocol is given real signatures.
 from __future__ import annotations
 
 import inspect
+from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.core.bot_knowledge.service import BotKnowledgeService
 
 from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
 from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
@@ -81,17 +83,23 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.api.bot_cli_tool_service import (
     BotCliToolServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+from agentclaw.community.core.apply_engine.cli_tools.bot_service import (
     BotCliToolService,
 )
 from agentclaw.community.core.common_config.bot_config_service import (
     BotCommonConfigService,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.api.bot_genome_promotion_service import (
+    GenomePromotionServiceProtocol,
+)
+from agentclaw.community.api.bot_genome_registry_service import (
+    GenomeRegistryProtocol,
 )
 from agentclaw.community.api.source_credential_service import (
     SourceCredentialServiceProtocol,
@@ -201,6 +209,22 @@ from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumAuthorStatsServiceProtocol,
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
+    ForumAuthorStatsService,
+)
+from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
+    ForumInteractionService,
+)
+from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
+    ForumPersonalCenterActivityService,
+)
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
@@ -223,12 +247,14 @@ from agentclaw.community.core.bot_management.services.bot_space_service import (
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
 )
+from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
+from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_config_manifest.credentials.service import (
     SourceCredentialService,
 )
@@ -256,6 +282,10 @@ from agentclaw.community.core.skill_center.services.installation_backfill_servic
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_file_service import (
+    TaskArtifactObjectFileService,
+    TaskArtifactObjectFileServiceProtocol,
 )
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
@@ -306,6 +336,10 @@ from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.api.agentswarm_service import (
+    AgentSwarmServiceProtocol,
+)
+from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -326,9 +360,19 @@ from agentclaw.community.core.acli_clis.service import AcliCliService
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
+from agentclaw.community.api.user_list_service import UserListServiceProtocol
+from agentclaw.community.core.user_list.service import UserListService
+
+
+from agentclaw.community.api.expert_catalog_service import ExpertCatalogServiceProtocol
+from agentclaw.community.core.expert_market.service import ExpertCatalogService
+
 _PAIRS = [
+    (BotKnowledgeServiceProtocol, BotKnowledgeService),
+    (UserListServiceProtocol, UserListService),
     (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),
+    (AgentSwarmServiceProtocol, AgentSwarmService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
@@ -341,7 +385,9 @@ _PAIRS = [
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
     (SourceCredentialServiceProtocol, SourceCredentialService),
-    (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
+    (ApplyRunServiceProtocol, ApplyRunService),
+    (GenomeRegistryProtocol, GenomeRegistryService),
+    (GenomePromotionServiceProtocol, GenomePromotionService),
     (BotCliToolServiceProtocol, BotCliToolService),
     (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
@@ -380,11 +426,19 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (BotMessageFeedbackServiceProtocol, BotMessageFeedbackService),
+    (ForumInteractionServiceProtocol, ForumInteractionService),
+    (ForumAuthorStatsServiceProtocol, ForumAuthorStatsService),
+    (
+        ForumPersonalCenterActivityServiceProtocol,
+        ForumPersonalCenterActivityService,
+    ),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
     (AcliCliServiceProtocol, AcliCliService),
+    (TaskArtifactObjectFileServiceProtocol, TaskArtifactObjectFileService),
+    (ExpertCatalogServiceProtocol, ExpertCatalogService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

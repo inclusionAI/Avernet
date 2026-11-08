@@ -135,6 +135,8 @@ describe("AutoHealSaveService", () => {
     vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
     vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
     vi.spyOn(gitClient, "commitAndPushSaved").mockResolvedValue({ branch: "saved/wf-test", commit: "abc123" });
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
   });
 
   it("denies save when the actor lacks edit permission", async () => {
@@ -184,6 +186,10 @@ describe("AutoHealSaveService", () => {
     expect(result.packId).toBe("pack-1");
     expect(result.branch).toBe("saved/wf-test");
     expect(result.commit).toBe("abc123");
+    // The snapshot must be based on the previous save/deploy content (scripts
+    // inheritance) — never on a fresh default-branch base.
+    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "saved/wf-test", "wf/wf-test");
+    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
 
     const row = await specRepo.findByWorkflowId("wf-test");
     expect(row).not.toBeNull();
@@ -204,20 +210,22 @@ describe("AutoHealDeployService", () => {
     deployHistoryRepo = new WorkflowDeployHistoryRepository(ctx.db as never);
     specRepo = new WorkflowSpecRepository(ctx.db as never, deployHistoryRepo);
     botPermRepo = new BotWorkflowPermissionRepository(ctx.db as never);
-    triggerRun = vi.fn().mockResolvedValue("flow-123");
+    triggerRun = vi.fn().mockResolvedValue("message-123");
 
     vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
     vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
     vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
     vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
     vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValue(0);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
     vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValue({
       branch: "wf/wf-test",
       tagName: "deploy/wf-test/#1",
       commit: "def456",
       deployNumber: 1,
     });
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
 
     await botPermRepo.upsert({
       bot_id: null,
@@ -255,7 +263,7 @@ describe("AutoHealDeployService", () => {
     expect(result.deployNumber).toBe(1);
     expect(result.version).toBe(1);
     expect(result.tagName).toBe("deploy/wf-test/#1");
-    expect(result.runId).toBe("flow-123");
+    expect(result.messageId).toBe("message-123");
 
     const history = await deployHistoryRepo.listHistory("wf-test", 10);
     expect(history.length).toBe(1);
@@ -263,10 +271,41 @@ describe("AutoHealDeployService", () => {
     expect(history[0].deploy_number).toBe(1);
     expect(history[0].is_active).toBe(1);
     expect(history[0].tag_name).toBe("deploy/wf-test/#1");
+    // The deploy must be based on the previous deploy content (scripts
+    // inheritance) — never on a fresh default-branch base.
+    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "wf/wf-test");
+    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
 
     const row = await specRepo.findByWorkflowId("wf-test");
     expect(row?.version).toBe(1);
-    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1");
+    // No source run supplied, so the re-run cannot resolve a target Bot.
+    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1", null);
+  });
+
+  it("forwards the source run so the re-run targets its own Bot", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    await service.deploy({
+      workflowId: "wf-test",
+      packId: "pack-1",
+      sourceFlowId: "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
+      actorId: "user-1",
+    });
+
+    // The re-run must reach the Bot that ran the source, never the diagnosis Bot.
+    expect(triggerRun).toHaveBeenCalledWith(
+      "wf-test",
+      "user-1",
+      "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
+    );
   });
 
   it("allows deploy with execute permission (no edit)", async () => {
@@ -380,7 +419,7 @@ describe("AutoHealDeployService", () => {
       triggerRun,
     );
 
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValueOnce(5);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
     vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValueOnce({
       branch: "wf/wf-test",
       tagName: "deploy/wf-test/#6",
@@ -395,7 +434,117 @@ describe("AutoHealDeployService", () => {
     const placeholder = history.find((h) => h.deploy_number === 1);
     const real = history.find((h) => h.deploy_number === 6);
     expect(placeholder?.is_active).toBe(0);
-    expect(placeholder?.tag_name).toBeNull();
+    // The reserve step must never write a null tag_name: managed MySQL declares
+    // the column NOT NULL and the v65 relaxation never ran there, so a null
+    // would abort the deploy with "Column 'tag_name' cannot be null".
+    expect(placeholder?.tag_name).toBe("deploy/wf-test/#1");
+    expect(real?.is_active).toBe(1);
+    expect(real?.tag_name).toBe("deploy/wf-test/#6");
+  });
+
+  it("reserves a non-null tag name before the git push reveals the real tag", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    // Capture the row as it exists between reserve and activation.
+    let reservedTagName: string | null | undefined;
+    let reservedIsActive: number | undefined;
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(async () => {
+      const rows = await ctx.db.query<{ tag_name: string; is_active: number }>(
+        "SELECT tag_name, is_active FROM workflow_deploy_history WHERE workflow_id = ? AND deploy_number = ?",
+        ["wf-test", 1],
+      );
+      reservedTagName = rows[0]?.tag_name;
+      reservedIsActive = rows[0]?.is_active;
+      return { branch: "wf/wf-test", tagName: "deploy/wf-test/#1", commit: "abc123", deployNumber: 1 };
+    });
+
+    await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+
+    expect(reservedTagName).toBe("deploy/wf-test/#1");
+    expect(reservedIsActive).toBe(0);
+  });
+
+  it("reuses the reserved deploy number per deploy instead of skipping ahead", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    // Echo the number the service computed, as the real commitAndPushDeploy does
+    // (it tags with the passed number and returns it). The old fixed-return mocks
+    // never saw the computed value, which is how the double increment slipped by.
+    const echoPush = vi.fn(async (_repoDir: string, _workflowId: string, deployNumber: number) => ({
+      branch: "wf/wf-test",
+      tagName: `deploy/wf-test/#${deployNumber}`,
+      commit: "def456",
+      deployNumber,
+    }));
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(echoPush);
+
+    const first = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+    expect(first.deployNumber).toBe(1);
+    const second = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+    expect(second.deployNumber).toBe(2);
+    expect(second.tagName).toBe("deploy/wf-test/#2");
+
+    // Reserved number = dbMax + 1; a git max that is not ahead must NOT bump the
+    // tag past it: one history row per deploy, no inactive placeholders, no gaps.
+    expect(echoPush.mock.calls.map((call) => call[2])).toEqual([1, 2]);
+    const history = await deployHistoryRepo.listHistory("wf-test", 10);
+    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 2]);
+    const firstRow = history.find((h) => h.deploy_number === 1);
+    const secondRow = history.find((h) => h.deploy_number === 2);
+    expect(firstRow?.is_active).toBe(0);
+    expect(secondRow?.is_active).toBe(1);
+    expect(secondRow?.tag_name).toBe("deploy/wf-test/#2");
+  });
+
+  it("numbers the git tag gitMax+1 when external tags are ahead of the DB", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
+    let pushedDeployNumber = 0;
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(
+      async (_repoDir: string, _workflowId: string, deployNumber: number) => {
+        pushedDeployNumber = deployNumber;
+        return { branch: "wf/wf-test", tagName: `deploy/wf-test/#${deployNumber}`, commit: "def456", deployNumber };
+      },
+    );
+
+    const result = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+
+    // dbMax=0 → reserved=1; external tags already reach #5 → the tag must be
+    // gitMax + 1 (#6), keeping the reserved #1 as an inactive placeholder.
+    expect(pushedDeployNumber).toBe(6);
+    expect(result.deployNumber).toBe(6);
+    expect(result.tagName).toBe("deploy/wf-test/#6");
+
+    const history = await deployHistoryRepo.listHistory("wf-test", 10);
+    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 6]);
+    const placeholder = history.find((h) => h.deploy_number === 1);
+    const real = history.find((h) => h.deploy_number === 6);
+    expect(placeholder?.is_active).toBe(0);
     expect(real?.is_active).toBe(1);
     expect(real?.tag_name).toBe("deploy/wf-test/#6");
   });

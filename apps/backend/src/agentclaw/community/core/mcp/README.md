@@ -105,3 +105,19 @@ or legacy `api_key` in the server entry. Bot URL wins over user URL, which wins
 over the Center endpoint. See ADR 0016. Container-wide mcporter
 `headerPolicies` remain host-matched runtime policy, however; this core module
 neither emits nor disables them per server.
+
+## Outbound Bot context
+
+Bot-scoped remote MCP configuration includes `X-TC-Bot-Id`, whose value is the
+current platform business `bot_id`, not a device ID or engine-specific ID.
+`MCPConfigService.build_mcp_sync_payload` adds it after all Header merging;
+configured values with the same case-insensitive name cannot override it.
+Both incremental DeviceSync and whole-artifact composition supply the target
+Bot ID, independently of engine type. Custom URLs also receive this context;
+it is not a Center-bound credential and does not change existing authentication.
+
+Only user-scoped catalog preflight, which has no target Bot, omits `bot_id`.
+LOCAL/stdio MCP configuration is unchanged. Downstream services decide how to
+consume the Header; it provides context, not proof of authorization. Existing
+runtime configurations acquire it on their next configuration sync/reprojection;
+no database migration, new setting, or alternate Header name is introduced.

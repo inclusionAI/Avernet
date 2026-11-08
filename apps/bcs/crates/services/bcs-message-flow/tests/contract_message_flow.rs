@@ -20,6 +20,8 @@ use tokio::sync::{Mutex, RwLock};
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
+use bcs_test_support::LazySeedAuthorityHook;
+
 struct BlockingInterceptor;
 
 #[path = "support/session.rs"]
@@ -356,6 +358,27 @@ impl GroupHistoryBotRequestPort for RecordingTargetHistoryBotRequest {
     }
 }
 
+/// Real authority chain mirroring the fixture
+/// `created_by` rows as live owner edges
+/// (bot-authority plan Task 6.5; the
+/// `created_by` reads themselves are gone).
+fn staff_authority(pairs: &[(&str, &str)]) -> Arc<LazySeedAuthorityHook> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    for (bot_id, owner) in pairs {
+        chain.hook.seed_owner(bot_id, owner);
+    }
+    chain.hook
+}
+
+const DRIVER_OWNER_1: &[(&str, &str)] = &[("bot-driver", "1")];
+
+fn with_hook(
+    flow: BcsMessageFlow,
+    pairs: &[(&str, &str)],
+) -> BcsMessageFlow {
+    flow.with_bot_authority_hook(Some(staff_authority(pairs)))
+}
+
 #[tokio::test]
 async fn session_history_allows_human_who_is_only_session_participant() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
@@ -452,7 +475,8 @@ async fn session_history_allows_human_whose_owned_bot_is_session_participant() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_session_history(SessionHistoryCommand {
@@ -498,7 +522,10 @@ async fn session_history_denies_human_with_no_session_or_group_stake() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(
+        bcs_test_support::lazy_authority_chain().hook,
+    ));
 
     let err = history
         .get_session_history(SessionHistoryCommand {
@@ -576,7 +603,8 @@ async fn session_history_denies_group_owner_when_not_in_session_and_owns_no_sess
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-observer", "1")])));
 
     let err = history
         .get_session_history(SessionHistoryCommand {
@@ -852,7 +880,8 @@ async fn group_history_falls_back_to_driver_and_normalizes_bot_history() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         history_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -969,7 +998,8 @@ async fn history_requests_provider_target_without_ws_connection() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         history_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-provider", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -1114,6 +1144,7 @@ async fn web_send_resets_message_count_routes_and_delivers() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1180,6 +1211,7 @@ async fn web_send_persists_human_only_audience_for_manager_worker() {
     .with_message_repo(repo.clone());
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1224,6 +1256,7 @@ async fn web_send_persists_human_only_audience_for_manager_worker() {
 
     chat_flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1269,6 +1302,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     let before_send_ms = bcs_protocol::now_ms();
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1375,6 +1409,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1419,6 +1454,7 @@ async fn failed_provider_web_send_uses_unified_system_message() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1465,6 +1501,7 @@ async fn deprecated_provider_stream_gray_match_keeps_provider_delivery_target() 
     ])));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1505,6 +1542,7 @@ async fn deprecated_provider_stream_gray_miss_keeps_provider_delivery_target() {
     ])));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1545,6 +1583,7 @@ async fn deprecated_provider_stream_gray_disabled_keeps_provider_delivery_target
     ])));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1603,6 +1642,7 @@ async fn deprecated_provider_stream_gray_does_not_change_inject_delivery_target(
     ])));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1695,6 +1735,7 @@ async fn provider_send_context_captures_bypass_headers_for_abort_routing() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1782,6 +1823,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1829,6 +1871,7 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -1881,6 +1924,7 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
     );
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -1939,6 +1983,7 @@ async fn opted_in_channel_sender_identity_is_projected_to_bot_frame() -> Service
     );
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_410025".to_string(),
             staff_no: "410025".to_string(),
@@ -2001,6 +2046,7 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -2045,6 +2091,7 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
     );
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2114,6 +2161,7 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
     .with_session_management(Arc::new(StaticSessionManagement::new(session)));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2184,6 +2232,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
     .with_session_management(Arc::new(StaticSessionManagement::new(session)));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2240,6 +2289,7 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
     .with_session_management(Arc::new(StaticSessionManagement::new(session)));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2331,6 +2381,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     .with_session_management(Arc::new(StaticSessionManagement::new(session)));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2418,6 +2469,7 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
     .with_session_management(Arc::new(StaticSessionManagement::new(session)));
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2484,6 +2536,7 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
     );
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_2".to_string(),
             staff_no: "2".to_string(),
@@ -2538,6 +2591,7 @@ async fn web_send_inject_delivery_uses_event_frame() {
     );
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -2594,6 +2648,7 @@ async fn web_send_delivers_to_private_group_targets() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -2647,6 +2702,7 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
 
     let outcome = flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
@@ -2686,12 +2742,15 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
         .save_created_by("bot-driver", "1", true)
         .await
         .unwrap();
-    let flow = BcsMessageFlow::new(
+    let flow = with_hook(
+        BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
+        ),
+        DRIVER_OWNER_1,
     );
 
     let outcome = flow
@@ -2933,12 +2992,15 @@ async fn group_chat_uses_human_staff_number_as_display_name_when_speaking_as_own
         .save_created_by("bot-driver", "1", true)
         .await
         .unwrap();
-    let flow = BcsMessageFlow::new(
+    let flow = with_hook(
+        BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
+        ),
+        DRIVER_OWNER_1,
     );
 
     flow.handle_group_chat(GroupChatCommand {
@@ -3037,6 +3099,17 @@ async fn persistent_group_send_resolves_running_session_and_persists_message_eve
         .expect("group")
         .participants;
     let repo = Arc::new(RecordingMessageRepo::default());
+    // F4: an absent-mode Human participant cannot send; this
+    // exercise of the persist/event path runs as a Present one.
+    let participants = participants
+        .into_iter()
+        .map(|mut participant| {
+            if participant.bot_uuid == "human_1" {
+                participant.mode = Some(ParticipantMode::Present);
+            }
+            participant
+        })
+        .collect();
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -4008,7 +4081,8 @@ async fn group_history_prefers_high_priority_even_when_low_priority_finishes_fir
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -4063,7 +4137,8 @@ async fn group_history_falls_back_to_driver_when_view_bot_fails() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -4111,7 +4186,8 @@ async fn group_history_falls_back_to_store_when_all_bots_fail() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -4173,6 +4249,7 @@ fn human_web_send(
     attachments: Option<Vec<bcs_domain::Attachment>>,
 ) -> WebSendCommand {
     WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -4337,6 +4414,7 @@ async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
     .with_message_repo(repo.clone());
 
     flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
@@ -4394,6 +4472,7 @@ async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
 
 fn web_send_human_mentions(mention_actor_ids: Vec<String>) -> WebSendCommand {
     WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),

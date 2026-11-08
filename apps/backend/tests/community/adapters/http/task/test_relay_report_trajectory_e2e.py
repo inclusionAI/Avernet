@@ -55,6 +55,9 @@ from agentclaw.community.core.task.task_context.relay_report import time as _rel
 import agentclaw.community.core.task.task_context.relay_report as relay_report_mod
 import agentclaw.community.core.task.task_center.task_service_relay as task_service_relay_mod
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.task.domain.models import (
     Status,
     TaskExecutionGraph,
@@ -356,6 +359,18 @@ class _RealModules(Module):
     @provider
     def callback_enricher(self) -> CallbackDataEnricher:
         return SimpleNamespace()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def artifact_repo(self) -> "TaskArtifactRepositoryProtocol":
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
 
 
 def _build_client(service: _RelayService, tcs) -> TestClient:

@@ -364,3 +364,12 @@ Preview PK with `?width=560&height=800&mode=pk-vote` or `?width=360&height=600&m
 - PK uses the existing contract and is covered by the focused/component fixtures, but only limited PK visual QA was performed in this phase.
 - Narrow layout keeps the vignette/roster fallback; the full stage is optimized for wide/medium containers.
 - The workflow board is verified from real referee-script graph fixtures and the local preview; it has not yet been validated against a live BCS deployment/run. The phase-4 acceptance screenshots/recording are synthetic previews; no live BCS round could be started locally because the running BCS has zero bots/groups. No BCS Service API, Plugin API, referee script, database, or migration change is introduced.
+
+### Bundle size budget
+
+The full UMD bundle includes the shared collaboration-definition components and
+this theme. The current upstream baseline builds to 251,652 bytes; adding the
+night-banquet panel yields approximately 320,000 bytes. The combined bundle budget
+is 320 KiB (327,680 bytes). The separate 120 KiB atlas limit and public asset
+checks remain in effect. This limit covers the entire shared bundle, not just the
+game, and should be reviewed when shared components or the theme grow.

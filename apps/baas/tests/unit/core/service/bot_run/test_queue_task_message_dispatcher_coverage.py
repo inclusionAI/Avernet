@@ -28,7 +28,7 @@ def _make_dispatcher(**overrides):
     return QueueTaskMessageDispatcher(**defaults)
 
 
-def _make_binding_info():
+def _make_binding_info(engine_type: str = "openclaw"):
     return BotBindingInfo(
         bot_id="bot-1",
         entity_id="ent-1",
@@ -36,6 +36,7 @@ def _make_binding_info():
         device_id="dev-1",
         device_provider="docker",
         binding_id=1,
+        engine_type=engine_type,
     )
 
 
@@ -66,6 +67,21 @@ class TestDispatchSend:
         assert call_kwargs["run_id"] == "run-1"
         assert call_kwargs["bot_id"] == "bot-1"
         assert call_kwargs["meta"]["request_type"] == "chat"
+        assert call_kwargs["meta"]["engine_type"] == "openclaw"
+
+    @pytest.mark.asyncio
+    async def test_send_stamps_teclaw_engine_type(self):
+        d = _make_dispatcher()
+        await d.dispatch_send(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info("teclaw"),
+            bot_id="bot-1",
+        )
+        meta = d._queue_repository.insert_queue.call_args.kwargs["meta"]
+        assert meta["engine_type"] == "teclaw"
 
     @pytest.mark.asyncio
     async def test_send_with_callback_string(self):
@@ -175,6 +191,21 @@ class TestDispatchInject:
         assert call_kwargs["meta"]["request_type"] == "inject"
         # inject 无调用方 timeout，写默认值以便被 Worker 超时扫描收敛
         assert call_kwargs["meta"]["timeout"] == 300.0
+        assert call_kwargs["meta"]["engine_type"] == "openclaw"
+
+    @pytest.mark.asyncio
+    async def test_inject_stamps_teclaw_engine_type(self):
+        d = _make_dispatcher()
+        await d.dispatch_inject(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="inject",
+            binding_info=_make_binding_info("teclaw"),
+            bot_id="bot-1",
+        )
+        meta = d._queue_repository.insert_queue.call_args.kwargs["meta"]
+        assert meta["engine_type"] == "teclaw"
 
     @pytest.mark.asyncio
     async def test_inject_with_attachments(self):
@@ -381,6 +412,31 @@ class TestDispatchSendStream:
             chunks.append(c)
         assert len(chunks) == 1
         assert chunks[0].type == "final"
+
+    @pytest.mark.asyncio
+    async def test_stream_stamps_teclaw_engine_type(self):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:final"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "final"
+        chunk_rec.content = "done"
+        chunk_rec.metadata = None
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        d._run_repository.get_by_run_id.return_value = None
+
+        async for _ in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info("teclaw"),
+            bot_id="bot-1",
+        ):
+            pass
+
+        meta = d._queue_repository.insert_queue.call_args.kwargs["meta"]
+        assert meta["engine_type"] == "teclaw"
 
     @pytest.mark.asyncio
     async def test_stream_with_error_chunk(self):

@@ -1,0 +1,52 @@
+CurrentUserPath:
+  get:
+    operationId: get_current_user
+    tags: ["Collaboration / Users"]
+    summary: Read the verified Human context for browser configuration.
+    description: Returns only the authenticated Human ID and display name, with Cache-Control:no-store.
+    x-avernet-security: {user: required, app: required}
+    responses:
+      '200':
+        description: Current verified Human; no Bot, App or credential projection.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, message, data, request_id]
+              properties:
+                code: {type: integer, const: 20000}
+                message: {type: string}
+                request_id: {$ref: '../shared.yaml#/RequestId'}
+                data:
+                  type: object
+                  additionalProperties: false
+                  required: [user_id, display_name]
+                  properties:
+                    user_id: {type: string, minLength: 1}
+                    display_name: {type: string}
+      '401':
+        description: Missing or invalid authentication.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: {$ref: '../shared.yaml#/ErrorEnvelope'}
+      '403': {$ref: '#/UserContextRejected'}
+
+ExpectedUser:
+  name: X-BCS-Expected-User
+  in: header
+  required: false
+  description: >-
+    Optional equality guard against the verified Human ID; never an identity
+    credential. Duplicate, malformed or mismatched values fail before dispatch
+    with 403 user_context_changed. Browser clients send it on all scoped reads
+    and writes; the native browser entry requires it on POST.
+  schema: {type: string, minLength: 1}
+
+UserContextRejected:
+  description: Human context unavailable, changed, or rejected by the browser/invite boundary.
+  x-error-codes: [forbidden, user_context_changed, browser_context_required, invite_code_required]
+  content:
+    application/json:
+      schema: {$ref: '../shared.yaml#/ErrorEnvelope'}

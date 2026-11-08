@@ -3,6 +3,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -20,7 +22,7 @@ def runtime_for(status):
 def prepare(runtime, engine='aicoding'):
     return AicodingProvisioningStrategy(engine)._prepare_restart(
         BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine=engine),
-        device_id='target', target_runtime=runtime,
+        device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
 
 
@@ -127,7 +129,7 @@ def test_binding_path_uses_baas_state_even_after_local_bot_becomes_pending():
     verify = AicodingProvisioningStrategy('aicoding').prepare_restart(
         BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
         binding_id=42, device_service_provider=lambda: device_service,
-        target_runtime_provider=lambda: runtime, bot_repository=repository,
+        restart_dependencies=RestartBackupDependencies(baas_runtime=lambda: runtime), bot_repository=repository,
     )
     verify()
     assert runtime.get_bot.call_count == 2

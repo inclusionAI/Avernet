@@ -34,6 +34,7 @@ def dependencies():
         "bot_type": "personal",
         "active_engine": "openclaw",
         "ext": {},
+        "status": "ACTIVE",
     }
     bindings = MagicMock(spec=DeviceBindingRepository)
     bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(
@@ -60,6 +61,7 @@ def dependencies():
 async def test_owner_can_compare_current_engine_to_paired_backend_release(dependencies):
     bots, bindings, resolver, transport = dependencies
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -95,6 +97,7 @@ async def test_probe_failure_is_a_sanitized_detection_result(dependencies, failu
     bots, bindings, resolver, transport = dependencies
     transport.invoke.side_effect = failure
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -118,6 +121,7 @@ async def test_published_stages_never_fall_back_to_draft(dependencies, stage):
 
     bots, bindings, resolver, transport = dependencies
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -139,6 +143,7 @@ async def test_missing_binding_does_not_mean_legacy(dependencies):
     bots, bindings, resolver, transport = dependencies
     bindings.get_active_by_bot_and_owner.return_value = None
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -176,6 +181,7 @@ async def test_multi_instance_probe_is_frozen_to_selected_device(
     bindings.get_active_by_bot_and_owner.return_value.device_provider = "baas"
     inventory = MagicMock(return_value=[{"device_uuid": value} for value in ids])
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -229,6 +235,7 @@ async def test_other_engines_return_not_applicable_without_device_access(
     bots.get_by_id_and_owner.return_value["active_engine"] = engine
     inventory = MagicMock(side_effect=AssertionError("must not list devices"))
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -251,3 +258,67 @@ async def test_other_engines_return_not_applicable_without_device_access(
     resolver.resolve_for_binding_invoke.assert_not_called()
     inventory.assert_not_called()
     transport.invoke.assert_not_called()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('space_visible,listed,operator', [(True, False, False), (False, True, False), (True, True, True)])
+async def test_visible_advisory_uses_restart_standing_before_any_device_work(dependencies, space_visible, listed, operator):
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+    class Rights:
+        def get_operable_permission_level(self, **kwargs):
+            return PermissionLevel.MEMBER if space_visible else PermissionLevel.NONE
+        def get_permission_level(self, *args):
+            return PermissionLevel.MEMBER if listed else PermissionLevel.NONE
+        def get_explicit_permission_level(self, **kwargs):
+            return PermissionLevel.MEMBER if operator else PermissionLevel.NONE
+
+    bots, bindings, resolver, transport = dependencies
+    service = EngineVersionService(
+        lifecycle=MagicMock(),bots=bots, bindings=bindings, resolver=resolver,
+        probe=partial(probe_engine_release, transport), collaborators=Rights(),
+        list_devices=MagicMock(), config=EngineVersionConfig('REL20261014'))
+    result = await service.inspect(bot_id='bot-1', owner_id='owner', caller_id='reader')
+    if operator:
+        assert result['restart_hint'] == 'recommended'
+        transport.invoke.assert_awaited_once()
+    else:
+        assert result['detection'] == {'status': 'not_applicable', 'reason': 'restart_not_permitted'}
+        assert result['restart_hint'] == 'restricted'
+        assert 'current' not in result
+        bindings.get_active_by_bot_and_owner.assert_not_called()
+        resolver.resolve_for_binding_invoke.assert_not_called()
+        transport.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('card_state,actions,allowed', [('service_draft', ['restart'], True), ('service_online', ['restart_publish'], False), ('service_draft', [], False)])
+async def test_service_requires_existing_draft_restart_action(dependencies, card_state, actions, allowed):
+    from agentclaw.community.core.bot_inventory.types import BotAction, DisplayState
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value['bot_type'] = 'service'
+    lifecycle = SimpleNamespace(cards_for_bots=lambda **kwargs: {'bot-1': [SimpleNamespace(display_state=DisplayState(card_state), actions=[BotAction(action) for action in actions])]})
+    service = EngineVersionService(bots=bots, bindings=bindings, resolver=resolver,
+        probe=partial(probe_engine_release, transport), collaborators=MagicMock(), lifecycle=lifecycle,
+        list_devices=MagicMock(), config=EngineVersionConfig('REL20261014'))
+    result = await service.inspect(bot_id='bot-1', owner_id='owner', caller_id='owner')
+    assert result['restart_hint'] == ('recommended' if allowed else 'restricted')
+    assert transport.invoke.await_count == int(allowed)
+
+
+@pytest.mark.asyncio
+async def test_service_draft_can_be_inspected_alongside_published_history(dependencies):
+    from agentclaw.community.core.bot_inventory.types import BotAction, DisplayState
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value['bot_type'] = 'service'
+    lifecycle = SimpleNamespace(cards_for_bots=lambda **kwargs: {'bot-1': [
+        SimpleNamespace(display_state=DisplayState.SERVICE_ONLINE, actions=[BotAction.RESTART_PUBLISH]),
+        SimpleNamespace(display_state=DisplayState.SERVICE_DRAFT, actions=[BotAction.RESTART]),
+        SimpleNamespace(display_state=DisplayState.SERVICE_OFFLINE, actions=[]),
+    ]})
+    service = EngineVersionService(bots=bots, bindings=bindings, resolver=resolver,
+        probe=partial(probe_engine_release, transport), collaborators=MagicMock(), lifecycle=lifecycle,
+        list_devices=MagicMock(), config=EngineVersionConfig('REL20261014'))
+    result = await service.inspect(bot_id='bot-1', owner_id='owner', caller_id='owner')
+    assert result['restart_hint'] == 'recommended'
+    assert result['context']['instance_id'] == 'instance-1'
+    transport.invoke.assert_awaited_once()

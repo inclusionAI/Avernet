@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import type { SendFileRefs } from '@/pages/Workspace/hooks/useBotChat';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { buildDebugChatFileRequest } from '@/services/botWorkshop/debugChatFiles';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
@@ -17,6 +18,7 @@ interface DebugChatComposerProps {
   sessionId: string | null;
   userId: string | null;
   ownerId?: string;
+  runtimeStage?: BotRuntimeStage;
   isRequesting: boolean;
   /** 会话模型选择器放在发送按钮左侧，保持调试输入区操作聚合。 */
   modelSelector?: ReactNode;
@@ -30,6 +32,7 @@ export function DebugChatComposer({
   sessionId,
   userId,
   ownerId,
+  runtimeStage,
   isRequesting,
   modelSelector,
   capabilitySets,
@@ -39,7 +42,7 @@ export function DebugChatComposer({
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState<BotSessionFileView[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
+  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, runtimeStage);
   const cancelAllRef = useRef(upload.cancelAll);
   cancelAllRef.current = upload.cancelAll;
 

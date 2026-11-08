@@ -1,5 +1,49 @@
 # bcs-service-api Context
 
+Operation-boundary delivery admission (bot-authority spec §8.2 — 已准入输出不追溯):
+`DeliveryAdmissionService::resolve_recipient_views` resolves each candidate
+connection's delivery view ONCE per accepted operation per scope (one shared
+snapshot batch, never per frame). `OutputAdmissionPort` installs the result as
+read-only in-process permits at business-accept time; producers stamp trusted
+metadata (`FrontendDeliveryCommand.operation_id` / `run_id` / `terminal`) and
+the adapter checks frames against frozen permits at the enqueue boundary.
+Mid-operation revocation never interrupts admitted output; new operations,
+subscriptions and reconnects re-admit against current facts. Frames with no
+operation tag are independent resource events authorized per publish against
+current facts; their read failures skip fail-closed and never cancel streams.
+Terminal frames are typed: after accept the producer registers the operation's
+COMPLETE Send-run set (`register_operation_runs`) BEFORE the durable commit —
+a terminal closes only its own stream, and the operation turns Draining when
+EVERY registered stream is terminal (Run terminal ≠ operation complete);
+producer visibility facts are frozen from the admission-time Group/Session
+snapshot before the first callback, and managed deliveries pre-assign their
+canonical run ids (`DeliveryAdmissionTarget.run_id`) so bindings, facts and
+the full managed ∪ direct stream set exist before the commit — a queue
+worker never runs an unbound admitted row, and a caller cancelled AT the
+commit boundary changes nothing. Accepted operations are reclaimed only by
+explicit end-states, never by age: stream terminals, recipient loss, or
+`release_operation_runs`. Releases are exact: commit-side failure, duplicates
+and admission-time rejections release only their fresh identities, a
+`delivered=false` explicit rejection releases only that run, a transport Err
+(uncertain) releases nothing, and an aborted send releases only runs that
+never started — already-delivered siblings keep their binding until their
+own terminal. A terminal that cannot enqueue within the bounded backpressure
+budget retires the saturated connection (observable transport failure),
+leaving no silent final-less stream.
+
+Bot-view delivery admission consumes the existing batched `BotAuthorityPort::roles_for`
+contract (one result per input in order), including fail-closed length/error checks.
+SQL implementations read actual identity pairs in bounded chunks, never scalar
+`can_manage` per viewer. Accepted Run aliases enter MessageFlow under their
+canonical output identity after authenticated Bot/scope validation; no transport
+or database details enter that contract.
+
+MessageFlowService::publish_state_machine_result accepts the original one-shot
+result command. Success acknowledges durable Group admission for managed targets
+and synchronous acceptance for legacy targets, never Bot completion. Publication
+must reject conflicting facts, empty admission and rejected/failed targets.
+Stable history identity does not promise idempotent legacy network delivery.
+
 ## Provides
 
 ProviderManagementService and ProviderCoreService expose public slug discovery
@@ -201,7 +245,7 @@ dispatcher-to-Send boundary without native inject.
   repository contracts provide an activation CAS; Memory/SQL implementations
   and the runtime-cleanup decorator must preserve it. Normal State Machine
   completion, failure, and cancellation use the same CAS, propagate write errors,
-  and dispatch callbacks only from the returned activation snapshot. Missing
+  and return the completed activation snapshot. Missing
   activation metadata is never inferred from the current Session. Completed/Failed
   Run recovery prepares the immutable terminal IM intent before completing the
   Session, then shares the foreground delivery path. Chat publication uses its
@@ -297,6 +341,12 @@ MessageFlowService exposes Human-only environment-wide delivery-policy read/repl
 
 - Application, core, and port trait contracts for BCS.
 - Group human-mention notify mode is part of the Group patch contract.
+  Normal creation also carries the concrete `HumanMentionNotifyMode` through
+  `CreateCollaborationGroup` and `GroupCreateCommand`. Both HTTP adapters default
+  omitted values to `all` and reject explicit null or unknown values. Management
+  sets it before the first Group upsert, including inline provisioning and
+  creation without an initial Session; no follow-up patch or extra write is
+  needed. DM creation/reuse contracts and notification routing are unchanged.
   Both HTTP adapters translate the wire field into
   `application::v1::GroupPatch::human_mention_notify_mode` (`null` and unknown
   values are rejected at the adapter boundary); the V1 Group application copies
@@ -435,6 +485,12 @@ conflict without credential replay; different refs may share a valid register to
 Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
 contracts have shared conformance harnesses, including Memory/SQLite implementations.
 No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+Authorization returns `ProviderRegistrationAuthorization` containing allowed
+connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mode`
+is an internal optional claim copied only from a verified Token, not an HTTP
+parameter. The core checks a present value against current Provider configuration
+before mutations; None preserves historical v2 compatibility. Consumers and test
+fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
@@ -481,3 +537,40 @@ and Direct A2A. ChatRun ports expose nullable delivery/source IDs, durable manag
 checkpoint CAS and cursor recovery pages capped at eight records. DeliveryLookup
 supports an eight-ID recovery batch. Async acceptance may include a safe queue
 summary; HTTP version negotiation remains the adapter's responsibility.
+
+SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
+
+BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
+
+BotRunContextPort remains the trusted pre-delivery registration boundary. The
+bootstrap composition may decorate it with process-local output lineage without
+changing Memory/Redis storage semantics or adding per-frame remote reads.
+Independent producers and MessageFlow must share that registration instance;
+missing/retired nonmanaged Runs have no authorization to produce message effects.
+The existing BotRunContextPort conformance harness covers the decorated Memory
+and cache implementations, in addition to producer-to-consumer integration tests.
+
+`BotRunContextPort::put_alias_context` is the compatibility projection of an
+already validated accepted alias, not a new producer. Its default delegates the
+storage write for existing implementations; lifecycle decorators must not mint
+independent output lineage, including when a delayed ACK overlaps canonical
+terminal cleanup. WS uses this method for direct A2A alias scope projection.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+This retirement is a breaking Rust Service API change: bcs-service-api is version
+1.0.0. Group/Session consumers and implementations must rebuild together; Plugin
+API versions and State Machine contracts are unchanged.

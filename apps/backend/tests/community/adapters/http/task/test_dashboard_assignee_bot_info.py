@@ -17,7 +17,11 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_user_
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
     TaskCallbackRepositoryProtocol, TaskInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
@@ -98,6 +102,27 @@ class _StubModule(Module):
             "bot_a": {"bot_id": "bot_a", "owner_id": "o1", "bot_name": "BotA"},
             "bot_b": {"bot_id": "bot_b", "owner_id": "o2", "bot_name": "BotB"},
         })
+
+    @singleton
+    @provider
+    def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        class _EmptyArtifactService:
+            def list_artifacts(self, task_id, *, node_id=None, limit=200):
+                return []
+
+        return _EmptyArtifactService()
 
 
 @pytest.fixture

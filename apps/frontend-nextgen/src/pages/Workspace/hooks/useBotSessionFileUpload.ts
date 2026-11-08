@@ -1,6 +1,7 @@
 /** useBotSessionFileUpload — 单聊会话文件上传 Hook(暂存 → 串行上传 → ready)。
  *  上传成功后回写 store.readyFiles,并返回 ready 文件供 chip 引用。 */
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { botSessionFileService } from '@/services/workspace/botSessionFileService';
 import { SESSION_FILE_MAX_BATCH } from '@/services/workspace/sessionFileUtils';
 import { useBotSessionFileStore, type UploadTask } from '@/stores/botSessionFileStore';
@@ -25,6 +26,7 @@ export function useBotSessionFileUpload(
   sessionId: string | null,
   userId: string | null,
   ownerId?: string,
+  stage?: BotRuntimeStage,
 ): UseBotSessionFileUploadResult {
   const store = useBotSessionFileStore();
   const uploadingRef = useRef(false);
@@ -78,6 +80,7 @@ export function useBotSessionFileUpload(
           store.updateTask(currentTask.localId, { phase: 'uploading', progress: 0, abortController });
           const res = await botSessionFileService.uploadOne(botId, sessionId, userId, currentTask.file, {
             ownerId,
+            ...(stage ? { stage } : {}),
             signal: abortController.signal,
             onProgress: updateProgress(currentTask.localId),
           });
@@ -104,7 +107,7 @@ export function useBotSessionFileUpload(
         store.setIsUploading(false);
       }
     },
-    [botId, sessionId, userId, ownerId, store],
+    [botId, sessionId, userId, ownerId, stage, store],
   );
 
   const cancelAll = useCallback(() => {

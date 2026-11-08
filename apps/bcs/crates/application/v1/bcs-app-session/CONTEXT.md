@@ -2,7 +2,15 @@
 
 ## Provides
 
+- Delivery admission shares one Group/Session snapshot across candidates and
+  resolves all distinct Bot-view (User, Bot) pairs through `BotAuthorityPort::roles_for`
+  once. Scalar `can_manage` is not used for fanout. Errors or malformed batch
+  lengths fail the entire admission closed; no partial permits are returned.
+
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
+- Human owners may change an existing owned Bot participant's auto/muted mode
+  without Session management authority. This exception does not grant scope
+  changes, participant insertion, or other Session management rights.
 - StateMachine/ordinary-history merging uses the shared domain identity and
   newest-first projection. Durable messages take precedence across legacy IDs;
   workflow metadata does not group distinct outputs into a single chat round.
@@ -13,6 +21,10 @@
 - `SessionFileApplicationServiceImpl`, which selects a Human or owned Bot
   actor, authorizes Session membership and file mutations, enriches legacy
   file commands, and orchestrates best-effort completion notifications.
+- `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
+  verifies current-Session membership for session/round writes and Group membership for group writes, validates the
+  `{sessionId}:{round}` format, and delegates all Group Context operations to
+  the underlying application service.
 
 ## Consumes
 
@@ -56,12 +68,15 @@
 
 ## Runtime ownership
 
-This crate owns V1 Session and Session File authorization and orchestration.
-For files, it enforces membership and the owner-or-owning-Human mutation rule
-before storage mutation, and sends completion notification only after a
-successful lifecycle transition. Delivery adapters may translate HTTP and
-WebSocket requests into these contracts but must not reimplement session/file
-authorization or token policy.
+This crate owns V1 Session, Session File, and the public Group Context add
+resource-membership gate. The Group Context gate reads the persisted Session
+at request time so dynamically invited Session participants remain allowed;
+Group Context storage and field-policy semantics stay in the Group Context
+application service. For files, it enforces membership and the
+owner-or-owning-Human mutation rule before storage mutation, and sends
+completion notification only after a successful lifecycle transition. Delivery
+adapters may translate HTTP and WebSocket requests into these contracts but
+must not reimplement session/file authorization or token policy.
 
 ## Tests
 

@@ -7,7 +7,7 @@ use bcs_service_api::core::provider_registration::*;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::bot_provider::BotProviderRecord;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, ProviderAuthMode,
+    BotCapabilities, BotRegistryCoreService,
     ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
     RelationCoreService, ServiceError, ServiceResult,
 };
@@ -18,8 +18,15 @@ pub struct ProviderRegistrationCore {
     credentials: Arc<dyn ProviderCredentialRepoPort>,
     bindings: Arc<dyn ProviderBotBindingRepoPort>,
     registrations: Arc<dyn BotProviderRepoPort>,
+    // Held for the retirement dispatch (next Task-4 step):
+    // Human-registry lookups and legacy relation projection
+    // cleanup after retirement; trusted registration itself
+    // now runs through the repo composites.
+    #[allow(dead_code)]
     registry: Arc<dyn BotRegistryCoreService>,
+    #[allow(dead_code)]
     relations: Arc<dyn RelationCoreService>,
+    #[allow(dead_code)]
     env: String,
     self_service_providers: Vec<String>,
     url_guard: OutboundUrlGuard,
@@ -130,18 +137,45 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         &self,
         provider_id: &str,
         owner: &str,
-    ) -> ServiceResult<Vec<ProviderRegistrationMode>> {
-        self.authorized_provider(provider_id, owner).await?;
+    ) -> ServiceResult<ProviderRegistrationAuthorization> {
+        let provider = self.authorized_provider(provider_id, owner).await?;
+        let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
         // Endpoint readiness is checked at registration, never at issuance.
-        Ok(vec![
-            ProviderRegistrationMode::Plugin,
-            ProviderRegistrationMode::Gateway,
-        ])
+        Ok(ProviderRegistrationAuthorization {
+            allowed_modes: vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway],
+            auth_mode,
+        })
     }
 
     async fn register(
         &self,
         command: RegisterProviderBot,
+    ) -> ServiceResult<ProviderRegistrationResult> {
+        // Backward-compatible surface: the legacy path derives
+        // its initialization from the verified token owner.
+        let mutation_id = uuid::Uuid::new_v4().to_string();
+        let owner = command.owner.clone();
+        self.register_with_ownership(
+            command,
+            bcs_service_api::types::bot_authority::OwnershipInitialization {
+                // The Provider token's verified Human IS the
+                // initiator of the legacy surface too.
+                owner_user_id: owner.clone(),
+                mutation: bcs_service_api::types::bot_authority::AuthorityMutation {
+                    mutation_id,
+                    actor: bcs_service_api::types::bot_authority::AuthorityActor::Human {
+                        user_id: owner,
+                    },
+                },
+            },
+        )
+        .await
+    }
+
+    async fn register_with_ownership(
+        &self,
+        command: RegisterProviderBot,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
     ) -> ServiceResult<ProviderRegistrationResult> {
         let provider = self
             .authorized_provider(&command.provider_id, &command.owner)
@@ -155,6 +189,10 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        if command.token_auth_mode.is_some_and(|mode| mode != downlink.auth_mode) {
+            return Err(invalid("registration token auth_mode no longer matches Provider; obtain a new token"));
+        }
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref).map_err(invalid)?;
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.
@@ -167,31 +205,27 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             bot_uuid: new_bot_uuid(), bot_token: new_session_token(),
             webhook_url: command.webhook_url,
         };
-        self.registrations.create_provider_bot(BotProviderRecord {
-            bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
-            provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
-            webhook_url: record.webhook_url.clone(), is_deleted: false,
-        }, BotCapabilities {
-            name: Some(record.bot_name.clone()), visibility: "protected".into(),
-            // Match Provider-admin registration for both connection modes:
-            // AgentPass identifies this Bot by its Provider's external ref.
-            agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
-                .then(|| record.provider_bot_ref.clone()),
-            ..BotCapabilities::default()
-        }, &record.owner, &record.bot_token).await?;
-        self.registry
-            .ensure_human_actor(&record.owner, &record.owner)
-            .await?;
-        self.relations
-            .ensure_owner_edges(
-                &format!("human_{}", record.owner),
-                &record.bot_uuid,
-                &self.env,
-            )
-            .await?;
+        // The registered Bot gets its ownership initialization
+        // in the SAME store transaction it is created by
+        // (spec §10.2); nothing is written when any step
+        // fails, so no token is returned on failure.
+        self.registrations
+            .create_provider_bot_with_ownership(BotProviderRecord {
+                bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+                provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
+                webhook_url: record.webhook_url.clone(), is_deleted: false,
+            }, BotCapabilities {
+                name: Some(record.bot_name.clone()), visibility: "protected".into(),
+                // Match Provider-admin registration for both connection modes:
+                // AgentPass identifies this Bot by its Provider's external ref.
+                agent_code: identity.agent_code.clone(),
+                ..BotCapabilities::default()
+            }, &record.owner, &record.bot_token, initialization).await?;
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,
+            identity,
+            auth_mode: downlink.auth_mode,
         })
     }
 }

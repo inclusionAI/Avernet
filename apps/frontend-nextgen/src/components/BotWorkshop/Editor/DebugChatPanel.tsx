@@ -1,6 +1,7 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
+import { DebugAssistantMessage, DebugThinkingReply } from '@/components/BotWorkshop/Editor/DebugChatMessage';
 import { BotModelSelector } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -15,7 +16,6 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { FileText, Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -31,22 +31,7 @@ export function shouldAppendThinking(messages: DebugMessageLike[], isRequesting:
   return !lastMessage || lastMessage.role === 'user';
 }
 
-function ThinkingReply({ botName }: { botName: string }) {
-  return (
-    <div className="flex items-start gap-3" role="status" aria-live="polite" aria-label={`${botName} 正在思考`}>
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs text-background">
-        {botName.slice(0, 1)}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="m-0 text-xs font-medium">{botName}</p>
-        <p className="m-0 mt-1 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          Thinking...
-        </p>
-      </div>
-    </div>
-  );
-}
+export { getDebugMessageBlocks } from '@/components/BotWorkshop/Editor/DebugChatMessage';
 
 function DebugMessageContent({ content }: { content: string }) {
   const parsed = parseDebugChatMessageContent(content);
@@ -68,6 +53,7 @@ function DebugMessageContent({ content }: { content: string }) {
 
 export function DebugChatPanel({
   bot,
+  authenticatedUserId,
   runtimeStage,
   ownerId,
   fullscreen = false,
@@ -75,6 +61,7 @@ export function DebugChatPanel({
   onToggleFullscreen,
 }: {
   bot: BotDomain;
+  authenticatedUserId: string | null;
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
   fullscreen?: boolean;
@@ -82,7 +69,7 @@ export function DebugChatPanel({
   onToggleFullscreen?: () => void;
 }) {
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
-  const identityId = useWorkspaceStore((state) => state.activeIdentityId);
+  const identityId = authenticatedUserId;
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,15 +82,16 @@ export function DebugChatPanel({
       displayName: bot.name,
       online: bot.lifecycle === 'running',
       chatable: true,
-      runtimeStage: runtimeStage ?? resolveBotRuntimeStage(bot.lifecycle),
+      botType: bot.serviceMode === 'service' ? 'service' : 'personal',
+      runtimeStage: bot.serviceMode === 'service' ? runtimeStage ?? resolveBotRuntimeStage(bot.lifecycle) : 'draft',
     }),
-    [bot.id, bot.lifecycle, bot.name, bot.ownerId, ownerId, runtimeStage],
+    [bot.id, bot.lifecycle, bot.name, bot.ownerId, bot.serviceMode, ownerId, runtimeStage],
   );
   const registerRenderScreenLibraries = useCallback(
     (botId: string) => botEditorService.registerRenderScreenLibraries(botId, ownerId ?? bot.ownerId),
     [bot.ownerId, ownerId],
   );
-  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries);
+  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries, identityId);
   const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
     setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
@@ -227,39 +215,33 @@ export function DebugChatPanel({
           <Empty compact title="暂无调试会话" description="新建会话后即可向当前 Bot 发送消息。" />
         ) : (
           <>
-            {debug.chat.messages.map((message) => (
-              <div key={message.id} className="group flex items-start gap-3">
-                <div
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs ${
-                    message.role === 'user' ? 'bg-brand/15 text-brand' : 'bg-foreground text-background'
-                  }`}
-                >
-                  {message.role === 'user' ? '我' : bot.name.slice(0, 1)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="m-0 text-xs font-medium">{message.role === 'user' ? '我' : bot.name}</p>
-                  {debug.chat.isRequesting && message.role !== 'user' && !message.content.trim() ? (
-                    <p
-                      className="m-0 mt-1 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                      Thinking...
-                    </p>
-                  ) : (
+            {debug.chat.messages.map((message, index) => (
+              message.role !== 'user' ? (
+                <DebugAssistantMessage
+                  key={message.id}
+                  message={message}
+                  botName={bot.name}
+                  avatarUrl={avatarUrl}
+                  isStreaming={debug.chat.isRequesting && index === debug.chat.messages.length - 1}
+                />
+              ) : (
+                <div key={message.id} className="group flex items-start gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs text-brand">我</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="m-0 text-xs font-medium">我</p>
                     <DebugMessageContent content={message.content} />
-                  )}
+                  </div>
                 </div>
-              </div>
+              )
             ))}
             {shouldAppendThinking(debug.chat.messages, debug.chat.isRequesting) ? (
-              <ThinkingReply botName={bot.name} />
+              <DebugThinkingReply botName={bot.name} avatarUrl={avatarUrl} />
             ) : null}
           </>
         )}
       </div>
       <DebugChatComposer
+        runtimeStage={chatBot.runtimeStage}
         key={session?.sessionId ?? 'no-session'}
         botId={chatBot.realBotId}
         sessionId={session?.sessionId ?? null}

@@ -1,6 +1,6 @@
 from typing import Protocol, runtime_checkable
 
-from ._record import BotRunQueueRecord
+from ._record import ActiveBot, BotRunQueueRecord
 
 
 @runtime_checkable
@@ -26,8 +26,8 @@ class BotRunQueueRepository(Protocol):
         """按 run_id 取工作项。"""
         ...
 
-    def discover_active_bots(self, limit: int = 50) -> list[str]:
-        """发现有 PENDING 工作项的 bot_id 列表（确定性顺序，避免活锁）。"""
+    def discover_active_bots(self, limit: int = 50) -> list[ActiveBot]:
+        """发现有 PENDING 工作项的 bot 摘要列表（确定性顺序，避免活锁）。"""
         ...
 
     def claim_pending_by_bot(

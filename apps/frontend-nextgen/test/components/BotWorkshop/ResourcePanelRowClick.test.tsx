@@ -29,9 +29,9 @@ function renderPanel(overrides: Partial<Parameters<typeof ResourcePanel>[0]> = {
   return props;
 }
 
-/** 目录行名称与路径同文本（根目录文件夹 path === name），取第一个即名称行。 */
+/** 目录行名称与路径同文本，但面包屑也会渲染同名段；改按行热区按钮的 aria-label 精确命中「展开/收起docs」。 */
 function clickDocsName() {
-  fireEvent.click(screen.getAllByText('docs')[0]);
+  fireEvent.click(screen.getByRole('button', { name: /^(展开|收起)docs$/ }));
 }
 
 beforeEach(() => {
@@ -60,6 +60,17 @@ test('点击目录行名称区域即展开并懒加载子目录', async () => {
 
   expect(onLoadDirectory).toHaveBeenCalledWith('docs');
   expect(await screen.findByText('guide')).toBeInTheDocument();
+});
+
+test('深层级行按祖先层级渲染缩进导轨', async () => {
+  renderPanel();
+  clickDocsName();
+  await screen.findByText('guide');
+
+  // guide 为 depth-1 目录，其子文件行（不存在则以 guide 自身断言）：guide 行应有 1 根导轨
+  const guideRow = screen.getByText('guide').closest('div[data-depth]');
+  expect(guideRow).toHaveAttribute('data-depth', '1');
+  expect(guideRow?.querySelectorAll('span[aria-hidden][data-rail]').length).toBeGreaterThan(0);
 });
 
 test('再次点击名称区域收起目录，且已加载目录不重复请求', async () => {
@@ -127,6 +138,17 @@ test('点击文件名称从右侧抽屉打开预览', async () => {
   expect(onPreview).toHaveBeenCalledWith('README.md');
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
   expect(screen.getByText('# TeamClaw')).toBeInTheDocument();
+});
+
+test('预览失败（如大文件超限）不打开抽屉且 rejection 不逃逸', async () => {
+  // toast 由全局错误通道负责；组件侧吞掉传播即可，否则 dev 下弹 Unhandled Rejection 遮罩
+  const onPreview = jest.fn().mockRejectedValue(new Error('File too large for preview'));
+  renderPanel({ onPreview });
+
+  fireEvent.click(screen.getByRole('button', { name: '预览README.md' }));
+
+  await waitFor(() => expect(onPreview).toHaveBeenCalled());
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
 test('删除确认弹层内取消不会误折叠已展开目录', async () => {

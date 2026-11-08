@@ -1,5 +1,12 @@
 # `agentclaw.community.core.repository`
 
+B5: App Grant's physical owner columns use the existing stable entity locator.
+`get_live_bot_owners_by_entity` batch-projects current Owners for exact stable
+resource addresses; `page_live_bots_by_pks` pages relation targets by existing PK.
+The original
+`filter_live_bots` keeps its strict current-Owner semantics for existing callers.
+Neither method grants user access. No schema change or history rewrite occurs.
+
 Every repository contract and every repository implementation in the backend,
 grouped by domain. Persistence is the one role this package serves; it holds no
 services, no routers, and no domain policy.
@@ -10,9 +17,12 @@ core/repository/
 └── implementations/  the ORM bodies — each declaring its Protocol(s) as a base
 ```
 
-Repositories are not plugins. Each has exactly one implementation, and the only
-per-profile difference is the `DatabasePlugin` injected into its constructor — one
-layer below, where the swap belongs. See `plugins/README.md` for the test that
+Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
+row. Its `steal` operation atomically inserts or replaces that row's holder and
+acquisition timestamps in one transaction. Both Bot and Session force-acquire
+paths use `steal`; they must not release a lock before inserting its replacement.
+Space writers additionally share the narrow transaction extension described below. See `plugins/README.md` for the test that
 puts them here rather than there.
 
 ## Domains
@@ -49,6 +59,22 @@ persistence contracts, while `forum.py` and `feedback.py` hold the BBS content
 and task feedback contracts. `implementations/task/` mirrors that package
 layout.
 
+## Compatibility locators and immutable resource keys
+
+Bot-owned resource reads/writes in chat, quality tasks, whitelist and ORM task
+discovery resolve a legacy `(bot_id, owner_id)` locator to the live Bot's immutable
+entity before using the existing resource column. The column name remains
+`owner_id`; it is not a current-person foreign key. Tenant/environment filtering
+remains in persistence. Ambiguous live matches raise an error. Detached historical
+records preserve their explicit locator; database errors never trigger fallback.
+Owner-only administrative lists can match a current Owner through a set-based Bot
+subquery, while a complete Bot address uses the resolved exact entity.
+
+Collaborator queries use the existing `bot_pk`, including bulk lists. Their
+`owner_id` remains a historical snapshot. Device binding lookup accepts the same
+owner/entity locator and detects ambiguity even when one Bot has no binding.
+Neither repository operation grants caller permissions.
+
 ## The contract is enforceable
 
 Every Protocol member carries `@abstractmethod` and every implementation declares
@@ -82,11 +108,40 @@ Hence the rule, enforced by the guard: `from __future__ import annotations` plus
 evaluated at runtime uses the typeshed `= ...` idiom with the real default named
 in a comment, rather than an exception to the rule.
 
+## Space persistence effects (internal transaction contract)
+
+`SpacePersistenceEffects` is not a public Service API, remote Plugin API, event
+bus or generic unit of work. Space, maintenance, work-order approval and the
+Skill Space creator receive the same singleton policy from the composition root.
+It only locks the source, records membership, or reserves a new Space identity
+using the **caller-owned Session**. It never commits independently or performs
+network/queue I/O. Permission checks and Skill publication/grant policy stay with
+their existing owners.
+
+`NoKnowledgeSpacePersistenceEffects` is the default: source locking only, no
+knowledge imports, outbox queries, capture UPDATE or identity effects.
+`KnowledgeSpacePersistenceEffects` reuses the original source write guard,
+snapshot admission and retained-ID protection. The lifecycle wrapper validates
+configuration/history after DB bootstrap or before the first library writer;
+constructors perform no I/O. Its producer guard uses the same policy instance,
+so calling synchronization without HTTP lifespan cannot bypass validation.
+
+All members of this internal protocol are abstract, implementations explicitly
+inherit it, and domain imports in the protocol are type-only like other
+repository contracts. Behavioral tests cover missing-table business operations,
+no-op effects without a DB, and real same-transaction capture rollback.
+`test_space_persistence_boundary.py` rejects direct knowledge implementation
+imports in the finite set of legacy writers. There is no new CI exemption.
+
 ## Context Boundary
 
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - SpacePersistenceEffects
+  - SpaceKnowledgeSyncRepository
+  - SpaceKnowledgeSyncRepositoryProtocol
+  - OwnerHandoffRepository
   - BuildIgnoreRepository
   - BuildIgnoreRepositoryProtocol
   - BotCommonConfigRepository
@@ -115,8 +170,16 @@ provides:
   - BotCliToolRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
-  - ManifestContentRepositoryProtocol
-  - ManifestContentRepository
+  - ContentStoreRepositoryProtocol
+  - ContentStoreRepository
+  - GenomeRevisionRepositoryProtocol
+  - GenomeRevisionRepository
+  - GenomeRefRepositoryProtocol
+  - GenomeRefRepository
+  - GenomePatchRepositoryProtocol
+  - GenomePatchRepository
+  - GenomePromotionRepositoryProtocol
+  - GenomePromotionRepository
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
@@ -131,6 +194,12 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumInteractionRepositoryProtocol
+  - ForumAuthorStatsRepositoryProtocol
+  - ForumPersonalCenterActivityRepositoryProtocol
+  - ForumTopicTagRepositoryProtocol
+  - ForumTopicTagRepository
+  - ForumDigestReportRepositoryProtocol
   # task / feedback
   - FeedbackRepositoryProtocol
   # spaces / market_favorites
@@ -181,6 +250,7 @@ provides:
   - TaskCallbackCorrelationRepositoryProtocol
   - TaskTrajectoryRepositoryProtocol
   - TaskDiscoveryLockRepositoryProtocol
+  - TaskArtifactRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -225,6 +295,10 @@ provides:
   - CollaboratorRepository
   # task / forum
   - ForumRepository
+  - ForumInteractionRepository
+  - ForumAuthorStatsRepository
+  - ForumPersonalCenterActivityRepository
+  - ForumDigestReportRepository
   # task / feedback
   - FeedbackRepository
   # spaces / market_favorites
@@ -277,12 +351,20 @@ provides:
   - TaskCallbackCorrelationRepository
   - TaskTrajectoryRepository
   - TaskDiscoveryLockRepository
+  - TaskArtifactRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
+  - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.core.space_knowledge.capture_guard
+  - agentclaw.community.core.space_knowledge.repository
+  - agentclaw.community.plugin_api.space_knowledge
+  - agentclaw.community.plugin_api.space_membership
+  - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
@@ -295,9 +377,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.apply_engine  # the apply row and the CLI-tool record it persists
   - agentclaw.community.core.bot_config_manifest
+  - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
+  - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
-  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config
@@ -323,6 +407,7 @@ internal_dependencies:
   - agentclaw.community.core.user_list
   - agentclaw.community.core.workspace
   - agentclaw.community.log
+  - agentclaw.community.utils.app_utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```
@@ -336,3 +421,7 @@ intended cost.
 Moving a repository between domains changes a module path that `corp/ocb` imports.
 `specs/2026-08-05-core-repository-consolidation/path-map.md` is the artifact those
 rewrites are driven from.
+
+Changing the Space persistence constructor affects direct library callers and
+corporate composition roots: pass an explicit policy, never an optional fallback.
+See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.

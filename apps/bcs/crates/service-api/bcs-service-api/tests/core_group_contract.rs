@@ -1,7 +1,7 @@
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
-    ServiceError, Workspace,
+    ServiceError,
 };
 use bcs_test_support::NoopGroupCoreService;
 
@@ -104,10 +104,6 @@ async fn noop_group_mutations_fail_closed_on_missing_groups() {
         service
             .update_participant_mode(missing, "driver", ParticipantMode::Muted)
             .await,
-        Err(ServiceError::GroupNotFound(id)) if id == missing
-    ));
-    assert!(matches!(
-        service.update_workspace(missing, Workspace::default()).await,
         Err(ServiceError::GroupNotFound(id)) if id == missing
     ));
     assert!(matches!(

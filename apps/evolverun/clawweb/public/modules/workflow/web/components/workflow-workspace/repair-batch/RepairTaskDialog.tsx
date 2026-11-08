@@ -1,3 +1,5 @@
+import { workflowSnapshotKey, type WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import { itemSnapshotKey } from '../../../../server/contracts/repair-version-scope'
 import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairActionFailure, type RepairRecoveryAction } from '../../../api/repair-action-error'
@@ -10,9 +12,15 @@ import { button, primary, RepairDialog } from './repair-view'
 const frozenItemTitle = (item: RepairTaskDetail['latestAttempt']['input']['items'][number]) =>
   typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound }: {
+function feedbackItems(detail: RepairTaskDetail) {
+  const rows=detail.latestAttempt.input.automation?.roundId?detail.revisions:[detail.latestAttempt];
+  return [...new Map([...rows].sort((a,b)=>a.revision-b.revision).flatMap(row=>row.input.items.map(item=>[item.itemId,item] as const))).values()]
+}
+
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound, onWorkflowMismatch }: {
   workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
   onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
+  onWorkflowMismatch?: () => void;
 }) {
   const [detail, setDetail] = useState<RepairTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -29,6 +37,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const [instructions, setInstructions] = useState('')
   const [feedback, setFeedback] = useState('')
   const [feedbackItemIds, setFeedbackItemIds] = useState<string[]>([])
+  const [frozenFeedbackItems, setFrozenFeedbackItems] = useState<RepairTaskDetail['latestAttempt']['input']['items']>([])
+  const loadedFeedbackScope=useRef('')
   const [feedbackCandidates, setFeedbackCandidates] = useState<RepairCandidatesResponse | null>(null)
   const [feedbackCandidatesLoading, setFeedbackCandidatesLoading] = useState(false)
   const [feedbackCandidatesError, setFeedbackCandidatesError] = useState('')
@@ -38,6 +48,10 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const requestPayloadKey = useRef('')
   const requestSequence = useRef(0)
   const activeTask = useRef<{ taskId: string; active: boolean } | null>(null)
+  const workflowMismatch = useRef(onWorkflowMismatch)
+  workflowMismatch.current = onWorkflowMismatch
+  const feedbackHasTarget = !!detail?.latestAttempt.input.items[0]?.context?.targetSnapshot
+  const feedbackHistory = feedbackHasTarget || includeHistorical
 
   useEffect(() => {
     let current = true
@@ -49,7 +63,11 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     const read = historyPage === 1 ? repairBatches.task(taskId) : repairBatches.task(taskId, historyPage)
     read.then(result => {
       if (!current) return
-      if (result.workflowId !== workflowId || result.taskId !== taskId) { activeTask.current = { taskId, active: false }; setTaskError('此任务不属于当前工作流'); return }
+      if (result.workflowId !== workflowId || result.taskId !== taskId) {
+        activeTask.current = { taskId, active: false }; setTaskError('此任务不属于当前工作流')
+        if (result.workflowId !== workflowId) workflowMismatch.current?.()
+        return
+      }
       setDetail(result)
       const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase) || !!result.automaticProgress && result.automaticProgress.completedBatches < result.automaticProgress.totalBatches && ['review', 'no_change'].includes(result.latestAttempt.phase)
       activeTask.current = { taskId, active }
@@ -68,12 +86,31 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     let current = true
     setFeedbackCandidatesLoading(true)
     setFeedbackCandidatesError('')
-    repairBatches.candidates(workflowId, { state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical })
-      .then(result => { if (current) setFeedbackCandidates(result) })
+    repairBatches.candidates(workflowId, { metadataPage: 1, includeTasks: false, ...(feedbackHasTarget ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: feedbackHistory })
+      .then(async result => {
+        if (!current || !detail) return
+        const key=`${taskId}:${detail.latestAttempt.revision}`
+        if(loadedFeedbackScope.current!==key){
+          const originals=feedbackItems(detail)
+          const items=new Map(originals.map(item=>[item.itemId,item]))
+          if(detail.latestAttempt.input.automation?.roundId&&items.size<(detail.scopeItemCount??0)){
+            for(let page=1;page<=(detail.revisionPage?.totalPages??1);page++){
+              if(page===detail.revisionPage?.page)continue
+              const historical=await repairBatches.task(taskId,page)
+              if(historical.taskId!==taskId||historical.latestAttempt.revision!==detail.latestAttempt.revision)throw new Error('任务版本已变化，请返回后重新核对。')
+              for(const item of feedbackItems(historical))if(!items.has(item.itemId))items.set(item.itemId,item)
+            }
+            if(items.size<(detail.scopeItemCount??0))throw new Error('完整原建议尚未读取，请重试；不会只取最后一批。')
+          }
+          if(!current)return
+          setFrozenFeedbackItems([...items.values()]);setFeedbackItemIds([...items.keys()]);loadedFeedbackScope.current=key
+        }
+        setFeedbackCandidates(result)
+      })
       .catch(reason => { if (current) setFeedbackCandidatesError(repairReadError(reason)) })
       .finally(() => { if (current) setFeedbackCandidatesLoading(false) })
     return () => { current = false }
-  }, [mode, workflowId, feedbackPage, includeHistorical, sourceRefresh])
+  }, [mode, workflowId, feedbackPage, feedbackHistory, feedbackHasTarget, sourceRefresh])
 
   const inspectCandidate = (revision?: number) => {
     try {
@@ -93,7 +130,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       editorRevision.current = key
       setInstructions(detail.latestAttempt.input.instructions)
       setFeedback(detail.latestAttempt.phase === 'failed' ? detail.latestAttempt.input.feedback : '')
-      setFeedbackItemIds(detail.latestAttempt.input.items.map(item => item.itemId))
+      const originals=feedbackItems(detail);setFrozenFeedbackItems(originals);setFeedbackItemIds(originals.map(item=>item.itemId))
+      loadedFeedbackScope.current=!detail.latestAttempt.input.automation?.roundId||originals.length>=(detail.scopeItemCount??0)?key:''
       setFeedbackPage(1); setFeedbackCandidates(null); setFeedbackCandidatesError('')
       requestId.current = ''; requestPayloadKey.current = ''
     }
@@ -157,13 +195,17 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     catch (reason) { setError(repairActionFailure(reason).message) }
     finally { setBusy(false) }
   }
+  const feedbackAllowed=!!detail&&['failed','review','blocked','no_change'].includes(detail.latestAttempt.phase)
   const revise = async () => {
     if (!detail || !feedbackCandidates || !feedbackItemIds.length || feedbackCandidatesLoading || feedbackCandidatesError || taskError || busy || effectiveRecoveryAction || !canEdit || !feedbackCandidates.canEdit
-      || !detail.capabilities.generation || !['failed', 'review', 'blocked'].includes(detail.latestAttempt.phase)
+      || !detail.capabilities.generation || !feedbackAllowed || feedbackItemIds.length>feedbackCandidates.limits.maxItems
       || editorRevision.current !== `${taskId}:${detail.latestAttempt.revision}`) return
+    const target = detail.latestAttempt.input.items[0]?.context?.targetSnapshot as WorkflowSnapshotRef | undefined
+    const targetKey = target ? workflowSnapshotKey(target) : undefined
+    const items = [...frozenFeedbackItems, ...feedbackCandidates.items]
     const revisionInput = {
       workflowId, inputDigest: feedbackCandidates.inputDigest, includeHistorical: feedbackCandidates.includeHistorical,
-      itemIds: feedbackItemIds, instructions,
+      itemIds: feedbackItemIds, instructions, ...(targetKey ? { targetSnapshotKey: targetKey, historicalItemIds: feedbackItemIds.filter(id => { const item = items.find(value => value.itemId === id); return item && itemSnapshotKey(item) !== targetKey }) } : {}),
       expectedAttemptRevision: detail.latestAttempt.revision,
       parentCandidateCommit: typeof detail.latestSuccessful?.draft?.candidateCommit === 'string' ? detail.latestSuccessful.draft.candidateCommit : null,
       feedback: feedback.trim(),
@@ -190,22 +232,22 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   }
 
   if (mode === 'feedback' && detail) {
-    const frozenItems = detail.latestAttempt.input.items
+    const frozenItems = frozenFeedbackItems
     const frozenIds = new Set(frozenItems.map(item => item.itemId))
     const selectableItems = [...frozenItems, ...(feedbackCandidates?.items ?? []).filter(item => !frozenIds.has(item.itemId))]
     const maxItems = feedbackCandidates?.limits.maxItems ?? 100
-    const readOnly = !canEdit || feedbackCandidates?.canEdit === false || !detail.capabilities.generation || !['failed', 'review', 'blocked'].includes(detail.latestAttempt.phase)
+    const readOnly = !canEdit || feedbackCandidates?.canEdit === false || !detail.capabilities.generation || !feedbackAllowed
     const blocker = busy ? '正在提交或核对任务，请稍候…' : taskError ? '任务读取失败，请先核对任务状态。'
       : !canEdit || feedbackCandidates?.canEdit === false ? '当前只有查看权限，不能生成候选。'
       : !detail.capabilities.generation ? '生成服务尚未接入，仍可查看范围与候选。'
-      : !['failed', 'review', 'blocked'].includes(detail.latestAttempt.phase) ? '当前任务状态不允许生成新一轮；可返回审核查看进度。'
+      : !feedbackAllowed ? '当前任务状态不允许生成新一轮；可返回审核查看进度。'
       : editorRevision.current !== `${taskId}:${detail.latestAttempt.revision}` ? '任务已进入新轮次，请返回审核后重新确认范围。'
       : effectiveRecoveryAction ? error || '原候选结果尚未确认，请先核对原结果。'
       : feedbackCandidatesLoading ? '正在读取本轮可选建议…'
       : feedbackCandidatesError || !feedbackCandidates ? '建议读取失败，请重试后生成。'
-      : !feedbackItemIds.length ? '请至少保留一条建议。' : ''
+      : !feedbackItemIds.length ? '请至少保留一条建议。' : feedbackItemIds.length>maxItems ? `单次最多 ${maxItems} 条建议，请明确调整本版范围；历史版本保留。` : ''
 
-    return <RepairWorkspace navigation={false} stage={1} title="调整范围与要求，生成下一轮候选" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) inspectCandidate() }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
+    return <RepairWorkspace navigation={false} stage={1} title="调整建议与要求" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) inspectCandidate() }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
     <p className="text-xs leading-5 text-muted-foreground">选择建议即可生成；修复要求与修改反馈均为选填。新候选保留原任务基线，不会应用或部署。</p>
     <p className="text-xs text-muted-foreground">{detail.latestSuccessful ? `下一轮从最新成功候选 v${detail.latestSuccessful.revision} 继续；查看历史版本不会改变生成基准。` : '当前尚无成功候选，下一轮从原任务基线开始。'}</p>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]"><fieldset className="rounded-lg border border-input bg-card p-5">
@@ -216,7 +258,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
         const title = frozenItemTitle(item)
         return <label key={item.itemId} className="flex items-start gap-3 rounded-lg border border-input/50 p-3 text-xs text-muted-foreground">
           <input type="checkbox" aria-label={`选择修订项 ${title}`} checked={feedbackItemIds.includes(item.itemId)}
-            disabled={busy || readOnly || feedbackCandidatesLoading || (!feedbackItemIds.includes(item.itemId) && feedbackItemIds.length >= maxItems)}
+            disabled={busy || readOnly || feedbackCandidatesLoading && (!frozenIds.has(item.itemId) || loadedFeedbackScope.current !== editorRevision.current) || (!feedbackItemIds.includes(item.itemId) && feedbackItemIds.length >= maxItems)}
             onChange={() => setFeedbackItemIds(current => current.includes(item.itemId)
               ? current.filter(id => id !== item.itemId) : [...current, item.itemId])}
             className="mt-0.5 h-4 w-4 rounded border-input accent-primary" />
@@ -241,7 +283,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm">
       <div><p className="text-sm font-semibold text-foreground">本轮已选 {feedbackItemIds.length} 条 · 生成后进入审核</p>
         <p id="repair-generation-help" role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || notice || '修复要求与反馈选填，留空将沿用所选建议。'}</p>
-      </div><div className="flex flex-wrap gap-2">{recoveryButton}<button type="button" className={primary} aria-describedby="repair-generation-help" disabled={!!blocker} onClick={() => void revise()}>{busy ? '处理中…' : '确认生成下一版'}</button></div>
+      </div><div className="flex flex-wrap gap-2">{recoveryButton}<button type="button" className={primary} aria-describedby="repair-generation-help" disabled={!!blocker} onClick={() => void revise()}>{busy ? '处理中…' : '生成新版本'}</button></div>
     </footer>
   </RepairWorkspace>
   }

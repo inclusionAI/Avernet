@@ -7,6 +7,8 @@ import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 // 建群表单重度使用 Radix Select/Popover 等组件，jsdom 下异步渲染开销大：
 // 并行全量（--maxWorkers=50%）下个别用例在默认 30s 随机临界超时。
@@ -101,6 +103,7 @@ beforeEach(() => {
       summary: { participants: 1, nodes: 1, initial_nodes: [] },
       participants: [{ binding: 'role-1', display_name: '助手', required: true, assigned: false }],
       errors: [],
+      warnings: [],
     },
   });
 });
@@ -159,6 +162,7 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
     expect(gs.createGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         strategy: 'chat',
+        humanMentionNotifyMode: 'all',
         name: '我的群',
         driverBotUuid: 'b1',
         originator: 'actor-1',
@@ -179,10 +183,13 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('gap-3');
 
   const autoReply = screen.getByRole('switch', { name: '自动回复' });
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(screen.getByTestId('free-chat-settings-grid')).toContainElement(notifyField);
+  expect(autoReply.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   expect(autoReply).toBeChecked();
-  expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('lg:whitespace-nowrap');
+  expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('text-muted-foreground');
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass(
-    'grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)]',
+    'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]',
   );
 
   fireEvent.click(autoReply);
@@ -199,12 +206,73 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   );
 });
 
+it.each([
+  ['自由聊天', 'chat', '不通知', 'none'],
+  ['任务协作', 'manager_worker', '仅群主 Bot', 'driver_bot_only'],
+  ['自定义协作', 'state_machine', '不通知', 'none'],
+] as const)('%s 提交所选 @Human 通知来源', async (label, strategy, option, mode) => {
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g-notify' } });
+  renderModal({ activeIdentity: botIdentity });
+  fireEvent.click(screen.getByRole('radio', { name: label }));
+  if (strategy === 'state_machine') {
+    fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [assistant]' } });
+    fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+    await screen.findByRole('button', { name: '重新编辑' });
+    fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  } else if (strategy === 'manager_worker') {
+    await selectLeader('主节点（Manager Bot）', /我 Bot/);
+  }
+  const field = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(field).toHaveTextContent('所有成员');
+  await selectLeader('@Human 通知来源', new RegExp(`^${option}$`));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({ strategy, humanMentionNotifyMode: mode })),
+  );
+});
+
+it('重新打开建群弹窗将通知来源重置为所有成员', async () => {
+  const props = { activeIdentity: botIdentity, onClose: jest.fn(), onCreated: jest.fn() };
+  const view = render(<CreateGroupModal open {...props} />);
+  await selectLeader('@Human 通知来源', /^不通知$/);
+  fireEvent.click(screen.getByRole('radio', { name: '任务协作' }));
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('不通知');
+  view.rerender(<CreateGroupModal open={false} {...props} />);
+  view.rerender(<CreateGroupModal open {...props} />);
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('所有成员');
+});
+
+it('任务执行建群隐藏通知来源且不提交该字段', async () => {
+  gs.createGroupViaExecute.mockReset().mockResolvedValue({ ok: true, data: { groupId: 'g-execute' } });
+  renderModal({ activeIdentity: botIdentity });
+  await selectLeader('@Human 通知来源', /^不通知$/);
+  fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  expect(screen.queryByRole('button', { name: '@Human 通知来源' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [assistant]' } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  await screen.findByRole('button', { name: '重新编辑' });
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('不通知');
+  fireEvent.click(screen.getByRole('checkbox', { name: '是否以任务执行' }));
+  expect(screen.queryByRole('button', { name: '@Human 通知来源' })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() => expect(gs.createGroupViaExecute).toHaveBeenCalled());
+  expect(gs.createGroupViaExecute.mock.calls[0][0]).not.toHaveProperty('humanMentionNotifyMode');
+  expect(gs.createGroup).not.toHaveBeenCalled();
+});
+
 it('task_master_slave uses the selected manager as driver_bot_uuid', async () => {
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
   renderModal();
 
   fireEvent.click(screen.getByRole('radio', { name: '任务协作' }));
   expect(screen.queryByText('主节点统一推进任务，其余成员作为 Worker 配合执行。')).not.toBeInTheDocument();
+  const manager = screen.getByRole('button', { name: '主节点（Manager Bot）' });
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(manager.parentElement?.parentElement?.parentElement).toContainElement(notifyField);
+  expect(manager.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('主节点（Manager Bot）', /Alpha/);
   await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
@@ -292,6 +360,7 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
       summary: { initial_nodes: ['node-1'] },
       participants: [{ binding: 'role-1', display_name: 'Alpha', required: true }],
       errors: [],
+      warnings: [],
       graph: {
         graph_mode: 'acyclic',
         nodes: [
@@ -332,7 +401,45 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('lg:overflow-y-auto');
   expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-[420px]', 'pb-2');
   expect(screen.getByText('协同剧本')).toHaveClass('text-xs', 'font-semibold');
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  const scriptFrame = screen.getByText('协同剧本').parentElement?.parentElement;
+  expect(scriptFrame).toHaveClass('border');
+  expect(scriptFrame).not.toContainElement(notifyField);
+  expect(scriptFrame).toContainElement(screen.getByRole('button', { name: '重新编辑' }));
+  expect(scriptFrame?.parentElement).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
+  expect(scriptFrame?.nextElementSibling).toContainElement(notifyField);
   expect(screen.getByRole('button', { name: '重新编辑' })).toHaveClass('text-xs');
+});
+
+it('previews a validation-only Loop but blocks creation until the server permits execution', async () => {
+  const response = JSON.parse(readFileSync(resolve(__dirname, '../../../../../../bcs/tests/fixtures/fixed_loop_preview.json'), 'utf8'));
+  const validate = jest.mocked(collaborationDefinitionService.validate);
+  validate.mockResolvedValueOnce({ ok: true, data: response });
+  renderModal({ activeIdentity: botIdentity });
+  fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  const yaml = readFileSync(resolve(__dirname, '../../../../../../bcs/tests/fixtures/fixed_loop_authoring.yaml'), 'utf8');
+  fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: yaml } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  expect(await screen.findByText(/暂不能创建协作群/)).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('VALIDATION_ONLY_FEATURE');
+  expect(screen.getByRole('status')).toHaveTextContent('$.runtime.state_machine.version');
+  expect(screen.getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  expect(gs.createGroup).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '重新编辑' }));
+  validate.mockResolvedValueOnce({ ok: true, data: { ...response, warnings: [] } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  await waitFor(() => expect(screen.queryByText(/暂不能创建协作群/)).not.toBeInTheDocument());
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'loop-group' } });
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() => expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({
+    definitionYaml: yaml, strategy: 'state_machine', participantBindings: [{ binding: 'writer', actor_ids: ['b1'] }],
+  })));
 });
 
 it('shows YAML validation errors on the left side of the footer action row', async () => {
@@ -344,6 +451,7 @@ it('shows YAML validation errors on the left side of the footer action row', asy
       summary: { participants: 0, nodes: 0, initial_nodes: [] },
       participants: [],
       errors: [{ code: 'INVALID_YAML', path: '$', message: '角色定义无效' }],
+      warnings: [],
     },
   });
   renderModal({ activeIdentity: botIdentity });
@@ -352,7 +460,7 @@ it('shows YAML validation errors on the left side of the footer action row', asy
   fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: invalid' } });
   fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
 
-  const error = await screen.findByText('角色定义无效');
+  const error = await screen.findByText(/角色定义无效/);
   const footer = screen.getByTestId('create-group-modal-footer');
   expect(footer).toContainElement(error);
   expect(screen.getByTestId('create-group-modal-body')).not.toContainElement(error);
@@ -387,6 +495,126 @@ it('disables confirm until at least one participant is selected', async () => {
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+});
+
+it('协作目标智能推荐落地后自动全选推荐结果', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      {
+        id: 'b1',
+        name: 'Alpha',
+        online: true,
+        status: 'online',
+        reachability: 'reachable',
+        recommendScore: 0.9,
+        shortProfile: '值班相关',
+      },
+    ],
+  });
+  renderModal();
+
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '提升值班效率' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+
+  // 推荐链路含 350ms 防抖，且本组件在 jsdom 下渲染开销大，放宽 waitFor 超时。
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByTestId('group-participant-selected')).toHaveTextContent('Alpha');
+});
+
+it('再次智能推荐不勾选用户取消过的 Bot，新出现的结果仍自动选中', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      { id: 'b1', name: 'Alpha', online: true, status: 'online', reachability: 'reachable', recommendScore: 0.9 },
+      { id: 'b2', name: 'Beta', online: true, status: 'online', reachability: 'reachable', recommendScore: 0.8 },
+    ],
+  });
+  renderModal();
+
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '值班' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 2 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+
+  // 用户取消 Alpha：再次推荐时取消优先，不应被自动勾回。
+  fireEvent.click(within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }));
+  await waitFor(
+    () => {
+      expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByTestId('group-participant-selected')).not.toHaveTextContent('Alpha');
+
+  // 修改目标再次智能推荐：Alpha 保持取消，Beta 保持选中。
+  fireEvent.change(screen.getByLabelText('协作目标'), { target: { value: '值班响应' } });
+  fireEvent.click(screen.getByRole('button', { name: '智能推荐可协作 Bot' }));
+  await waitFor(
+    () => {
+      expect(
+        within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }),
+      ).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByText('已选 1 个')).toBeInTheDocument();
+  expect(screen.getByTestId('group-participant-selected')).toHaveTextContent('Beta');
+  expect(screen.getByTestId('group-participant-selected')).not.toHaveTextContent('Alpha');
+});
+
+it('按画像筛选搜索结果不自动选中', async () => {
+  cs.listCandidates.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
+  cs.recommendCandidates.mockResolvedValue({
+    ok: true,
+    data: [
+      {
+        id: 'b1',
+        name: 'Alpha',
+        online: true,
+        status: 'online',
+        reachability: 'reachable',
+        recommendScore: 0.9,
+        shortProfile: '值班相关',
+      },
+    ],
+  });
+  renderModal();
+
+  fireEvent.click(screen.getByRole('button', { name: '可协作 Bot' }));
+  fireEvent.click(screen.getByText('按画像筛选'));
+  const profileSearchInput = await screen.findByLabelText('按画像关键词搜索可协作 Bot');
+  fireEvent.change(profileSearchInput, { target: { value: '值班' } });
+
+  await waitFor(
+    () => {
+      expect(
+        within(screen.getByTestId('group-participant-list')).getByRole('button', { name: /Alpha/ }),
+      ).toBeInTheDocument();
+    },
+    { timeout: 5000 },
+  );
+  expect(screen.getByText('已选 0 个')).toBeInTheDocument();
 });
 
 it('keeps the create actions outside the scroll region after selecting a bot', async () => {

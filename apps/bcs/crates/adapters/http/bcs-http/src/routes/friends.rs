@@ -24,6 +24,7 @@ pub async fn create_friend_request(
     let caller_actor_id =
         match resolve_caller(&state, &headers, &uri, req.from_bot.as_deref()).await {
             Ok(caller) => caller,
+            Err(ResolveCallerError::Authentication(error)) => return error.into_response(),
             Err(ResolveCallerError::NoCaller) => {
                 return error_response(
                     StatusCode::UNAUTHORIZED,
@@ -47,6 +48,9 @@ pub async fn create_friend_request(
                     StatusCode::FORBIDDEN,
                     format!("Forbidden: not authorized to act as bot '{}'", actor_id),
                 );
+            }
+            Err(ResolveCallerError::AuthorityFailed) => {
+                return authority_failed_response();
             }
         };
 
@@ -103,6 +107,7 @@ pub async fn list_friend_requests(
     let caller_actor_id =
         match resolve_caller(&state, &headers, &uri, query.bot_uuid.as_deref()).await {
             Ok(caller) => caller,
+            Err(ResolveCallerError::Authentication(error)) => return error.into_response(),
             Err(ResolveCallerError::NoCaller) => {
                 return error_response(
                     StatusCode::UNAUTHORIZED,
@@ -126,6 +131,9 @@ pub async fn list_friend_requests(
                     StatusCode::FORBIDDEN,
                     format!("Forbidden: not authorized to act as bot '{}'", actor_id),
                 );
+            }
+            Err(ResolveCallerError::AuthorityFailed) => {
+                return authority_failed_response();
             }
         };
 
@@ -262,9 +270,20 @@ pub async fn list_friends(
 #[derive(Debug)]
 enum ResolveCallerError {
     NoCaller,
+    Authentication(crate::error::HttpAdapterError),
     NoUserIdentity,
     BotNotFound(String),
     OwnershipDenied(String),
+    AuthorityFailed,
+}
+
+/// The live authority read failed; internal, never a
+/// deny-masquerading 403.
+fn authority_failed_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "bot authority lookup failed",
+    )
 }
 
 #[derive(Debug)]
@@ -272,6 +291,10 @@ enum ActorOwnershipError {
     NoUserIdentity,
     BotNotFound,
     Denied,
+    /// The live authority read failed — surfaced as an
+    /// internal error, never a deny-as-403 (bot-authority
+    /// plan Task 6.5).
+    AuthorityFailed,
 }
 
 struct ResolvedRequestReceiverCaller {
@@ -285,7 +308,7 @@ async fn resolve_caller(
     uri: &Uri,
     requested_actor_id: Option<&str>,
 ) -> Result<String, ResolveCallerError> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(actor_id);
     }
 
@@ -297,6 +320,9 @@ async fn resolve_caller(
             }
             Err(ActorOwnershipError::BotNotFound) => {
                 return Err(ResolveCallerError::BotNotFound(actor_id.to_string()));
+            }
+            Err(ActorOwnershipError::AuthorityFailed) => {
+                return Err(ResolveCallerError::AuthorityFailed);
             }
             Err(ActorOwnershipError::Denied) => {}
         }
@@ -313,7 +339,7 @@ async fn resolve_request_receiver_caller(
     request_id: &str,
     action: &str,
 ) -> Result<ResolvedRequestReceiverCaller, Response> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(ResolvedRequestReceiverCaller {
             actor_id,
             request_to_bot: None,
@@ -350,6 +376,9 @@ async fn resolve_request_receiver_caller(
                 action, request_to_bot
             ),
         )),
+        Err(ActorOwnershipError::AuthorityFailed) => {
+            Err(authority_failed_response())
+        }
     }
 }
 
@@ -359,7 +388,7 @@ async fn resolve_friends_list_caller(
     uri: &Uri,
     target_actor_id: &str,
 ) -> Result<String, Response> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(actor_id);
     }
 
@@ -377,6 +406,9 @@ async fn resolve_friends_list_caller(
             StatusCode::FORBIDDEN,
             format!("Not authorized to access bot '{}'", target_actor_id),
         )),
+        Err(ActorOwnershipError::AuthorityFailed) => {
+            Err(authority_failed_response())
+        }
     }
 }
 
@@ -406,15 +438,38 @@ async fn check_actor_ownership(
         .await
     {
         Ok(bot) => {
-            if bot
-                .created_by
-                .as_deref()
-                .map(|owner| owner == staff_no)
-                .unwrap_or(true)
+            // Human self access is an identity check, not a Bot management edge.
+            if bot.actor_kind == bcs_service_api::ActorKind::Human {
+                return if actor_id == format!("human_{staff_no}") {
+                    Ok(())
+                } else {
+                    Err(ActorOwnershipError::Denied)
+                };
+            }
+
+            // Control rule (bot-authority plan Task 6.5):
+            // the Human→Bot leg is the CURRENT `can_manage`
+            // edge through the live authority hook — the
+            // historical `created_by` claim (including its
+            // `None` auto-claim) no longer authorizes
+            // acting as a Bot here. A failing read is an
+            // internal error, never a deny-as-403.
+            match state
+                .services
+                .bot_authority_hook
+                .can_manage(&staff_no, actor_id)
+                .await
             {
-                Ok(())
-            } else {
-                Err(ActorOwnershipError::Denied)
+                Ok(true) => Ok(()),
+                Ok(false) => Err(ActorOwnershipError::Denied),
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        actor_id = %actor_id,
+                        "bot authority lookup failed on friends route"
+                    );
+                    Err(ActorOwnershipError::AuthorityFailed)
+                }
             }
         }
         Err(BotUseCaseError::Service(
@@ -424,7 +479,7 @@ async fn check_actor_ownership(
     }
 }
 
-async fn optional_caller_from_token(state: &HttpAppState, headers: &HeaderMap) -> Option<String> {
+async fn optional_caller_from_token(state: &HttpAppState, headers: &HeaderMap) -> Result<Option<String>, crate::error::HttpAdapterError> {
     state.bot_uuid_from_headers(headers).await
 }
 
@@ -509,4 +564,8 @@ fn error_response(status: StatusCode, message: impl Into<String>) -> Response {
         })),
     )
         .into_response()
+}
+
+impl From<crate::error::HttpAdapterError> for ResolveCallerError {
+    fn from(error: crate::error::HttpAdapterError) -> Self { Self::Authentication(error) }
 }

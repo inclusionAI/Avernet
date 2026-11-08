@@ -1,10 +1,10 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * GroupSessionView —— coop_group 节点的执行详情：群成员 + 群消息明细。
- * GroupDrillDownPanel —— 多个 coop_group 节点的左侧并列 Tab 容器。
+ * V2 起由副屏 L2(TaskNodePanelV2)整体吸收内嵌;旧的左侧并列 Tab rail 容器(GroupDrillDownPanel)已退役。
  */
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Close, Users } from './icons';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft } from './icons';
 import { Empty, SectionCard } from './theme';
 import { C } from './tokens';
 import { TruncatedText } from './TruncatedText';
@@ -337,8 +337,12 @@ const ChatBubble: React.FC<{ msg: GroupMessage }> = ({ msg }) => {
   const collapsed = collapsible && !expanded;
   const renderedContent = renderableSource(msg.content) ?? msg.content;
   const displayContent = collapsed ? truncateText(renderedContent, MESSAGE_DISPLAY_CHAR_LIMIT) : renderedContent;
+  const timestampMs = new Date(msg.timestamp).getTime();
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 0' }}>
+    <div
+      data-ts={Number.isNaN(timestampMs) ? undefined : timestampMs}
+      style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 0' }}
+    >
       <div
         style={{
           width: 28,
@@ -468,7 +472,9 @@ export const GroupSessionView: React.FC<{
   apiBaseUrl: string;
   userId?: string;
   onBack: () => void;
-}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack }) => {
+  backLabel?: string;
+  refreshVersion?: number;
+}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack, backLabel = '返回任务节点', refreshVersion = 0 }) => {
   const groupId = node.groupId;
   const sessionId = node.sessionId;
   // 下钻通道按物理 session 形态判定:协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId。
@@ -480,18 +486,44 @@ export const GroupSessionView: React.FC<{
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [membersExpanded, setMembersExpanded] = useState(false);
   const [noMessagePermission, setNoMessagePermission] = useState(false);
+  const loadScopeRef = useRef('');
+  const hasSnapshotRef = useRef(false);
 
   const assignee = node.assignee;
+  const loadScope = JSON.stringify([
+    groupId,
+    sessionId,
+    isGroup,
+    assignee,
+    node.assigneeName,
+    node.executor,
+    bcsBaseUrl,
+    apiBaseUrl,
+    userId,
+  ]);
   useEffect(() => {
     if (!sessionId) {
+      loadScopeRef.current = '';
+      hasSnapshotRef.current = false;
       setError('节点缺少 session_id，无法下钻');
       setLoading(false);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setNoMessagePermission(false);
+    const sameScope = loadScopeRef.current === loadScope;
+    const backgroundRefresh = sameScope && hasSnapshotRef.current;
+    if (!sameScope) {
+      loadScopeRef.current = loadScope;
+      hasSnapshotRef.current = false;
+      setGroup(null);
+      setMessages([]);
+      setMembersExpanded(false);
+    }
+    if (!backgroundRefresh) {
+      setLoading(true);
+      setError(null);
+      setNoMessagePermission(false);
+    }
     // group_id 非空（群执行）→ 查群成员（预发 OpenAPI；传入 bcsBaseUrl 时兼容 BCS raw）
     // group_id 空时（单 bot，或群信息缺失）：本地用节点执行者兜底合成一条成员。
     // 后端 dashboard 返回单 bot 信息尚未实现；不兜底会导致单 bot（根节点）下钻「执行者（0）」错显。
@@ -570,17 +602,31 @@ export const GroupSessionView: React.FC<{
         if (cancelled) return;
         setNoMessagePermission(noMessagePerm);
         setMessages(sortMessagesByTimestamp(filterGroupMessages(msgs)));
+        setError(null);
+        hasSnapshotRef.current = true;
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || backgroundRefresh) return;
         setError(err instanceof Error ? err.message : '加载执行会话信息失败');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !backgroundRefresh) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [groupId, sessionId, bcsBaseUrl, apiBaseUrl, assignee, userId]);
+  }, [
+    apiBaseUrl,
+    assignee,
+    bcsBaseUrl,
+    groupId,
+    isGroup,
+    loadScope,
+    node.assigneeName,
+    node.executor,
+    refreshVersion,
+    sessionId,
+    userId,
+  ]);
 
   const memberCount = group?.participants.length ?? 0;
   const msgCount = messages.length;
@@ -616,7 +662,7 @@ export const GroupSessionView: React.FC<{
       >
         <button
           type="button"
-          aria-label="返回任务节点"
+          aria-label={backLabel}
           onClick={onBack}
           style={{
             display: 'inline-flex',
@@ -816,140 +862,3 @@ export const GroupSessionView: React.FC<{
     </div>
   );
 };
-
-export const GroupDrillDownPanel: React.FC<{
-  nodes: TaskNodeView[];
-  activeNodeId: string;
-  bcsBaseUrl: string;
-  apiBaseUrl: string;
-  userId?: string;
-  onSelect: (nodeId: string) => void;
-  onClose: (nodeId: string) => void;
-}> = ({ nodes, activeNodeId, bcsBaseUrl, apiBaseUrl, userId, onSelect, onClose }) => {
-  const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
-  const activeNode = nodes.find((item) => item.id === activeNodeId) ?? nodes[0];
-  if (!activeNode) return <Empty description="暂无协作群执行详情" minHeight={180} />;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        minHeight: 0,
-        overflow: 'hidden',
-        background: C.surface,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          minHeight: 48,
-          padding: '6px 8px',
-          borderBottom: `1px solid ${C.border}`,
-          background: C.surfaceRaised,
-          overflowX: 'auto',
-          flexShrink: 0,
-        }}
-      >
-        {nodes.map((node) => {
-          const active = node.id === activeNode.id;
-          return (
-            <div
-              key={node.id}
-              role="tab"
-              aria-selected={active}
-              tabIndex={0}
-              onClick={() => onSelect(node.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onSelect(node.id);
-                }
-              }}
-              style={{
-                position: 'relative',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 190,
-                minWidth: 190,
-                maxWidth: 190,
-                minHeight: 32,
-                padding: '5px 28px',
-                border: 0,
-                borderRadius: 0,
-                background: 'transparent',
-                color: active ? C.primary : C.textSecondary,
-                cursor: 'pointer',
-                fontSize: 11,
-                transition: 'color 150ms ease-out',
-                flexShrink: 0,
-                boxSizing: 'border-box',
-              }}
-            >
-              <button
-                type="button"
-                aria-label={`关闭 ${node.name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClose(node.id);
-                }}
-                onMouseEnter={() => setHoveredTabId(node.id)}
-                onMouseLeave={() => setHoveredTabId(null)}
-                style={{
-                  position: 'absolute',
-                  left: 4,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 20,
-                  height: 20,
-                  padding: 0,
-                  border: 0,
-                  borderRadius: 5,
-                  background: 'transparent',
-                  color: active ? C.primary : C.textSecondary,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
-              >
-                {hoveredTabId === node.id ? <Close size={14} /> : <Users size={15} />}
-              </button>
-              <TruncatedText
-                value={node.name}
-                maxLength={20}
-                as="div"
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  textAlign: 'center',
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <GroupSessionView
-          node={activeNode}
-          bcsBaseUrl={bcsBaseUrl}
-          apiBaseUrl={apiBaseUrl}
-          userId={userId}
-          onBack={() => onClose(activeNode.id)}
-        />
-      </div>
-    </div>
-  );
-};
-
-// 兼容旧引用
-export const GroupDrillDown = GroupSessionView;

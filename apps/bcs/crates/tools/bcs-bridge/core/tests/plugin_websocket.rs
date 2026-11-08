@@ -71,11 +71,7 @@ impl BridgePeer {
         let bot_id = connect["params"]["bot_id"].as_str().expect("bot.connect bot_id").to_owned();
         // The bridge always requests V3; the peer negotiates its own version.
         assert_eq!(connect["params"]["protocol_version"], 3);
-        if self.config.bots.iter().any(|bot| bot.engine == "qwenwork") {
-            assert_eq!(connect["params"]["client_kind"], "native_mcp");
-        } else {
-            assert!(connect["params"]["client_kind"].is_null());
-        }
+        assert_eq!(connect["params"]["client_kind"], "native_mcp");
         match expected_token {
             Some(token) => assert_eq!(connect["params"]["token"], token),
             None => assert!(connect["params"].get("token").is_none()
@@ -93,16 +89,18 @@ impl BridgePeer {
 }
 
 #[tokio::test]
-async fn qwenwork_requests_native_mcp_without_changing_other_engine_handshakes() {
-    let mut peer = BridgePeer::one_bot().await;
-    peer.config.bots[0].engine = "qwenwork".into();
-    // Reuse the fake CLI engine; this test isolates the outgoing handshake.
-    let mut registry = EngineRegistry::builtin();
-    registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom("qwenwork", "unused", vec![]));
-    let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
-    let (_, shutdown, task) = peer.start_state(state);
-    let _socket = peer.accept("bot-a", None).await;
-    stop(shutdown, task).await;
+async fn all_engines_request_native_mcp() {
+    for engine in ["claude-code", "codex", "qwenwork", "cfuse-cc", "cfuse-codex", "custom-engine"] {
+        let mut peer = BridgePeer::one_bot().await;
+        peer.config.bots[0].engine = engine.into();
+        // Reuse the fake CLI engine; this test isolates the outgoing handshake.
+        let mut registry = EngineRegistry::builtin();
+        registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom(engine, "unused", vec![]));
+        let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
+        let (_, shutdown, task) = peer.start_state(state);
+        let _socket = peer.accept("bot-a", None).await;
+        stop(shutdown, task).await;
+    }
 }
 
 #[tokio::test]
@@ -162,6 +160,38 @@ async fn reject_connect(peer: &BridgePeer, code: &str) {
     assert_eq!(connect["method"], "bot.connect");
     send_json(&mut socket, json!({"type":"res", "id":connect["id"], "ok":false,
         "error":{"code":code,"message":"synthetic connection rejection","retryable":false}})).await;
+}
+
+#[tokio::test]
+async fn default_hook_idle_result_error_preserves_safe_cause_on_bcn_uplink() {
+    for version in [2, 3] {
+        let mut peer = BridgePeer::with_version(version).await;
+        peer.config.bots[0].engine_bin = Some("python3".into());
+        assert!(peer.config.bots[0].engine_options.is_empty(), "exercise the default completion mode");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_cc_hook_idle.py");
+        let mut engines = EngineRegistry::builtin();
+        engines.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom(
+            "claude-code", "python3", vec![fixture.to_string_lossy().into_owned(), "rate_limit_error".into()]));
+        let state = Arc::new(AppState::new(peer.config.clone(), &engines).unwrap());
+        let (_, shutdown, task) = peer.start_state(state);
+        let mut socket = peer.accept("bot-a", None).await;
+        send_json(&mut socket, chat_send("error-request", "error-run", "group-a:session-a", "test failure")).await;
+        let ack = recv_application(&mut socket, |frame| frame["id"] == "error-request").await;
+        assert_eq!(ack["ok"], true);
+        let terminal = recv_application(&mut socket, |frame| {
+            matches!(frame["event"].as_str(), Some("chat" | "chat.event"))
+                && matches!(frame["payload"]["state"].as_str(), Some("error" | "final"))
+        }).await;
+        let payload = &terminal["payload"];
+        assert_eq!(payload["state"], "error");
+        assert_eq!(payload["errorKind"], "runtime_error");
+        assert_eq!(payload["errorMessage"],
+            "engine exited: upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later");
+        assert_eq!(payload[if version == 3 { "runId" } else { "run_id" }], "error-run");
+        if version == 3 { assert_eq!(payload["sessionId"], "group-a:session-a"); }
+        assert!(!terminal.to_string().contains("PRIVATE"));
+        stop(shutdown, task).await;
+    }
 }
 
 #[tokio::test]
@@ -511,6 +541,8 @@ async fn v3_interaction_round_trip_resolves_and_finishes_the_run() {
 fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> ProviderConfig {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_cc_upstream.py");
     ProviderConfig {
+        provider_auth: None,
+        api_url: None,
         provider_id: "upstream-test".into(),
         mode: ConnectionMode::Plugin,
         listen: None,
@@ -528,6 +560,8 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
             let cwd = dir.path().join(name);
             std::fs::create_dir_all(&cwd).unwrap();
             BotConfig {
+                agent_code: None,
+                bot_slug: None,
                 provider_bot_ref: (*name).into(),
                 bot_id: Some(format!("bot-{}", (b'a' + index as u8) as char)),
                 token: None,
@@ -669,4 +703,39 @@ async fn stop(shutdown: CancellationToken, task: JoinHandle<anyhow::Result<()>>)
     shutdown.cancel();
     tokio::time::timeout(IO_TIMEOUT, task).await
         .expect("plugin server ignored shutdown").expect("plugin task panicked").unwrap();
+}
+
+#[tokio::test]
+async fn subbot_identity_failure_keeps_its_sibling_running() {
+    let dir=tempfile::tempdir().unwrap();
+    let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config=config_for(&dir,listener.local_addr().unwrap(), &["a","b"]);
+    config.provider_auth=Some("agentpass-subbots".into());
+    for (bot,slug) in config.bots.iter_mut().zip(["a","b"]) {
+        bot.agent_code=Some("parent".into());bot.bot_slug=Some(slug.into());
+        bot.provider_bot_ref=format!("parent:{slug}");bot.token=Some(format!("static-{slug}"));
+    }
+    let peer=BridgePeer {dir,listener,config,version:3};
+    let (_,shutdown,task)=peer.start().await;
+    let mut sockets=Vec::new();
+    for _ in 0..2 {
+        let (stream,_)=tokio::time::timeout(IO_TIMEOUT,peer.listener.accept()).await.unwrap().unwrap();
+        let mut socket=accept_async(stream).await.unwrap();
+        let connect=recv_json(&mut socket).await;
+        sockets.push((socket,connect));
+    }
+    let (mut b,b_req)=sockets.pop().unwrap();
+    let (mut a,a_req)=sockets.pop().unwrap();
+    if b_req["params"]["bot_id"]=="bot-a" { std::mem::swap(&mut a,&mut b); }
+    let (a_req,b_req)=if a_req["params"]["bot_id"]=="bot-a" {(a_req,b_req)} else {(b_req,a_req)};
+    send_json(&mut b,json!({"type":"res","id":b_req["id"],"ok":true,"payload":{
+        "bot_uuid":"bot-b","token":"static-b","is_new":false,"protocol_version":3,"min_supported_version":1
+    }})).await;
+    send_json(&mut a,json!({"type":"res","id":a_req["id"],"ok":false,
+        "error":{"code":"unauthorized","message":"Bot disabled","retryable":false}})).await;
+    send_json(&mut b,chat_send("sibling-request","sibling-run","group:s","Hello")).await;
+    let ack=recv_application(&mut b,|frame| frame["id"]=="sibling-request").await;
+    assert_eq!(ack["ok"],true);
+    shutdown.cancel();
+    tokio::time::timeout(IO_TIMEOUT,task).await.unwrap().unwrap().unwrap_err();
 }

@@ -1,4 +1,5 @@
 """Fixtures for ExpertChat core tests."""
+from tests.community.bot_address_fakes import support_legacy_locator
 import pytest
 from unittest.mock import MagicMock
 
@@ -39,7 +40,7 @@ def mock_bot_repo():
         "status": "ACTIVE",
         "binding_id": 12345
     })
-    return repo
+    return support_legacy_locator(repo)
 
 
 @pytest.fixture

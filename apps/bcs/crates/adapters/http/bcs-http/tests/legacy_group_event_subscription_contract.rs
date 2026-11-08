@@ -190,6 +190,7 @@ async fn legacy_create_group_delegates_inline_subscriptions_to_v1_application() 
                 .body(Body::from(
                     json!({
                         "label": "Webhook group",
+                        "human_mention_notify_mode": "driver_bot_only",
                         "context": "diagnostic",
                         "driver_bot": "driver-bot",
                         "participants": [{
@@ -244,6 +245,7 @@ async fn legacy_create_group_delegates_inline_subscriptions_to_v1_application() 
     }
     match command.group {
         CreateGroupSpec::Collaboration(group) => {
+            assert_eq!(group.human_mention_notify_mode, bcs_service_api::HumanMentionNotifyMode::DriverBotOnly);
             assert_eq!(group.driver_bot_uuid, "driver-bot");
             assert_eq!(group.participants.len(), 1);
         }

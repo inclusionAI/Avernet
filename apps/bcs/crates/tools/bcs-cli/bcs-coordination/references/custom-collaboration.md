@@ -14,7 +14,7 @@
 
 - 生成或修改自定义协作 YAML 前，必须读取 [custom-collaboration-schema.md](custom-collaboration-schema.md)。
 - YAML 中只声明逻辑 participant binding，不写真实 Bot UUID。运行或创建群时，再通过 CLI 参数把逻辑角色绑定到当前 session 或发现结果中的 Bot。
-- 不根据 YAML 外观猜测有效性。设计交付或建群前必须通过 `bcs-cli collaboration validate`；当前 session 一次性运行由 `bcs collaborate run` 的服务端接口执行同一套 authoring 和运行时校验。
+- 不根据 YAML 外观猜测有效性。设计交付或建群前必须通过服务端校验：文件用 `bcs-cli collaboration validate`，已保存的 Draft 可校验指定版本；当前 session 一次性运行由 `bcs collaborate run` 的服务端接口执行同一套 authoring 和运行时校验。
 - 服务端固定拒绝当前运行时尚未实现的 `guard`、`action`、`output_contract`、`variables`、`events` 和 `input_schema`。`judge` 仅在当前 BCS 实例配置了 LLM provider 时可用。
 - 普通流程使用 v1 无环图；Loop 使用 v2 hierarchical，由服务端展开为无环执行图。外层图仍要求唯一零入度入口、唯一 `final_output` 出口，且所有节点从入口可达并能到达最终出口。
 - v2 可以在同一外层图中放置多个 Loop，各自维护执行次数和上一结果，通过外层 `transitions` 连接；不支持嵌套 Loop 或直接跳入另一个 Loop 的 body。具体字段及 outcome/target 区别见 [Fixed Loop](custom-collaboration-schema.md#fixed-loop)。
@@ -109,7 +109,7 @@ bcs collaboration validate "$candidate_file"
 ```
 
 8. 修复全部错误并重试，最多修复两轮。仍失败时报告校验错误，不交付或创建猜测版本。
-9. 如果用户只要求设计工作流，或尚未明确授权建群，校验通过后重新读取临时文件，在用户可见回复中提供完整 `yaml` 代码块、逻辑角色绑定表和校验摘要，并用明确问句请求确认：
+9. 如果用户只要求设计工作流，或尚未明确授权建群，校验通过后重新读取临时文件，默认在用户可见回复中提供完整 `yaml` 代码块、逻辑角色绑定表和校验摘要，并用明确问句请求确认：
 
 ```text
 自定义协作 YAML 已设计并校验通过，目前尚未创建执行群。
@@ -153,7 +153,7 @@ HTTP 请求若同时带非空 `event_subscriptions` 和 `create_initial_session=
 - 不输出顶层 `api_version`、`id` 或 `version`；这些字段由 BCS 创建群时提供。
 - 不把真实 Bot UUID、token、私密地址或运行时 participant role 写进 YAML。
 - 真实 Bot UUID 只放在 `collaborate run --binding` 或 `collaboration create --binding` 参数中，不写入 YAML。
-- 用户可见交付必须包含完整 YAML，不能用临时文件路径、工具输出或“见上文”代替。
+- 默认的设计交付包含完整 YAML，不能用临时文件路径、工具输出或“见上文”代替。
 - 执行节点只输出自己的业务产物；不要要求每个节点重复传递完整参数对象。
 
 

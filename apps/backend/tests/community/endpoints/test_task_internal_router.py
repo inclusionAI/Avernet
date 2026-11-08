@@ -11,6 +11,8 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.core.task.domain.intake import (
     IntakeTarget,
     IntakeTargetType,
@@ -34,6 +36,10 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSendResult,
+    OpenApiBotPort,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -418,26 +424,60 @@ def relay_context_expired_attempt():
     pass
 
 
-# Query surfaces are public-only. Keep the unauthenticated internal mirror from
-# being reintroduced accidentally; live/singlebox readers use /openapi/v1.
+# Authenticated mirrors of the public task read surfaces.
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/dashboard",
-    scenario="not_exposed",
-    input=CaseInput(query_params={"task_id": "task-endpoint-1"}),
-    expect=ExpectError(status=404),
+    scenario="happy_ok",
+    seed=_seed_internal_task,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"task_id": "task-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"run_id": 1, "status": "DEFINED"}},
+    ),
 )
-def dashboard_not_exposed():
+def dashboard_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/dashboard",
+    scenario="err_unauthenticated",
+    input=CaseInput(query_params={"task_id": "task-endpoint-1"}),
+    expect=ExpectError(status=401),
+)
+def dashboard_unauthenticated():
     pass
 
 
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/list",
-    scenario="not_exposed",
-    expect=ExpectError(status=404),
+    scenario="happy_ok",
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"user_id": "user-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": []},
+    ),
 )
-def list_not_exposed():
+def list_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="err_unauthenticated",
+    expect=ExpectError(status=401),
+)
+def list_unauthenticated():
     pass
 
 
@@ -676,4 +716,134 @@ def internal_revoke_happy():
     expect=ExpectError(status=401),
 )
 def internal_revoke_unauthenticated():
+    pass
+
+
+# ── 最终结果回写(不鉴权;按 root 节点 session 续写,不改任务态) ──────────────
+class _WritebackBotPort:
+    """OpenApiBotPort 替身:runner world 里该 Port 解析为 None(可选注入),
+    不能用 bind_overrides(对 None 无法建子类),直接 binder.bind 完整实例。"""
+
+    async def send_message(self, *, bot_id, message, metadata, message_id=None):
+        return BotSendResult(run_id="wb-run-endpoint-1", session_id="sess-endpoint-1")
+
+
+def _seed_writeback(world) -> None:
+    root = TaskNode(
+        node_id="task-endpoint-1",
+        task_id="task-endpoint-1",
+        status=Status.RUNNING,
+        task_spec=_DOMAIN_TASK_SPEC,
+        run_info=RuntimeInfo(
+            assignee="bot-endpoint-1",
+            extend_props={"session_id": "sess-endpoint-1", "assignee_owner_id": "owner-1"},
+        ),
+        node_run_graph=None,
+    )
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        tasks=[root],
+        task_id="task-endpoint-1",
+    )
+
+    def get_task_dashboard(_self, _task_id, _node_id=None, *, include_action_log=False):
+        return graph
+
+    bind_overrides(world, TaskServiceProtocol, {"get_task_dashboard": get_task_dashboard})
+    world.injector.binder.bind(OpenApiBotPort, to=_WritebackBotPort(), scope=None)
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/result_writeback",
+    scenario="happy_ok",
+    seed=_seed_writeback,
+    input=CaseInput(
+        json_body={"task_id": "task-endpoint-1", "message": "任务最终结果:已完成"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "task-endpoint-1",
+                "session_id": "sess-endpoint-1",
+                "run_id": "wb-run-endpoint-1",
+            },
+        },
+    ),
+)
+def result_writeback_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/result_writeback",
+    scenario="err_invalid_body",
+    input=CaseInput(json_body={}),
+    expect=ExpectError(status=422),
+)
+def result_writeback_error():
+    pass
+
+
+# ── BBS Browse-Loop manual skill-install repair trigger (internal /api/v1 face)
+_SKILL_INSTALL_RESULT = {
+    "run_id": "run_skill_install",
+    "session_id": "sess_skill_install",
+    "mode": "openclaw",
+    "status": "submitted",
+    "action": "install_skills",
+}
+
+
+def _seed_bbs_skill_install_runner(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        return _SKILL_INSTALL_RESULT
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+def _seed_bbs_skill_install_not_found(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        raise NotFound("subscription not found")
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="happy_ok",
+    seed=_seed_bbs_skill_install_runner,
+    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": _SKILL_INSTALL_RESULT},
+    ),
+)
+def bbs_skill_install_internal_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="err_subscription_not_found",
+    seed=_seed_bbs_skill_install_not_found,
+    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    expect=ExpectError(status=404),
+)
+def bbs_skill_install_internal_error():
     pass

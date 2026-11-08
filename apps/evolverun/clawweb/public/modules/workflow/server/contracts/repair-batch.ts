@@ -1,3 +1,4 @@
+import { workflowSnapshotKey, type WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { createHash } from 'node:crypto';
 import type { AutomationOrigin } from './workflow-automation.js';
 
@@ -5,6 +6,8 @@ export const REPAIR_BATCH_SCHEMA = 'workflow-repair/v2' as const;
 export const MAX_ITEMS = 100;
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_FROZEN_BYTES = 1024 * 1024;
+// Separate bounded storage/transport budget; core inputs keep their existing 1 MiB limit.
+export const MAX_MATERIAL_BYTES = 16 * 1024 * 1024 - 4096;
 export const MAX_MODEL_INPUT_BYTES = 256 * 1024;
 export const MAX_RESULT_BYTES = 512 * 1024;
 export const MAX_PACK_BYTES = 20 * 1024 * 1024;
@@ -33,17 +36,20 @@ export type StoredRepairItem = RepairItem & {
 export type RepairBaseline = {
   workflowId: string; packId: string; releaseRevision: number; activeDeployNumber: number | null;
   specDigest: string; repoId: string; specPath: string; packCommit: string; packDigest: string;
-  /** Canonical deployed JSON, verified against the tagged configuration; specDigest remains raw Git bytes. */
+  /** Canonical deployed JSON context; manual drafts need not match it to Git. specDigest remains raw Git bytes. */
   proposalSpecDigest?: string;
 };
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
+  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number;flowCount?:number};
   automation?: AutomationOrigin;
   integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
+/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. An omitted phase is legacy generation. */
+export type RepairModelInput = { phase?: 'planning' | 'generation'; itemId: string; coreInput: string; materials: Record<string, unknown> };
 export type RepairRevision = {
   workflowId: string; taskId: string; revision: number; phase: RepairRevisionPhase; stateVersion: number;
   requestId: string; requestDigest: string; input: RepairBatchInput;
@@ -88,6 +94,38 @@ function digest(value: unknown): value is string { return typeof value === 'stri
 function gitObject(value: unknown): value is string { return typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value); }
 function gitIdentity(value: unknown, max: number): value is string { return text(value, max) && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
 
+/** Validate optional AIS display records against this frozen task before persisting the result. */
+export function validateRepairModelInputs(value: unknown, input: RepairBatchInput): void {
+  if (value === undefined) return;
+  valid(Array.isArray(value), 'modelInputs');
+  const itemIds = new Set(input.items.map(item => item.itemId));
+  const seen = new Set<string>();
+  let hasPlanning = false;
+  for (const entry of value) {
+    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId)
+      && text(entry.coreInput, MAX_RESULT_BYTES), 'modelInputs record');
+    valid(entry.phase === undefined || entry.phase === 'planning' || entry.phase === 'generation', 'modelInputs phase');
+    const phase = entry.phase ?? 'generation';
+    const key = `${phase}:${entry.itemId}`;
+    valid(!seen.has(key) && (phase !== 'planning' || !hasPlanning), 'modelInputs record');
+    seen.add(key);
+    if (phase === 'planning') hasPlanning = true;
+    const materials = entry.materials;
+    valid(object(materials) && materials.schemaVersion === 'repair-local-materials/v1'
+      && materials.taskId === input.taskId && materials.revision === input.revision
+      && text(materials.root, 4096) && Array.isArray(materials.files), 'modelInputs materials');
+    const paths = new Set<string>();
+    for (const file of materials.files) {
+      valid(object(file) && text(file.kind, 64) && text(file.path, 4096) && !paths.has(file.path)
+        && integer(file.bytes) && digest(file.sha256) && text(file.purpose, 4000)
+        && Array.isArray(file.itemIds), 'modelInputs material file');
+      valid(file.itemIds.every(id => text(id, 64) && itemIds.has(id))
+        && new Set(file.itemIds).size === file.itemIds.length, 'modelInputs material sources');
+      paths.add(file.path);
+    }
+  }
+}
+
 export function validateSourceRef(value: unknown): SourceRef {
   valid(object(value), 'source');
   if (value.kind === 'suggestion') {
@@ -119,6 +157,12 @@ export function validateRepairItem(value: unknown): RepairItem {
   }
   return item;
 }
+/** Complete source bodies use the separate material budget; inline/core items keep their original cap. */
+export function validateRepairMaterialItem(value:unknown):RepairItem{
+ const item=validateRepairItemStructure(value);valid(text(item.instruction,MAX_INSTRUCTIONS_CHARS,true),'instruction');
+ try{boundedRepairJson(item,MAX_MATERIAL_BYTES);}catch(error){if(error instanceof RepairBatchError)throw new RepairBatchError(error.code,error.message,{...error.details,stage:'source_material',reasonCode:'REPAIR_MATERIALS_TOO_LARGE'});throw error;}
+ return item;
+}
 export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   valid(object(value) && value.kind === 'daily' && digest(value.intentId)
     && integer(value.policyVersion, 1) && integer(value.evidenceCutoffMs, 1), 'automation origin');
@@ -138,6 +182,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
+  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES&&(ref.flowCount===undefined||integer(ref.flowCount)),'frozen materials');}
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
   if (value.integration !== undefined) {
     const integration = value.integration;
@@ -163,6 +208,19 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   // The shared MySQL renderer maps VARCHAR(255) to VARCHAR(190).
   valid(gitIdentity(baseline.workflowId, 190) && text(baseline.packId, 255) && text(baseline.repoId, 255), 'baseline identity');
   valid(integer(baseline.releaseRevision) && (baseline.activeDeployNumber === null || integer(baseline.activeDeployNumber, 1)), 'baseline revision');
+  for (const item of value.items) {
+    if (item.context?.referenceOnly !== true) continue;
+    const binding = item.context.sourceSnapshot, target = item.context.targetSnapshot;
+    valid(value.integration && object(binding) && binding.status === 'resolved' && object(binding.snapshot) && object(target), 'historical reference');
+    const source = binding.snapshot;
+    valid(source.kind === 'deployment' && integer(source.workflowVersion, 1) && integer(source.deployNumber, 1)
+      || source.kind === 'saved' && gitObject(source.commit) && text(source.sourceFlowId, 255), 'historical source identity');
+    valid(source.workflowId === baseline.workflowId && target.workflowId === baseline.workflowId
+      && target.kind === 'deployment' && integer(target.workflowVersion, 1) && target.deployNumber === baseline.activeDeployNumber
+      && digest(target.configDigest) && digest(source.configDigest)
+      && workflowSnapshotKey(source as WorkflowSnapshotRef) !== workflowSnapshotKey(target as WorkflowSnapshotRef), 'historical target/source identity');
+  }
+
   valid(digest(baseline.specDigest) && gitObject(baseline.packCommit) && gitObject(baseline.packDigest), 'baseline digests');
   valid(baseline.proposalSpecDigest === undefined || digest(baseline.proposalSpecDigest), 'baseline proposalSpecDigest');
   valid(text(baseline.specPath, 1024) && !baseline.specPath.startsWith('/') && !baseline.specPath.includes('\\')
@@ -174,7 +232,8 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
 /** Flow identity, rather than analysis IDs or rewritten text, detects materially new ignored-scope evidence. */
 export function repairEvidenceFlows(item: RepairItem): string[] {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
-  return [...new Set([...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
+  const summary=item.context?.evidenceSummary as {flowIds?:string[]}|undefined;
+  return [...new Set([...(Array.isArray(summary?.flowIds)?summary.flowIds:[]),...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
     ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])]),
     ...(Array.isArray(item.context?.suggestions) ? item.context.suggestions : []).flatMap((entry:any)=>Array.isArray(entry?.runIds)?entry.runIds:Array.isArray(entry?.impactRunIds)?entry.impactRunIds:[])]
     .filter((id): id is string => typeof id === 'string' && !!id))].sort();
@@ -182,8 +241,9 @@ export function repairEvidenceFlows(item: RepairItem): string[] {
 
 export function repairEvidenceFacts(item: RepairItem) {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
-  const eventIds = [...new Set(diagnoses.flatMap((entry: any) => Array.isArray(entry?.evidenceEventIds) ? entry.evidenceEventIds : [])
+  const summary=item.context?.evidenceSummary as {eventIds?:string[];severity?:number}|undefined;
+  const eventIds = [...new Set([...(Array.isArray(summary?.eventIds)?summary.eventIds:[]),...diagnoses.flatMap((entry: any) => Array.isArray(entry?.evidenceEventIds) ? entry.evidenceEventIds : [])]
     .filter((id: unknown): id is string => typeof id === 'string'))].sort() as string[];
   const severity = diagnoses.reduce((rank: number, entry: any) => Math.max(rank, ['low', 'medium', 'high', 'critical'].indexOf(entry?.severity) + 1), 0);
-  return { eventIds, severity };
+  return { eventIds, severity:Math.max(severity,summary?.severity??0) };
 }

@@ -112,7 +112,11 @@ class _OwnerBots:
     def get_by_id_and_owner(self, bot_id, owner_id):
         if bot_id != BOT or owner_id != USER:
             return None
-        return {"bot_id": BOT, "owner_id": USER}
+        return {"id": 100, "bot_id": BOT, "owner_id": USER, "entity_id": USER}
+
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [row] if row else []
 
 
 class _OwnerCollaborators:

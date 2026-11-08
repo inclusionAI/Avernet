@@ -5,9 +5,9 @@ End-point-level coverage (not line coverage): of all HTTP routes registered in
 bcs-http's router.rs, which ones does the e2e suite actually exercise?
 
 Two inputs:
-  1. The full registered endpoint set — parsed from router.rs. Verified by
-     inspection (build_api_routes is the single, unconditional, no-nest
-     registration site; there is no OpenAPI/utoipa spec to read instead).
+  1. The registered endpoint set — parsed from router.rs and its explicit
+     `.merge(routes::<module>::router())` mounts. Unmounted route modules are
+     not included. This covers build_api_routes; it is not a Rust AST parser.
   2. The set of endpoints actually hit — preferably read from the structured
      `bcs_http_access` request-start log. Older logs fall back to the
      `[→BCS] METHOD PATH` marker emitted by debug_middleware. Concrete paths and
@@ -27,6 +27,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # method helpers allowed in axum routing::get/post/put/patch/delete. `any` is
 # excluded on purpose — neither shows up here (all routes use the typed helpers).
@@ -53,7 +54,7 @@ class Endpoint:
     method: str          # GET/POST/... uppercase
     path: str            # registered template, e.g. /groups/{id}/members
     handler: str         # e.g. routes::groups::add_group_member
-    line: int            # router.rs line where .route( begins
+    line: int            # source module line where .route( begins
 
     def key(self):
         return (self.method, self.path)
@@ -66,7 +67,7 @@ class Coverage:
     unmatched_hits: set = field(default_factory=set)  # set of (method, raw_path)
 
 
-def parse_router(router_path: str) -> list:
+def parse_router(router_path: str, *, modules_dir=None) -> list:
     """Parse every .route("PATH", METHOD(h)...) into Endpoint list.
 
     Handles single-line and multi-line .route(...) blocks and chained
@@ -75,6 +76,8 @@ def parse_router(router_path: str) -> list:
     """
     with open(router_path, encoding="utf-8") as f:
         src = f.read()
+    if modules_dir is None:
+        modules_dir = Path(router_path).parent / "routes"
 
     # Strip C-style line and block comments BEFORE parsing so commented-out
     # routes (e.g. `// .route(...)`) are not picked up as active endpoints.
@@ -132,6 +135,16 @@ def parse_router(router_path: str) -> list:
             inside = block[hstart:hend].strip()
             handler = re.split(r"[,\s]", inside, maxsplit=1)[0]
             endpoints.append(Endpoint(method, path, handler, line))
+
+    # Follow only mounted modules, not every Rust file in routes/. A missing
+    # source is an error rather than silently shrinking the denominator.
+    for mount in re.finditer(r"\.merge\(\s*routes::(\w+)::router\(\)\s*\)", src):
+        module = mount.group(1)
+        for endpoint in parse_router(str(modules_dir / f"{module}.rs"), modules_dir=modules_dir):
+            handler = endpoint.handler
+            if "::" not in handler:
+                handler = f"routes::{module}::{handler}"
+            endpoints.append(Endpoint(endpoint.method, endpoint.path, handler, endpoint.line))
     return endpoints
 
 

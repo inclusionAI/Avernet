@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use super::cli::CliSession;
+use super::codex_owned::{NativeTransport, OwnedConnection};
 use super::codex_app_server::CodexAppServer;
 use super::codex_transport::CodexConnection;
 use super::trace::TraceContext;
@@ -18,6 +18,7 @@ use super::{TurnError, TurnRequest};
 
 #[derive(Default)]
 pub(super) struct NativeServer {
+    transport: NativeTransport,
     server: Mutex<Option<Server>>,
     next_lease: AtomicU64,
     stopped: AtomicBool,
@@ -79,7 +80,9 @@ impl ManagedConnection {
         if let Some(commands) = self.commands.take() {
             let (done, result) = oneshot::channel();
             if commands.send(Command::Close { lease: self.lease, done: Some(done) }).is_ok() {
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(6), result).await;
+                // The router bounds both the late start ACK and the interrupt ACK.
+                // Do not return while either phase still owns the thread.
+                let _ = result.await;
             }
         }
     }
@@ -96,6 +99,8 @@ impl Drop for ManagedConnection {
 }
 
 impl NativeServer {
+    pub fn new(transport: NativeTransport) -> Self { Self { transport, ..Default::default() } }
+
     pub async fn shutdown(&self) {
         self.stopped.store(true, Ordering::Release);
         if let Some(mut server) = self.server.lock().await.take() {
@@ -105,7 +110,7 @@ impl NativeServer {
     }
 
     pub async fn connect(
-        &self, engine: &CodexAppServer, bin: &Path, args: &[String],
+        &self, engine: &CodexAppServer, bin: &Path,
         req: &TurnRequest, abort: &CancellationToken,
     ) -> Result<(CodexConnection, bool), TurnError> {
         let mut guard = tokio::select! {
@@ -121,16 +126,15 @@ impl NativeServer {
             let _ = (&mut server.task).await;
         }
         if guard.is_none() {
-            // Raw stdout is traced after demultiplexing, under the current run.
-            let mut process = CliSession::spawn(bin, args, &req.cwd, &[],
-                req.trace.as_ref().map(TraceContext::shared_process)).await.map_err(TurnError::Spawn)?;
-            process.disable_raw_trace();
-            let mut connection = CodexConnection::Process(process);
-            let mut backlog = VecDeque::new();
-            let mut next_id = 1;
-            let initialization = engine.initialize(&mut connection, &mut next_id, &mut backlog, abort);
-            tokio::time::timeout(std::time::Duration::from_secs(30), initialization).await
-                .map_err(|_| TurnError::Protocol("Codex app-server initialization timed out".into()))??;
+            let startup = async {
+                let mut connection = OwnedConnection::spawn(self.transport, engine, bin, req, abort).await?;
+                let mut backlog = VecDeque::new();
+                let mut next_id = 1;
+                engine.initialize(&mut connection.transport, &mut next_id, &mut backlog, abort).await?;
+                Ok::<_, TurnError>((connection, backlog))
+            };
+            let (connection, backlog) = tokio::time::timeout(std::time::Duration::from_secs(30), startup).await
+                .map_err(|_| TurnError::Protocol("Owned Codex app-server startup timed out; check launcher --listen support and engine diagnostics".into()))??;
             let (commands, receiver) = mpsc::unbounded_channel();
             let task = tokio::spawn(async move { serve(connection, receiver, backlog).await });
             *guard = Some(Server { commands, task });
@@ -153,6 +157,7 @@ impl NativeServer {
 }
 
 struct InterruptWaiter {
+    thread: Option<String>,
     deadline: tokio::time::Instant,
     done: Option<oneshot::Sender<io::Result<()>>>,
 }
@@ -163,11 +168,23 @@ struct Router {
     loaded: HashSet<String>,
     next_id: u64,
     interrupts: HashMap<u64, InterruptWaiter>,
+    closing: HashMap<u64, InterruptWaiter>,
+    server_requests: HashMap<String, (u64, Value)>,
 }
 
 impl Router {
     async fn write(&mut self, cli: &mut CodexConnection, lease: u64, mut value: Value) -> io::Result<()> {
         if !self.clients.contains_key(&lease) { return Ok(()); }
+        if value.get("method").is_none() {
+            // Responses to server requests retain the engine's original RPC id.
+            // A different lease (or a stale reply after closure) cannot answer.
+            let key = value["id"].to_string();
+            if self.server_requests.get(&key).is_some_and(|(owner, _)| *owner == lease) {
+                self.server_requests.remove(&key);
+                return write_line(cli, &value.to_string()).await;
+            }
+            return Ok(());
+        }
         if let Some(id) = value.get("id").cloned() {
             let wire_id = self.next_id;
             self.next_id += 1;
@@ -185,6 +202,7 @@ impl Router {
         let id = self.next_id;
         self.next_id += 1;
         self.interrupts.insert(id, InterruptWaiter {
+            thread: Some(thread.to_owned()),
             deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5), done,
         });
         write_line(cli, &json!({"jsonrpc":"2.0", "id":id, "method":"turn/interrupt",
@@ -206,7 +224,25 @@ impl Router {
 
     async fn message(&mut self, cli: &mut CodexConnection, mut value: Value) -> io::Result<()> {
         if value.get("method").is_some() && value.get("id").is_some() {
-            // Reject unsupported approval/HITL calls even while no turn is attached.
+            // Only forward questions with an exact active thread/turn owner.
+            if value["method"] == "item/tool/requestUserInput" {
+                let owner = self.clients.iter().find_map(|(lease, client)| {
+                    match (&client.thread, &client.turn) {
+                        (Some(thread), Some(turn)) if super::codex_app_server::matches_turn(&value, thread, turn, true)
+                            && !client.messages.is_closed() => Some(*lease),
+                        _ => None,
+                    }
+                });
+                if let Some(lease) = owner {
+                    let key = value["id"].to_string();
+                    if !self.server_requests.contains_key(&key) {
+                        self.server_requests.insert(key, (lease, value["id"].clone()));
+                        self.deliver(lease, &value)?;
+                    }
+                    return Ok(());
+                }
+            }
+            // Unsupported or unowned requests never reach another conversation.
             return write_line(cli, &json!({"jsonrpc":"2.0", "id":value["id"],
                 "error":{"code":-32000,"message":"bridge-provider does not support app-server server requests"}}).to_string()).await;
         }
@@ -232,11 +268,26 @@ impl Router {
                         client.turn = Some(turn.into());
                     } else if let Some(thread) = &pending.thread {
                         // Cancellation can happen before turn/start acknowledges.
-                        self.interrupt(cli, thread, turn, None).await?;
+                        let done = self.closing.remove(&pending.lease).and_then(|waiter| waiter.done);
+                        self.interrupt(cli, thread, turn, done).await?;
                     }
+                }
+                if pending.method == "turn/start"
+                    && let Some(waiter) = self.closing.remove(&pending.lease) {
+                    if value.get("error").is_none() {
+                        return Err(io::Error::other("Cancelled Codex turn/start response lacked a turn id; restarting the owned server"));
+                    }
+                    if let Some(done) = waiter.done { let _ = done.send(Ok(())); }
                 }
                 value["id"] = pending.id;
                 self.deliver(pending.lease, &value)?;
+            }
+            return Ok(());
+        }
+        if value["method"] == "serverRequest/resolved" {
+            let key = value["params"]["requestId"].to_string();
+            if let Some((lease, _)) = self.server_requests.remove(&key) {
+                self.deliver(lease, &value)?;
             }
             return Ok(());
         }
@@ -271,18 +322,31 @@ impl Router {
     }
 }
 
-async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
-    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new() };
+async fn serve(mut connection: OwnedConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
+    let cli = &mut connection.transport;
+    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new(), closing: HashMap::new(), server_requests: HashMap::new() };
+    let mut waiting = VecDeque::new();
     let result: io::Result<()> = async {
         loop {
             if let Some(value) = backlog.pop_front() {
-                router.message(&mut cli, value).await?;
+                router.message(cli, value).await?;
                 continue;
             }
+            let ready = waiting.iter().position(|command| match command {
+                Command::Open { thread, .. } => !thread.as_ref().is_some_and(|thread|
+                    router.closing.values().chain(router.interrupts.values()).any(|waiter| waiter.thread.as_ref() == Some(thread))),
+                _ => true,
+            });
             tokio::select! {
-                command = commands.recv() => match command {
+                command = async {
+                    if let Some(index) = ready { waiting.remove(index) } else { commands.recv().await }
+                } => match command {
                     None => return Ok(()),
                     Some(Command::Open { lease, thread, messages, ready, trace }) => {
+                        if thread.as_ref().is_some_and(|thread| router.closing.values().chain(router.interrupts.values()).any(|waiter| waiter.thread.as_ref() == Some(thread))) {
+                            waiting.push_back(Command::Open { lease, thread, messages, ready, trace });
+                            continue;
+                        }
                         if thread.as_ref().is_some_and(|thread| router.clients.values().any(|client| client.thread.as_ref() == Some(thread))) {
                             let _ = ready.send(Err(io::Error::other("Codex thread already has an active Bridge turn")));
                             continue;
@@ -291,23 +355,36 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
                         router.clients.insert(lease, Client { thread, turn: None, messages, trace });
                         let _ = ready.send(Ok(loaded));
                     }
-                    Some(Command::Write { lease, value }) => router.write(&mut cli, lease, value).await?,
+                    Some(Command::Write { lease, value }) => router.write(cli, lease, value).await?,
                     Some(Command::Close { lease, done }) => {
+                        waiting.retain(|command| !matches!(command, Command::Open { lease: waiting_lease, .. } if *waiting_lease == lease));
+                        let abandoned: Vec<_> = router.server_requests.iter()
+                            .filter(|(_, (owner, _))| *owner == lease).map(|(key, (_, id))| (key.clone(), id.clone())).collect();
+                        for (key, id) in abandoned {
+                            router.server_requests.remove(&key);
+                            write_line(cli, &json!({"jsonrpc":"2.0", "id":id,
+                                "error":{"code":-32000,"message":"Bridge turn closed before user input"}}).to_string()).await?;
+                        }
                         if let Some(client) = router.clients.remove(&lease)
                             && let (Some(thread), Some(turn)) = (client.thread, client.turn) {
-                            router.interrupt(&mut cli, &thread, &turn, done).await?;
+                            router.interrupt(cli, &thread, &turn, done).await?;
+                        } else if let Some(pending) = router.pending.values().find(|pending| pending.lease == lease && pending.method == "turn/start") {
+                            router.closing.insert(lease, InterruptWaiter {
+                                thread: pending.thread.clone(),
+                                deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5), done,
+                            });
                         } else if let Some(done) = done { let _ = done.send(Ok(())); }
                     }
                 },
-                _ = tokio::time::sleep_until(router.interrupts.values().map(|waiter| waiter.deadline).min()
+                _ = tokio::time::sleep_until(router.interrupts.values().chain(router.closing.values()).map(|waiter| waiter.deadline).min()
                     .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(86400))),
-                    if !router.interrupts.is_empty() => {
+                    if !router.interrupts.is_empty() || !router.closing.is_empty() => {
                     return Err(io::Error::new(io::ErrorKind::TimedOut, "Codex turn interruption was not acknowledged; restarting the owned server"));
                 }
                 line = cli.next_line() => {
                     let line = line?.ok_or_else(disconnected)?;
                     let value = serde_json::from_str(&line).map_err(io::Error::other)?;
-                    router.message(&mut cli, value).await?;
+                    router.message(cli, value).await?;
                 }
             }
         }
@@ -320,7 +397,7 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
             let _ = client.messages.try_send(Err(io::Error::new(error.kind(), error.to_string())));
         }
     }
-    cli.kill().await;
+    connection.shutdown().await;
 }
 
 async fn write_line(cli: &mut CodexConnection, line: &str) -> io::Result<()> {

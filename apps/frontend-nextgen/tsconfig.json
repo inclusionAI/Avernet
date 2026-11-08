@@ -7,9 +7,17 @@
     "paths": {
       "@/*": ["./src/*"],
       "@@/*": ["./src/.umi/*"],
-      "@tc-chat/core": ["./node_modules/@tc-chat/core"]
+      "@tc-chat/core": ["./node_modules/@tc-chat/core"],
+      "@avernet/a2a-chat-client": ["../../packages/a2a-chat-client/src/index.ts"],
+      "@avernet/a2a-chat-client/testing": ["../../packages/a2a-chat-client/src/testing.ts"]
     }
   },
   "exclude": ["node_modules", "dist", "src/.umi/*", ".tmp"],
-  "include": ["mock/**/*", "src/**/*", "test/**/*", "config/**/*"]
+  "include": [
+    "mock/**/*",
+    "src/**/*",
+    "test/**/*",
+    "config/**/*",
+    "../../packages/a2a-chat-client/src/**/*"
+  ]
 }

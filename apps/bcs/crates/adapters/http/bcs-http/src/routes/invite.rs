@@ -45,6 +45,11 @@ fn build_invite_service(
         base_url: host,
         group_link_url: state.invite_group_link_url.clone(),
         session_link_url: state.invite_session_link_url.clone(),
+        // The route is protocol adaptation only; the
+        // invite-issuance control legs resolve the
+        // authority hook live inside the service
+        // (bot-authority plan Task 6.5).
+        bot_authority: Some(state.services.bot_authority_hook.clone()),
     }
 }
 
@@ -52,15 +57,15 @@ async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
-) -> (Option<String>, Option<String>) {
-    let bot_id = super::bot_id_from_headers(state, headers).await;
+) -> Result<(Option<String>, Option<String>), HttpAdapterError> {
+    let bot_id = super::bot_id_from_headers(state, headers).await?;
     if bot_id.is_some() {
-        return (bot_id, None);
+        return Ok((bot_id, None));
     }
     let user = state.user_identity.extract(headers, uri).await;
     let staff_no = user.as_ref().and_then(|u| u.staff_no.clone());
     let human_id = staff_no.as_deref().map(|s| format!("human_{}", s));
-    (human_id, staff_no)
+    Ok((human_id, staff_no))
 }
 
 pub async fn create_group_invite_link(
@@ -70,7 +75,10 @@ pub async fn create_group_invite_link(
     Path(group_id): Path<String>,
     body: Option<Json<InviteLinkBody>>,
 ) -> Response {
-    let (caller_actor_id, caller_staff_no) = resolve_caller(&state, &headers, &uri).await;
+    let (caller_actor_id, caller_staff_no) = match resolve_caller(&state, &headers, &uri).await {
+        Ok(caller) => caller,
+        Err(error) => return error.into_response(),
+    };
     let body = body.map(|b| b.0).unwrap_or_default();
     let svc = build_invite_service(&state, &headers);
     let cmd = CreateInviteTokenCommand {
@@ -92,7 +100,10 @@ pub async fn create_session_invite_link(
     Path(session_id): Path<String>,
     body: Option<Json<InviteLinkBody>>,
 ) -> Response {
-    let (caller_actor_id, caller_staff_no) = resolve_caller(&state, &headers, &uri).await;
+    let (caller_actor_id, caller_staff_no) = match resolve_caller(&state, &headers, &uri).await {
+        Ok(caller) => caller,
+        Err(error) => return error.into_response(),
+    };
     let body = body.map(|b| b.0).unwrap_or_default();
     let svc = build_invite_service(&state, &headers);
     let cmd = CreateInviteTokenCommand {

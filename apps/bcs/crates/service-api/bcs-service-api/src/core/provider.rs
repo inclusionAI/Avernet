@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+pub use bcs_domain::provider::ProviderCollaborationScope;
 use bcs_domain::{
     BotCapabilities, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
     ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
@@ -72,6 +73,25 @@ pub trait ProviderCoreService: Send + Sync {
             message: "provider slug lookup is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    async fn register_provider_with_policy(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        slug: Option<String>, admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if scope.is_some() { return Err(ServiceError::InternalError("Provider policy registration is not configured".into())); }
+        self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url).await
+    }
+
+    async fn update_provider_with_policy(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>, admin_callback_url: Option<String>,
+        scope: Option<ProviderCollaborationScope>,
+    ) -> ServiceResult<ProviderRecord> {
+        if scope.is_some() { return Err(ServiceError::InternalError("Provider policy update is not configured".into())); }
+        self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url).await
     }
 
     /// Additive registration entry point preserving callers of register_provider.
@@ -165,23 +185,91 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<ProviderRecord>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderBotDeletion {
-    pub bot_uuid: String,
-    pub deleted: bool,
+/// Bot-authority retirement branch (spec §7.1): the durable
+/// identity location the Provider Core resolves the retiring
+/// Bot from. The store re-derives the branch under the lock;
+/// a mismatch is an error, never a silent reinterpretation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderRetireBranch {
+    /// Provider Bot metadata exists (the accepted Provider
+    /// membership record routes the retirement).
+    Metadata,
+    /// A gateway binding routes the deletion and the Bot
+    /// carries no provider metadata (legacy gateway before
+    /// metadata backfill).
+    BindingFallback,
+    /// An owner-suffixed legacy Bot with no binding and no
+    /// provider metadata. The allow flag only relaxes the
+    /// LOOKUP — the existing admission conditions stay intact.
+    LegacyUnbound,
+}
+
+/// Application command for the Provider retirement (bot-authority
+/// plan §3.1 frozen contract, spec §7.1). `provider_admin_token`
+/// is verified ONLY by the Core; it never enters the mutation,
+/// audit rows or any return value.
+#[derive(Debug, Clone)]
+pub struct RetireProviderBotParams {
+    pub provider_id: String,
+    pub provider_admin_token: String,
+    pub provider_bot_ref: String,
+    /// `true` only relaxes the LegacyUnbound lookup to the
+    /// existing owner-suffixed admission; it never grants
+    /// deletion power by itself.
+    pub allow_unbound_owner_suffixed_bot: bool,
+}
+
+/// Already-generated command from the Provider Core to the
+/// BotProviderRepo after the Provider credential verification.
+/// It carries the verified Provider id (never the token) and
+/// the expected branch the store must re-verify under the lock.
+#[derive(Debug, Clone)]
+pub struct ProviderRetire {
+    pub provider_id: String,
+    pub bot_id: String,
+    pub provider_bot_ref: String,
+    pub mutation: crate::types::bot_authority::AuthorityMutation,
+    pub expected_branch: ProviderRetireBranch,
+}
+
+/// Committed retirement result. `bot_id`/`provider_id`/
+/// `provider_bot_ref`/`branch` are the non-credential locating
+/// information the existing external cleanup needs, and they
+/// ARE retrievable from the retained tombstone/metadata/binding
+/// on a retry. `changed` is false when the retirement was
+/// already tombstoned (idempotent re-execution).
+#[derive(Debug, Clone)]
+pub struct ProviderRetirement {
+    pub bot_id: String,
+    pub provider_id: String,
+    pub provider_bot_ref: String,
+    pub changed: bool,
+    pub branch: ProviderRetireBranch,
 }
 
 #[async_trait]
 pub trait ProviderBotCoreService: Send + Sync {
-    /// Delete a Bot-owned Provider identity (upstream or gateway), after Provider
-    /// admin authorization. SQL gateway deletion also disables its projection.
-    /// None means no Bot metadata identity is available; callers may use the
-    /// existing authorized legacy binding path. Errors must never fall back.
-    async fn delete_registered_provider_bot(
-        &self, provider_id: &str, provider_admin_token: &str, provider_bot_ref: &str,
-    ) -> ServiceResult<Option<ProviderBotDeletion>> {
-        let _ = (provider_id, provider_admin_token, provider_bot_ref);
-        Ok(None)
+    /// Retire a Provider Bot atomically (bot-authority spec §7.1).
+    ///
+    /// Verifies the Provider credential (the token is used for
+    /// verification only), resolves the Bot within the existing
+    /// authorization limits on the three durable identity
+    /// branches, and issues one atomic retirement command: the
+    /// Bot tombstone, the Provider/ref tombstone, the necessary
+    /// binding disable, owner/manager edge revocation, pending
+    /// transfer closure (fixed system marker) and the retire
+    /// audit commit in ONE store transaction — never followed by
+    /// a second ordinary delete. The verified Provider actor
+    /// (`Provider { provider_id }`) is the audit/mutation
+    /// initiator; the token is never recorded.
+    async fn retire_registered_bot(
+        &self, params: RetireProviderBotParams,
+    ) -> ServiceResult<ProviderRetirement> {
+        let _ = params;
+        Err(ServiceError::InvalidOperation {
+            message: "provider bot retirement is not configured".to_string(),
+            request_id: None,
+        })
     }
 
     /// Update only the routing override; identities and capabilities remain unchanged.
@@ -246,6 +334,12 @@ pub trait ProviderBotCoreService: Send + Sync {
         agent_code: &str,
     ) -> ServiceResult<RuntimeBotIdentity>;
 
+    async fn authenticate_agentpass_actor_event(&self, provider_id: &str, agent_code: &str, actor: &str) -> ServiceResult<RuntimeBotIdentity> {
+        let bot = self.authenticate_agentpass_event(provider_id, agent_code).await?;
+        if bot.bot_uuid != actor { return Err(ServiceError::Unauthorized("Actor does not match AgentPass Bot".into())); }
+        Ok(bot)
+    }
+
     async fn authenticate_provider_admin_event(
         &self,
         provider_id: &str,
@@ -277,9 +371,7 @@ pub trait ProviderBotCoreService: Send + Sync {
     /// Each `Option` field is a PATCH: `Some` replaces the value (an empty
     /// `Vec` clears the array), `None` leaves it unchanged. The binding
     /// identity (`provider_bot_ref`, `bot_uuid`) is never changed. The
-    /// `agent_code` is reconstructed from the provider's auth mode so an
-    /// AgentPass bot's routing identifier survives a reload — callers must not
-    /// pass it through from `registry.get()`, which strips it.
+    /// Stored `agent_code` is preserved; ordinary updates cannot change identity.
     async fn update_provider_bot(
         &self,
         provider_id: &str,
@@ -308,6 +400,20 @@ pub trait ProviderBotCoreService: Send + Sync {
             request_id: None,
         })
     }
+}
+
+/// The owner-suffixed legacy Bot shape
+/// (`{prefix}:{owner}`) — the single Home of the
+/// LegacyUnbound admission rule. The
+/// `allow_unbound_owner_suffixed_bot` flag only
+/// relaxes the LOOKUP; this rule keeps the
+/// existing admission (spec §7.1) and every
+/// caller (Core, stores) evaluates the SAME
+/// spelling here.
+pub fn is_owner_suffixed_bot_id(bot_id: &str) -> bool {
+    bot_id.rsplit_once(':').is_some_and(|(prefix, owner)| {
+        !prefix.trim().is_empty() && !owner.trim().is_empty()
+    })
 }
 
 /// Library-level command, independent of JSON PATCH representation.

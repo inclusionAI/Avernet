@@ -67,6 +67,8 @@ export interface BotSessionFileListData {
 export interface BotRequestParams {
   user_id: string;
   owner_id?: string;
+  /** 仅文件列表支持好友身份；不授予上传、删除或内容访问权限。 */
+  f_user_id?: string;
   stage?: 'draft' | 'verify' | 'online';
 }
 

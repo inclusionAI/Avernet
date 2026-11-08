@@ -2,6 +2,7 @@ import type {
   CollaborationDefinitionGraphEdge,
   CollaborationDefinitionGraphNode,
   CollaborationDefinitionGraphPreview,
+  CollaborationDefinitionLoopRoute,
 } from '@/domain/collaboration/graphTypes';
 import type { ParticipantDefinition } from '@/services/workspace/collaborationDefinitionService';
 
@@ -20,6 +21,13 @@ export const COLLABORATION_NODE_KIND_LABELS: Record<CollaborationDefinitionGraph
 
 export type CollaborationNodeTone = 'blue' | 'green' | 'neutral';
 
+export class CollaborationGraphLayoutError extends Error {
+  constructor(public readonly code: 'unsupported_mode' | 'invalid_graph', message: string) {
+    super(message);
+    this.name = 'CollaborationGraphLayoutError';
+  }
+}
+
 export interface CollaborationBindingView {
   roleName: string;
   botId?: string;
@@ -34,19 +42,32 @@ export interface CollaborationGraphNodeData extends Record<string, unknown> {
   assigneeBotId?: string;
   assigneeBotName?: string;
   isInitial: boolean;
+  logicalLoopView?: boolean;
 }
 
 export interface CollaborationGraphLayoutNode {
+  parentId?: string;
   id: string;
   position: { x: number; y: number };
   data: CollaborationGraphNodeData;
 }
 
 export interface CollaborationGraphLayoutEdge {
+  outcome: string;
+  sourceHandle?: string;
+  targetHandle?: string;
   id: string;
   source: string;
   target: string;
   label?: string;
+  data?: {
+    loopRoute: CollaborationDefinitionLoopRoute;
+    outcome: string;
+    labelLane: number;
+    logicalView?: boolean;
+    returnEdge?: boolean;
+    returnX?: number;
+  };
 }
 
 export interface CollaborationGraphLayout {
@@ -101,8 +122,9 @@ export function buildCollaborationGraphLayout(
   initialNodes: string[],
   bindingViews: Record<string, CollaborationBindingView> = {},
 ): CollaborationGraphLayout {
-  if (graph.graph_mode !== 'acyclic') {
-    throw new Error(`暂不支持 ${graph.graph_mode} 模式的协作流程预览`);
+  const layoutMode = graph.execution_graph_mode ?? graph.graph_mode;
+  if (layoutMode !== 'acyclic') {
+    throw new CollaborationGraphLayoutError('unsupported_mode', `暂不支持 ${layoutMode} 模式的协作流程预览`);
   }
   if (!graph.nodes.length) throw new Error('图中没有节点');
 
@@ -111,6 +133,9 @@ export function buildCollaborationGraphLayout(
   const rank = new Map<string, number>();
   const outgoing = new Map<string, string[]>();
   graph.nodes.forEach((node) => {
+    if (nodeById.has(node.node_id)) {
+      throw new CollaborationGraphLayoutError('invalid_graph', `节点 ID 重复：${node.node_id}`);
+    }
     nodeById.set(node.node_id, node);
     indegree.set(node.node_id, 0);
     rank.set(node.node_id, 0);
@@ -118,8 +143,14 @@ export function buildCollaborationGraphLayout(
   });
 
   const initialSet = new Set(initialNodes);
+  for (const id of initialSet) {
+    if (!nodeById.has(id)) throw new CollaborationGraphLayoutError('invalid_graph', `入口节点不存在：${id}`);
+  }
   const outcomeCount = new Map<string, Set<string>>();
   graph.edges.forEach((edge: CollaborationDefinitionGraphEdge) => {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) {
+      throw new CollaborationGraphLayoutError('invalid_graph', `边引用不存在的节点：${edge.source} -> ${edge.target}`);
+    }
     outgoing.get(edge.source)?.push(edge.target);
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
     const outcomes = outcomeCount.get(edge.source) ?? new Set<string>();
@@ -169,19 +200,29 @@ export function buildCollaborationGraphLayout(
         },
         data: {
           definition: node,
-          title: node.display_name.trim() || node.node_id,
+          title: node.display_name.trim() || node.execution?.definition_node_id || node.node_id,
           ...formatAssignee(node, bindingViews),
           isInitial: initialSet.has(node.node_id),
         },
       }));
     });
 
-  const edges = graph.edges.map((edge, i) => ({
-    id: `${edge.source}:${edge.outcome}:${edge.target}:${i}`,
-    source: edge.source,
-    target: edge.target,
-    label: edge.outcome !== 'complete' || (outcomeCount.get(edge.source)?.size ?? 0) > 1 ? edge.outcome : undefined,
-  }));
+  const pairCounts = new Map<string, number>();
+  const edges = graph.edges.map((edge, i) => {
+    const pair = JSON.stringify([edge.source, edge.target]);
+    const labelLane = pairCounts.get(pair) ?? 0;
+    pairCounts.set(pair, labelLane + 1);
+    return {
+      id: `${edge.source}:${edge.outcome}:${edge.target}:${i}`,
+      outcome: edge.outcome,
+      source: edge.source,
+      target: edge.target,
+      ...(edge.loop_route ? { data: { loopRoute: edge.loop_route, outcome: edge.outcome, labelLane } } : {}),
+      label: edge.display_name ?? (edge.loop_route
+        ? edge.loop_route.kind === 'continue' ? 'continue' : edge.loop_route.logical_outcome
+        : edge.outcome !== 'complete' || (outcomeCount.get(edge.source)?.size ?? 0) > 1 ? edge.outcome : undefined),
+    };
+  });
 
   return { nodes, edges };
 }

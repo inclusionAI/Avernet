@@ -370,7 +370,16 @@ lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_exp
 
 ## 查询与取消
 
-所有接口复用现有 Human/Bot 认证；当前 Session 成员资格、加入序号和消息可见性由应用层校验。
+所有接口复用现有 Human/Bot 认证；当前 Session 成员资格和消息可见性由应用层校验。
+只读投递查询对有加入序号的 Chat 成员复用历史消息的可见窗口：以该调用者的
+`participant_join_seq` 为锚点，使用现有 `message_history.new_participant_visible_limit`
+及 `MessageRepoPort::resolve_history_window_start`，而不是把加入序号本身当作硬下限。
+因此窗口内的入会前消息可查询，窗口外消息仍返回 403；补充 StateMachine 历史记录
+使用历史读取相同的窗口豁免，但不豁免私有消息和 Human audience 校验。
+ManagerWorker/StateMachine 查询不应用 Chat 加入窗口，仍逐条检查消息可见性。
+没有记录加入序号的旧 Session 保留原来的无序号限制行为。查询身份仍是认证调用者，
+不新增 `view_bot_id` 或隐式 Bot 代查权限。取消和人工处置保持原来的加入序号限制。
+窗口仅在存在匹配投递的请求中按批次解析一次；读取失败返回错误，不降级为无限可见。
 只有原发送者可以按消息或 delivery 取消。Admin/Integration 不隐式绕过成员权限。
 
 | 方法与路径 | 参数 | 结果 |

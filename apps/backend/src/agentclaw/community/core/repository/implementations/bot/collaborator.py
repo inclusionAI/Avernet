@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import or_, func, tuple_
 
 from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
@@ -23,6 +23,8 @@ from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRole,
 )
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -114,11 +116,22 @@ class CollaboratorRepository(
     ) -> List[CollaboratorRecord]:
         """List collaborators for a bot."""
         with self._db.orm_session() as db:
-            query = db.query(self._Collaborator).filter(
-                self._Collaborator.bot_id == bot_id,
-                self._Collaborator.owner_id == owner_id,
-                self._Collaborator.env == env,
-            )
+            bots = db.query(BotModel.id).filter(
+                BotModel.bot_id == bot_id,
+                or_(BotModel.entity_id == owner_id, BotModel.owner_id == owner_id),
+                BotModel.env == env,
+                BotModel.is_delete == 0,
+            ).limit(2).all()
+            if len(bots) > 1:
+                raise BotLookupAmbiguousError(f"Ambiguous collaborator Bot locator: {bot_id}")
+            query = db.query(self._Collaborator).filter(self._Collaborator.env == env)
+            if bots:
+                query = query.filter(self._Collaborator.bot_pk == bots[0][0])
+            else:
+                query = query.filter(
+                    self._Collaborator.bot_id == bot_id,
+                    self._Collaborator.owner_id == owner_id,
+                )
             if role:
                 query = query.filter(self._Collaborator.role == role)
             rows = query.order_by(self._Collaborator.gmt_create.asc()).all()
@@ -129,26 +142,34 @@ class CollaboratorRepository(
         pairs: List[tuple[str, str]],
         env: str,
     ) -> List[CollaboratorRecord]:
-        """List collaborators for multiple exact Bot/Owner pairs."""
+        """Resolve compatibility locators in bulk, then query existing Bot PKs."""
         wanted = set(pairs)
         if not wanted:
             return []
         with self._db.orm_session() as db:
-            rows = (
-                db.query(self._Collaborator)
-                .filter(
-                    self._Collaborator.bot_id.in_({bot_id for bot_id, _ in wanted}),
-                    self._Collaborator.owner_id.in_(
-                        {owner_id for _, owner_id in wanted}
-                    ),
-                    self._Collaborator.env == env,
-                )
-                .order_by(self._Collaborator.gmt_create.asc())
-                .all()
-            )
-            return [
-                row.to_record() for row in rows if (row.bot_id, row.owner_id) in wanted
-            ]
+            bots = db.query(BotModel.id, BotModel.bot_id, BotModel.entity_id, BotModel.owner_id).filter(
+                or_(
+                    tuple_(BotModel.bot_id, BotModel.entity_id).in_(wanted),
+                    tuple_(BotModel.bot_id, BotModel.owner_id).in_(wanted),
+                ),
+                BotModel.env == env,
+                BotModel.is_delete == 0,
+            ).all()
+            matches: dict[tuple[str, str], int] = {}
+            for pk, bot_id, entity_id, owner_id in bots:
+                for pair in {(bot_id, entity_id), (bot_id, owner_id)} & wanted:
+                    if pair in matches and matches[pair] != pk:
+                        raise BotLookupAmbiguousError(f"Ambiguous collaborator Bot locator: {bot_id}")
+                    matches[pair] = pk
+            # Detached historical records retain the old explicit snapshot filter.
+            unresolved = wanted - matches.keys()
+            criteria = [self._Collaborator.bot_pk.in_(set(matches.values()))]
+            if unresolved:
+                criteria.append(tuple_(self._Collaborator.bot_id, self._Collaborator.owner_id).in_(unresolved))
+            rows = db.query(self._Collaborator).filter(
+                self._Collaborator.env == env, or_(*criteria)
+            ).order_by(self._Collaborator.gmt_create.asc()).all()
+            return [row.to_record() for row in rows]
 
     def list_by_user(
         self,

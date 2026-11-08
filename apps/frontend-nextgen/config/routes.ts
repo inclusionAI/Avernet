@@ -30,6 +30,7 @@ export const routes = [
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
+      { path: '/collaboration-square/experts', component: '@/pages/CollaborationSquare/Experts' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。
@@ -37,7 +38,13 @@ export const routes = [
       { path: '/collaboration-square/tasks', redirect: '/lab/community' },
       // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
+      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
+      { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
+      { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
+      { path: '/evolution-factory/tasks/:taskId', component: '@/pages/EvolutionFactory/TaskDetail' },
+      { path: '/evolution-factory/domains/:ownerUserId/:domainId', component: '@/pages/EvolutionFactory/DomainDetail' },
+      { path: '/evolution-factory/bench/runs/:benchRunId', component: '@/pages/EvolutionFactory/BenchRunDetail' },
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/task-instances', component: '@/pages/BotWorkshop/TaskInstances' },

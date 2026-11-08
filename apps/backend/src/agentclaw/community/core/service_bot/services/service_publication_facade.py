@@ -39,6 +39,8 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     InstanceHealthStatus,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
@@ -162,15 +164,18 @@ class ServicePublicationFacade:
         The ``require_service`` refusal is a bot-type answer, not a
         collaborator one, and the surface still reports it separately.
         """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise ServicePublicationNotFoundError("bot not found")
+        try:
+            bot = dict(BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id,
+            ).bot)
+        except BotAddressNotFoundError as exc:
+            raise ServicePublicationNotFoundError("bot not found") from exc
 
         level = resolve_operable_permission_level(
             self._collaborator_service,
             bot=bot,
             user_id=actor_id,
-            owner_id=owner_id,
+            owner_id=str(bot["owner_id"]),
             env=get_current_env(),
         )
         if level < required_level:

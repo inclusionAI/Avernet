@@ -19,6 +19,27 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new().route("/webhook", post(handle_webhook)).with_state(state)
 }
 
+/// A listener may serve several Providers, but each request authenticates only
+/// against its target Provider. Never accept a bearer from another group.
+pub fn multi_router(states: Vec<Arc<AppState>>) -> Router {
+    let states: std::collections::BTreeMap<_, _> = states.into_iter()
+        .map(|state| (state.config.provider_id.clone(), state)).collect();
+    Router::new().route("/webhook", post(handle_multi_webhook)).with_state(Arc::new(states))
+}
+
+async fn handle_multi_webhook(
+    State(states): State<Arc<std::collections::BTreeMap<String, Arc<AppState>>>>,
+    headers: HeaderMap,
+    Json(value): Json<Value>,
+) -> Response {
+    let state = value.pointer("/to_bot/provider_id").and_then(Value::as_str).and_then(|id| states.get(id));
+    let Some(state) = state else { return BridgeError::unauthorized().into_response(); };
+    match dispatch(state.clone(), headers, value).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
 async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -31,6 +52,9 @@ async fn handle_webhook(
 }
 
 async fn dispatch(state: Arc<AppState>, headers: HeaderMap, value: Value) -> Result<Response, BridgeError> {
+    if state.config.mode != crate::config::ConnectionMode::Gateway {
+        return Err(BridgeError::invalid_request("HTTP delivery requires gateway mode"));
+    }
     let auth = headers.get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok()).unwrap_or_default();
     let token = state.config.bcs_to_provider_token.as_deref().ok_or_else(BridgeError::unauthorized)?;
@@ -45,13 +69,15 @@ async fn dispatch(state: Arc<AppState>, headers: HeaderMap, value: Value) -> Res
     }));
     match runtime::dispatch(state, req).await? {
         RuntimeReply::Json { status, body } => Ok((StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), Json(body)).into_response()),
-        RuntimeReply::Run { stream, handle } => {
+        RuntimeReply::Run { delivery: runtime::RunDelivery::Gateway { stream }, handle } => {
             let frames = gateway_stream(stream, handle, trace);
             let mut response = Response::new(Body::from_stream(frames));
             response.headers_mut().insert(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream; charset=utf-8"));
             response.headers_mut().insert(axum::http::header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
             Ok(response)
         }
+        RuntimeReply::Run { delivery: runtime::RunDelivery::Plugin, .. } =>
+            Err(BridgeError::invalid_request("HTTP delivery requires a gateway stream")),
     }
 }
 
@@ -104,7 +130,7 @@ mod tests {
     async fn idle_gateway_emits_transport_heartbeat_without_retaining_event() {
         let registry = crate::run::RunRegistry::new();
         let (handle, _) = registry.begin("heartbeat", "fp".into());
-        let stream = gateway_stream(Box::pin(crate::run::forward_stream(handle.clone())), handle.clone(), None);
+        let stream = gateway_stream(Box::pin(crate::run::forward_stream(handle.clone()).unwrap()), handle.clone(), None);
         let mut stream = Box::pin(stream);
         let frame = tokio::time::timeout(Duration::from_millis(200), stream.next()).await.unwrap().unwrap().unwrap();
         assert_eq!(frame.as_ref(), crate::sse::HEARTBEAT.as_bytes());

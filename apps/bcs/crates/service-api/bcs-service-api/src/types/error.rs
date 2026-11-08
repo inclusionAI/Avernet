@@ -32,9 +32,6 @@ pub enum ServiceError {
     #[error("Group '{0}' not found")]
     GroupNotFound(String),
 
-    /// Proposal not found.
-    #[error("Proposal '{0}' not found or expired")]
-    ProposalNotFound(String),
 
     /// Invalid operation on a specific request.
     #[error("Invalid operation on request {request_id}: {message}", request_id = request_id.as_deref().unwrap_or("unknown"))]
@@ -134,10 +131,6 @@ pub enum ServiceError {
     #[error("Invalid session params: {0}")]
     SessionInvalidParams(String),
 
-    /// Session reactivation blocked because callback is still pending.
-    #[error("Session '{0}' callback still pending")]
-    SessionCallbackPending(String),
-
     /// Group contains non-public bots, preventing visibility change to public.
     /// Each tuple is (bot_uuid, bot_name).
     #[error("Group contains non-public bots preventing visibility change")]
@@ -177,7 +170,6 @@ impl ServiceError {
                 serde_json::json!({ "bot_id": bot_id, "method": method })
             }
             Self::GroupNotFound(id) => serde_json::json!({ "group_id": id }),
-            Self::ProposalNotFound(id) => serde_json::json!({ "proposal_id": id }),
             Self::InvalidOperation { message, request_id } => {
                 serde_json::json!({ "message": message, "request_id": request_id })
             }
@@ -200,7 +192,6 @@ impl ServiceError {
             Self::ParticipantNotFound(id) => serde_json::json!({ "participant_id": id }),
             Self::SessionNotFound(id) => serde_json::json!({ "session_id": id }),
             Self::SessionInvalidParams(reason) => serde_json::json!({ "reason": reason }),
-            Self::SessionCallbackPending(id) => serde_json::json!({ "session_id": id }),
             Self::Conflict(reason)
             | Self::Unauthorized(reason)
             | Self::Forbidden(reason)

@@ -10,6 +10,7 @@ use bcs_auth_api::{AuthError, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::{BotControlPlaneCore, BotCore, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
+use bcs_bot_store::provider::MemoryBotProviderStore;
 use bcs_config::resolve_env_str;
 use bcs_http::{
     router::build_router,
@@ -176,6 +177,14 @@ fn test_app_with_options(
         provider_repo.clone(),
         provider_bindings.clone(),
     ));
+    // The production composition always wires the Bot
+    // Provider metadata over the SAME shared MemoryBotState,
+    // so the atomic retirement contract tests run on the
+    // real wiring.
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
     let registry = Arc::new(BotCore::with_provider_repos(
         bot_repo,
         provider_repo.clone(),
@@ -188,7 +197,8 @@ fn test_app_with_options(
         provider_credentials.clone(),
         provider_bindings,
         registry_service.clone(),
-    ));
+    )
+    .with_bot_provider_repo(bot_providers));
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl.clone();
     let relation = Arc::new(RecordingRelationCoreService::default());

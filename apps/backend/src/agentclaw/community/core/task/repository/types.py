@@ -12,7 +12,7 @@ projection can be added later without a schema change.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
@@ -25,6 +25,9 @@ from agentclaw.community.core.task.domain.models import (
     RelationType,
     Status,
 )
+from agentclaw.community.core.task.task_context.task_artifact import ArtifactContent
+from agentclaw.community.utils.app_utils import get_current_executor_app
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,8 @@ class TaskInfoRecord:
     lease_owner: Optional[str] = None
     lease_until: Optional[int] = None
     heartbeat_at: Optional[int] = None
+    env: str = field(default_factory=get_current_env)
+    executor_app: str = field(default_factory=get_current_executor_app)
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -287,4 +292,30 @@ class TaskCallbackCorrelationRecord:
     task_id: str
     node_id: str
     retry: int
+    gmt_create: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class TaskArtifactRecord:
+    """Table-faithful record for one ``task_artifact`` row(spec 2026-10-20-task-artifact-domain §6)。
+
+    append-only 不可变清单:无任何 UPDATE 投影;``content`` 存解析后的领域分支对象,
+    ``created_at``(int ms)读时由 ``gmt_create`` 折算(trajectory 同款惯例)。可空列
+    (``node_id``/``attempt``/``content_hash``/``creator``/``modifier`` 等)为容错/人工修数
+    留口,发布路径必填由领域侧保证。
+    """
+
+    artifact_id: str
+    artifact_name: Optional[str]
+    task_id: str
+    node_id: Optional[str]
+    attempt: Optional[int]
+    scope_session_id: Optional[str]
+    kind: str
+    storage: str
+    content: ArtifactContent
+    content_hash: Optional[str]
+    creator: Optional[str]
+    modifier: Optional[str]
+    created_at: int
     gmt_create: Optional[datetime] = None

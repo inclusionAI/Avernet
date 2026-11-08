@@ -69,8 +69,12 @@ it('retains every member and frozen original when a real exact plan contains lar
   const revision=await service.create('test',{workflowId:'wf-1',inputDigest:page.inputDigest,itemIds:selected.map(row=>row.itemId),instructions:'',requestId:'complete'});
   expect(revision.input.items).toHaveLength(10);
   expect(revision.input.items.every(row=>!('readSummary' in row))).toBe(true);
-  expect((revision.input.items[0].context?.diagnoses as Array<{reasoning:string}>)[0].reasoning).toBe('证'.repeat(10000));
-  expect(revision.input.integration?.plans[0].originalItemIds).toHaveLength(10);
+  expect(revision.input.materials).toBeDefined();
+  const original=await service.material(revision.taskId,revision.revision,revision.input.items[0].itemId);
+  expect((original.context?.diagnoses as Array<{reasoning:string}>)[0].reasoning).toBe('证'.repeat(10000));
+  expect(Buffer.byteLength(JSON.stringify(revision.input))).toBeLessThan(256*1024);
+  expect(revision.input.integration?.plans.flatMap(plan=>plan.originalItemIds).sort()).toEqual(f.items.map(item=>item.itemId).sort());
+  expect(revision.input.items.flatMap(row=>row.sources)).toHaveLength(10);
 });
 it('pages complete metadata and retains trusted raw reads for legacy automatic selection',async()=>{
   const f=await repairFixture(125);fixtures.push(f);

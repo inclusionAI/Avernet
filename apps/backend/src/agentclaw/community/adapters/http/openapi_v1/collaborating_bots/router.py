@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-
-from fastapi import APIRouter, Request
+from typing import Annotated, Any
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.clusters import cluster_for_engine
@@ -19,7 +18,6 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors, page
-from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
 from agentclaw.community.core.bot_inventory.errors import BotInventoryPermissionError
@@ -27,7 +25,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryTemplatePort,
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Query, Request
 
 from .schemas import CollaboratingBot, CollaborationSummary
 
@@ -109,7 +109,8 @@ async def list_collaborating_bots(
     page_params: PageParamsDep,
     user_id: UserIdDep,
     caller: ActingCallerDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    stage: Annotated[RuntimeStage, Query(description="Filter service Bots by runtime stage before pagination; defaults to draft. Other Bot kinds are unchanged.")] = RuntimeStage.DRAFT,
+    bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(
         CollaboratorServiceProtocol
     ),
@@ -131,25 +132,19 @@ async def list_collaborating_bots(
     relations = await asyncio.to_thread(
         collaborators.list_user_collaborations, user_id
     )
-    if granted_pairs is not None:
-        relations = [
-            relation
-            for relation in relations
-            if (relation.bot_id, relation.owner_id) in granted_pairs
-        ]
     if not relations:
         return page(0, [], request)
 
-    relation_by_pair = {
-        (relation.bot_id, relation.owner_id): relation for relation in relations
-    }
-    result = await asyncio.to_thread(
-        bot_service.list_bots_by_owner_bot_pairs,
-        pairs=list(relation_by_pair),
+    relation_by_pk = {relation.bot_pk: relation for relation in relations}
+    total, rows = await asyncio.to_thread(
+        bot_repo.page_live_bots_by_pks,
+        bot_pks=list(relation_by_pk),
+        exclude_owner_id=user_id,
+        entity_pairs=list(granted_pairs) if granted_pairs is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
+        stage=stage.value,
     )
-    rows = result["items"]
     template_configs, row_spaces = await asyncio.gather(
         asyncio.to_thread(_resolve_template_configs, rows, template_port),
         asyncio.to_thread(_resolve_row_spaces, rows, space_context),
@@ -161,12 +156,12 @@ async def list_collaborating_bots(
         items.append(
             _to_item(
                 bot,
-                relation_by_pair[(bot["bot_id"], bot["owner_id"])],
+                relation_by_pk[bot["id"]],
                 template_config=template_configs.get(bot_id),
                 space=row_spaces.get((owner_id, str(bot.get("space_id") or ""))),
             )
         )
-    return page(result["total"], items, request)
+    return page(total, items, request)
 
 
 __all__ = ["router"]

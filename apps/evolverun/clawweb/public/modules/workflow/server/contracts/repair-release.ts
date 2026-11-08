@@ -48,7 +48,8 @@ export type RepairReleaseDetail = {
 /** Service API; routes enforce authenticated workflow access in addition to target checks. */
 export interface RepairReleaseService {
   readonly configured: boolean;
-  detail(taskId: string): Promise<RepairReleaseDetail>;
+  /** A route may reuse its already-read task revision; omitted retains legacy lookup. */
+  detail(taskId: string, latestSuccessfulRevision?: number | null): Promise<RepairReleaseDetail>;
   targets(actorId: string, taskId: string): Promise<RepairReleaseTarget[]>;
   confirm(actorId: string, taskId: string, request: RepairConfirmRequest): Promise<RepairApproval>;
   publish(actorId: string, taskId: string, request: RepairConfirmRequest): Promise<RepairDeployment>;

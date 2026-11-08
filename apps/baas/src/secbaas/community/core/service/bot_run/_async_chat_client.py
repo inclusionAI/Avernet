@@ -1672,9 +1672,7 @@ class AsyncChatClient:
             else ()
         )
         if bypass_keys and any(k in session_key for k in bypass_keys):
-            logger.info(
-                "[log_event] event=%s, payload=%s", event_name, payload
-            )
+            logger.info("[log_event] event=%s, payload=%s", event_name, payload)
             return
 
         # 含敏感内容的字段按事件类型过滤

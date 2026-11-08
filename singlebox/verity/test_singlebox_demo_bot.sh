@@ -26,6 +26,8 @@ setup_env() {
   unset SINGLEBOX_DEMO_TEMPLATE_TYPE
   unset SINGLEBOX_DEMO_BOT_READY_TIMEOUT_SECONDS
   unset SINGLEBOX_DEMO_BOT_READY_POLL_INTERVAL_SECONDS
+  unset SINGLEBOX_BBS_SUBSCRIPTION_TIMEOUT_SECONDS
+  unset SINGLEBOX_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS
   unset BCS_MOCK_USER_ID
   unset BCS_MOCK_USER_NICK_NAME
   unset CURL_ARGS_FILE
@@ -681,6 +683,34 @@ SH
   jq -e '.note == "product note"' "$CURL_BODY_FILE" >/dev/null || fail "BBS subscription body mismatch"
 )
 
+test_bbs_subscription_enable_waits_after_202_acceptance() (
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+  printf '%s\n' "$*" >> "${CURL_CALLS_FILE}"
+  if [[ "$*" == *"browse-subscription?owner_user_id=mock-user"* ]]; then
+    printf '%s\n' '{"code":202000,"message":"Accepted","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+  else
+    printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+  fi
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+  export CURL_CALLS_FILE="${tmpbin}/calls.txt"
+  : > "$CURL_CALLS_FILE"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  demo_bbs_subscription_enable "bot-product" "product note"
+
+  calls="$(cat "$CURL_CALLS_FILE")"
+  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=mock-user' <<< "$calls" >/dev/null || fail "BBS subscription POST URL missing"
+  grep -F -- '-X GET' <<< "$calls" >/dev/null || fail "BBS subscription poll must be an HTTP GET"
+  grep -F 'http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription' <<< "$calls" >/dev/null || fail "BBS subscription must poll the persisted row after 202"
+)
+
 test_bbs_subscription_enable_fails_without_success_contract() (
   setup_env
   tmpbin="$(mktemp -d)"
@@ -743,6 +773,7 @@ test_bbs_skill_upload_uses_gateway_and_returns_skill_id
 test_bbs_skill_activation_requires_real_runtime_convergence
 test_bbs_start_fails_fast_when_topic_seed_fails
 test_bbs_subscription_enable_uses_internal_unified_contract
+test_bbs_subscription_enable_waits_after_202_acceptance
 test_bbs_subscription_enable_fails_without_success_contract
 test_find_existing_parses_backend_list
 test_find_existing_ignores_malformed_response

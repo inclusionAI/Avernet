@@ -1,6 +1,11 @@
 import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdentity';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import {
+  getCollaborationBotConversationUrl,
+  getCollaborationGroupConversationUrl,
+} from '@/utils/collaborationSquare';
 import { Bot, Terminal } from 'lucide-react';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
@@ -9,6 +14,7 @@ import type {
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
+  CodingBotConversationHost,
   ConversationInstanceScopeCapability,
   HumanIdentity,
   InviteCodeGatePolicy,
@@ -22,12 +28,30 @@ import type {
   RuntimeEnvironment,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  TaskSessionJumpTarget,
   UserProfilePresentation,
   UserSearchCapability,
 } from './types';
 
 function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
   return { status: 'unsupported', value, reason };
+}
+
+const DEFAULT_TASK_API_BASE = '/openapi/v1/collaboration/tasks';
+
+function configuredTaskApiBase(): string {
+  return typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
+    ? TEAMCLAW_TASK_API_BASE
+    : DEFAULT_TASK_API_BASE;
+}
+
+function normalizeTaskConversationRouteUrl(routeUrl: string): string | null {
+  if (!routeUrl.startsWith('/')) return null;
+  const base = new URL(typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const parsed = new URL(routeUrl, base);
+  if (parsed.origin !== base.origin) return null;
+  if (!['/workspace/chat', '/workspace/collaboration'].includes(parsed.pathname)) return null;
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 export const defaultCapabilities: AppCapabilities = {
@@ -46,6 +70,34 @@ export const defaultCapabilities: AppCapabilities = {
   getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
     unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
+  // 任务节点联动统一切真实会话路由：URL 与左侧 Bot/群、Session 选中态由既有
+  // 路由 hydration 同源更新；TaskPanel 的跨会话保活由 taskConversationNavigationStore 编排。
+  navigateToConversation: (target: TaskSessionJumpTarget): CapabilityResult<null> => {
+    if (!target.sessionId) {
+      return unsupported(null, '会话跳转目标缺少 sessionId');
+    }
+    const isGroupTarget = target.kind === 'group' || target.sessionId.startsWith('bcs_grp_');
+    const routeUrl = target.routeUrl
+      ? normalizeTaskConversationRouteUrl(target.routeUrl)
+      : isGroupTarget
+      ? getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId)
+      : getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    if (!routeUrl) return unsupported(null, '会话跳转地址不是受支持的站内会话路由');
+
+    useTaskSidePanelStore.getState().closeLinkedSession();
+    const currentUrl =
+      typeof window === 'undefined'
+        ? ''
+        : `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (currentUrl === routeUrl) return { status: 'available', value: null };
+
+    // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
+    // 且 capability 求值频率低;只在真正发生路由跳转时取模块。
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
+    umiHistory.push(routeUrl);
+    return { status: 'available', value: null };
+  },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
   // 守卫（阿里云形态 spaces=false 时 SpaceAdmin 页 replace 回落 /ticket-center），不在运行期重定向。
   // 返回 null。internal overlay 仍显式 override 为 null 作为防御性回归护栏（见 src/extensions/internal.ts）。
@@ -140,7 +192,13 @@ export const defaultCapabilities: AppCapabilities = {
   // 真实 URL 拼接只在 internal overlay（src/extensions/internal.ts，.internal-paths 剥离）。
   getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
-  getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({
+    status: 'available',
+    value:
+      typeof TEAMCLAW_LOGIN_STRATEGY !== 'undefined' && TEAMCLAW_LOGIN_STRATEGY === 'ace-gateway'
+        ? 'ace-gateway'
+        : 'oauth-provider',
+  }),
   // Open Core 默认按构建变量识别运行环境；变量缺失时沿用 PRE，不在公开源码写入部署域名。
   getRuntimeEnvironment: (): CapabilityResult<RuntimeEnvironment> => ({
     status: 'available',
@@ -149,16 +207,16 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core（=阿里云外部生产形态）默认激活邀请码门禁——gate 为产品对外准入控制（登录后未绑码则弹不可关闭输入弹窗）。
   // internal overlay 覆盖为 'disabled'（员工形态，ACE 后端无邀请码端点）。门禁生效性由 getLoginStrategy + 本 capability 双门控。
   getInviteCodeGatePolicy: (): CapabilityResult<InviteCodeGatePolicy> => ({ status: 'available', value: 'enabled' }),
-  // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
-  // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
-  getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
+  // Open Core 默认走 openapi 公开面；本地排障可通过 TEAMCLAW_TASK_API_BASE 切到 /api/v1 直连 Task Engine。
+  // internal overlay 仍可覆盖本 capability，生产默认行为不变。
+  getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: configuredTaskApiBase() }),
   // 社区 BBS 已发布到 collaboration task 公开面：
   // Topic 前缀为 /openapi/v1/collaboration/tasks/bbs/topics；订阅列表为
   // /openapi/v1/collaboration/tasks/bbs/browse-subscriptions；单 Bot CRUD 为
   // /openapi/v1/collaboration/tasks/bots/{id}/bbs/browse-subscription。
   getBbsApiBase: (): CapabilityResult<string> => ({
     status: 'available',
-    value: '/openapi/v1/collaboration/tasks/bbs/topics',
+    value: `${configuredTaskApiBase()}/bbs/topics`,
   }),
   // Open Core / 开源部署:api-key 直发消息,无 secbaas per-bot 授权闭环 → grant/revoke 短路 no-op,开关只写 BCS task_claim_mode。
   // internal overlay 覆盖为 'secbaas-relay'(经 secbaas 透传人类 Cookie 授权 api-key 调某 bot)。
@@ -192,6 +250,8 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
   getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
+  getBotEditorPanels: () => ({ status: 'available', value: [] }),
+  getConversationComposer: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
@@ -210,6 +270,26 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getOpenClawRegistrationEnabled: () => ({ status: 'available', value: true }),
+  getDeepSeekHarnessOnboardingCommand: () => ({ status: 'available', value: null }),
+  getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: true }),
+  getDeepSeekHarnessRegistrationGuideUrl: () => {
+    const runtime =
+      typeof window === 'undefined'
+        ? undefined
+        : (window as { AVERNET_RUNTIME_CONFIG?: { DSH_REGISTRATION_GUIDE_URL?: string } }).AVERNET_RUNTIME_CONFIG;
+    const value = runtime?.DSH_REGISTRATION_GUIDE_URL?.trim();
+    if (!value) return { status: 'available', value: null };
+    try {
+      const url = new URL(value);
+      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) {
+        return { status: 'available', value };
+      }
+    } catch {
+      // Invalid optional deployment links must not block the inline onboarding steps.
+    }
+    return { status: 'available', value: null };
+  },
   getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
     const runtime =
       typeof window === 'undefined'
@@ -267,4 +347,17 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 没有 AIXCoding 微应用货源:Coding Bot 会话可选择,但工作区显式提示未配置。
+  getCodingBotConversationHost: (): CapabilityResult<CodingBotConversationHost | null> => ({
+    status: 'available',
+    value: null,
+  }),
+  // SPM 埋点 adapter(add-spm-tracking):Open Core 默认 no-op——零上报、
+  // 不加载任何埋点 SDK;internal overlay 注入真实 Tracert 实现(码表在 overlay 侧维护,
+  // 开源仓库只见语义点位常量 src/tracking/points.ts)。
+  trackerAdapter: {
+    click: () => {},
+    expo: () => {},
+    config: () => {},
+  },
 };

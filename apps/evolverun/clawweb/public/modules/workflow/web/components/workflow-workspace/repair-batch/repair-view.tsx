@@ -1,3 +1,4 @@
+import { itemSnapshotKey } from '../../../../server/contracts/repair-version-scope'
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 
@@ -14,9 +15,11 @@ export const itemHeading = (item: RepairInboxItem) => {
   return title.length > 96 ? title.slice(0, 96) + '…' : title
 }
 export const isLegacyPreview = (item: RepairInboxItem) => !item.sourceAvailable && item.updatedAtMs === 0
-export function exclusion(item: RepairInboxItem, taskId?: string) {
+export function exclusion(item: RepairInboxItem, taskId?: string, targetSnapshotKey?: string) {
   if (isLegacyPreview(item)) return '历史预览：原始建议或证据已不可用，无法重新生成；请查看历史记录'
   if (!item.sourceAvailable) return '原始来源已不可用，无法核对原建议与证据'
+  if (targetSnapshotKey && !itemSnapshotKey(item)) return '运行版本未确认，暂不能作为生成依据'
+  if (targetSnapshotKey && itemSnapshotKey(item) !== targetSnapshotKey) return null
   if (item.state === 'no_action') return '已暂不处理，可恢复后重新选择'
   if (item.state === 'processing') return taskId && item.activeTaskId === taskId ? null : '已有任务正在处理，请查看该任务的生成进度'
   if (item.state === 'awaiting_verification') return '上一轮已采纳，正在等待效果验证；请回看上一轮观察，不能重复生成'

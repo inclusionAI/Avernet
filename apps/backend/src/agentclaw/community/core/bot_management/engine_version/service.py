@@ -13,7 +13,11 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.engine_runtime.gate import require_bot_operator
+from agentclaw.community.core.engine_runtime.gate import resolve_operator_level
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import resolve_operable_permission_level
+from agentclaw.community.core.bot_inventory.protocols import ServiceLifecyclePort
+from agentclaw.community.core.bot_inventory.types import BotAction, DisplayState
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -24,9 +28,6 @@ from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
 
-from agentclaw.community.core.engine_runtime.errors import (
-    EngineBotTypeNotSupportedError,
-)
 from .errors import (
     EngineVersionInstanceSelectionError,
     EngineVersionStageUnsupportedError,
@@ -56,6 +57,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
         collaborators: CollaboratorServiceProtocol,
         list_devices: Callable[[str], list[dict[str, Any]]],
         config: EngineVersionConfig,
+        lifecycle: ServiceLifecyclePort,
     ) -> None:
         self._bots = bots
         self._bindings = bindings
@@ -64,6 +66,7 @@ class EngineVersionService(EngineVersionServiceProtocol):
         self._collaborators = collaborators
         self._list_devices = list_devices
         self._config = config
+        self._lifecycle = lifecycle
 
     async def inspect(
         self,
@@ -77,35 +80,57 @@ class EngineVersionService(EngineVersionServiceProtocol):
         bot = await asyncio.to_thread(self._bots.get_by_id_and_owner, bot_id, owner_id)
         if not bot:
             raise BotNotFoundError("Bot not found")
-        await asyncio.to_thread(
-            require_bot_operator,
-            self._collaborators,
-            bot=bot,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            caller_id=caller_id,
-        )
-        if stage != "draft":
-            raise EngineVersionStageUnsupportedError("stage_not_supported")
-        if bot.get("bot_type") not in {"personal", "service"}:
-            raise EngineBotTypeNotSupportedError("Bot type not supported")
+        # Visibility is broader than operation permission: inventory Space members
+        # and explicit collaboration-directory readers may receive an advisory
+        # refusal, but strangers must still get the same masked 404 as absence.
+        await asyncio.to_thread(self._require_visible, bot, caller_id, owner_id)
         context: VersionContext = {
             "bot_id": bot_id,
             "stage": stage,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
         target = release_target(self._config.target_release)
+
+        def restricted(reason: str) -> EngineVersionResult:
+            return {
+                "detection": {"status": "not_applicable", "reason": reason},
+                "release_target": {"status": "unavailable", "reason": reason},
+                "comparison": "unknown",
+                "restart_hint": "restricted",
+                "restart_reason": reason,
+                "context": context,
+            }
+
+        level = await asyncio.to_thread(
+            resolve_operator_level, self._collaborators,
+            bot=bot, caller_id=caller_id, owner_id=owner_id,
+        )
+        if level < PermissionLevel.MEMBER:
+            return restricted("restart_not_permitted")
+        if stage != "draft":
+            raise EngineVersionStageUnsupportedError("stage_not_supported")
+        if bot.get("bot_type") not in {"personal", "service"}:
+            return restricted("bot_type_not_supported")
         if bot.get("active_engine") not in {"openclaw", "hermes"}:
             return {
-                "detection": {
-                    "status": "not_applicable",
-                    "reason": "engine_not_supported",
-                },
+                "detection": {"status": "not_applicable", "reason": "engine_not_supported"},
                 "release_target": target,
                 "comparison": "unknown",
                 "restart_hint": "none",
                 "context": context,
             }
+        if bot.get("status") not in {"ACTIVE", "FAILED"}:
+            return restricted("bot_not_ready")
+        if bot.get("bot_type") == "service":
+            cards = await asyncio.to_thread(self._lifecycle.cards_for_bots, bots=[bot])
+            matches = cards.get(bot_id, ())
+            # This endpoint addresses the draft runtime. Historical or online
+            # publication cards do not revoke an independently restartable draft.
+            if not any(
+                card.display_state == DisplayState.SERVICE_DRAFT
+                and BotAction.RESTART in card.actions for card in matches
+            ):
+                return restricted("service_not_draft")
         detection: Detection = {"status": "read_failed", "reason": "probe_unavailable"}
         current: CurrentVersion = {}
         try:
@@ -153,6 +178,24 @@ class EngineVersionService(EngineVersionServiceProtocol):
         if current:
             result["current"] = current
         return result
+
+    def _require_visible(self, bot: dict[str, Any], caller_id: str, owner_id: str) -> None:
+        if caller_id == owner_id:
+            return
+        try:
+            effective = resolve_operable_permission_level(
+                self._collaborators, bot=bot, user_id=caller_id, owner_id=owner_id,
+            )
+            # The collaboration directory returns explicit records even after
+            # Space operation revocation. This proves visibility, never restart.
+            listed = self._collaborators.get_permission_level(
+                int(bot["id"]), caller_id, owner_id,
+            )
+            if max(effective, PermissionLevel(listed)) >= PermissionLevel.MEMBER:
+                return
+        except Exception:
+            pass  # No visibility proof on unavailable permission storage.
+        raise BotNotFoundError("Bot not found")
 
     async def _select_instance(self, binding, requested: str | None) -> str:
         if binding.device_provider not in {"arca", "baas", "teclaw", "local"}:

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bcs_bot::BotCore;
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{BotCapabilities, BotRegistryCoreService};
 use bcs_services_container::Services;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -122,38 +122,297 @@ async fn add_uses_authenticated_bot_actor_and_rejects_duplicate() {
 }
 
 #[tokio::test]
-async fn normal_routes_do_not_trust_actor_id_from_query_or_body() {
-    let (status, body) = post_json(
-        "/groupcontext/add?groupId=game-room-7&sessionId=sess-001&actorId=other_bot",
-        "judge-token",
-        json!({
-            "actor_id": "other_bot",
-            "name": "player_state",
-            "scope_level": "session",
-            "content": "state",
-            "visible_to": {"userIds": []},
-            "collect_from": {"userIds": ["judge_bot"]}
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["status"], "ok");
+async fn add_accepts_missing_and_empty_collect_from_with_owner_only_write_and_owners() {
+    let app = app().await;
 
-    let (status, body) = post_json(
-        "/groupcontext/add?groupId=game-room-7&sessionId=sess-001",
-        "other-token",
-        json!({
-            "actor_id": "judge_bot",
-            "name": "private_write",
-            "scope_level": "session",
-            "content": "state",
-            "visible_to": {"userIds": []},
-            "collect_from": {"userIds": ["judge_bot"]}
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-collect",
+            "judge-token",
+            json!({
+                "name": "missing_collect",
+                "scope_level": "session",
+                "content": "missing policy",
+                "visible_to": {"userIds": []}
+            }),
+        ))
+        .await
+        .expect("missing policy response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body, json!({"status": "ok", "error_msg": null}));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-collect",
+            "judge-token",
+            json!({
+                "name": "empty_collect",
+                "scope_level": "session",
+                "content": "empty policy",
+                "visible_to": {"userIds": []},
+                "collect_from": {"userIds": []}
+            }),
+        ))
+        .await
+        .expect("empty policy response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-collect",
+            "judge-token",
+            json!({
+                "name": "shared_write",
+                "scope_level": "session",
+                "content": "shared policy",
+                "visible_to": {"userIds": []},
+                "collect_from": {"userIds": ["other_bot"]}
+            }),
+        ))
+        .await
+        .expect("shared policy response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-collect",
+            "judge-token",
+            json!({"name": "missing_collect", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("owner get response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["collect_from"], json!({"userIds": []}));
+    assert_eq!(item["owners"], json!({"userIds": ["judge_bot"]}));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-collect",
+            "other-token",
+            json!({"name": "empty_collect", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("reader get response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["content"], "empty policy");
+    assert!(item.get("visible_to").is_none());
+    assert!(item.get("collect_from").is_none());
+    assert!(item.get("owners").is_none());
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/update?groupId=game-room-7&sessionId=sess-collect",
+            "other-token",
+            json!({
+                "name": "empty_collect",
+                "scope_level": "session",
+                "content": "attempted non-owner write",
+                "change_reason": "should be denied"
+            }),
+        ))
+        .await
+        .expect("non-owner update response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response_json(response).await;
     assert_eq!(body["status"], "permission_denied");
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/update?groupId=game-room-7&sessionId=sess-collect",
+            "other-token",
+            json!({
+                "name": "shared_write",
+                "scope_level": "session",
+                "content": "listed writer update",
+                "change_reason": "listed writer"
+            }),
+        ))
+        .await
+        .expect("listed writer update response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body, json!({"status": "ok", "error_msg": null}));
+}
+
+#[tokio::test]
+async fn normal_routes_do_not_trust_actor_id_from_query_or_body() {
+    let app = app().await;
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-001&actorId=judge_bot",
+            "other-token",
+            json!({
+                "actor_id": "judge_bot",
+                "name": "private_write",
+                "scope_level": "session",
+                "content": "state",
+                "visible_to": {"userIds": []}
+            }),
+        ))
+        .await
+        .expect("add response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-001",
+            "other-token",
+            json!({"name": "private_write", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("actual creator get response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["owners"], json!({"userIds": ["other_bot"]}));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-001",
+            "judge-token",
+            json!({"name": "private_write", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("forged body actor get response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert!(item.get("owners").is_none());
+}
+
+#[tokio::test]
+async fn add_ignores_owners_input_and_update_transfers_owner_access() {
+    let app = app().await;
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-owner",
+            "judge-token",
+            json!({
+                "name": "player_state",
+                "scope_level": "session",
+                "content": "v1",
+                "visible_to": {"userIds": ["judge_bot"]},
+                "collect_from": {"userIds": ["judge_bot"]},
+                "owners": {"userIds": ["admin"]}
+            }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-owner",
+            "admin-token",
+            json!({"name": "player_state", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response_json(response).await;
+    assert_eq!(body["status"], "permission_denied");
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-owner",
+            "judge-token",
+            json!({"name": "player_state", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["visible_to"], json!({"userIds": ["judge_bot"]}));
+    assert_eq!(item["collect_from"], json!({"userIds": ["judge_bot"]}));
+    assert_eq!(item["owners"], json!({"userIds": ["judge_bot"]}));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/update?groupId=game-room-7&sessionId=sess-owner",
+            "judge-token",
+            json!({
+                "name": "player_state",
+                "scope_level": "session",
+                "content": "v2",
+                "owners": {"userIds": ["admin"]},
+                "change_reason": "transfer ownership"
+            }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body, json!({"status": "ok", "error_msg": null}));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/list?groupId=game-room-7&sessionId=sess-owner",
+            "admin-token",
+            json!({"scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let contexts = body["contexts"].as_array().expect("contexts");
+    assert_eq!(contexts[0]["name"], "player_state");
+    assert_eq!(contexts[0]["permission"], "WRO");
+    assert!(!body.to_string().contains("\"owners\""));
+
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-owner",
+            "admin-token",
+            json!({"name": "player_state", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["content"], "v2");
+    assert_eq!(item["visible_to"], json!({"userIds": ["judge_bot"]}));
+    assert_eq!(item["collect_from"], json!({"userIds": ["judge_bot"]}));
+    assert_eq!(item["owners"], json!({"userIds": ["admin"]}));
+
+    let response = app
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-owner",
+            "judge-token",
+            json!({"name": "player_state", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert!(item.get("visible_to").is_none());
+    assert!(item.get("collect_from").is_none());
+    assert!(item.get("owners").is_none());
 }
 
 #[tokio::test]
@@ -407,7 +666,13 @@ async fn invalid_time_wire_types_are_rejected() {
 async fn add_list_and_get_follow_visibility_rules() {
     let app = app().await;
     for (name, visible_to, collect_from, content, token) in [
-        ("game_rule", json!([]), json!(["admin"]), "规则", "admin-token"),
+        (
+            "game_rule",
+            json!([]),
+            json!(["admin"]),
+            "规则",
+            "admin-token",
+        ),
         (
             "player_word_1",
             json!(["张三", "judge_bot"]),
@@ -425,9 +690,9 @@ async fn add_list_and_get_follow_visibility_rules() {
         (
             "write_only",
             json!(["李四"]),
-            json!(["张三"]),
+            json!(["other_bot", "张三"]),
             "只能写",
-            "zhangsan-token",
+            "other-token",
         ),
     ] {
         let response = app

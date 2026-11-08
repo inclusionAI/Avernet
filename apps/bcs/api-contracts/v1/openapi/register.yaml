@@ -9,7 +9,10 @@ RegisterTokenResult:
     token:
       type: string
       minLength: 1
-      description: HMAC register token signed with the deployment invite secret.
+      description: >-
+        HMAC register token signed with the deployment invite secret. Newly issued
+        Provider-scoped v2 payloads include auth_mode from Provider configuration.
+        Historical v2 payloads without this claim remain accepted by the server.
     expires_at:
       type: integer
       description: Absolute token expiry in milliseconds since the Unix epoch.
@@ -53,13 +56,21 @@ BotRegistrationResult:
     registration:
       type: object
       additionalProperties: false
-      required: [provider_id, provider_bot_ref, mode, webhook_url, effective_webhook_url]
+      required: [provider_id, provider_bot_ref, mode, webhook_url, effective_webhook_url, auth_mode, agent_code, bot_slug]
       description: Present only for Provider-scoped registration. Does not indicate bridge process readiness.
       properties:
         provider_id:
           type: string
         provider_bot_ref:
           type: string
+        auth_mode:
+          type: string
+          enum: [static_bearer, provider_admin, agentpass, agentpass-subbots]
+        agent_code:
+          type: [string, "null"]
+          description: Original AgentPass parent, never composed with the slug.
+        bot_slug:
+          type: [string, "null"]
         mode:
           type: string
           enum: [plugin, gateway]
@@ -83,7 +94,8 @@ RegisterTokenPath:
       Without provider_id this preserves the legacy v1 token and response.
       With provider_id, the caller must own the enabled Provider or the Provider
       must be explicitly approved for self-service registration by server config.
-      A v2 token fixes Provider and Human ownership and allowed modes; it can
+      A v2 token fixes Provider and Human ownership, allowed connection modes and
+      Provider auth_mode at issuance; it can
       also be consumed by legacy POST /register, which preserves HTTP 200 and
       bare JSON. Legacy GET /register/token supports the same optional
       provider_id through its configured Human authentication boundary.
@@ -154,8 +166,15 @@ RegisterPath:
       A v1 token cannot register gateway or Provider
       options. A v2 token requires provider_bot_ref; Provider/owner cannot be
       overridden by request parameters. Provider authorization is checked again
-      on redemption. Plugin saves membership without HTTP delivery binding.
+      on redemption. When the signed auth_mode claim is present, it must match
+      the current Provider configuration before creation; a mismatch is invalid_request.
+      Historical v2 tokens without this claim use the current Provider configuration.
+      Plugin saves membership without HTTP delivery binding.
       Both modes support static_bearer, provider_admin and agentpass Providers.
+      agentpass-subbots requires a complete provider_bot_ref in parent:slug form.
+      BCS splits the last colon, validates both parts, stores the parent as
+      agent_code and preserves the supplied ref. Existing Providers
+      cannot change authentication mode.
       For AgentPass, provider_bot_ref must be the real AgentPass agent code;
       BCS saves it as the Bot's agent_code, as in Provider-admin registration.
       No separate agent_code parameter or AgentPass token is required to register.
@@ -167,6 +186,7 @@ RegisterPath:
       these prerequisites before creation; plugin does not read or require
       a downlink credential. Credential-store failures return 500, not a readiness
       error. Provider/ref is unique across modes and retained after soft deletion.
+      Checks run inside registration; no separate availability-check API is provided.
       Any duplicate scoped ref returns 409, including an identical retry.
       A valid token can register multiple distinct refs. SQL Bot creation and
       gateway binding creation are atomic; owner-edge failures are returned but
@@ -201,7 +221,7 @@ RegisterPath:
       - name: provider_bot_ref
         in: query
         required: false
-        description: Required with a Provider-scoped v2 token; stable identity within the Provider. For AgentPass Providers, supply the real AgentPass agent code, which is also stored as the Bot's agent_code in both modes.
+        description: Required with a Provider-scoped v2 token; stable identity within the Provider. For agentpass, supply the real AgentPass agent code. For agentpass-subbots, supply the client-composed parent:slug ref; the last colon delimits a slug matching [a-z0-9][a-z0-9_-]{0,31}, and only the parent is stored as agent_code. The complete ref is limited to 128 bytes.
         schema:
           type: string
           minLength: 1

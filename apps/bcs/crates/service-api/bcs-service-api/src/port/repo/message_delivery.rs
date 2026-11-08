@@ -57,6 +57,14 @@ pub struct DeliveryAdmissionTarget {
     pub kind: DeliveryType,
     pub max_queued: u32,
     pub semantic_projection_json: serde_json::Value,
+    /// Caller-preassigned canonical run identity for this delivery
+    /// (Send targets only). The sending flow assigns it BEFORE the
+    /// durable admission commits so the run's operation binding and
+    /// frozen producer facts exist before ANY queue worker can
+    /// execute the row — a callback can never observe an admitted
+    /// run without its trusted operation identity (spec §8.2).
+    /// `None` lets the admission assign one (legacy producers).
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,6 +90,9 @@ pub struct AdmitMessageDeliveries {
     /// manager result, not the `chat_error` history row as Bot conversation input.
     pub display_message: Option<DeliveryDisplayMessage>,
     pub message_id: String,
+    /// Ordinary canonical bodies use a text envelope. One-shot Group chat
+    /// results may instead retain a StateMachine/Public string with Bot sender
+    /// and nonempty Run identity; stores preserve that producer fact verbatim.
     pub message: NewMessage,
     pub flow_kind: DeliveryFlowKind,
     pub targets: Vec<DeliveryAdmissionTarget>,

@@ -227,6 +227,9 @@ export interface CreateGroupParams {
   master_bot?: string;
   /** 服务调用时是否自动启动（state_machine 群默认 true） */
   auto_start_on_service_invocation?: boolean;
+  /** 创建初始会话并按需立即启动状态机。 */
+  create_initial_session?: boolean;
+  start_initial_run?: boolean;
   /** 结构化协同定义 YAML（state_machine 群必填） */
   collaboration_definition_yaml?: string;
   /** 自定义开场消息模板；StateMachine 留空时使用 BCS 默认副屏。 */

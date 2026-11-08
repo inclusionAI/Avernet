@@ -2,6 +2,7 @@
 
 from .admission_modes import AdmissionMode
 from .admission_account_routes import ACCOUNT_ADMISSION
+from .admission_genome_routes import GENOME_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
@@ -25,6 +26,12 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("POST", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish",
+    ): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # Minimal classification requires a verified human, but no Bot grant.
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
@@ -284,6 +291,19 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/cli-operations"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
@@ -513,6 +533,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/engine/default-model",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/engine/status",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
@@ -702,6 +726,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/source-credentials"): AdmissionMode.OPEN,
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/categories"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/{expert_id}"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/market/clis"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
@@ -913,4 +940,5 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/work-order-notifications/read-all",
     ): AdmissionMode.USER_GATED,
     **ACCOUNT_ADMISSION,
+    **GENOME_ADMISSION,
 }

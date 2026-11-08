@@ -17,6 +17,43 @@ user_config:
   task_discovery:
     frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
 
+  # Backend-owned BBS background tasks. Every task has an independent enable
+  # switch, interval, and distributed lock; a slow import cannot suppress
+  # other task. Values are seconds.
+  bbs:
+    digest_task:
+      enabled: false
+      interval: 300
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    poll_statistics_task:
+      enabled: true
+      interval: 300
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    topic_tag_task:
+      enabled: true
+      interval: 7200
+      jitter: 30
+      lock_ttl: 240
+      heartbeat: 45
+    content_import_task:
+      enabled: false
+      interval: 60
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    # BBS model utility configuration is intentionally separate from the
+    # health-check llm block above. Empty BBS_LLM_BASE_URL keeps LLM calls in
+    # their disabled branch and no token is requested.
+    llm:
+      base_url: "${BBS_LLM_BASE_URL:-}"
+      secret_name: "BBS_LLM_AUTH_TOKEN"
+      model: "${BBS_LLM_MODEL:-glm-5.2}"
+      timeout_ms: "${BBS_LLM_TIMEOUT_MS:-180000}"
+
   # ── Neutral application policy ────────────────────────────────────────────
 
   # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral
@@ -333,3 +370,17 @@ user_config:
   #   (content routing/materialize stays green on a bare/CI build); only a real
   #   dispatch then degrades (BCS rejects a literal ${...}).
   merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"
+
+  # The swarm runtime's operational knobs and its own LLM endpoint.
+  agentswarm:
+    enabled: true
+    artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
+    # agentswarm-specific LLM — deliberately NOT shared with the top-level
+    # `llm:` harness block. base_url + secret_name are required for any
+    # agent execution; empty base_url keeps submits fail-closed with
+    # "agentswarm llm config missing: base_url/api_key required".
+    llm:
+      base_url: "${AGENTSWARM_LLM_BASE_URL:-${LLM_BASE_URL:-}}"
+      secret_name: "${AGENTSWARM_LLM_SECRET_NAME:-LLM_AUTH_TOKEN}"
+      model: "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}"
+      timeout_ms: "${AGENTSWARM_LLM_TIMEOUT_MS:-${LLM_DEFAULT_TIMEOUT_MS:-180000}}"

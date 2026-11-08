@@ -71,6 +71,8 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots"),
+    ("get", "/openapi/v1/bots/collaborations"),
     # Release inspection explicitly rejects published stages, never falls back
     # to a draft. Its stage parameter is an intentional additive contract.
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
@@ -89,6 +91,14 @@ _STAGE_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
     ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    # acli CLIs address one runtime of a bot: a service bot's stage, omitted
+    # for every other bot (apps/backend/specs/2026-10-21-acli-cli-operations, D7).
+    ("get", "/openapi/v1/bots/{bot_id}/clis"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis"),
+    ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations"),
 }
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
@@ -97,7 +107,12 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: caller's own bot — because ``bot_id`` alone does not identify one. They do
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
+_REQUIRED_OWNER_OPERATIONS = {
+    ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
+}
+
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
@@ -108,6 +123,10 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
     ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
@@ -144,6 +163,21 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"),
+    # The genome registry (RSI-03) addresses the same (owner, bot_id) pair as
+    # the manifest: a revision belongs to a bot, not to one of its runtimes.
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/revisions"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/revisions:capture"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions/{rev}/diff"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions/{rev}"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/policy"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/refs"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/refs/draft"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/content/{digest}"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/content"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/promotions"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/promotions"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/promotions/{promotion_id}"),
     # W9's CLI tools take the config-manifest group's bars, so they address a
     # bot that may be someone else's the same way. No ``stage`` for the same
     # reason: a tool is installed on the bot, not on one of its runtimes — and
@@ -452,17 +486,19 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             assert not params["stage"].get("required", False), path
         if "owner_id" in params:
             carrying_owner.append((method, path))
-            # Never required anywhere: omitting it means the caller's own bot,
-            # which is what every one of these operations meant before the
-            # parameter existed.
-            assert not params["owner_id"].get("required", False), path
+            # Eval publication explicitly names a resource owner; it does not
+            # derive one from the caller as runtime operations do.
+            assert params["owner_id"].get("required", False) is (
+                (method, path) in _REQUIRED_OWNER_OPERATIONS
+            ), path
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
     # their bot-first address; engine restart, default-config and nodes also
     # have no legacy alias. Session File is OpenAPI-only, yielding 28 current
     # + 16 retiring operations.
-    assert len(engine_runtime) == 44
+    # The default-model read shares the existing owner and stage addressing.
+    assert len(engine_runtime) == 45
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -471,7 +507,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
         "no retiring address of those five, whose contract is frozen"
     )
     assert sorted(carrying_owner) == sorted(
-        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
+        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE | _REQUIRED_OWNER_OPERATIONS
     ), (
         "owner_id belongs to engine-runtime and the explicitly listed "
         "owner-addressed operations, and to nothing else by accident"
@@ -513,6 +549,7 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
 
 def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
     expected = {
+        ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions"),
         ("post", "/openapi/v1/bots/{bot_id}/sessions"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
@@ -520,6 +557,10 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        # Read-only file operations use the same owned friend-session guard.
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),

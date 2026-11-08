@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { BcnBridge } from './bridge.js';
 import { Config, normalizeConfig, type Config as PluginConfig } from './config.js';
-import { loadOrOnboardBotSession, persistBotSession } from './credentials.js';
+import { loadOrRegisterBotSession, persistBotSession } from './credentials.js';
 import { BcnWsClient } from './ws-client.js';
 
 export const name = 'deepseek-harness-channel-bcn';
@@ -26,7 +26,7 @@ export async function apply(ctx: Context, rawConfig: PluginConfig): Promise<() =
     return async () => {};
   }
 
-  const { session, endpoint } = await loadOrOnboardBotSession(ctx, config);
+  const { session, endpoint } = await loadOrRegisterBotSession(ctx, config);
   let bridge: BcnBridge | undefined;
   const client = new BcnWsClient({
     endpoint,

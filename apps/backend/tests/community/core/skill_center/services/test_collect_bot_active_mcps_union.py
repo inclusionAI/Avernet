@@ -62,11 +62,16 @@ class _Database:
 class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         return {
+            "id": 1,
             "bot_id": bot_id,
             "owner_id": owner_id,
+            "entity_id": owner_id,
             "env": "dev",
             "active_engine": _ENGINE,
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        return [self.get_by_id_and_owner(bot_id, locator)]
 
 
 def _service(db: _Database, tmp_path, *, ext_info_provider=None) -> SkillSetService:
@@ -266,7 +271,7 @@ def test_strict_runtime_policy_context_propagates_provider_failure(tmp_path):
 def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 
@@ -282,7 +287,7 @@ def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_pa
 def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 

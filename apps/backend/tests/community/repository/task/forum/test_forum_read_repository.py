@@ -7,14 +7,21 @@ import pytest
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_CLOSED,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
+    ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollSelection,
+    ForumTopicViewerRecord,
+    ForumTopicSummaryRecord,
+    ForumTopicConfig,
 )
 from agentclaw.community.core.task.forum.repository.models import (
     ForumPostModel,
     ForumTopicModel,
 )
-from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
+from agentclaw.community.core.repository.implementations.task.forum import (
     ForumRepository,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -31,13 +38,14 @@ def _topic(repo, request_id, *, title, body="description", topic_type="DISCUSSIO
     ).topic
 
 
-def _reply(repo, topic_id, request_id, body):
+def _reply(repo, topic_id, request_id, body, reply_to_post_id=None):
     return repo.create_reply(
         topic_id=topic_id,
         author_type="BOT",
         author_id="bot-b",
         client_request_id=request_id,
         body=body,
+        reply_to_post_id=reply_to_post_id,
     ).post
 
 
@@ -140,6 +148,78 @@ def test_topic_reads_are_isolated_by_tenant_and_environment(db, monkeypatch):
         )
 
 
+def test_get_topic_returns_persisted_tags_and_poll_result(db):
+    repo = ForumRepository(db)
+    topic = repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-poll",
+        title="poll",
+        body="Choose one",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B"))
+        ),
+    ).topic
+
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        row.analysis_result = {
+            "summary": {"content": "The topic asks participants to choose one option."},
+            "tags": ["AI治理", "投票"],
+            "poll_stats": {
+                "total_votes": 3,
+                "participant_count": 3,
+                "by_option": [
+                    {"index": 0, "votes": 2, "percent": 67},
+                    {"index": 1, "votes": 1, "percent": 33},
+                ],
+            },
+        }
+
+    result = repo.get_topic(topic.topic_id)
+
+    assert result is not None
+    assert result.analysis.tags == ("AI治理", "投票")
+    assert result.analysis.summary == ForumTopicSummaryRecord(
+        content="The topic asks participants to choose one option."
+    )
+    assert result.analysis.poll_result is not None
+    assert result.analysis.poll_result.total_votes == 3
+    assert result.analysis.poll_result.participant_count == 3
+    assert result.analysis.poll_result.options == (
+        ForumPollResultOptionRecord(index=0, votes=2, percent=67),
+        ForumPollResultOptionRecord(index=1, votes=1, percent=33),
+    )
+
+def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(db):
+    repo = ForumRepository(db)
+    topic = repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-poll-empty",
+        title="poll",
+        body="Choose one",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="MULTI", options=("A", "B"))
+        ),
+    ).topic
+
+    result = repo.get_topic(topic.topic_id)
+
+    assert result is not None
+    assert result.analysis is not None
+    assert result.analysis.summary is None
+    assert result.analysis.tags == ()
+    assert result.analysis.poll_result is not None
+    assert result.analysis.poll_result.total_votes == 0
+    assert result.analysis.poll_result.participant_count == 0
+    assert result.analysis.poll_result.options == (
+        ForumPollResultOptionRecord(index=0, votes=0, percent=0),
+        ForumPollResultOptionRecord(index=1, votes=0, percent=0),
+    )
+
 def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     repo = ForumRepository(db)
     topic = _topic(repo, "topic", title="topic")
@@ -156,6 +236,217 @@ def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     assert [item.post_id for item in result.items] == [first.post_id, second.post_id]
     assert beyond.total == 2
     assert beyond.items == ()
+
+
+def test_list_posts_returns_reference_and_two_level_floor_groups(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    first_floor = _reply(repo, topic.topic_id, "post-1", "first floor")
+    second_floor = _reply(repo, topic.topic_id, "post-2", "second floor")
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "post-3",
+        "reply to first floor",
+        reply_to_post_id=first_floor.post_id,
+    )
+    grandchild = _reply(
+        repo,
+        topic.topic_id,
+        "post-4",
+        "reply to the child",
+        reply_to_post_id=child.post_id,
+    )
+
+    first_page = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=1)
+    second_page = repo.list_posts(topic_id=topic.topic_id, offset=1, limit=1)
+    beyond = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=1)
+
+    assert first_page.total == 2
+    assert [item.post_id for item in first_page.items] == [first_floor.post_id]
+    assert first_page.items[0].floor_no == 1
+    assert [
+        item.post_id for item in first_page.items[0].children
+    ] == [child.post_id, grandchild.post_id]
+    assert first_page.items[0].children[0].reply_to_post_id == first_floor.post_id
+    assert first_page.items[0].children[0].reply_to_floor_no == 1
+    # A reply to a child has no floor-bearing target; it stays in the same group.
+    assert first_page.items[0].children[1].reply_to_post_id == child.post_id
+    assert first_page.items[0].children[1].reply_to_floor_no is None
+
+    assert second_page.items[0].post_id == second_floor.post_id
+    assert second_page.items[0].floor_no == 2
+    assert second_page.items[0].children == ()
+    assert beyond.total == 2
+    assert beyond.items == ()
+
+
+def test_list_posts_prioritizes_helpful_before_paging_without_renumbering_floors(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "help-topic", title="help", topic_type=TOPIC_TYPE_HELP)
+    first = _reply(repo, topic.topic_id, "help-post-1", "ordinary first")
+    second = _reply(repo, topic.topic_id, "help-post-2", "helpful second")
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "help-post-child",
+        "child of helpful second",
+        reply_to_post_id=second.post_id,
+    )
+    third = _reply(repo, topic.topic_id, "help-post-3", "helpful third")
+    fourth = _reply(repo, topic.topic_id, "help-post-4", "ordinary fourth")
+    base = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    times = {
+        first.post_id: base,
+        second.post_id: base.replace(minute=1),
+        child.post_id: base.replace(minute=2),
+        third.post_id: base.replace(minute=3),
+        fourth.post_id: base.replace(minute=4),
+    }
+    with db.orm_session() as session:
+        rows = session.query(ForumPostModel).filter_by(topic_id=topic.topic_id).all()
+        for row in rows:
+            row.gmt_create = times[row.post_id]
+        session.query(ForumPostModel).filter(
+            ForumPostModel.post_id.in_([second.post_id, third.post_id])
+        ).update(
+            {ForumPostModel.post_config: {"helpful": {"marked": True}}},
+            synchronize_session=False,
+        )
+
+    first_page = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=2)
+    second_page = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=2)
+
+    assert first_page.total == 4
+    assert [item.post_id for item in first_page.items] == [second.post_id, third.post_id]
+    assert [item.floor_no for item in first_page.items] == [2, 3]
+    assert [item.helpful for item in first_page.items] == [True, True]
+    assert first_page.items[0].children[0].post_id == child.post_id
+    assert first_page.items[0].children[0].reply_to_floor_no == 2
+    assert first_page.items[0].children[0].helpful is False
+
+    assert [item.post_id for item in second_page.items] == [first.post_id, fourth.post_id]
+    assert [item.floor_no for item in second_page.items] == [1, 4]
+    assert [item.helpful for item in second_page.items] == [False, False]
+
+
+def test_list_topics_orders_by_latest_reply_activity(db):
+    repo = ForumRepository(db)
+    first = _topic(repo, "req-active-1", title="first")
+    second = _topic(repo, "req-active-2", title="second")
+    _reply(repo, first.topic_id, "req-active-reply", "reply revives first")
+
+    with db.orm_session() as session:
+        first_row = session.query(ForumTopicModel).filter_by(
+            topic_id=first.topic_id
+        ).one()
+        second_row = session.query(ForumTopicModel).filter_by(
+            topic_id=second.topic_id
+        ).one()
+        first_row.gmt_create = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+        second_row.gmt_create = datetime(2026, 9, 20, 8, 10, tzinfo=timezone.utc)
+        session.query(ForumPostModel).filter_by(topic_id=first.topic_id).update(
+            {ForumPostModel.gmt_create: datetime(2026, 9, 20, 8, 20, tzinfo=timezone.utc)}
+        )
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert [item.topic_id for item in result.items] == [first.topic_id, second.topic_id]
+    assert result.items[0].latest_activity_at is not None
+    assert result.items[1].latest_activity_at is not None
+
+
+def test_get_topic_viewer_state_reports_current_vote_without_page_dependency(db):
+    repo = ForumRepository(db)
+    poll = repo.create_topic(
+        author_type="HUMAN",
+        author_id="author-human",
+        client_request_id="viewer-poll-topic",
+        title="Choose",
+        body="Vote once",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B"))
+        ),
+    ).topic
+    vote = repo.create_reply(
+        topic_id=poll.topic_id,
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="viewer-vote",
+        body="I choose A",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    ).post
+
+    voted = repo.get_topic_viewer_state(
+        topic_id=poll.topic_id, author_type="HUMAN", author_id="user-a"
+    )
+    not_voted = repo.get_topic_viewer_state(
+        topic_id=poll.topic_id, author_type="HUMAN", author_id="user-b"
+    )
+
+    assert voted == ForumTopicViewerRecord(
+        has_voted=True,
+        vote_post_id=vote.post_id,
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+    assert not_voted == ForumTopicViewerRecord(has_voted=False)
+
+
+def test_update_topic_tags_preserves_other_analysis_projection(db):
+    from agentclaw.community.core.repository.implementations.task.forum import (
+        ForumTopicTagRepository,
+    )
+
+    repo = ForumRepository(db)
+    topic = _topic(repo, "tag-topic", title="tag topic")
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        row.analysis_result = {
+            "summary": {"content": "Existing summary"},
+            "tags": [],
+            "poll_cursor_id": 7,
+        }
+
+    updated = ForumTopicTagRepository(db).update_topic_tags(
+        topic_id=topic.topic_id, tags=("工程", "架构")
+    )
+
+    assert updated is not None
+    assert updated.analysis.tags == ("工程", "架构")
+    assert updated.analysis.summary == ForumTopicSummaryRecord(content="Existing summary")
+    assert updated.analysis.poll_result is None
+    assert updated.analysis.poll_cursor_id == 7
+
+
+def test_list_topics_counts_nested_replies_and_latest_child_activity(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    first_floor = _reply(
+        repo, topic.topic_id, "post-1", "first floor"
+    )
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "post-2",
+        "child",
+        reply_to_post_id=first_floor.post_id,
+    )
+    grandchild = _reply(
+        repo,
+        topic.topic_id,
+        "post-3",
+        "grandchild",
+        reply_to_post_id=child.post_id,
+    )
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert result.items[0].reply_count == 3
+    assert result.items[0].latest_activity_at and (
+        result.items[0].latest_activity_at.replace(tzinfo=None)
+        == grandchild.created_at.replace(tzinfo=None)
+    )
 
 
 def test_list_posts_allows_closed_topic_but_hides_cross_tenant_topic(db):

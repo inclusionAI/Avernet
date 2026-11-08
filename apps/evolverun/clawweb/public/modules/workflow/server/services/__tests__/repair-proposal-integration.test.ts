@@ -55,7 +55,7 @@ it('returns bounded current-plan authorization when rechecking selected original
  expect(classify).toHaveBeenCalledTimes(1);
  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
 });
-it('does not let complementary classification authorize a changed baseline',async()=>{
+it('keeps changed-baseline originals as manual draft goals without requiring classification authorization',async()=>{
  const {c,advance,classify}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
@@ -66,19 +66,21 @@ it('does not let complementary classification authorize a changed baseline',asyn
  const page=await service.candidates('wf-1');
  expect(page.items[0].aggregation).toMatchObject({status:'ready',relation:'complementary',reevaluation:true,itemIds:['item-0','item-1']});
  const state=await service.selectionState('wf-1',['item-0','item-1'],false);
- await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-0','item-1']}});
+ const created=await service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'});
+ expect(created.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
  expect(f.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
- expect(f.calls).toHaveLength(0);
+ expect(f.calls).toHaveLength(1);
 });
-it('rejects a changed single baseline without dispatching or inheriting an unselected member',async()=>{
+it('generates one selected original without inheriting an unselected plan member',async()=>{
  const {c,advance}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
  const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const state=await service.selectionState('wf-1',['item-1'],false);
  expect(state.plans[0].itemIds).toEqual(['item-0','item-1']);
- await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-1']}});
- expect(f.calls).toHaveLength(0);
+ const created=await service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'});
+ expect(created.input.items.map(item=>item.itemId)).toEqual(['item-1']);
+ expect(f.calls).toHaveLength(1);
 });
 it.each([false,true])('never lets a model combine contradictory scalars or omit originals (stale=%s)',async(stale)=>{
  const {c,read,classify,advance}=await setup(2);
@@ -137,8 +139,9 @@ it('freezes all original sources and the actual consumer protocol in one generat
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:page.items[0].aggregation!.itemIds,inputDigest:page.inputDigest,instructions:'keep business behavior',requestId:'integrated-generation'});
  expect(revision.input.instructions).toBe('keep business behavior');
  expect(revision.input.items.map(i=>i.itemId)).toEqual(['item-0','item-1','item-2']);
- expect(revision.input.integration?.schemaVersion).toBe('workflow-proposal-plan/v1');
+ expect(revision.input.integration?.plans).toHaveLength(1);
  expect(revision.input.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1','item-2']);
+ expect(revision.input.items.every(item=>item.context?.evidencePacket)).toBe(true);
  expect(f.calls).toHaveLength(1);
 });
 it('a model omitting or inventing a source fails safely without hiding original suggestions',async()=>{
@@ -157,19 +160,20 @@ it('preserves supported vs unknown cause references and rejects invented evidenc
  expect(cards.every(card=>card.aggregation?.status==='unavailable')).toBe(true);
 });
 
-it('does not generate when critical evidence payloads are absent or modified',async()=>{
+it('records missing evidence for review without blocking a manual draft',async()=>{
  const {c}=await setup(1);
  f.items[0].context!.diagnoses=[{flowId:'run-1',nodeId:'query',evidence:[{eventId:'missing',missing:true}]}];
  const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const page=await integrated.candidates('wf-1');
- await expect(integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:page.inputDigest,instructions:'',requestId:'evidence-missing'})).rejects.toThrow(/证据/);
- expect(f.calls).toHaveLength(0);
+ const created=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:page.inputDigest,instructions:'',requestId:'evidence-missing'});
+ expect(created.input.items[0].context?.evidencePacket).toMatchObject({missingEvidence:true});
+ expect(f.calls).toHaveLength(1);
 });
 
-it('serves original queued suggestions through strict bounded JSON before any model completes',async()=>{
+it('serves original suggestions without pretending they are queued before a job exists',async()=>{
  const {c}=await setup();const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const page=await integrated.candidates('wf-1',{previewSignatures:['issue']});
- expect(page.items).toHaveLength(3);expect(page.items.every(i=>i.aggregation?.status==='queued')).toBe(true);
+ expect(page.items).toHaveLength(3);expect(page.items.every(i=>i.aggregation?.status==='uncertain')).toBe(true);
  expect(JSON.parse(JSON.stringify(page)).items).toHaveLength(3);
 });
 
@@ -187,7 +191,7 @@ it.each(['requests','tokens'] as const)('releases the %s budget lease and anothe
  restartTime=61000;await restarted.tick();expect(classify).toHaveBeenCalledTimes(1);
 });
 
-it('retains a reviewed shared cause in every affected frozen plan without adding unselected sources',async()=>{
+it('keeps the manual joint scope and original proposals when reviewed causes span selected sources',async()=>{
  const {c,read,classify,advance}=await setup();
  f.items.forEach((item,i)=>{(item.proposal!.operations as Array<Record<string,unknown>>)[0].nodeId=`node-${i}`});
  const shared={title:'共同输入缺失',certainty:'hypothesis',itemIds:['item-0','item-1'],evidenceIds:[]};
@@ -200,8 +204,8 @@ it('retains a reviewed shared cause in every affected frozen plan without adding
  const page=await integrated.candidates('wf-1');
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,instructions:'',requestId:'shared-cause'});
  expect(revision.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
- expect(revision.input.integration?.plans).toHaveLength(2);
- expect(revision.input.integration?.plans.map(plan=>plan.causes)).toEqual(reviewed.map(card=>card.aggregation!.causes));
+ expect(revision.input.integration?.plans.flatMap(plan=>plan.originalItemIds).sort()).toEqual(['item-0','item-1']);
+ expect(revision.input.items.map(item=>item.proposal)).toEqual(f.items.slice(0,2).map(item=>item.proposal));
 });
 
 it.each([false,true])('resolves every original member to the same aggregation details (hydration=%s)',async(hydrate)=>{
@@ -236,4 +240,71 @@ it.each([false,true])('accepts supported evidence only from a cause member (cros
   expect(cards.flatMap(card=>card.aggregation?.causes??[])).toEqual([]);
   await expect(c.prepare('wf-1',snapshot.items,snapshot.baseline)).rejects.toThrow(/整合/);
  }
+});
+
+it('organizes version-bound sources without reading Git or using the active deployment as their fingerprint',async()=>{
+  f=await repairFixture(2);
+  for(const m of repairReleaseMigrations)for(const sql of m.sql)await f.db.exec(f.db.dialect.renderDdl(sql));
+  const binding={status:'resolved' as const,snapshot:{kind:'deployment' as const,workflowId:'wf-1',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}};
+  f.items.forEach(item=>{item.context={sourceSnapshot:binding};});
+  f.sourcePort.activeSnapshot=async()=>binding;
+  f.executionPort.resolveBaseline=async()=>{throw new Error('Git manifest is unavailable');};
+  let time=1000;let service:ReturnType<typeof createRepairWorkbenchService>;
+  const classify=vi.fn(async({items}:any)=>({plans:[{itemIds:items.map((i:any)=>i.itemId),title:'Compatible goals',changes:['Preserve both goals'],relation:'complementary'}],conflicts:[]}));
+  const c=createProposalCoordinator({db:f.db,now:()=>time,read:workflowId=>service.proposalSnapshot(workflowId),model:{key:'local',classify}});
+  service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+  await c.tick();time+=3000;await c.tick();
+  expect(classify).toHaveBeenCalledTimes(1);
+  const result=await service.candidates('wf-1');
+  expect(result.items).toHaveLength(1);
+  expect(result.items[0].aggregation?.status).toBe('ready');
+  expect(result.items[0].aggregation?.originals).toHaveLength(2);
+});
+
+it.each(['current','historical'] as const)('keeps cross-issue plans and conflicts intact in %s signature reads',async(versionScope)=>{
+ const {c,read,advance,classify}=await setup(3);
+ const binding={status:'resolved' as const,snapshot:{kind:'deployment' as const,workflowId:'wf-1',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}};
+ f.sourcePort.activeSnapshot=async()=>binding;
+ f.items.forEach((item,i)=>{item.context={...item.context,signature:`issue-${i}`,sourceSnapshot:binding};item.sources=item.sources.map(source=>({...source,signature:`issue-${i}`}));});
+ const conflict={itemIds:['item-1','item-2'],nodeId:'query',path:'/executor/prompt',reason:'Choose one output constraint'};
+ classify.mockResolvedValueOnce({plans:[{itemIds:['item-0','item-1'],title:'Preserve both goals',changes:['input and output'],relation:'complementary'},
+  {itemIds:['item-2'],title:'Alternative goal',changes:['different output'],relation:'complementary'}],conflicts:[conflict]});
+ await c.tick();advance(3000);await c.tick();
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const full=await service.candidates('wf-1');
+ expect(full.items[0].aggregation).toMatchObject({status:'ready',itemIds:['item-0','item-1'],conflicts:[conflict]});
+ if(versionScope==='historical')f.sourcePort.activeSnapshot=async()=>({...binding,snapshot:{...binding.snapshot,workflowVersion:40,deployNumber:35}});
+ for(const signature of ['issue-0','issue-1']){
+  const page=await service.candidates('wf-1',{signature,versionScope,...versionScope==='historical'?{snapshotKey:JSON.stringify(['deployment','wf-1',39,34])}:{}});
+  expect(page.items).toHaveLength(1);
+  expect(page.items[0].aggregation).toEqual(full.items[0].aggregation);
+  expect(page.page.total).toBe(1);
+ }
+ if(versionScope==='current'){
+  const snapshot=await read('wf-1');
+  const prepared=await c.prepare('wf-1',snapshot.items.filter(item=>item.itemId!=='item-2'),{...await f.executionPort.resolveBaseline('wf-1'),activeDeployNumber:34});
+  expect(prepared.integration?.plans[0].id).toBe(full.items[0].aggregation!.id);
+  expect(prepared.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1']);
+ }
+ expect(classify).toHaveBeenCalledTimes(1);
+});
+
+it('classifies large report histories using bounded evidence excerpts while retaining every original',async()=>{
+ const {c,read,classify,advance}=await setup(18);
+ f.items.forEach((item,i)=>{item.context={nodeId:'query',diagnoses:[{flowId:`run-${i}`,analysisContext:{facts:['observed timeout']},evidence:[{eventId:`event-${i}`,payload:{report:'evidence line\n'.repeat(25000)}}]}]};});
+ classify.mockImplementationOnce(async(input:any)=>({plans:[{itemIds:input.items.map((item:any)=>item.itemId),title:'补齐超时与重试约束',changes:['保留各节点参数'],relation:'complementary'}],conflicts:[],causes:[{title:'observed timeout',certainty:'supported',itemIds:['item-0'],evidenceIds:['event-0']}]}));
+ await c.tick();advance(3000);await c.tick();
+ expect(classify).toHaveBeenCalledOnce();
+ const request=classify.mock.calls[0][0];expect(Buffer.byteLength(JSON.stringify(request.items))).toBeLessThan(180000);
+ expect(request.items[0].context.diagnoses[0].analysisContext.facts).toEqual(['observed timeout']);
+ const snapshot=await read('wf-1');const cards=await c.present('wf-1',snapshot.items,snapshot.baseline);
+ expect(cards).toHaveLength(1);expect(cards[0].aggregation?.itemIds).toHaveLength(18);
+ expect(cards[0].aggregation?.causes?.[0].certainty).toBe('hypothesis');
+ expect((cards[0].aggregation!.originals[0].context!.diagnoses as any[])[0].evidence[0].payload.report).toBe('evidence line\n'.repeat(25000));
+});
+it('retains actionable byte diagnostics when one aggregation goal itself exceeds the input budget',async()=>{
+ const {c,read,advance}=await setup(2);(f.items[0].proposal!.operations as any[])[0].value='long goal\n'.repeat(20000);
+ await c.tick();advance(3000);await c.tick();
+ const snapshot=await read('wf-1');const cards=await c.present('wf-1',snapshot.items,snapshot.baseline);
+ expect(cards.find(card=>card.itemId==='item-0')?.aggregation?.diagnostic).toMatchObject({reason:'SCOPE_TOO_LARGE',limitBytes:180000,itemCount:1});
 });

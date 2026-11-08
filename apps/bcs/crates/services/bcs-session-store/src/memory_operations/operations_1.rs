@@ -199,21 +199,14 @@ impl MemorySessionRepo {
 
         can_reactivate(
             sess.status,
-            sess.session_kind,
-            sess.callback_status.as_deref(),
-        )
+            sess.session_kind)
         .map_err(|msg| {
-            if msg == "callback is still pending" {
-                ServiceError::SessionCallbackPending(session_id.to_string())
-            } else {
-                ServiceError::SessionInvalidParams(format!("{session_id}: {msg}"))
-            }
+            ServiceError::SessionInvalidParams(format!("{session_id}: {msg}"))
         })?;
 
         sess.status = SessionStatus::Running;
         sess.output = None;
         sess.error_message = None;
-        sess.callback_status = Some("pending".to_string());
         if let Some(i) = new_input {
             sess.input = Some(i);
         }
@@ -222,10 +215,6 @@ impl MemorySessionRepo {
         sess.completed_at = None;
         let result = sess.clone();
         let activation_count = sess.activation_count;
-        st.callback_leases.insert(
-            session_id.to_string(),
-            CallbackLeaseState::for_session_kind(SessionKind::ServiceInvocation),
-        );
         debug!(session_id = %session_id, activation_count, "Session reactivated");
         Ok(result)
     }
@@ -252,21 +241,14 @@ impl MemorySessionRepo {
         }
         can_reactivate(
             session.status,
-            session.session_kind,
-            session.callback_status.as_deref(),
-        )
+            session.session_kind)
         .map_err(|message| {
-            if message == "callback is still pending" {
-                ServiceError::SessionCallbackPending(session_id.to_string())
-            } else {
-                ServiceError::SessionInvalidParams(format!("{session_id}: {message}"))
-            }
+            ServiceError::SessionInvalidParams(format!("{session_id}: {message}"))
         })?;
 
         session.status = SessionStatus::Running;
         session.output = None;
         session.error_message = None;
-        session.callback_status = Some("pending".to_string());
         if let Some(input) = new_input {
             session.input = Some(input);
         }
@@ -275,10 +257,6 @@ impl MemorySessionRepo {
         session.completed_at = None;
         let result = session.clone();
         let activation_count = session.activation_count;
-        state.callback_leases.insert(
-            session_id.to_string(),
-            CallbackLeaseState::for_session_kind(SessionKind::ServiceInvocation),
-        );
         debug!(session_id = %session_id, activation_count, "Session reactivated with CAS");
         Ok(Some(result))
     }
@@ -461,94 +439,6 @@ impl MemorySessionRepo {
             .await
             .map_err(|error| ServiceError::InternalError(error.to_string()))?;
         Ok(candidate)
-    }
-}
-
-impl MemorySessionRepo {
-    pub(super) async fn repo_claim_callback(
-        &self,
-        command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> {
-        let mut state = self.state.write().await;
-        let session = state
-            .sessions
-            .get(&command.session_id)
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if session.status != SessionStatus::Completed
-            || session.session_kind != SessionKind::ServiceInvocation
-            || session.activation_count != command.expected_activation_count
-            || session.callback_status.as_deref() != Some("pending")
-        {
-            return Ok(None);
-        }
-        let Some(lease) = state.callback_leases.get_mut(&command.session_id) else {
-            return Ok(None);
-        };
-        let Some(current_token) = lease.token else {
-            return Ok(None);
-        };
-        if lease
-            .until_ms
-            .is_some_and(|until_ms| until_ms > command.now_ms)
-        {
-            return Ok(None);
-        }
-        let next_token = current_token.checked_add(1).ok_or_else(|| {
-            ServiceError::InternalError("Session callback lease token overflow".to_string())
-        })?;
-        lease.token = Some(next_token);
-        lease.owner = Some(command.lease_owner);
-        lease.until_ms = Some(command.lease_until_ms);
-        Ok(Some(SessionCallbackClaim {
-            lease_token: next_token,
-        }))
-    }
-}
-
-impl MemorySessionRepo {
-    pub(super) async fn repo_complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> {
-        if !matches!(
-            command.terminal_status.as_str(),
-            "succeeded" | "partial_failed" | "failed" | "not_applicable"
-        ) {
-            return Err(ServiceError::SessionInvalidParams(format!(
-                "invalid terminal callback status: {}",
-                command.terminal_status
-            )));
-        }
-        let mut state = self.state.write().await;
-        let session = state
-            .sessions
-            .get(&command.session_id)
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if session.status != SessionStatus::Completed
-            || session.session_kind != SessionKind::ServiceInvocation
-            || session.activation_count != command.expected_activation_count
-            || session.callback_status.as_deref() != Some("pending")
-        {
-            return Ok(false);
-        }
-        let Some(lease) = state.callback_leases.get(&command.session_id) else {
-            return Ok(false);
-        };
-        if lease.token != Some(command.lease_token)
-            || lease.owner.as_deref() != Some(command.lease_owner.as_str())
-        {
-            return Ok(false);
-        }
-        let session = state
-            .sessions
-            .get_mut(&command.session_id)
-            .expect("Session existence checked above");
-        session.callback_status = Some(command.terminal_status);
-        session.updated_at = now_ms();
-        let lease = state
-            .callback_leases
-            .get_mut(&command.session_id)
-            .expect("Callback lease existence checked above");
-        lease.owner = None;
-        lease.until_ms = None;
-        Ok(true)
     }
 }
 

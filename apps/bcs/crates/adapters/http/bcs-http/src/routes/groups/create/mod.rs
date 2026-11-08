@@ -7,10 +7,10 @@ mod participants;
 mod response;
 mod spec;
 
-pub use definition::*;
-pub use participants::*;
-pub use response::*;
-pub use spec::*;
+pub(crate) use definition::*;
+pub(crate) use participants::*;
+pub(crate) use response::*;
+pub(crate) use spec::*;
 
 pub async fn create_group(
     State(state): State<HttpAppState>,
@@ -168,6 +168,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         None
     };
     let cmd = GroupCreateCommand {
+        human_mention_notify_mode: req.human_mention_notify_mode,
         create_initial_session: req.create_initial_session,
         group_id: req.id,
         caller_actor_id: caller_actor_id.clone(),
@@ -181,10 +182,6 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         participants,
         member_bot_ids,
         group_kind,
-        service_spec: req
-            .service_spec
-            .clone()
-            .and_then(|v| serde_json::from_value(v).ok()),
         group_strategy,
         visibility: req.visibility,
         provisioning: false,

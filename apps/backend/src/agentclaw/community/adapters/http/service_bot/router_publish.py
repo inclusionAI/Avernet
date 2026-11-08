@@ -690,6 +690,10 @@ async def sync_scale_progress(
     response_model=ApiResponse,
     summary="更新发布单状态",
 )
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+))
 async def update_publish_status(
     publish_id: int,
     request: UpdatePublishStatusRequest,
@@ -814,6 +818,10 @@ async def offline_publish(
     response_model=ApiResponse,
     summary="服务 Bot 扩缩容",
 )
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+))
 async def scale_publish_bot(
     publish_id: int,
     user: AuthenticatedUser = Depends(get_current_user),
@@ -2128,7 +2136,7 @@ async def update_service_bot_config(
         bot_id = request.bot_id.strip()
 
         # Get current bot ext to merge service_bot_config
-        bot = bot_service.get_bot(bot_id, owner_id)
+        bot = bot_service.get_bot_by_address(bot_id, owner_id)
         current_ext = bot.get("ext") or {}
         if isinstance(current_ext, str):
             try:
@@ -2147,7 +2155,7 @@ async def update_service_bot_config(
         ext_update = {"service_bot_config": merged_service_bot_config}
 
         # Call service to update bot ext
-        bot_service.update_bot_ext(bot_id, owner_id, ext_update)
+        bot_service.update_bot_ext(bot_id, str(bot["owner_id"]), ext_update)
 
         logger.info(
             f"[update_service_bot_config] Successfully updated service_bot_config for bot {bot_id} "

@@ -94,6 +94,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CRON_HISTORY,
     # Model
     Capability.MODEL_LIST,
+    Capability.MODEL_DEFAULT_GET,  # additive configured-default read contract
     Capability.MODEL_SWITCH,
     # Default config
     Capability.DEFAULT_CONFIG_GET,
@@ -107,6 +108,9 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CLI_DOWNLOAD,
     Capability.CLI_ACLI_INSTALL,
     Capability.CLI_ACLI_UNINSTALL,
+    Capability.CLI_ACLI_CANCEL,
+    Capability.CLI_ACLI_LIST,
+    Capability.CLI_ACLI_OPERATION_GET,
 })
 GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
 

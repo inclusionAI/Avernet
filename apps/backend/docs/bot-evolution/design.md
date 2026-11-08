@@ -170,7 +170,7 @@ the part that owns it.
    `skills/refund-policy: update SKILL.md`) with a rationale.
 5. **Genome** records candidate revision `r42` (parent `r41`), and
    **Evolution Run** has **Promotion** check the platform floor (schema,
-   locked genes, secret and personal-data scan) before any verification is
+   mutable genes and pins, secret and personal-data scan) before any verification is
    spent on it.
 6. **Verification** runs parent and candidate paired, with repeated seeds,
    on validation in eval bots, plus the hidden regression and safety suites,
@@ -284,7 +284,7 @@ pairs; and a redacted export is a P6 item
 | --- | --- |
 | Gains are illusory (overfit to the strategy's own cases) | Holdout and regression suites owned by Verification; paired statistics with confidence intervals; budget-matched baseline; periodic re-audit of promoted revisions on fresh cases |
 | Level 3 optimizes noise or weakens the judge | Verifier fixed and human-owned; mechanism verification on held-out improvement problems; depth bounded at 2; mechanism adoption human-approved |
-| Reward hacking or evaluator tampering | Evaluators and suites outside the genome; locked genes; diff audit for guardrail-touching edits |
+| Reward hacking or evaluator tampering | Evaluators and suites outside the genome; non-mutable genes; diff audit for guardrail-touching edits |
 | Persona drift or context collapse | Itemized patches only; size-change thresholds; per-item provenance |
 | Memory or skill poisoning through trajectories | Experience is untrusted input; secret and personal-data scan on patches; risk tiers |
 | Cost blow-up | Per-run, per-bot, and per-tenant budgets enforced by Evolution Run, not by the strategy |

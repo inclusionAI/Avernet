@@ -60,6 +60,12 @@ impl GroupManagementService for GroupManagement {
     ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
         let (caller, group) = self.authorize_add_member(&cmd).await?;
 
+        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        scope_actors.extend([caller.clone(), cmd.bot_id.clone()]);
+        if self.registry.collaboration_owner(&scope_actors).await?.is_some() {
+            if group.visibility != "private" { return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into())); }
+        }
+
         let bot = self
             .registry
             .get(&cmd.bot_id)
@@ -92,7 +98,7 @@ impl GroupManagementService for GroupManagement {
         }
 
         if bot.actor_kind == ActorKind::Bot {
-            self.ensure_add_member_reachable(&group.driver_bot, &cmd.bot_id)
+            self.ensure_reachable(&group.driver_bot, &cmd.bot_id)
                 .await?;
             if group.visibility == "public" && bot.capabilities.visibility != "public" {
                 return Err(GroupUseCaseError::InvalidProposal(format!(
@@ -181,28 +187,29 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
-        let is_coordinator = group.originator() == caller || group.driver_bot == caller || {
-            if caller.starts_with("human_") {
-                let staff_no = caller.trim_start_matches("human_");
-                let owned = self.registry.list_bots_by_creator(staff_no).await;
-                owned
-                    .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot || b.bot_uuid == group.originator())
-            } else {
-                false
-            }
-        };
+        // Row 15 (bot-authority plan Task 6.3): the
+        // coordinator leg keeps its Group-fact structure
+        // (caller IS the driver/originator, or CONTROLS the
+        // driver/originator Bot through a live `can_manage`
+        // edge); the owner leg is the live control edge for
+        // the target Bot itself. The literal
+        // `list_bots_by_creator` prefix is NEVER used as a
+        // whitelist (plan: 不能把 list 前缀当白名单).
+        let mut is_coordinator =
+            group.originator() == caller || group.driver_bot == caller;
         let is_self = caller == cmd.bot_id;
-        let is_owner = if caller.starts_with("human_") {
-            let staff_no = caller.trim_start_matches("human_");
-            self.registry
-                .list_bots_by_creator(staff_no)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == cmd.bot_id)
-        } else {
-            false
-        };
+        let mut is_owner = false;
+        if let Some(staff_no) = caller.strip_prefix("human_") {
+            if !is_coordinator {
+                is_coordinator = self
+                    .human_controls_bot(staff_no, &group.driver_bot)
+                    .await?
+                    || self
+                        .human_controls_bot(staff_no, group.originator())
+                        .await?;
+            }
+            is_owner = self.human_controls_bot(staff_no, &cmd.bot_id).await?;
+        }
         if !is_coordinator && !is_self && !is_owner {
             return Err(GroupUseCaseError::Forbidden(
                 "Caller is not authorized to remove this member".to_string(),
@@ -380,21 +387,31 @@ impl GroupManagementService for GroupManagement {
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
-        // Only coordinator (driver, originator, or driver's owner) can change visibility
+        // Only coordinator (driver, originator, or the
+        // Bot the caller CURRENTLY controls as the driver)
+        // can change visibility: live `can_manage` on the
+        // driver Bot (row 15).
         let is_coordinator = cmd.caller_actor_id == group.driver_bot
             || group.originator.as_deref() == Some(&cmd.caller_actor_id)
-            || self
-                .registry
-                .list_bots_by_creator(&cmd.caller_actor_id)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == group.driver_bot);
+            || match cmd.caller_actor_id.strip_prefix("human_") {
+                Some(staff_no) => {
+                    self.human_controls_bot(staff_no, &group.driver_bot)
+                        .await?
+                }
+                None => false,
+            };
         if !is_coordinator {
             return Err(GroupUseCaseError::Forbidden(
                 "Only the group coordinator can change visibility".to_string(),
             ));
         }
 
+        if visibility == "public" {
+            let actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            if self.registry.collaboration_owner(&actors).await?.is_some() {
+                return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
         if visibility == "public" {
             if group.group_kind == GroupKind::Dm {
                 return Err(GroupUseCaseError::InvalidProposal(
@@ -416,19 +433,6 @@ impl GroupManagementService for GroupManagement {
             ))
             .await?;
         Ok(group_to_detail(updated))
-    }
-
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.group
-            .update_workspace(&cmd.group_id, cmd.workspace.clone())
-            .await?;
-        Ok(GroupWorkspaceResult {
-            group_id: cmd.group_id,
-            workspace: cmd.workspace,
-        })
     }
 
     async fn update_routing_policy(
@@ -604,66 +608,4 @@ impl GroupManagementService for GroupManagement {
         })
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-
-        let running_service_count = self
-            .session_management
-            .count_running_service(&cmd.group_id)
-            .await
-            .unwrap_or(0);
-
-        if let Some(spec_patch) = cmd.service_spec.clone() {
-            if let Err(error) = validate_service_spec_patch(
-                group.service_spec.as_ref(),
-                spec_patch.as_ref(),
-                running_service_count,
-            ) {
-                let conflict = match error {
-                    crate::core::ServiceSpecPatchError::CallbackConfigImmutable => {
-                        GroupPatchSettingsConflict {
-                            field: ServiceSpecPatchConflictField::CallbackConfig,
-                            running_service_count,
-                        }
-                    }
-                    crate::core::ServiceSpecPatchError::RouteFieldsLocked(count) => {
-                        GroupPatchSettingsConflict {
-                            field: ServiceSpecPatchConflictField::RouteFields,
-                            running_service_count: count,
-                        }
-                    }
-                };
-                return Err(GroupUseCaseError::Conflict(
-                    serde_json::to_string(&conflict)
-                        .unwrap_or_else(|_| "service_spec patch rejected".to_string()),
-                ));
-            }
-
-            self.group
-                .mutate(group_mutation_command(
-                    &cmd.group_id,
-                    "system",
-                    GroupMutationKind::UpdateServiceSpec(spec_patch),
-                ))
-                .await?;
-        }
-
-        let updated = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-
-        Ok(GroupPatchSettingsResult {
-            group_id: cmd.group_id,
-            service_spec: updated.service_spec,
-        })
-    }
 }

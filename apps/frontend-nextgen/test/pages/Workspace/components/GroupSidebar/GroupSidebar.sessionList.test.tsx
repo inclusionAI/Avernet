@@ -76,6 +76,18 @@ describe('GroupSidebar', () => {
     expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md');
   });
 
+  it('选中会话胶囊升级品牌蓝 bg-primary/10，标题点亮 text-primary（2026-10-22 对话侧同轮裁决）', () => {
+    const { rerender } = render(<GroupSidebar {...makeProps()} />);
+    rerender(<GroupSidebar {...makeProps({ selectedSessionId: 's1' })} />);
+    const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
+    expect(sessionTrigger).toHaveAttribute('aria-current', 'page');
+    const capsule = sessionTrigger.previousElementSibling as HTMLElement;
+    // 几何契约不变（inset-x-2 全宽 rx6）；壳层会话选中语言已统一定稿为品牌蓝。
+    expect(capsule).toHaveClass('bg-primary/10');
+    expect(capsule).not.toHaveClass('bg-selected');
+    expect(screen.getByText('会话一')).toHaveClass('text-primary');
+  });
+
   it('选中协作群暂无会话时展示明确空态', () => {
     render(
       <GroupSidebar
@@ -87,6 +99,8 @@ describe('GroupSidebar', () => {
     );
 
     expect(screen.getByText('当前协作群暂无会话')).toBeInTheDocument();
+    // 空态升级为引导卡（2026-10-22）：陈述之外给「点哪」的下一步动作。
+    expect(screen.getByText('点击群行尾的「＋」按钮，发起第一场协作会话')).toBeInTheDocument();
     expect(screen.queryByText('暂无协作群临时会话')).not.toBeInTheDocument();
   });
 
@@ -101,7 +115,7 @@ describe('GroupSidebar', () => {
     expect(screen.queryByRole('group', { name: '会话范围筛选' })).not.toBeInTheDocument();
   });
 
-  it('v2 会话行无前置消息图标、无日期（设计稿「群目录二级」同构）', () => {
+  it('v2 会话行无前置消息图标、无日期列；相对时间走右缘轻提示（2026-10-22 精修）', () => {
     const { container } = render(<GroupSidebar {...makeProps()} />);
 
     expect(container.querySelectorAll('svg.lucide-message-square')).toHaveLength(0);

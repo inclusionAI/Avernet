@@ -5,14 +5,14 @@ interface DataTableRowProps<Row> {
   row: Row;
   rowIndex: number;
   columns: DataTableColumn<Row>[];
-  rowHeight: 'h-14' | 'h-16' | 'h-20';
+  rowHeight: 'h-14' | 'h-16' | 'h-18' | 'h-20';
   onClick?: () => void;
 }
 
 export function DataTableRow<Row>({ row, rowIndex, columns, rowHeight, onClick }: DataTableRowProps<Row>) {
   const interactive = Boolean(onClick);
   const rowClassName = [
-    'group border-b border-border transition-colors duration-150',
+    'group border-b border-border/60 transition-colors duration-150',
     rowHeight,
     interactive ? 'cursor-pointer hover:bg-muted/40' : 'hover:bg-muted/40',
   ].join(' ');

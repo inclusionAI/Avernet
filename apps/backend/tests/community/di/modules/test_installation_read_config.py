@@ -67,6 +67,7 @@ def test_environment_scoped_common_config_drives_reader(monkeypatch, environment
         bot={
             "bot_id": "default",
             "owner_id": "owner",
+            "entity_id": "owner",
             "env": "pre" if expected else "prod",
             "active_engine": "openclaw",
         },

@@ -8,6 +8,8 @@ from agentclaw.community.core.skill_center.services.skill_cache import GlobalSyn
 
 def _make_service():
     svc = GitSyncService.__new__(GitSyncService)
+    svc._expert_scanner = None
+    svc._expert_source_repo_id = "aiworkbench"
     svc.config = MagicMock()
     svc.config.local_bare_repo = "/repo.git"
     return svc

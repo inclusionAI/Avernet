@@ -40,6 +40,69 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # Dedicated disposable MySQL services for the six
+      # bot-authority plan §6 gates (Task 8): each
+      # authority_mysql entry applies the FULL migration
+      # chain and therefore needs its own EMPTY database
+      # (migration chains must not run on the same dirty
+      # database). Existing MySQL contract steps keep the
+      # main `bcs_contract` service unchanged.
+      mysql_authority_edge:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_authority_edge
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql_authority_bot:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_authority_bot
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql_authority_group:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_authority_group
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3309:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql_authority_session:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_authority_session
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3310:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       CARGO_TERM_COLOR: always
       BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3306/bcs_contract
@@ -157,6 +220,68 @@ jobs:
       - name: Run MySQL DB plugin contract
         if: steps.changes.outputs.skip-bcs != 'true'
         run: cargo test -p bcs-db-mysql --test conformance_db_plugin -- --ignored
+
+      # Bot-authority plan §6 gates (Task 8): four dedicated
+      # disposable databases (one per service above). Each
+      # step must report `1 passed / 0 failed / 0 ignored` —
+      # a matching-zero run ("0 tests") also fails the step
+      # — and the harness scenario inventory line so an
+      # empty aggregate can never slip through.
+      - name: Run Bot Authority strict reads/manager/transfer MySQL conformance
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3307/bcs_authority_edge
+        run: |
+          output=$(cargo test -p bcs-edge-permission-store --test authority_mysql \
+            authority_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+            || { echo "$output"; exit 1; }
+          echo "$output"
+          echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
+            || { echo "expected summary: 1 passed / 0 failed / 0 ignored" >&2; exit 1; }
+          echo "$output" | grep -q 'authority-mysql-gate=edge-authority scenarios=55' \
+            || { echo "authority scenario inventory unfinished" >&2; exit 1; }
+
+      - name: Run Bot Authority provider lifecycle MySQL conformance
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3308/bcs_authority_bot
+        run: |
+          output=$(cargo test -p bcs-bot-store --test authority_mysql \
+            provider_lifecycle_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+            || { echo "$output"; exit 1; }
+          echo "$output"
+          echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
+            || { echo "expected summary: 1 passed / 0 failed / 0 ignored" >&2; exit 1; }
+          echo "$output" | grep -q 'authority-mysql-gate=provider-lifecycle scenarios=30' \
+            || { echo "provider lifecycle scenario inventory unfinished" >&2; exit 1; }
+
+      - name: Run Bot Authority group snapshot MySQL conformance
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3309/bcs_authority_group
+        run: |
+          output=$(cargo test -p bcs-group-store --test authority_mysql \
+            group_authorization_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+            || { echo "$output"; exit 1; }
+          echo "$output"
+          echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
+            || { echo "expected summary: 1 passed / 0 failed / 0 ignored" >&2; exit 1; }
+          echo "$output" | grep -q 'authority-mysql-gate=group-authorization scenarios=9' \
+            || { echo "group snapshot scenario inventory unfinished" >&2; exit 1; }
+
+      - name: Run Bot Authority session snapshot MySQL conformance
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3310/bcs_authority_session
+        run: |
+          output=$(cargo test -p bcs-session-store --test authority_mysql \
+            session_authorization_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+            || { echo "$output"; exit 1; }
+          echo "$output"
+          echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
+            || { echo "expected summary: 1 passed / 0 failed / 0 ignored" >&2; exit 1; }
+          echo "$output" | grep -q 'authority-mysql-gate=session-authorization scenarios=6' \
+            || { echo "session snapshot scenario inventory unfinished" >&2; exit 1; }
 
       - name: Run MySQL Eventing migration contract
         if: steps.changes.outputs.skip-bcs != 'true'

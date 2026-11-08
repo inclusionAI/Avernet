@@ -4,8 +4,8 @@ use anyhow::{anyhow, Context};
 use bcs_protocol::{BcsFrame, BotConnectParams, BotConnectResponse, RequestFrame};
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::{net::TcpStream, task::JoinSet};
-use tokio_tungstenite::{connect_async_with_config, tungstenite::{Message, protocol::WebSocketConfig}, MaybeTlsStream, WebSocketStream};
+use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinSet};
+use tokio_tungstenite::{connect_async_with_config, tungstenite::{Message, Error as WsError, error::ProtocolError, protocol::{CloseFrame, WebSocketConfig, frame::coding::CloseCode}}, MaybeTlsStream, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 
 use crate::{config::{BotConfig, PluginConfig}, encoder::{Encoder, PluginEncoder, WebSocketV2Encoder, plugin_reply}, error::BridgeError,
@@ -18,6 +18,10 @@ const MAX_ROUTES: usize = 1024;
 const ROUTE_TTL: Duration = Duration::from_secs(300);
 const MAX_OCCUPIED_RETRIES: u32 = 6;
 const MAX_OCCUPIED_BACKOFF: Duration = Duration::from_secs(8);
+// Independent of the (possibly long) connect timeout. Leave room for engine
+// cleanup within the CLI's lifecycle wait, even when the peer ignores Close.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+const TRANSPORT_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(500);
 
 struct PendingRun {
     handle: RunHandle,
@@ -41,6 +45,7 @@ struct BotClient {
     bot: BotConfig,
     config: PluginConfig,
     identity: ConnectionIdentity,
+    status: crate::status::BridgeStatus,
     /// Whether the current connection negotiated protocol V3. V3 selects the
     /// canonical Run Event uplink and enables interaction (HITL) support.
     protocol_v3: bool,
@@ -50,6 +55,7 @@ struct BotClient {
     wire_seq: u64,
 }
 
+#[derive(Debug)]
 enum ConnectionFailure {
     Retry(&'static str),
     AlreadyConnected,
@@ -57,9 +63,19 @@ enum ConnectionFailure {
     Kicked,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct BotIdentityFailure(String);
+
 /// Run one independent client per configured Bot. Shutdown cancels and reaps
 /// active engine turns; an ordinary socket error only reconnects its client.
 pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow::Result<()> {
+    let status = crate::status::BridgeStatus::default();
+    status.register(&state.config);
+    serve_observed(state, shutdown, status).await
+}
+
+pub(crate) async fn serve_observed(state: Arc<AppState>, shutdown: CancellationToken, status: crate::status::BridgeStatus) -> anyhow::Result<()> {
     let config = state.config.plugin.clone().context("plugin config required")?;
     let stop = shutdown.child_token();
     let mut clients = JoinSet::new();
@@ -68,7 +84,17 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
         let bot = bot.clone();
         let config = config.clone();
         let stop = stop.clone();
-        clients.spawn(async move { BotClient::new(state, bot, config).await?.run(stop).await });
+        let status = status.clone();
+        clients.spawn(async move {
+            let provider = state.config.provider_id.clone();
+            let reference = bot.provider_bot_ref.clone();
+            let result = match BotClient::new(state, bot, config, status.clone()).await {
+                Ok(client) => client.run(stop.clone()).await,
+                Err(error) => Err(error),
+            };
+            status.set(&provider, &reference, if result.is_err() { "failed" } else if stop.is_cancelled() { "stopped" } else { "offline" });
+            result
+        });
     }
     let mut first_error = None;
     while let Some(result) = clients.join_next().await {
@@ -76,7 +102,7 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 if first_error.is_none() { first_error = Some(error); }
-                stop.cancel();
+                tracing::warn!("Upstream Bot client failed; other Bot clients remain running");
             }
             Err(error) => {
                 if first_error.is_none() { first_error = Some(anyhow!("upstream client task failed: {error}")); }
@@ -89,43 +115,60 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
 }
 
 impl BotClient {
-    async fn new(state: Arc<AppState>, bot: BotConfig, config: PluginConfig) -> anyhow::Result<Self> {
+    async fn new(state: Arc<AppState>, bot: BotConfig, config: PluginConfig, status: crate::status::BridgeStatus) -> anyhow::Result<Self> {
         let bot_id = bot.bot_id.clone().context("plugin bot_id required")?;
         let saved = state.sessions.load_identity(&config.url, &bot.provider_bot_ref).await?;
         let identity = match saved {
-            Some(identity) if identity.bot_id != bot_id => return Err(anyhow!("stored identity does not match configured bot_id")),
+            Some(identity) if identity.bot_id != bot_id => return Err(anyhow!(BotIdentityFailure("stored identity does not match configured bot_id".into()))),
             Some(identity) => identity,
             None => ConnectionIdentity { bot_id, token:bot.token.clone().unwrap_or_default() },
         };
-        Ok(Self {state,bot,config,identity,protocol_v3:false,pending:BTreeMap::new(),routes:BTreeMap::new(),replies:VecDeque::new(),wire_seq:0})
+        Ok(Self {state,bot,config,identity,status,protocol_v3:false,pending:BTreeMap::new(),routes:BTreeMap::new(),replies:VecDeque::new(),wire_seq:0})
     }
 
     async fn run(mut self, stop: CancellationToken) -> anyhow::Result<()> {
         let mut occupied_retries = 0;
         let outcome = loop {
+            self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "connecting");
+            if stop.is_cancelled() { break Ok(()); }
             let connected = tokio::select! {
+                biased;
+                // Once upgraded, keep ownership outside cancellable login work.
+                connected = self.open_socket() => connected,
                 _ = stop.cancelled() => break Ok(()),
-                connected = self.connect() => connected,
             };
             let result = match connected {
-                Ok((mut socket, identity)) => {
-                    occupied_retries = 0;
-                    // Never cancel a spawned SQLite commit midway through
-                    // shutdown: await it before releasing the database owner.
-                    match self.state.sessions.save_identity(&self.config.url, &self.bot.provider_bot_ref, identity.clone()).await {
-                        Ok(()) => {
-                            self.identity = identity;
-                            tracing::info!(provider_bot_ref = %self.bot.provider_bot_ref, bot_id = %self.identity.bot_id,
-                                version = if self.protocol_v3 { 3 } else { 2 },
-                                "upstream Bot connected with the negotiated Bot WebSocket protocol");
-                            // A renegotiated version retargets every live run: its
-                            // uplink encoder and interaction support follow the
-                            // new connection.
-                            self.refresh_run_transport();
-                            if stop.is_cancelled() { Ok(()) } else { self.connected(&mut socket, &stop).await }
-                        }
-                        Err(error) => Err(ConnectionFailure::Fatal(anyhow!("cannot persist plugin identity: {error}"))),
-                    }
+                Ok(mut socket) => {
+                    let result = async {
+                        if stop.is_cancelled() { return Ok(()); }
+                        let identity = tokio::select! {
+                            biased;
+                            // Prefer a completed login so its rotated token is
+                            // committed even when shutdown arrives simultaneously.
+                            connected = self.connect(&mut socket) => connected?,
+                            _ = stop.cancelled() => return Ok(()),
+                        };
+                        occupied_retries = 0;
+                        // Never cancel a spawned SQLite commit midway through
+                        // shutdown: await it before releasing the database owner.
+                        self.state.sessions.save_identity(&self.config.url, &self.bot.provider_bot_ref, identity.clone()).await
+                            .map_err(|error| ConnectionFailure::Fatal(anyhow!("cannot persist plugin identity: {error}")))?;
+                        self.identity = identity;
+                        self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "online");
+                        tracing::info!(provider_bot_ref = %self.bot.provider_bot_ref, bot_id = %self.identity.bot_id,
+                            version = if self.protocol_v3 { 3 } else { 2 },
+                            "upstream Bot connected with the negotiated Bot WebSocket protocol");
+                        // A renegotiated version retargets every live run: its
+                        // uplink encoder and interaction support follow the
+                        // new connection.
+                        self.refresh_run_transport();
+                        if stop.is_cancelled() { Ok(()) } else { self.connected(&mut socket, &stop).await }
+                    }.await;
+                    self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "disconnecting");
+                    // Do not select on stop here: the owner must outlive Close
+                    // on success, cancellation, rejected login and failed writes.
+                    self.close_socket(&mut socket).await;
+                    result
                 },
                 Err(error) => Err(error),
             };
@@ -145,13 +188,14 @@ impl BotClient {
                     occupied_retries += 1;
                     tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, attempt = occupied_retries,
                         max_retries = MAX_OCCUPIED_RETRIES, delay_ms = retry_delay.as_millis() as u64,
-                        "BCS still holds the previous Bot connection; retrying bot.connect");
+                        "BCS reports an active Bot connection; retrying bot.connect");
                 }
                 Err(ConnectionFailure::Retry(reason)) => {
                     tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, reason, pending_runs = self.pending.len(),
                         "upstream disconnected; retaining runs for reconnect");
                 }
             }
+            self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "reconnecting");
             tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
                 _ = tokio::time::sleep(retry_delay) => {}
@@ -189,13 +233,17 @@ impl BotClient {
         }
     }
 
-    async fn connect(&mut self) -> Result<(Socket, ConnectionIdentity), ConnectionFailure> {
+    async fn open_socket(&self) -> Result<Socket, ConnectionFailure> {
         let wire_config = WebSocketConfig::default()
             .max_message_size(Some(crate::sse::MAX_FRAME_BYTES))
             .max_frame_size(Some(crate::sse::MAX_FRAME_BYTES));
-        let (mut socket, _) = tokio::time::timeout(self.timeout(), connect_async_with_config(&self.config.url, Some(wire_config), false))
+        let (socket, _) = tokio::time::timeout(self.timeout(), connect_async_with_config(&self.config.url, Some(wire_config), false))
             .await.map_err(|_| ConnectionFailure::Retry("WebSocket connect timeout"))?
             .map_err(|_| ConnectionFailure::Retry("WebSocket connect failed"))?;
+        Ok(socket)
+    }
+
+    async fn connect(&mut self, socket: &mut Socket) -> Result<ConnectionIdentity, ConnectionFailure> {
         let id = format!("bridge-connect-{}",uuid::Uuid::new_v4());
         let params = BotConnectParams {
             bot_id:Some(self.identity.bot_id.clone()),
@@ -204,19 +252,19 @@ impl BotClient {
             // support. A server without V3 answers with its best version and
             // the client adapts (only 2 and 3 are accepted below).
             protocol_version:Some(3),
-            client_kind:(self.bot.engine == "qwenwork").then(|| "native_mcp".to_owned()),
+            client_kind:Some("native_mcp".to_owned()),
         };
         let request = BcsFrame::Request(RequestFrame::new(&id,"bot.connect",Some(
             serde_json::to_value(params).map_err(|error| ConnectionFailure::Fatal(error.into()))?)));
-        send(&mut socket, &request, self.timeout()).await?;
+        send(socket, &request, self.timeout()).await?;
         let response = tokio::time::timeout(self.timeout(), async {
             loop {
-                match receive(&mut socket, self.timeout()).await? {
+                match receive(socket, self.timeout()).await? {
                     Some(BcsFrame::Response(response)) if response.id == id => break Ok(response),
                     Some(BcsFrame::Event(event)) if event.event == "bot.kicked" => break Err(ConnectionFailure::Kicked),
                     // Application traffic before bot.connect is not accepted.
                     Some(BcsFrame::Request(request)) => {
-                        send(&mut socket, &plugin_reply(&request.id,
+                        send(socket, &plugin_reply(&request.id,
                             Err(BridgeError::unavailable("bot.connect has not completed"))), self.timeout()).await?;
                     }
                     _ => {}
@@ -229,13 +277,13 @@ impl BotClient {
             }
             let retry = response.error.as_ref().is_some_and(|error| error.retryable || error.code == "bot_id_conflict");
             return Err(if retry { ConnectionFailure::Retry("bot.connect temporarily rejected") }
-                else { ConnectionFailure::Fatal(anyhow!("BCS rejected bot.connect; check Bot identity, token and protocol")) });
+                else { ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("BCS rejected bot.connect; check Bot identity, token and protocol".into()))) });
         }
         let connected: BotConnectResponse = serde_json::from_value(response.payload.unwrap_or(Value::Null))
-            .map_err(|_| ConnectionFailure::Fatal(anyhow!("invalid bot.connect response")))?;
+            .map_err(|_| ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("invalid bot.connect response".into()))))?;
         if !matches!(connected.protocol_version, 2 | 3)
             || connected.bot_uuid != self.identity.bot_id || connected.token.trim().is_empty() {
-            return Err(ConnectionFailure::Fatal(anyhow!("bot.connect returned a mismatched identity, protocol or empty token")));
+            return Err(ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("bot.connect returned a mismatched identity, protocol or empty token".into()))));
         }
         self.protocol_v3 = connected.protocol_version == 3;
         if self.bot.engine == "qwenwork" && !connected.capabilities.as_ref()
@@ -243,7 +291,49 @@ impl BotClient {
             tracing::warn!("BCS did not enable MCP task coordination; check the Bot Provider configuration and server version");
         }
         let identity = ConnectionIdentity {bot_id:connected.bot_uuid,token:connected.token};
-        Ok((socket, identity))
+        Ok(identity)
+    }
+
+    async fn close_socket(&self, socket: &mut Socket) {
+        let result = tokio::time::timeout(CLOSE_TIMEOUT, async {
+            // Sending Close only flushes our frame; keep reading until the peer
+            // acknowledges it. A peer-initiated Close is also flushed here.
+            match socket.close(Some(CloseFrame { code: CloseCode::Normal, reason: "".into() })).await {
+                Ok(()) => {},
+                // receive() already consumed a peer Close. tungstenite queued
+                // its reply, but rejects sending another Close as a new frame.
+                Err(WsError::Protocol(ProtocolError::SendAfterClosing)) => return socket.flush().await,
+                Err(error) => return Err(error),
+            }
+            while let Some(frame) = socket.next().await {
+                match frame? {
+                    Message::Close(_) => { socket.flush().await?; break; }
+                    // Ignore application frames while closing, but drive queued
+                    // control frames without extending the overall deadline.
+                    _ => socket.flush().await?,
+                }
+            }
+            Ok::<(), WsError>(())
+        }).await;
+        match result {
+            Ok(Ok(())) | Ok(Err(WsError::ConnectionClosed | WsError::AlreadyClosed)) => {
+                tracing::debug!(provider_id = %self.state.config.provider_id, provider_bot_ref = %self.bot.provider_bot_ref,
+                    "upstream Bot WebSocket close completed");
+            }
+            Ok(Err(_)) => tracing::warn!(provider_id = %self.state.config.provider_id, provider_bot_ref = %self.bot.provider_bot_ref,
+                "upstream Bot WebSocket close failed; releasing transport"),
+            Err(_) => tracing::warn!(provider_id = %self.state.config.provider_id, provider_bot_ref = %self.bot.provider_bot_ref,
+                timeout_ms = CLOSE_TIMEOUT.as_millis() as u64,
+                "upstream Bot WebSocket close timed out; releasing transport"),
+        }
+        // Dropping a TLS stream does not perform async TLS close_notify. Attempt
+        // transport shutdown even if the WS handshake failed or timed out, then
+        // let the caller drop the socket before releasing its lifecycle lock.
+        match tokio::time::timeout(TRANSPORT_SHUTDOWN_TIMEOUT, socket.get_mut().shutdown()).await {
+            Ok(Ok(())) => {},
+            _ => tracing::warn!(provider_id = %self.state.config.provider_id, provider_bot_ref = %self.bot.provider_bot_ref,
+                "upstream Bot transport shutdown failed or timed out; dropping socket"),
+        }
     }
 
     async fn connected(&mut self, socket: &mut Socket, stop: &CancellationToken) -> Result<(), ConnectionFailure> {
@@ -297,6 +387,9 @@ impl BotClient {
     }
 
     async fn dispatch(&mut self, request: RequestFrame) -> Result<Value, BridgeError> {
+        if self.state.config.mode != crate::config::ConnectionMode::Plugin {
+            return Err(BridgeError::invalid_request("Plugin delivery requires plugin mode"));
+        }
         self.routes.retain(|run_id,route| self.pending.contains_key(run_id) || route.touched.elapsed() < ROUTE_TTL);
         let wire_group = request.params.as_ref().and_then(|p| p.get("bcs_group_id")).and_then(Value::as_str).unwrap_or_default().to_string();
         let alias = request.params.as_ref().and_then(|p| p.get("session_key")).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -345,12 +438,11 @@ impl BotClient {
                 Err(error)
             }
             RuntimeReply::Json {body,..} => Ok(body),
-            RuntimeReply::Run {handle,stream} => {
-                // The runtime stream is gateway-facing. Upstream reads its
-                // durable-in-process event buffer using its own delivery cursor.
-                drop(stream);
+            RuntimeReply::Run {handle,delivery:runtime::RunDelivery::Plugin} => {
                 handle.set_interaction_uplink(self.protocol_v3);
-                let cursor = self.routes.get(&run_id).map_or(0, |route| route.cursor);
+                // A terminal tombstone may outlive its route by a poll interval.
+                // Recover the consumed prefix rather than starting again at zero.
+                let cursor = self.routes.get(&run_id).map_or(handle.retention_stats().delivery_cursor, |route| route.cursor);
                 self.routes.entry(run_id.clone()).or_insert_with(|| Route {
                     session,alias,group:wire_group.clone(),wire_session,cursor,touched:Instant::now(),
                 });
@@ -360,6 +452,8 @@ impl BotClient {
                 self.pending.entry(run_id.clone()).or_insert_with(|| PendingRun {handle,encoder,cursor,failed_delivery:false});
                 Ok(json!({"run_id":run_id}))
             }
+            RuntimeReply::Run {delivery:runtime::RunDelivery::Gateway {..},..} =>
+                Err(BridgeError::invalid_request("Plugin delivery requires plugin mode")),
         }
     }
 
@@ -371,7 +465,7 @@ impl BotClient {
         Ok(())
     }
 
-    async fn flush_events(&mut self, socket: &mut Socket) -> Result<(), ConnectionFailure> {
+    async fn flush_events<S: futures::Sink<Message> + Unpin>(&mut self, socket: &mut S) -> Result<(), ConnectionFailure> {
         let timeout = self.timeout();
         let mut delivered = Vec::new();
         for (run_id,pending) in &mut self.pending {
@@ -382,8 +476,11 @@ impl BotClient {
                 }
                 continue;
             }
+            if !self.routes.get(run_id).is_some_and(|route| route.cursor == pending.cursor) {
+                return Err(ConnectionFailure::Fatal(anyhow!("inconsistent Plugin delivery route cursor")));
+            }
             // One event per run per tick prevents a busy session starving others.
-            if let Some(event) = pending.handle.next_after(pending.cursor) {
+            if let Some(event) = pending.handle.next_after(pending.cursor).map_err(|error| ConnectionFailure::Fatal(error.into()))? {
                 let (frame, rejected) = match pending.encoder.encode(&event) {
                     Ok(frame) => (frame, false),
                     Err(error) => {
@@ -408,13 +505,18 @@ impl BotClient {
                     // this run. Other Bots/sessions keep their connections.
                     pending.failed_delivery = true;
                     pending.handle.request_abort("encoding_error");
+                    continue;
                 }
+                // No await after the local write: commit the buffer and both
+                // route cursors as one synchronous step. This is not a BCS ACK.
+                pending.handle.commit_delivery_through(event.seq)
+                    .map_err(|error| ConnectionFailure::Fatal(error.into()))?;
                 pending.cursor = event.seq;
                 if let Some(route) = self.routes.get_mut(run_id) { route.cursor = pending.cursor; route.touched = Instant::now(); }
             } else if pending.handle.is_terminal() {
                 // Check terminal BEFORE the empty snapshot again: a final may
                 // have been appended between the first snapshot and this flag.
-                if pending.handle.next_after(pending.cursor).is_none() {
+                if pending.handle.next_after(pending.cursor).map_err(|error| ConnectionFailure::Fatal(error.into()))?.is_none() {
                     pending.handle.release_delivery();
                     delivered.push(run_id.clone());
                 }
@@ -434,7 +536,7 @@ fn request_params_session(params: Option<&Value>) -> Option<String> {
     (!session.trim().is_empty()).then(|| session.to_string())
 }
 
-async fn send(socket: &mut Socket, frame: &BcsFrame, timeout: Duration) -> Result<(), ConnectionFailure> {
+async fn send<S: futures::Sink<Message> + Unpin>(socket: &mut S, frame: &BcsFrame, timeout: Duration) -> Result<(), ConnectionFailure> {
     let text = serde_json::to_string(frame).map_err(|error| ConnectionFailure::Fatal(error.into()))?;
     tokio::time::timeout(timeout,socket.send(Message::Text(text.into()))).await
         .map_err(|_| ConnectionFailure::Retry("WebSocket write timeout"))?
@@ -458,3 +560,7 @@ async fn receive(socket: &mut Socket, timeout: Duration) -> Result<Option<BcsFra
         _ => Err(ConnectionFailure::Retry("unsupported WebSocket frame")),
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_retention_tests.rs"]
+mod retention_tests;

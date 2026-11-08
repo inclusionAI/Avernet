@@ -12,6 +12,9 @@ from sqlalchemy.exc import IntegrityError
 from injector import inject
 
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantWhitelist
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
@@ -22,8 +25,9 @@ class WhitelistService:
     """Batch-write bots onto the dormant whitelist."""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(self, db: DatabasePlugin, bots: BotRepository) -> None:
         self._db = db
+        self._bot_addresses = BotAddressResolver(bots)
 
     def batch_add(self, entries: list[dict], created_by: str) -> dict:
         """Add a list of whitelist entries, skipping duplicates.
@@ -40,9 +44,17 @@ class WhitelistService:
         skipped = 0
         with self._db.orm_session() as session:
             for entry in entries:
+                try:
+                    locator = self._bot_addresses.resolve(
+                        bot_id=entry["bot_id"], legacy_owner_id=entry["owner_id"]
+                    ).entity_id
+                except BotAddressNotFoundError:
+                    # Offline imports have historically been accepted before a
+                    # Bot exists. Preserve their explicit address for later use.
+                    locator = entry["owner_id"]
                 row = DormantWhitelist(
                     bot_id=entry["bot_id"],
-                    owner_id=entry["owner_id"],
+                    owner_id=locator,
                     governance_source=entry.get("governance_source", "manual"),
                     reason=entry.get("reason"),
                     created_by=created_by,

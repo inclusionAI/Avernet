@@ -98,7 +98,7 @@ class _Grants:
             app_name="partner",
             bot_id=bot_id,
             user_id=user_id,
-            owner_id=user_id,
+            owner_id=user_id, current_owner_id=user_id,
             avernet_tenant="teamclaw",
             env="test",
             gmt_create=datetime(2026, 8, 10),

@@ -26,6 +26,8 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bridge-state.sqlite3");
         let bots = ["worker-a", "worker-b"].into_iter().map(|name| BotConfig {
+            agent_code: None,
+            bot_slug: None,
             provider_bot_ref: name.into(), engine: "claude-code".into(),
             bot_id: None, token: None,
             model: None, cwd: dir.path().to_owned(), permission_mode: None, engine_bin: None,

@@ -42,20 +42,8 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(service.count_running_service("group-1").await.unwrap(), 0);
-    assert!(
-        service
-            .list_running_service(0, 20)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     assert!(service.list_running_service_after(None, 20).await.is_err());
     assert!(service.complete_running_service_activation("session-1", 1, None, None).await.is_err());
-    service
-        .update_callback_status("session-1", "completed")
-        .await
-        .unwrap();
     assert!(
         service
             .complete_if_running("session-1", None, None)

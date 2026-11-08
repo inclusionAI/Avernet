@@ -316,3 +316,34 @@ async def test_unavailable_context_skips_pipeline(
 
     assert result.iam_token == "original"
     pipeline.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_match_does_not_block_event_loop():
+    import asyncio
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+    plugin = _Plugin([])
+
+    def blocking_match(context):
+        entered.set()
+        assert release.wait(2), "event loop could not release blocking match"
+        return False
+
+    plugin.match = blocking_match
+    context = _context()
+    pipeline = TokenPluginPipeline(plugins=(plugin,), outbound_appender=_Appender())
+    task = asyncio.create_task(pipeline.run(context))
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert entered.is_set()
+        assert not task.done()
+    finally:
+        release.set()
+    results = await task
+    assert results[0].status == "skipped"

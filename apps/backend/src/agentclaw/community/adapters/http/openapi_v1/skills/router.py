@@ -69,6 +69,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
     LocalSkillSecurityObservationRepositoryProtocol,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.local_skill_security_observation import (
     LocalSkillSecurityObservation,
@@ -435,6 +436,10 @@ async def get_skill_security_observations(
     if not skill_id.isdecimal():
         raise LocalSkillNotFoundError()
     record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
+    bot = BotAddressResolver(bot_repository).resolve(
+        bot_id=bot_id, legacy_owner_id=owner_id
+    ).bot
+    owner_id = stable_resource_owner_id(bot)
     if (
         str(record.get("bolt_id")) != bot_id
         or str(record.get("user_id")) != owner_id
@@ -492,7 +497,6 @@ async def get_skill_security_observations(
     # The scan table can be unavailable after a successful observation-mode
     # upload. Never show a prior package's PASS for the currently installed
     # bytes when that exact upload left no durable scan row.
-    bot = bot_repository.get_by_id_and_owner(bot_id, owner_id)
     try:
         installed_digest = (
             await upload_service.installed_package_digest(

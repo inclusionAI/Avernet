@@ -29,7 +29,10 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 mod transaction;
-pub use transaction::{DbExecuteResult, DbStatement, DbTransactionParam, DbTransactionStep, DbTransactionStepResult};
+pub use transaction::{
+    DbExecuteResult, DbStatement, DbTransactionOptions, DbTransactionParam,
+    DbTransactionStep, DbTransactionStepResult,
+};
 
 /// Result type for database plugin operations.
 pub type DbResult<T> = Result<T, DbError>;
@@ -56,6 +59,18 @@ pub enum DbError {
     /// Backend-specific failure.
     #[error("database backend error: {0}")]
     Backend(String),
+
+    /// A deadline set via
+    /// [`DbPlugin::transaction_with_options`] elapsed between
+    /// two transaction steps (Task-0 方案 A). The whole
+    /// transaction is rolled back through the existing
+    /// `Err` → rollback path before this error is returned;
+    /// callers must treat the outcome as a terminal failure
+    /// and never auto-retry it. The deadline cannot interrupt a
+    /// single oversized statement that is still running —
+    /// statement sizes stay the caller's responsibility.
+    #[error("database transaction exceeded its deadline")]
+    Timeout,
 }
 
 impl DbError {
@@ -440,6 +455,42 @@ pub trait DbPlugin: Send + Sync + 'static {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>>;
+
+    /// Run the same steps inside one transaction with execution
+    /// options (Task-0 方案 A: bounded-work escape).
+    ///
+    /// All [`Self::transaction`] semantics hold unchanged. With
+    /// `options.deadline` set, the executor checks the elapsed
+    /// transaction time BETWEEN two steps (and before commit); once
+    /// the deadline is exceeded it stops and returns
+    /// [`DbError::Timeout`], and the `Err` path rolls the whole
+    /// transaction back. A deadline therefore never produces a
+    /// partial commit.
+    ///
+    /// ## Residual risk (contractual)
+    ///
+    /// A single oversized statement that is still running is NOT
+    /// interruptible by this deadline (残余风险 = 单条语句执行期内
+    /// 不可打断): the running statement finishes first, and only the
+    /// following between-step / pre-commit check observes the
+    /// overrun. Callers must still bound statement sizes.
+    ///
+    /// On `Timeout` the outcome is deterministically rolled back by
+    /// this contract; callers must not auto-retry it.
+    ///
+    /// The default implementation delegates to [`Self::transaction`]
+    /// and deliberately ignores the options: only implementations
+    /// that override this method enforce the deadline. Callers that
+    /// require bounded work must select a plugin that does (both
+    /// bundled SQL plugins do).
+    async fn transaction_with_options(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        let _ = options;
+        self.transaction(steps).await
+    }
 
     /// Return whether this plugin can reach its backend.
     async fn health_check(&self) -> DbResult<DbHealth>;

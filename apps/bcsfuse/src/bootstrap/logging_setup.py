@@ -16,15 +16,8 @@ _DETAIL_LOGGERS = (
 
 
 def resolve_business_log_level() -> int:
-    """Resolve once at startup; explicit LOG_LEVEL wins over environment defaults."""
-    environment = (
-        os.getenv("SERVER_ENV")
-        or os.getenv("REAL_SERVER_ENV")
-        or os.getenv("ALIPAY_APP_ENV")
-        or ""
-    ).strip().lower()
-    default = "DEBUG" if environment in {"pre", "prepub"} else "INFO"
-    level_name = os.getenv("LOG_LEVEL", default).strip().upper()
+    """Default to stage summaries; enable detailed diagnostics explicitly."""
+    level_name = os.getenv("LOG_LEVEL", "INFO").strip().upper()
     levels = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,

@@ -1,5 +1,6 @@
+import {repairReleaseMigrations} from '@avernet/clawweb-shared/server/schema-repair-release';
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';
 import { gzipSync } from 'node:zlib';
@@ -8,15 +9,18 @@ import { createRepairBatchesRouter } from '../repair-batches.js';
 import { repairFixture } from '../../services/__tests__/repair-batch-fixtures.js';
 import { createRepairSourcePort } from '../../repositories/repair-source-adapter.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
+import { createRepairReleaseService } from '../../services/repair-release-service.js';
 
 describe('repair workbench HTTP authorization and lifecycle', () => {
   const close: Array<() => Promise<void>> = [];
   afterEach(async () => { for (const fn of close.splice(0)) await fn(); });
-  async function setup(enabled = true) {
+  async function setup(enabled = true, withRelease = false) {
     const f = await repairFixture();
     const service = createRepairWorkbenchService(f.db, f.sourcePort, enabled ? f.executionPort : undefined);
+    if (withRelease) for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
     const app = express(); app.use(express.json({ limit: '10mb' }));
     app.use('/api/workflow-repairs', createRepairBatchesRouter({ service,
+      ...(withRelease ? { release: createRepairReleaseService({ db: f.db, workbench: service }) } : {}),
       async authorize(req, workflowId) {
         // A test composition root; production uses the separately tested verified principal resolver.
         const role = req.get('x-test-role');
@@ -37,8 +41,51 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     }
     return { ...f, service, request };
   }
+  it('reads frozen task history only once when serving task and release details together', async () => {
+    const f = await setup(true, true);
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: '', requestId: 'one-task-read' });
+    const query = vi.spyOn(f.db, 'query');
+    const result = await f.request(`/${created.body.taskId}`);
+    const reads = query.mock.calls.filter(([sql]) => sql.startsWith('SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? AND task_id = ? ORDER BY revision DESC'));
+    query.mockRestore();
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ latestAttempt: { revision: 1 }, release: { approval: null, deployments: [] } });
+    expect(reads).toHaveLength(1);
+  });
+  it('supports task-free candidate reads over GET and POST without changing selection identities or authorization', async () => {
+    const f = await setup();
+    const shown = await f.request('/candidates?workflowId=wf-1');
+    await f.request('/', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.body.inputDigest, instructions: '', requestId: 'light-page' });
+    const normal = await f.request('/candidates?workflowId=wf-1');
+    expect(normal.body.tasks).toHaveLength(1);
+    const reads = vi.spyOn(f.db, 'query');
+    for (const result of [await f.request('/candidates?workflowId=wf-1&includeTasks=false', undefined, 'viewer'),
+      await f.request('/candidates/query', { workflowId: 'wf-1', includeTasks: false }, 'viewer')]) {
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ tasks: [], inputDigest: normal.body.inputDigest, items: normal.body.items, canEdit: false });
+    }
+    expect(reads.mock.calls.filter(([sql]) => sql.includes('FROM workflow_repair_revisions'))).toHaveLength(0);
+    reads.mockRestore();
+    expect((await f.request('/candidates?workflowId=wf-1&includeTasks=invalid')).status).toBe(400);
+    expect((await f.request('/candidates?workflowId=wf-1&includeTasks=false', undefined, 'denied')).status).toBe(403);
+  });
+  it('returns a definite pre-creation failure instead of an unknown write result when the deployed pack cannot be read', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    f.executionPort.resolveBaseline = async () => { throw new Error('private git diagnostic'); };
+    const failed = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0', 'item-1'], instructions: 'Keep selection', requestId: 'baseline-read' });
+    expect(failed).toMatchObject({ status: 503, body: { code: 'CAPABILITY_UNAVAILABLE',
+      reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created' } });
+    expect(JSON.stringify(failed.body)).not.toContain('private git diagnostic');
+    expect(f.calls).toHaveLength(0);
+    expect((await f.request('/requests/lookup?workflowId=wf-1&requestId=baseline-read')).body.revision).toBeNull();
+  });
   it.each([1,110])('reads oversized evidence from %i diagnoses through real GET/POST without applying the generation freeze limit', async count => {
     const f = await repairFixture(0); close.push(() => f.db.close());
+    for(const migration of repairReleaseMigrations)for(const sql of migration.sql)await f.db.exec(f.db.dialect.renderDdl(sql));
     const source = { diagnosisId:'d',analysisId:'a',flowId:'run',sourceId:'s',completedAtMs:1,
       failureSignature:'timeout',failureMode:'timeout',nodeId:'query',reasoning:'证'.repeat(366000)+'x'.repeat(976),evidenceEventIds:[],
       proposal:{summary:'修复查询',operations:[{op:'replace',nodeId:'query',path:'/prompt',value:'full prompt'}]} };
@@ -58,9 +105,10 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
       const detail=await fetch(url+`/items/${json.items[0].itemId}?workflowId=wf-1`).then(r=>r.json());
       expect(detail.context.diagnoses).toHaveLength(count);
       expect(detail.context.diagnoses[0].reasoning).toBe(sources[0].reasoning);
-      await expect(service.create('test',{workflowId:'wf-1',inputDigest:json.inputDigest,itemIds:[json.items[0].itemId],instructions:'',requestId:'oversize'})).rejects.toMatchObject({code:'PAYLOAD_TOO_LARGE'});
+      const created=await service.create('test',{workflowId:'wf-1',inputDigest:json.inputDigest,itemIds:[json.items[0].itemId],instructions:'',requestId:`oversize-${post}`});
+      expect(created.input.materials).toBeDefined();expect(Buffer.byteLength(JSON.stringify(created.input))).toBeLessThan(1024*1024);
     }
-    expect(f.calls).toHaveLength(0);expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+    expect(f.calls).toHaveLength(1);expect(await f.db.query('SELECT * FROM workflow_repair_items')).toHaveLength(1);
   });
   it('requires view/edit permission and derives the mutation actor from verified authorization', async () => {
     const f = await setup();
@@ -76,6 +124,14 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request(`/${created.body.taskId}`, undefined, 'denied')).status).toBe(403);
     expect((await f.request(`/${created.body.taskId}/revisions/1`, undefined, 'viewer')).status).toBe(200);
     expect((await f.request(`/${created.body.taskId}/revisions/999`)).status).toBe(404);
+  });
+  it('authorizes frozen material reads and rejects items outside the selected revision',async()=>{
+    const f=await setup();const inbox=await f.request('/candidates?workflowId=wf-1');
+    const created=await f.request('/',{workflowId:'wf-1',inputDigest:inbox.body.inputDigest,itemIds:['item-0'],instructions:'',requestId:'read-material'});
+    const path=`/${created.body.taskId}/revisions/1/materials/item-0`;
+    expect((await f.request(path,undefined,'denied')).status).toBe(403);
+    const result=await f.request(path,undefined,'viewer');expect(result.status).toBe(200);expect(result.body.itemId).toBe('item-0');
+    expect((await f.request(`/${created.body.taskId}/revisions/1/materials/item-1`,undefined,'viewer')).status).toBe(404);
   });
   it('authorizes frozen-input retry and returns the same revision for duplicate requests', async () => {
     const f = await setup();
@@ -154,7 +210,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     const f = await setup();
     const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
     const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'create' };
-    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64) })).status).toBe(409);
+    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64), requestId: 'stale-list' })).status).toBe(202);
     expect((await f.request('/', { ...input, instructions: '界'.repeat(22000) })).status).toBe(413);
     const created = (await f.request('/', input)).body;
     expect((await f.request(`/${created.taskId}/revisions/1.5`)).status).toBe(400);

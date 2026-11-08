@@ -381,3 +381,16 @@ describe("AgentLogTool query safety", () => {
     expect(String((caught as Error).message)).not.toContain(leakedDetail);
   });
 });
+
+it("clamps historical queries and removes future or undated records before extracting evidence", async () => {
+  const source = collector([
+    { timestamp: '1500', level: 'INFO', source: 'agentclaw', message: 'historical', metadata: {} },
+    { timestamp: '2500', level: 'INFO', source: 'agentclaw', message: 'future', metadata: { bindingId: 'future-binding' } },
+    { timestamp: 'unknown', level: 'INFO', source: 'agentclaw', message: 'undated', metadata: {} },
+  ]);
+  const result = await new AgentLogTool(source, ['agentclaw']).search({ ...context, notAfterMs: 2000000 }, { identifiers: ['botId'], from: 1000, to: 3000 });
+  expect(source.search).toHaveBeenCalledWith(expect.objectContaining({ to: 2000 }));
+  expect(result.entries).toMatchObject([{ message: 'historical' }]);
+  expect(JSON.stringify(result)).not.toContain('future-binding');
+  expect(result.queryScope).toMatchObject({ notAfterMs: 2000000, omittedOutsideRange: 2 });
+});

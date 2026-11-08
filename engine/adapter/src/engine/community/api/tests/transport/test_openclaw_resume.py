@@ -10,6 +10,37 @@ from engine.community.api.transport import openclaw_resume
 from engine.community.api.transport.openclaw_resume import OpenClawResumeRegistry
 
 
+@pytest.mark.asyncio
+async def test_cumulative_snapshots_compress_without_changing_wire_frames(monkeypatch):
+    monkeypatch.setattr(openclaw_resume, "MAX_BYTES_PER_RUN", 16_000)
+    registry = OpenClawResumeRegistry()
+    run, _ = registry.create(session_key="sk", run_id="r")
+    live = AsyncMock()
+    await run.attach("live", live)
+    for index in range(50):
+        await run.publish("chat", {"runId": "r", "state": "delta", "text": "story " * (200 + index)})
+        await asyncio.sleep(0)
+    await run.publish("chat", {"runId": "r", "state": "final"})
+    await run.finish()
+    await run._subscribers["live"].task
+    assert run.resumable
+    assert run.buffered_bytes < 16_000 < run._replay_bytes
+    replay = AsyncMock()
+    await run.attach("replay", replay)
+    await run._subscribers["replay"].task
+    assert replay.send_text.await_args_list == live.send_text.await_args_list
+
+
+@pytest.mark.asyncio
+async def test_uncompressed_replay_budget_still_bounded(monkeypatch):
+    monkeypatch.setattr(openclaw_resume, "MAX_REPLAY_BYTES_PER_RUN", 2000)
+    registry = OpenClawResumeRegistry()
+    run, _ = registry.create(session_key="sk", run_id="r")
+    await run.publish("chat", {"text": "x" * 3000})
+    assert run.reason == "CACHE_LIMIT"
+    assert registry.buffered_bytes == run.buffered_bytes == 0
+
+
 def test_ticket_is_required_and_not_retained_in_plaintext() -> None:
     registry = OpenClawResumeRegistry()
     created = registry.create(session_key="session:one", run_id="run-1")
@@ -46,6 +77,7 @@ async def test_resume_replays_before_live_events_after_disconnect() -> None:
         "state": "starting",
         "replayCount": 2,
         "lastResumeSeq": 2,
+        "startedAt": run.started_at_ms,
     }
     await run.publish("chat", {"seq": 13, "state": "final", "text": "Hello world"})
     await run.finish()
@@ -140,3 +172,66 @@ async def test_terminal_run_expires(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert registry.lookup(session_key="session:one", ticket=ticket) is None
     assert registry.buffered_bytes == 0
+
+
+@pytest.mark.asyncio
+async def test_small_queue_and_cache_overflow_preserve_live_final(monkeypatch):
+    monkeypatch.setattr(openclaw_resume, "SUBSCRIBER_QUEUE_SIZE", 1)
+    monkeypatch.setattr(openclaw_resume, "MAX_EVENTS_PER_RUN", 1)
+    registry = OpenClawResumeRegistry()
+    run, _ = registry.create(session_key="sk", run_id="run")
+    socket = AsyncMock()
+    await run.attach("live", socket)
+    sender = run._subscribers["live"].task
+    for index in range(5):
+        await run.publish("chat", {"state": "delta", "text": str(index)})
+    await run.publish("chat", {"state": "final", "text": "done"})
+    await run.finish()
+    await asyncio.wait_for(sender, 1)
+    frames = [json.loads(c.args[0])["payload"] for c in socket.send_text.await_args_list]
+    assert [f["text"] for f in frames] == ["0", "1", "2", "3", "4", "done"]
+    assert run.reason == "CACHE_LIMIT"
+    assert run.state == "final"
+    socket.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stalled_subscriber_closes_but_run_remains_recoverable(monkeypatch):
+    monkeypatch.setattr(openclaw_resume, "SUBSCRIBER_QUEUE_SIZE", 1)
+    monkeypatch.setattr(openclaw_resume, "SUBSCRIBER_QUEUE_TIMEOUT_SECONDS", 0.01)
+    registry = OpenClawResumeRegistry()
+    run, ticket = registry.create(session_key="sk", run_id="run")
+    blocked = asyncio.Event()
+    async def send(_frame):
+        await blocked.wait()
+    slow, healthy = AsyncMock(), AsyncMock()
+    slow.send_text.side_effect = send
+    await run.attach("slow", slow)
+    slow_task = run._subscribers["slow"].task
+    await run.attach("healthy", healthy)
+    healthy_task = run._subscribers["healthy"].task
+    for index in range(4):
+        await run.publish("chat", {"state": "delta", "text": str(index)})
+    await run.publish("chat", {"state": "final"})
+    await run.finish()
+    await asyncio.wait_for(healthy_task, 1)
+    await asyncio.gather(slow_task, return_exceptions=True)
+    slow.close.assert_awaited_once_with(code=1013)
+    healthy.close.assert_not_awaited()
+    assert healthy.send_text.await_count == 5
+    assert registry.lookup(session_key="sk", ticket=ticket) is run
+    assert run.resumable and len(run._events) == 5
+
+
+@pytest.mark.asyncio
+async def test_failed_subscriber_write_closes_socket():
+    registry = OpenClawResumeRegistry()
+    run, _ = registry.create(session_key="sk", run_id="run")
+    socket = AsyncMock()
+    socket.send_text.side_effect = RuntimeError("broken transport")
+    await run.attach("broken", socket)
+    sender = run._subscribers["broken"].task
+    await run.publish("chat", {"state": "delta"})
+    await asyncio.wait_for(sender, 1)
+    socket.close.assert_awaited_once_with(code=1011)
+    assert not run._subscribers

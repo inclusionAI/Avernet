@@ -63,7 +63,7 @@ export default function InsightCenter() {
       <div className="insight-sidebar-inner">
         <div className="insight-workspace-title"><span className="insight-workspace-icon"><MonitoringIcon name="grid" /></span>效果中心</div>
         <nav aria-label="效果中心功能" className="insight-side-nav">
-          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, ...(canViewMonitoring ? [{ active: monitoring, label: "Agent 监控自愈", value: true, icon: "pulse" as const }] : [])].map(item =>
+          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, ...(canViewMonitoring ? [{ active: monitoring, label: "Agent 诊断治愈", value: true, icon: "pulse" as const }] : [])].map(item =>
             <button key={item.label} type="button" aria-current={item.active ? "page" : undefined} onClick={() => select(item.value)} className={item.active ? "active" : ""}><MonitoringIcon name={item.icon} />{item.label}</button>)}
         </nav>
       </div>

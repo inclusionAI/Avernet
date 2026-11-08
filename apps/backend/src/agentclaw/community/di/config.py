@@ -26,7 +26,7 @@ from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
 )
 
-from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+from agentclaw.community.core.apply_engine.delivery_mode import (
     TeclawDeliveryMode,
 )
 from agentclaw.community.core.task_queue.types import DEFAULT_APP

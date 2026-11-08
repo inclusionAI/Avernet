@@ -98,6 +98,14 @@ export const PanelToggle: React.FC<P> = (p) => (
     <line x1="9" y1="2" x2="9" y2="12" stroke="#fff" strokeWidth="1.2" />
   </svg>
 );
+export const TaskSwitcherIcon: React.FC<P> = (p) => (
+  <Svg {...p}>
+    <rect width="6" height="6" x="3" y="4" rx="1" />
+    <path d="m4 17 2 2 4-4" />
+    <path d="M13 7h8" />
+    <path d="M13 17h8" />
+  </Svg>
+);
 
 /** 节点状态 → icon（F3） */
 /** 节点状态圆点（对齐 PRD demo 图1：实心圆点 + 浅描边） */
@@ -202,5 +210,16 @@ export const ArrowLeft: React.FC<P> = (p) => (
     strokeLinejoin="round"
   >
     <path d="M19 12H5M12 19l-7-7 7-7" />
+  </svg>
+);
+
+/** 下钻热区 icon(Workflow 缩绘,PRD 方案A 下钻按钮) */
+export const DrillWorkflow: React.FC<P> = (p) => (
+  <svg width="12" height="12" viewBox="0 0 14 14" fill="none" {...p}>
+    <rect x="1" y="1" width="5" height="4" rx="1" fill="currentColor" />
+    <rect x="8" y="4.5" width="5" height="4" rx="1" fill="currentColor" opacity={0.55} />
+    <rect x="8" y="9" width="5" height="4" rx="1" fill="currentColor" opacity={0.55} />
+    <rect x="1" y="9" width="5" height="4" rx="1" fill="currentColor" opacity={0.35} />
+    <path d="M6.5 3 H7.6 C8 3 8 3.4 8 3.7 V10 M6.5 11 H7.6" stroke="currentColor" strokeWidth="1.2" fill="none" />
   </svg>
 );

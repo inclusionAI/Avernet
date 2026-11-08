@@ -1712,6 +1712,7 @@ fn query_entry_with_policy(
             FriendCheckInStrategy::DeptFree => "DEPT_FREE".to_string(),
         },
         is_friend: None,
+        access_relation: None,
     }
 }
 
@@ -1736,5 +1737,6 @@ fn query_entry(bot_uuid: &str) -> BotQueryEntry {
         friend_ext: serde_json::Map::new(),
         friend_check_in_strategy: "APPROVAL".to_string(),
         is_friend: None,
+        access_relation: None,
     }
 }

@@ -17,7 +17,11 @@ from fastapi import FastAPI
 #: Extending this tuple is a contract change: it must land together with the
 #: matching gateway domain + route_security entries, never alone.
 _DECLARED_PREFIXES = (
+    "/openapi/v1/service-envs",
     "/openapi/v1/bots",
+    # Governed expert catalogue — declared together with the experts backend
+    # domain and tenant-authenticated route_security entries.
+    "/openapi/v1/experts",
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/org",
@@ -28,6 +32,11 @@ _DECLARED_PREFIXES = (
     # Department directory search — a tenant-wide catalogue read, declared with
     # its own gateway domain + route_security entry.
     "/openapi/v1/org/dept",
+    # Agent-swarm compute surface (submit/poll/list/detail/cancel/SSE/report).
+    # Declared with its own gateway domain (upstreams.domains.agentswarm →
+    # backend, schema bots.openapi.json) + route_security (the top-level
+    # /** user:required default — no explicit override).
+    "/openapi/v1/agentswarm",
     # BCS publish-to-users — the external contract path the gateway's
     # `collaboration-publish` domain routes to the backend (pulled out of the
     # broad collaboration→bcs namespace). Declared with its gateway domain +
@@ -71,3 +80,19 @@ def test_no_internal_routes_leak_into_public_namespace(
 
 def test_public_surface_is_present(app_with_testing_modules: FastAPI) -> None:
     assert _public_paths(app_with_testing_modules), "no /openapi/v1 routes mounted"
+
+
+def test_service_env_domain_is_declared_in_gateway_configuration():
+    """The namespace declaration must correspond to routing and caller policy."""
+    from pathlib import Path
+
+    import yaml
+
+    config_path = Path(__file__).resolve().parents[5] / "gateway/configs/application.yaml"
+    config = yaml.safe_load(config_path.read_text())["user_config"]
+    domain = config["upstreams"]["domains"]["service-envs"]
+    assert domain["server"] == "backend"
+    assert domain["schema"]["path"] == "schemas/bots.openapi.json"
+    assert config["route_security"]["/openapi/v1/service-envs/**"] == {
+        "user": "optional", "app": "optional", "bot": "optional",
+    }

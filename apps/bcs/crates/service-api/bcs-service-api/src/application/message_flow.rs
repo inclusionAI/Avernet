@@ -37,6 +37,8 @@ pub enum ChatEventState {
 
 #[derive(Debug, Clone)]
 pub struct WebSendCommand {
+    /// Request-only credential; only the bound direct provider may consume it.
+    pub caller_execution: Option<super::caller_execution::CallerExecution>,
     pub caller: CallerContext,
     pub group_id: String,
     pub session_id: Option<String>,
@@ -58,6 +60,11 @@ pub struct WebSendCommand {
 #[derive(Debug)]
 pub struct WebSendOutcome {
     pub queue_admission: Option<super::message_delivery::DeliveryAdmissionView>,
+    /// The application-assigned business-operation identity the
+    /// output permits and operation-tagged frames belong to
+    /// (bot-authority spec §8.2). `active_run_ids` remains response
+    /// metadata only; Run bindings derive from THIS identity.
+    pub operation_id: String,
     pub primary_run_id: String,
     pub status: String,
     pub active_run_ids: Vec<String>,
@@ -376,6 +383,16 @@ pub trait MessageFlowService: Send + Sync {
         _downstream_run_id: Option<&str>,
     ) -> ServiceResult<()> { Ok(()) }
 
+    /// Publish a one-shot Run's immutable chat result. Managed targets are
+    /// accepted durably; legacy targets must acknowledge synchronous delivery.
+    /// History identity is stable; ambiguous legacy calls must not be replayed.
+    async fn publish_state_machine_result(
+        &self,
+        _cmd: crate::StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        Err(service_not_configured("state-machine result publication"))
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome>;
 
     async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {
@@ -414,6 +431,8 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<Option<ChatAbortScope>> {
         Ok(None)
     }
+    /// Legacy Runs move the IM source to the accepted identity. Admitted output
+    /// Runs retain it on the canonical identity used by event normalization.
     async fn rebind_channel_source_message(
         &self,
         _source_run_id: &str,
@@ -421,6 +440,10 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<bool> {
         Ok(false)
     }
+    /// Register an authenticated Bot acceptance alias. In addition to Task
+    /// correlation, an admitted output Run (including NotTask) retains its
+    /// canonical operation, producer scope and terminal identity. Conflicting
+    /// aliases and wrong-Bot acceptances must be rejected before publication.
     async fn register_task_run_alias(
         &self,
         task_id: &str,

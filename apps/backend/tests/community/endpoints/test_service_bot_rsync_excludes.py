@@ -26,8 +26,8 @@ class TestRsyncExcludesLogic:
         assert len(_OPENCLAW_RSYNC_EXCLUDES) == 25
 
     def test_claude_code_default_excludes_count(self):
-        """ClaudeCode引擎默认有31条rsync排除规则"""
-        assert len(_CLAUDE_CODE_RSYNC_EXCLUDES) == 31
+        """ClaudeCode引擎默认有33条rsync排除规则"""
+        assert len(_CLAUDE_CODE_RSYNC_EXCLUDES) == 33
 
     def test_parse_ext_with_custom_excludes(self):
         """测试从ext字段解析自定义rsync excludes"""

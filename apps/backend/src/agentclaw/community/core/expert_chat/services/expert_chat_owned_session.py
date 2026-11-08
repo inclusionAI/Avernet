@@ -31,7 +31,7 @@ class ExpertChatOwnedSessionMixin:
         session_key: str,
         iam_token: Optional[str] = None,
         *,
-        bcn_friend_authorized: bool = False,
+        bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
         """Read one Backend-owned expert-chat session from its existing runtime."""
         result = await self.list_chat_sessions(
@@ -43,6 +43,7 @@ class ExpertChatOwnedSessionMixin:
             offset=0,
             iam_token=iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         items = result.get("items") or []
         if not items:
@@ -59,7 +60,7 @@ class ExpertChatOwnedSessionMixin:
         offset: int = 0,
         iam_token: Optional[str] = None,
         *,
-        bcn_friend_authorized: bool = False,
+        bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
         bot = self._require_owned_session(
             user_id, bot_id, owner_id, session_key,
@@ -71,6 +72,7 @@ class ExpertChatOwnedSessionMixin:
             owner_id,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if need_poll or connection is None:
             raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")

@@ -28,7 +28,6 @@ DEFAULT_ENGINE_TYPE = "openclaw"
 # bucket 解析）仍需识别它们，故 SUPPORTED_ENGINE_TYPES 保持全集不动。
 INTERNAL_ENGINE_TYPES = frozenset({"aicoding"})
 
-
 def _get_engine_types() -> list[str]:
     """从环境变量或默认列表获取引擎类型。
 

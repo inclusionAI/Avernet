@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import threading
 
 log_path = sys.argv[1]
 MOCK_DELAY = float(os.environ.get("MOCK_DELAY", "0"))
@@ -11,8 +12,10 @@ threads = set()
 turns = 0
 counter = 0
 ignore_interrupts = set()
+gated_interrupts = set()
 delayed_turns = set()
 delayed_completions = {}
+questions = {}
 
 
 def send(value):
@@ -24,10 +27,18 @@ for raw in sys.stdin:
     method = request.get("method")
     params = request.get("params") or {}
     with open(log_path, "a") as log:
-        log.write(json.dumps(dict(request, pid=os.getpid())) + "\n")
+        log.write(json.dumps(dict(request, pid=os.getpid(),
+            actor=os.environ.get("BCN_ACTOR_BOT_ID"))) + "\n")
     if MOCK_DELAY:
         time.sleep(MOCK_DELAY)
     response = {}
+    if method is None and request.get("id") in questions:
+        thread, turn = questions.pop(request["id"])
+        send({"method":"item/agentMessage/delta", "params":{"threadId":thread,"turnId":turn,
+            "delta":json.dumps(request.get("result", request.get("error")))}})
+        send({"method":"turn/completed", "params":{"threadId":thread,"turnId":turn,
+            "turn":{"id":turn,"status":"completed"}}})
+        continue
     if method == "initialize":
         response = {"capabilities": {}}
     elif method == "initialized":
@@ -47,6 +58,16 @@ for raw in sys.stdin:
         thread = params["threadId"]
         assert thread in threads
         prompt = params["input"][0]["text"]
+        if prompt.startswith("gated-start-"):
+            while not os.path.exists(log_path + ".release"):
+                time.sleep(0.005)
+            prompt = prompt.removeprefix("gated-start-")
+        if prompt == "start-error":
+            send({"id": request["id"], "error": {"message": "start rejected"}})
+            continue
+        if prompt == "start-malformed":
+            send({"id": request["id"], "result": {"turn": {}}})
+            continue
         if prompt == "crash":
             os._exit(2)
         turns += 1
@@ -81,16 +102,49 @@ for raw in sys.stdin:
         send({"id": request["id"], "result": {"turn": {"id": turn}}})
         if stale and phase == "after-ack":
             stale_completion()
+        if prompt.startswith("async-"):
+            item = {"type":"agentMessage","id":"async-item-"+turn,"delivery":"async","text":"Choose a drink?",
+                "questions":[{"title":"你今天更想喝什么？","options":["咖啡","茶","白水"]}]}
+            if prompt != "async-snapshot-only":
+                send({"method":"item/completed","params":{"threadId":thread,"turnId":turn,"item":item}})
+            send({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":turn,"delta":"Question sent."}})
+            send({"method":"turn/completed","params":{"threadId":thread,"turnId":turn,
+                "turn":{"id":turn,"status":"completed","items":[item,{"type":"agentMessage","id":"final-"+turn,
+                    "phase":"final_answer","text":"Question sent."}]}}})
+            continue
+        if prompt.startswith("ask-"):
+            rpc_id = "question-" + turn
+            questions[rpc_id] = (thread, turn)
+            form = {"threadId":thread,"turnId":turn,"itemId":"item-"+turn,"isBlocking":True,
+                "questions":[{"id":"choice","header":"Choice","question":"Pick one?","isOther":True,
+                    "options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]},
+                    {"id":"text","header":"Text","question":"Details?","options":None}]}
+            if prompt == "ask-secret":
+                form["questions"][0]["isSecret"] = True
+            if prompt == "ask-wrong-turn":
+                form["turnId"] = "not-the-active-turn"
+            send({"id":rpc_id,"method":"item/tool/requestUserInput","params":form})
+            if prompt == "ask-engine-close":
+                send({"method":"serverRequest/resolved","params":{"threadId":thread,"requestId":rpc_id}})
+                questions.pop(rpc_id)
+                send({"method":"turn/completed","params":{"threadId":thread,"turnId":turn,
+                    "turn":{"id":turn,"status":"completed"}}})
+            if prompt == "ask-crash":
+                time.sleep(0.05)
+                os._exit(2)
+            continue
         if prompt == "fail":
             send({"method": "turn/completed", "params": {
                 "threadId": thread, "turnId": turn,
                 "turn": {"id": turn, "status": "failed", "error": {"message": "test failure"}}}})
             continue
+        if prompt == "gated-interrupt":
+            gated_interrupts.add(turn)
         if prompt == "ignore-interrupt":
             ignore_interrupts.add(turn)
         if prompt == "hold-delayed-completion":
             delayed_turns.add(turn)
-        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion"):
+        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion", "gated-interrupt"):
             continue
         send({"method": "item/agentMessage/delta", "params": {
             "threadId": thread, "turnId": turn, "delta": f"{os.getpid()}:"}})
@@ -102,6 +156,15 @@ for raw in sys.stdin:
             "threadId": thread, "turn": {"id": turn, "status": "completed"}}})
         continue
     elif method == "turn/interrupt":
+        if params["turnId"] in gated_interrupts:
+            def release_interrupt(rpc_id=request["id"], turn_params=dict(params)):
+                while not os.path.exists(log_path + ".interrupt-release"):
+                    time.sleep(0.005)
+                send({"id": rpc_id, "result": {}})
+                send({"method": "turn/completed", "params": dict(turn_params,
+                    turn={"id": turn_params["turnId"], "status": "interrupted"})})
+            threading.Thread(target=release_interrupt, daemon=True).start()
+            continue
         if params["turnId"] in ignore_interrupts:
             continue
         send({"id": request["id"], "result": {}})

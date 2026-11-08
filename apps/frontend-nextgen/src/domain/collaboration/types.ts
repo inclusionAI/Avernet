@@ -25,6 +25,8 @@ export type ParticipantMode = 'auto' | 'muted' | 'present' | 'absent';
 /** 消息可见域：full=完整视角；participant=参与者视角（仅公共/与自己相关/自己的消息）。 */
 export type MessageViewScope = 'full' | 'participant';
 export type DeliveryPolicy = 'send_to_driver' | 'inject_observers';
+/** @Human 消息外部渠道通知来源（与后端 HumanMentionNotifyMode 线值对齐）。 */
+export type HumanMentionNotifyMode = 'all' | 'driver_bot_only' | 'none';
 
 export interface ParticipantView {
   actorId: string;
@@ -71,9 +73,20 @@ export interface GroupView {
   isPublic: boolean;
   publicJoinRole?: ParticipantRole;
   deliveryPolicy: DeliveryPolicy;
+  /** @Human 消息外部渠道通知来源。旧版后端详情 GET 可能缺省（服务端对缺省存量群按 all 处理），
+   *  映射层不伪造默认值；展示层以 all 兜底，写入必须携带显式值。 */
+  humanMentionNotifyMode?: HumanMentionNotifyMode;
   sidePanelConfig?: SidePanelConfig;
   /** 仅创建响应返回，用于立即展示 Driver/Manager 启动状态。 */
   initialRun?: GroupInitialRun;
+}
+/** 协作群更新补丁（服务端 PATCH UpdateGroup 的领域形态）：
+ *  仅携带需变更字段；未提交字段服务端保持原值（省略≠清空，null 会被后端拒绝）。各面板/编排层共用。 */
+export interface GroupUpdatePatch {
+  name?: string;
+  visibility?: 'private' | 'public';
+  deliveryPolicy?: DeliveryPolicy;
+  humanMentionNotifyMode?: HumanMentionNotifyMode;
 }
 export interface SessionView {
   sessionId: string;

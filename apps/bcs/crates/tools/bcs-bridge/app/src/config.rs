@@ -5,9 +5,8 @@ use bcs_bridge_core::config::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
-use crate::credentials::CredentialSource;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegistrationSettings {
     /// Registration API prefix; `--api-url` or the deploy profile default when absent.
@@ -33,26 +32,13 @@ fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
     Ok((settings, table))
 }
 
-pub fn load_runtime(path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<ProviderConfig> {
-    Ok(load_runtime_with_settings(path, credentials)?.1)
-}
-
-pub(crate) fn load_runtime_with_settings(path: &Path, credentials: &dyn CredentialSource) -> anyhow::Result<(RegistrationSettings, ProviderConfig)> {
-    let text = fs::read_to_string(path).context("Cannot read bridge configuration")?;
-    let (settings, table) = parse(&text)?;
-    let webhook_token = if table.get("mode").and_then(toml::Value::as_str) == Some("plugin") {
-        None
-    } else {
-        let provider = table.get("provider_id").and_then(toml::Value::as_str)
-            .context("Gateway configuration requires provider_id")?;
-        Some(credentials.webhook_token(provider)?)
-    };
-    Ok((settings, runtime(&table, path, webhook_token.as_deref())?))
-}
-
 /// Supply the resolved webhook credential in memory; never persist the runtime copy.
 pub fn runtime(table: &toml::Table, path: &Path, webhook_token: Option<&str>) -> anyhow::Result<ProviderConfig> {
     let mut runtime = table.clone();
+    runtime.remove("registration");
+    if let Some(bots) = runtime.get_mut("bot").and_then(toml::Value::as_array_mut) {
+        for bot in bots { if let Some(bot) = bot.as_table_mut() { bot.remove("registration"); } }
+    }
     // Read old configuration files, but never trust their credential as a fallback.
     runtime.remove("bcs_to_provider_token");
     if let Some(token) = webhook_token {
@@ -66,6 +52,27 @@ pub struct Bootstrap {
     pub settings: RegistrationSettings,
     pub original: Option<String>,
     pub previous: Option<toml::Table>,
+    pub document: toml::Table,
+    pub(crate) edit: Option<crate::multi_config::Edit>,
+}
+
+#[cfg(test)]
+pub fn read_for_registration(path: &Path, auth: &str, provider: &str, mode: &str) -> anyhow::Result<Bootstrap> {
+    crate::multi_config::read_for_registration(path, auth, provider, mode, false, false, None)
+}
+
+impl Bootstrap {
+    pub(crate) fn finish(&self, document: toml::Table) -> anyhow::Result<toml::Table> {
+        match &self.edit { Some(edit) => edit.finish(document), None => Ok(document) }
+    }
+
+    pub(crate) fn all_bots(&self) -> toml::Table {
+        self.edit.as_ref().map(|edit| edit.source.bots_document()).unwrap_or_else(|| self.document.clone())
+    }
+
+    pub(crate) fn modifying_runtime(&self) -> bool {
+        self.previous.is_some() || self.edit.is_some()
+    }
 }
 
 pub fn read_bootstrap(path: &Path) -> anyhow::Result<Bootstrap> {
@@ -82,14 +89,14 @@ pub fn read_registration_source(path: &Path, replace_existing: bool) -> anyhow::
         if table.get("provider_id").and_then(toml::Value::as_str).is_none()
             || !table.get("bot").and_then(toml::Value::as_array).is_some_and(|bots| !bots.is_empty())
         { bail!("Existing runtime configuration is incomplete; review it before replacing"); }
-        return Ok(Bootstrap { settings, original, previous: Some(table) });
+        return Ok(Bootstrap { settings, original, previous: Some(table), document: toml::Table::new(), edit: None });
     }
     table.remove("bcs_to_provider_token");
     if !table.is_empty() { bail!("Before registration, configuration may contain only [registration] settings"); }
-    Ok(Bootstrap { settings, original, previous: None })
+    Ok(Bootstrap { settings, original, previous: None, document: toml::Table::new(), edit: None })
 }
 
-fn read_existing(path: &Path) -> anyhow::Result<Option<String>> {
+pub(crate) fn read_existing(path: &Path) -> anyhow::Result<Option<String>> {
     match fs::symlink_metadata(path) {
         Ok(meta) if !meta.file_type().is_file() => bail!("Bridge configuration must be a regular file, not a symlink or directory"),
         Ok(_) => fs::read_to_string(path).map(Some).context("Cannot read bridge configuration"),
@@ -109,6 +116,15 @@ pub struct PreparedConfig {
 }
 
 impl PreparedConfig {
+    pub fn save_recovery(mut self, text: &str, reason: &str) -> anyhow::Result<()> {
+        if self.temporary.write_all(text.as_bytes()).is_err() {
+            return recovery(self.temporary, "writing recovery configuration failed; file may be incomplete");
+        }
+        if self.temporary.as_file().sync_all().is_err() {
+            return recovery(self.temporary, "syncing recovery configuration failed; durability is not guaranteed");
+        }
+        recovery(self.temporary, reason)
+    }
     pub fn new(path: &Path, original: Option<String>) -> anyhow::Result<Self> {
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let mut builder = fs::DirBuilder::new();
@@ -145,6 +161,7 @@ impl PreparedConfig {
         backup.write_all(original.as_bytes()).context("Cannot write configuration backup")?;
         backup.as_file().sync_all().context("Cannot sync configuration backup")?;
         let (_, path) = backup.keep().map_err(|_| anyhow::anyhow!("Cannot retain configuration backup"))?;
+        sync_parent(&path)?;
         Ok(path)
     }
 
@@ -164,10 +181,18 @@ impl PreparedConfig {
             self.temporary.persist_noclobber(&self.path)
         };
         match installed {
-            Ok(_) => Ok(()),
+            Ok(_) => sync_parent(&self.path).context("Configuration installed but directory sync failed; verify it before retrying registration"),
             Err(error) => recovery(error.file, "cannot install configuration"),
         }
     }
+}
+
+// Sync the directory entry as well as the file before acknowledging persistence.
+fn sync_parent(path: &Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    File::open(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))?
+        .sync_all().context("Cannot sync bridge configuration directory")?;
+    Ok(())
 }
 
 fn recovery(file: NamedTempFile, reason: &str) -> anyhow::Result<()> {

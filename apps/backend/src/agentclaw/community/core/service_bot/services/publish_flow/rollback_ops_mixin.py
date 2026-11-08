@@ -105,7 +105,7 @@ class RollbackOpsMixin:
 
         # 4. Get Bot info (obtained from current_record, since it is the original publish record)
         owner_id = current_record.owner_id
-        bot = self._bot_service.get_bot(bot_id=current_record.source_bot_id, user_id=owner_id)
+        bot = self._bot_service.get_bot_by_address(bot_id=current_record.source_bot_id, user_id=owner_id)
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 

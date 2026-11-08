@@ -16,9 +16,14 @@
 import type { SessionView } from '@/domain/collaboration';
 import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
+import {
+  markTaskNavigationRouteHydrated,
+  shouldPreserveTaskPanelForSession,
+} from '@/services/tasks/taskConversationNavigation';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
+import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface GroupChatFavoritesModel {
   favorite: boolean;
@@ -28,6 +33,8 @@ export interface GroupChatFavoritesModel {
 
 export interface UseGroupChatHeaderPanelsOptions {
   session: SessionView | null;
+  /** 当前登录用户任务列表查询口径。 */
+  userId: string | null;
   /** 与消息区渲染同源的已载入消息（过滤后口径，保证每条搜索结果可定位）。 */
   messages: ChatMessage[];
   /** 副屏 handle（与 ChatLayout.Panel panelRef 同源）。 */
@@ -84,6 +91,9 @@ const HIGHLIGHT_TIMEOUT_MS = 3000;
 
 export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOptions): UseGroupChatHeaderPanelsResult {
   const { session, messages, panelRef } = options;
+  const sessionId = session?.sessionId ?? null;
+
+  useSessionTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
 
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
@@ -93,15 +103,17 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 会话切换即复位（面板内容按当前会话呈现；副屏被 closePanelForce 强关，镜像必须同步回 false）。
-  const sessionId = session?.sessionId ?? null;
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const [sessionEpoch, setSessionEpoch] = useState(0);
   if (lastSessionIdRef.current !== sessionId) {
     lastSessionIdRef.current = sessionId;
-    setSidePaneOpen(false);
+    if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/collaboration')) setSidePaneOpen(false);
     setHighlightMessageId(null);
     setSessionEpoch((epoch) => epoch + 1);
   }
+  useEffect(() => {
+    markTaskNavigationRouteHydrated(sessionId, '/workspace/collaboration');
+  }, [sessionId]);
 
   // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 SDK autoCloseWhenEmpty 弹回）。
   const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);

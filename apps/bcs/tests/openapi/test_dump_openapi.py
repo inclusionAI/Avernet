@@ -16,6 +16,7 @@ from scripts.dump_openapi import dump_contract  # noqa: E402
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 COLLABORATION_TAGS = [
+    "Collaboration / Users",
     "Authentication",
     "Collaboration / Bots",
     "Collaboration / Friendships",
@@ -66,7 +67,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 73)
+        self.assertEqual(len(operations), 74)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
@@ -82,7 +83,7 @@ class DumpOpenApiTests(unittest.TestCase):
 
         self.assertEqual(
             [tag["name"] for tag in contract["tags"]],
-            COLLABORATION_TAGS,
+            COLLABORATION_TAGS + ["Group Context"],
         )
         operation_tags = [
             operation.get("tags")
@@ -117,7 +118,8 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 24)
+        # 27 current dev operations plus 11 bot-authority operations.
+        self.assertEqual(len(operations), 38)
         self.assertTrue(
             all(path.startswith("/api/v1/collaboration/") for _, path in operations)
         )

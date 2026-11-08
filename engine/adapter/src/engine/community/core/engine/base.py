@@ -96,6 +96,7 @@ _PLUGIN_CAPABILITY_DOMAINS: tuple[tuple[str, tuple[Capability, ...]], ...] = (
         "_models",
         (
             Capability.MODEL_LIST,
+            Capability.MODEL_DEFAULT_GET,
             Capability.MODEL_SWITCH,
         ),
     ),
@@ -376,6 +377,12 @@ class BaseEngine(ABC):
                     f"matching capabilities (expected at least one of "
                     f"{sorted(c.value for c in domain_set)})"
                 )
+
+        if Capability.MODEL_DEFAULT_GET in declared:
+            from engine.community.core.models.default_model import DefaultModelService
+
+            if not isinstance(self._models, DefaultModelService):
+                problems.append("  - default model capability requires DefaultModelService")
 
         if problems:
             raise EngineError(

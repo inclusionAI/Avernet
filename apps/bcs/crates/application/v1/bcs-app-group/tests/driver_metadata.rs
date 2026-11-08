@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::GroupServiceImpl;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
@@ -21,6 +22,7 @@ struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 impl Fixture {
@@ -34,6 +36,7 @@ impl Fixture {
             Arc::new(MemorySessionRepo::new()),
             repo,
         ));
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -44,24 +47,36 @@ impl Fixture {
                 sessions.clone(),
                 Arc::new(NoopSystemMessageService),
             )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
             .for_v1_openapi(),
         );
         let service = GroupServiceImpl::new(
             groups.clone(),
             bots.clone(),
             friends,
-            relation,
             sessions,
             management,
-            GroupServiceConfig {
-                relation_env: "dev".into(),
-            },
+        )
+        .with_bot_authority_hook(
+            bcs_test_support::authority_hook_for(authority_repo.clone()),
+        )
+        .with_bot_authority_core(
+            bcs_test_support::authority_hook_for(authority_repo.clone()),
         );
         Self {
             service,
             groups,
             bots,
+            authority_repo,
         }
+    }
+
+    /// The fixture's authority repo (the row-9
+    /// ownership view read; review fix 2b).
+    fn authority_repo_handle(&self) -> &Arc<MemoryBotRepo> {
+        &self.authority_repo
     }
 
     async fn register_driver(&self, owner: Option<&str>) {
@@ -80,8 +95,21 @@ impl Fixture {
                 .save_created_by("driver", owner, true)
                 .await
                 .expect("save owner");
+            // Row 9: the owner display resolves through the
+            // CURRENT ownership view, so the fixture grants
+            // the owner edge too (an empty historical owner
+            // is no edge).
+            if !owner.is_empty() {
+                bcs_test_support::grant_owner_edge(
+                    &self.authority_repo,
+                    "driver",
+                    owner,
+                )
+                .await;
+            }
         }
     }
+
 
     async fn store_group(&self, driver: &str) {
         let mut group = Group::new(
@@ -264,4 +292,48 @@ async fn dm_detail_and_summary_do_not_gain_driver_metadata() {
             assert!(value.get(key).is_none(), "DM must omit {key}");
         }
     }
+}
+
+// Review fix (Important#2b, row 9): the owner
+// DISPLAY follows the CURRENT ownership view —
+// an A→B ownership transfer moves the display to
+// B and stops showing A, even though
+// `created_by` keeps the historical fact.
+#[tokio::test]
+async fn detail_owner_display_moves_after_transfer() {
+    let fixture = Fixture::new();
+    fixture.register_driver(Some("alice")).await;
+    fixture
+        .bots
+        .ensure_human_actor("alice", "Alice")
+        .await
+        .expect("register alice");
+    fixture
+        .bots
+        .ensure_human_actor("bob", "Bob")
+        .await
+        .expect("register bob");
+    fixture.store_group("driver").await;
+
+    // Before: A's view.
+    let detail = fixture.detail().await;
+    assert_eq!(detail["driver_bot_owner"], "human_alice");
+    assert_eq!(detail["driver_bot_owner_name"], "Alice");
+
+    // The A→B handover on the authority store
+    // (created_by stays the historical fact —
+    // spec §3.3: 转交不改 created_by).
+    bcs_test_support::grant_owner_edge(
+        fixture.authority_repo_handle(),
+        "driver",
+        "bob",
+    )
+    .await;
+
+    // After: B's view only; A is gone from the
+    // display even though `created_by` still
+    // names alice.
+    let detail = fixture.detail().await;
+    assert_eq!(detail["driver_bot_owner"], "human_bob");
+    assert_eq!(detail["driver_bot_owner_name"], "Bob");
 }

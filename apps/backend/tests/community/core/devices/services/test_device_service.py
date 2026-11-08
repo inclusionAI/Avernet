@@ -418,6 +418,17 @@ class TestListDevices:
 
 
 class TestReleaseDevice:
+    def test_non_baas_release_does_not_receive_transient_operator(self):
+        record = _make_record(device_props={"unrelated": "value"})
+        repo = MagicMock()
+        repo.get_by_id.return_value = record
+        svc = _make_service(repo=repo)
+        svc._do_release = MagicMock()
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_make_operator("caller"))
+
+        assert svc._do_release.call_args.kwargs["device"].device_props == {"unrelated": "value"}
+
     def test_release_active_device(self):
         record = _make_record(status=DeviceBindingStatus.ACTIVE.value)
         released_record = _make_record(status=DeviceBindingStatus.RELEASED.value)

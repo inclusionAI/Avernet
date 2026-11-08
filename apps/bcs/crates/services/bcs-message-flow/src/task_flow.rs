@@ -4,6 +4,8 @@ pub(crate) use support::{apply_session_participants};
 use support::*;
 #[path = "task_flow/dispatch.rs"]
 mod dispatch;
+#[path = "task_flow/output.rs"]
+mod output;
 pub use dispatch::handle_task_dispatch;
 
 use std::collections::BTreeMap;
@@ -344,7 +346,7 @@ pub async fn handle_task_complete(
             crate::bot_event_actor(&cmd.bot_id),
         )
         .await?;
-        complete_service_session_if_needed(flow, &group, &scope.group_id, status, &cmd.payload)
+        complete_service_session_if_needed(flow, &scope.group_id, status, &cmd.payload)
             .await?
     };
     log_task_complete(

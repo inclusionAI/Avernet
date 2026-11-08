@@ -2,7 +2,7 @@
 Reranker 模块
 
 支持的模型：
-- bge-reranker-v2-m3: BGE 官方格式
+- bge-reranker-v2-m3: 原始 query 和 document 文本
 - Qwen3-Reranker-4B: Chat Prompt 格式
 
 用法：

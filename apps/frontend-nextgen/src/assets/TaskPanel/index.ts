@@ -21,13 +21,11 @@ import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
 import type { ComponentType } from 'react';
 import { TaskPanelAdapter } from './TaskPanelAdapter';
 
-export { GroupDrillDownPanel } from './GroupDrillDown';
+export { GroupSessionView } from './GroupDrillDown';
 export { TaskPanel } from './TaskPanel';
 export { TaskPanelAdapter } from './TaskPanelAdapter';
 export { TaskPanelFetcher } from './TaskPanelFetcher';
-export { TaskPanelHeader } from './TaskPanelHeader';
 export { mapDashboard, mapTaskStatus } from './taskPanelMapper';
-export { TaskSubTaskPanel } from './TaskSubTaskPanel';
 export type {
   DagEdgeView,
   DagNodeView,
@@ -37,6 +35,7 @@ export type {
   TaskStatus,
   TaskView,
 } from './types';
+export { collectTaskArtifacts, TaskArtifactsList } from './v2/TaskArtifactsList';
 
 /**
  * 注册任务副屏模块。由 `src/extensions/empty.ts` 在 app 初始化时调用一次。

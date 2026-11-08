@@ -63,9 +63,42 @@ it.each([
   (spec: any) => { spec._businessPolicy = 'unknown fields count'; },
   (spec: any) => { spec.nodes[0].version = 'nested business version'; },
   (spec: any) => { spec.version = { businessPolicy: 'not scalar metadata' }; },
-])('rejects actual configuration drift rather than dropping unknown fields or order', change => {
+])('uses deployed configuration identity without blocking background work on a Git representation difference', change => {
   const changed = structuredClone(deployed); change(changed);
-  expect(() => repairProposalSpecDigest(tagged, changed)).toThrow('配置不一致');
+  expect(repairProposalSpecDigest(tagged, changed)).toBe(digestCanonicalJson(changed));
+});
+
+it.each([false, true])('reconciles a single full-file proposal against the actual Git baseline rather than directly applying its file content (automatic=%s)', async automatic => {
+  const f = await repairFixture(1);
+  try {
+    const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), specDigest: createHash('sha256').update(yaml).digest('hex'),
+      proposalSpecDigest: repairProposalSpecDigest(tagged, { ...deployed, description: 'different deployed configuration' }) };
+    f.executionPort.resolveBaseline = async () => baseline;
+    const original = { summary: 'repair the selected report goal', baseSpecDigest: baseline.proposalSpecDigest,
+      patches: [{ file: baseline.specPath, content: 'old complete workflow file that must not be replayed' }] };
+    f.items[0].proposal = original;
+    const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+    const inbox = await service.candidates('wf-1');
+    const created = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: 'keep business constraints', requestId: 'full-file-reference',
+      ...(automatic ? { automation: { kind: 'daily' as const, intentId: '1'.repeat(64), policyVersion: 1, evidenceCutoffMs: 1 } } : {}) });
+    expect(created.input.integration).toMatchObject({ baselineSpecDigest: baseline.specDigest,
+      plans: [{ originalItemIds: ['item-0'] }] });
+    expect(created.input.items[0].proposal).toEqual(original);
+    expect(created.input.instructions).toBe('keep business constraints');
+    expect(f.calls).toHaveLength(1);
+    expect((f.calls[0] as any).input.integration).toEqual(created.input.integration);
+    // Existing failed tasks are upgraded only when explicitly regenerated.
+    const legacyInput = { ...created.input }; delete legacyInput.integration;
+    await f.db.exec('UPDATE workflow_repair_revisions SET input_json = ? WHERE task_id = ? AND revision = 1', [JSON.stringify(legacyInput), created.taskId]);
+    await service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: created.stateVersion,
+      status: 'failed', error: { code: 'CANDIDATE_WRITE_FAILED' } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: null });
+    const retry = await service.retryGeneration('human', created.taskId, { expectedRevision: 1, requestId: 'retry-full-file' });
+    expect(retry.input.integration).toEqual(created.input.integration);
+    expect(retry.input.baseline).toEqual(created.input.baseline);
+    expect(retry.input.items[0].proposal).toEqual(original);
+    expect((await service.task(created.taskId)).revisions.find(row => row.revision === 1)!.input.integration).toBeUndefined();
+  } finally { f.raw.close(); }
 });
 
 it('does not confuse raw bytes with semantic identity or silently accept missing proposal metadata', () => {

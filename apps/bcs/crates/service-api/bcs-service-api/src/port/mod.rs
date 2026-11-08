@@ -1,5 +1,6 @@
 pub mod coordination_intent;
 pub use coordination_intent::*;
+pub mod bot_authority;
 pub mod bot_catalog_cleanup;
 pub mod bot_connection;
 pub mod bot_terminal_observer;
@@ -25,11 +26,12 @@ pub mod pending_group_message;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
-pub mod session_callback;
+
 pub mod session_channel_outbound;
 pub mod state_machine_metrics;
 pub mod state_machine_result;
 
+pub use bot_authority::BotAuthorityPort;
 pub use bot_catalog_cleanup::{BotCatalogCleanupPort, NoopBotCatalogCleanupPort};
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
@@ -49,7 +51,8 @@ pub use delivery::{
     BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
     BotDeliveryPort, BotDeliveryResult, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
-    ProviderTransportPreference, RunFallbackDelivery,
+    OutputAdmissionPort, OutputOperationAdmission, ProviderTransportPreference,
+    RunFallbackDelivery,
 };
 pub use event_delivery::*;
 pub use event_metrics::*;
@@ -121,7 +124,7 @@ pub use repo::{
     UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
-pub use session_callback::SessionCallbackDispatchPort;
+
 pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     StateMachineTerminalEvent, StateMachineTerminalStatus,

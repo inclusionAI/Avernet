@@ -3,7 +3,16 @@ import { useId, useState } from 'react';
 import type { DiagnosisItem } from '../../../types/monitoring';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
 
-export const decisionLabels = { ALL: '全部', ALERT: '告警', PASS: '通过', UNRESOLVED: '无法判断' };
+export function getDiagnosisTitle(item: DiagnosisItem): string {
+  if (item.decision === 'UNRESOLVED') return '诊断失败';
+  const businessTitle = [item.businessProblemCategory, item.businessProblemSubtype]
+    .map(value => value?.trim()).filter(Boolean).join(' · ');
+  if (businessTitle) return businessTitle;
+  if (item.decision === 'ALERT') return '异常告警';
+  if (item.handlerName === 'COMPLETED') return '任务已完成';
+  if (item.handlerName === 'NOT_COMPLETED') return '任务尚未完成';
+  return '任务完成状态未知';
+}
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 export function timeParts(value: string | null) {
   if (!value || !Number.isFinite(Date.parse(value))) return null;
@@ -20,7 +29,7 @@ function Field({ label, value, emphasis = false }: { label: string; value: strin
 export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; open: boolean; toggle: () => void }) {
   const detailId = useId();
   const [copyMessage, setCopyMessage] = useState('');
-  const title = [item.businessProblemCategory, item.businessProblemSubtype].filter(Boolean).join(' · ') || decisionLabels[item.decision];
+  const title = getDiagnosisTitle(item);
   const identifier = item.traceId || item.sessionKey || item.sessionId || item.diagnosisId;
   const time = timeParts(item.occurredAt);
   const symbol = { ALERT: 'alert', PASS: 'check', UNRESOLVED: 'question' } as const;
@@ -45,7 +54,7 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
       <dl className="detail-grid">
         <Field label="TC 故障标签" value={item.tcFaultLabel} /><Field label="诊断置信度" value={item.confidence === null ? null : `${(item.confidence * 100).toFixed(1)}%`} emphasis />
         <Field label="业务问题类型" value={item.businessProblemCategory} /><Field label="业务问题子类型" value={item.businessProblemSubtype} />
-        <Field label="处理人" value={item.handlerName} /><Field label="是否人工干预" value={item.humanIntervention ? '是' : '否'} />
+        <Field label="任务是否完成" value={item.decision === 'UNRESOLVED' ? '未判定' : item.handlerName === 'COMPLETED' ? '是' : item.handlerName === 'NOT_COMPLETED' ? '否' : '未知'} /><Field label="是否人工纠错" value={item.decision === 'UNRESOLVED' ? '未判定' : item.humanIntervention ? '是' : '否'} />
         <Field label="会话时间" value={displayTime(item.occurredAt)} /><Field label="诊断完成时间" value={displayTime(item.diagnosedAt)} />
       </dl>
       <div className="detail-identifiers">{ids.map(([label, value]) => value && <div className="id-line" key={label}><span>{label}</span><code>{value}</code><button className="copy-btn" type="button" aria-label={`复制${label}`} onClick={() => void copy(label!, value)}><Icon name="copy" /></button></div>)}</div>

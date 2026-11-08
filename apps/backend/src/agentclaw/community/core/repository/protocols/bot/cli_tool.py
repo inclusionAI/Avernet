@@ -11,7 +11,7 @@ from abc import abstractmethod
 from typing import Optional, Protocol, Sequence, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.cli_tools import (
+    from agentclaw.community.core.apply_engine.cli_tools import (
         BotCliToolRecord,
     )
 

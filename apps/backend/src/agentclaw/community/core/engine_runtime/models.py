@@ -99,13 +99,16 @@ class BotFacts:
 
 @dataclass(frozen=True)
 class SocketInfo:
-    """One WebSocket a caller may open against a bot.
+    """One endpoint a caller may reach a bot on.
 
     ``url`` is complete and opaque — the caller opens it verbatim, appending
-    nothing and rebuilding nothing. It is also the *only* field: the credential
-    travels inside it, because a browser's WebSocket handshake can carry one
-    nowhere else, and publishing it a second time alongside would leave a caller
-    guessing which one the socket honours.
+    nothing and rebuilding nothing. It is also the *only* field: on the socket
+    kinds that carry a credential, that credential travels inside the URL,
+    because a browser's WebSocket handshake can carry one nowhere else, and
+    publishing it a second time alongside would leave a caller guessing which
+    one the socket honours. The ``a2a`` kind is the credential-less exception:
+    an HTTP base URL for the engine's A2A face, addressed browser-direct by
+    its issuer.
     """
 
     kind: str
@@ -135,6 +138,12 @@ class ConnectionResult:
     expires_at: str
     sockets: list[SocketInfo] = field(default_factory=list)
     transport_mode: str = ""
+    a2a_withheld: bool = False
+    """服务端治理后明确拒绝签发 A2A 面（用户灰度未命中）。
+
+    客户端据此禁用 ws 推导兜底与 A2A 探测——"没有地址"与"明确拒绝"
+    不同：前者允许直连拓扑的推导兜底，后者是用户级控制的负结果。
+    """
 
 
 __all__ = ["BotFacts", "ConnectionResult", "EngineResult", "SocketInfo"]

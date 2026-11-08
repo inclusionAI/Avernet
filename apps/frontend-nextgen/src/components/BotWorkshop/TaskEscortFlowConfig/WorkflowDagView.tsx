@@ -49,7 +49,7 @@ const EXECUTOR_COLORS: Record<string, { bg: string; border: string; text: string
 
 const DEFAULT_COLOR = { bg: '#f9fafb', border: '#9ca3af', text: '#4b5563' };
 
-interface DagNodeData {
+interface DagNodeData extends Record<string, unknown> {
   label: string;
   executorType: string;
   executorDetail?: string;

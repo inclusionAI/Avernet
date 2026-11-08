@@ -20,7 +20,7 @@ pub(super) fn bot_token_from_headers(headers: &HeaderMap) -> Option<String> {
 pub(super) async fn bot_id_from_headers(
     state: &HttpAppState,
     headers: &HeaderMap,
-) -> Option<String> {
+) -> Result<Option<String>, HttpAdapterError> {
     state.bot_uuid_from_headers(headers).await
 }
 
@@ -29,7 +29,7 @@ pub(super) async fn require_bot_id_from_headers(
     headers: &HeaderMap,
 ) -> Result<String, HttpAdapterError> {
     bot_id_from_headers(state, headers)
-        .await
+        .await?
         .ok_or_else(|| HttpAdapterError::Unauthorized("valid bot token is required".to_string()))
 }
 
@@ -46,18 +46,18 @@ pub(super) async fn caller_actor_id_from_headers(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
-) -> Option<String> {
-    if let Some(bot_id) = state.bot_uuid_from_headers(headers).await {
-        return Some(bot_id);
+) -> Result<Option<String>, HttpAdapterError> {
+    if let Some(bot_id) = state.bot_uuid_from_headers(headers).await? {
+        return Ok(Some(bot_id));
     }
 
-    state
+    Ok(state
         .user_identity
         .extract(headers, uri)
         .await
         .and_then(|identity| identity.staff_no)
         .filter(|staff_no| !staff_no.is_empty())
-        .map(|staff_no| format!("human_{staff_no}"))
+        .map(|staff_no| format!("human_{staff_no}")))
 }
 
 pub(super) async fn require_caller_actor_id_from_headers(
@@ -66,7 +66,7 @@ pub(super) async fn require_caller_actor_id_from_headers(
     uri: &Uri,
 ) -> Result<String, HttpAdapterError> {
     caller_actor_id_from_headers(state, headers, uri)
-        .await
+        .await?
         .ok_or_else(|| {
             HttpAdapterError::Unauthorized(
                 "valid bot token or human identity is required".to_string(),

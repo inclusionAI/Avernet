@@ -187,6 +187,10 @@ async def get_chat_session(
         logger.warning(f"[expert_chats.get_chat_session] Bot not published: {e}")
         return ApiResponse(success=False, message=str(e), error_code=4001)
 
+    except ChatPermissionError as e:
+        logger.warning("[expert_chats.get_chat_session] Permission denied: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=403)
+
     except ConnectionError as e:
         logger.error(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
         error_code = int(e.error_code) if e.error_code else 5001

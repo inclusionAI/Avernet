@@ -1,4 +1,9 @@
 import { BotEditLockAction } from '@/components/BotWorkshop/BotCard/BotEditLockAction';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { engineVersionTooltip, engineVersionUiState } from '@/domain/botEngineVersion';
+import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import type { BotDomain } from '@/services/botWorkshop';
 import React from 'react';
@@ -7,31 +12,64 @@ export interface BotInfoCellProps {
   bot: BotDomain;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
   onReleaseLock?: (bot: BotDomain) => Promise<void>;
-  /** 描述未单独成列时，随 Bot 信息紧凑展示。 */
-  compactDescription?: boolean;
+  engineVersionState?: BotEngineVersionState;
+  onOpenEngineUpdate?: (bot: BotDomain) => void;
 }
 
-/** 名称不再是独立按钮：整行已可点击进入详情，避免行内嵌套可交互元素。 */
-const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLock, compactDescription = false }) => {
+/**
+ * 名称不再是独立按钮：整行已可点击进入详情，避免行内嵌套可交互元素。
+ * 「引擎有更新」tag 紧贴名称右侧，点击直达更新确认弹窗（dmore image 19）。
+ */
+const BotInfoCell: React.FC<BotInfoCellProps> = ({
+  bot,
+  onClaimLock,
+  onReleaseLock,
+  engineVersionState,
+  onOpenEngineUpdate,
+}) => {
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
-  const description = bot.description?.trim();
+  const engineUpdatable =
+    engineVersionState?.kind === 'ready' &&
+    engineVersionUiState(engineVersionState.observation) === 'updatable';
   return (
     <div className="flex min-w-0 items-center gap-3">
       <span
         aria-hidden
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold leading-none text-primary"
+        className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10"
       >
-        <img src={avatarUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+        <img src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />
       </span>
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-medium text-foreground">{bot.name}</span>
+          <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
+          {onOpenEngineUpdate && engineUpdatable ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto shrink-0 rounded-full p-0"
+                    aria-label={`引擎有更新：${engineVersionTooltip(engineVersionState.observation)}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenEngineUpdate(bot);
+                    }}
+                  >
+                    <Badge tone="warning" className="cursor-pointer whitespace-nowrap">
+                      引擎有更新
+                    </Badge>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{engineVersionTooltip(engineVersionState.observation)}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
           <span className="inline-flex shrink-0">
             <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
           </span>
         </div>
-        <span className="truncate text-xs text-muted-foreground">{bot.entityKey}</span>
-        {compactDescription && description ? <span className="truncate text-xs text-muted-foreground">{description}</span> : null}
+        <span className="truncate text-xs text-content-icon">{bot.entityKey}</span>
       </div>
     </div>
   );

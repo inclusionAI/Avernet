@@ -1,4 +1,4 @@
-import type { DeliveryPolicy, GroupView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView } from '@/domain/collaboration';
 import type { DingTalkBindingState, GroupDingTalkConfig } from '@/services/workspace/channelBindingService';
 import { channelBindingService } from '@/services/workspace/channelBindingService';
 import { groupMemberService } from '@/services/workspace/groupMemberService';
@@ -10,11 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export interface UseGroupManagementResult {
-  updateGroup: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-    deliveryPolicy?: DeliveryPolicy;
-  }) => Promise<DomainResult<GroupView> | null>;
+  updateGroup: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null>;
   addMember: (actorId: string) => Promise<boolean>;
   removeMember: (actorId: string) => Promise<boolean>;
   leaveGroup: (actorId: string) => Promise<boolean>;

@@ -46,18 +46,22 @@ export interface BotModelPageDto {
 }
 
 export interface BotSocketDto {
-  kind: 'chat';
+  /** B17：a2a = 服务端签发的 A2A base（浏览器可达），card/rpc 挂其下 */
+  kind: 'chat' | 'a2a';
   url: string;
 }
 export interface BotConnectionDto {
   transport_mode?: 'direct' | 'relay';
   engine: string;
   expires_at: string;
+  /** 用户灰度负结果（服务端治理后明确拒绝 A2A）——与 sockets 缺 a2a 是两个语义 */
+  a2a_withheld?: boolean;
   sockets: BotSocketDto[];
 }
 
 export interface BotRequestParams {
   user_id: string;
+  stage?: 'draft' | 'verify' | 'online';
   owner_id?: string;
   f_user_id?: string;
 }

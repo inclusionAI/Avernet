@@ -263,6 +263,7 @@ pub(crate) async fn commit_routed_reply(
     // the reconstructed full reply.
     let text = normalized.map(|reply| reply.text.as_str()).unwrap_or(text);
     let command = WebSendCommand {
+        caller_execution: None,
         caller: bcs_service_api::CallerContext::Public,
         group_id: group.id.clone(),
         session_id: Some(session_id.clone()),
@@ -300,6 +301,7 @@ pub(crate) async fn commit_routed_reply(
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id: None,
         });
     }
     let target_ids = targets.iter().map(|t| t.target_bot_id.clone()).collect();
@@ -463,6 +465,18 @@ pub async fn prepare_group_admission(
     sender_name: &str,
     sender_owner: Option<String>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
+    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None).await
+}
+
+pub(crate) async fn prepare_group_admission_with_message(
+    flow: &BcsMessageFlow,
+    group: &Group,
+    command: &WebSendCommand,
+    decision: &RoutingDecision,
+    sender_name: &str,
+    sender_owner: Option<String>,
+    canonical_message: Option<(&str, &NewMessage)>,
+) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     // State-machine is an independently gated business flow, even when its
     // transport happens to be the group endpoint.
     if group.group_strategy == GroupStrategy::StateMachine {
@@ -513,34 +527,49 @@ pub async fn prepare_group_admission(
         let mut projection = serde_json::to_value(projection)?;
         projection["drain_context"] = serde_json::json!(drain);
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
+        // F1 (spec §8.2 — R6): pre-assign the canonical run identity
+        // BEFORE the durable admission commits, so the sender can
+        // install the run's operation binding and frozen producer
+        // facts before ANY queue worker can execute the row. Only
+        // executable Send targets get one; admission-time rejections
+        // never run and stay unassigned.
+        let run_id = (target.delivery_type == bcs_domain::DeliveryType::Send && rejection.is_none())
+            .then(|| uuid::Uuid::new_v4().to_string());
         targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid.clone(),
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id,
         });
     }
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let message_id = uuid::Uuid::new_v4().to_string();
-    let sender_type = if command.from_actor_id.starts_with("human_") { SenderType::Human } else { SenderType::Bot };
-    let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(Some(group), &command.from_actor_id, sender_type, "chat", None)?;
-    let message = NewMessage {
-        group_id: group.id.clone(),
-        session_id: session_id.into(),
-        sender_id: command.from_actor_id.clone(),
-        sender_type: if command.from_actor_id.starts_with("human_") {
-            SenderType::Human
-        } else {
-            SenderType::Bot
-        },
-        message_type: "chat".into(),
-        content: queued_inbound_content(command),
-        client_msg_id: command.idempotency_key.clone(),
-        visibility_domain,
-        audience,
-        owner_bot_id: None,
-        created_at: now_ms as u64,
-        run_id: String::new(),
+    let (message_id, message) = match canonical_message {
+        Some((id, message)) => (id.to_owned(), message.clone()),
+        None => {
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let sender_type = if command.from_actor_id.starts_with("human_") { SenderType::Human } else { SenderType::Bot };
+            let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(Some(group), &command.from_actor_id, sender_type, "chat", None)?;
+            let message = NewMessage {
+                group_id: group.id.clone(),
+                session_id: session_id.into(),
+                sender_id: command.from_actor_id.clone(),
+                sender_type: if command.from_actor_id.starts_with("human_") {
+                    SenderType::Human
+                } else {
+                    SenderType::Bot
+                },
+                message_type: "chat".into(),
+                content: queued_inbound_content(command),
+                client_msg_id: command.idempotency_key.clone(),
+                visibility_domain,
+                audience,
+                owner_bot_id: None,
+                created_at: now_ms as u64,
+                run_id: String::new(),
+            };
+            (message_id, message)
+        }
     };
     let event = prepare_message_event(flow, &message_id, &message)?;
     Ok(Some(AdmitMessageDeliveries {

@@ -88,22 +88,29 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
     [],
   );
 
-  if (externalBots.loading) return <Skeleton.Card />;
+  if (externalBots.loading)
+    return (
+      <div aria-label="外部 Bot 管理" className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+        <Skeleton.Card />
+      </div>
+    );
   if (externalBots.error)
     return (
-      <Empty
-        title="外部 Bot 列表加载失败"
-        description={externalBots.error}
-        action={
-          <Button
-            variant="secondary"
-            leftIcon={<RefreshCw className="size-4" />}
-            onClick={() => void externalBots.retry()}
-          >
-            重试
-          </Button>
-        }
-      />
+      <div aria-label="外部 Bot 管理" className="rounded-[10px] bg-muted/40">
+        <Empty
+          title="外部 Bot 列表加载失败"
+          description={externalBots.error}
+          action={
+            <Button
+              variant="secondary"
+              leftIcon={<RefreshCw className="size-4" />}
+              onClick={() => void externalBots.retry()}
+            >
+              重试
+            </Button>
+          }
+        />
+      </div>
     );
 
   return (
@@ -127,13 +134,17 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
         </Button>
       </div>
       {visibleItems.length ? (
-        <DataTable columns={columns} rows={visibleItems} getRowKey={(bot) => bot.id} ariaLabel="外部 Bot 列表" />
+        <div className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+          <DataTable columns={columns} rows={visibleItems} getRowKey={(bot) => bot.id} ariaLabel="外部 Bot 列表" rowHeight="h-18" />
+        </div>
       ) : (
-        <Empty
-          title={keyword ? '没有符合条件的外部 Bot' : '暂无已接入的外部 Bot'}
-          description={keyword ? '尝试更换搜索关键词。' : '接入后，可在此查看并管理 Bot 的协作配置。'}
-          action={keyword ? undefined : <Button onClick={() => setRegistrationOpen(true)}>接入外部 Bot</Button>}
-        />
+        <div className="rounded-[10px] bg-muted/40">
+          <Empty
+            title={keyword ? '没有符合条件的外部 Bot' : '暂无已接入的外部 Bot'}
+            description={keyword ? '尝试更换搜索关键词。' : '接入后，可在此查看并管理 Bot 的协作配置。'}
+            action={keyword ? undefined : <Button onClick={() => setRegistrationOpen(true)}>接入外部 Bot</Button>}
+          />
+        </div>
       )}
       <BotRegistrationDialog
         open={registrationOpen}

@@ -176,3 +176,42 @@ async fn mysql_coercion_cannot_turn_malformed_legacy_identity_into_registration(
         assert!(matches!(repo.find_agent_registration(code).await, Err(ServiceError::InternalError(_))));
     }
 }
+
+#[tokio::test]
+async fn actor_static_and_implicit_identity_reads_are_bounded() {
+    use bcs_service_api::types::agent_registration::AgentBotQuery;
+    let (db,count,repo)=fixture().await;
+    db.execute(DbStatement::with_params("UPDATE bcs_providers SET config = ?", vec![r#"{"downlink":{"auth_mode":"agentpass"}}"#.into()])).await.unwrap();
+    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
+    for i in 0..25 { insert(db.as_ref(),&format!("bot-{i:02}"),"parent",&bcs_config::resolve_env_str()).await; }
+    db.execute(DbStatement::new("UPDATE bcs_bots SET session_token='static' WHERE bot_uuid='bot-00'")).await.unwrap();
+    let mut query=AgentBotQuery { agent_code:"parent".into(),bot_uuid:Some("bot-00".into()),
+        provider_id:None,cursor:None,limit:1,implicit_only:false };
+    assert_eq!(repo.query_agent_bots(&query).await.unwrap().len(),1);
+    assert_eq!(count.queries.load(Ordering::SeqCst),1);
+    assert_eq!(count.rows.load(Ordering::SeqCst),1);
+    assert!(repo.lookup_bot_token("static",Some("bot-00")).await.unwrap().is_some());
+    assert_eq!(count.queries.load(Ordering::SeqCst),2);
+    assert_eq!(count.rows.load(Ordering::SeqCst),2);
+    query.bot_uuid=None;query.implicit_only=true;query.limit=2;
+    assert_eq!(repo.query_agent_bots(&query).await.unwrap().len(),2);
+    assert_eq!(count.queries.load(Ordering::SeqCst),3);
+    assert_eq!(count.rows.load(Ordering::SeqCst),4);
+}
+
+#[tokio::test]
+async fn pending_ws_token_lookup_has_bounded_reads_and_no_writes() {
+    let (db, count, repo) = fixture().await;
+    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
+    let token = repo.connect_or_promote_streaming("pending".into()).await.unwrap();
+    count.queries.store(0, Ordering::SeqCst);
+    count.rows.store(0, Ordering::SeqCst);
+    assert!(repo.lookup_bot_token(&token, None).await.unwrap().is_some());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 2);
+    assert_eq!(count.rows.load(Ordering::SeqCst), 0);
+    assert!(repo.lookup_bot_token("unknown", None).await.unwrap().is_none());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 3);
+    repo.disconnect_streaming("pending").await;
+    assert!(repo.lookup_bot_token(&token, None).await.unwrap().is_some());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 5);
+}

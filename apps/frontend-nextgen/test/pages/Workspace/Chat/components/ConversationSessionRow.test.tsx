@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 // 会话行契约测试（restore-design-chat-page-b2-b3 Batch 1，dmore「会话目录二级*」帧 1:1）：
 // 平齐化（无 rail/前置图标/条数列）、点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
-// 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话,收藏不入菜单走星标）。
+// 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话;收藏只走行内星标）。
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
 import '@testing-library/jest-dom';
@@ -32,10 +32,14 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 稿二级行:无前置消息图标、右余部无「N 条」列。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px，与一级名称同色；选中仅由背景区分，不再加黑加粗。
+    // 稿二级行:无前置消息图标、右余部无「N 条」列。
+    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
+    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
+    // 文字 13px/18px；未选中与一级名称同色,选中点亮品牌蓝(2026-10-22 二轮)但不加黑加粗。
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-    expect(title).toHaveClass('font-normal', 'text-content-strong');
+    expect(title).toHaveClass('font-normal');
+    expect(title).toHaveClass(selected ? 'text-primary' : 'text-content-strong');
   });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
@@ -62,11 +66,12 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     expect(container.firstElementChild).not.toBeNull();
   });
 
-  it('选中胶囊与 bot 行同构：全宽 bg-selected rx6（稿实拍 #EBEBEB x208..510）', () => {
+  it('选中胶囊升级品牌蓝：全宽 bg-primary/10 rx6（2026-10-22 二轮，告别与 hover 灰底不可辨）', () => {
     const { container } = render(<ConversationSessionRow session={session} selected onSelect={jest.fn()} />);
     const row = container.firstElementChild as HTMLElement;
     const capsule = row.querySelector('span[aria-hidden="true"]') as HTMLElement;
-    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-selected');
+    // 几何契约不变(inset-x-2 全宽 rx6);选 中改壳 shell 主导航同语言的品牌蓝底。
+    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-primary/10');
   });
 
   it('hover 胶囊与选中胶囊同几何：同样 inset-x-2 全宽，背景不随热区分级变短', () => {
@@ -148,9 +153,7 @@ describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互�
     expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
 
     // 选中且未收藏：星标同样常驻 → 常驻让位 pr-[44px]（mr-4 → 右界同为 60px）。
-    rerender(
-      <ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />,
-    );
+    rerender(<ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />);
     expect(button).toHaveClass('pr-[44px]');
     expect(button).not.toHaveClass('pr-2');
   });
@@ -161,6 +164,41 @@ describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互�
     // pr-2 存活即证明无任何让位档生效（twMerge 会移除被覆盖的基础值）。
     expect(button).toHaveClass('pl-2', 'pr-2');
     expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+  });
+});
+
+describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () => {
+  it('静默态右缘轻提示相对时间（gmtModified），hover/聚焦/触屏/菜单开启让位图标', () => {
+    const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    render(
+      <ConversationSessionRow
+        session={{ ...session, gmtModified }}
+        selected={false}
+        onSelect={jest.fn()}
+        onToggleFavorite={jest.fn()}
+      />,
+    );
+    // 3 小时前的相对时间口径 + 11px 弱化 hint 色 + 静默可见。
+    const time = screen.getByText('3 小时前');
+    expect(time).toHaveClass('text-[11px]', 'text-content-hint');
+    // 让位触发集与星标显隐同构（方向相反）：图标出现时时间退场。
+    expect(time).toHaveClass(
+      'group-hover/row:opacity-0',
+      'group-focus-within/row:opacity-0',
+      'group-has-[[data-state=open]]/row:opacity-0',
+    );
+  });
+
+  it('gmtModified 缺失不渲染时间节点；只读行时间常驻不参与让位', () => {
+    render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
+    expect(screen.queryByText('刚刚')).not.toBeInTheDocument();
+    // 只读行右侧无图标区，时间常驻（无 opacity-0 让位档）。
+    const gmtModified = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    render(
+      <ConversationSessionRow session={{ ...session, gmtModified }} selected={false} readOnly onSelect={jest.fn()} />,
+    );
+    const time = screen.getByText('5 分钟前');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
   });
 });
 
@@ -227,15 +265,16 @@ describe('ConversationSessionRow 收藏动作', () => {
 });
 
 describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形态）', () => {
-  it('hover「…」菜单承载编辑标题/清除上下文/删除会话,收藏不入菜单（星标常驻）', async () => {
+  it('hover「…」菜单不重复提供收藏,收藏只走行内星标', async () => {
     const user = userEvent.setup();
+    const onToggleFavorite = jest.fn();
     const actions = createActions();
     render(
       <ConversationSessionRow
         session={{ ...session, favorite: true }}
         selected={false}
         onSelect={jest.fn()}
-        onToggleFavorite={jest.fn()}
+        onToggleFavorite={onToggleFavorite}
         actions={actions}
       />,
     );
@@ -243,7 +282,7 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
     const menu = await screen.findByRole('dialog');
     const items = within(menu).getAllByRole('button');
     expect(items.map((item) => item.textContent)).toEqual(['编辑标题', '清除上下文', '删除会话']);
-    // 收藏走行内常驻星标,菜单不重复提供翻转入口。
+    // 外部星标是唯一收藏入口,避免菜单和行内操作重复。
     expect(screen.getByRole('button', { name: '取消收藏' })).toBeInTheDocument();
     expect(within(menu).queryByText('取消收藏')).toBeNull();
     expect(within(menu).queryByText('收藏会话')).toBeNull();
@@ -265,7 +304,7 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
     await user.click(screen.getByRole('button', { name: '会话更多操作' }));
     const menu = await screen.findByRole('dialog');
     await user.click(within(menu).getByRole('button', { name: /删除会话/ }));
-    expect(await screen.findByText('删除会话', { selector : '[role="alertdialog"] *' })).toBeInTheDocument();
+    expect(await screen.findByText('删除会话', { selector: '[role="alertdialog"] *' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '确认删除' }));
     expect(actions.run).toHaveBeenCalledTimes(1);
     expect(actions.run.mock.calls[0][0]).toEqual({ type: 'delete' });
@@ -299,5 +338,39 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
   it('未传 actions 的行不渲染菜单入口（降级/未接入场景）', () => {
     render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
     expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationSessionRow Bot 回复中指示（#2990 还原）', () => {
+  it('replyingSessionId 命中当前行:渲染旋转指示(role=status),绝对定位不挤标题', () => {
+    const { container } = render(
+      <ConversationSessionRow session={session} selected onSelect={jest.fn()} replyingSessionId="session-1" />,
+    );
+    const status = screen.getByRole('status', { name: 'Bot 正在回复' });
+    // 40-54px 缩进区,标题起点 60px 不随 loading 出现跳动。
+    expect(status).toHaveClass('left-[40px]', 'top-1/2', 'z-10');
+    const spinner = status.querySelector('svg');
+    expect(spinner).toHaveClass('animate-spin');
+    // 标题热区让位不受影响:标题起点仍为 52px margin。
+    expect(screen.getByRole('button', { name: '对话会话' })).toHaveClass('ml-[52px]');
+    expect(container.firstElementChild).not.toBeNull();
+  });
+
+  it('未命中行不渲染指示;只读行即使命中也不渲染', () => {
+    const { unmount } = render(
+      <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} replyingSessionId="other" />,
+    );
+    expect(screen.queryByRole('status', { name: 'Bot 正在回复' })).not.toBeInTheDocument();
+    unmount();
+    render(
+      <ConversationSessionRow
+        session={session}
+        selected={false}
+        readOnly
+        onSelect={jest.fn()}
+        replyingSessionId="session-1"
+      />,
+    );
+    expect(screen.queryByRole('status', { name: 'Bot 正在回复' })).not.toBeInTheDocument();
   });
 });

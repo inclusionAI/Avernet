@@ -1,8 +1,10 @@
 """Account/local and retiring operation admission, composed into ADMISSION."""
 
 from .admission_modes import AdmissionMode
+from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 ACCOUNT_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    **{(method, DWS_PATH + suffix): AdmissionMode.REFUSED for method, suffix in DWS_OPERATIONS},
     # ── Workshop/local admission follows the operation's shape ───────────────
     # Both listings are owner-scoped, so an application sees only the named
     # user's own bots that user delegated to it. The restriction is applied by

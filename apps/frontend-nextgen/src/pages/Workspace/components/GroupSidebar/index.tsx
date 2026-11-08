@@ -9,6 +9,8 @@ import { GroupItem } from './GroupItem';
 import { GroupSidebarCollapsedRail } from './GroupSidebarCollapsedRail';
 import { GroupSidebarSearchRow, type KindFilter, type Membership } from './GroupSidebarSearchRow';
 import { GroupRowsSkeleton } from './GroupSidebarSkeletons';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
@@ -245,6 +247,7 @@ export function GroupSidebar(props: GroupSidebarProps) {
           groups={props.groups}
           selectedGroupId={props.selectedGroupId}
           onOpenGroup={(groupId) => {
+            Tracert.click(Points.workspaceCollab.openGroup, { group_id: groupId });
             props.onSelectGroup(groupId);
             expand();
           }}

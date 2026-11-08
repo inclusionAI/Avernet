@@ -54,6 +54,28 @@ pub enum ManagerWorkerHistoryView {
 }
 
 impl MessageService {
+    async fn authorize_provider_scope(
+        &self, group: &Group, session: Option<&Session>, caller: &CallerContext,
+    ) -> Result<(), GroupUseCaseError> {
+        let mut actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        let caller_id = match caller {
+            CallerContext::Human(actor) => Some(actor.actor_id.clone()),
+            CallerContext::Bot(actor) => Some(actor.bot_uuid.clone()),
+            _ => None,
+        };
+        if let Some(id) = &caller_id { actors.push(id.clone()); }
+        if self.registry.collaboration_owner(&actors).await?.is_none() { return Ok(()); }
+        if caller_id.is_none() {
+            return Err(GroupUseCaseError::Service(ServiceError::Forbidden(
+                "same_owner history requires an authenticated owner actor".into(),
+            )));
+        }
+        if let Some(session) = session {
+            actors.extend(session.participants.iter().map(|p| p.bot_uuid.clone()));
+            self.registry.collaboration_owner(&actors).await?;
+        }
+        Ok(())
+    }
     fn human_message_view(
         group: &Group,
         session: Option<&Session>,
@@ -377,6 +399,8 @@ impl GroupMessageHistoryService for MessageService {
             GroupUseCaseError::Service(ServiceError::GroupNotFound(cmd.group_id.clone()))
         })?;
 
+        self.authorize_provider_scope(&group, None, &cmd.caller).await?;
+
         if group.group_strategy == GroupStrategy::ManagerWorker {
             return Err(GroupUseCaseError::Service(ServiceError::InvalidOperation {
                 message: "manager-worker group history requires session_id".to_string(),
@@ -521,6 +545,9 @@ impl GroupMessageHistoryService for MessageService {
 
         // Chat and ManagerWorker use independent cutoffs for the new message store path.
         let group_opt = self.group.get(&cmd.group_id).await;
+        if let Some(group) = &group_opt {
+            self.authorize_provider_scope(group, session.as_ref(), &cmd.caller).await?;
+        }
         let human_view = group_opt.as_ref().and_then(|group| {
             Self::human_message_view(group, session.as_ref(), cmd.view_bot_id.as_deref())
         });

@@ -92,6 +92,8 @@ class DeviceContextResolver:
         conn_info = self._normalize_schema(raw_conn_info, provider)
 
         bot = self._bot_repository.get_by_id_and_owner(bot_id, user_id)
+        if bot is None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, user_id)
         bot_type = (bot or {}).get("bot_type") or ""
 
         return DeviceContext(

@@ -104,4 +104,8 @@ class TestAppServicesModule(Module):
         ``di/ -> api/`` cycle-free at import time)."""
         from agentclaw.community.adapters.http.local.sql import router as local_sql_router
 
-        return OptionalRouters(routers=[local_sql_router])
+        from agentclaw.community.adapters.http.bot_knowledge.router import (
+            router as bot_knowledge_router,
+        )
+
+        return OptionalRouters(routers=[local_sql_router, bot_knowledge_router])

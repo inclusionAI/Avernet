@@ -493,6 +493,20 @@ def test_update_group_notify_mode_is_omitted_but_non_null() -> None:
 NOTIFY_MODE_ENUM = ["driver_bot_only", "all", "none"]
 
 
+def test_create_group_notify_mode_is_optional_non_null_and_normal_only() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["oneOf"]
+    normal, dm = variants
+    field = normal["properties"]["human_mention_notify_mode"]
+    assert field["enum"] == NOTIFY_MODE_ENUM
+    assert field["type"] == "string"
+    assert field["default"] == "all"
+    assert "human_mention_notify_mode" not in normal["required"]
+    assert "human_mention_notify_mode" not in dm["properties"]
+
+
 def test_group_notify_mode_is_required_on_every_response_shape() -> None:
     contract = load_contract(CONTRACT_ROOT)
 

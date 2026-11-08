@@ -1,10 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { Request as AccessRequest } from 'express';
-import type { WorkflowAutomationService } from '../contracts/workflow-automation.js';
+import { RepairAutomationDeniedError, type WorkflowAutomationService } from '../contracts/workflow-automation.js';
 import type { AutoAnalysisSettings } from "../services/task-guard/auto-analysis-settings.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { requireWorkflowAccess, resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
+
+import { automationRecordQuery, InvalidAutomationRecordQuery } from '../contracts/workflow-automation-history.js';
 
 export function createTaskGuardSettingsRouter(input: {
   settings: AutoAnalysisSettings;
@@ -45,6 +47,7 @@ export function createTaskGuardSettingsRouter(input: {
       const message = error instanceof Error ? error.message : '';
       if (message === 'SETTINGS_CONFLICT') { res.status(409).json({ error: '配置已变化，请刷新后保存' }); return; }
       if (message === 'INVALID_AUTOMATION_POLICY') { res.status(400).json({ error: '自动分析策略无效，请检查时间和版本' }); return; }
+      if (message === 'INVALID_NOTIFICATION_RECIPIENTS') { res.status(400).json({ error: '通知人请填写有效账号 ID，最多 20 人；留空通知工作流负责人' }); return; }
       throw error;
     }
   }));
@@ -56,12 +59,33 @@ export function createTaskGuardSettingsRouter(input: {
     if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入，手动功能仍可使用' }); return; }
     res.json(await automation.status(id));
   }));
+  router.get('/workflows/:workflowId/automation-records', asyncHandler(async (req, res) => {
+    const id = String(req.params.workflowId);
+    if (!await access(req, res, id, 'view')) return;
+    const automation = input.automation?.();
+    if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入' }); return; }
+    try { res.json(await automation.records(id, automationRecordQuery(req.query))); }
+    catch (error) {
+      if (error instanceof InvalidAutomationRecordQuery) { res.status(400).json({ error: error.message }); return; }
+      throw error;
+    }
+  }));
   router.post('/workflows/:workflowId/automation-retry', asyncHandler(async (req, res) => {
     const id = String(req.params.workflowId);
     if (!await access(req, res, id, 'edit')) return;
     const automation = input.automation?.();
     if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入' }); return; }
-    await automation.retryFailures(id);
+    const jobId = req.body?.jobId;
+    if (jobId !== undefined && (typeof jobId !== 'string' || !jobId.trim() || jobId.length > 128)) {
+      res.status(400).json({ error: '重试任务编号无效' }); return;
+    }
+    try { await automation.retryFailures(id, jobId); }
+    catch (error) {
+      if (error instanceof RepairAutomationDeniedError && error.message === 'TASK_NOT_RETRYABLE') {
+        res.status(409).json({ error: '该任务当前不可重试，请查看更新后的记录' }); return;
+      }
+      throw error;
+    }
     res.json(await automation.status(id));
   }));
   return router;

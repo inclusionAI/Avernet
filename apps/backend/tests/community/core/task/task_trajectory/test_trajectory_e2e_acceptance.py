@@ -20,7 +20,7 @@ The four acceptance cases (spec §验收(端到端) lines 250-255):
    EXECUTE event ``error_type=underlying_interface_error``; after analysis
    ``failure_reason`` starts with ``underlying_interface_error:`` + carries
    the interface error msg.
-3. **timeout** (执行超时) — an SLA-timeout RESET (single-bot 600s) → RESET
+3. **timeout** (执行超时) — an SLA-timeout RESET (single-bot 900s) → RESET
    ``action_result=sla_timeout`` + ext_info ``elapsed_ms``/``sla_threshold_ms``;
    after analysis ``failure_reason`` starts with ``execution_timeout:``.
 4. **hung** — a node hung (terminal ``HUNG``) → after analysis
@@ -661,7 +661,7 @@ class TestE2EFourFailureTypesAcceptance:
         assert "策略=search" in analysis.boost_reason
 
     def test_timeout_failure_reason_starts_with_execution_timeout(self):
-        """Case 3 (执行超时): an SLA-timeout RESET (single-bot 600s) → RESET
+        """Case 3 (执行超时): an SLA-timeout RESET (single-bot 900s) → RESET
         event ``action_result=sla_timeout`` + ext_info ``elapsed_ms``/
         ``sla_threshold_ms``; after analysis ``failure_reason`` starts with
         ``execution_timeout:`` with elapsed/threshold (spec line 254)."""
@@ -700,9 +700,9 @@ class TestE2EFourFailureTypesAcceptance:
             f"failure_reason must start with 'execution_timeout:'; "
             f"got {analysis.failure_reason!r}"
         )
-        # the single-bot SLA threshold (600s = 600_000ms) is in the failure_reason
-        assert "600000" in analysis.failure_reason, (
-            f"failure_reason must carry the 600s SLA threshold; got {analysis.failure_reason!r}"
+        # the single-bot SLA threshold (900s = 900_000ms) is in the failure_reason
+        assert "900000" in analysis.failure_reason, (
+            f"failure_reason must carry the 900s SLA threshold; got {analysis.failure_reason!r}"
         )
         assert "阈值" in analysis.failure_reason  # the spec's Chinese template
         # boost_reason still derived from the DISPATCH event

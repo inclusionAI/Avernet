@@ -46,6 +46,13 @@ the rest.
   explicitly signed off on the memory consequence in DR-1.
 
 ### RSI-02 Genome schema and patch format
+- **Status**: done (2026-10-18). Contract:
+  [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md); spec:
+  `apps/backend/specs/2026-10-18-bot-genome-schema/`. Owner and engine-review
+  sign-off: @totalfrank. Closed G-1, G-2, G-3, G-7, G-10. Follow-ups opened:
+  #2858 (`engine_config`), #2859 (effective MCP config), #2860 (MCP header
+  credentials), #2862 (`script: null`); depends on #2162 (resource removal)
+  through RSI-04.
 - **Module**: backend (contract), engine (review)
 - **Goal**: Normative JSON Schema for Genome Revision (`spec`, `policy`,
   `revision` metadata) and Genome Patch (ops, risk-tier mapping, rewrite
@@ -57,8 +64,8 @@ the rest.
 - **Deliverable**: `apps/backend/specs/<date>-bot-genome-schema/` with schema files,
   examples, and a compatibility table against Manifest v1.
 - **Done when**: every Manifest v1 example round-trips into a revision;
-  every patch op has a defined risk tier; reviewers agree on locked-gene
-  defaults.
+  every patch op has a defined risk tier; reviewers agree on the policy
+  defaults (`mutable_genes`, `pins`).
 
 ### RSI-06 Strategy port, capability catalog, and Job Protocol
 - **Module**: evolution (new), arch
@@ -102,47 +109,70 @@ the rest.
 
 ## P1 — Versioned bots (useful independently of RSI)
 
-### RSI-03 Genome Registry in Backend
+### RSI-03 Genome Registry in Backend — done
 - **Module**: backend
 - **Goal**: Revisions table, refs with CAS, patch apply/validate, diff,
-  pinned source resolution into the content store, lineage queries.
-  Promotion API that moves `active` and invokes Manifest apply (personal
-  bots) or publishes the revision as the next published version (service
-  bots). The
-  applied-digest → revision mapping and the drift check
-  ([01-genome.md](01-genome.md) §5.5).
+  captured and produced content in the content store, lineage queries.
+  Promotion API that moves `active` by CAS, records the promotion and
+  hands the revision's desired state to a `RevisionApplier` seam. The drift
+  check ([01-genome.md](01-genome.md) §5.5).
 - **Depends on**: RSI-02.
 - **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
-- **Done when**: create revision from manifest, from patch; diff any two;
-  move refs with conflict detection; conformance + unit tests; singlebox
-  acceptance story "edit → revision → apply → go back two revisions by
-  promoting an earlier one".
+- **Shipped** (`apps/backend/specs/2026-10-19-bot-genome-registry/`):
+  `core/bot_genome/` with the five tables, capture of a bot's current state
+  (`POST …/genome/revisions:capture`), patches applied to their own base
+  (`POST …/genome/revisions`), the policy operation (`PUT …/genome/policy`),
+  diff, `draft` by CAS, content read/upload, promotions, and the
+  `/openapi/v1/bots/{bot_id}/genome` surface; conformance, repository,
+  wiring and route tests. Promotion's only applier refuses every delivery as
+  `not_appliable` naming RSI-04, before any ref moves, so the singlebox
+  story stops at the refusal.
+- **Landed since** (`apps/backend/specs/2026-10-23-apply-engine-desired-state/`):
+  the apply engine is its own component (`core/apply_engine/`) taking one
+  typed desired state from two compilers, the Manifest's and the genome's
+  (`compile_spec`, `GenomeCompiler` registered under the `genome` kind); the
+  contract's `compiled.yaml` oracles are replaced by an equivalence test
+  that compiles every case both ways; drift is observed by reading the bot
+  (`GenomeRegistry.drift`), and the promotion row carries neither a
+  compiled document, nor its digest, nor an apply id; the resources root is
+  cleared and rewritten each apply (#2162) and `script: null` declares no
+  script (#2862).
+- **Left to RSI-04**: delivery itself (personal bots), service-bot publish,
+  pinning the commit of a shared-repository skill (`origin: repo` records
+  the path only), and resolving Center and repo skills at delivery.
+- **Follow-up**: capture refuses a platform-managed teclaw bot (teclaw
+  delivery mode `platform`, `CaptureRefused`): it has no device to read, so
+  capturing it means composing its state from the platform's own rows, the
+  way that delivery mode does.
 
-### RSI-04 Manifest changes for the genome
+### RSI-04 Direct delivery of a compiled revision (Stage 2)
 - **Module**: backend
-- **Goal**: The Manifest stays revision-unaware; it gains only these
-  format features and one fact of its own
-  ([01-genome.md](01-genome.md) §8):
-  1. content-store source: an entry may point at a digest in the manifest
-     content store; apply reads the bytes from the store and skips the
-     fetch;
-  2. `engine_config` applies: a materialiser for an allowlist of keys
-     (open decision G-4; may land in P3/P4);
-  3. `memory` category: curated items plus a mode, handed by apply to the
-     engine adapter (`EngineMemoryProjection`; lands after RSI-05);
-  4. produced-content write path for the content store (content created by
-     a patch, not fetched);
-  5. applied-document digest: the apply report records the digest of the
-     exact document it applied; for service bots, the publish record
-     records the digest of the published document.
-  No revision table, refs, or `revision_id` in the Manifest; the
-  `/config-manifest` endpoints are unchanged. The existing service-bot
-  rollback feature is not changed.
-- **Depends on**: RSI-03.
-- **Done when**: all existing manifest tests pass unchanged; new tests show
-  that a document using content-store sources applies without any fetch and
-  that apply reports and publish records carry the applied document digest;
-  `engine_config` and `memory` tests land with their items.
+- **Goal**: Deliver a promoted revision to the bot runtime through the
+  apply engine with no Manifest document in between. The engine, its typed
+  desired state and the genome compiler already exist
+  (`core/apply_engine/`, `core/bot_genome/compile.py`; the run service
+  looks the compiler up by the apply's state reference). What remains is
+  binding: a `RevisionApplier` that starts an apply run with
+  `StateRef("genome", promotion_id)` and reports its outcome on the promotion
+  row, in place of `PendingDeliveryApplier`; the materialisers resolving a
+  `CenterSkillVersion` and a `RepoSkillPath` (today only a local package
+  is delivered); the service-bot publish path; and the singlebox story.
+  The Manifest grammar gains no new source kinds. No digest is recorded
+  anywhere: whether the bot holds `active` is observed by reading it
+  ([01-genome.md](01-genome.md) §5.5). Still Manifest work, landing with
+  their own items: `engine_config` (open decision G-4,
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858)) and the
+  `memory` category (after RSI-05). No revision table, refs, or
+  `revision_id` in the Manifest; the `/config-manifest` endpoints are
+  unchanged. The existing service-bot rollback feature is not changed.
+- **Depends on**: RSI-03 (the seam) and the apply-engine desired-state
+  refactor (the engine, the two compilers, the totality fixes #2162 and
+  #2862).
+- **Done when**: all existing manifest tests pass unchanged; promoting a
+  revision in singlebox delivers it to a personal bot with no fetch and no
+  Manifest write, and `GenomeRegistry.drift` then reads the bot as holding
+  `active`; going back two revisions by promoting an earlier one restores
+  the bot, removed resources and script included.
 
 ## P2 — Evolution core
 
@@ -306,7 +336,8 @@ the rest.
   amend reserved-file rule accordingly.
 - **Depends on**: RSI-02, DR-1 accepted.
 - **Interim**: until done, memory evolution uses a platform-managed persona
-  file (e.g. `LESSONS.md`).
+  file, an existing identity type such as `KNOWLEDGE.md` (`LESSONS.md` is not
+  a Manifest identity type; [01-genome.md](01-genome.md) §7).
 
 ### RSI-15 Memory consolidation strategy
 - **Module**: evolution
@@ -345,5 +376,5 @@ evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
 | DS-2 (was D-3) | ClawBench as platform default grader | 04-default-strategies.md → RSI-11 |
 | DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |
 | DS-4 (was D-5) | ClawMind analyzer contract; dormant analyzers wire-or-remove | 04-default-strategies.md |
-| D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 01-genome.md; RSI-03 |
+| D-6 | Genome storage: DB + content store vs git repo per bot | **Closed (RSI-03):** DB + content store; 01-genome.md §9.2 |
 | A-n | Evolution API open decisions (event delivery; bot run requests postponed) | 09-evolution-api.md |

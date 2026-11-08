@@ -67,6 +67,8 @@ def test_public_patch_exercises_real_cron_device_state_check(
         resolver=MagicMock(),
         template_repo=MagicMock(),
         publish_repo=MagicMock(),
+        runtime_bindings=MagicMock(),
+        collaborators=MagicMock(),
     )
     service._forward_runtime_target_request = AsyncMock(
         return_value={

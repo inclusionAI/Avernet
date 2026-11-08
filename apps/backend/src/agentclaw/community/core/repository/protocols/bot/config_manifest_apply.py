@@ -12,7 +12,7 @@ from abc import abstractmethod
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.repository.apply_models import (
+    from agentclaw.community.core.apply_engine.repository.apply_models import (
         BotConfigManifestApplyLockRecord,
         BotConfigManifestApplyRecord,
     )

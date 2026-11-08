@@ -151,6 +151,16 @@ impl BotRepoPort for NoConnectBotRepo {
         self.inner.list_bots_by_creator(created_by).await
     }
 
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.inner
+            .list_uninitialized_bots_by_creator(created_by, limit)
+            .await
+    }
+
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {
         self.inner.discover(query).await
     }

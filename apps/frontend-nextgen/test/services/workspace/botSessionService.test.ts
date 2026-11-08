@@ -88,6 +88,8 @@ describe('botSessionService', () => {
             template_type: 'normalCC',
             owner_entity_id: '3',
             status: 'ACTIVE',
+            actions: ['restart'],
+            disabled_actions: { restart_publish: '仅发布 Bot 支持' },
           },
           {
             bot_id: 'normal-empty:4',
@@ -125,6 +127,9 @@ describe('botSessionService', () => {
         displayName: '普通 CC',
         isAgentCodingBot: false,
         templateType: 'normalCC',
+        actions: ['restart'],
+        disabledActions: { restart_publish: '仅发布 Bot 支持' },
+        runtimeStage: 'draft',
       }),
       expect.objectContaining({
         displayName: '无模板 CC',
@@ -137,6 +142,50 @@ describe('botSessionService', () => {
         templateType: 'generalCC',
       }),
     ]);
+  });
+
+  it('服务 Bot 的在线目录使用 online，但不从 inventory 扩大操作权限', async () => {
+    ownedMocked.listBots.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            bot_name: 'Service',
+            engine: 'OpenClaw',
+            bot_type: 'service',
+            owner_entity_id: 'owner-1',
+            status: 'ACTIVE',
+          },
+        ],
+        total: 1,
+      },
+    });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            display_state: 'service_draft',
+            owner_entity_id: 'owner-1',
+            actions: ['restart'],
+          },
+        ],
+        total: 1,
+      },
+    });
+    expect(await botSessionService.listOwnedBots('viewer')).toMatchObject({
+      ok: true,
+      data: [
+        {
+          botType: 'service',
+          runtimeStage: 'online',
+          actions: [],
+          ownerId: 'owner-1',
+        },
+      ],
+    });
   });
 
   it('listOwnedBots 透传 bots 接口原始 status(视图侧判定 Bot 可用性)', async () => {
@@ -517,5 +566,15 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(favorites).toMatchObject({
     ok: true,
     data: { total: 1, items: [{ sessionId: 'sid-f', title: '收藏标题', favorite: true }] },
+  });
+});
+
+describe('owned directory engine context stays deferred', () => {
+  it.each(['personal', 'service'])('does not scan inventory for %s directory rows', async (bot_type) => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [{ bot_id: 'deferred', bot_name: 'Bot', owner_entity_id: 'owner', bot_type, status: 'ACTIVE', engine: 'openclaw' }] } });
+    ownedMocked.listBotInventory.mockClear();
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: bot_type === 'service' ? 'online' : 'draft' }] });
+    expect(ownedMocked.listBotInventory).not.toHaveBeenCalled();
   });
 });

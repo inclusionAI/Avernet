@@ -40,6 +40,27 @@ fn error(error: ServiceError) -> Response {
         ServiceError::Conflict(_) => StatusCode::CONFLICT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
+    // The public body stays minimal, but the internal deny
+    // classification is NEVER dropped server-side: the reasons
+    // are a fixed vocabulary (no message content, no
+    // credentials), and together with the request id they are
+    // the only way to tell WHICH gate rejected a production
+    // request behind the uniform 403 body.
+    if status.is_server_error() {
+        tracing::warn!(
+            request_id = %bcs_observability::CurrentRequestId,
+            status = %status,
+            reason = ?error,
+            "message deliveries request failed"
+        );
+    } else {
+        tracing::info!(
+            request_id = %bcs_observability::CurrentRequestId,
+            status = %status,
+            reason = ?error,
+            "message deliveries request rejected"
+        );
+    }
     (
         status,
         Json(serde_json::json!({"error": status.canonical_reason().unwrap_or("request failed")})),

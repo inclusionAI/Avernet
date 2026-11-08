@@ -10,6 +10,16 @@ import { Compass, Sparkles } from 'lucide-react';
 // 默认形态用例一律置前，internal 注入 override 用例按依赖顺序排列。
 
 describe('routeMeta 路由归属契约', () => {
+  it('智能进化所有详情和创建路径共用一个导航入口', () => {
+    for (const path of [
+      '/evolution-factory',
+      '/evolution-factory/new',
+      '/evolution-factory/tasks/task-1',
+      '/evolution-factory/bench/runs/run-1',
+    ]) {
+      expect(getRouteMeta(path)?.navKey).toBe('evolution-factory');
+    }
+  });
   it('对话 / 协作群路由按约定落位（navKey + 标题），默认 capability 注入为空时合并结果=基线', () => {
     expect(getRouteMeta('/workspace/chat')?.navKey).toBe('conversation');
     expect(getRouteMeta('/workspace/chat')?.title).toBe('对话');
@@ -58,7 +68,10 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
       'collaboration-square',
       'lab',
     ]);
-    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop']);
+    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual([
+      'bot-workshop',
+      'evolution-factory',
+    ]);
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
@@ -124,6 +137,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'bot-workshop',
       'capability-workshop',
       'market',
+      'evolution-factory',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');
   });

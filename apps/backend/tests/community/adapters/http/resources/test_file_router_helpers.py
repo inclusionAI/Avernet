@@ -8,6 +8,8 @@ preview now returns JSON via ``PreviewResponse`` and does not land here).
 """
 from unittest.mock import MagicMock
 
+from tests.community.bot_address_fakes import support_legacy_locator
+
 import pytest
 from fastapi import HTTPException
 
@@ -18,6 +20,21 @@ from agentclaw.community.adapters.http.resources.file_router import (
 )
 
 pytestmark = pytest.mark.unit
+
+def _bot_repository():
+    repo = support_legacy_locator(MagicMock())
+
+    def unique(bot_id):
+        row = repo.get_by_id(bot_id)
+        if row is not None:
+            row.setdefault("id", 1)
+            row.setdefault("bot_id", bot_id)
+            row.setdefault("entity_id", row["owner_id"])
+        return row
+
+    repo.get_unique_by_id.side_effect = unique
+    return repo
+
 
 
 class TestContentHeadersAlwaysAttaches:
@@ -50,7 +67,7 @@ class TestContentHeadersAlwaysAttaches:
 
 class TestAuthorizePreviewDefaultBot:
     def test_missing_default_bot_row_uses_authenticated_user(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
 
         owner_id = _authorize_preview_bot(
@@ -66,7 +83,7 @@ class TestAuthorizePreviewDefaultBot:
         bot_repo.get_by_id.assert_not_called()
 
     def test_missing_default_bot_row_rejects_different_requested_owner(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
@@ -84,7 +101,7 @@ class TestAuthorizePreviewDefaultBot:
 
 class TestAuthorizePreviewBot:
     def test_owner_is_authorized(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = {
             "bot_id": "bot-1",
             "owner_id": "owner",
@@ -103,7 +120,7 @@ class TestAuthorizePreviewBot:
         collaborator_svc.check_collaborator_permission.assert_not_called()
 
     def test_unknown_bot_returns_404(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
         bot_repo.get_by_id.return_value = None
 
@@ -119,7 +136,7 @@ class TestAuthorizePreviewBot:
         assert exc_info.value.status_code == 404
 
     def test_authorized_collaborator_uses_authoritative_owner(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
         bot_repo.get_by_id.return_value = {
             "bot_id": "bot-1",
@@ -141,7 +158,7 @@ class TestAuthorizePreviewBot:
         assert owner_id == "owner"
 
     def test_unauthorized_collaborator_returns_403(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
         bot_repo.get_by_id.return_value = {"owner_id": "owner"}
         collaborator_svc = MagicMock()
@@ -161,7 +178,7 @@ class TestAuthorizePreviewBot:
         assert exc_info.value.status_code == 403
 
     def test_permission_check_error_fails_closed(self):
-        bot_repo = MagicMock()
+        bot_repo = _bot_repository()
         bot_repo.get_by_id_and_owner.return_value = None
         bot_repo.get_by_id.return_value = {"owner_id": "owner"}
         collaborator_svc = MagicMock()

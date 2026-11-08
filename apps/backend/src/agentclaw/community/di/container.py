@@ -10,9 +10,12 @@ instead of deferring the failure to first request. ``dev`` / local
 boots skip it to keep startup snappy and to tolerate the prod-only
 deps (ZDAS handle, Arca sandbox) that aren't reachable locally.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
+
+from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
 
 from injector import Injector, Module
 
@@ -28,16 +31,20 @@ from agentclaw.community.di.config import (
 )
 
 from agentclaw.community.di.modules.access_module import AccessModule
+from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
+from agentclaw.community.di.modules.bbs_config_module import BbsConfigModule
+from agentclaw.community.di.modules.bbs_digest_module import BbsDigestModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
+from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
-from agentclaw.community.di.modules.manifest_delivery_module import (
-    ManifestDeliveryModule,
+from agentclaw.community.di.modules.apply_engine_module import (
+    ApplyEngineModule,
 )
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
@@ -48,18 +55,24 @@ from agentclaw.community.di.modules.caller_identity_module import CallerIdentity
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
 from agentclaw.community.di.modules.config_module import ConfigModule
+from agentclaw.community.di.modules.content_store_module import ContentStoreModule
 from agentclaw.community.di.modules.cron_module import CronModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
     DesktopSkillRecoveryConfigModule,
 )
 from agentclaw.community.di.modules.devices_module import DevicesModule
-from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
+from agentclaw.community.di.modules.economy_governance_module import (
+    EconomyGovernanceModule,
+)
 from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
-from agentclaw.community.di.modules.execution_identity_module import ExecutionIdentityModule
+from agentclaw.community.di.modules.expert_market_module import ExpertMarketModule
+from agentclaw.community.di.modules.execution_identity_module import (
+    ExecutionIdentityModule,
+)
 from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
@@ -78,21 +91,30 @@ from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import 
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
-from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
+from agentclaw.community.di.modules.bot_message_feedback_module import (
+    BotMessageFeedbackModule,
+)
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
     RuntimeProjectionRecoveryModule,
 )
 from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
-from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
+from agentclaw.community.di.modules.session_resources_module import (
+    SessionResourcesModule,
+)
 from agentclaw.community.di.modules.tc_file_upload_integration_module import (
     TcFileUploadIntegrationModule,
 )
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
-from agentclaw.community.di.modules.skill_center_group4_module import SkillCenterGroup4Module
+from agentclaw.community.di.modules.skill_center_group4_module import (
+    SkillCenterGroup4Module,
+)
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
+from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
+from agentclaw.community.di.modules.space_knowledge_module import SpaceKnowledgeModule
+from agentclaw.community.di.space_knowledge_capture_config import SpaceKnowledgeCaptureConfig
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
@@ -100,6 +122,9 @@ from agentclaw.community.di.modules.task_persistence_module import TaskPersisten
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
+)
+from agentclaw.community.di.modules.task_artifact_config_module import (
+    TaskArtifactConfigModule,
 )
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
@@ -155,6 +180,10 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Task-artifact OBJECT_FILE object-store config (task module's own
+        # ``task_artifact_storage`` block). Own module for the same headroom
+        # reason as TaskTrajectoryConfigModule.
+        TaskArtifactConfigModule(),
         # Public-API ``user_id`` bypass list (``openapi`` user_config block).
         # Own module for the same headroom reason; its provider refuses a
         # malformed block anywhere and a non-empty list in pre/prod, and is
@@ -171,13 +200,20 @@ def build_injector(
         CommonConfigModule(),
         BotManagementModule(),
         ExecutionIdentityModule(),
+        OwnerHandoffModule(),
         DigitalEmployeeModule(),
+        AgentSwarmModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
-        ManifestDeliveryModule(),
+        # The content store binds after the module that parses its blob root
+        # (cfg.BotConfigManifestConfig) and before its two consumers.
+        ContentStoreModule(),
+        ApplyEngineModule(),
+        BotGenomeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        ExpertMarketModule(),
         TaskModule(),
         DevicesModule(),
         McpModule(),
@@ -196,6 +232,8 @@ def build_injector(
         SessionResourcesModule(),
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
+        BotKnowledgeModule(profile),
+        SpaceKnowledgeModule(),
         WorkOrdersModule(),
         BotFriendAuthModule(),
         HarnessModule(),
@@ -215,6 +253,8 @@ def build_injector(
         HttpClientModule(),
         EconomyGovernanceModule(),
         TaskDiscoveryModule(),
+        BbsConfigModule(),
+        BbsDigestModule(),
     ]
 
     modules.extend(modules_for(profile))
@@ -243,7 +283,13 @@ def build_injector(
     # surfaced inside `discover_lifecycle_participants` would silently drop the
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        OwnerHandoffPolicy,
+    )
+
+    _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
@@ -261,6 +307,7 @@ def build_injector(
 
 
 # ── Eager bootstrap check ───────────────────────────────────────────────
+
 
 def eager_check_critical_bindings(injector: Injector) -> None:
     """Resolve a small allowlist of critical bindings to surface
@@ -308,9 +355,6 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     if missing:
         raise RuntimeError(
             "DI eager-check failed: the following critical bindings did "
-            "not resolve. Fix the bindings before deploying.\n  "
-            + "\n  ".join(missing)
+            "not resolve. Fix the bindings before deploying.\n  " + "\n  ".join(missing)
         )
-    logger.info(
-        "[DI] eager-check OK: resolved %s critical bindings", len(critical)
-    )
+    logger.info("[DI] eager-check OK: resolved %s critical bindings", len(critical))

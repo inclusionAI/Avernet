@@ -6,9 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcs_domain::{RegisterTokenPayload, RegisterTokenError, register_token_encode, register_token_decode_and_verify};
-use bcs_service_api::{
-    AdminBotOnboardCommand, BotConnectCommand, OnboardActorIdentity,
-};
+use bcs_service_api::application::v1::{ApplicationError, RegisterBot};
 use serde::Deserialize;
 
 use crate::state::HttpAppState;
@@ -55,7 +53,7 @@ pub async fn get_register_token(
     let Query(query) = match query {
         Ok(query) => query,
         Err(_) => return scoped::error_response(
-            bcs_service_api::application::v1::ApplicationError::invalid(
+            ApplicationError::invalid(
                 "invalid_request", "invalid registration query",
             ),
         ),
@@ -131,7 +129,7 @@ pub async fn register_bot(
     }
 
     // 3. Decode and verify token
-    let payload = match register_token_decode_and_verify(token_str, &state.invite_token_secret) {
+    let _payload = match register_token_decode_and_verify(token_str, &state.invite_token_secret) {
         Ok(p) => p,
         Err(RegisterTokenError::UnsupportedVersion)
             if bcs_domain::provider_registration_token::decode_and_verify(
@@ -156,62 +154,38 @@ pub async fn register_bot(
         }
     };
 
-    // 4. Extract staff_no from payload.id ("human_xxx" -> "xxx")
-    let staff_no = payload.id.trim_start_matches("human_").to_string();
-
-    // 5. Connect bot (creates new bot_uuid + bot_token)
-    let connect_result = match state
-        .services
-        .bot_management
-        .connect_bot(BotConnectCommand {
-            caller_actor_id: None,
-            token: None,
-            bot_id: None,
-            protocol_version: None,
+    // 4. Delegate the v1 trusted registration to the shared
+    //    facade. The legacy adapter strips the historically
+    //    unknown mode/provider_bot_ref/webhook_url fields
+    //    BEFORE the facade (they are never parsed here), the
+    //    facade verifies the token expiry itself, and the
+    //    register application commits the trusted chain. There
+    //    is no connect→onboard orchestration and no
+    //    warn-and-succeed any more (bot authority spec §10.1).
+    let Some(service) = state.register_application.as_deref() else {
+        return scoped::error_response(ApplicationError::internal(
+            "registration service is not configured",
+        ));
+    };
+    match service
+        .register_bot(RegisterBot {
+            // Legacy v1 tolerance: mode/provider_bot_ref/
+            // webhook_url are ignored and never forwarded,
+            // even when they cannot parse as the Provider
+            // mode enum.
+            token: token_str.to_string(),
+            bot_name,
+            mode: None,
+            provider_bot_ref: None,
+            webhook_url: None,
         })
         .await
     {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal", "message": format!("bot connect failed: {}", e)})),
-            ).into_response();
-        }
-    };
-
-    // 6. Onboard bot (set name + establish ownership)
-    let onboard_result = state
-        .services
-        .bot_onboarding
-        .admin_onboard_bot(AdminBotOnboardCommand {
-            bot_uuid: connect_result.bot_uuid.clone(),
-            name: Some(bot_name.clone()),
-            summary: None,
-            domains: vec![],
-            skills: vec![],
-            scopes: vec![],
-            binding_channels: None,
-            actor_identity: Some(OnboardActorIdentity {
-                staff_no,
-                nick_name: None,
-            }),
-        })
-        .await;
-
-    if let Err(e) = onboard_result {
-        tracing::warn!(
-            request_id = %bcs_observability::CurrentRequestId,
-            bot_uuid = %connect_result.bot_uuid,
-            error = %e,
-            "register: admin_onboard_bot failed after connect"
-        );
+        Ok(bot) => scoped::success_response(serde_json::json!({
+            "bot_name": bot.bot_name,
+            "bot_uuid": bot.bot_uuid,
+            "bot_token": bot.bot_token,
+        })),
+        Err(error) => scoped::error_response(error),
     }
-
-    // 7. Return credentials
-    scoped::success_response(serde_json::json!({
-        "bot_name": bot_name,
-        "bot_uuid": connect_result.bot_uuid,
-        "bot_token": connect_result.token,
-    }))
 }

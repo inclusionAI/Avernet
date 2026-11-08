@@ -186,12 +186,6 @@ pub struct UpdateVisibilityRequest {
     pub visibility: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PatchGroupSettingsRequest {
-    #[serde(default)]
-    pub service_spec: Option<Option<ServiceSpec>>,
-}
-
 #[cfg(test)]
 mod legacy_update_group_request_tests {
     use super::*;

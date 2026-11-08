@@ -15,6 +15,7 @@
  * action="deploy", matching ClawMind semantics.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { withGitOperation } from "@avernet/clawweb-shared/server/services/git-execution";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import { normalizeWorkflowSpec, validateWorkflowSemantics, type WorkflowSpec } from "../workflow.js";
@@ -26,6 +27,8 @@ import {
   createTempRepo,
   ensurePackManifest,
   getMaxDeployNumberFromGitTags,
+  prepareBranchBase,
+  pruneLegacyPackCopy,
   removeTempRepo,
   writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
@@ -36,6 +39,11 @@ export type AutoHealDeployInput = {
   workflowId: string;
   packId?: string | null;
   diagnosisId?: string | null;
+  /**
+   * Run being repaired. The post-deploy re-run must reach the Bot that ran this
+   * source, so the target Bot is read from it rather than from autoHeal config.
+   */
+  sourceFlowId?: string | null;
   note?: string | null;
   autoRun?: boolean;
   actorId: string;
@@ -49,11 +57,23 @@ export type AutoHealDeployResult = {
   deployNumber: number;
   version: number;
   tagName: string;
-  runId?: string | null;
+  /** BaaS message id from the post-deploy re-run, not a ClawMind flow id. */
+  messageId?: string | null;
 };
 
 function isReservedWorkflowId(id: string): boolean {
   return /^__.+__$/.test(id);
+}
+
+/**
+ * Deterministic git tag name for a deploy number.
+ *
+ * Must stay in sync with `commitAndPushDeploy` in clawflows-git-client.ts.
+ * Used to satisfy the NOT NULL constraint on `workflow_deploy_history.tag_name`
+ * when reserving the deploy row, before the git push reveals the real tag.
+ */
+function buildDeployTagName(workflowId: string, deployNumber: number): string {
+  return `deploy/${workflowId}/#${deployNumber}`;
 }
 
 function makeError(status: number, error: string, message: string): Error & { status: number; error: string } {
@@ -71,7 +91,11 @@ export class AutoHealDeployService {
     private botPermRepo: BotWorkflowPermissionRepository | null,
     private gitConfig: ClawFlowsGitConfig,
     private author: GitAuthor,
-    private triggerRun?: (workflowId: string, actorId: string) => Promise<string | null>,
+    private triggerRun?: (
+      workflowId: string,
+      actorId: string,
+      sourceFlowId?: string | null,
+    ) => Promise<string | null>,
   ) {}
 
   async deploy(input: AutoHealDeployInput): Promise<AutoHealDeployResult> {
@@ -141,7 +165,11 @@ export class AutoHealDeployService {
           workflowId,
           deployNumber: next,
           version: newVersion,
-          tagName: null,
+          // The real tag name is only known after the git push, but
+          // workflow_deploy_history.tag_name is NOT NULL on managed MySQL. Use
+          // the deterministic tag this deploy will produce; the activation step
+          // overwrites it with the authoritative value from gitResult.
+          tagName: buildDeployTagName(workflowId, next),
           action: "deploy",
           specJson,
           note: input.note ?? "auto-heal deploy",
@@ -156,37 +184,47 @@ export class AutoHealDeployService {
       throw makeError(500, "Internal Server Error", `无法预留部署记录: ${msg}`);
     }
 
-    let repoDir: string;
-    try {
-      repoDir = await createTempRepo();
-    } catch (mkErr) {
-      const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
-      throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
-    }
+    const gitResult = await withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
+      let repoDir: string;
+      try {
+        repoDir = await createTempRepo();
+      } catch (mkErr) {
+        const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
+        throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
+      }
 
-    let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
-    try {
-      await cloneClawflows(repoDir, this.gitConfig);
-      await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
-      await ensurePackManifest(repoDir, packId, workflowId);
+      let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
+      try {
+        await cloneClawflows(repoDir, this.gitConfig);
+        // Base the deploy on the previous deploy content so Pack scripts and assets
+        // are inherited instead of being dropped (see prepareBranchBase).
+        await prepareBranchBase(repoDir, `wf/${workflowId}`);
+        await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
+        await ensurePackManifest(repoDir, packId, workflowId);
+        await pruneLegacyPackCopy(repoDir, packId);
 
-      // Fall back to git tags if there are tags not yet reflected in the DB
-      // (e.g. manual/external deploys). This is a safety net, not the primary
-      // allocation mechanism.
-      const gitMaxDeployNumber = getMaxDeployNumberFromGitTags(repoDir, workflowId);
-      const deployNumber = Math.max(reservedDeployNumber, gitMaxDeployNumber) + 1;
+        // Fall back to git tags if there are tags not yet reflected in the DB
+        // (e.g. manual/external deploys). This is a safety net, not the primary
+        // allocation mechanism. reservedDeployNumber is already dbMax + 1, so the
+        // common case (git max ≤ dbMax) reuses the reserved number and the
+        // activation below takes the single-row fast path; only a git max that is
+        // ahead of the DB bumps the number past the reservation.
+        const gitMaxDeployNumber = await getMaxDeployNumberFromGitTags(repoDir, workflowId);
+        const deployNumber = Math.max(reservedDeployNumber, gitMaxDeployNumber + 1);
 
-      gitResult = await commitAndPushDeploy(
-        repoDir,
-        workflowId,
-        deployNumber,
-        newVersion,
-        input.note ?? "auto-heal deploy",
-        this.author,
-      );
-    } finally {
-      await removeTempRepo(repoDir);
-    }
+        gitResult = await commitAndPushDeploy(
+          repoDir,
+          workflowId,
+          deployNumber,
+          newVersion,
+          input.note ?? "auto-heal deploy",
+          this.author,
+        );
+      } finally {
+        await removeTempRepo(repoDir);
+      }
+      return gitResult;
+    });
 
     if (!gitResult) {
       throw makeError(500, "Internal Server Error", "Git deploy produced no result");
@@ -235,10 +273,10 @@ export class AutoHealDeployService {
       throw makeError(500, "Internal Server Error", `部署 tag 已推送，但部署记录写入失败: ${msg}`);
     }
 
-    let runId: string | null | undefined;
+    let messageId: string | null | undefined;
     if (input.autoRun !== false && this.triggerRun) {
       try {
-        runId = await this.triggerRun(workflowId, actorId);
+        messageId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null);
       } catch (runErr) {
         const msg = runErr instanceof Error ? runErr.message : String(runErr);
         console.warn(`[auto-heal] deploy succeeded but auto-run failed for ${workflowId}: ${msg}`);
@@ -253,7 +291,7 @@ export class AutoHealDeployService {
       deployNumber: gitResult.deployNumber,
       version: newVersion,
       tagName: gitResult.tagName,
-      runId: runId ?? null,
+      messageId: messageId ?? null,
     };
   }
 }

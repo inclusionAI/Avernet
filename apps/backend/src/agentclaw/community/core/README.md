@@ -1,126 +1,57 @@
-# core/
+# `agentclaw.community.core`
 
-Business logic for the backend module, per re-architecture proposal §5.1/5.2.
+Backend domain policy and application services. Read the
+[Backend development guide](../../../../README.md) for architecture authority,
+DI and verification. This is the current domain layout; old `core/routers/`
+and flat `core/services/` migration checklists are not instructions for new code.
 
-```
-core/
-├── routers/        # HTTP / WebSocket endpoints  (← agentclaw/servers/web/routes/)
-├── services/       # Business service implementations  (← agentclaw/services/<domain>/service.py)
-└── dependencies/   # FastAPI dependency providers  (← agentclaw/servers/web/dependencies/)
-```
+## Responsibilities and dependencies
 
-`core` depends on `api/` (contracts) and `plugin_api/` (capability interfaces).
-It must NOT import from `plugins/` directly — concrete implementations
-are wired in by the application bootstrap based on runtime mode.
+Domains own business rules and their Service API Protocols. Most are exposed
+through re-exports in [api](../api/README.md); core does not import those exports
+back. HTTP/WS routers and request/response schemas live in `adapters/http/`,
+not in core. Services receive outbound capability Protocols from `plugin_api/`
+and dependencies via constructor injection. New bindings live in `di/modules/`.
+Existing `dependencies/`, legacy buckets and named architecture exceptions are
+bounded migration debt; do not infer general permission to import a concrete
+plugin, web framework or composition root into a new service.
 
-## Migration source map
+[Repository contracts and ORM implementations](repository/README.md) are grouped
+by consumer domain in `core/repository/`; they are not profile plugins.
+[Outbound ports](ports/README.md) document consumer-owned narrow seams.
 
-| Target (core)               | Source (current)                                  |
-|-----------------------------|---------------------------------------------------|
-| `core/routers/devices.py`   | `agentclaw/servers/web/routes/devices.py`         |
-| `core/routers/projects.py`  | `agentclaw/servers/web/routes/projects.py`        |
-| `core/routers/expert_chats.py` | `agentclaw/servers/web/routes/expert_chats.py` |
-| `core/routers/system_config.py` | `agentclaw/servers/web/routes/system_config.py` |
-| `core/routers/whitelist.py` | `agentclaw/servers/web/routes/whitelist.py`       |
-| `core/routers/user.py`      | `agentclaw/servers/web/routes/user.py`            |
-| `core/routers/hrorg.py`     | `agentclaw/servers/web/routes/hrorg.py`           |
-| `core/services/device.py`   | `agentclaw/services/device/service.py`            |
-| `core/services/expert_chat.py` | `agentclaw/services/expert_chat/`              |
-| `core/services/project.py`  | `agentclaw/services/project/`                     |
-| `core/services/channel.py`  | `agentclaw/services/channel/`                     |
-| `core/services/publish.py`  | `agentclaw/services/publish/`                     |
-| `core/services/system_config.py` | `agentclaw/services/system_config/`          |
-| `core/dependencies/auth.py` | `agentclaw/servers/web/dependencies/auth.py`      |
-| `core/app.py` (last step)   | `agentclaw/servers/web/app.py`                    |
-| **Skill Center (migrated)** | |
-| `core/services/skill_parser.py` | `agentclaw/services/openclawserver/server/services/skill_service.py` (SkillParser) |
-| `core/services/skill_cache.py` | `agentclaw/services/openclawserver/server/services/skill_service.py` (MarketCache) |
-| `core/services/skill_service.py` | `agentclaw/services/openclawserver/server/services/skill_service.py` (SkillService) |
-| `core/services/skill_set_service.py` | `agentclaw/services/openclawserver/server/services/skill_set_service.py` |
-| `core/services/skill_auth_service.py` | `agentclaw/services/openclawserver/server/services/skill_auth_service.py` |
-| `core/services/market_sync.py` | `agentclaw/services/market_sync/service.py` |
-| `core/services/skill_scan.py` | `agentclaw/services/openclawserver/server/services/skill_scan_service.py` |
-| `core/services/git_sync.py` | `agentclaw/services/git_sync_service.py` |
-| `core/routers/skills.py` | `agentclaw/services/openclawserver/server/routers/skills.py` |
-| `core/routers/skillsets.py` | `agentclaw/services/openclawserver/server/routers/skillsets.py` |
-| `core/routers/skill_auth.py` | `agentclaw/services/openclawserver/server/routers/skill_auth.py` |
-| `core/routers/skill_scan.py` | `agentclaw/services/openclawserver/server/routers/skill_scan.py` |
-| `core/dependencies/skills.py` | `agentclaw/services/openclawserver/server/repositories/__init__.py` |
-| `plugin_api/skill_repository.py` | (new Protocol interface) |
-| `plugins/local/skill_repository.py` | `agentclaw/services/openclawserver/server/repositories/sqlite_*.py` |
-| `plugins/prod/skill_repository.py` | `agentclaw/services/openclawserver/server/repositories/zdas_*.py` |
+## Domain navigation
 
-> Skeleton only for non-skill-center rows — no code has been moved. Old paths are still authoritative.
+Read the affected domain's **Context Boundary** and **Change impact** before
+changing it, then follow its declared consumers and dependencies. These are
+common starting points, not an exhaustive ownership list:
 
-## TODO — incremental migration checklist
+| Area | Domain entrypoints |
+| --- | --- |
+| Identity and permissions | [access](access/README.md), [auth](auth/README.md), [caller identity](caller_identity/README.md), [application grants](bot_app_grant/README.md) |
+| Bot lifecycle and execution | [bot management](bot_management/README.md), [engine runtime](engine_runtime/README.md), [runtime binding](runtime_binding/README.md), [devices](devices/README.md) |
+| Publication | [service bot](service_bot/README.md), [task queue](task_queue/README.md) |
+| Skills and configuration | [skill center](skill_center/README.md), [skills pool](skills_pool/README.md), [manifest](bot_config_manifest/README.md), [configuration surface](bot_config_surface/README.md) |
+| Conversations and collaboration | [bot chat](bot_chat/README.md), [group chat](group_chat/README.md), [expert chat](expert_chat/README.md), [agentswarm](agentswarm/README.md) |
+| Spaces and shared content | [spaces](spaces/README.md), [resources](resources/README.md), [content store](content_store/README.md), [workspace](workspace/README.md) |
+| Platform state | [config](config/README.md), [system config](system_config/README.md), [events](events/README.md), [repositories](repository/README.md) |
 
-Each row is a self-contained PR: move the file, update importers, delete
-the old path, run tests, tick the box. Claim a row by appending your
-name + date in the Owner column.
+## Context Boundary maintenance
 
-### Routers
+Use [service_bot](service_bot/README.md) as a real example of `purpose`,
+`provides`, `consumes`, `internal_dependencies` and prose `Change impact`.
+Copy the format, not its long dependency list. The
+[format guide](../../../../../../docs/arch/context-boundary-format.md) defines
+which fields are enforced: `internal_dependencies` permits imports made by
+this module; `consumes` records intent. Neither waives the layer rules.
 
-#### Skill Center (← `services/openclawserver/server/routers/`) — Done (2026-04-08)
+For a new significant domain, register the package in
+`tests/community/architecture/test_module_boundaries.py` (relative to Backend).
+For cross-domain changes, review both sides' contracts, callers, DI bindings and
+boundary declarations. Changes to outbound Protocols also need consumer-level
+contract tests; changes to Service APIs need their conformance tests. When the
+enterprise host participates, check the matching host ref/gitlink and corp
+bindings rather than assuming a public test run covers them.
 
-- [x] `core/routers/skills.py`
-- [x] `core/routers/skillsets.py`
-- [x] `core/routers/skill_auth.py`
-- [x] `core/routers/skill_scan.py`
-
-#### Other (← `servers/web/routes/`)
-
-- [ ] `core/routers/devices.py` — Owner:
-- [ ] `core/routers/projects.py` — Owner:
-- [ ] `core/routers/expert_chats.py` — Owner:
-- [ ] `core/routers/system_config.py` — Owner:
-- [ ] `core/routers/whitelist.py` — Owner:
-- [ ] `core/routers/user.py` — Owner:
-- [ ] `core/routers/hrorg.py` — Owner:
-
-### Services
-
-#### Skill Center (← `services/openclawserver/server/services/`) — Done (2026-04-08)
-
-- [x] `core/services/skill_parser.py`
-- [x] `core/services/skill_cache.py`
-- [x] `core/services/skill_service.py`
-- [x] `core/services/skill_set_service.py`
-- [x] `core/services/skill_auth_service.py`
-- [x] `core/services/git_sync.py`
-- [x] `core/dependencies/skills.py` (repository + service DI)
-- [x] `plugin_api/skill_repository.py` (Protocol interface)
-- [x] `plugins/local/skill_repository.py` (SQLite impl)
-- [x] `plugins/prod/skill_repository.py` (ZDAS impl)
-
-#### Other (← `services/<domain>/`)
-
-- [ ] `core/services/device.py` — also touches DeviceAccessor wiring. Owner:
-- [ ] `core/services/expert_chat.py` — Owner:
-- [ ] `core/services/project.py` — Owner:
-- [ ] `core/services/channel.py` — Owner:
-- [ ] `core/services/publish.py` — Owner:
-- [ ] `core/services/system_config.py` — Owner:
-- [ ] `core/services/antprocess.py` — verify whether this stays in core
-      or becomes a plugin. Owner:
-- [x] `core/services/skill_scan.py` — Done (2026-04-08)
-- [x] `core/services/market_sync.py` — Done (2026-04-08)
-- [ ] `core/services/hrorg.py` — Owner:
-- [ ] `core/services/policy.py` — Owner:
-
-### Dependencies (← `servers/web/dependencies/`)
-
-- [ ] `core/dependencies/auth.py` — must consume `AuthPlugin` via the
-      plugin factory (Phase C in `plugins/README.md`). Owner:
-
-### App bootstrap (last step)
-
-- [ ] `core/app.py` ← `servers/web/app.py` — switch `main.py` over,
-      delete `servers/web/`. Owner:
-
-### Out of scope here
-
-- `servers/sofa/`, `servers/mcp/` — external RPC entry points; keep
-  under `servers/` for now. Decide their final home in a separate
-  proposal.
-- `services/openclawserver/` — large submodule (gateway bootstrap +
-  static assets); migrate as a follow-up after Phase A/B finish.
+Historical migration proposals under `specs/` explain earlier moves; their old
+paths and unchecked TODOs do not supersede this index or current source.

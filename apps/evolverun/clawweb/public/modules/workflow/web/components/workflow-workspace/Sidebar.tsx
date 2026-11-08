@@ -11,6 +11,7 @@ interface SidebarProps {
   isAdmin: boolean
   hasWorkflow: boolean
   counts?: { diagnosis?: number; remedies?: number }
+  compact?: boolean
 }
 
 function NavIcon({ name }: { name: WorkspaceIcon }) {
@@ -25,17 +26,17 @@ function NavIcon({ name }: { name: WorkspaceIcon }) {
   return <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">{paths[name]}</svg>
 }
 
-function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
+function NavButton({ item, active, onClick, compact = false }: { item: NavItem; active: boolean; onClick: () => void; compact?: boolean }) {
   const accessibleName = item.count == null ? item.label : `${item.label} ${item.count}`
-  return <button type="button" onClick={onClick} aria-label={accessibleName} aria-current={active ? 'page' : undefined} className={`group relative flex w-full items-center gap-3 overflow-hidden rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}>
-    {active && <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-blue-600" />}
-    <span className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${active ? 'bg-blue-100 text-blue-700' : 'text-slate-400 group-hover:bg-white group-hover:text-slate-600'}`}><NavIcon name={item.icon} /></span>
-    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-    {item.count != null && <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums ${active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{item.count}</span>}
+  return <button type="button" onClick={onClick} aria-label={accessibleName} title={compact ? accessibleName : undefined} aria-current={active ? 'page' : undefined} className={`group relative flex w-full items-center ${compact ? 'justify-center gap-0' : 'gap-3'} overflow-hidden rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${active ? 'bg-primary/10 font-semibold text-primary' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}>
+    {active && <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-primary" />}
+    <span className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-slate-400 group-hover:bg-card group-hover:text-slate-600'}`}><NavIcon name={item.icon} /></span>
+    <span className={compact ? 'sr-only' : 'min-w-0 flex-1 truncate'}>{item.label}</span>
+    {item.count != null && !compact && <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums ${active ? 'bg-primary/15 text-primary' : 'bg-slate-100 text-slate-500'}`}>{item.count}</span>}
   </button>
 }
 
-export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow, counts }: SidebarProps) {
+export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow, counts, compact = false }: SidebarProps) {
   const analysisItems: NavItem[] = [
     { key: 'overview', label: '运行概览', icon: 'overview' },
     { key: 'diagnosis', label: '问题与优化', icon: 'diagnosis', count: counts?.diagnosis },
@@ -46,17 +47,17 @@ export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow
     { key: 'management', label: '管理设置', icon: 'management' },
   ]
 
-  return <aside className="flex h-full w-[264px] shrink-0 flex-col border-r border-slate-200 bg-white" aria-label="任务护航导航">
-    <div className="border-b border-slate-200 px-4 py-4">
+  return <aside className={`flex h-full ${compact ? 'w-[68px]' : 'w-[264px]'} shrink-0 flex-col border-r border-border bg-card`} aria-label="任务护航导航">
+    <div className={`border-b border-border ${compact ? 'px-3' : 'px-4'} py-4`}>
       <div className="flex items-center gap-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-base text-white shadow-sm">✦</span>
-        <div><h2 className="text-sm font-semibold tracking-tight text-slate-950">任务护航</h2><p className="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-400">TASK GUARD</p></div>
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-base text-primary-foreground shadow-sm">✦</span>
+        <div className={compact ? 'sr-only' : undefined}><h2 className="text-sm font-semibold tracking-tight text-slate-950">任务护航</h2><p className="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-400">TASK GUARD</p></div>
       </div>
     </div>
-    <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-4">
-      {isAdmin && <div className="mb-5"><p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">全局</p><NavButton item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} /></div>}
+    <div className={`relative min-h-0 flex-1 overflow-y-auto ${compact ? 'px-2' : 'px-3'} py-4`}>
+      {isAdmin && <div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>全局</p><NavButton compact={compact} item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} /></div>}
 
-      {hasWorkflow && <><div className="mb-5"><p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">分析与改进</p><div className="space-y-0.5">{analysisItems.map((item) => <NavButton key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div><div><p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">工作流配置</p><div className="space-y-0.5">{configItems.map((item) => <NavButton key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div></>}
+      {hasWorkflow && <><div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>分析与改进</p><div className="space-y-0.5">{analysisItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div><div><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>工作流配置</p><div className="space-y-0.5">{configItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div></>}
     </div>
   </aside>
 }

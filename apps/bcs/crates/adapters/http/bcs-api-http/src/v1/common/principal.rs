@@ -14,6 +14,8 @@ pub enum PrincipalVerificationError {
     Missing,
     #[error("Principal is invalid: {0}")]
     Invalid(String),
+    #[error("Bot identity store is unavailable")]
+    Unavailable,
 }
 
 /// Gateway-to-BCN trust boundary.
@@ -39,6 +41,19 @@ where
     let request_id = RequestId::from_headers(request.headers());
     match state.principal_verifier().verify(request.headers()).await {
         Ok(caller) => {
+            // A comparison only, never an authentication source. Prevent a browser
+            // account switch from submitting a configuration prepared by another Human.
+            if request.headers().contains_key("x-bcs-expected-user") {
+                let values = request.headers().get_all("x-bcs-expected-user");
+                let expected = values.iter().next().and_then(|v| v.to_str().ok());
+                if values.iter().count() != 1 || expected.is_none()
+                    || expected != caller.user.as_ref().map(|user| user.id.as_str()) {
+                    return super::application_error_response(&request_id,
+                        bcs_service_api::application::v1::ApplicationError::forbidden_code(
+                            "user_context_changed", "Current user changed; reopen the configuration",
+                        )).into_response();
+                }
+            }
             request.extensions_mut().insert(caller);
             request.extensions_mut().insert(request_id);
             next.run(request).await
@@ -50,6 +65,12 @@ where
         Err(PrincipalVerificationError::Invalid(reason)) => {
             warn!(request_id = %request_id.0, %reason, "Gateway Principal verification failed");
             ErrorResponse::unauthenticated(request_id.0).into_response()
+        }
+        Err(PrincipalVerificationError::Unavailable) => {
+            super::application_error_response(&request_id,
+                bcs_service_api::application::v1::ApplicationError::bad_gateway(
+                    "bot_identity_unavailable", "Bot identity store unavailable",
+                )).into_response()
         }
     }
 }

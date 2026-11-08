@@ -1,0 +1,27 @@
+schema_version: 1
+
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+
+manifest:
+  resources:
+    - path: data/archive/
+      source:
+        protocol: oss
+        bucket: cms-assets
+        key: kb/knowledge-base.zip
+        auth: cms-oss
+      unpack: zip
+      strip_components: 1
+    - path: data/kb/
+      from: content
+      subpath: kb/

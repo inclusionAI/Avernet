@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::{
     ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     ParticipantKind, MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError,
-    ServiceSpec, Workspace,
-};
+    };
 
 /// Request for creating a group collaboration session.
 #[derive(Debug, Clone)]
@@ -24,14 +23,14 @@ pub struct GroupCreateCommand {
     /// Whether to create and initialize the first Session. False is supported
     /// only for non-provisional normal Groups, including StateMachine, and is not persisted.
     pub create_initial_session: bool,
+    /// Normal Group notification policy, persisted with the initial Group write.
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub routing_policy: Option<RoutingPolicy>,
     pub participants: Vec<GroupCreateParticipantCommand>,
     /// Backward-compatible flat member list for callers that do not provide roles.
     pub member_bot_ids: Vec<String>,
     /// Group kind: Normal (default) or Dm (1:1 direct message).
     pub group_kind: Option<GroupKind>,
-    /// Service-as-a-Group configuration. None for regular groups.
-    pub service_spec: Option<ServiceSpec>,
     /// Group strategy: Chat (default), ManagerWorker, or StateMachine.
     pub group_strategy: Option<GroupStrategy>,
     /// Actor (bot_uuid or human_xxx) that initiated group creation.
@@ -115,14 +114,6 @@ pub struct GroupUpdateVisibilityCommand {
     pub visibility: String,
 }
 
-/// Request for replacing a group workspace.
-#[derive(Debug, Clone)]
-pub struct GroupUpdateWorkspaceCommand {
-    pub caller_actor_id: Option<String>,
-    pub group_id: String,
-    pub workspace: Workspace,
-}
-
 /// Request for updating a group's routing policy.
 #[derive(Debug, Clone)]
 pub struct GroupRoutingPolicyCommand {
@@ -167,11 +158,6 @@ pub struct BotGroupListCommand {
     pub limit: u64,
 }
 
-#[derive(Debug, Clone)]
-pub struct GroupWorkspaceQueryCommand {
-    pub group_id: String,
-}
-
 /// Participant view returned by group application-service DTOs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupParticipantView {
@@ -201,7 +187,6 @@ pub struct GroupDetailResult {
     pub opening_message: Option<crate::types::OpeningMessage>,
     pub participants: Vec<GroupParticipantView>,
     pub message_count: usize,
-    pub workspace: Workspace,
     pub service_group_uuid: Option<String>,
     pub service_mode: Option<String>,
     pub group_kind: GroupKind,
@@ -211,7 +196,6 @@ pub struct GroupDetailResult {
     pub updated_at: u64,
     pub chat_url: Option<String>,
     pub context_injected: u64,
-    pub service_spec: Option<ServiceSpec>,
     pub latest_running_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_run: Option<InitialGroupRun>,
@@ -309,13 +293,6 @@ pub struct GroupDeleteResult {
     pub deleted: bool,
 }
 
-/// Response payload for a successful workspace update.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupWorkspaceResult {
-    pub group_id: String,
-    pub workspace: Workspace,
-}
-
 /// Response payload for a successful routing-policy update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupRoutingPolicyResult {
@@ -332,46 +309,6 @@ pub struct GroupParticipantModeResult {
     pub message_view_scope: MessageViewScope,
 }
 
-/// Patch the mutable `ServiceSpec` fields of a group's settings.
-///
-/// The application use case owns the validation rules (immutable
-/// `callback_config`; `timeout_seconds` / `max_concurrency` locked while
-/// service-invocation sessions are running) so delivery adapters never call
-/// into the core service spec helper directly.
-#[derive(Debug, Clone)]
-pub struct GroupPatchSettingsCommand {
-    pub group_id: String,
-    /// `None` — no service_spec change. `Some(None)` — remove service_spec.
-    /// `Some(Some(spec))` — install / replace the service_spec.
-    pub service_spec: Option<Option<ServiceSpec>>,
-}
-
-/// Outcome of a successful group settings patch.
-#[derive(Debug, Clone)]
-pub struct GroupPatchSettingsResult {
-    pub group_id: String,
-    pub service_spec: Option<ServiceSpec>,
-}
-
-/// When validation rejects the patch, the use case returns this via
-/// [`GroupUseCaseError::Conflict`]; the running-session count lets the
-/// delivery adapter build a precise conflict body.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct GroupPatchSettingsConflict {
-    pub field: ServiceSpecPatchConflictField,
-    pub running_service_count: u64,
-}
-
-/// Which `ServiceSpec` field was rejected by the patch validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceSpecPatchConflictField {
-    /// `callback_config` is immutable.
-    CallbackConfig,
-    /// `timeout_seconds` / `max_concurrency` are locked while sessions run.
-    RouteFields,
-}
-
 /// Use-case level error with enough detail for delivery adapters to map status.
 #[derive(Debug, thiserror::Error)]
 pub enum GroupUseCaseError {
@@ -385,10 +322,6 @@ pub enum GroupUseCaseError {
     InvalidGroupStatus(String),
     #[error("Invalid proposal: {0}")]
     InvalidProposal(String),
-    #[error("Proposal '{0}' not found or expired")]
-    ProposalNotFound(String),
-    #[error("Proposal '{0}' expired")]
-    ProposalExpired(String),
     #[error("Invalid history limit: {0}")]
     InvalidHistoryLimit(u64),
     #[error("Actor '{0}' not found")]
@@ -434,11 +367,6 @@ pub trait GroupQueryService: Send + Sync {
         &self,
         cmd: BotGroupListCommand,
     ) -> Result<GroupListResult, GroupUseCaseError>;
-
-    async fn get_workspace(
-        &self,
-        cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError>;
 }
 
 /// Group management application service.
@@ -497,11 +425,6 @@ pub trait GroupManagementService: Send + Sync {
         cmd: GroupUpdateVisibilityCommand,
     ) -> Result<GroupDetailResult, GroupUseCaseError>;
 
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError>;
-
     async fn update_routing_policy(
         &self,
         cmd: GroupRoutingPolicyCommand,
@@ -512,13 +435,4 @@ pub trait GroupManagementService: Send + Sync {
         cmd: GroupParticipantModeCommand,
     ) -> Result<GroupParticipantModeResult, GroupUseCaseError>;
 
-    /// Patch a group's mutable `ServiceSpec` settings. Validates the patch
-    /// against the current value and the running service-invocation session
-    /// count; returns [`GroupUseCaseError::Conflict`] carrying a
-    /// [`GroupPatchSettingsConflict`] in its message (JSON-encoded) when the
-    /// patch is rejected.
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError>;
 }

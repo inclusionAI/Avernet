@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.default import DefaultProvisioningStrategy
@@ -125,7 +127,7 @@ def test_empty_inventory_logs_raw_summary(caplog):
         BotProvisioningContext(
             bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
         ),
-        device_id='caller-uuid', target_runtime=runtime,
+        device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
     verify()
     runtime.post_bots_api.assert_not_called()
@@ -140,7 +142,7 @@ def test_active_empty_inventory_continues_without_claiming_backup_success():
         BotProvisioningContext(
             bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
         ),
-        device_id='caller-uuid', target_runtime=runtime,
+        device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
     verify()
     runtime.post_bots_api.assert_not_called()
@@ -162,7 +164,7 @@ def test_all_stopped_inventory_skips_backup_but_verifies_again():
 
     with patch.object(backup, 'prepare_backup') as prepared:
         verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            ctx, device_id='caller-uuid', target_runtime=runtime,
+            ctx, device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
         )
 
     prepared.assert_not_called()
@@ -181,7 +183,7 @@ def test_all_released_inventory_skips_backup():
         BotProvisioningContext(
             bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
         ),
-        device_id='caller-uuid', target_runtime=runtime,
+        device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
     verify()
     runtime.post_bots_api.assert_not_called()
@@ -197,7 +199,7 @@ def test_no_live_target_recheck_continues_if_device_reappears():
         BotProvisioningContext(
             bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
         ),
-        device_id='caller-uuid', target_runtime=runtime,
+        device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
     verify()
 
@@ -210,8 +212,8 @@ def test_operation_id_is_fresh_per_restart_request():
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]
     with patch.object(backup, 'prepare_backup', side_effect=lambda **kwargs: Mock()) as prepared:
         strategy = AicodingProvisioningStrategy('aicoding')
-        strategy._prepare_restart(ctx, device_id='caller-uuid', target_runtime=runtime)
-        strategy._prepare_restart(ctx, device_id='caller-uuid', target_runtime=runtime)
+        strategy._prepare_restart(ctx, device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime))
+        strategy._prepare_restart(ctx, device_id='caller-uuid', restart_dependencies=RestartBackupDependencies.for_instance(runtime))
     ids = [call.kwargs['operation_id'] for call in prepared.call_args_list]
     assert len(ids) == 2 and ids[0] != ids[1]
 
@@ -262,11 +264,20 @@ def test_backup_failure_continues_original_restart_and_lock_ownership(phase, pro
     bot = _make_bot(active_engine='aicoding', binding_id=42)
     repository, state = _stateful_bot_repository(bot)
     device = Mock()
-    device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE'}
+    from tests.community.core.devices.services.test_device_service import _make_record
+    device.get_device.return_value = _make_record(
+        id=42, device_id='old-container', device_provider=provider, status='ACTIVE',
+        device_props={'sandbox_id': 'old-sandbox'},
+    )
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
                         baas_service_provider=lambda: runtime)
+
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    svc._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: runtime, arca_transport=lambda: ArcaRestartTransport(Mock()),
+    )
 
     def prepare_check(**kwargs):
         assert not locks.rows  # No 25-minute wait inside the old 120-second lease.
@@ -364,7 +375,8 @@ def test_coding_prepare_returns_verifier_without_touching_any_lock():
         assert strategy.prepare_restart(ctx) is verify
         prepare.assert_called_once()
         kwargs = prepare.call_args.kwargs
-        assert kwargs['target_runtime_provider'] is None
+        assert 'target_runtime_provider' not in kwargs
+        assert 'arca_restart_transport_provider' not in kwargs
         assert re.fullmatch(r'[a-f0-9]{32}', kwargs['operation_id'])
         verify.assert_not_called()  # The caller decides when to verify (under its lock).
 
@@ -431,22 +443,32 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
     device_repo.get_by_id.return_value = device_repo.get_by_device_id.return_value = record
     device = make_device_service(repo=device_repo)
     device._exec_shell_new = Mock(side_effect=lambda **kw: _run_absent_helper_probe(kw['shell_cmd']))
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    routed_device = DeviceServiceRouter(
+        repository=device_repo, bot_query=Mock(), providers={provider: device},
+        default_provider_key=provider,
+    )
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
-    svc = _make_service(locks, bot_repository=repository, device_provider=device,
+    svc = _make_service(locks, bot_repository=repository, device_provider=routed_device,
                         baas_service_provider=lambda: runtime)
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    svc._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: runtime, arca_transport=lambda: ArcaRestartTransport(device._exec_shell_new),
+    )
     with patch.object(svc, 'stop_bot', return_value=True) as stop, \
          patch.object(svc, 'start_bot', return_value=bot) as start, \
          patch.object(svc, '_restart_bot_baas', return_value=bot) as update:
         assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
-    device._exec_shell_new.assert_not_called()
     if provider == 'baas':
+        device._exec_shell_new.assert_not_called()
         assert runtime.post_bots_api.call_count == 2
         assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
     else:
+        assert device._exec_shell_new.call_count == 2
         runtime.post_bots_api.assert_not_called()
-        assert 'reason=arca_provider' in caplog.text
+        assert 'reason=helper_absent' in caplog.text
     if provider == 'arca':
         stop.assert_called_once()
         start.assert_called_once()
@@ -580,8 +602,12 @@ async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
     runtime = Mock()
     with patch.object(registry, 'resolve_restart_strategy', return_value=(ctx, OtherStrategy())):
         await registry.prepare_instance_restart(bot={}, device_id='target', target_runtime=runtime)
-    prepared.assert_called_once_with(ctx, device_id='target', target_runtime=runtime,
-                                     operation_id=None, restart_key=None)
+    prepared.assert_called_once()
+    assert prepared.call_args.args == (ctx,)
+    kwargs = prepared.call_args.kwargs
+    dependencies = kwargs.pop('restart_dependencies')
+    assert kwargs == dict(device_id='target', operation_id=None, restart_key=None)
+    assert dependencies.baas_runtime() is runtime
     assert not runtime.mock_calls
 
 
@@ -665,12 +691,12 @@ def test_ordinary_backup_budget_includes_time_already_spent_in_queue():
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
 @pytest.mark.parametrize('record_type', [dict, SimpleNamespace])
-def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, record_type):
+def test_arca_missing_sandbox_skips_io_but_still_verifies_binding(engine, status, record_type):
     ctx = BotProvisioningContext(
         bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
     )
     device = Mock()
-    # No sandbox_id is needed: even an already destroyed sandbox can be replaced.
+    # Legacy bindings without sandbox_id still allow recovery, without claiming backup.
     device.get_device.return_value = record_type(
         device_id='destroyed-container', device_provider='arca', status=status,
         device_props={},
@@ -682,7 +708,7 @@ def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, rec
     with patch.object(backup, 'prepare_backup') as prepared:
         verify = AicodingProvisioningStrategy(engine).prepare_restart(
             ctx, binding_id=42, device_service_provider=lambda: device,
-            target_runtime_provider=runtime_provider, bot_repository=repository,
+            restart_dependencies=RestartBackupDependencies(baas_runtime=runtime_provider), bot_repository=repository,
         )
         verify()
         repository.get_by_id_and_owner.return_value = {'binding_id': 99}
@@ -716,7 +742,7 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
     repository.get_by_id_and_owner.return_value = {'binding_id': 42}
     verify = AicodingProvisioningStrategy(engine).prepare_restart(
         ctx, binding_id=42, device_service_provider=lambda: device,
-        target_runtime_provider=runtime_provider, bot_repository=repository,
+        restart_dependencies=RestartBackupDependencies(baas_runtime=runtime_provider), bot_repository=repository,
         operation_id=OPERATION,
     )
     verify()  # Backup failures must not block restart.

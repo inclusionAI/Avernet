@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
@@ -224,7 +224,7 @@ sources:
     ref: v1.2.0
 manifest:
   resources:
-    - path: assets/logo.png
+    - path: data/assets/logo.png
       from: content
       subpath: brand/logo.png
 """)
@@ -232,7 +232,7 @@ manifest:
     _accept("""schema_version: 1
 manifest:
   resources:
-    - path: assets/logo.png
+    - path: data/assets/logo.png
       source:
         protocol: git
         url: https://code.example.com/team/content.git
@@ -684,6 +684,8 @@ manifest:
         ("/etc/passwd", "absolute_path"),
         ("../../etc/passwd", "path_traversal"),
         ("data/../../etc/passwd", "path_traversal"),
+        ("data//faq.csv", "invalid_path"),
+        ("data/./faq.csv", "invalid_path"),
     ],
 )
 def test_an_escaping_resource_path_is_refused(path, code):
@@ -701,8 +703,10 @@ manifest:
 
 
 def test_a_dotdot_prefixed_directory_name_is_not_a_traversal():
-    """The check is per segment: ``..config`` is a legitimate directory name."""
-    _accept(
+    """The traversal check is per segment: ``..config`` is a name, not ``..``. It is still refused, as
+    every dot-prefixed name is — a dotfile is the workspace's own and never a resource — and that one
+    reason is the only one the validator gives."""
+    rejected = _reject(
         """schema_version: 1
 manifest:
   resources:
@@ -714,6 +718,7 @@ manifest:
         auth: oss-cred
 """
     )
+    assert rejected == [("manifest.resources[0].path", "resources_protected_entry")]
 
 
 def test_a_resource_nested_under_a_directory_entry_is_refused():
@@ -1200,8 +1205,26 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
     # predicate refuses it as invalid rather than assuming str.
     assert relative_path_refusal(123)[0] == "invalid_path"
     # The legitimate shapes, including the per-segment '..' reading.
-    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md", "data/kb/"):
         assert relative_path_refusal(value) is None, value
+    # Normalisation is not this rule's: a fetch key or subpath is an address in
+    # another namespace (an object-store key may contain ``//``).
+    for value in ("a//b", "./skills/foo"):
+        assert relative_path_refusal(value) is None, value
+
+
+def test_resource_path_refusal_adds_normalisation_for_the_paths_the_engine_writes():
+    """The resources schema check, the compiler and the desired-state model ask this one, so a path the
+    schema accepts never fails the model: an accepted document cannot crash the compile."""
+    from agentclaw.community.core.apply_engine.paths import resource_path_refusal
+
+    for value in ("data//faq.csv", "data/./x", "data/kb//", "."):
+        refusal = resource_path_refusal(value)
+        assert refusal is not None and refusal[0] == "invalid_path", value
+        assert "not normalised" in refusal[1]
+    assert resource_path_refusal("../x")[0] == "path_traversal"
+    for value in ("data/a.md", "data/kb/", "data/..config"):
+        assert resource_path_refusal(value) is None, value
 
 
 # ── the rules that must survive the protocol axis ──────────────────────────
@@ -1473,3 +1496,26 @@ def test_one_mistake_on_a_source_field_is_one_violation():
         assert decl is None
         assert len(violations) == 1, (raw, [v.message for v in violations])
         assert expected in violations[0].message, (raw, violations[0].message)
+
+
+def test_resources_may_not_name_a_protected_workspace_entry():
+    """The workspace root is the resources root; a path naming a protected entry (an identity file, the
+    skills tree, a dotfile) is refused at PUT, because converging resources clears the root and those
+    entries belong to other constructs. Any other workspace-relative path is a resource."""
+    outside = """schema_version: 1
+manifest:
+  resources:
+    - path: SOUL.md
+      content: hi
+    - path: skills/tidy/SKILL.md
+      content: hi
+    - path: notes/.env
+      content: hi
+    - path: notes/hello.txt
+      content: hi
+"""
+    rejected = _reject(outside)
+    assert ("manifest.resources[0].path", "resources_protected_entry") in rejected
+    assert ("manifest.resources[1].path", "resources_protected_entry") in rejected
+    assert ("manifest.resources[2].path", "resources_protected_entry") in rejected
+    assert not any(code == "resources_protected_entry" and "[3]" in loc for loc, code in rejected)

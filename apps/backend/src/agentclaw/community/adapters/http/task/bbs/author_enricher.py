@@ -86,16 +86,25 @@ def enrich_bot_display_names(
         return list(records)
     injector = _request_injector(request)
     bot_service = _bot_service(injector)
+    def _flat_candidates(source: Sequence[Any]) -> list[Any]:
+        candidates: list[Any] = []
+        for record in source:
+            candidates.append(record)
+            children = getattr(record, "children", ())
+            if children:
+                candidates.extend(_flat_candidates(tuple(children)))
+        return candidates
+
     needs_lookup = {
         record.author_id
-        for record in records
+        for record in _flat_candidates(records)
         if getattr(record, "author_type", None) == AUTHOR_TYPE_BOT
         and record.display_name is None
         and record.author_id
     }
     lookup = {bid: _bot_display_name(bot_service, bid) for bid in needs_lookup}
-    enriched: list[Any] = []
-    for record in records:
+
+    def _enrich_record(record: Any) -> Any:
         if (
             getattr(record, "author_type", None) == AUTHOR_TYPE_BOT
             and record.display_name is None
@@ -103,10 +112,15 @@ def enrich_bot_display_names(
         ):
             name = lookup.get(record.author_id)
             if name:
-                enriched.append(replace(record, display_name=name))
-                continue
-        enriched.append(record)
-    return enriched
+                record = replace(record, display_name=name)
+        children = getattr(record, "children", ())
+        if children:
+            enriched_children = tuple(_enrich_record(child) for child in children)
+            if enriched_children != tuple(children):
+                record = replace(record, children=enriched_children)
+        return record
+
+    return [_enrich_record(record) for record in records]
 
 
 def enrich_bot_display_name(record: Any, *, request: Any) -> Any:

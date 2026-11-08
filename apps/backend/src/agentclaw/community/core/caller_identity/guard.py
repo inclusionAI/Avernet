@@ -40,9 +40,10 @@ def load_bot(
 
 
 def require_owner_of_active_service_bot(bot: Mapping[str, Any], actor_id: str) -> None:
-    """Only the owner may change an active service bot's CLIs.
+    """Only the owner may change an active service bot's caller identity.
 
-    The bot is checked first (an inactive or non-service bot is read-only for
+    Caller identity exists only for service bots, which other people call. The
+    bot is checked first (an inactive or non-service bot is read-only for
     everyone), then the actor (only its owner may change it).
     """
     if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":

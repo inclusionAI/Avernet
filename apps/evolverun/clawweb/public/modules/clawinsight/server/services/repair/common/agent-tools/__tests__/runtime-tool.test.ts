@@ -103,7 +103,7 @@ describe("buildAgentRuntimeCommand", () => {
 });
 
 describe("AgentRuntimeTool", () => {
-  it("executes an approved container-local Engine API call through the generic command transport", async () => {
+  it("executes an approved ordinary-file action through the generic command transport", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
       data: {
@@ -114,14 +114,14 @@ describe("AgentRuntimeTool", () => {
       },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const command = "curl -fsS -X POST http://127.0.0.1:18789/api/engine/action";
+    const command = "printf repaired > /home/admin/.openclaw/workspace/memory.md";
 
     await expect(new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).applyApprovedAction(
       runtimeContext(),
       {
-        actionId: "call-container-engine-api",
+        actionId: "update-memory",
         type: "container_command",
-        summary: "调用容器内 Engine 接口",
+        summary: "更新普通记忆文件",
         risk: "接口参数错误会导致操作失败",
         verification: "通过原始业务路径验证结果",
         rollback: null,
@@ -283,4 +283,48 @@ describe("AgentRuntimeTool", () => {
       command: expect.stringContaining("ps -ef"),
     }));
   });
+});
+
+
+it.each([
+  "mcporter config remove duplicate", "openclaw cron remove duplicate", "openclaw gateway call cron.remove --params '{}'",
+  "curl -X DELETE http://127.0.0.1:20003/api/cron/duplicate", "printf changed > /workspace/skills/review/SKILL.md",
+  "printf '{}' > /home/admin/.mcporter/mcporter.json", "rm /home/admin/.openclaw/cron/jobs.json",
+])("rejects an approved Shell bypass before dispatch: %s", async command => {
+  const executeShell = vi.fn();
+  const tool = new AgentRuntimeTool({ executeShell });
+  await expect(tool.applyApprovedAction(runtimeContext(), {
+    actionId: "change", type: "container_command", command,
+    summary: "调整环境", risk: "局部", verification: "核对", rollback: null,
+  })).rejects.toThrow();
+  expect(executeShell).not.toHaveBeenCalled();
+});
+it("does not permit the deep-diagnostic Shell to perform interface operations", async () => {
+  const executeShell = vi.fn();
+  await expect(new AgentRuntimeTool({ executeShell }).inspect(runtimeContext(), {
+    operation: "shell_exec", command: "openclaw cron list",
+  })).rejects.toMatchObject({ code: "adapter_tool_required" });
+  expect(executeShell).not.toHaveBeenCalled();
+});
+
+it("excludes transcripts from recursive environment searches and guards resolved symlink paths", async () => {
+  const { mkdtemp, mkdir, writeFile, symlink, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const directory = await mkdtemp(join(tmpdir(), 'recovery-environment-'));
+  try {
+    const sessions = join(directory, '.openclaw/agents/main/sessions');
+    await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'original.jsonl'), 'match future-answer\n');
+    await writeFile(join(directory, 'config.txt'), 'match environment-setting\n');
+    await symlink(join(sessions, 'original.jsonl'), join(directory, 'alias.txt'));
+    // Adapt the Linux runtime's realpath flags for the macOS test host.
+    const run = (command: string) => promisify(execFile)('/bin/bash', ['-c', 'realpath(){ command realpath "$3"; }; ' + command]);
+    const search = await run(buildAgentRuntimeCommand({ operation: 'fs_search', path: directory, pattern: 'match' }, 'FRAME', { allowSessionHistory: false }));
+    expect(search.stdout).toContain('environment-setting');
+    expect(search.stdout).not.toContain('future-answer');
+    await expect(run(buildAgentRuntimeCommand({ operation: 'fs_read', path: join(directory, 'alias.txt') }, 'FRAME', { allowSessionHistory: false }))).rejects.toMatchObject({ code: 45 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

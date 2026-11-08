@@ -18,9 +18,8 @@ use bcs_service_api::{
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     DmActorSpec, Group, GroupCoreService, GroupMessage, GroupStatus, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, MessageFlowService, Participant, ParticipantMode,
-    ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, ServiceSpec,
-    SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRunView, Workspace,
+    ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRunView,
     SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome,
     TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
@@ -175,23 +174,11 @@ impl GroupCoreService for RecordingGroupCoreService {
         Err(ServiceError::GroupNotFound(group_id.to_string()))
     }
 
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
     async fn update_label(&self, id: &str, _label: Option<String>) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
     async fn update_status(&self, id: &str, _status: GroupStatus) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        _service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
@@ -721,6 +708,7 @@ fn new_state() -> TestState {
     let bot_run_context = Arc::new(RecordingBotRunContext::default());
     let interactions = Arc::new(RecordingInteractionService::default());
     let dispatch_state = Arc::new(BotDispatchState {
+        expected_actor_id: None,
         bot_runtime: bot_runtime.clone(),
         message_flow: message_flow.clone(),
         collaboration_runtime: collaboration_runtime.clone(),
@@ -732,7 +720,6 @@ fn new_state() -> TestState {
         group_dispatch: Arc::new(RecordingGroupDispatchContext {
             group: group.clone(),
         }),
-        callback_dispatch: Arc::new(bcs_test_support::NoopSessionCallbackDispatchPort),
         system_message: Some(system_message.clone()),
         coordination_processed: Arc::new(Mutex::new(HashMap::new())),
         agent_credential_backfill: None,
@@ -2841,7 +2828,7 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
     state
         .dispatch_state
         .run_channels
-        .register_with_trace_parent(
+        .register_internal_with_trace_parent(
             "run-traced".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -2923,7 +2910,7 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     state
         .dispatch_state
         .run_channels
-        .register_with_trace_parent(
+        .register_internal_with_trace_parent(
             "gateway-run".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3132,7 +3119,7 @@ async fn task_response_ack_from_target_worker_registers_sub_run_alias() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "task-1".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3184,7 +3171,7 @@ async fn direct_chat_response_alias_carries_run_context_to_streaming_events() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "direct-outer-run".to_string(),
             session_id.to_string(),
             client_tx,
@@ -3259,7 +3246,7 @@ async fn task_response_ack_from_manager_does_not_register_sub_run_alias() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "task-1".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3339,7 +3326,7 @@ async fn bot_event_frame_restores_session_id_from_sub_run_mapping() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "outer-run".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3415,4 +3402,22 @@ async fn bot_chat_event_frame_uses_explicit_bcs_session_id() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].group_id, "group-1");
     assert_eq!(events[0].bcs_session_id.as_deref(), Some("group-1:abcdef12"));
+}
+
+#[tokio::test]
+async fn connected_socket_cannot_handshake_as_another_bot() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered = None;
+    for id in ["bot-a", "bot-b"] {
+        let connect = BcsFrame::Request(RequestFrame::new(id, "bot.connect",
+            Some(serde_json::json!({"bot_id":id,"protocol_version":1}))));
+        dispatch_frame(&state.dispatch_state,&serde_json::to_string(&connect).unwrap(),&tx,&mut registered).await.unwrap();
+        let response = recv_response(&mut rx).await;
+        assert_eq!(response.ok,id=="bot-a");
+    }
+    assert_eq!(registered.as_deref(),Some("bot-a"));
+    assert_eq!(state.bot_runtime.connect_count.load(Ordering::Relaxed),1);
+    assert!(state.dispatch_state.bot_connections.is_connected("bot-a").await);
+    assert!(!state.dispatch_state.bot_connections.is_connected("bot-b").await);
 }

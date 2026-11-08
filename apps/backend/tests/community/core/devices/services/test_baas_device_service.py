@@ -72,6 +72,7 @@ def _make_service(
     vault=None,
     task_queue_service=None,
     template_service=None,
+    a2a_issuance_gate=None,
 ) -> BaasDeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -95,6 +96,7 @@ def _make_service(
         template_resolver=template_resolver,
         vault=vault,
         layout_confirmation=MagicMock(),
+        a2a_issuance_gate=a2a_issuance_gate,
         task_queue_service=task_queue_service,
         template_service=template_service,
     )
@@ -355,6 +357,9 @@ class TestGetDeviceConnection:
         info.tenant = "team_claw"
         info.engine_port = 20003
         info.expires_at = "2099-01-01T00:00:00Z"
+        # Explicit: a MagicMock attr would otherwise answer a truthy Mock and
+        # turn "the provider issued nothing" into a fake socket upstream.
+        info.a2a_base_url = ""
         return info
 
     def test_returns_baas_connection_with_bot_engine(self):
@@ -422,6 +427,128 @@ class TestGetDeviceConnection:
         svc.get_device_connection(binding_id=7, operator=_operator("u001"))
 
         assert "path" not in baas.get_ws_info.call_args.kwargs
+
+    def test_a2a_base_url_passes_through_unmangled(self):
+        """The A2A face address is BaaS-owned; this layer neither derives,
+        re-addresses nor drops it. Absent (empty) stays empty."""
+        baas = MagicMock()
+        info = self._ws_info()
+        info.a2a_base_url = "http://bot-a1b2-vc.stable.alipay.net:32196"
+        baas.get_ws_info.return_value = info
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+
+    def test_an_absent_a2a_base_url_stays_absent(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
+
+    # ------------------------------------------------------------------
+    # A2A issuance gray gate (design: docs/superpowers/specs/
+    # 2026-10-27-a2a-user-issuance-gray-release-design.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _gate(staff_decision: dict[str, bool]) -> MagicMock:
+        gate = MagicMock()
+        gate.allows_face.side_effect = lambda staff_id: staff_decision[staff_id]
+        return gate
+
+    def _ws_info_with_a2a_face(self):
+        info = self._ws_info()
+        info.a2a_base_url = "http://bot-a1b2-vc.stable.alipay.net:32196"
+        return info
+
+    def test_gate_allows_operator_keeps_the_issued_face(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas, a2a_issuance_gate=self._gate({"u001": True})
+        )
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+        assert result.a2a_withheld is False
+
+    def test_gate_denies_operator_signs_an_empty_face(self):
+        """名单外用户拿到空 a2a face：下游不装 a2a socket，前端探针落 v3。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas, a2a_issuance_gate=self._gate({"u001": False})
+        )
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
+        assert result.a2a_withheld is True
+
+    def test_gate_is_judged_on_the_caller_not_the_owner_operator(self):
+        """engine_runtime 面传下来的 operator 是 resolved owner（权限兼容
+        +实例亲和），灰度身份必须取 caller_id——协作者不继承 owner 的桶。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas,
+            a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
+        )
+
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id="u002"
+        )
+        allowed = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id=None,
+        )
+
+        judged = [c.args[0] for c in svc._a2a_issuance_gate.allows_face.call_args_list]
+        # caller_id 在场即覆盖 operator.staff_id；缺席则回退 operator（operator
+        # 本身就是 caller 的面，如 devices HTTP 面）。
+        assert judged == ["u002", "u001"]
+        assert denied.a2a_base_url != ""
+        assert allowed.a2a_base_url == ""
+
+    def test_gate_still_judges_when_no_face_is_issued(self):
+        """review R3-F1：上游没签发地址也要过门——local/单机 provider 不填
+        a2a_base_url，但直连拓扑可从 WS 推导出 A2A 地址。名单外用户必须
+        拿到 withheld=True 才禁得住推导兜底；名单成员则保留空地址推导。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()  # 无 a2a face
+        svc = _make_service(
+            baas_service=baas,
+            a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
+        )
+
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001")
+        )
+        allowed = svc.get_device_connection(binding_id=7, operator=_operator("u002"))
+
+        assert denied.a2a_base_url == ""
+        assert denied.a2a_withheld is True
+        assert allowed.a2a_base_url == ""
+        assert allowed.a2a_withheld is False
+        assert allowed.a2a_base_url == ""
+
+    def test_gate_failure_withholds_rather_than_breaks_the_connection(self):
+        """门读配置抛异常也只收敛 a2a face：v3 面照常签发。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        gate = MagicMock()
+        gate.allows_face.side_effect = RuntimeError("config store down")
+        svc = _make_service(baas_service=baas, a2a_issuance_gate=gate)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
+        assert result.target == "BAAS_DEVICE@template:20003"
 
     def test_server_issued_expiry_is_passed_through(self):
         """The ``ttl`` argument is ignored here — the server decides — so the
@@ -1250,6 +1377,79 @@ class TestContainerInitSteps:
 
 
 class TestDoRelease:
+    @pytest.mark.parametrize(
+        "stored,caller,expected",
+        [(None, "caller", "caller"), ("", "caller", "caller"), ("owner", "caller", "owner")],
+    )
+    def test_release_uses_caller_when_binding_identity_missing(self, stored, caller, expected):
+        props = {"bot_uuid": "BOT-1"}
+        if stored is not None:
+            props["entity_id"] = stored
+        original = props.copy()
+        binding = _make_binding_record(device_props=props)
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == expected
+        assert binding.device_props == original
+        repo.release_binding.assert_called_once()
+
+    def test_release_keeps_request_id_stable_across_callers(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        for caller in ("first", "second"):
+            svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        calls = baas.destroy_bot.call_args_list
+        assert [c.kwargs["operator"] for c in calls] == ["first", "second"]
+        assert calls[0].kwargs["request_id"] == calls[1].kwargs["request_id"]
+
+    def test_release_without_identity_records_physical_failure(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.side_effect = BaasServiceError("operator must not be empty")
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(""))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == ""
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    @pytest.mark.parametrize("props", [None, []])
+    def test_malformed_legacy_props_preserve_release_failure_handling(self, props):
+        binding = _make_binding_record()
+        binding.device_props = props
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        svc = _make_service(repo=repo)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator())
+
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    def test_stored_release_operator_is_not_trusted(self):
+        binding = _make_binding_record(device_props={"bot_uuid": "BOT-1", "_release_operator": "forged"})
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator("caller"))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == "caller"
+        assert binding.device_props["_release_operator"] == "forged"
+
     def test_destroy_bot_called_with_bot_uuid_from_props(self):
         baas = MagicMock()
         svc = _make_service(baas_service=baas)

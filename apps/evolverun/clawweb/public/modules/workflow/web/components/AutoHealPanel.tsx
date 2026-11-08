@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from 'react'
-import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy, useAutoHealRun } from '@avernet/workflow/web/api/hooks'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '@avernet/workflow/web/api/hooks'
+import { useAutoHealSourceRun } from '../api/useAutoHealSourceRun'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion } from '@avernet/clawweb-shared/web/types'
 import { formatDuration } from '@avernet/workflow/web/utils/time'
 
-type Phase = 'idle' | 'diagnosing' | 'diagnosed' | 'saving' | 'saved' | 'deploying' | 'deployed' | 'running' | 'error'
+type Phase = 'idle' | 'diagnosing' | 'diagnosed' | 'saving' | 'saved' | 'deploying' | 'deployed' | 'running' | 'run-error' | 'error'
 
 interface AutoHealPanelProps {
   run: FlowRun
@@ -27,7 +28,10 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   const diagnoseMutation = useAutoHealDiagnose()
   const saveMutation = useAutoHealSave()
   const deployMutation = useAutoHealDeploy()
-  const runMutation = useAutoHealRun()
+  const runMutation = useAutoHealSourceRun()
+  // Block same-tick double clicks before mutation state can rerender the buttons.
+  const deployInFlight = useRef(false)
+  const runInFlight = useRef(false)
 
   // Close on Escape
   useEffect(() => {
@@ -39,7 +43,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   }, [onClose])
 
   const handleDiagnose = useCallback(() => {
-    if (!run.flow_id) {
+    if (!run.flow_id?.trim()) {
       setPhase('error')
       setErrorMessage('运行记录缺少 flow_id，无法发起诊断。请刷新页面后重试。')
       return
@@ -109,9 +113,41 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
     )
   }, [diagnosisResult, saveMutation])
 
-  const handleDeploy = useCallback(() => {
-    if (!diagnosisResult) return
+  const handleRerun = useCallback(() => {
+    if (!diagnosisResult || runInFlight.current) return
+    if (!run.flow_id?.trim()) {
+      setPhase('run-error')
+      setErrorMessage('运行记录缺少 flow_id，无法重新运行。请刷新页面后重试。')
+      return
+    }
 
+    runInFlight.current = true
+    setPhase('running')
+    setErrorMessage(null)
+
+    runMutation.mutate(
+      { workflowId: diagnosisResult.workflowId, sourceFlowId: run.flow_id },
+      {
+        onSuccess: () => {
+          runInFlight.current = false
+          setPhase('idle')
+          setDiagnosisResult(null)
+          setCustomPrompt('')
+          onRerunComplete?.()
+        },
+        onError: (err) => {
+          runInFlight.current = false
+          setPhase('run-error')
+          setErrorMessage(extractErrorMessage(err, '重新运行失败'))
+        },
+      },
+    )
+  }, [diagnosisResult, run.flow_id, runMutation, onRerunComplete])
+
+  const handleDeploy = useCallback(() => {
+    if (!diagnosisResult || deployInFlight.current) return
+
+    deployInFlight.current = true
     setPhase('deploying')
     setErrorMessage(null)
 
@@ -121,46 +157,23 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
         packId: saveResult?.packId ?? null,
         diagnosisId: diagnosisResult.diagnosisId,
         note: 'auto-heal deploy',
-        autoRun,
+        // The legacy server callback cannot resolve the original run's bot/lifecycle.
+        autoRun: false,
       },
       {
-        onSuccess: (deployResult) => {
-          if (autoRun && deployResult.runId) {
-            setPhase('running')
-          } else {
-            setPhase('deployed')
-          }
+        onSuccess: () => {
+          deployInFlight.current = false
+          setPhase('deployed')
+          if (autoRun) handleRerun()
         },
         onError: (err) => {
+          deployInFlight.current = false
           setPhase('error')
           setErrorMessage(extractErrorMessage(err, '部署修复失败'))
         },
       },
     )
-  }, [diagnosisResult, saveResult, deployMutation, autoRun])
-
-  const handleRerun = useCallback(() => {
-    if (!diagnosisResult) return
-
-    setPhase('running')
-    setErrorMessage(null)
-
-    runMutation.mutate(
-      { workflowId: diagnosisResult.workflowId },
-      {
-        onSuccess: () => {
-          setPhase('idle')
-          setDiagnosisResult(null)
-          setCustomPrompt('')
-          onRerunComplete?.()
-        },
-        onError: (err) => {
-          setPhase('error')
-          setErrorMessage(extractErrorMessage(err, '重新运行失败'))
-        },
-      },
-    )
-  }, [diagnosisResult, runMutation, onRerunComplete])
+  }, [diagnosisResult, saveResult, deployMutation, autoRun, handleRerun])
 
   const handleReset = useCallback(() => {
     setPhase('idle')
@@ -186,7 +199,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* Error */}
-          {phase === 'error' && errorMessage && (
+          {(phase === 'error' || phase === 'run-error') && errorMessage && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
               <div className="flex items-center gap-2 mb-1">
                 <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
@@ -215,7 +228,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
           {phase === 'diagnosing' && <DiagnosingContent elapsed={diagnosingElapsed} />}
 
           {/* Diagnosed: Results */}
-          {(phase === 'diagnosed' || phase === 'saving' || phase === 'saved' || phase === 'deploying' || phase === 'deployed' || phase === 'error') && diagnosisResult && (
+          {(phase === 'diagnosed' || phase === 'saving' || phase === 'saved' || phase === 'deploying' || phase === 'deployed' || phase === 'run-error' || phase === 'error') && diagnosisResult && (
             <DiagnosisResults
               result={diagnosisResult}
               diffExpanded={diffExpanded}
@@ -272,7 +285,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
           )}
 
           {/* Deployed: Success state */}
-          {phase === 'deployed' && (
+          {(phase === 'deployed' || phase === 'run-error') && (
             <div className="rounded-lg border border-green-200 bg-green-50 px-5 py-4 text-center">
               <svg className="mx-auto mb-2 h-10 w-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -350,9 +363,9 @@ function PanelHeader({ run, onClose }: { run: FlowRun; onClose: () => void }) {
 
 function PhaseIndicator({ phase }: { phase: Phase }) {
   const steps = [
-    { key: 'diagnose', label: '诊断', active: phase === 'diagnosing', done: ['diagnosed', 'saving', 'saved', 'deploying', 'deployed', 'running'].includes(phase) },
-    { key: 'save', label: '保存', active: phase === 'saving', done: ['saved', 'deploying', 'deployed', 'running'].includes(phase) },
-    { key: 'deploy', label: '部署', active: phase === 'deploying', done: ['deployed', 'running'].includes(phase) },
+    { key: 'diagnose', label: '诊断', active: phase === 'diagnosing', done: ['diagnosed', 'saving', 'saved', 'deploying', 'deployed', 'running', 'run-error'].includes(phase) },
+    { key: 'save', label: '保存', active: phase === 'saving', done: ['saved', 'deploying', 'deployed', 'running', 'run-error'].includes(phase) },
+    { key: 'deploy', label: '部署', active: phase === 'deploying', done: ['deployed', 'running', 'run-error'].includes(phase) },
     { key: 'rerun', label: '重跑', active: phase === 'running', done: phase === 'running' },
   ]
 
@@ -374,7 +387,7 @@ function PhaseIndicator({ phase }: { phase: Phase }) {
           {i < steps.length - 1 && <span className="mx-1 text-gray-300">→</span>}
         </span>
       ))}
-      {phase === 'error' && <span className="ml-auto font-medium text-red-500">失败</span>}
+      {(phase === 'error' || phase === 'run-error') && <span className="ml-auto font-medium text-red-500">{phase === 'run-error' ? '运行失败' : '失败'}</span>}
       {activeLabel && <span className="ml-auto font-medium text-blue-600">{activeLabel}</span>}
     </div>
   )
@@ -755,7 +768,7 @@ function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDepl
     <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          {(phase === 'diagnosed' || phase === 'deployed' || phase === 'error') && (
+          {(phase === 'diagnosed' || phase === 'deployed' || phase === 'run-error' || phase === 'error') && (
             <button
               onClick={onReset}
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
@@ -808,7 +821,7 @@ function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDepl
           )}
 
           {/* Rerun button */}
-          {phase === 'deployed' && (
+          {(phase === 'deployed' || phase === 'run-error') && (
             <button
               onClick={onRerun}
               disabled={isRunning}

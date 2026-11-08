@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_app_group_context::GroupContextApplicationServiceImpl;
-use bcs_domain::{GroupContextEntry, GroupContextEntryMeta, GroupContextPermission, GroupContextPolicy, ScopeLevel};
+use bcs_domain::{
+    GroupContextEntry, GroupContextEntryMeta, GroupContextOwners, GroupContextPermission,
+    GroupContextPolicy, ScopeLevel,
+};
 use bcs_group_context_store::{
     GroupContextRepo, GroupContextStoreError, MemoryGroupContextRepo, NewGroupContextEntry,
     StoreResult,
@@ -12,10 +15,11 @@ use bcs_service_api::application::v1::{
     GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
 };
 use chrono::{Duration, TimeZone, Utc};
+use serde_json::json;
 
 fn ctx() -> GroupContextRequestContext {
     GroupContextRequestContext {
-        group_id: "game-room-7".into(),
+        group_id: Some("game-room-7".into()),
         session_id: Some("sess-001".into()),
         round_id: Some("round-003".into()),
     }
@@ -23,6 +27,10 @@ fn ctx() -> GroupContextRequestContext {
 
 fn policy(users: &[&str]) -> GroupContextPolicy {
     GroupContextPolicy::users(users.iter().copied())
+}
+
+fn owners(user_ids: impl IntoIterator<Item = impl Into<String>>) -> GroupContextOwners {
+    GroupContextOwners::new(user_ids)
 }
 
 fn service(repo: Arc<dyn GroupContextRepo>) -> GroupContextApplicationServiceImpl {
@@ -93,7 +101,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
         scope_level: ScopeLevel::Session,
         content: "张三出局".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -116,7 +124,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
             scope_level: ScopeLevel::Session,
             content: "李四出局".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -126,7 +134,276 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
 }
 
 #[tokio::test]
-async fn add_validates_content_collect_from_actor_and_required_scope_params() {
+async fn add_session_and_round_scope_do_not_require_group_id() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    for (name, scope_level, expected_scope) in [
+        ("session_context", ScopeLevel::Session, "sess-001"),
+        ("round_context", ScopeLevel::Round, "round-003"),
+    ] {
+        let mut request_context = ctx();
+        request_context.group_id = None;
+
+        app.add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context,
+            name: name.into(),
+            scope_level,
+            content: "ok".into(),
+            visible_to: policy(&[]),
+            collect_from: Some(policy(&["judge_bot"])),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("selected scope boundary is enough");
+
+        let active = repo
+            .get_active(name, expected_scope)
+            .await
+            .expect("store ok")
+            .expect("active row");
+        assert_eq!(active.scope_level, scope_level);
+        assert_eq!(active.scope, expected_scope);
+    }
+}
+
+#[tokio::test]
+async fn add_collect_from_is_optional_empty_and_independent_of_owner_authority() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    for (name, collect_from) in [
+        ("missing_collect", None),
+        ("empty_collect", Some(policy(&[]))),
+    ] {
+        app.add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: name.into(),
+            scope_level: ScopeLevel::Group,
+            content: "owner-only v1".into(),
+            visible_to: policy(&[]),
+            collect_from,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("add does not require the creator in collect_from");
+
+        let active = repo
+            .get_active(name, "game-room-7")
+            .await
+            .expect("store ok")
+            .expect("active row");
+        assert_eq!(active.collect_from, policy(&[]));
+        assert_eq!(active.owners, owners(["judge_bot"]));
+
+        app.update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: name.into(),
+            scope_level: ScopeLevel::Group,
+            content: Some("owner-only v2".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("owner remains writable without collect_from membership");
+
+        let active = repo
+            .get_active(name, "game-room-7")
+            .await
+            .expect("store ok")
+            .expect("updated row");
+        assert_eq!(active.collect_from, policy(&[]));
+        assert_eq!(active.owners, owners(["judge_bot"]));
+        assert_eq!(active.content, "owner-only v2");
+    }
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "delegated_writer".into(),
+        scope_level: ScopeLevel::Group,
+        content: "delegated v1".into(),
+        visible_to: policy(&[]),
+        collect_from: Some(policy(&["other_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("creator may add while delegating collect_from to another bot");
+
+    app.update(UpdateGroupContext {
+        actor_id: "other_bot".into(),
+        request_context: ctx(),
+        name: "delegated_writer".into(),
+        scope_level: ScopeLevel::Group,
+        content: Some("delegated v2".into()),
+        change_reason: Some("listed writer".into()),
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("explicit collect_from member keeps write access");
+
+    let delegated = repo
+        .get_active("delegated_writer", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("delegated row");
+    assert_eq!(delegated.content, "delegated v2");
+    assert_eq!(delegated.collect_from, policy(&["other_bot"]));
+    assert_eq!(delegated.owners, owners(["judge_bot"]));
+}
+
+#[tokio::test]
+async fn add_reports_missing_scope_boundary_with_scope_level() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    for (scope_level, mut request_context, expected_message) in [
+        (
+            ScopeLevel::Group,
+            ctx(),
+            "param groupId is required when scope_level=group",
+        ),
+        (
+            ScopeLevel::Session,
+            ctx(),
+            "param sessionId is required when scope_level=session",
+        ),
+        (
+            ScopeLevel::Round,
+            ctx(),
+            "param roundId is required when scope_level=round",
+        ),
+    ] {
+        request_context.group_id = None;
+        match scope_level {
+            ScopeLevel::Group => {
+                request_context.session_id = None;
+                request_context.round_id = None;
+            }
+            ScopeLevel::Session => request_context.session_id = None,
+            ScopeLevel::Round => request_context.round_id = None,
+        }
+
+        let error = app
+            .add(AddGroupContext {
+                actor_id: "judge_bot".into(),
+                request_context,
+                name: "boundary".into(),
+                scope_level,
+                content: "ok".into(),
+                visible_to: policy(&[]),
+                collect_from: Some(policy(&["judge_bot"])),
+                valid_from: None,
+                valid_to: None,
+            })
+            .await
+            .expect_err("selected boundary is required");
+        assert!(
+            error.to_string().contains(&expected_message),
+            "error: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn update_list_and_get_use_selected_scope_without_group_id() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    for (scope_level, request_context, expected_scope) in [
+        (
+            ScopeLevel::Session,
+            GroupContextRequestContext {
+                group_id: None,
+                session_id: Some("sess-001".into()),
+                round_id: None,
+            },
+            "sess-001",
+        ),
+        (
+            ScopeLevel::Round,
+            GroupContextRequestContext {
+                group_id: None,
+                session_id: None,
+                round_id: Some("round-003".into()),
+            },
+            "round-003",
+        ),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: request_context.clone(),
+            name: "selected_scope".into(),
+            scope_level,
+            content: "initial".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed succeeds");
+
+        app.update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: request_context.clone(),
+            name: "selected_scope".into(),
+            scope_level,
+            content: Some("updated".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("selected scope boundary is enough for update");
+
+        let get = app
+            .get(GetGroupContext {
+                actor_id: "张三".into(),
+                request_context: request_context.clone(),
+                name: "selected_scope".into(),
+                scope_levels: None,
+                limit: None,
+            })
+            .await
+            .expect("selected scope boundary is enough for get");
+        assert_eq!(get.items.len(), 1);
+        assert_eq!(get.items[0].content, "updated");
+
+        let list = app
+            .list(ListGroupContexts {
+                actor_id: "张三".into(),
+                request_context: request_context.clone(),
+                scope_levels: Some(vec![scope_level]),
+            })
+            .await
+            .expect("selected scope boundary is enough for list");
+        assert_eq!(
+            list.contexts
+                .iter()
+                .map(|item| item.scope.as_str())
+                .collect::<Vec<_>>(),
+            vec![expected_scope]
+        );
+    }
+}
+
+#[tokio::test]
+async fn add_validates_content_and_required_scope_params() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
 
     let error = app
@@ -137,7 +414,7 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
             scope_level: ScopeLevel::Group,
             content: "x".repeat(4097),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -148,40 +425,8 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
     let error = app
         .add(AddGroupContext {
             actor_id: "judge_bot".into(),
-            request_context: ctx(),
-            name: "empty_collect".into(),
-            scope_level: ScopeLevel::Group,
-            content: "ok".into(),
-            visible_to: policy(&[]),
-            collect_from: policy(&[]),
-            valid_from: None,
-            valid_to: None,
-        })
-        .await
-        .expect_err("empty collect_from rejected");
-    assert_code(error, "invalid_param");
-
-    let error = app
-        .add(AddGroupContext {
-            actor_id: "other_bot".into(),
-            request_context: ctx(),
-            name: "not_writer".into(),
-            scope_level: ScopeLevel::Group,
-            content: "ok".into(),
-            visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
-            valid_from: None,
-            valid_to: None,
-        })
-        .await
-        .expect_err("actor must be collect_from member");
-    assert_code(error, "permission_denied");
-
-    let error = app
-        .add(AddGroupContext {
-            actor_id: "judge_bot".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -189,7 +434,7 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
             scope_level: ScopeLevel::Session,
             content: "ok".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -207,12 +452,16 @@ fn add_for_validation(
 ) -> AddGroupContext {
     AddGroupContext {
         actor_id: actor_id.into(),
-        request_context: GroupContextRequestContext { group_id: group_id.into(), session_id: Some("sess-001".into()), round_id: Some("round-003".into()) },
+        request_context: GroupContextRequestContext {
+            group_id: Some(group_id.to_string()),
+            session_id: Some("sess-001".into()),
+            round_id: Some("round-003".into()),
+        },
         name: name.into(),
         scope_level: ScopeLevel::Group,
         content: "ok".into(),
         visible_to,
-        collect_from,
+        collect_from: Some(collect_from),
         valid_from: None,
         valid_to: None,
     }
@@ -318,6 +567,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
             change_reason: None,
             visible_to: Some(oversized_policy()),
             collect_from: Some(policy(&["judge_bot"])),
+            owners: None,
             valid_from: None,
             valid_to: None,
         })
@@ -335,6 +585,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
             change_reason: None,
             visible_to: None,
             collect_from: Some(oversized_policy()),
+            owners: None,
             valid_from: None,
             valid_to: None,
         })
@@ -361,7 +612,7 @@ async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy()
         scope_level: ScopeLevel::Session,
         content: "第一轮".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -382,6 +633,7 @@ async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy()
         change_reason: Some("第一轮投票".into()),
         visible_to: None,
         collect_from: None,
+        owners: None,
         valid_from: None,
         valid_to: None,
     })
@@ -426,7 +678,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
         scope_level: ScopeLevel::Session,
         content: "默认有效期".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -451,7 +703,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
         scope_level: ScopeLevel::Session,
         content: "显式有效期".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(explicit_from),
         valid_to: Some(explicit_to),
     })
@@ -481,7 +733,7 @@ async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_v
         scope_level: ScopeLevel::Session,
         content: "原内容".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(original_from),
         valid_to: Some(original_to),
     })
@@ -498,6 +750,7 @@ async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_v
         change_reason: None,
         visible_to: None,
         collect_from: None,
+        owners: None,
         valid_from: None,
         valid_to: None,
     })
@@ -526,6 +779,7 @@ async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_v
         change_reason: Some("只调整业务有效期".into()),
         visible_to: None,
         collect_from: None,
+        owners: None,
         valid_from: Some(changed_from),
         valid_to: Some(changed_to),
     })
@@ -556,7 +810,7 @@ async fn get_and_list_do_not_filter_by_business_valid_to() {
         scope_level: ScopeLevel::Session,
         content: "业务有效期已过但仍是当前版本".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(past_from),
         valid_to: Some(past_to),
     })
@@ -607,6 +861,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
             change_reason: None,
             visible_to: None,
             collect_from: None,
+            owners: None,
             valid_from: None,
             valid_to: None,
         })
@@ -621,7 +876,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
         scope_level: ScopeLevel::Session,
         content: "old".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -637,6 +892,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
             change_reason: None,
             visible_to: None,
             collect_from: None,
+            owners: None,
             valid_from: None,
             valid_to: None,
         })
@@ -654,7 +910,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
             scope_level: ScopeLevel::Session,
             content: "old".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -670,6 +926,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
             change_reason: None,
             visible_to: None,
             collect_from: None,
+            owners: None,
             valid_from: None,
             valid_to: None,
         })
@@ -690,7 +947,7 @@ async fn add_update_and_systemset_record_version_creators() {
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot", "admin"]),
+        collect_from: Some(policy(&["judge_bot", "admin"])),
         valid_from: None,
         valid_to: None,
     })
@@ -712,6 +969,7 @@ async fn add_update_and_systemset_record_version_creators() {
         change_reason: None,
         visible_to: None,
         collect_from: None,
+        owners: None,
         valid_from: None,
         valid_to: None,
     })
@@ -749,6 +1007,528 @@ async fn add_update_and_systemset_record_version_creators() {
             .collect::<Vec<_>>(),
         vec!["judge_bot", "admin", "system"]
     );
+}
+
+#[tokio::test]
+async fn add_defaults_creator_owner_and_ignores_body_owners() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let command: AddGroupContext = serde_json::from_value(json!({
+        "actor_id": "judge_bot",
+        "request_context": {
+            "group_id": "game-room-7",
+            "session_id": "sess-001",
+            "round_id": "round-003",
+        },
+        "name": "player_state",
+        "scope_level": "session",
+        "content": "v1",
+        "visible_to": {"userIds": []},
+        "collect_from": {"userIds": ["judge_bot"]},
+        "owners": {"userIds": ["attacker"]}
+    }))
+    .expect("unknown add body field is ignored by serde");
+
+    app.add(command).await.expect("add succeeds");
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.creator, "judge_bot");
+    assert_eq!(active.owners, owners(["judge_bot"]));
+}
+
+#[tokio::test]
+async fn owner_can_update_all_fields_without_collect_from_membership() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v1".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: Some(policy(&["judge_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v2".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: Some(policy(&["other_bot"])),
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("owner removes self from collect_from");
+
+    let valid_from = Utc.with_ymd_and_hms(2026, 10, 19, 8, 0, 0).unwrap();
+    let valid_to = Utc.with_ymd_and_hms(2026, 10, 20, 8, 0, 0).unwrap();
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v3".into()),
+        change_reason: Some("owner updates full row".into()),
+        visible_to: Some(policy(&["张三", "李四"])),
+        collect_from: Some(policy(&["other_bot"])),
+        owners: Some(owners(["judge_bot", "admin"])),
+        valid_from: Some(valid_from),
+        valid_to: Some(valid_to),
+    })
+    .await
+    .expect("owner is not required to be in collect_from");
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "v3");
+    assert_eq!(active.visible_to, policy(&["张三", "李四"]));
+    assert_eq!(active.collect_from, policy(&["other_bot"]));
+    assert_eq!(active.owners, owners(["judge_bot", "admin"]));
+    assert_eq!(active.valid_from, valid_from);
+    assert_eq!(active.valid_to, Some(valid_to));
+}
+
+#[tokio::test]
+async fn w_only_non_owner_updates_content_and_validity_but_not_management_fields() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v1".into(),
+        visible_to: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot", "other_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    let valid_from = Utc.with_ymd_and_hms(2026, 10, 19, 8, 0, 0).unwrap();
+    let valid_to = Utc.with_ymd_and_hms(2026, 10, 20, 8, 0, 0).unwrap();
+    app.update(UpdateGroupContext {
+        actor_id: "other_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("w-only update".into()),
+        change_reason: Some("normal writer".into()),
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: Some(valid_from),
+        valid_to: Some(valid_to),
+    })
+    .await
+    .expect("W-only actor keeps content and validity access");
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "w-only update");
+    assert_eq!(active.owners, owners(["judge_bot"]));
+
+    for update in [
+        UpdateGroupContext {
+            actor_id: "other_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_level: ScopeLevel::Session,
+            content: None,
+            change_reason: Some("change reason is only audit metadata".into()),
+            visible_to: Some(policy(&["other_bot"])),
+            collect_from: None,
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        },
+        UpdateGroupContext {
+            actor_id: "other_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_level: ScopeLevel::Session,
+            content: None,
+            change_reason: Some("change reason is only audit metadata".into()),
+            visible_to: None,
+            collect_from: Some(policy(&["other_bot"])),
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        },
+        UpdateGroupContext {
+            actor_id: "other_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_level: ScopeLevel::Session,
+            content: None,
+            change_reason: Some("change reason cannot bypass owner field policy".into()),
+            visible_to: None,
+            collect_from: None,
+            owners: Some(owners(["other_bot"])),
+            valid_from: None,
+            valid_to: None,
+        },
+    ] {
+        let error = app
+            .update(update)
+            .await
+            .expect_err("W-only actor cannot modify management fields");
+        assert_code(error, "permission_denied");
+    }
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.visible_to, policy(&["judge_bot"]));
+    assert_eq!(active.collect_from, policy(&["judge_bot", "other_bot"]));
+    assert_eq!(active.owners, owners(["judge_bot"]));
+}
+
+#[tokio::test]
+async fn ownership_transfer_takes_effect_immediately() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v1".into(),
+        visible_to: policy(&[]),
+        collect_from: Some(policy(&["judge_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v2".into()),
+        change_reason: Some("transfer ownership".into()),
+        visible_to: None,
+        collect_from: Some(policy(&["judge_bot"])),
+        owners: Some(owners(["admin"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("current owner transfers ownership");
+
+    let transferred = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("transferred active row");
+    assert_eq!(transferred.owners, owners(["admin"]));
+    assert!(transferred.owners.contains("admin"));
+    assert!(!transferred.owners.contains("judge_bot"));
+
+    app.update(UpdateGroupContext {
+        actor_id: "admin".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v3 by owner outside collect_from".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: Some(policy(&["judge_bot"])),
+        owners: Some(owners(["admin"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("new owner is active immediately");
+
+    let error = app
+        .update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_level: ScopeLevel::Session,
+            content: None,
+            change_reason: None,
+            visible_to: Some(policy(&["judge_bot"])),
+            collect_from: None,
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("old owner immediately loses management rights");
+    assert_code(error, "permission_denied");
+
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v4 by retained normal writer".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("old owner retains ordinary W policy only");
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "v4 by retained normal writer");
+    assert_eq!(active.owners, owners(["admin"]));
+}
+
+#[tokio::test]
+async fn update_validates_requested_owners() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v1".into(),
+        visible_to: policy(&[]),
+        collect_from: Some(policy(&["judge_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    for (owners, expected_code) in [
+        (
+            GroupContextOwners::new(Vec::<String>::new()),
+            "invalid_param",
+        ),
+        (owners(["   "]), "invalid_param"),
+        (owners(["a".repeat(256)]), "payload_too_large"),
+        (
+            GroupContextOwners::new((0..240).map(|index| format!("owner-{index:03}-99999999"))),
+            "payload_too_large",
+        ),
+    ] {
+        let error = app
+            .update(UpdateGroupContext {
+                actor_id: "judge_bot".into(),
+                request_context: ctx(),
+                name: "player_state".into(),
+                scope_level: ScopeLevel::Session,
+                content: None,
+                change_reason: None,
+                visible_to: None,
+                collect_from: None,
+                owners: Some(owners),
+                valid_from: None,
+                valid_to: None,
+            })
+            .await
+            .expect_err("invalid owners rejected");
+        assert_code(error, expected_code);
+    }
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.owners, owners(["judge_bot"]));
+}
+
+#[tokio::test]
+async fn update_and_systemset_preserve_legacy_empty_owners() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let now = Utc
+        .timestamp_millis_opt(1_728_374_400_000)
+        .single()
+        .unwrap();
+    repo.create_active(NewGroupContextEntry {
+        context_id: "ctx-legacy-empty-owners".into(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        scope: "sess-001".into(),
+        content: "v1".into(),
+        creator: "writer-a".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["writer-a"]),
+        owners: owners(Vec::<String>::new()),
+        supersedes: None,
+        change_reason: None,
+        valid_from: now,
+        valid_to: None,
+        tx_time: now,
+    })
+    .await
+    .expect("seed migrated row with NULL owners");
+
+    let before_update = app
+        .list(ListGroupContexts {
+            actor_id: "writer-a".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("list legacy empty owners");
+    assert_eq!(before_update.contexts.len(), 1);
+    assert_eq!(
+        before_update.contexts[0].permission,
+        GroupContextPermission::WR
+    );
+
+    app.update(UpdateGroupContext {
+        actor_id: "writer-a".into(),
+        request_context: ctx(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v2".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("update preserves legacy empty owners");
+
+    let after_update = repo
+        .get_active("legacy_empty_owners", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(after_update.content, "v2");
+    assert_eq!(after_update.owners, owners(Vec::<String>::new()));
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v3".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["writer-a"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("systemset preserves legacy empty owners");
+
+    let after_systemset = repo
+        .get_active("legacy_empty_owners", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(after_systemset.content, "v3");
+    assert_eq!(after_systemset.owners, owners(Vec::<String>::new()));
+}
+
+#[tokio::test]
+async fn systemset_preserves_existing_owners_and_defaults_new_owner_to_system() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "system_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "system v1".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("system create succeeds");
+    let first = repo
+        .get_active("system_rule", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("first active row");
+    assert_eq!(first.owners, owners(["system"]));
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "system_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "system v2".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("systemset does not require system to be in collect_from");
+    let second = repo
+        .get_active("system_rule", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("second active row");
+    assert_eq!(second.owners, owners(["system"]));
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "owned_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "human v1".into(),
+        visible_to: policy(&[]),
+        collect_from: Some(policy(&["judge_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "owned_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "human v2 by system".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("systemset bypasses owner and collect_from authorization");
+
+    let active = repo
+        .get_active("owned_rule", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "human v2 by system");
+    assert_eq!(active.owners, owners(["judge_bot"]));
 }
 
 #[tokio::test]
@@ -888,6 +1668,95 @@ async fn list_filters_visible_or_writable_and_labels_permissions() {
 }
 
 #[tokio::test]
+async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "owner-managed state".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: Some(policy(&["judge_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("owner-managed state".into()),
+        change_reason: None,
+        visible_to: Some(policy(&["张三"])),
+        collect_from: Some(policy(&["张三"])),
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("owner updates policy without being listed in it");
+
+    let owner_list = app
+        .list(ListGroupContexts {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("owner list succeeds");
+    let owner_context = owner_list
+        .contexts
+        .iter()
+        .find(|item| item.name == "player_state")
+        .expect("owner is not filtered by visible_to or collect_from");
+    assert_eq!(owner_context.permission, GroupContextPermission::WRO);
+    let encoded_list = serde_json::to_value(&owner_list).expect("list response serializes");
+    assert!(!encoded_list.to_string().contains("\"owners\""));
+
+    let owner_get = app
+        .get(GetGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("owner get bypasses visible_to");
+    assert_eq!(owner_get.items.len(), 1);
+    assert_eq!(owner_get.items[0].content, "owner-managed state");
+    assert_eq!(owner_get.items[0].visible_to, Some(policy(&["张三"])));
+    assert_eq!(owner_get.items[0].collect_from, Some(policy(&["张三"])));
+    assert_eq!(owner_get.items[0].owners, Some(owners(["judge_bot"])));
+    let encoded_owner_get = serde_json::to_value(&owner_get).expect("owner get serializes");
+    assert_eq!(
+        encoded_owner_get["items"][0]["owners"],
+        serde_json::json!({"userIds": ["judge_bot"]})
+    );
+
+    let reader_get = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("ordinary reader succeeds");
+    assert_eq!(reader_get.items.len(), 1);
+    assert_eq!(reader_get.items[0].visible_to, None);
+    assert_eq!(reader_get.items[0].collect_from, None);
+    assert_eq!(reader_get.items[0].owners, None);
+    let encoded_reader_get = serde_json::to_value(&reader_get).expect("reader get serializes");
+    assert!(encoded_reader_get.to_string().find("\"owners\"").is_none());
+}
+
+#[tokio::test]
 async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
     for (scope_level, content) in [
@@ -913,7 +1782,7 @@ async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
         .get(GetGroupContext {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -930,7 +1799,7 @@ async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
         .get(GetGroupContext {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: Some("sess-001".into()),
                 round_id: None,
             },
@@ -982,7 +1851,7 @@ async fn list_without_scope_levels_queries_only_deepest_supplied_scope() {
         .list(ListGroupContexts {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: None,
                 round_id: None,
             },
@@ -1003,7 +1872,7 @@ async fn list_without_scope_levels_queries_only_deepest_supplied_scope() {
         .list(ListGroupContexts {
             actor_id: "张三".into(),
             request_context: GroupContextRequestContext {
-                group_id: "game-room-7".into(),
+                group_id: Some("game-room-7".into()),
                 session_id: Some("sess-001".into()),
                 round_id: None,
             },

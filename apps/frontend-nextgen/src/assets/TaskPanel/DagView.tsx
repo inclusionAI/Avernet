@@ -42,7 +42,11 @@ export const DagView: React.FC<{
   /** 当前已下钻副屏的节点 id(用于高亮) */
   drilledNodeId?: string | null;
   onViewNodeDetail?: (node: DagNodeView) => void;
-}> = ({ dagNodes: propNodes, dagEdges, selectedNodeId, drilledNodeId, onViewNodeDetail }) => {
+  /** V2:点节点 = 选中(优先于 onViewNodeDetail 的旧抽屉语义,由 L1 传入) */
+  onNodeClick?: (nodeId: string) => void;
+  /** V2:下钻热区回调(仅 dagNodes.drillable 节点渲染热区) */
+  onNodeDrill?: (nodeId: string) => void;
+}> = ({ dagNodes: propNodes, dagEdges, selectedNodeId, drilledNodeId, onViewNodeDetail, onNodeClick, onNodeDrill }) => {
   const [scale, setScale] = useState(1);
   // pan 仅表示用户偏移；居中由 render 时的 base(view.w/2, TOP_BAND) 承担。
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -240,13 +244,15 @@ export const DagView: React.FC<{
   const handleMouseUp = useCallback(() => {
     const pointer = nodePointerRef.current;
     if (pointer && !pointer.moved) {
-      onViewNodeDetail?.(pointer.node);
+      // V2:优先走 selectNode 选中语义;旧消费者(抽屉详情)保持原回调
+      if (onNodeClick) onNodeClick(pointer.node.id);
+      else onViewNodeDetail?.(pointer.node);
     }
     dragRef.current = null;
     nodePointerRef.current = null;
     panRef.current = null;
     setIsDragging(false);
-  }, [onViewNodeDetail]);
+  }, [onViewNodeDetail, onNodeClick]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
@@ -365,8 +371,9 @@ export const DagView: React.FC<{
             const d = sameCol
               ? `M ${x1} ${y1} L ${x2} ${y2}`
               : `M ${x1} ${y1} C ${x1} ${midY} ${x2} ${midY} ${x2} ${y2}`;
-            // 目标节点状态决定连线色
-            const edgeColor = EDGE_COLORS[to.status] ?? C.border;
+            // 目标节点状态决定连线色;V2 边语义(rework/split_work)优先为 warning 虚线 + reason title(spec §3.3)
+            const isSemantic = e.semantics === 'rework' || e.semantics === 'split_work';
+            const edgeColor = isSemantic ? C.warning : EDGE_COLORS[to.status] ?? C.border;
             const isActive = to.status === 'running';
             return (
               <g key={i}>
@@ -375,11 +382,13 @@ export const DagView: React.FC<{
                   fill="none"
                   stroke={edgeColor}
                   strokeWidth={isActive ? 2 : 1.5}
-                  opacity={to.status === 'pending' ? 0.5 : 0.8}
+                  opacity={isSemantic ? 0.9 : to.status === 'pending' ? 0.5 : 0.8}
                   markerEnd="url(#dag-arrow)"
-                  strokeDasharray={to.status === 'pending' ? '5 3' : undefined}
-                  style={isActive ? { animation: 'dag-flow 1.5s linear infinite' } : undefined}
-                />
+                  strokeDasharray={isSemantic ? '4 3' : to.status === 'pending' ? '5 3' : undefined}
+                  style={isActive && !isSemantic ? { animation: 'dag-flow 1.5s linear infinite' } : undefined}
+                >
+                  {isSemantic && <title>{e.reason ?? e.semantics}</title>}
+                </path>
               </g>
             );
           })}
@@ -399,7 +408,8 @@ export const DagView: React.FC<{
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    onViewNodeDetail?.(n);
+                    if (onNodeClick) onNodeClick(n.id);
+                    else onViewNodeDetail?.(n);
                   }
                 }}
                 style={{ cursor: 'pointer' }}
@@ -468,6 +478,31 @@ export const DagView: React.FC<{
                 >
                   #{n.id.slice(-4)}
                 </text>
+                {/* V2 下钻热区:仅协作群节点(mapper 富化的 drillable)+ 宿主提供回调时渲染(PRD 方案A) */}
+                {n.drillable && onNodeDrill && (
+                  <g
+                    role="button"
+                    aria-label="下钻节点副屏"
+                    style={{ cursor: 'pointer' }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNodeDrill(n.id);
+                    }}
+                  >
+                    <title>下钻节点副屏</title>
+                    <circle cx={n.x + NODE_W - 16} cy={n.y + NODE_H - 14} r={11} fill={C.warning} opacity={0.12} />
+                    <path
+                      d={`M ${n.x + NODE_W - 21} ${n.y + NODE_H - 17} h 4 v 5 h -4 M ${n.x + NODE_W - 20} ${n.y + NODE_H - 18} l -2 -2 h 8 M ${n.x + NODE_W - 12} ${n.y + NODE_H - 20} l 2 -2 v 8`}
+                      stroke={C.warning}
+                      strokeWidth={1.2}
+                      fill="none"
+                    />
+                  </g>
+                )}
               </g>
             );
           })}

@@ -13,6 +13,8 @@ export const monitoringDdl = [
   engine VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
   session_key VARCHAR(1024) DEFAULT NULL COMMENT '上游会话键，无可靠值时为空',
   session_id VARCHAR(255) DEFAULT NULL COMMENT '上游真实Session ID',
+  session_nas_path TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '实际诊断原会话NAS路径，仅内部存储和自愈使用，不返回页面',
+  runtime_identity TEXT DEFAULT NULL COMMENT '完整运行身份JSON，仅内部存储和自愈使用，不返回页面',
   trace_id VARCHAR(255) DEFAULT NULL COMMENT 'AI Vision Trace ID，TE上报必填',
   occurred_at_ms BIGINT DEFAULT NULL COMMENT '会话时间，UTC Unix毫秒，无可靠值时为空',
   diagnosed_at_ms BIGINT NOT NULL COMMENT '最终诊断完成时间，UTC Unix毫秒',
@@ -23,7 +25,8 @@ export const monitoringDdl = [
   business_problem_subtype VARCHAR(128) DEFAULT NULL COMMENT '业务问题子类',
   system_diagnosis TEXT COMMENT '脱敏系统诊断文本，接口最多8000码点',
   business_diagnosis TEXT COMMENT '脱敏业务诊断文本，接口最多8000码点',
-  handler_name VARCHAR(128) DEFAULT NULL COMMENT '可选处理人归属信息，不代表已处理',
+  handler_name VARCHAR(128) DEFAULT NULL COMMENT '诊断时原任务是否完成：COMPLETED已完成，NOT_COMPLETED未完成，NULL未知',
+  self_healing_results MEDIUMTEXT DEFAULT NULL COMMENT '自愈结果JSON数组，按task_id和result_version去重',
   human_intervention BIGINT NOT NULL COMMENT '当前输入是否人工追问重试纠正前序任务：0否1是',
   received_at_ms BIGINT NOT NULL COMMENT '服务端首次接收时间，UTC Unix毫秒',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '数据库行创建时间',
@@ -52,7 +55,7 @@ export const monitoringDdl = [
 export function renderMonitoringDdl(dialect: Dialect): string[] {
   return monitoringDdl.map((ddl) => {
     if (dialect.name === "sqlite") {
-      return dialect.renderDdl(ddl.replace(/CHARACTER SET (?:latin1|utf8mb4) COLLATE (?:latin1_bin|utf8mb4_bin)/g, "COLLATE BINARY"));
+      return dialect.renderDdl(ddl.replace(/MEDIUMTEXT/g, "TEXT").replace(/CHARACTER SET (?:latin1|utf8mb4) COLLATE (?:latin1_bin|utf8mb4_bin)/g, "COLLATE BINARY"));
     }
     if (dialect.name !== "mysql" && dialect.name !== "zdas") throw new Error("Unsupported monitoring DDL dialect");
     // These non-indexed locators must retain the protocol's 255-codepoint capacity.

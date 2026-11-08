@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { classifyResult, writeReports } from './test-reports.mjs';
+import { verifyPackageBoundaries } from './verify-package-boundaries.mjs';
 
 export function workspacePackages(root) {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -63,6 +64,13 @@ export function main(args = process.argv.slice(2)) {
   const root = realpathSync(resolve(rootArg || process.cwd()));
   const packages = selectWorkspacePackages(workspacePackages(root), scope);
   if (!packages.length) throw new Error(`No ${scope} workspace packages found`);
+  if (mode === 'check') {
+    const publicPackages = selectWorkspacePackages(packages, 'public');
+    if (publicPackages.length) {
+      const count = verifyPackageBoundaries(publicPackages);
+      console.log(`[ClawWeb CI] ${count} public package boundaries OK`);
+    }
+  }
   const npm = process.env.npm_execpath;
   if (mode !== 'test') {
     if (!npm) throw new Error('Run build/check through npm run ci:build or ci:check');

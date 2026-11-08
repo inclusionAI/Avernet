@@ -2,6 +2,7 @@
 
 只负责 CRUD 语义，不含 HTTP 相关逻辑。
 """
+from dataclasses import replace
 from injector import inject
 
 from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
@@ -74,6 +75,11 @@ class RenderScreenService(RenderScreenServiceProtocol):
     def authorize_render_screen_bot(self, *, bot_id: str, user_id: str) -> str:
         """Resolve the scope and enforce collaborative access for coding bots."""
         scope = self._resolve_scope(bot_id)
+        bot = self._bot_repo.get_by_id(bot_id)
+        if (bot and bot.get("bot_type") == "service"
+                and str(bot.get("entity_id") or "") == user_id
+                and str(bot.get("owner_id") or "") != user_id):
+            raise PermissionError("无权操作此 Bot 的 CDN 配置")
         if scope == "bot" and not self._bot_has_collaborative_access(bot_id, user_id):
             raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
         return scope
@@ -93,8 +99,14 @@ class RenderScreenService(RenderScreenServiceProtocol):
         if scope == "bot":
             if not self._bot_has_collaborative_access(record.bot_id, user_id):
                 raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {record.bot_id}")
-        elif record.owner_id != user_id:
-            raise PermissionError("无权操作此 Bot 的 CDN 配置")
+        else:
+            bot = self._bot_repo.get_by_id(record.bot_id)
+            expected_owner = record.owner_id
+            if (bot and bot.get("bot_type") == "service"
+                    and record.owner_id == str(bot.get("entity_id") or "")):
+                expected_owner = str(bot.get("owner_id") or "")
+            if expected_owner != user_id:
+                raise PermissionError("无权操作此 Bot 的 CDN 配置")
         return record
 
     def list_render_screens(
@@ -116,7 +128,11 @@ class RenderScreenService(RenderScreenServiceProtocol):
             return self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)
 
         effective_owner_id = owner_id or current_user_id or ""
-        return self._repo.list_by_bot_id(bot_id=bot_id, owner_id=effective_owner_id)
+        records = self._repo.list_by_bot_id(bot_id=bot_id, owner_id=effective_owner_id)
+        if bot and bot.get("bot_type") == "service":
+            return [replace(row, owner_id=str(bot["owner_id"]))
+                    if row.owner_id == str(bot["entity_id"]) else row for row in records]
+        return records
 
     def create_render_screen(
         self,

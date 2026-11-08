@@ -14,7 +14,7 @@ harness reset point with:
                           start_time — defensive; for pending_dispatch_stuck the
                           dwell baseline is the node start_time when available)
       * sla_threshold_ms = effective SLA in ms for timeout-class triggers only:
-                          sla_timeout → 600_000 single_bot / 900_000 coop_group
+                          sla_timeout → 900_000 single_bot / 900_000 coop_group
                           (overridable via execution_config["SLA_TIMEOUT"]);
                           pending_dispatch_stuck → 180_000 (overridable via
                           execution_config["PENDING_TIMEOUT"]);
@@ -24,7 +24,7 @@ harness reset point with:
                           FAILED/RUNNING→PENDING site; pre-increment for harness_max)
 
 Covers (per tasks.md P3 REQ-4):
-    1. SLA-timeout RESET row (single-bot 600s; coop-group 900s) carries
+    1. SLA-timeout RESET row (single-bot 900s; coop-group 900s) carries
        failure_reason-derivable elapsed/threshold.
     2. pending_dispatch_stuck carries the dwell + 180s threshold.
     3. Non-timeout triggers (exec_failed_retry / bbs_lease_expired / harness_max)
@@ -246,7 +246,7 @@ def _set_running_node(svc, task_id, node_id, *, run_mode="single_bot",
 
 
 # ---------------------------------------------------------------------------
-# 1. SLA-timeout RESET row (single-bot 600s, coop-group 900s)
+# 1. SLA-timeout RESET row (single-bot 900s, coop-group 900s)
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +256,7 @@ class TestResetSlaTimeout:
     ``action_result=sla_timeout`` + ``ext_info.{trigger, elapsed_ms,
     sla_threshold_ms, attempts_seen}`` are failure_reason-derivable."""
 
-    def test_single_bot_threshold_is_600s(self):
+    def test_single_bot_threshold_is_900s(self):
         svc = TaskGraphService()
         graph = svc.initialize_graph(_task_info("t1"))
         t0 = int(time.time() * 1000)
@@ -283,7 +283,7 @@ class TestResetSlaTimeout:
         assert rec.attempt == 1  # post-increment (mirrors _log_action RESET attempt)
         info = _ext_info(rec)
         assert info["trigger"] == "sla_timeout"
-        assert info["sla_threshold_ms"] == 600_000  # 600.0s * 1000
+        assert info["sla_threshold_ms"] == 900_000  # 900.0s * 1000
         assert info["attempts_seen"] == 1
         # elapsed_ms ≈ now - start_time (allow generous tolerance for test latency)
         assert info["elapsed_ms"] is not None
@@ -697,9 +697,9 @@ class TestThresholdMirrorLockstep:
         harness = TaskHarness(svc)  # default-constructed (prod wiring)
         cfg = svc._execution_config("t1") or {}
 
-        # SLA: single-bot 600s, coop-group 900s (default constants)
+        # SLA: single-bot 900s, coop-group 900s (default constants)
         assert int(harness._sla_timeout("t1", s_node) * 1000) == \
-            effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 600_000
+            effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 900_000
         assert int(harness._sla_timeout("t1", g_node) * 1000) == \
             effective_sla_threshold_ms(cfg, effective_run_mode(g_node)) == 900_000
         # PENDING: 180s default
@@ -726,7 +726,7 @@ class TestThresholdMirrorLockstep:
         """Known-limitation pin (NOT a desired property): the helpers read
         MODULE constants; a custom-constructed harness reads its injected
         defaults. They DIVERGE — the trajectory would record the module
-        constant (600/180 s), not the harness's actual threshold (10/5 s).
+        constant (900/180 s), not the harness's actual threshold (10/5 s).
         Production harnesses are default-constructed, so this divergence is
         latent today; the patch-carried-seam follow-up removes it by having the
         harness compute the threshold itself. If that follow-up lands, this
@@ -746,8 +746,8 @@ class TestThresholdMirrorLockstep:
         # custom harness applies its injected defaults (10s single / 5s pending)
         assert int(custom._sla_timeout("t1", s_node) * 1000) == 10_000
         assert int(custom._pending_timeout("t1") * 1000) == 5_000
-        # …while the helpers apply the MODULE constants (600s / 180s) → DIVERGE
-        assert effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 600_000
+        # …while the helpers apply the MODULE constants (900s / 180s) → DIVERGE
+        assert effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 900_000
         assert effective_pending_timeout_ms(cfg) == 180_000
         assert effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) != \
             int(custom._sla_timeout("t1", s_node) * 1000)

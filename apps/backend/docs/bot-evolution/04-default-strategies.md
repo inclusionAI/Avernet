@@ -545,7 +545,7 @@ Coupling points found in the code, and what replaces each:
 | --- | --- |
 | Hard-coded `/home/admin/.openclaw/workspace` and `~/.openclaw/agents/*/sessions` | `ctx.workspace` (materialised genome) for edits; `ctx.experience.sessions()` for sessions |
 | `openclaw agent --local --agent …` to run tune/review/judge/bench | `ctx.agents.start()` (the `agents` capability; an operation looked up by id), OpenClaw provider first; bench execution moves to eval bots in the Verification Service |
-| OpenClaw md conventions (SOUL/AGENTS/TOOLS, `skills/skills-local`, `config/mcporter.json`) | Genome genes (`persona`, `skills`, `tools.mcp`); engine projection owns paths |
+| OpenClaw md conventions (SOUL/AGENTS/TOOLS, `skills/skills-local`, `config/mcporter.json`) | Genome genes (`persona`, `skills`, `tools/mcp`); engine projection owns paths |
 | `active_engine='openclaw'`, `bot_type='personal'` filters in `singlebox/bot-runtime.ts` | Binding check: the bot's engine must have providers for everything in `needs`, and be among the `engine` values of the `agents@1` definitions |
 | Direct SQLite reads of Backend tables (`ac_bots`, …) | Genome Registry / Backend APIs |
 | `OPENCLAW_*` env vars in `local-execution.ts` | Configuration loading only (raw environment access belongs in config/bootstrap) |
@@ -673,7 +673,9 @@ persona goes to review (T2). The strategy never uses memory `replace` mode
 
 **Interim until the engine memory projection contract lands (RSI-05).**
 Until engines can project curated memory items, memory evolution is limited
-to a platform-managed persona file (for example `LESSONS.md`). In that
+to a platform-managed persona file (an existing identity type such as
+`KNOWLEDGE.md`; a new `LESSONS.md` would first need the Manifest identity
+whitelist extended, [01-genome.md](01-genome.md) §7). In that
 interim the strategy emits `file.edit` ops on that file instead of
 `memory.*` ops. Those are persona edits, so they are T2 and go to review,
 and the binding must allow them (see open decision DS-5, §14). The strategy
@@ -1031,8 +1033,7 @@ Notable errors (binding check, at configuration time rather than partway
 through a paid run): `422` when the bot's engine has no provider for a
 capability in `needs` (for example ClawEvolve on a non-OpenClaw bot,
 because its agent definitions are OpenClaw only); `422` when
-`allowed_genes` leaves the bot's genome `policy` (locked genes stay
-locked); `412` on a stale `If-Match`.
+`allowed_genes` leaves the bot's genome `policy.mutable_genes`; `412` on a stale `If-Match`.
 
 ### `POST /bots/{bot_id}/evolution/runs`
 
@@ -1422,8 +1423,8 @@ Response:
 ```
 
 Notable errors: `422` when the patch fails the schema, its base is not
-current, or an op touches a gene outside the binding's `allowed_genes` or a
-locked gene.
+current, or an op touches a gene outside the binding's `allowed_genes` or the
+bot's `mutable_genes`, or a pinned item.
 
 ### `GET /evolution/v1/runs/{run}/candidates/{id}`
 
@@ -1712,12 +1713,11 @@ class ConsolidateMemoryStrategy(EvolutionStrategy):
   `BatchRunAnalyzer` / `LessonExpireScheduler` code should be either wired
   into strategies or removed.
 - **DS-5: Interim memory binding.** Before RSI-05, consolidate-memory
-  writes a persona file (`LESSONS.md`), but its binding allows only
+  writes a persona file (for example `KNOWLEDGE.md`), but its binding allows only
   `memory`. Options: allow `persona` for the interim binding (wider than
   needed), or let `allowed_genes` name one item (for example
-  `persona/LESSONS.md`) if the genome policy supports item-level targets.
-  Recommendation: item-level target, if [01-genome.md](01-genome.md) can
-  express it.
+  `persona/KNOWLEDGE.md`). Recommendation: the item-level target, which the
+  gene path grammar supports ([01-genome.md](01-genome.md) §2.1).
 - **DS-6: One ClawEvolve strategy or three.** `bot_evolution`,
   `skill_evolution`, and `skill_hardening` as three registered strategies,
   or one strategy with a flow param? The sources leave both open.

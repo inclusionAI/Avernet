@@ -513,10 +513,12 @@ class MCPConfigService(MCPConfigServiceProtocol):
         engine_type: Optional[str] = None,
         bot_override: dict[str, Any] | None = None,
         user_config_snapshot: dict[str, Any] | None = None,
+        bot_id: str | None = None,
     ) -> tuple[Optional[str], dict[str, str], str, Optional[str]]:
         """根据用户配置与默认值构建合并后的 MCP 同步参数。
 
         返回 (api_key, merged_headers, endpoint_env, transport_protocol)。
+        Bot 投递传入 bot_id；用户级目录预检没有目标 Bot，因此允许省略。
         """
         server_code = mcp_data.get("serverCode") or mcp_data.get("server_code", "")
         _api_key = api_key
@@ -602,6 +604,13 @@ class MCPConfigService(MCPConfigServiceProtocol):
                     if key.lower() != header_name.lower()
                 }
                 merged_headers[header_name] = value
+
+        # Bot context follows every remote endpoint, including custom URLs.
+        run_mode = mcp_data.get("run_mode") or mcp_data.get("runMode", "REMOTE")
+        if bot_id is not None and run_mode != "LOCAL":
+            merged_headers = _merge_headers_by_name(
+                merged_headers, {"X-TC-Bot-Id": bot_id}
+            )
 
         return _api_key, merged_headers, _endpoint_env, _transport_protocol
 

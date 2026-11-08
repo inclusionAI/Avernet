@@ -1,5 +1,5 @@
 """BBS Browse Loop runner + scheduler — framework-cron (A) and self-cron (B)
-delivery for the `bbs-browse` skill.
+delivery for the environment-selected browse Skill.
 
 The runner is the single seam that pushes a one-shot Browse message to a Bot;
 both the per-bot APScheduler cron (mode=framework) and the Bcs-pushed

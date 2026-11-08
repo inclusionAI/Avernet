@@ -1,5 +1,7 @@
+import { appendRecoveryResult } from "./monitoring-recovery-results.js";
+import type { MonitoringRecoveryResult } from "../services/monitoring/contracts.js";
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
-import { CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
+import { CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
 import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
@@ -8,11 +10,11 @@ import { target, targetKey, targetParams, targetWhere } from '../services/monito
 import { readMonitoringSummaries } from './monitoring-summaries.js';
 const fields = {
   entityId: "entity_id", env: "env", schemaVersion: "schema_version", eventId: "event_id", botId: "bot_id", engine: "engine", sessionKey: "session_key",
-  sessionId: "session_id", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
+  sessionId: "session_id", sessionNasPath: "session_nas_path", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
   decision: "decision", tcFaultLabel: "tc_fault_label", confidence: "confidence_json",
   businessProblemCategory: "business_problem_category", businessProblemSubtype: "business_problem_subtype",
   systemDiagnosis: "system_diagnosis", businessDiagnosis: "business_diagnosis", handlerName: "handler_name",
-  humanIntervention: "human_intervention",
+  humanIntervention: "human_intervention", runtimeIdentity: "runtime_identity",
 } satisfies Partial<Record<keyof DiagnosisEvent, string>>;
 const columns = Object.values(fields);
 function integer(value: unknown): number {
@@ -29,6 +31,11 @@ function eventFromRow(row: Row): DiagnosisEvent {
   for (const [key, col] of Object.entries(fields)) event[key] = row[col];
   // Read-only projection of historical v1 rows; HTTP validators still reject v1.
   if (event.schemaVersion === "claw-monitoring/diagnosis-event/v1") event.schemaVersion = DIAGNOSIS_VERSION;
+  if (event.schemaVersion === DIAGNOSIS_V3_VERSION || event.schemaVersion === DIAGNOSIS_V4_VERSION) {
+    event.runtimeIdentity = row.runtime_identity == null ? null : JSON.parse(String(row.runtime_identity));
+  } else {
+    delete event.runtimeIdentity;
+  }
   event.diagnosisId = row.event_id;
   event.occurredAt = iso(row.occurred_at_ms);
   event.diagnosedAt = iso(row.diagnosed_at_ms);
@@ -43,8 +50,13 @@ function checkFromRow(row: Row): BotCheck {
     checkedAt: iso(row.checked_at_ms), lastSuccessfulCheckAt: iso(row.last_successful_check_at_ms), status: row.status }, integer(row.checked_at_ms));
 }
 function item(event: DiagnosisEvent): DiagnosisItem {
-  const { schemaVersion: _version, eventId: _event, engine: _engine, ...result } = event;
+  const { eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, sessionNasPath: _sessionNasPath, ...result } = event;
   return result;
+}
+// NAS metadata is first-write-only, not part of diagnosis content equality.
+function diagnosisContent(event: DiagnosisEvent): string {
+  const { sessionNasPath: _path, ...content } = event;
+  return JSON.stringify(content);
 }
 function isDuplicate(error: unknown): boolean {
   const e = error as { code?: string; errno?: number };
@@ -64,7 +76,7 @@ export class MonitoringRepository implements MonitoringStore {
       await this.ready;
       return await fn();
     } catch (error) {
-      if (error instanceof MonitoringError && ["EVENT_CONFLICT", "CHECK_CONFLICT"].includes(error.code)) throw error;
+      if (error instanceof MonitoringError && ["EVENT_CONFLICT", "CHECK_CONFLICT", "RESULT_TARGET_NOT_FOUND", "RESULT_CONFLICT"].includes(error.code)) throw error;
       this.ready = null;
       throw new MonitoringError("NOT_READY", "监控存储暂不可用或表结构不兼容。");
     }
@@ -100,6 +112,8 @@ export class MonitoringRepository implements MonitoringStore {
         const value = event[name as keyof typeof fields];
         if (name === "occurredAt" || name === "diagnosedAt") return value === null ? null : Date.parse(String(value));
         if (name === "humanIntervention") return value ? 1 : 0;
+        if (name === "sessionNasPath") return value ?? null;
+        if (name === "runtimeIdentity") return value == null ? null : JSON.stringify(value);
         if (name === "confidence") return value === null ? null : JSON.stringify(value);
         return value;
       });
@@ -112,10 +126,13 @@ export class MonitoringRepository implements MonitoringStore {
         if (!isDuplicate(error)) throw error;
         const [row] = await this.db.query(`SELECT ${columns.join(", ")} FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
         if (!row) throw new Error("Duplicate not yet visible");
-        if (row.schema_version !== event.schemaVersion || row.entity_id !== resolved.entityId || row.env !== resolved.env || JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
+        if (row.schema_version !== event.schemaVersion || row.entity_id !== resolved.entityId || row.env !== resolved.env || diagnosisContent(eventFromRow(row)) !== diagnosisContent(event)) conflict();
         return false;
       }
     });
+  }
+  async appendRecoveryResult(result: MonitoringRecoveryResult): Promise<boolean> {
+    return this.run(() => appendRecoveryResult(this.db, result));
   }
   async applyCheck(input: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean> {
     const resolved = target(input.target);

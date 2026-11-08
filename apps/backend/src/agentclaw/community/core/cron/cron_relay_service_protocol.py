@@ -8,7 +8,13 @@ from typing import Any, Protocol, runtime_checkable
 class CronRelayServiceProtocol(Protocol):
     """Service API for cron listing and request forwarding."""
 
-    async def list_all_crons(self, *args: Any, **kwargs: Any) -> Any: ...
+    async def list_all_crons(self, *args: Any, **kwargs: Any) -> Any:
+        """List ordinary runtimes and the authenticated user's existing Callers.
+
+        Implicit Caller selection applies with no stage or online; explicit
+        targeting and draft/verify filters retain their existing contracts.
+        """
+        ...
 
     async def list_running_crons(self, *args: Any, **kwargs: Any) -> Any: ...
 

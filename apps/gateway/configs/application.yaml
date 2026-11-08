@@ -228,6 +228,17 @@ user_config:
     # still require a human — rather than the ~57 that admit a machine caller.
     # Six rules a reviewer can check against the table beats fifty-seven nobody
     # will read.
+    # Isolated service environments: backend owns OPEN admission and NoCheck.
+    "/openapi/v1/service-envs/**":
+      user: optional
+      app: optional
+      bot: optional
+
+    "/openapi/v1/experts/**":
+      user: optional
+      app: optional
+      bot: optional
+
     "/openapi/v1/bots/**":
       user: optional
       app: optional
@@ -442,7 +453,29 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      service-envs:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      experts:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       bots:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
+      # /openapi/v1/agentswarm (additive-only within v1; a breaking change
+      # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only
+      # signs; the backend owns admission, tenant derivation and audit.
+      agentswarm:
         server: backend
         schema:
           source: file

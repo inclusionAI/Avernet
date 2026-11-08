@@ -4,6 +4,7 @@ use super::*;
 
 pub struct SessionManagementServiceImpl {
     pub(super) repo: Arc<dyn SessionRepoPort>,
+    pub(super) collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     pub(super) group_repo: Arc<dyn GroupRepoPort>,
     pub(super) bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     pub(super) event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
@@ -36,6 +37,9 @@ pub fn new(
 
 #[async_trait]
 impl SessionManagementService for SessionManagementWithRuntimeCleanup {
+    async fn authorize_collaboration(&self, session_id: &str, actor_id: &str) -> Result<(), SessionUseCaseError> {
+        self.inner.authorize_collaboration(session_id, actor_id).await
+    }
     async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> { self.inner.validate_session_registry().await }
     async fn ensure_direct_session(&self, id: &str) -> Result<bcs_service_api::port::repo::session_registry::SessionRegistration, SessionUseCaseError> {
         self.inner.ensure_direct_session(id).await.map_err(Into::into)
@@ -84,55 +88,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
-        self.inner.count_running_service(group_id).await
-    }
-
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner.list_running_service(offset, limit).await
-    }
-
     async fn list_running_service_after(
         &self, cursor: Option<&str>, limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         self.inner.list_running_service_after(cursor, limit).await
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner
-            .list_recoverable_callbacks(now_ms, after_session_id, limit)
-            .await
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        self.inner.update_callback_status(session_id, status).await
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        self.inner.claim_callback(command).await
-    }
-
-    async fn complete_callback(
-        &self,
-        command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        self.inner.complete_callback(command).await
     }
 
     async fn complete_if_running(
@@ -222,6 +181,14 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner
             .list_group_ids_by_session_participant(bot_uuid)
             .await
+    }
+
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> Result<bool, SessionUseCaseError> {
+        self.inner.has_group_session_participant(group_id, actor_ids).await
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
@@ -332,11 +299,17 @@ pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -
         Self {
             repo,
             group_repo,
+            collaboration_registry: None,
             bot_runtime: None,
             event_record_factory: None,
             message_repo: None,
             frontend_delivery: None,
         }
+    }
+
+pub fn with_collaboration_registry(mut self, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>) -> Self {
+        self.collaboration_registry = Some(registry);
+        self
     }
 
 pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
@@ -500,6 +473,11 @@ pub(super) async fn persist_session_opening_message(
                 exclude_conn_id: None,
                 visibility_domain,
                 audience,
+                // A session-opening message is an independent
+                // resource event: authorized per event.
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             }),
         )
         .await

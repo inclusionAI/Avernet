@@ -1,7 +1,8 @@
 import {
-  CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError,
-  type BotCheck, type DiagnosisEvent, type DiagnosisQuery,
+  CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError,
+  type BotCheck, type DiagnosisEvent, type DiagnosisQuery, type RuntimeIdentity,
 } from "./contracts.js";
+import { validActionEvent } from "./action-policy.js";
 import { id, target } from "./target.js";
 export { id } from "./target.js";
 
@@ -50,32 +51,58 @@ function reportIdentity(v: Record<string, unknown>, version: string) {
 const diagnosisKeys = ["entityId", "env", "schemaVersion", "eventId", "diagnosisId", "botId", "engine", "sessionKey", "sessionId", "traceId",
   "occurredAt", "diagnosedAt", "decision", "tcFaultLabel", "confidence", "businessProblemCategory",
   "businessProblemSubtype", "systemDiagnosis", "businessDiagnosis", "handlerName", "humanIntervention"];
+/** Full credentials object; normalization must not interpret/trim field values. */
+export function parseRuntimeIdentity(input: unknown): RuntimeIdentity | null {
+  if (input === null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) invalid("运行身份必须是对象或 null。");
+  const entries = Object.entries(input);
+  if (!entries.length || entries.some(([key, value]) => !key || typeof value !== "string")) invalid("运行身份必须是字符串字典。");
+  const unicode = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+  if (entries.some(([key, value]) => unicode.test(key) || unicode.test(value))) invalid();
+  // fromEntries defines own data properties, including __proto__, without invoking setters.
+  const result: RuntimeIdentity = Object.fromEntries(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > 32 * 1024) {
+    throw new MonitoringError("PAYLOAD_TOO_LARGE", "运行身份大小超限。");
+  }
+  return result;
+}
 export function parseDiagnosis(input: unknown, key: string | undefined): DiagnosisEvent {
-  const v = record(input, diagnosisKeys);
-  const identity = reportIdentity(v, DIAGNOSIS_VERSION);
+  const v = record(input, [...diagnosisKeys, "runtimeIdentity", "sessionNasPath"]);
+  const version = v.schemaVersion === DIAGNOSIS_V4_VERSION ? DIAGNOSIS_V4_VERSION : v.schemaVersion === DIAGNOSIS_V3_VERSION ? DIAGNOSIS_V3_VERSION : DIAGNOSIS_VERSION;
+  const identity = reportIdentity(v, version);
+  if (version === DIAGNOSIS_V4_VERSION && [...diagnosisKeys, "runtimeIdentity"].some(k => !(k in v))) invalid("v4 必须包含完整标签及身份字段。");
+  if (version === DIAGNOSIS_VERSION && "runtimeIdentity" in v) invalid("包含未约定的字段。");
+  const runtimeIdentity = version !== DIAGNOSIS_VERSION ? parseRuntimeIdentity(v.runtimeIdentity) : null;
   const eventId = id(v.eventId);
   if (id(v.diagnosisId) !== eventId || key !== eventId) invalid();
   const engine = oneOf(v.engine, ["OC", "TE"]);
   const decision = oneOf(v.decision, ["ALERT", "PASS", "UNRESOLVED"]);
   const confidence = v.confidence ?? null;
   if (confidence !== null && (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) invalid();
-  if (decision !== "ALERT" && confidence !== null) invalid();
+  if (version !== DIAGNOSIS_V4_VERSION && decision !== "ALERT" && confidence !== null) invalid();
   const tcFaultLabel = nullableText(v.tcFaultLabel, 128);
-  if (decision === "PASS" && tcFaultLabel !== null) invalid();
+  if (version !== DIAGNOSIS_V4_VERSION && decision === "PASS" && tcFaultLabel !== null) invalid();
   const sessionKey = nullableText(v.sessionKey, 1024);
   const sessionId = nullableText(v.sessionId, 255);
+  const sessionNasPath = nullableText(v.sessionNasPath, 4096);
+  if (sessionNasPath !== null && (!sessionNasPath.startsWith("/") || /[\\\u0000-\u001f\u007f-\u009f]/.test(sessionNasPath)
+    || sessionNasPath.split("/").some(part => part === "." || part === ".."))) invalid("会话 NAS 路径无效。");
   const traceId = nullableText(v.traceId, 255);
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();
   if (typeof v.humanIntervention !== "boolean") invalid();
-  return {
-    schemaVersion: DIAGNOSIS_VERSION, eventId, diagnosisId: eventId, ...identity, engine,
+  const event: DiagnosisEvent = {
+    ...(version !== DIAGNOSIS_VERSION ? { schemaVersion: version, runtimeIdentity } : { schemaVersion: version }),
+    eventId, diagnosisId: eventId, ...identity, engine,
     sessionKey, sessionId, traceId, occurredAt: v.occurredAt == null ? null : timestamp(v.occurredAt),
+    ...(sessionNasPath !== null ? { sessionNasPath } : {}),
     diagnosedAt: timestamp(v.diagnosedAt), decision, tcFaultLabel, confidence,
     businessProblemCategory: nullableText(v.businessProblemCategory, 128),
     businessProblemSubtype: nullableText(v.businessProblemSubtype, 128),
     systemDiagnosis: nullableText(v.systemDiagnosis, 8000), businessDiagnosis: nullableText(v.businessDiagnosis, 8000),
     handlerName: nullableText(v.handlerName, 128), humanIntervention: v.humanIntervention,
   };
+  if (version === DIAGNOSIS_V4_VERSION && !validActionEvent(event)) invalid("诊断标签与告警判定不一致。");
+  return event;
 }
 export function parseCheck(input: unknown, now: number): BotCheck {
   const v = record(input, ["schemaVersion", "botId", "entityId", "env", "engine", "checkedAt", "lastSuccessfulCheckAt", "status"]);

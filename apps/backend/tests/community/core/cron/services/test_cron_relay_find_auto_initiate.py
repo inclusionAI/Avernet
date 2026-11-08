@@ -28,6 +28,8 @@ def _make_service(
     publish_repo=None,
 ):
     return CronRelayService(
+        runtime_bindings=MagicMock(),
+        collaborators=MagicMock(),
         bot_provider=bot_provider or MagicMock(),
         device_provider=device_provider or MagicMock(),
         transport=transport or MagicMock(),

@@ -1,0 +1,2 @@
+#!/bin/sh
+echo shopctl 2.3.0

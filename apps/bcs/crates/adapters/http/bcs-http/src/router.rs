@@ -43,6 +43,7 @@ fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpApp
 
 fn build_api_routes() -> Router<HttpAppState> {
     Router::new()
+        .merge(routes::collaboration_drafts::router())
         .route("/manifest", get(routes::manifest::get_manifest))
         .route(
             "/assets/{bundle_name}/{file_name}",
@@ -251,12 +252,6 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/groupcontext/update", post(routes::group_context::update))
         .route("/groupcontext/list", post(routes::group_context::list))
         .route("/groupcontext/get", post(routes::group_context::get))
-        .route("/groups/request", post(routes::group_requests::group_request))
-        .route(
-            "/groups/{token}/confirm",
-            get(routes::group_requests::confirm_group_page)
-                .post(routes::group_requests::confirm_group),
-        )
         .route(
             "/groups/{id}/members",
             post(routes::groups::add_group_member),
@@ -284,10 +279,6 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route(
             "/groups/{id}/visibility",
             put(routes::groups::update_group_visibility),
-        )
-        .route(
-            "/groups/{id}/workspace",
-            get(routes::groups::get_workspace).put(routes::groups::update_workspace),
         )
         .route(
             "/groups/{id}/settings",

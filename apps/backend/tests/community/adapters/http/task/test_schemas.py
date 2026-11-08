@@ -95,11 +95,13 @@ def test_node_context_dto_does_not_expose_task_level_gaps() -> None:
             gaps=["legacy graph gap"],
             task_id="t1",
             node_id="n1",
+            attempt=1,
             root_task_spec=spec,
             current_task_spec=spec,
         )
     )
     assert dto.task_id == "t1" and dto.node_id == "n1"
+    assert dto.attempt == 1
     assert "gaps" not in dto.model_dump()
 
 

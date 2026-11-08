@@ -86,7 +86,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   // 逐群合并进 sessionGroups（不整替整行，避免覆盖列表的 membership 等视图字段）。
   // 失败也写入缓存占位（空名单），防止逐字防抖搜索对同一失败群反复请求；页面重挂载即重置。
   const loadGroups = useCallback(
-    async (identityId: string | null, q?: string) => {
+    async (identityId: string | null, q?: string, requestedMembership = membership) => {
       const identity = resolveIdentity(identityId);
       if (!identity) {
         setGroupsError(null);
@@ -94,14 +94,19 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
       }
       useWorkspaceStore.getState().setIsGroupsLoading(true);
       setGroupsError(null);
+      const isCurrentList = () => {
+        const current = useWorkspaceStore.getState();
+        return current.activeIdentityId === identityId && current.membership === requestedMembership
+          && lastSearchRef.current === (q || '');
+      };
       try {
         const detail = pinnedGroup ? await loadScopedGroup(pinnedGroup.groupId, identity.id) : null;
         const res = detail
           ? detail.ok
             ? { ok: true as const, data: [detail.data] }
             : detail
-          : await groupService.loadGroups(identity, { q, membership });
-        if (useWorkspaceStore.getState().activeIdentityId !== identityId) return;
+          : await groupService.loadGroups(identity, { q, membership: requestedMembership });
+        if (!isCurrentList()) return;
         if (res.ok) {
           // 先用缓存过的成员名单给新列表播种（列表接口不回传 participants），再对仍未有
           // 成员的群异步补拉详情——防抖搜索/身份切换的列次同一群不再重复请求。
@@ -121,7 +126,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
           if (!shouldMuteNonAuthedToast()) toast.error(res.error.friendlyMessage);
         }
       } finally {
-        useWorkspaceStore.getState().setIsGroupsLoading(false);
+        if (isCurrentList()) useWorkspaceStore.getState().setIsGroupsLoading(false);
       }
     },
     [resolveIdentity, membership, pinnedGroup, seedFromCache, enrichParticipants],
@@ -188,7 +193,11 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   );
 
   const refreshGroups = useCallback(async () => {
-    await loadGroups(activeIdentityId, lastSearchRef.current || undefined);
+    // 创建成功可能刚切换筛选/清空搜索，同步搜索基线并取消旧防抖，避免使用上一帧的条件。
+    const current = useWorkspaceStore.getState();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    lastSearchRef.current = current.groupSearchText;
+    await loadGroups(activeIdentityId, current.groupSearchText || undefined, current.membership);
   }, [loadGroups, activeIdentityId]);
 
   const retryGroups = useCallback(async () => {

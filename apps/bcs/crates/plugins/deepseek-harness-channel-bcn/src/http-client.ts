@@ -1,13 +1,12 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { RequestOptions } from 'node:http';
-import type { Config } from './config.js';
 import type { ResolvedEndpoint } from './endpoint.js';
+import { validateRegistrationResponse, type ProviderTokenScope } from './registration.js';
 import {
   MAX_FRAME_BYTES,
   asNonEmptyString,
   asRecord,
-  type BotSession,
   type RegisterBotResponse,
 } from './protocol.js';
 
@@ -89,15 +88,21 @@ export class NodeHttpTransport implements HttpTransport {
   }
 }
 
-export class BcnOnboardingClient {
+export class BcnRegistrationClient {
   constructor(
     private readonly endpoint: ResolvedEndpoint,
     private readonly transport: HttpTransport,
     private readonly timeoutMs: number,
   ) {}
 
-  async register(token: string, botName: string): Promise<RegisterBotResponse> {
+  async register(token: string, botName: string,
+    provider?: { scope: ProviderTokenScope; providerBotRef: string },
+  ): Promise<RegisterBotResponse> {
     const query = new URLSearchParams({ token, 'bot-name': botName });
+    if (provider) {
+      query.set('mode', 'plugin');
+      query.set('provider_bot_ref', provider.providerBotRef);
+    }
     const response = asRecord(await this.transport.requestJson(
       this.endpoint,
       'register',
@@ -110,28 +115,12 @@ export class BcnOnboardingClient {
     if (!registeredName || !botUuid || !botToken) {
       throw new Error('BCN registration returned an incomplete Bot Session');
     }
-    return { bot_name: registeredName, bot_uuid: botUuid, bot_token: botToken };
+    if (!provider && response?.registration != null) {
+      throw new Error('BCN legacy registration unexpectedly returned Provider metadata');
+    }
+    const registration = provider ? validateRegistrationResponse(response?.registration, provider) : undefined;
+    return { bot_name: registeredName, bot_uuid: botUuid, bot_token: botToken,
+      ...(registration ? { registration } : {}) };
   }
 
-  async onboard(session: BotSession, config: Config): Promise<void> {
-    const response = asRecord(await this.transport.requestJson(
-      this.endpoint,
-      'bots/onboard',
-      {
-        method: 'POST',
-        headers: { authorization: `Bearer ${session.botToken}` },
-        body: {
-          name: config.botName || session.botName,
-          summary: config.summary,
-          domains: config.domains,
-          skills: config.skills,
-          scopes: config.scopes,
-        },
-      },
-      this.timeoutMs,
-    ));
-    if (response?.onboarded !== true || asNonEmptyString(response.bot_uuid) !== session.botUuid) {
-      throw new Error('BCN rejected Bot descriptor onboarding');
-    }
-  }
 }

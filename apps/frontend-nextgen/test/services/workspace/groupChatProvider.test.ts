@@ -810,3 +810,36 @@ describe('groupChatProvider', () => {
     expect(inner.inner.originalOnMessage).toHaveBeenCalledWith(rawFrame);
   });
 });
+
+
+test('exec approval is handled outside SDK and uses the active transport for resolve', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as any).inner;
+  let pending: any[] = [];
+  provider.subscribeToExecApprovals((snapshot) => { pending = snapshot.interactions; });
+  const event = { type: 'event', event: 'interaction', group_id: 'g1', bcsSessionId: 's1',
+    bcsRunId: 'run', bot_uuid: 'bot', payload: { kind: 'exec', phase: 'requested', interactionId: 'i1',
+      toolName: 'bash', command: 'top -l 2', options: [
+        { decision: 'allow_once', label: 'Allow once' }, { decision: 'deny', label: 'Deny' },
+      ] } };
+  inner.transport.onMessage(event);
+  expect(pending).toHaveLength(1);
+  expect(inner.originalOnMessage).not.toHaveBeenCalledWith(event);
+  const submit = provider.resolveExecApproval(pending[0].key, { decision: 'deny' });
+  const sent = lastOriginalSend.mock.calls.at(-1)[0];
+  expect(sent).toMatchObject({ method: 'interaction.resolve', params: { decision: 'deny', bcsRunId: 'run' } });
+  inner.transport.onMessage({ type: 'res', id: sent.id, ok: true, payload: { interactionStatus: 'resolved' } });
+  await submit;
+  expect(pending).toEqual([]);
+  inner.transport.onMessage({ ...event, payload: { ...event.payload, interactionId: 'i2' } });
+  expect(pending).toHaveLength(1);
+  await provider.disconnect();
+  expect(pending).toEqual([]);
+  inner.transport.onMessage(event);
+  expect(pending).toEqual([]);
+});

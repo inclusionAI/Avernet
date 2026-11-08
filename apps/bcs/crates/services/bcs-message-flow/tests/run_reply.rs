@@ -75,7 +75,7 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
                 sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some("input".into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
             flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
-                max_queued: 100, semantic_projection_json: json!({"version":1}) }], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap().deliveries.remove(0);
+                max_queued: 100, semantic_projection_json: json!({"version":1}), run_id: None,}], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap().deliveries.remove(0);
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,
             reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
@@ -153,7 +153,7 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
                 sender_id: "human".into(), sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some(format!("input-{index}")), owner_bot_id: None, created_at: 1, run_id: String::new() },
             flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
-                max_queued: 100, semantic_projection_json: json!({"version":1}) }], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap();
+                max_queued: 100, semantic_projection_json: json!({"version":1}), run_id: None,}], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap();
         let input = &source.deliveries[0];
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,

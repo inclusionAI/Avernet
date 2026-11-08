@@ -1,10 +1,11 @@
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { HumanMentionNotifyMode, MessageViewScope } from '@/domain/collaboration/types';
 import type { CreateGroupBody } from '@/services/backendApi/collaboration/collaborationGroupController';
 
 export interface CreateGroupInput {
   name: string;
   strategy: 'chat' | 'manager_worker' | 'state_machine';
   deliveryPolicy?: 'send_to_driver' | 'inject_observers';
+  humanMentionNotifyMode?: HumanMentionNotifyMode;
   definitionYaml?: string;
   driverBotUuid: string;
   originator: string;
@@ -23,9 +24,9 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
         ? input.strategy === 'manager_worker'
           ? ('manager' as const)
           : ('driver' as const)
-        : input.strategy === 'chat'
-        ? ('consultant' as const)
-        : ('worker' as const),
+        : input.strategy === 'manager_worker'
+        ? ('worker' as const)
+        : ('consultant' as const),
     ...(participant.message_view_scope ? { message_view_scope: participant.message_view_scope } : {}),
   }));
   const base = {
@@ -35,6 +36,7 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
     participants,
     driver_bot_uuid: input.driverBotUuid,
     originator: input.originator,
+    ...(input.humanMentionNotifyMode !== undefined ? { human_mention_notify_mode: input.humanMentionNotifyMode } : {}),
   };
   if (input.strategy === 'chat') {
     return {

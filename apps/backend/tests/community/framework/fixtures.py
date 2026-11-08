@@ -16,6 +16,7 @@ in ``tests/endpoints/`` can request them by name.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -34,6 +35,7 @@ from tests.community.framework.world import World
 # The injector is set in ``app_with_testing_modules`` and read by
 # ``world`` in the same test scope.
 _CURRENT_TEST_INJECTOR: dict[int, Injector] = {}
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -58,6 +60,14 @@ def app_with_testing_modules(request) -> FastAPI:
     that need the injector outside a request reach for it via this
     fixture's return value or the ``world`` fixture.
     """
+    # Endpoint seeds must never write or unlink the developer's ~/.openclaw.
+    # Keep the real JSON file loader, but give this test its own local root.
+    from agentclaw.community.core.channel import json_config_utils
+
+    monkeypatch = request.getfixturevalue("monkeypatch")
+    tmp_path = request.getfixturevalue("tmp_path")
+    monkeypatch.setattr(json_config_utils, "_get_local_base_dir", lambda: tmp_path / "openclaw")
+
     # Lazy imports so this module stays import-light: pulling in
     # ``agentclaw.community.adapters.http.app`` triggers the whole router graph + model
     # registration, which we want done exactly once per test session,
@@ -123,7 +133,12 @@ def app_with_testing_modules(request) -> FastAPI:
             raise RuntimeError(
                 "BaasPublishPoller threads did not stop before test database disposal"
             )
-        engine.dispose()
+        # StaticPool shares one SQLite connection with background sessions.
+        # Use their lock so disposal cannot race an in-flight query/transaction.
+        logger.debug("test.database.dispose stage=waiting engine_id=%s", id(engine))
+        with db_mod._session_lock:
+            engine.dispose()
+        logger.debug("test.database.dispose stage=complete engine_id=%s", id(engine))
 
 
 @pytest.fixture

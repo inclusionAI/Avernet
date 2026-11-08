@@ -1,0 +1,1 @@
+"""BBS digest task implementation."""

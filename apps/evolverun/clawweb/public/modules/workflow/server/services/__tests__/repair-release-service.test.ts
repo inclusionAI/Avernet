@@ -50,6 +50,8 @@ describe('reviewed candidate publication', () => {
     expect(approval).toMatchObject({ candidateCommit: 'd'.repeat(40), baselineDeployNumber: 7, target: { id: 'target-1' } });
     expect(f.dispatches).toEqual([]);
     expect((await f.service.detail(f.revision.taskId)).approval).toEqual(approval);
+    expect((await f.service.detail(f.revision.taskId, 1)).approval).toEqual(approval);
+    expect((await f.service.detail(f.revision.taskId, null)).approval).toBeNull();
     expect((await f.workbench.task(f.revision.taskId)).latestAttempt.phase).toBe('review');
   });
   it('creates the next task on the latest effective baseline and preserves the published task and observation evidence', async () => {

@@ -69,6 +69,7 @@ def sync_local_bin_artifact(
     version: str,
     build_ignore_paths: tuple[str, ...],
     run_command: Callable[..., Any],
+    enabled: bool = True,
 ) -> None:
     """Copy only .local/bin; a present directory must copy successfully.
 
@@ -92,10 +93,10 @@ def sync_local_bin_artifact(
         if target_bin.exists():
             if not target_bin.is_dir():
                 raise NotADirectoryError("home artifact bin is not a directory")
-        reason = ""
-        if is_excluded(".local/bin", build_ignore_paths):
+        reason = "feature_disabled" if not enabled else ""
+        if not reason and is_excluded(".local/bin", build_ignore_paths):
             reason = "excluded"
-        else:
+        elif not reason:
             # COSEC: validate every source entry before accessing its child;
             # a linked Home/.local/bin must never redirect the source scan.
             for directory in (source_home, source_home / ".local", source_bin):

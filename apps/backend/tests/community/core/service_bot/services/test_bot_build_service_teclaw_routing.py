@@ -7,6 +7,8 @@ byte-for-byte unchanged. Provider is resolved by querying baas.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,6 +41,8 @@ def _svc(
     baas.create_bot.return_value = {"bot_uuid": "BOT-a", "publish_id": 7}
     baas.upgrade_bot.return_value = {"bot_uuid": "BOT-a", "publish_id": 8}
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),

@@ -5,6 +5,7 @@ The payload schema must match BaaS ``PoolabCreateConfig`` field names
 Fields without the ``poolab_`` prefix are filtered by BaaS's
 ``_POOLAB_ALLOWED_OVERRIDE_FIELDS`` whitelist and silently dropped.
 """
+from tests.community.bot_address_fakes import support_legacy_locator
 from unittest.mock import MagicMock
 
 import pytest
@@ -345,6 +346,7 @@ def test_baas_wrapper_injects_bot_type_resolver_from_bot_repo():
     from unittest.mock import MagicMock
 
     svc = _make_service()
+    support_legacy_locator(svc._bot_repo)
     svc._outbound_rule_provider = MagicMock()
     svc._bot_repo.get_by_id_and_owner.return_value = {"bot_type": "service"}
 
@@ -352,7 +354,7 @@ def test_baas_wrapper_injects_bot_type_resolver_from_bot_repo():
 
     resolver = svc._outbound_rule_provider.build_rule.call_args.kwargs["bot_type_resolver"]
     assert resolver("b1", "o1") == "service"
-    svc._bot_repo.get_by_id_and_owner.assert_called_with(bot_id="b1", owner_id="o1")
+    svc._bot_repo.get_by_id_and_owner.assert_called_with("b1", "o1")
 
 
 def test_baas_wrapper_resolver_returns_none_when_bot_missing():
@@ -360,6 +362,7 @@ def test_baas_wrapper_resolver_returns_none_when_bot_missing():
     from unittest.mock import MagicMock
 
     svc = _make_service()
+    support_legacy_locator(svc._bot_repo)
     svc._outbound_rule_provider = MagicMock()
     svc._bot_repo.get_by_id_and_owner.return_value = None
 

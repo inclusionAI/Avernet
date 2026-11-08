@@ -119,7 +119,7 @@ _story_cli_direct_onboard() {
 story_cli_operator_creates_custom_collaboration() {
     info "Story: an operator validates, trials, and persists a custom collaboration through bcs-cli"
     local yaml_file group_id trial_group_id trial_session_id run_id cleanup_status
-    yaml_file="$(mktemp -t bcs-custom-collaboration.XXXXXX 2>/dev/null || mktemp)"
+    yaml_file="$(bcs_cli_mktemp bcs-custom-collaboration.XXXXXX)"
     printf '%s\n' "name: CLI custom release workflow
 participants:
   planner:
@@ -449,9 +449,6 @@ story_cli_operator_runs_sessions_and_services() {
     assert_json_eq "CLI session completion returns completed" "$BCS_CLI_STDOUT" "status" "completed"
     assert_json_eq "CLI session completion keeps its output" "$BCS_CLI_STDOUT" "output.summary" "approved by CLI"
 
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "CLI service fixture enables group invocation" "200" || return
-
     _cli_story_run "release pipeline invokes the group service" PM service invoke \
         --group "$group_id" --input '{"commit":"cli123"}' \
         --meta '{"source":"cli-story"}' --caller-id "cli-release-pipeline" \
@@ -569,7 +566,7 @@ story_cli_operator_validates_channel_management() {
 #   - Get/list expose the active entry after mutation.
 story_cli_operator_manages_group_context() {
     info "Story: an operator manages Group Context through bcs-cli"
-    local group_id session_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
+    local group_id session_id round_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
 
     _cli_story_create_pm_group "CLI group-context workspace" || return
     group_id="$CLI_STORY_GROUP_ID"
@@ -584,6 +581,7 @@ story_cli_operator_manages_group_context() {
     updated="updated group context from cli e2e"
     session_content="session group context from cli e2e"
     round_content="round group context from cli e2e"
+    round_id="${session_id}:round-cli-e2e-$$"
 
     _cli_story_run "operator adds a group context entry" PM group-context add \
         --group-id "$group_id" \
@@ -613,7 +611,7 @@ story_cli_operator_manages_group_context() {
     _cli_story_run "operator adds a round context entry" PM group-context add \
         --group-id "$group_id" \
         --session-id "$session_id" \
-        --round-id "round-cli-e2e-$$" \
+        --round-id "$round_id" \
         --name "$ctx_name" \
         --scope-level round \
         --content "$round_content" \
@@ -650,12 +648,12 @@ story_cli_operator_manages_group_context() {
     _cli_story_run "operator lists group context entries" PM group-context list \
         --group-id "$group_id" \
         --session-id "$session_id" \
-        --round-id "round-cli-e2e-$$" \
+        --round-id "$round_id" \
         --scope-levels group,session,round || {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }
-    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WR")
+    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WRO")
     assert_eq "CLI group-context list returns the updated metadata" "$list_has_item" "1"
 
     _cli_story_run "operator gets the updated group context entry" PM group-context get \

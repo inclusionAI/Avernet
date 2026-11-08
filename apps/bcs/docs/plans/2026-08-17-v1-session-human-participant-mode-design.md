@@ -47,11 +47,14 @@ Human targets are strictly self-service:
   visibility rule.
 - A Session manager cannot update or auto-add a different Human participant.
 
-Bot targets preserve the current V1 behavior:
+Bot targets (owner exception added 2026-10-19):
 
 - The target must already be a Session participant.
-- The caller must pass `can_manage_session`.
+- The caller must pass `can_manage_session` or be the target Bot's Human owner.
 - Only `auto` and `muted` are accepted.
+- Ownership alone grants only this mode change, not message view scope changes
+  or other Session management rights. A combined mode/scope request must pass
+  both authorization checks before either change is written.
 
 This intentionally differs from legacy authorization. Legacy requires only an
 authenticated caller and does not bind that caller to the target Human.
@@ -74,7 +77,7 @@ authenticated caller and does not bind that caller to the target Human.
      (`absent`);
    - always apply the requested mode after the add.
 6. For an existing Bot target:
-   - require Session management authority;
+    - require Session management authority or ownership of this Bot;
    - reject Human-only modes;
    - update the stored mode.
 7. For a missing non-Human target:
@@ -94,7 +97,8 @@ an `absent` Observer that a retry will update.
 - Mode incompatible with actor kind: `400 invalid_participant_mode`.
 - Human target does not match the authenticated Human: `403 forbidden`.
 - Caller cannot read the Session for self-service: `403 forbidden`.
-- Existing Bot update without management authority: `403 forbidden`.
+- Existing Bot mode update without management authority or target ownership:
+  `403 forbidden`.
 - Missing Bot participant for an authorized manager: `404 participant_not_found`.
 
 ## Testing
@@ -107,7 +111,8 @@ Add contract, HTTP adapter, Service API, and application tests for:
 - missing Human self first-insert as Observer;
 - rejection of another Human even for a Session manager;
 - rejection of actor/mode mismatches;
-- preservation of Bot `auto/muted` management behavior;
+- preservation of Bot `auto/muted` management behavior and the mode-only owner
+  exception, including rejection of unrelated Bot and scope mutations;
 - preservation of missing-Bot behavior.
 
 Regenerate the Gateway-owned `apps/gateway/configs/schemas/bcn.openapi.json`

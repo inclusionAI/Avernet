@@ -1,3 +1,4 @@
+mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -90,6 +91,7 @@ impl GroupSessionConnectionService for RecordingConnectionService {
                 message_view_scope: MessageViewScope::Full,
                 joined_at: None,
             }],
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
     }
 }
@@ -108,6 +110,7 @@ fn app_with_registry(service: Arc<RecordingConnectionService>, registry: Arc<Wor
         group_session_connections: Some(service.clone()),
         frontend_connections: registry,
         run_channels: Arc::new(RunChannelManager::new()),
+        delivery_admission: Arc::new(support::AllowAllAdmission),
     });
     group_session_websocket_router(
         service,

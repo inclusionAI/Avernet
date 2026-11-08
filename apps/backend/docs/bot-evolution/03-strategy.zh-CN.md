@@ -25,7 +25,7 @@
 | --- | --- |
 | 具体的默认进化策略（ClawEvolve、记忆整合）以及完整的 ClawEvolve 代码草图 | [04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md) |
 | 绑定、运行生命周期、租约与重新派发、预算与紧急停止开关、运行时与作业协议线上格式、操作的平台侧、沙箱 | [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) |
-| 基因组补丁能表达什么、修订版、锁定基因 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
+| 基因组补丁能表达什么、修订版、基因组策略配置 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | `Episode` 与 `Feedback` 的 schema、脱敏、保留期限 | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | 套件、划分、评分器、验证配置，以及判定如何得出 | [07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 门禁、风险等级、评审、晋升 | [08-promotion.zh-CN.md](08-promotion.zh-CN.md) |
@@ -516,7 +516,7 @@ class Operation:
 
 - `needs` 中的每个能力都必须有针对该 bot 引擎的 provider；
 - bot 的引擎必须在该策略 `agents@1` 定义的 `engine` 值之中；
-- （来自绑定而非注册记录）`allowed_genes` 必须在 bot 的 `policy` 范围之内；锁定基因保持锁定；
+- （来自绑定而非注册记录）`allowed_genes` 必须在 bot 的 `policy.mutable_genes` 范围之内；
 - 如果注册记录带有 `params_schema`，则绑定的 `params` 必须能通过它的校验。
 
 前两项由 Strategy Registry 回答（§9，`check_engine`）；整个绑定检查归 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 负责。

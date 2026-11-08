@@ -108,7 +108,9 @@ singlebox/.dependencies
 .codefuse
 .codegraph
 .opencode
+.superpowers/
 openspec
+.dmore
 
 scripts/undercover-game.sh
 scripts/.dependencies

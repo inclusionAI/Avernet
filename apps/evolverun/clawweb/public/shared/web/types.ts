@@ -1721,7 +1721,8 @@ export interface AutoHealDeployResult {
   deployNumber: number
   version: number
   tagName: string
-  runId?: string | null
+  /** BaaS message id from the post-deploy re-run, not a ClawMind flow id. */
+  messageId?: string | null
 }
 
 export interface AutoHealErrorChainItem {
@@ -1771,7 +1772,8 @@ export interface AutoHealApplyResult {
 export interface AutoHealRunResult {
   ok: boolean
   workflowId: string
-  flowId?: string | null
+  /** BaaS message id for this delivery, not a ClawMind flow id. */
+  messageId?: string | null
   message?: string | null
 }
 

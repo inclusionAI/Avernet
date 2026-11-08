@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from agentclaw.community.core.task.domain.prompt_constants import (
+    BENCHMARK_EXECUTION_CONSTRAINT,
     NO_WEB_SEARCH_CONSTRAINT,
     OUTPUT_LANGUAGE_CONSTRAINT,
 )
@@ -305,7 +306,7 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
         parts.append(f"**任务类型**: {business_type}")
 
     # Constraints
-    parts.append(NO_WEB_SEARCH_CONSTRAINT)
+    parts.append(BENCHMARK_EXECUTION_CONSTRAINT)
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
     return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)

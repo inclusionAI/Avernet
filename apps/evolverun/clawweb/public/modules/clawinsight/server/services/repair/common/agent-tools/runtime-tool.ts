@@ -54,7 +54,20 @@ function boundedText(value: unknown, field: string, maxLength: number): string {
   return text;
 }
 
-export function buildAgentRuntimeCommand(request: AgentRuntimeInspectInput, frameMarker = "REPAIR_EVIDENCE_PREVIEW"): string {
+function assertAdapterToolAccess(command: string): void {
+  const normalized = command.replace(/\\\r?\n/g, "").replace(/['"]/g, "");
+  if (/\bopenclaw\s+(?:cron|gateway|config|skills|mcp|plugins)\b|\bmcporter\s+config\s+(?:add|remove|delete|set|import)\b|\/api\/(?:mcp|skills|cron|engine|file)(?:[\/\s?'"]|$)|\/api\/v1\/(?:bot\/(?:apply|cron)|file\/(?:read|list|upload|remove|skill-package))(?:[\/\s?'"]|$)/i.test(normalized)) {
+    agentToolValidation("adapter_tool_required", "引擎操作必须使用已声明的接口工具；MCP 和用户 Skill 变更交给 Owner，不能用 Shell、CLI 或直接 HTTP 绕过");
+  }
+}
+
+/** Reject explicit management bypasses, not a general-purpose Shell parser. */
+export function assertAgentContainerCommand(command: string): void {
+  assertAdapterToolAccess(command);
+  if (BotEngineOperations.isManagedPath(command)) agentToolValidation("managed_runtime_file", "Shell 动作不能变更 MCP、用户 Skill 或 Cron 管理文件；读取请使用调查工具");
+}
+
+export function buildAgentRuntimeCommand(request: AgentRuntimeInspectInput, frameMarker = "REPAIR_EVIDENCE_PREVIEW", options: { allowSessionHistory?: boolean } = {}): string {
   if (!/^[A-Za-z0-9_-]+$/.test(frameMarker)) agentToolValidation("invalid_runtime_frame", "读取回执标识无效");
   const unsafe = request as AgentRuntimeInspectInput & {
     command?: unknown; cmd?: unknown; url?: unknown; method?: unknown;
@@ -64,22 +77,27 @@ export function buildAgentRuntimeCommand(request: AgentRuntimeInspectInput, fram
     agentToolValidation("raw_runtime_command_forbidden", "Repair 只读工具不接受原始 command、URL 或 HTTP method");
   }
 
+  const historyGuard = options.allowSessionHistory === false
+    ? 'case "$p" in */.openclaw/agents/*/sessions|*/.openclaw/agents/*/sessions/*|*/.claude/projects|*/.claude/projects/*) exit 45 ;; esac;' : '';
+  const historyPrune = options.allowSessionHistory === false
+    ? "\\( -path '*/.openclaw/agents/*/sessions' -o -path '*/.claude/projects' \\) -prune -o " : '';
+  const prelude = (path: string) => `${resolvedPathPrelude(path)} ${historyGuard}`;
   switch (request.operation) {
     case "fs_list": {
       const path = safePath(request.path);
       const maxEntries = integer(request.maxEntries, 200, 1, 500, "maxEntries");
-      return `${resolvedPathPrelude(path)} test -d "$p" || exit 46; find -P "$p" -mindepth 1 -maxdepth 1 -printf '%y\\t%p\\n' | head -n ${maxEntries}`;
+      return `${prelude(path)} test -d "$p" || exit 46; find -P "$p" -mindepth 1 -maxdepth 1 -printf '%y\\t%p\\n' | head -n ${maxEntries}`;
     }
     case "fs_find": {
       const path = safePath(request.path);
       const name = boundedText(request.name, "name", 256);
       const maxDepth = integer(request.maxDepth, 4, 1, 12, "maxDepth");
       const maxEntries = integer(request.maxEntries, 200, 1, 500, "maxEntries");
-      return `${resolvedPathPrelude(path)} ${searchablePathGuard()} test -d "$p" || exit 46; find -P "$p" -maxdepth ${maxDepth} -name ${shellQuote(name)} -printf '%y\\t%p\\n' | head -n ${maxEntries}`;
+      return `${prelude(path)} ${searchablePathGuard()} test -d "$p" || exit 46; find -P "$p" -maxdepth ${maxDepth} -name ${shellQuote(name)} -printf '%y\\t%p\\n' | head -n ${maxEntries}`;
     }
     case "fs_stat": {
       const path = safePath(request.path);
-      return `${resolvedPathPrelude(path)} stat --printf='%F\\t%a\\t%U:%G\\t%s\\t%y\\t%n\\n' -- "$p"`;
+      return `${prelude(path)} stat --printf='%F\\t%a\\t%U:%G\\t%s\\t%y\\t%n\\n' -- "$p"`;
     }
     case "fs_read": {
       const path = safePath(request.path);
@@ -91,7 +109,7 @@ export function buildAgentRuntimeCommand(request: AgentRuntimeInspectInput, fram
 NR == ${endLine + 1} { more=1; exit }
 END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_read\\",\\"count\\":%d,\\"hasMore\\":%s}\\n", count, more ? "true" : "false" }`;
       const reader = `awk ${shellQuote(program)}`;
-      return `${resolvedPathPrelude(path)} ${readableFileGuard()} case "$p" in /proc/[0-9]*/environ|/proc/[0-9]*/cmdline) tr '\\000' '\\n' < "$p" | ${reader} ;; *) ${reader} "$p" ;; esac`;
+      return `${prelude(path)} ${readableFileGuard()} case "$p" in /proc/[0-9]*/environ|/proc/[0-9]*/cmdline) tr '\\000' '\\n' < "$p" | ${reader} ;; *) ${reader} "$p" ;; esac`;
     }
     case "fs_search": {
       const path = safePath(request.path);
@@ -105,7 +123,7 @@ NR == ${maxMatches + 1} { more=1; exit 10 }
 END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_search\\",\\"count\\":%d,\\"hasMore\\":%s}\\n", count, more ? "true" : "false" }`;
       // Normalize expected early pipe closure only when the reader observed overflow.
       // A producer error without overflow must not become a successful empty search.
-      return `${resolvedPathPrelude(path)} ${searchablePathGuard()} ${validatePattern}{ if test -d "$p"; then find -P "$p" -type f -exec grep -nH${flag} --binary-files=without-match -- ${shellQuote(pattern)} {} +; else ${readableFileGuard()} grep -n${flag} --binary-files=without-match -- ${shellQuote(pattern)} "$p"; fi; } | awk ${shellQuote(program)}; search_codes=("\${PIPESTATUS[@]}"); if test "\${search_codes[1]}" = 10; then exit 0; fi; if test "\${search_codes[1]}" != 0; then exit "\${search_codes[1]}"; fi; if test "\${search_codes[0]}" -gt 1; then exit "\${search_codes[0]}"; fi`;
+      return `${prelude(path)} ${searchablePathGuard()} ${validatePattern}{ if test -d "$p"; then find -P "$p" ${historyPrune}-type f -exec grep -nH${flag} --binary-files=without-match -- ${shellQuote(pattern)} {} +; else ${readableFileGuard()} grep -n${flag} --binary-files=without-match -- ${shellQuote(pattern)} "$p"; fi; } | awk ${shellQuote(program)}; search_codes=("\${PIPESTATUS[@]}"); if test "\${search_codes[1]}" = 10; then exit 0; fi; if test "\${search_codes[1]}" != 0; then exit "\${search_codes[1]}"; fi; if test "\${search_codes[0]}" -gt 1; then exit "\${search_codes[0]}"; fi`;
     }
     case "process_list": {
       if (request.pattern == null || request.pattern === "") return "ps -ef";
@@ -120,6 +138,7 @@ END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_search\\",\\"count\\":%d,\\"
       if (!path.startsWith("/") || path.startsWith("//") || path.includes("://")) {
         agentToolValidation("invalid_loopback_path", "http_get 只允许 loopback 绝对 URL path");
       }
+      assertAdapterToolAccess(path);
       return `curl -fsS --max-time 10 -- ${shellQuote(`http://127.0.0.1:${port}${path}`)}`;
     }
     case "shell_exec": {
@@ -127,6 +146,7 @@ END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_search\\",\\"count\\":%d,\\"
         || request.command.length > 16_384 || request.command.includes("\0")) {
         agentToolValidation("invalid_runtime_command", "command 必须是 1..16384 字符且不含 NUL 的 shell 命令");
       }
+      assertAdapterToolAccess(request.command);
       const encoded = Buffer.from(request.command, "utf8").toString("base64");
       return `cd /home/admin 2>/dev/null || cd /; printf %s ${shellQuote(encoded)} | base64 -d | bash --noprofile --norc`;
     }
@@ -228,6 +248,7 @@ export class AgentRuntimeTool {
   async inspect(
     context: AgentToolContext,
     request: AgentRuntimeInspectInput,
+    options: { allowSessionHistory?: boolean } = {},
   ): Promise<Record<string, unknown>> {
     if (request.operation === "trajectory_read") {
       if (!this.trajectory) throw new AgentToolError(503, "trajectory_unavailable", "轨迹读取未配置");
@@ -244,7 +265,7 @@ export class AgentRuntimeTool {
     return this.execute(
       context,
       request.operation,
-      buildAgentRuntimeCommand(request, frameMarker),
+      buildAgentRuntimeCommand(request, frameMarker, options),
       requestLocators,
       { request, frameMarker },
     );
@@ -261,6 +282,7 @@ export class AgentRuntimeTool {
     if (action.command.length > 16_384 || action.command.includes("\0")) {
       agentToolValidation("invalid_approved_command", "获批 command 格式不合法");
     }
+    assertAgentContainerCommand(action.command);
     const encoded = Buffer.from(action.command, "utf8").toString("base64");
     return this.execute(
       context,

@@ -477,11 +477,6 @@ export function createInternalRunsRouter(
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
-      if (result.status === 'conflict') {
-        res.status(409).json({ success: false, error: "Conflict", message: "This flow uses the retry epoch protocol" });
-        return;
-      }
-
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
       res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
     } catch (error) {

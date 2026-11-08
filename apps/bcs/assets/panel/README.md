@@ -50,6 +50,98 @@ The chat renderer opens components with names such as:
 />
 ```
 
+### Collaboration definition preview
+
+The bundle exports the inline `CollaborationDefinitionCard` and the side-panel
+`CollaborationDefinitionPreview`. A producer should emit the stable component
+name through the BCS CLI instead of hand-building the escaped payload:
+
+```bash
+bcs-cli collaboration draft create workflow.yaml --draft-id "$draft_id" --title "Release review"
+```
+
+The CLI returns a short `message` using `bcsPanel.CollaborationDefinitionCard`.
+Schema 2 contains only `schemaVersion`, `draftId`, and `revision`.
+The card loads no YAML until opened. The existing host bridge and Agent resource
+binding supply `bcsPanel`; no frontend registration changes are required.
+The preview uses the host's `apiBaseUrl` or `baseUrl` (top-level props take
+precedence over `data`, including the `params.data` / `payload.data` envelopes).
+The card forwards an explicitly configured base when opening the preview;
+otherwise the side-panel host can inject its own base. Only the preview falls
+back to `/bcnproxy` when no host base is supplied. Requests append
+`/collaboration/drafts/...` or `/collaboration/definitions/validate` to a BCS root
+base; a base already ending in `/collaboration`, such as `/api/v1/collaboration`,
+uses `/drafts/...` or `/definitions/validate` without duplicating the namespace.
+Host configuration is separate from the three-field reference and must
+expose the requested API; configuring a base does not mount service routes.
+The fixed revision is read without credentials or custom request headers. The
+preview rejects redirects and verifies UTF-8 length and SHA-256.
+Validation requests use the stored version, never a substituted source body.
+Validation outages preserve already verified source for copying. References are
+transferable and revocable; reopening/refreshing reads the current availability
+without a persistent cache. Historical cards are normalized to the three fields;
+obsolete extra fields are ignored and never forwarded.
+Deployed CLI versions can keep emitting four-field cards: the native reference
+endpoint retains a fixed, non-secret `readToken` placeholder for their strict
+decoder. Panel 1.7.1 discards it and never sends the former read-token header.
+The BCS API and Panel/host need updating; upgrading the CLI is optional.
+
+Opening a card selects **协作预览**. **查看定义** shows the read-only original;
+**复制源码** appears beside **协作定义 YAML** only in that tab and copies the
+verified original. YAML syntax highlighting uses only the YAML grammar and renders
+React text nodes, preserving indentation, line endings and literal markup.
+Successful validation appears inline with the header's version
+information. Changing the fixed revision returns to the preview tab. Both card
+versions fill their host width, including the preview button.
+
+Loop previews show the logical structure used by group creation: one body per
+Loop, a return edge, iteration limits, and distinct exit branches. Nested Loops
+retain their containers. The diagram fits the panel width and supports zoom;
+the projection does not change the stored YAML or validation summary.
+
+Historical schema 1 snapshots and `collaboration preview <file>` retain their
+read-only behavior. Opening a preview never creates groups, drafts, or Runs.
+
+### Open the host's group creation modal
+
+Schema 2 previews offer a primary **发起协作** button in the upper right. An explicit click calls the trusted
+host's generic `onOpenCreateGroup({ draft: reference })`, where `reference` has
+exactly `{schemaVersion: 2, draftId, revision}`. Other panels can call
+`onOpenCreateGroup()` to guide ordinary group creation without a Draft. The event
+only opens configuration; it never submits. The BCS Panel owns preview and source
+copying, not a separate creation form or Human API client. Schema 1 stays read-only;
+a missing callback leaves the preview usable with an integration notice.
+
+The current `apps/frontend` UMD host injects this callback for panel components,
+checks the options, and lazy-loads its existing `CreateGroupModal`. Independent
+`selectOriginator` and optional `initialDraft` props control owned-Bot selection
+and initial content. Without them, the normal entry retains its current identity.
+With a Draft, the host verifies the fixed revision's bytes/hash and seeds the
+existing free editor once, then automatically validates and expands role bindings
+and the logical Loop preview. Draft entry fixes the state-machine group type and
+hides type/template switching. Users can still choose **重新编辑** to edit and
+revalidate YAML. Entries without a Draft retain all group types and templates.
+Editing invalidates the prior validation and bindings; it does not write a Draft.
+
+Owned Bots come from `/bcnproxy/collaboration/user`, independently of the current
+chat Bot. Candidates use the selected originator's perspective. Switching that
+Bot clears members and bindings; searching or paging preserves selections.
+The same `CreateGroupParams` feed normal and Human creation. Submission snapshots
+the current form, rechecks the Human, and validates the **current edited YAML**
+for state-machine groups. It never reloads a Draft over edits. YAML bytes and
+bindings travel separately; Draft reads need only the fixed ID and revision.
+
+**建群并开始协作** explicitly starts a state-machine group. The other group types
+use **创建协作群**. Unknown outcomes block repeat submission. Closing/reopening the
+same modal preserves edits and submission state; refreshing or closing the panel
+has no persistent recovery guarantee. A later share revocation cannot withdraw
+text already read into the local editor.
+
+`apps/frontend-nextgen` has not adopted this callback or editable modal parameters.
+Its API bases, identity, navigation and acceptance work remain in the
+[group-launch roadmap](../../specs/2026-10-22-collaboration-draft-group-launch/roadmap.md).
+No API base, navigation target or user identity is accepted from message options.
+
 For a failed Run, the panel shows a **Rerun** action. It sends an empty
 `POST /state-machine-runs/{run_id}/reruns` request. The source panel remains on
 the source Run; presentation of the child is driven by the new Run's opening
@@ -76,8 +168,12 @@ GET /assets/bcsPanel/index.umd.js
 The bundle treats `react` and `react-dom` as host-provided globals and bundles
 the panel implementation dependencies needed at runtime.
 
-`test:umd` checks that the generated bundle exports `StateMachineRunView`,
-which is the entry name used by `bcsPanel.StateMachineRunView`.
+`test:umd` checks the public component exports, including
+`StateMachineRunView`, `UndercoverGamePanel`, `CollaborationDefinitionCard`, and
+`CollaborationDefinitionPreview`. The collaboration integration test also
+checks the shared snapshot vectors, click-to-open lifecycle, UMD tab payload,
+UUID v7 compatibility, repeated-tab focus, expanded Loop forward-edge layout,
+and validation rendering.
 
 ## Publishing
 

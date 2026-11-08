@@ -25,7 +25,6 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     CollaboratorService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -48,6 +47,9 @@ from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime i
 from agentclaw.community.core.expert_chat.services.expert_chat_owned_session import (
     ExpertChatOwnedSessionMixin,
 )
+from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
+from agentclaw.community.core.expert_chat.services.chat_stage import ExpertChatStageMixin
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -108,7 +110,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
+class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatStageMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject
@@ -122,6 +124,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         collaborator_service: CollaboratorService,
         transport: DeviceAdapterTransport,
         instance_service: ExpertChatInstanceService,
+        publish_repository: BotPublishRepositoryProtocol,
     ):
         """Initialise.
 
@@ -151,6 +154,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         self._collaborator_service = collaborator_service
         self._transport = transport
         self._instance_service = instance_service
+        self._publish_repository = publish_repository
 
     # ============ Public Methods ============
 
@@ -171,7 +175,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             BotNotPublishedError: Bot 未绑定设备
         """
         # 1. 校验 bot 是否存在且 ACTIVE（通过 bot_id + owner_id 唯一定位）
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             logger.warning(
                 f"[ExpertChatService] Bot not found: {bot_id}, owner={owner_id}"
@@ -185,7 +189,11 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
         # 2. 校验 Bot 是否已绑定设备
-        binding_id = bot.get("binding_id")
+        binding_id = (
+            self._online_chat_binding(bot)
+            if bot.get("bot_type") == "service"
+            else bot.get("binding_id")
+        )
         if not binding_id:
             logger.warning(f"[ExpertChatService] Bot not bound to device: {bot_id}")
             raise BotNotPublishedError(f"Bot未绑定设备: {bot_id}")
@@ -217,7 +225,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             owner_id = entry["owner_id"]
 
             # 使用 get_by_id_and_owner 唯一定位 bot
-            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            bot = self._find_chat_bot(bot_id, owner_id)
             if not bot:
                 logger.warning(
                     f"[ExpertChatService] Bot not found in list: {bot_id}, owner={owner_id}"
@@ -275,7 +283,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         Returns:
             是否成功
         """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
@@ -438,6 +446,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         iam_token: Optional[str] = None,
         *,
         bcn_friend_authorized: bool = False,
+        actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
         """List one user's sessions for one expert Bot.
 
@@ -469,6 +478,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             owner_id,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
@@ -685,7 +695,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             是否成功删除
         """
         # 1. 校验 bot 是否存在
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot不存在: {bot_id}")
 
@@ -731,7 +741,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """Resolve and authorize a Bot before any container-side operation."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot不存在: {bot_id}")
         if bot.get("status") != "ACTIVE":
@@ -739,7 +749,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
 
         # 以下为安全注释COSEC：互动列表归属和 Bot 访问权均使用服务端登录身份校验。
         bot_in_list = any(
-            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
+            entry["bot_id"] == bot_id and entry["owner_id"] == str(bot["entity_id"])
             for entry in self._repo.list_chat_bots(user_id)
         )
         if not bot_in_list:
@@ -747,59 +757,6 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         if not bcn_friend_authorized:
             self._check_chat_access(bot, user_id)
         return bot
-
-    async def _prepare_chat_connection(
-        self,
-        bot: Dict[str, Any],
-        user_id: str,
-        owner_id: str,
-        iam_token: Optional[str],
-        *,
-        bcn_friend_authorized: bool = False,
-    ) -> tuple[Optional[Dict[str, Any]], bool]:
-        """Resolve caller/owner binding and return Adapter connection data."""
-        bot_id = bot["bot_id"]
-        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
-        logger.info(
-            "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
-            bot_id,
-            bot.get("call_type"),
-            bot_call_type,
-        )
-        if bot_call_type == McpCallType.CALLER:
-            result = await self._instance_service.get_caller_connection(
-                user_id=user_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                iam_token=iam_token,
-            )
-            if result.get("need_poll", False):
-                logger.info(
-                    "[ExpertChatService] Caller instance not ready: bot=%s, user=%s",
-                    bot_id,
-                    user_id,
-                )
-                return result.get("connection"), True
-            instance = result.get("instance", {})
-            ext = instance.get("ext") or {}
-            bot["binding_id"] = ext.get("binding_id")
-        elif bot.get("bot_type", "personal") == "service":
-            from agentclaw.community.core.service_bot.repository.models import (
-                PublishStatus,
-            )
-
-            bot["binding_id"] = self._baas_service.get_bind_id(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                bot_type="service",
-                publish_status=PublishStatus.SUCCESS.value,
-            )
-
-        return self._get_connection(
-            bot,
-            user_id,
-            bcn_friend_authorized=bcn_friend_authorized,
-        ), False
 
     async def _list_owned_adapter_sessions(
         self,

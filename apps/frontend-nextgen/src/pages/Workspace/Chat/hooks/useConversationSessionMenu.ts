@@ -1,9 +1,13 @@
-import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
+import type {
+  ConversationSessionAction,
+  ConversationSessionActionFeatures,
+} from '@/services/workspace/conversationSessionActionService';
 import { useRef, useState } from 'react';
 
 export interface ConversationSessionRowActions {
   run(action: ConversationSessionAction): Promise<boolean>;
   pending: boolean;
+  features?: ConversationSessionActionFeatures;
 }
 
 /** 弹窗只在请求成功后关闭；异步失败保留草稿和确认上下文。 */

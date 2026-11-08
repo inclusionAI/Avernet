@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -16,6 +17,9 @@ from agentclaw.community.core.task.forum.models import (
     ForumPostRecord,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
+    ForumTopicViewerRecord,
+    ForumPollSelection,
 )
 
 
@@ -34,6 +38,7 @@ def _topic(body: str = "description") -> ForumTopicRecord:
         title="Topic title",
         body=body,
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
@@ -87,29 +92,55 @@ async def test_list_topics_returns_preview_without_full_body():
 
 
 @pytest.mark.asyncio
-async def test_get_topic_returns_full_body_without_posts():
+async def test_get_topic_returns_full_body_viewer_state_without_posts():
+    viewer = ForumTopicViewerRecord(
+        has_voted=True,
+        vote_post_id="post_vote",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+
     class Service:
         def get_topic(self, **kwargs):
-            assert kwargs == {"topic_id": "topic_1"}
-            return _topic("full description")
+            assert kwargs == {
+                "topic_id": "topic_1",
+                "viewer_author_type": "HUMAN",
+                "viewer_author_id": "user-a",
+            }
+            return replace(_topic("full description"), viewer=viewer)
 
     payload = await get_topic(
         topic_id="topic_1",
         request=_request("/openapi/v1/collaboration/tasks/bbs/topics/topic_1"),
+        viewer_author_type="HUMAN",
+        viewer_author_id="user-a",
         service=Service(),
     )
 
     assert payload.data is not None
     assert payload.data.body == "full description"
+    assert payload.data.viewer is not None
+    assert payload.data.viewer.has_voted is True
+    assert payload.data.viewer.vote_post_id == "post_vote"
+    assert payload.data.viewer.poll_selection is not None
+    assert payload.data.viewer.poll_selection.option_indices == [0]
     assert "posts" not in payload.data.model_dump()
 
 
 @pytest.mark.asyncio
-async def test_list_posts_returns_separate_page_contract():
+async def test_list_posts_returns_first_level_page_with_child_group():
+    child = replace(
+        _post(),
+        post_id="post_2",
+        body="Child reply",
+        reply_to_post_id="post_1",
+        reply_to_floor_no=1,
+    )
+    parent = replace(_post(), floor_no=3, helpful=True, children=(child,))
+
     class Service:
         def list_posts(self, **kwargs):
             assert kwargs == {"topic_id": "topic_1", "page": 1, "page_size": 20}
-            return ForumPostPage(total=1, items=(_post(),))
+            return ForumPostPage(total=1, items=(parent,))
 
     payload = await list_posts(
         topic_id="topic_1",
@@ -120,7 +151,15 @@ async def test_list_posts_returns_separate_page_contract():
 
     assert payload.data is not None
     assert payload.data.total == 1
-    assert payload.data.items[0].model_dump()["post_id"] == "post_1"
+    item = payload.data.items[0]
+    assert item.model_dump()["post_id"] == "post_1"
+    assert item.floor_no == 3
+    assert item.helpful is True
+    assert item.children[0].post_id == "post_2"
+    assert item.children[0].reply_to_post_id == "post_1"
+    assert item.children[0].reply_to_floor_no == 1
+    assert item.children[0].helpful is False
+    assert item.children[0].children == []
 
 
 @pytest.mark.asyncio
@@ -133,6 +172,7 @@ async def test_list_topics_surfaces_stored_author_display():
         title="Topic title",
         body="description",
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
         display_name="国科",

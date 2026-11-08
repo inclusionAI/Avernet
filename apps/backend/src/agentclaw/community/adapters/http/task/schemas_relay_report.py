@@ -27,6 +27,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportEventType,
     TaskReportResult,
 )
+from agentclaw.community.core.task.task_context.task_artifact.report_item import (
+    parse_artifact_report_items,
+)
 
 
 class ExecutionEventDTO(BaseModel):
@@ -39,6 +42,29 @@ class ExecutionEventDTO(BaseModel):
     output_patch: dict[str, Any] = Field(default_factory=dict)
     local_acceptance_result: AcceptanceResultDTO | None = None
     failure_reason: str | None = None
+
+
+class ArtifactReportItemDTO(BaseModel):
+    """一条上报产物 item:恰一个 content 字段(互斥)承载对应分支的 **JSON 对象**。
+
+    content 对象不含 kind tag——判别由字段名承载;结构性校验(互斥/交叉校验/上限)
+    在核心 ``parse_artifact_report_item`` 收口,HTTP 层只转协议(Rule 22)。
+    content 对象形态为线上契约(2026-10-22 用户定稿);核心解析对 JSON 字符串
+    仍容忍(手动 API 兼容),但本 DTO(线上口)只收对象。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_name: str | None = None
+    artifact_kind: str
+    session_id: str | None = None
+    task_id: str
+    node_id: str
+    attempt: int
+    text_content: dict[str, Any] | None = None
+    file_content: dict[str, Any] | None = None
+    url_link_content: dict[str, Any] | None = None
+    code_content: dict[str, Any] | None = None
 
 
 class PlannedNodeRunInfoDTO(BaseModel):
@@ -181,6 +207,10 @@ class TaskReportCommandDTO(BaseModel):
     relay_token: str = Field(min_length=1)
     event_type: TaskReportEventType
     event: dict[str, Any] | None = None
+    # 产物上报(2026-10-22 用户定稿):报文顶层可选列表,与 trace/task_acceptance_result
+    # 平级——产物是"一次执行的结果清单"而非事件内部细节。携带条件:仅
+    # EXECUTION_RESULT 且 execution_decision=ACCEPTED(to_domain 拒绝其余一切组合)。
+    artifacts: list[ArtifactReportItemDTO] | None = None
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
@@ -212,6 +242,12 @@ class TaskReportCommandDTO(BaseModel):
         return self
 
     def to_domain(self) -> TaskReportCommand:
+        # 产物携带条件(报文顶层 artifacts,2026-10-22 用户定稿):仅 EXECUTION_RESULT
+        # 事件允许携带;其余事件类型(如 PLANNED)夹带即整体拒绝。
+        if self.artifacts is not None and self.event_type != TaskReportEventType.EXECUTION_RESULT:
+            raise TaskStateError(
+                f"{self.event_type.value} events must not carry artifacts"
+            )
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
             if self.event is None:
                 raise TaskStateError("EXECUTION_RESULT requires an event")
@@ -220,6 +256,18 @@ class TaskReportCommandDTO(BaseModel):
                 raise TaskStateError("execution patch belongs to another task")
             if parsed.node_id is not None and parsed.node_id != self.node_id:
                 raise TaskStateError("execution patch targets another node")
+            if self.artifacts is not None and str(parsed.execution_decision).upper() != "ACCEPTED":
+                # 只有 ACCEPTED 事件允许携带产物;DECLINED 夹带即整体拒绝,不静默丢弃。
+                raise TaskStateError("declined execution events must not carry artifacts")
+            artifact_patch = (
+                parse_artifact_report_items(
+                    [item.model_dump() for item in self.artifacts],
+                    report_task_id=self.task_id,
+                    report_node_id=self.node_id,
+                )
+                if self.artifacts is not None
+                else None
+            )
             goal = parsed.actual_goal
             event: TaskNodePatch | TaskNode | None = TaskNodePatch(
                 task_id=self.task_id,
@@ -243,6 +291,7 @@ class TaskReportCommandDTO(BaseModel):
                     else None
                 ),
                 failure_reason=parsed.failure_reason,
+                artifact_patch=artifact_patch,
             )
         elif self.event is not None:
             planned = PlannedNodeDTO.model_validate(self.event)

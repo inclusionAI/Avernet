@@ -8,6 +8,12 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    stable_resource_owner_id,
+)
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
 )
@@ -91,6 +97,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
+        self._bot_address_resolver = BotAddressResolver(bot_repo)
         self._runtime = runtime
         self._flow = MutationProjectionFlow(repository=repository, runtime=runtime, recovery=recovery)
         self._legacy_factory = legacy_factory
@@ -106,8 +113,11 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
 
     def _bot(self, *, bot_id: str, owner_id: str, user_id: str) -> dict:
         """Resolve the exact addressed Bot before applying caller policy."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        try:
+            bot = self._bot_address_resolver.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
             # The SkillSet control plane speaks one error vocabulary so the HTTP
             # adapter maps a single family: an invisible Bot scope is a SkillSet
             # not-found, not a Local Skill one.
@@ -140,7 +150,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         # _still_exists``, which pins it.
         if not self._authorization.can_manage_bot(
             bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=str(bot["owner_id"]),
             actor_id=user_id,
         ):
             raise SkillSetAccessDeniedError()
@@ -160,7 +170,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_sets(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -181,7 +191,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         # boundary or require a runtime action.
         item = self._repository.create_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             name=name,
             description=description,
             engine_type=self._engine(bot),
@@ -198,7 +208,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.get_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -223,7 +233,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             user_id=actor_id,
         )
         return LegacySkillSetScope(
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             bot_id=scope.bot_id,
         )
 
@@ -240,7 +250,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         item = self._repository.update_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             name=name,
             description=description,
@@ -261,7 +271,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._repository.delete_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -279,7 +289,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_skills(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -306,7 +316,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         except SkillSetControlPlaneNotFoundError:
             pass
 
-        owner_id = str(bot["owner_id"])
+        owner_id = stable_resource_owner_id(bot)
         legacy = self._legacy_factory.create(
             entity_id=str(bot.get("entity_id") or owner_id),
             bot_id=bot_id,
@@ -412,14 +422,14 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     ) -> DesiredStateMutation:
         if target["is_default"]:
             self._require_excluded_default_skill(
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 bot_id=bot_id,
                 set_id=str(target["id"]),
                 skill_id=skill_id,
             )
             return self._repository.unexclude_default_skill(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -427,7 +437,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             )
         return self._repository.add_skill(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             skill_id=skill_id,
             engine_type=self._engine(bot),
@@ -446,7 +456,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         if target["is_default"]:
             return self._repository.exclude_default_skill(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -454,7 +464,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             )
         return self._repository.remove_skill(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             skill_id=skill_id,
             engine_type=self._engine(bot),
@@ -516,7 +526,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 if previous_state is not None:
                     self._repository.restore_desired_state(
                         bot_id=bot_id,
-                        owner_id=str(bot["owner_id"]),
+                        owner_id=stable_resource_owner_id(bot),
                         state=previous_state,
                         engine_type=self._engine(bot),
                     )
@@ -530,7 +540,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                     if previous_state is not None
                     else self._repository.snapshot_desired_state(
                         bot_id=bot_id,
-                        owner_id=str(bot["owner_id"]),
+                        owner_id=stable_resource_owner_id(bot),
                         engine_type=self._engine(bot),
                     )
                 ),
@@ -565,7 +575,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             legacy_factory=self._legacy_factory,
             bot=bot,
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             target=target,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -627,7 +637,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
         return self._repository.list_mcps(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=str(target["id"]),
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -650,7 +660,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             # exclusion can be removed; the membership stays immutable.
             codes = self._repository.excluded_default_mcp_codes(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=str(target["id"]),
             )
             if server_code not in codes:
@@ -659,7 +669,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             require_mcp_delivery_eligibility(
                 mcp_config=self._mcp_config,
                 engine_type=self._engine(bot),
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 detail=detail,
             )
@@ -671,7 +681,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 scope_from_result=mcp_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_mcp(
                     bot_id=bot_id,
-                    owner_id=str(bot["owner_id"]),
+                    owner_id=stable_resource_owner_id(bot),
                     set_id=set_id,
                     server_code=server_code,
                     engine_type=self._engine(bot),
@@ -683,7 +693,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         require_mcp_delivery_eligibility(
             mcp_config=self._mcp_config,
             engine_type=self._engine(bot),
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             server_code=server_code,
             detail=detail,
         )
@@ -697,7 +707,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             scope_from_result=mcp_claim_scope,
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 server_code=server_code,
                 name=catalog["name"],
@@ -729,7 +739,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 scope_from_result=mcp_release_scope,
                 mutation=lambda: self._repository.exclude_default_mcp(
                     bot_id=bot_id,
-                    owner_id=str(bot["owner_id"]),
+                    owner_id=stable_resource_owner_id(bot),
                     set_id=set_id,
                     server_code=server_code,
                     engine_type=self._engine(bot),
@@ -748,7 +758,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             scope_from_result=mcp_release_scope,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
@@ -762,7 +772,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._repository.get_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -779,7 +789,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             scope_from_result=set_activation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
@@ -801,7 +811,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             scope_from_result=set_deactivation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 active=False,
                 engine_type=self._engine(bot),
@@ -822,7 +832,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             scope_from_result=set_activation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=stable_resource_owner_id(bot),
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
@@ -832,7 +842,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
 
     def list_resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        owner_id = str(bot["owner_id"])
+        owner_id = stable_resource_owner_id(bot)
         return list_skill_set_resources(
             repository=self._repository,
             legacy_factory=self._legacy_factory,
@@ -916,7 +926,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     ) -> None:
         for mcp in self._repository.list_mcps(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
@@ -952,7 +962,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         inactive ordinary Set is a draft; a Default is always active)."""
         return self._repository.get_set(
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),

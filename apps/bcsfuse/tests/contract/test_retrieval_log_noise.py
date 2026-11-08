@@ -75,7 +75,7 @@ def test_real_pipeline_info_is_ordered_and_reports_request_rerank(
                 raise RuntimeError("model-unavailable")
             return [{"id": candidate["id"], "score": 0.8} for candidate in candidates[:top_k]]
 
-    monkeypatch.setattr(reranker_provider, "get_reranker", FixedModel)
+    monkeypatch.setattr(reranker_provider, "get_reranker", lambda model=None: FixedModel())
     vectors = QdrantMySQLVectorStore(
         dimension=2, qdrant_path=str(tmp_path / "vectors"),
         persistence_backend=FakePersistenceBackend(),

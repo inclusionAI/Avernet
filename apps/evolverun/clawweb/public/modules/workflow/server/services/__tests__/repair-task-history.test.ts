@@ -2,12 +2,22 @@
 import { afterEach, expect, it } from 'vitest';
 import { repairFixture } from './repair-batch-fixtures.js';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
-import { projectTaskHistory } from '../repair-task-history.js';
+import { projectTaskHistory, MAX_TASK_HTTP_BYTES } from '../repair-task-history.js';
 import { createRepairBatchesRouter } from '../../routes/repair-batches.js';
+import { RepairTaskRepository } from '../../repositories/repair-task-repository.js';
 import express from 'express';
 import type { Server } from 'node:http';
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
+it('keeps the HTTP JSON byte limit and optional-field behavior without canonicalizing the view',async()=>{
+ const f=await repairFixture(1);cleanup.push(()=>f.db.close());
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
+ const first=await service.create('owner',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:(await service.candidates('wf-1')).inputDigest,requestId:'http-bytes',instructions:''});
+ const task=await service.task(first.taskId);
+ expect(projectTaskHistory({...task,title:undefined})).not.toHaveProperty('title');
+ try { projectTaskHistory({...task,title:'界'.repeat(Math.ceil(MAX_TASK_HTTP_BYTES/3))});expect.fail('oversized HTTP response must fail'); }
+ catch(error){expect(error).toMatchObject({code:'PAYLOAD_TOO_LARGE',details:{limit:MAX_TASK_HTTP_BYTES}});expect((error as any).details.actualBytes).toBeGreaterThan(MAX_TASK_HTTP_BYTES);}
+});
 it('keeps an internal task larger than 8MiB and pages its complete frozen history over bounded HTTP', async () => {
   const f = await repairFixture(1); cleanup.push(() => f.db.close());
   const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
@@ -17,6 +27,7 @@ it('keeps an internal task larger than 8MiB and pages its complete frozen histor
     await f.db.exec(`INSERT INTO workflow_repair_revisions (task_id,revision,workflow_id,phase,request_id,request_digest,request_key,input_json,created_at_ms,updated_at_ms)
       VALUES (?,?,'wf-1','failed',?,'digest',?,?,0,0)`, [created.taskId, revision, `request-${revision}`, `key-${revision}`, JSON.stringify(input)]);
   }
+  for (const revision of [25,50]) await new RepairTaskRepository(f.db).append({...created,revision,input:{...created.input,revision}},'owner');
   const task = await service.task(created.taskId);
   expect(Buffer.byteLength(JSON.stringify(task))).toBeGreaterThan(8 * 1024 * 1024);
   expect(task.revisions).toHaveLength(50);
@@ -33,7 +44,29 @@ it('keeps an internal task larger than 8MiB and pages its complete frozen histor
   const response = await fetch(url), body = await response.json();
   expect(response.status).toBe(200); expect(body.revisionPage).toMatchObject({ page: 3, total: 50 });
   expect(body.revisions).toHaveLength(10); expect(body.revisions.at(-1).revision).toBe(1);
+  expect(body.executions[1]).toMatchObject({status:'dispatched',jobId:'job-1',attempt:1});
+  expect(Object.keys(body.executions).sort()).toEqual(['1','50']);
+  expect(body.latestAttempt.execution).toBeUndefined();
   expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(8 * 1024 * 1024);
+});
+it('returns each stored execution with its own revision and does not substitute a missing historical record',async()=>{
+ const f=await repairFixture(1);cleanup.push(()=>f.db.close());
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
+ const first=await service.create('owner',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:(await service.candidates('wf-1')).inputDigest,requestId:'first',instructions:''});
+ await service.report({workflowId:'wf-1',taskId:first.taskId,revision:1,expectedStateVersion:first.stateVersion,status:'failed',error:{code:'AIS_FAILED'}});
+ f.setRemoteStatus({status:'failed',rawStatus:'failed',errorMessage:null});
+ await service.retryGeneration('owner',first.taskId,{expectedRevision:1,requestId:'second'});
+ await f.db.exec("UPDATE ce_steps SET bot_run_id='job-history', output_json=? WHERE task_id=? AND round_no=1",[JSON.stringify({attempt:1,executionId:'exec-history',rawStatus:'failed'}),first.taskId]);
+ // Keep the existing step-ID binding even when legacy round metadata is stale.
+ await f.db.exec("UPDATE ce_steps SET round_no=0, bot_run_id='job-latest', output_json=? WHERE task_id=? AND round_no=2",[JSON.stringify({attempt:1,executionId:'exec-latest',rawStatus:'running'}),first.taskId]);
+ const task=await service.task(first.taskId);
+ expect(task.executions?.[1]).toMatchObject({status:'failed',jobId:'job-history',executionId:'exec-history'});
+ expect(task.executions?.[2]).toMatchObject({jobId:'job-latest',executionId:'exec-latest'});
+ expect(task.execution).toEqual(task.executions?.[2]);
+ await f.db.exec("UPDATE ce_steps SET output_json='null' WHERE task_id=? AND round_no=1",[first.taskId]);
+ expect((await service.task(first.taskId)).executions?.[1]).toMatchObject({status:'failed',executionId:null,rawStatus:null});
+ await f.db.exec('DELETE FROM ce_steps WHERE task_id=? AND round_no=1',[first.taskId]);
+ expect((await service.task(first.taskId)).executions?.[1]).toBeUndefined();
 });
 it('splits very large revisions into byte-bounded pages without dropping records', async () => {
   const f = await repairFixture(1); cleanup.push(() => f.db.close());

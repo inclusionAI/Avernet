@@ -1,10 +1,11 @@
 // 收起侧栏（56px）的「Bot 泊位」竖轨：整栏收起不留盲区，收起条仍回答
 // 「有谁 / 开着哪个」。分组以「界珠」短分隔打结，选中 Bot 亮出
-// 泊位缺口（primary 左刻 + 底），好友 Bot 头像带在线信号点——所有图形都承载
-// 信息，不做纯装饰。头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像
-// 中间穿过，读成故障线，已撤）。
-// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；AgentCoding Bot
-// 走专用 coding 对话；不可聊 Bot 保持降权占位（与分组「泊位」一致）；
+// 泊位缺口（primary 左刻 + 底）——所有图形都承载信息，不做纯装饰。
+// 头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像中间穿过，读成故障线，已撤）。
+// 好友在线信号点已移除(2026-10-21):metadata status 对已删除 Bot 仍残留 ACTIVE,
+// 绿点失真误导;死 Bot 好友关系/元数据同步问题另行立项推动后端修复。
+// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；Coding Bot 与普通 Bot
+// 共用同一条会话通道，不再绕行专用 coding 对话；不可聊/不可用 Bot 保持降权占位（与分组「泊位」一致）；
 // +N 溢出 / 空位虚线占位各有语义，均请求展开完整侧栏
 //（2026-10-14 体验修复：底端不再保留公开 Bot 发现入口）。
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
@@ -12,6 +13,7 @@ import type { ConversationBotSection, ConversationBotView } from '@/domain/conve
 import { Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
+import { resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 
 /** 每分组直达头像上限，超出走「+N」溢出收口（点击展开完整侧栏）。 */
 const RAIL_SECTION_MAX_VISIBLE = 5;
@@ -32,8 +34,6 @@ export interface ConversationCollapsedRailProps {
   onQuickOpen(view: ConversationBotView): void;
   /** 「+N 溢出 / 空位占位」入口：请求展开完整侧栏。 */
   onExpand(): void;
-  /** AgentCoding Bot 不建普通会话，直达专用 coding 对话页（与 Bot 行为一致）。 */
-  onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
 }
 
 /** 分组界珠：短轨 + 珠点，把「两组之间」编码为轨道上的一个结。 */
@@ -42,16 +42,6 @@ function SectionKnot() {
     <span aria-hidden="true" className="relative my-0.5 flex h-4 w-px justify-center bg-border">
       <span className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-muted-foreground/60" />
     </span>
-  );
-}
-
-/** 在线信号点：仅好友 Bot 佩戴（管理/团队 Bot 无好友在线语义）。 */
-function OnlineDot() {
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background"
-    />
   );
 }
 
@@ -91,7 +81,6 @@ function BotTile({
           {selected && (
             <span aria-hidden="true" className="absolute -left-1 top-1/2 h-3.5 w-1 -translate-y-1/2 rounded-full bg-primary" />
           )}
-          {view.section === 'friend' && bot.online === true && <OnlineDot />}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="right">{tooltip}</TooltipContent>
@@ -101,6 +90,7 @@ function BotTile({
 
 /** 降权占位：不可聊 Bot 不提供直达按钮（cursor 语义与分组泊位一致），仍保留身份提示。 */
 function NonInteractiveTile({ view }: { view: ConversationBotView }) {
+  const { reason } = resolveBotUnavailable(view.bot, view.section);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -117,7 +107,7 @@ function NonInteractiveTile({ view }: { view: ConversationBotView }) {
           />
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{view.bot.displayName}</TooltipContent>
+      <TooltipContent side="right">{reason ?? view.bot.displayName}</TooltipContent>
     </Tooltip>
   );
 }
@@ -147,7 +137,6 @@ export function ConversationCollapsedRail({
   selectedSection,
   onQuickOpen,
   onExpand,
-  onOpenAgentCodingBot,
 }: ConversationCollapsedRailProps) {
   return (
     <TooltipProvider delayDuration={300}>
@@ -170,17 +159,9 @@ export function ConversationCollapsedRail({
                   visible.map((view) => {
                     const selected =
                       view.bot.botId === selectedBotId && section.id === selectedSection;
-                    // 与 Bot 行 handleToggle 同口径：AgentCoding 直达 coding 对话；不可聊不提供直达。
-                    if (view.bot.isAgentCodingBot) {
-                      return (
-                        <BotTile
-                          key={view.bot.botId}
-                          view={view}
-                          selected={selected}
-                          tooltip={view.bot.displayName}
-                          onClick={() => onOpenAgentCodingBot(view.bot)}
-                        />
-                      );
+                    // 与 Bot 行 handleToggle 同口径：不可用/不可聊 Bot 均不提供直达。
+                    if (resolveBotUnavailable(view.bot, view.section).unavailable) {
+                      return <NonInteractiveTile key={view.bot.botId} view={view} />;
                     }
                     if (!view.bot.chatable) return <NonInteractiveTile key={view.bot.botId} view={view} />;
                     return (

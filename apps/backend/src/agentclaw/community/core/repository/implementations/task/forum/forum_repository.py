@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from injector import inject
@@ -11,30 +12,40 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
-    AUTHOR_TYPE_BOT,
-    BROWSE_MODE_FRAMEWORK,
+    TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
-    BrowseFeedPage,
-    BrowseFeedTopicRecord,
-    BrowseReportCreateResult,
-    BrowseSubscriptionPage,
-    BrowseSubscriptionRecord,
-    BrowseSubscriptionUpsertResult,
-    BrowseReportRecord,
+    ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
+    ForumPollSelection,
+    ForumPollProjectionCalculator,
+    ForumPollProjectionInput,
+    ForumPollVoteRecord,
+    ForumTopicAnalysisRecord,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
+    ForumTopicConfig,
     ForumTopicCreateResult,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
 from agentclaw.community.core.task.forum.repository.models import (
-    ForumBrowseReportModel,
-    ForumBrowseSubscriptionModel,
+    _helpful_from_post_config,
+    _poll_selection_from_post_config,
+    ForumInteractionModel,
     ForumPostModel,
     ForumTopicModel,
+)
+from agentclaw.community.core.repository.implementations.task.forum.analysis_row import (
+    analysis_to_row,
+)
+from agentclaw.community.core.repository.implementations.task.forum.browse_repository import (
+    BrowseRepositoryMixin,
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
@@ -45,7 +56,64 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 _TOPIC_REQUEST_INDEX = "uk_forum_topic_request"
 _POST_REQUEST_INDEX = "uk_forum_post_request"
-_BROWSE_REPORT_REQUEST_INDEX = "uk_forum_browse_report_request"
+
+
+def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
+    """Encode one Topic configuration section as JSON storage."""
+
+    if poll is None:
+        return None
+    return {
+        "selection": poll.selection,
+        "options": list(poll.options),
+        "deadline_at": (
+            poll.deadline_at.isoformat() if poll.deadline_at is not None else None
+        ),
+    }
+
+
+def _post_config_to_row(
+    poll_selection: ForumPollSelection | None,
+) -> dict[str, object] | None:
+    """Encode structured Post extensions as generic JSON storage.
+
+    The current contract stores only the exact POLL vote selection under the
+    ``poll_selection`` key. Keeping the outer object generic lets later Post
+    variants extend the same database column without another schema change.
+    """
+
+    if poll_selection is None:
+        return None
+    return {
+        "poll_selection": {"option_indices": list(poll_selection.option_indices)}
+    }
+
+
+def _helpful_post_config_to_row(helpful: bool) -> dict[str, object] | None:
+    """Encode the HELP reply marker in the generic Post extension column."""
+
+    return {"helpful": {"marked": True}} if helpful else None
+
+
+def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] | None:
+    """Encode the type-specific Topic configuration as one JSON object."""
+
+    if config is None:
+        return None
+    sections = tuple(
+        name
+        for name, value in (
+            ("poll", config.poll),
+            ("help", config.help),
+        )
+        if value is not None
+    )
+    if len(sections) != 1:
+        raise ValueError("topic_config must contain exactly one section")
+    if config.poll is not None:
+        return {"poll": _poll_to_row(config.poll)}
+    assert config.help is not None
+    return {"help": {"expected_time": config.help.expected_time}}
 
 
 def _is_unique_conflict(
@@ -89,16 +157,7 @@ def _is_post_request_idempotency_conflict(exc: IntegrityError) -> bool:
     )
 
 
-def _is_browse_report_request_idempotency_conflict(exc: IntegrityError) -> bool:
-    return _is_unique_conflict(
-        exc,
-        index_name=_BROWSE_REPORT_REQUEST_INDEX,
-        table_name="ac_forum_browse_report",
-        required_columns=("client_request_id",),
-    )
-
-
-class ForumRepository(ForumRepositoryProtocol):
+class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
     """Create Topics and their replies without persisted floor metadata."""
 
     @inject
@@ -166,31 +225,29 @@ class ForumRepository(ForumRepositoryProtocol):
                 )
             if author_id is not None:
                 query = query.filter(ForumTopicModel.author_id == author_id)
+            # Catalogue ordering follows user-visible activity, not any
+            # maintenance timestamp. Derived analysis updates must not make a
+            # Topic bubble to the top when nobody replied.
+            latest_activity_at = func.coalesce(
+                post_stats.c.latest_post_at,
+                ForumTopicModel.gmt_create,
+            )
             total = query.count()
             rows = (
                 query.order_by(
-                    ForumTopicModel.gmt_create.desc(), ForumTopicModel.id.desc()
+                    latest_activity_at.desc(),
+                    ForumTopicModel.id.desc(),
                 )
                 .offset(offset)
                 .limit(limit)
                 .all()
             )
             items = tuple(
-                ForumTopicRecord(
-                    topic_id=row[0].topic_id,
-                    author_type=row[0].author_type,
-                    author_id=row[0].author_id,
-                    display_name=row[0].author_display_name,
-                    avatar_url=row[0].author_avatar_url,
-                    title=row[0].title,
-                    body=row[0].body,
-                    status=row[0].status,
-                    created_at=row[0].gmt_create,
-                    updated_at=row[0].gmt_modified,
-                    topic_type=row[0].topic_type,
+                replace(
+                    row[0].to_record(),
                     reply_count=int(row[1] or 0),
                     latest_activity_at=(
-                        row[2] if row[2] is not None else row[0].gmt_modified
+                        row[2] if row[2] is not None else row[0].gmt_create
                     ),
                 )
                 for row in rows
@@ -211,17 +268,211 @@ class ForumRepository(ForumRepositoryProtocol):
             if topic is None:
                 raise NotFound("topic not found")
 
-            query = db.query(ForumPostModel).filter(ForumPostModel.topic_id == topic_id)
-            total = query.count()
             rows = (
-                query.order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
-                .offset(offset)
-                .limit(limit)
+                db.query(ForumPostModel)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
                 .all()
             )
-            return ForumPostPage(
-                total=total, items=tuple(row.to_record() for row in rows)
+            first_level_rows = tuple(
+                row for row in rows if row.reply_to_post_id is None
             )
+            total = len(first_level_rows)
+            floor_by_post_id = {
+                row.post_id: floor
+                for floor, row in enumerate(first_level_rows, start=1)
+            }
+            display_rows = tuple(
+                sorted(
+                    first_level_rows,
+                    key=lambda row: (
+                        0 if _helpful_from_post_config(row.post_config) else 1,
+                        row.gmt_create,
+                        row.id,
+                    ),
+                )
+            )
+            visible_rows = display_rows[offset : offset + limit]
+
+            children_by_parent: dict[str, list[ForumPostModel]] = {}
+            for row in rows:
+                if row.reply_to_post_id is not None:
+                    children_by_parent.setdefault(
+                        row.reply_to_post_id, []
+                    ).append(row)
+
+            items = tuple(
+                replace(
+                    row.to_record(),
+                    floor_no=floor_by_post_id[row.post_id],
+                    reply_to_floor_no=None,
+                    children=tuple(
+                        replace(
+                            child.to_record(),
+                            reply_to_floor_no=floor_by_post_id.get(
+                                child.reply_to_post_id
+                            ),
+                        )
+                        for child in self._descendant_rows(
+                            root_post_id=row.post_id,
+                            all_rows=rows,
+                            children_by_parent=children_by_parent,
+                        )
+                    ),
+                )
+                for row in visible_rows
+            )
+            return ForumPostPage(total=total, items=items)
+
+    def get_post(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+    ) -> ForumPostRecord | None:
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .one_or_none()
+            )
+            return None if row is None else row.to_record()
+
+    def update_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord | None:
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            if _helpful_from_post_config(row.post_config) == helpful:
+                return row.to_record()
+            row.post_config = _helpful_post_config_to_row(helpful)
+            row.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return row.to_record()
+
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ) -> ForumPostRecord | None:
+        """Update a HELP marker and its ACCEPT event in one database transaction."""
+
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            previous_helpful = _helpful_from_post_config(row.post_config)
+            if previous_helpful == helpful:
+                return row.to_record()
+            now = datetime.now(timezone.utc)
+            row.post_config = _helpful_post_config_to_row(helpful)
+            row.gmt_modified = now
+            if helpful:
+                db.add(
+                    ForumInteractionModel(
+                        actor_type=actor_type,
+                        actor_id=actor_id,
+                        action_type="ACCEPT",
+                        target_type="POST",
+                        target_id=post_id,
+                        env=get_current_env(),
+                        gmt_create=now,
+                        gmt_modified=now,
+                    )
+                )
+            db.flush()
+            return row.to_record()
+
+    @staticmethod
+    def _descendant_rows(
+        *,
+        root_post_id: str,
+        all_rows: list[ForumPostModel],
+        children_by_parent: dict[str, list[ForumPostModel]],
+    ) -> list[ForumPostModel]:
+        """Collect all descendants of one first-level reply without recursion.
+
+        Storage keeps a single parent edge. Every descendant therefore belongs
+        to the same two-level presentation group, including replies addressed
+        to another child. The returned list preserves global chronological
+        order from ``all_rows`` and cycle guards make malformed data safe.
+        """
+        descendant_ids: set[str] = set()
+        queue = [root_post_id]
+        while queue:
+            parent_id = queue.pop(0)
+            if parent_id in descendant_ids:
+                continue
+            descendant_ids.add(parent_id)
+            queue.extend(
+                child.post_id
+                for child in children_by_parent.get(parent_id, [])
+                if child.post_id not in descendant_ids
+            )
+        descendant_ids.discard(root_post_id)
+        return [row for row in all_rows if row.post_id in descendant_ids]
 
     def create_topic(
         self,
@@ -232,6 +483,7 @@ class ForumRepository(ForumRepositoryProtocol):
         title: str,
         body: str,
         topic_type: str = TOPIC_TYPE_DISCUSSION,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -242,6 +494,25 @@ class ForumRepository(ForumRepositoryProtocol):
         now = datetime.now(timezone.utc)
         try:
             with self._transaction() as db:
+                replay = (
+                    db.query(ForumTopicModel)
+                    .filter(
+                        ForumTopicModel.author_type == author_type,
+                        ForumTopicModel.author_id == author_id,
+                        ForumTopicModel.client_request_id == client_request_id,
+                        ForumTopicModel.env == get_current_env(),
+                        ForumTopicModel.avernet_tenant
+                        == get_current_avernet_tenant(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if replay is not None:
+                    return ForumTopicCreateResult(
+                        topic=self._topic_record(db, replay),
+                        created=False,
+                    )
+
                 topic = ForumTopicModel(
                     topic_id=f"topic_{uuid.uuid4().hex}",
                     author_type=author_type,
@@ -251,6 +522,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     title=title,
                     body=body,
                     topic_type=topic_type,
+                    topic_config=_topic_config_to_row(topic_config),
                     client_request_id=client_request_id,
                     status=TOPIC_STATUS_OPEN,
                     env=get_current_env(),
@@ -277,6 +549,8 @@ class ForumRepository(ForumRepositoryProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -310,8 +584,36 @@ class ForumRepository(ForumRepositoryProtocol):
                         post=existing.to_record(), created=False
                     )
 
+                now = datetime.now(timezone.utc)
+                if topic.topic_type == TOPIC_TYPE_POLL:
+                    record = topic.to_record()
+                    if reply_to_post_id is not None:
+                        raise Conflict(
+                            "POLL replies must target the Topic; reply_to_post_id is not allowed"
+                        )
+                    if record.topic_config is not None:
+                        poll = record.topic_config.poll
+                        if (
+                            poll is not None
+                            and poll.deadline_at is not None
+                            and poll.deadline_at <= now
+                        ):
+                            raise Conflict("poll deadline has passed")
+
                 if topic.status != TOPIC_STATUS_OPEN:
                     raise Conflict(f"topic is {topic.status.lower()}")
+
+                if reply_to_post_id is not None:
+                    referenced_post = (
+                        db.query(ForumPostModel.id)
+                        .filter(
+                            ForumPostModel.topic_id == topic_id,
+                            ForumPostModel.post_id == reply_to_post_id,
+                        )
+                        .one_or_none()
+                    )
+                    if referenced_post is None:
+                        raise NotFound("reply_to_post_id not found in this topic")
 
                 if topic.topic_type in {TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE}:
                     already_replied = (
@@ -325,16 +627,16 @@ class ForumRepository(ForumRepositoryProtocol):
                     )
                     if already_replied is not None:
                         raise Conflict("author has already replied to this topic")
-
-                now = datetime.now(timezone.utc)
                 post = ForumPostModel(
                     post_id=f"post_{uuid.uuid4().hex}",
                     topic_id=topic_id,
+                    reply_to_post_id=reply_to_post_id,
                     author_type=author_type,
                     author_id=author_id,
                     author_display_name=author_display_name,
                     author_avatar_url=author_avatar_url,
                     body=body,
+                    post_config=_post_config_to_row(poll_selection),
                     client_request_id=client_request_id,
                     gmt_create=now,
                     gmt_modified=now,
@@ -352,6 +654,47 @@ class ForumRepository(ForumRepositoryProtocol):
                 raise
             return ForumReplyCreateResult(post=replay, created=False)
 
+    def get_topic_viewer_state(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> ForumTopicViewerRecord | None:
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.topic_type)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            if topic[0] != TOPIC_TYPE_POLL:
+                return ForumTopicViewerRecord(has_voted=False)
+
+            post = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.author_type == author_type,
+                    ForumPostModel.author_id == author_id,
+                )
+                .order_by(ForumPostModel.id.asc())
+                .first()
+            )
+            if post is None:
+                return ForumTopicViewerRecord(has_voted=False)
+            return ForumTopicViewerRecord(
+                has_voted=True,
+                vote_post_id=post.post_id,
+                poll_selection=_poll_selection_from_post_config(post.post_config),
+            )
+
     def get_topic(self, topic_id: str) -> ForumTopicRecord | None:
         with self._db.orm_session() as db:
             row = (
@@ -363,7 +706,185 @@ class ForumRepository(ForumRepositoryProtocol):
                 )
                 .one_or_none()
             )
-            return row.to_record() if row is not None else None
+            if row is None:
+                return None
+            record = self._topic_record(db, row)
+            if (
+                record.topic_type != TOPIC_TYPE_POLL
+                or record.topic_config is None
+                or record.topic_config.poll is None
+                or record.analysis.poll_result is not None
+            ):
+                return record
+
+            poll = record.topic_config.poll
+            empty_result = ForumPollResultRecord(
+                options=tuple(
+                    ForumPollResultOptionRecord(index=index, votes=0, percent=0)
+                    for index in range(len(poll.options))
+                ),
+                total_votes=0,
+                participant_count=0,
+                updated_at=record.updated_at,
+            )
+            return replace(
+                record, analysis=replace(record.analysis, poll_result=empty_result)
+            )
+
+    def advance_poll_projection(
+        self,
+        *,
+        topic_id: str,
+        calculator: "ForumPollProjectionCalculator",
+        batch_limit: int,
+    ) -> int:
+        """Advance one Topic's poll aggregate in one Topic-locked transaction.
+
+        Replies lock the Topic row on write, so taking the same lock here
+        serializes a batch against new vote Posts. The transaction consumes at
+        most ``batch_limit`` rows after the stored cursor, asks the core
+        calculator for a new projection, and commits both the projection and
+        advanced cursor together.
+        """
+
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if topic is None:
+                return 0
+            record = topic.to_record()
+            poll = (
+                None
+                if record.topic_config is None
+                else record.topic_config.poll
+            )
+            if (
+                record.topic_type != TOPIC_TYPE_POLL
+                or poll is None
+            ):
+                return 0
+
+            rows = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.id > record.analysis.poll_cursor_id,
+                )
+                .order_by(ForumPostModel.id.asc())
+                .limit(batch_limit)
+                .all()
+            )
+            if not rows:
+                # An empty batch is a true no-op. Rewriting the Topic with the
+                # same aggregate would make MySQL report a changed-row count of
+                # zero and SQLAlchemy raise StaleDataError in multi-worker
+                # deployments that repeat the projection within one second.
+                return 0
+            votes = tuple(
+                ForumPollVoteRecord(
+                    row_id=row.id,
+                    post_id=row.post_id,
+                    author_type=row.author_type,
+                    author_id=row.author_id,
+                    poll_selection=_poll_selection_from_post_config(
+                        row.post_config
+                    ),
+                )
+                for row in rows
+            )
+            analysis = calculator(
+                ForumPollProjectionInput(
+                    poll=poll,
+                    analysis=record.analysis,
+                    votes=votes,
+                )
+            )
+            topic.analysis_result = analysis_to_row(analysis)
+            topic.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return len(rows)
+
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> ForumTopicRecord | None:
+        with self._transaction() as db:
+            row = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.status == expected_status,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            row.title = title
+            row.body = body
+            row.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return self._topic_record(db, row)
+
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete Topic content and its direct interaction records together.
+
+        Interaction rows are string-keyed projections rather than foreign keys,
+        so they are removed explicitly for the deleted Topic and its Posts.
+        Published historical reports are retained; they reference content by
+        identifier and do not resurrect deleted Topic/Post rows.
+        """
+
+        with self._transaction() as db:
+            row = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None or row.status == TOPIC_STATUS_LOCKED:
+                return False
+
+            post_ids = [
+                result[0]
+                for result in db.query(ForumPostModel.post_id)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .all()
+            ]
+            if post_ids:
+                db.query(ForumInteractionModel).filter(
+                    ForumInteractionModel.target_type == "POST",
+                    ForumInteractionModel.target_id.in_(post_ids),
+                ).delete(synchronize_session=False)
+            db.query(ForumInteractionModel).filter(
+                ForumInteractionModel.target_type == "TOPIC",
+                ForumInteractionModel.target_id == topic_id,
+            ).delete(synchronize_session=False)
+            db.query(ForumPostModel).filter(
+                ForumPostModel.topic_id == topic_id
+            ).delete(synchronize_session=False)
+            db.delete(row)
+            db.flush()
+            return True
 
     def update_topic_status(
         self,
@@ -388,7 +909,7 @@ class ForumRepository(ForumRepositoryProtocol):
                 return None
             row.status = status
             db.flush()
-            return row.to_record()
+            return self._topic_record(db, row)
 
     def _find_request_topic(
         self, author_type: str, author_id: str, client_request_id: str
@@ -405,7 +926,12 @@ class ForumRepository(ForumRepositoryProtocol):
                 )
                 .one_or_none()
             )
-            return row.to_record() if row is not None else None
+            return None if row is None else self._topic_record(db, row)
+
+    @staticmethod
+    def _topic_record(db, row: ForumTopicModel) -> ForumTopicRecord:
+        del db
+        return row.to_record()
 
     def _find_request_post(
         self,
@@ -430,247 +956,3 @@ class ForumRepository(ForumRepositoryProtocol):
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
-
-    # ------------------------------------------------------------------
-    # BBS Browse Loop — subscription + actor-aware feed
-    # ------------------------------------------------------------------
-
-    _FEED_PREVIEW_LENGTH = 500
-    _FEED_EXCLUDE_TYPES = (TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE)
-
-    def upsert_subscription(
-        self,
-        *,
-        bot_id: str,
-        owner_user_id: str,
-        mode: str = BROWSE_MODE_FRAMEWORK,
-        note: str | None = None,
-    ) -> BrowseSubscriptionUpsertResult:
-        # Determine current subscription first (outside the write tx) to compute
-        # whether this is a create or an in-place update.
-        existing = self.get_subscription(bot_id)
-        now = datetime.now(timezone.utc)
-        with self._transaction() as db:
-            if existing is not None:
-                row = (
-                    db.query(ForumBrowseSubscriptionModel)
-                    .filter(
-                        ForumBrowseSubscriptionModel.bot_id == bot_id,
-                        ForumBrowseSubscriptionModel.env == get_current_env(),
-                        ForumBrowseSubscriptionModel.avernet_tenant
-                        == get_current_avernet_tenant(),
-                    )
-                    .one()
-                )
-                row.mode = mode
-                row.note = note
-                row.gmt_modified = now
-                db.flush()
-                return BrowseSubscriptionUpsertResult(
-                    subscription=row.to_record(), created=False
-                )
-            row = ForumBrowseSubscriptionModel(
-                bot_id=bot_id,
-                owner_user_id=owner_user_id,
-                mode=mode,
-                note=note,
-                env=get_current_env(),
-                avernet_tenant=get_current_avernet_tenant(),
-                gmt_create=now,
-                gmt_modified=now,
-            )
-            db.add(row)
-            db.flush()
-            return BrowseSubscriptionUpsertResult(
-                subscription=row.to_record(), created=True
-            )
-
-    def get_subscription(self, bot_id: str) -> BrowseSubscriptionRecord | None:
-        with self._db.orm_session() as db:
-            row = (
-                db.query(ForumBrowseSubscriptionModel)
-                .filter(
-                    ForumBrowseSubscriptionModel.bot_id == bot_id,
-                    ForumBrowseSubscriptionModel.env == get_current_env(),
-                    ForumBrowseSubscriptionModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .one_or_none()
-            )
-            return row.to_record() if row is not None else None
-
-    def list_subscriptions(
-        self,
-        *,
-        offset: int,
-        limit: int,
-        mode: str | None = None,
-        owner_user_id: str | None = None,
-    ) -> BrowseSubscriptionPage:
-        with self._db.orm_session() as db:
-            query = db.query(ForumBrowseSubscriptionModel).filter(
-                ForumBrowseSubscriptionModel.env == get_current_env(),
-                ForumBrowseSubscriptionModel.avernet_tenant
-                == get_current_avernet_tenant(),
-            )
-            if mode is not None:
-                query = query.filter(ForumBrowseSubscriptionModel.mode == mode)
-            if owner_user_id is not None:
-                query = query.filter(
-                    ForumBrowseSubscriptionModel.owner_user_id == owner_user_id
-                )
-            total = query.count()
-            rows = (
-                query.order_by(
-                    ForumBrowseSubscriptionModel.gmt_create.desc(),
-                    ForumBrowseSubscriptionModel.id.desc(),
-                )
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-            return BrowseSubscriptionPage(
-                total=total, items=tuple(row.to_record() for row in rows)
-            )
-
-    def delete_subscription(self, bot_id: str) -> bool:
-        with self._transaction() as db:
-            deleted = (
-                db.query(ForumBrowseSubscriptionModel)
-                .filter(
-                    ForumBrowseSubscriptionModel.bot_id == bot_id,
-                    ForumBrowseSubscriptionModel.env == get_current_env(),
-                    ForumBrowseSubscriptionModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .delete(synchronize_session=False)
-            )
-            return bool(deleted)
-
-    def list_browse_feed(
-        self,
-        *,
-        bot_id: str,
-        status: str | None,
-        topic_type: str | None,
-        offset: int,
-        limit: int,
-    ) -> BrowseFeedPage:
-        # A correlated subquery counts this Bot's replies per Topic; POLL/NOTICE
-        # topics the actor already replied to are excluded from the feed.
-        with self._db.orm_session() as db:
-            reply_count_subq = func.coalesce(
-                (
-                    db.query(func.count(ForumPostModel.id))
-                    .filter(
-                        ForumPostModel.topic_id == ForumTopicModel.topic_id,
-                        ForumPostModel.author_type == AUTHOR_TYPE_BOT,
-                        ForumPostModel.author_id == bot_id,
-                    )
-                    .correlate(ForumTopicModel)
-                    .scalar_subquery()
-                ),
-                0,
-            ).label("my_reply_count")
-
-            query = db.query(ForumTopicModel, reply_count_subq).filter(
-                ForumTopicModel.env == get_current_env(),
-                ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
-            )
-            if status is not None:
-                query = query.filter(ForumTopicModel.status == status)
-            if topic_type is not None:
-                query = query.filter(ForumTopicModel.topic_type == topic_type)
-            # DISCUSSION is always returned; POLL/NOTICE only when not yet replied.
-            query = query.filter(
-                or_(
-                    ForumTopicModel.topic_type.notin_(self._FEED_EXCLUDE_TYPES),
-                    reply_count_subq == 0,
-                )
-            )
-            total = query.count()
-            rows = (
-                query.order_by(
-                    ForumTopicModel.gmt_create.desc(), ForumTopicModel.id.desc()
-                )
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-            items = tuple(self._feed_record_from_row(row) for row in rows)
-            return BrowseFeedPage(total=total, items=items)
-
-    @staticmethod
-    def _feed_record_from_row(row) -> BrowseFeedTopicRecord:
-        topic, my_reply_count = row
-        body_preview = (topic.body or "")[:ForumRepository._FEED_PREVIEW_LENGTH]
-        return BrowseFeedTopicRecord(
-            topic_id=topic.topic_id,
-            author_type=topic.author_type,
-            author_id=topic.author_id,
-            title=topic.title,
-            body_preview=body_preview,
-            body_truncated=len(topic.body or "") > ForumRepository._FEED_PREVIEW_LENGTH,
-            status=topic.status,
-            topic_type=topic.topic_type,
-            created_at=topic.gmt_create,
-            updated_at=topic.gmt_modified,
-            my_reply_count=int(my_reply_count or 0),
-        )
-
-
-    def create_browse_report(
-        self,
-        *,
-        bot_id: str,
-        status: str,
-        client_request_id: str,
-        message: str | None = None,
-    ) -> BrowseReportCreateResult:
-        existing = self._find_request_browse_report(client_request_id)
-        if existing is not None:
-            return BrowseReportCreateResult(report=existing, created=False)
-
-        now = datetime.now(timezone.utc)
-        try:
-            with self._transaction() as db:
-                report = ForumBrowseReportModel(
-                    report_id=f"br_{uuid.uuid4().hex}",
-                    bot_id=bot_id,
-                    status=status,
-                    message=message,
-                    client_request_id=client_request_id,
-                    env=get_current_env(),
-                    avernet_tenant=get_current_avernet_tenant(),
-                    gmt_create=now,
-                    gmt_modified=now,
-                )
-                db.add(report)
-                db.flush()
-                return BrowseReportCreateResult(
-                    report=report.to_record(), created=True
-                )
-        except IntegrityError as exc:
-            if not _is_browse_report_request_idempotency_conflict(exc):
-                raise
-            replay = self._find_request_browse_report(client_request_id)
-            if replay is None:
-                raise
-            return BrowseReportCreateResult(report=replay, created=False)
-
-    def _find_request_browse_report(
-        self, client_request_id: str
-    ) -> BrowseReportRecord | None:
-        with self._db.orm_session() as db:
-            row = (
-                db.query(ForumBrowseReportModel)
-                .filter(
-                    ForumBrowseReportModel.client_request_id
-                    == client_request_id,
-                    ForumBrowseReportModel.env == get_current_env(),
-                    ForumBrowseReportModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .one_or_none()
-            )
-            return None if row is None else row.to_record()

@@ -28,6 +28,8 @@ MOCK_BOT_ITEM = {
     "gmt_create": "2026-01-01 00:00:00", "gmt_modified": "2026-01-01 00:00:00",
     "modifier_id": "448524", "share_policy": {}, "is_delete": False,
     "public": "private",
+    "engine_paths": {"openclaw": "/tmp/test/openclaw"},
+    "bot_work_dir": "/tmp/test/openclaw",
     "ext": {
         "passport": {"status": "AUTHORIZED", "is_first_bot": False},
         "avatar_url": "", "start_status": "running", "start_message": "",

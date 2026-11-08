@@ -181,6 +181,13 @@ MessageDeliveriesPath:
     operationId: get_message_deliveries
     tags: ["Collaboration / Sessions"]
     summary: Read managed delivery state for one canonical message.
+    description: >-
+      Requires current Session membership and visibility of each selected source.
+      Recorded Chat join anchors use the configured history window, including
+      permitted pre-join messages. ManagerWorker and StateMachine reads do not
+      apply a Chat join window. Private-message and Human audience checks remain
+      mandatory; any forbidden selected source rejects the request. Read access
+      does not expand cancellation or manual-resolution permissions.
     x-avernet-security:
       user: required
       app: required
@@ -231,6 +238,13 @@ SessionMessageDeliveriesQueryPath:
     operationId: query_session_message_deliveries
     tags: ["Collaboration / Sessions"]
     summary: Batch-query managed delivery state within one Session.
+    description: >-
+      Requires current Session membership and visibility of each selected source.
+      Recorded Chat join anchors use the configured history window, including
+      permitted pre-join messages. ManagerWorker and StateMachine reads do not
+      apply a Chat join window. Private-message and Human audience checks remain
+      mandatory; any forbidden selected source rejects the request. Read access
+      does not expand cancellation or manual-resolution permissions.
     x-avernet-security:
       user: required
       app: required

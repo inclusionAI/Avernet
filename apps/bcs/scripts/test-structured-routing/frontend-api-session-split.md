@@ -83,7 +83,6 @@ GET /groups/{id}
   "group_strategy": "manager_worker",
   "group_kind": "normal",
   "dm_pair_key": null,
-  "workspace": null,
   "service_group_uuid": null,
   "created_at": 1715700000000,
   "updated_at": 1715700000000

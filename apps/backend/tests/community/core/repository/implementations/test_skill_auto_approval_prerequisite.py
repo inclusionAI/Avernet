@@ -1,5 +1,7 @@
 """Skill-only AUTO Grant step against real SQLite persistence."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -75,15 +77,15 @@ def _skill_editor_requests(db):
 
 
 def _work_orders(db):
-    return WorkOrderRepository(db, _skill_editor_requests(db))
+    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skills(db):
-    return SpaceSkillRepository(db, _skill_editor_requests(db))
+    return SpaceSkillRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skill(db):
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     with spaces.create_team_transaction(
         name="Team", creator_id="owner-1", creator_user_name=None, env="dev"
     ) as team:

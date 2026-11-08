@@ -4,6 +4,7 @@ import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { ChevronRight, Copy, FolderOpen } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
+import { PrimaryNavToggle } from '../PrimaryNav';
 import { ChatConnectionStatus, CONNECTION_TONE_DOT } from '../ChatConnectionStatus';
 
 export { CONNECTION_TONE_DOT } from '../ChatConnectionStatus';
@@ -30,7 +31,8 @@ export interface ChatPanelHeaderProps {
  * 窄屏让位次序（2026-10-14 用户反馈：宽度不足时左侧与右侧五图标重叠）——ChatLayout 槽为
  * 左右各 flex:1 五五分，左侧内容必须可收缩：① 会话 ID 胶囊双倍收缩（shrink-2 + 内部
  * truncate，极限退化到仅 Copy 图标）；② 标题可截断；③ 状态点与返回钮不参与收缩。
- * 胶囊宽上限 180px 对齐 GroupHeader。
+ * 胶囊宽上限 180px 对齐 GroupHeader。④（2026-10-19）「已连接」文案 <lg 收纳为仅绿点，
+ * 可访问名由 ChatConnectionStatus 的 aria-label 恒撑（读屏/悬停不丢失）。
  */
 export function ChatPanelHeader({
   target,
@@ -70,6 +72,9 @@ export function ChatPanelHeader({
       }
       slotLeft={
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* 壳内一级导航入口（<lg）：置于「打开会话列表」左侧同排，取代内容区顶部独立条带；
+              壳外/精简路由上下文为 null 时本钮不渲染，组件仍可独立渲染（单测直渲形态）。 */}
+          <PrimaryNavToggle />
           {onOpenSessionList ? (
             <IconButton
               label="打开会话列表"

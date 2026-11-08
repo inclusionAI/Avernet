@@ -32,14 +32,16 @@ export class BcnInteractions {
   ) {}
 
   mount(ctx: Context, agent: Agent): void {
+    // DSH Web's remote answerer is registered earlier and does not call next
+    // while awaiting its UI. Own BCN agents before that fallback gets the request.
     ctx.on('approval/request', (req, next) => {
       const run = this.activeRun(agent);
       return run && req.agent === agent ? this.approve(run, req) : next();
-    });
+    }, { prepend: true });
     ctx.on('user-questions/request', (req, next) => {
       const run = this.activeRun(agent);
       return run && req.agent === agent ? this.ask(ctx, agent, run, req) : next();
-    });
+    }, { prepend: true });
   }
 
   cancelRun(runId: string): void {

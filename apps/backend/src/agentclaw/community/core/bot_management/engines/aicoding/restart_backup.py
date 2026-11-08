@@ -1,8 +1,8 @@
 """Best-effort coding restart backup; platform exec, never Relay HTTP.
 
-Backup failures and physical-identity observations do not veto restart.
-Lifecycle binding, operation ownership and durable mutation fences remain
-mandatory. No runtime upgrade is required; the v1 helper's archive budget remains 900 seconds.
+Backup I/O and runtime receipt observations do not veto restart.
+Lifecycle binding/Arca target checks, operation ownership and durable mutation
+fences remain mandatory. No runtime upgrade is required; the v1 helper's archive budget remains 900 seconds.
 """
 from __future__ import annotations
 
@@ -16,6 +16,9 @@ from typing import Any, Callable
 from urllib.parse import quote
 
 from agentclaw.community.log import get_logger
+
+from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
+from .restart_dependencies import RestartBackupDependencies
 
 logger = get_logger()
 
@@ -179,6 +182,8 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
     """
     try:
         return callback()
+    except RestartBackupTargetChanged:
+        raise
     except Exception as error:
         failure = error
     logger.warning(
@@ -340,8 +345,7 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
-    def prepare_restart(self, ctx, *, device_service_provider=None,
-                        target_runtime_provider=None, **kwargs):
+    def prepare_restart(self, ctx, *, device_service_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.
 
         Backup I/O and receipt failures degrade to warnings. Binding reads,
@@ -358,7 +362,7 @@ class AicodingRestartBackupMixin:
         kwargs['operation_id'] = _operation_id(
             kwargs.get('operation_id'), kwargs.pop('restart_key', None)
         )
-        verify = self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
+        verify = self._prepare_restart(ctx, **kwargs)
         if execution is None:
             return verify
 
@@ -377,16 +381,24 @@ class AicodingRestartBackupMixin:
             await asyncio.to_thread(verify)
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
-                        bot_repository=None, device_id=None, target_runtime=None,
-                        target_runtime_provider=None, operation_id=None):
+                        bot_repository=None, device_id=None,
+                        operation_id=None, restart_dependencies: RestartBackupDependencies | None = None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
             operation_id = _operation_id(operation_id)
+            dependencies = restart_dependencies or RestartBackupDependencies()
             if device_id is not None:
+                target_runtime = None
                 identity = dict(bot_id=ctx.bot_id, target_id=device_id,
                                 operation_id=operation_id)
+                def inventory():
+                    nonlocal target_runtime
+                    if target_runtime is None:
+                        target_runtime = dependencies.baas_runtime()
+                    return _query_inventory(target_runtime, **identity, phase='resolve')
+
                 targets = _best_effort(
-                    lambda: _query_inventory(target_runtime, **identity, phase='resolve'),
+                    inventory,
                     phase='resolve', **identity,
                 )
                 if targets == {}:
@@ -443,22 +455,41 @@ class AicodingRestartBackupMixin:
                 # Resolving the backup-only client is not a restart prerequisite.
                 check = _best_effort(
                     lambda: self._prepare_restart(
-                        ctx, device_id=target, target_runtime=target_runtime_provider(),
+                        ctx, device_id=target,
+                        restart_dependencies=RestartBackupDependencies.for_instance(dependencies.baas_runtime()),
                         operation_id=operation_id),
                     phase='prepare', bot_id=ctx.bot_id, target_id=target,
                     operation_id=operation_id,
                 )
             elif provider == 'arca':
-                # Direct ARCA restart does not participate in the BaaS backup
-                # protocol. In particular, recovery must not require an exec
-                # into an already destroyed sandbox. Keep the binding verifier
-                # and the caller's mutation fence before the original stop/start.
-                logger.info(
-                    "event=aicoding_restart_backup phase=skip reason=arca_provider "
-                    "bot_id=%s binding_id=%s", ctx.bot_id, binding_id,
-                )
-                def check():
-                    return None
+                props = _field(binding, 'device_props') or {}
+                sandbox_id = props.get('sandbox_id')
+                if (execution is not None and 'sandbox_id' in execution.payload
+                        and sandbox_id != execution.payload['sandbox_id']):
+                    raise RestartBackupTargetChanged('Arca restart target changed')
+                if not isinstance(sandbox_id, str) or not sandbox_id:
+                    def missing_sandbox():
+                        raise RestartBackupError('missing_sandbox', '旧绑定缺少沙箱 ID')
+                    _best_effort(missing_sandbox, phase='resolve', bot_id=ctx.bot_id,
+                                 target_id=target, operation_id=operation_id)
+                    check = None
+                else:
+                    # Same physical identity as release, not a BaaS inventory or
+                    # the logical device_id. Target/DB checks must stay blocking.
+                    transport = dependencies.arca_transport()
+                    executor = BoundArcaRestartExecutor(
+                        bindings=device_service, transport=transport,
+                        binding_id=binding_id,
+                        device_id=target, sandbox_id=sandbox_id,
+                    )
+                    receipt_check = _attempt_backup(
+                        execute=executor.execute, operation_id=operation_id,
+                        bot_id=ctx.bot_id, target_id=sandbox_id,
+                    )
+
+                    def check():
+                        executor.verify()
+                        receipt_check()
             else:
                 def execute(cmd):
                     if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
@@ -476,6 +507,15 @@ class AicodingRestartBackupMixin:
                     logger.error("event=aicoding_restart_backup phase=verify status=blocked "
                                  "reason=binding_changed bot_id=%s binding_id=%s", ctx.bot_id, binding_id)
                     raise RestartBackupError('binding_changed', '备份后绑定已变化，禁止替换其他容器')
+                if provider == 'arca' and check is None:
+                    current_binding = device_service.get_device(binding_id=binding_id)
+                    if (
+                        _field(current_binding, 'device_id') != target
+                        or _field(current_binding, 'device_provider') != provider
+                        or _field(current_binding, 'status') not in {'ACTIVE', 'PENDING', 'FAILED', 'STOPPED'}
+                        or (_field(current_binding, 'device_props') or {}).get('sandbox_id') != sandbox_id
+                    ):
+                        raise RestartBackupTargetChanged('Arca restart target changed')
                 if check is not None:
                     check()
             return verify

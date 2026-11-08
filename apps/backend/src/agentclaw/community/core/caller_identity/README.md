@@ -20,6 +20,16 @@ internal_dependencies:
 
 ### Change impact
 
+Explicit OpenAPI friend IAM preparation carries a server-verified
+`friend_user_id` and owned `session_id`. The adapter verifies friendship, resolves
+the effective chat stage, and loads the actual entity address from the exact
+Bot/owner pair. For Caller-mode services, installation is restricted to that
+subject's existing Caller instance, including when the subject is also the Bot
+owner. Owner inspection of another Human's conversation does not authorize
+credential installation there. The optional internal friend argument is not an
+authorization flag clients can supply directly to the application service.
+See `specs/2026-10-26-online-conversation-stage/spec.md` for the additive contract.
+
 IAM refresh accepts an optional `sessionKey` query parameter. The application
 passes its original value as `session_key` through the Caller contracts and
 runtime updater. Existing non-TeClaw callers need no session parameter.

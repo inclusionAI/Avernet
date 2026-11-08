@@ -1,10 +1,12 @@
-import { AgentToolCallIdempotencyConflictError } from "../repositories/repair/agent-tool-call-record.js";
+import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
+import { logRepairEvent } from "../services/repair/common/logging.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
 import { Router, json, type Request } from "express";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
+import { parseRequest } from "../services/repair/session-recovery/validation.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
@@ -20,6 +22,14 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   };
   router.post("/internal/monitoring/session-recoveries", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try {
+      if (!supplied) {
+        try {
+          const request = parseRequest(req.body);
+          if (request.execution_level !== "debug") logRepairEvent("session-recovery", "session_recovery_task", "CREATE_FAILED", {
+            eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
+            phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
+        } catch { /* Invalid input is not a failed online creation; preserve the existing unavailable response below. */ }
+      }
       const deps = runtime();
       res.set("Cache-Control", "no-store");
       res.status(202).json(await deps.service.create(req.body, { userId: "session-recovery-service", isAdmin: true }));
@@ -27,7 +37,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   const actor = async (req: Request): Promise<RecoveryActor> => {
     const resolved = supplied?.resolveActor ? await supplied.resolveActor(req)
-      : await resolveRepairRequestActor(req).then(value => value ? { userId: value.userId, isAdmin: false } : null);
+      : await resolveRepairRequestActor(req).then(value => value ? { userId: value.userId, isAdmin: req.isAdmin === true } : null);
     if (!resolved) throw new SessionRecoveryError(401, "recovery_login_required", "需要登录");
     return resolved;
   };
@@ -39,12 +49,20 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.json({ items: await tasks().list(String(req.query.event_id ?? ""), await actor(req)) }); }
     catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/simulations", json({ limit: "1mb", inflate: false }), async (req, res, next) => {
+    try { res.set("Cache-Control", "no-store").status(202).json(await tasks().createSimulations(req.body, await actor(req))); }
+    catch (error) { next(error); }
+  });
   router.get("/monitoring/session-recoveries/:taskId", async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().detail(String(req.params.taskId), await actor(req))); }
     catch (error) { next(error); }
   });
   router.patch("/monitoring/session-recoveries/:taskId/share", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
+    catch (error) { next(error); }
+  });
+  router.post("/monitoring/session-recoveries/:taskId/terminate", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try { res.set("Cache-Control", "no-store").json(await tasks().terminate(String(req.params.taskId), await actor(req), req.body?.reason)); }
     catch (error) { next(error); }
   });
   router.get("/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId", async (req, res, next) => {
@@ -98,6 +116,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     if (!/^\/(?:internal\/)?monitoring\/session-recoveries(?:\/|$)/.test(req.path)) { next(error); return; }
     const failure = error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? error
       : error instanceof AgentToolCallIdempotencyConflictError ? new SessionRecoveryError(409, "recovery_request_conflict", "同一工具请求标识不能用于不同内容")
+      : error instanceof AgentToolCallWorkloadConflictError ? new SessionRecoveryError(409, "recovery_execution_conflict", "执行授权已变化，不能继续当前操作")
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");

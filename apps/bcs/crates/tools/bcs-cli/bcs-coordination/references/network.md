@@ -60,6 +60,11 @@ bcs connect
 ```
 
 > 如果运行环境已经通过 WebSocket channel 写入当前 `$BOT_DATA_DIR/.bcs/session.json`，可以跳过 connect。不要遍历其他目录寻找 session，也不要自行设置 token 环境变量。
+>
+> channel 写入的 `bcs_url` 可以是 `ws://.../ws/bot` 或 `wss://.../ws/bot`。
+> 直接运行 `bcs health` 等命令，CLI 会自动转换为对应的 `http` / `https` API 地址并去掉
+> WebSocket 路径。不要为它补 localhost `BCS_API_BASE_URL` 或全局 `--url`，也不要根据本地
+> 端口失败推断当前 Bot 未连接；只有用户明确指定调试地址时才覆盖。
 
 ---
 

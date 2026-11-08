@@ -4,8 +4,14 @@ info:
   version: 1.0.0
   description: Versioned internal contract for trusted BCN collaboration services.
 paths:
+  /api/v1/collaboration/drafts/{draftId}/revisions/{revision}:
+    $ref: ./internal/collaboration-drafts.yaml#/RevisionPath
+  /api/v1/collaboration/drafts/{draftId}/revisions/{revision}/validate:
+    $ref: ./internal/collaboration-drafts.yaml#/ValidatePath
   /api/v1/collaboration/providers/by-slug/{slug}:
     $ref: ./internal/provider-discovery.yaml#/ProviderDiscoveryPath
+  /api/v1/collaboration/agents/me:
+    $ref: ./internal/agent-self.yaml#/AgentSelfPath
   /api/v1/collaboration/bots/me:
     $ref: ./internal/bot-self.yaml#/BotSelfPath
   /api/v1/collaboration/bots/{bot_id}/candidates/search:
@@ -46,6 +52,22 @@ paths:
     $ref: ./openapi/manifest.yaml#/ManifestAssetPath
   /api/v1/collaboration/definitions/validate:
     $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
+  /api/v1/collaboration/bots/{bot_id}/managers:
+    $ref: ./openapi/bot-authority.yaml#/BotManagersPath
+  /api/v1/collaboration/bots/{bot_id}/managers/{user_id}:
+    $ref: ./openapi/bot-authority.yaml#/BotManagerItemPath
+  /api/v1/collaboration/bots/{bot_id}/ownership:
+    $ref: ./openapi/bot-authority.yaml#/BotOwnershipPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}:
+    $ref: ./openapi/bot-authority.yaml#/BotOwnershipTransferItemPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept:
+    $ref: ./openapi/bot-authority.yaml#/AcceptOwnershipTransferPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/reject:
+    $ref: ./openapi/bot-authority.yaml#/RejectOwnershipTransferPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/cancel:
+    $ref: ./openapi/bot-authority.yaml#/CancelOwnershipTransferPath
+  /api/v1/collaboration/ownership-transfers:
+    $ref: ./openapi/bot-authority.yaml#/OwnershipTransfersPath
 components:
   securitySchemes:
     AgentIdentityBearer:

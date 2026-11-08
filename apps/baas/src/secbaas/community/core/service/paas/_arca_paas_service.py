@@ -775,7 +775,13 @@ class ArcaPaasService(PaasService):
         Returns:
             WsConnectionInfo with wss:// URL, JWT token, target, and expiry.
         """
-        return self._arca_sandbox_plugin.resolve_ws_conn_info(
+        # review P2：plugin 的 a2a_base_url 发现会同步实查 kube API（read_
+        # namespaced_service），曾被同步跑在本协程线程阻塞整个事件循环——
+        # WS 签发的关键路径绝不能被 A2A 可选字段的探索拖住（慢/挂/不可用
+        # 均不豁免）。to_thread 挪出控制线程（plugin 内部纯计算 + 实查均在
+        # 工作线程执行）。
+        return await asyncio.to_thread(
+            self._arca_sandbox_plugin.resolve_ws_conn_info,
             paas_device_id=paas_device_id,
             port=port,
             path=path,

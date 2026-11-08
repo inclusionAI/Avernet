@@ -260,9 +260,12 @@ test('persists a rotated bot.connect token before marking the connection ready',
   t.after(() => closeServer(server));
   const endpoint = await resolveEndpoint(server.endpoint);
   const persisted: BotSession[] = [];
+  const session = { ...botSession(server.endpoint), registration: {
+    providerId: 'prv_dsh', providerBotRef: 'dsh-local-ref', mode: 'plugin' as const, authMode: 'static_bearer' as const,
+  } };
   const client = new BcnWsClient({
     endpoint,
-    session: botSession(server.endpoint),
+    session,
     config: testConfig({ endpoint: server.endpoint }),
     onSessionChanged: async session => { persisted.push(session); },
   });
@@ -271,4 +274,5 @@ test('persists a rotated bot.connect token before marking the connection ready',
   await waitFor(() => client.connected, 'client did not connect');
   assert.equal(persisted[0]?.botToken, 'rotated-secret');
   assert.equal(client.botSession.botToken, 'rotated-secret');
+  assert.deepEqual(persisted[0]?.registration, session.registration);
 });

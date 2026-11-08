@@ -153,7 +153,7 @@ export function sourceTypeBadge(sourceType: string) {
 }
 
 export function getUserTaskTitle(record: any): string {
-  return record.task_spec?.metadata?.title || record.task_id;
+  return record.task_spec?.context?.title || record.task_spec?.metadata?.title || record.task_id;
 }
 
 export function getUserTaskGoal(record: any): string {

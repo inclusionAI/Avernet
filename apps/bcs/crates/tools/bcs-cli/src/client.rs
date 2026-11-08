@@ -6,6 +6,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
+#[path = "draft_client.rs"]
+mod drafts;
+
 use anyhow::{Context, Result, anyhow};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
@@ -14,10 +17,10 @@ use tracing::{debug, info, warn};
 use bcs_protocol::{
     BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BindingChannels, BotCapabilities, BotConnectParams,
     BotConnectResponse, BotDynamicStatus, BotInfo, ChatRunCancelResponse, ChatRunState,
-    ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, CreateGroupRequest,
+    ChatRunStatusResponse, ChatRunSubmitResponse, CreateGroupRequest,
     CreateGroupResponse, DiscoverBotsExtendedResponse, DiscoverBotsResponse, FriendApiResponse,
     FusionRequest, FusionResponse, JoinRequest, JoinResponse, OnboardRequest, OnboardResponse,
-    ParticipantBindingInfo, ParticipantInfo, ProposalResponse, QueryBotEntry, QueryBotsRequest,
+    ParticipantBindingInfo, ParticipantInfo, QueryBotEntry, QueryBotsRequest,
     SetVisibilityRequest, Skill, UpdateStatusRequest, UpdateStatusResponse,
 };
 
@@ -37,7 +40,9 @@ pub const DEFAULT_BCS_URL: &str = "http://localhost:21000";
 /// so the cross-host auth isolation is auditable.
 fn build_http_client() -> reqwest::Client {
     let policy = reqwest::redirect::Policy::custom(move |attempt| {
-        if attempt.previous().len() >= 10 {
+        if attempt.previous().first().is_some_and(|source| source.origin() != attempt.url().origin()) {
+            attempt.stop()
+        } else if attempt.previous().len() >= 10 {
             attempt.error("too many redirects")
         } else {
             // cross-host or same-host: follow; reqwest strips Authorization on
@@ -112,6 +117,7 @@ pub struct BcsClient {
     /// W3C Trace Context inherited from the Bash tool process. The CLI is a
     /// transparent carrier and never creates its own span.
     traceparent: Option<HeaderValue>,
+    actor_id: Option<HeaderValue>,
 }
 
 // ============================================================================
@@ -165,6 +171,25 @@ pub enum ChatAsyncError {
 }
 
 impl BcsClient {
+    pub async fn current_bot_uuid(&self) -> Result<String> {
+        let base = self.base_url.trim_end_matches('/');
+        let base = base.strip_suffix("/api/v1/collaboration")
+            .or_else(|| base.strip_suffix("/openapi/v1/collaboration")).unwrap_or(base);
+        let url = format!("{base}/api/v1/collaboration/bots/me");
+        // This parent/self passthrough endpoint consumes one Bot credential.
+        // Office OAuth is used on business requests; do not substitute it here.
+        let request = if self.token.is_some() {
+            let mut identity = self.clone();
+            identity.oauth_headers = None;
+            identity.add_headers(self.http_client.get(url))
+        } else { self.add_auth(self.http_client.get(url)) };
+        let response = request.send().await?;
+        if !response.status().is_success() { return Err(anyhow!("Current Bot identity request failed")); }
+        let body: serde_json::Value = response.json().await?;
+        if body["code"] != 20000 { return Err(anyhow!("Current Bot identity was rejected")); }
+        body["data"]["bot"]["bot_id"].as_str().filter(|id| !id.is_empty())
+            .map(str::to_owned).context("No authenticated Bot; specify --bot-uuid")
+    }
     ///Create a new BCS client with the given base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
@@ -176,6 +201,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -190,6 +216,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -208,6 +235,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -226,6 +254,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -243,6 +272,7 @@ impl BcsClient {
             client_identity: None,
             service_key: Some(raw_key.into()),
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -324,6 +354,9 @@ impl BcsClient {
     /// When no OAuth2 headers (prod), the layout is:
     /// - `Authorization: Bearer <bot_token>` (standard BCS auth)
     fn add_headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let builder = if let Some(actor) = &self.actor_id {
+            builder.header("X-BCN-Actor-Bot-Id", actor)
+        } else { builder };
         let has_oauth = self.oauth_headers.is_some();
 
         if has_oauth {
@@ -972,105 +1005,6 @@ impl BcsClient {
         Ok(result)
     }
 
-    // ========================================================================
-    // Group Chat Proposals
-    // ========================================================================
-
-    /// Evaluate and propose a group chat using token authentication.
-    /// The bot_uuid is derived from the token on the server side.
-    pub async fn propose_group_chat_with_token(
-        &self,
-        topic: &str,
-        suggested_participants: Option<Vec<String>>,
-        suggested_driver: Option<&str>,
-    ) -> Result<ProposalResponse> {
-        let url = format!("{}/groups/request", self.base_url);
-
-        let payload = serde_json::json!({
-            "topic": topic,
-            "suggested_participants": suggested_participants.unwrap_or_default(),
-            "suggested_driver": suggested_driver,
-        });
-
-        debug!(
-            topic = %topic,
-            "Proposing group chat"
-        );
-
-        let response = self
-            .add_auth(self.http_client.post(&url).json(&payload))
-            .send()
-            .await
-            .context("Failed to propose group chat")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Proposal failed ({}): {}", status, body));
-        }
-
-        // 先获取原始响应内容，便于调试
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-        eprintln!("[DEBUG] Response body: {}", body);
-
-        let result: ProposalResponse = serde_json::from_str(&body)
-            .with_context(|| format!("Invalid proposal response. Raw body: {}", body))?;
-
-        Ok(result)
-    }
-
-    /// Confirm a proposal.
-    pub async fn confirm_proposal(&self, confirm_url: &str) -> Result<ConfirmProposalResponse> {
-        // Handle relative URLs by prepending http://
-        let url = if confirm_url.starts_with("http://") || confirm_url.starts_with("https://") {
-            confirm_url.to_string()
-        } else {
-            format!("http://{}", confirm_url)
-        };
-
-        let response = self
-            .http_client
-            .post(&url)
-            .send()
-            .await
-            .context("Failed to confirm proposal")?;
-
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-
-        if !status.is_success() {
-            return Err(anyhow!("Confirmation failed ({}): {}", status, body));
-        }
-
-        // Server may return HTTP 200 with an error JSON body.
-        let json_value: serde_json::Value = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Invalid confirmation response (not JSON): {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
-
-        if let Some(error_msg) = json_value.get("error").and_then(|e| e.as_str()) {
-            let error_status = json_value
-                .get("status")
-                .and_then(|s| s.as_u64())
-                .unwrap_or(500);
-            return Err(anyhow!(
-                "Confirmation failed ({}): {}",
-                error_status,
-                error_msg
-            ));
-        }
-
-        let result: ConfirmProposalResponse =
-            serde_json::from_value(json_value).context("Invalid confirmation response")?;
-
-        Ok(result)
-    }
-
     fn normalize_tags(tags: &[String]) -> Vec<String> {
         tags.iter()
             .map(|tag| tag.trim().to_string())
@@ -1656,6 +1590,8 @@ impl BcsClient {
     ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
+            human_mention_notify_mode: Default::default(),
             create_initial_session,
             id: options.id,
             label: None,
@@ -1669,7 +1605,6 @@ impl BcsClient {
             opening_message: None,
             topic: options.topic,
             group_kind: None,
-            service_spec: None,
             group_strategy: Some("state_machine".to_string()),
             originator: Some(options.driver_bot),
             collaboration_definition_yaml: Some(options.definition_yaml),
@@ -1711,6 +1646,8 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
+            human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             mode: Some(mode.to_string()),
             driver_bot: Some(driver_bot.to_string()),
@@ -1724,7 +1661,6 @@ impl BcsClient {
             opening_message: None,
             topic: None,
             group_kind: None,
-            service_spec: None,
             group_strategy: None,
             originator: None,
             collaboration_definition_yaml: None,
@@ -1808,6 +1744,8 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
+            human_mention_notify_mode: Default::default(),
             create_initial_session,
             mode: None,
             driver_bot: Some(driver_bot.to_string()),
@@ -1821,7 +1759,6 @@ impl BcsClient {
             opening_message: None,
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
-            service_spec: None,
             group_strategy: group_strategy.map(str::to_string),
             originator: None,
             collaboration_definition_yaml: None,
@@ -2136,6 +2073,11 @@ impl BcsClient {
 // ============================================================================
 
 impl BcsClient {
+    pub fn set_actor_id(&mut self, actor: Option<&str>) -> Result<()> {
+        let caller = crate::CallerContext::new(None, actor)?;
+        self.actor_id = caller.actor_id().map(HeaderValue::from_str).transpose()?;
+        Ok(())
+    }
     /// Send a friend request.
     pub async fn send_friend_request(
         &self,
@@ -3049,25 +2991,21 @@ impl BcsClient {
         bytes: reqwest::Body,
         content_type: &str,
     ) -> Result<()> {
-        let bcs_host = reqwest::Url::parse(&self.base_url)
-            .ok()
-            .and_then(|u| u.host_str().map(String::from));
-        let target_host = reqwest::Url::parse(upload_url)
-            .ok()
-            .and_then(|u| u.host_str().map(String::from));
-        let cross_host = match (bcs_host.as_deref(), target_host.as_deref()) {
-            (Some(a), Some(b)) => a != b,
-            _ => false,
-        };
-        let mut req = self
-            .http_client
+        let source = reqwest::Url::parse(&self.base_url)?;
+        let target = reqwest::Url::parse(upload_url)?;
+        if !matches!(target.scheme(), "http" | "https") || target.host_str().is_none()
+            || !target.username().is_empty() || target.password().is_some() {
+            return Err(anyhow!("Invalid upload URL"));
+        }
+        let cross_host = source.origin() != target.origin();
+        let mut req = self.http_client
             .put(upload_url)
             .header(reqwest::header::CONTENT_TYPE, content_type)
             .body(bytes);
         if !cross_host {
             req = self.add_auth(req);
         }
-        let resp = req.send().await.context("put session file bytes")?;
+        let resp = req.send().await.map_err(reqwest::Error::without_url).context("put session file bytes")?;
         Self::ensure_success_status(resp, "put session file bytes").await
     }
 
@@ -3367,11 +3305,22 @@ impl BcsClient {
         if let Some(t) = ttl {
             url.push_str(&format!("?ttl={}", t));
         }
-        let resp = self
+        let mut resp = self
             .add_auth(self.http_client.get(&url))
             .send()
             .await
             .context("download session file")?;
+        if resp.status().is_redirection() {
+            let location = resp.headers().get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok()).context("Download redirect has no Location")?;
+            let target = resp.url().join(location)?;
+            if !matches!(target.scheme(), "http" | "https") || target.host_str().is_none()
+                || !target.username().is_empty() || target.password().is_some() {
+                return Err(anyhow!("Invalid download redirect"));
+            }
+            // Presigned storage URL authenticates itself; carry no BCN context.
+            resp = self.http_client.get(target).send().await.map_err(reqwest::Error::without_url).context("download storage content")?;
+        }
         if !resp.status().is_success() {
             let s = resp.status();
             let b = resp.text().await.unwrap_or_default();
@@ -3384,8 +3333,11 @@ impl BcsClient {
         use futures::StreamExt;
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk?).await?;
+            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk.map_err(reqwest::Error::without_url)?).await?;
         }
+        // Tokio buffers writes on a blocking worker. Wait for the final write
+        // and propagate its error before reporting that the file is ready.
+        tokio::io::AsyncWriteExt::flush(&mut f).await.context("flush downloaded file")?;
         Ok(out_path)
     }
 

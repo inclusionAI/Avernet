@@ -10,7 +10,7 @@ const owned = listBots as jest.MockedFunction<typeof listBots>;
 
 beforeEach(() => jest.clearAllMocks());
 
-test('按需合并真实分页，并从 BCN mine 中排除平台内 TC Bot', async () => {
+test('合并 mine 分页后仅保留 bot_ 前缀的外部 Bot，不依赖 TC Bot 目录', async () => {
   mine
     .mockResolvedValueOnce({
       code: 20000,
@@ -18,10 +18,10 @@ test('按需合并真实分页，并从 BCN mine 中排除平台内 TC Bot', asy
       data: {
         total: 3,
         items: [
-          { kind: 'bot', bot_id: 'tc-1:1001', name: 'TC Bot' },
+          { kind: 'bot', bot_id: '20260828_mpjo5k61:85020', name: '测试 TC Bot' },
           {
             kind: 'bot',
-            bot_id: 'external-1',
+            bot_id: 'bot_0e0ed32d',
             name: 'External One',
             descriptor: { summary: '外部描述', domains: [], scopes: [], skills: [] },
           },
@@ -33,19 +33,20 @@ test('按需合并真实分页，并从 BCN mine 中排除平台内 TC Bot', asy
       message: 'OK',
       data: {
         total: 3,
-        items: [{ kind: 'bot', bot_id: 'external-2', name: 'External Two', status: 'online' }],
+        items: [{ kind: 'bot', bot_id: 'bot_258dfd15', name: 'External Two', status: 'online' }],
       },
     });
   owned.mockResolvedValue({
     code: 200000,
     message: 'OK',
-    data: { total: 1, items: [{ bot_id: 'tc-1', bot_name: 'TC Bot' }] },
+    data: { total: 0, items: [] },
   });
 
   const result = await externalBotService.list({ pageSize: 2 });
 
-  expect(result.map((item) => item.id)).toEqual(['external-1', 'external-2']);
+  expect(result.map((item) => item.id)).toEqual(['bot_0e0ed32d', 'bot_258dfd15']);
   expect(result[0]).toMatchObject({ name: 'External One', description: '外部描述' });
   expect(mine).toHaveBeenNthCalledWith(1, { kind: 'bot', offset: 0, limit: 2 });
   expect(mine).toHaveBeenNthCalledWith(2, { kind: 'bot', offset: 2, limit: 2 });
+  expect(owned).not.toHaveBeenCalled();
 });

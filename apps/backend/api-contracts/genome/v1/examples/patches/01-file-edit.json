@@ -1,0 +1,61 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+  "ops": [
+    {
+      "op": "file.edit",
+      "target": "persona/SOUL.md",
+      "edits": [
+        {
+          "kind": "insert_after",
+          "anchor": "## Tone",
+          "content": "Use the customer's name once."
+        },
+        {
+          "kind": "replace_section",
+          "heading": "## Closing",
+          "content": "Summarise what was agreed, thank the customer and close the ticket.\n"
+        },
+        {
+          "kind": "diff",
+          "diff": "@@ -9,3 +9,3 @@\n Escalate when the customer asks for a manager.\n-Always apologise first.\n+Apologise once, then act.\n \n"
+        }
+      ]
+    },
+    {
+      "op": "file.edit",
+      "target": "skills/quality-check/scripts/check.py",
+      "edits": [
+        {
+          "kind": "diff",
+          "diff": "@@ -2,2 +2,2 @@\n \n-print('ok' if sys.stdin.read().strip() else 'empty')\n+print('ok' if sys.stdin.read().strip() else 'empty draft')\n"
+        }
+      ]
+    },
+    {
+      "op": "file.edit",
+      "target": "resources/data/faq.csv",
+      "edits": [
+        {
+          "kind": "insert_after",
+          "anchor": "question,answer",
+          "content": "How long do returns take?,Up to 30 days from delivery."
+        }
+      ]
+    },
+    {
+      "op": "file.edit",
+      "target": "resources/data/kb/shipping.md",
+      "edits": [
+        {
+          "kind": "diff",
+          "diff": "@@ -1,2 +1,2 @@\n # Shipping\n-Standard shipping takes 3-5 working days.\n+Standard shipping takes 2-4 working days.\n"
+        }
+      ]
+    }
+  ],
+  "rationale": "Example of one op kind, covering every field and value shape it allows; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

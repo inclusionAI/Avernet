@@ -14,6 +14,22 @@ const readers = (overrides: Partial<RepairSourceReaders> = {}): RepairSourceRead
 });
 
 describe('trusted workflow repair source adapter', () => {
+  it('shows only the last seven days of pending suggestions while retaining explicit history and active work', async () => {
+    const now = Date.now(), day = 24 * 60 * 60 * 1000;
+    const groups = vi.fn(async () => []);
+    const suggestions = async () => [
+      { id: 1, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'recent', status: 'pending', gmt_modified: now - 6 * day },
+      { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'older', status: 'pending', gmt_modified: now - 8 * day },
+      { id: 3, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'in-flight', status: 'applying', gmt_modified: now - 40 * day },
+    ];
+    const source = createRepairSourcePort(readers({ groups, suggestions }));
+    const recent = await source.load(db, 'wf', 'summary');
+    expect(recent.map(row => row.item.instruction).sort()).toEqual(['in-flight', 'recent']);
+    const cutoff = (groups.mock.calls[0] as unknown as [IDatabase, string, { sinceMs: number }])[2].sinceMs;
+    expect(cutoff).toBeGreaterThanOrEqual(now - 7 * day);
+    expect(cutoff).toBeLessThan(now - 7 * day + 1000);
+    expect(await source.load(db, 'wf', 'summary', { includeHistorical: true })).toHaveLength(3);
+  });
   it('retains group filter metadata for legacy suggestions without attaching uncited diagnoses', async () => {
     const result = await createRepairSourcePort(readers({ suggestions: async () => [{ id: 9, workflow_id: 'wf',
       failure_signature: 'output-contract|llm', fix_spec: 'Legacy suggestion', status: 'pending' }] })).load(db, 'wf', 'summary');
@@ -152,7 +168,7 @@ describe('trusted workflow repair source adapter', () => {
     expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });
-  it('retains oversized legacy suggestions for reads and rejects only selected frozen inputs', async () => {
+  it('retains large legacy material intact for the separate frozen-material budget', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const suggestions = async () => [
       { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: '过大建议', proposal_json: JSON.stringify({ ...proposal(), details: 'x'.repeat(1_100_000) }), status: 'pending' },
@@ -164,7 +180,8 @@ describe('trusted workflow repair source adapter', () => {
     const small = result.find(row => row.item.instruction === '增加超时')!;
     const large = result.find(row => row.item.instruction === '过大建议')!;
     expect((await port.load(db, 'wf', 'full', { itemIds: [small.item.itemId] }))).toHaveLength(2);
-    await expect(port.load(db, 'wf', 'full', { itemIds: [large.item.itemId] })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE', details: { stage: 'frozen_item' } });
+    const full=await port.load(db, 'wf', 'full', { itemIds: [large.item.itemId] });
+    expect(full.find(row=>row.item.itemId===large.item.itemId)!.item.proposal).toEqual(large.item.proposal);
     expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });
@@ -185,4 +202,14 @@ describe('trusted workflow repair source adapter', () => {
     await expect(createRepairSourcePort(readers({ groups: async () => { throw new Error('database unavailable'); } })).load(db, 'wf')).rejects.toThrow('database unavailable');
     await expect(createRepairSourcePort(readers({ evidence: async () => [{ event_id: 'ev-d1', workflow_id: 'wf', flow_id: 'run-d1', event_type: 'failed', payload_json: '{bad' }] })).load(db, 'wf')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
+});
+
+it('keeps identical proposals from different deployment identities as separate sources', async () => {
+  const value = {...proposal(),baseSpecDigest:'a'.repeat(64)};
+  const source=createRepairSourcePort(readers({groups:async()=>[{workflowId:'wf',signature:'timeout',inputDigest:'b'.repeat(64),sources:[diagnosis('d1',value),diagnosis('d2',value)]}],
+    snapshot:async(_db,_workflow,flowIds)=>({status:'resolved',snapshot:{kind:'deployment',workflowId:'wf',workflowVersion:flowIds[0]==='run-d1'?39:40,deployNumber:flowIds[0]==='run-d1'?34:35,configDigest:'a'.repeat(64)}})}));
+  const rows=await source.load(db,'wf','summary');
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map(row=>row.item.itemId)).size).toBe(2);
+  expect(rows.map(row=>row.item.context?.sourceSnapshot)).toEqual(expect.arrayContaining([expect.objectContaining({status:'resolved',snapshot:expect.objectContaining({workflowVersion:39})}),expect.objectContaining({status:'resolved',snapshot:expect.objectContaining({workflowVersion:40})})]));
 });

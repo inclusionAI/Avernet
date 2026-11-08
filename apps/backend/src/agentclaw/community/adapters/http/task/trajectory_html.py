@@ -441,10 +441,76 @@ def _render_analysis(analysis_raw: str | None, *, do_analysis: bool) -> str:
     return f'<section class="analysis"><h2>总体分析</h2>{body}</section>'
 
 
-def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = False) -> str:
+def _artifact_display_name(record) -> str:
+    """Descriptor 渲染名:``artifact_name`` 回落 ``file_content.file_name``,再回落 kind 中文。
+    只渲染名,不出任何 URL/下载链接(前端自拼;spec §7)。"""
+
+    name = getattr(record, "artifact_name", None)
+    if name:
+        return str(name)
+    content = getattr(record, "content", None)
+    file_name = getattr(content, "file_name", None)
+    if file_name:
+        return str(file_name)
+    return {
+        "text": "文本产物",
+        "file": "文件产物",
+        "url_link": "链接产物",
+        "code": "代码产物",
+    }.get(str(getattr(record, "kind", "")), "产物")
+
+
+_ARTIFACT_KIND_LABEL = {
+    "text": "文本",
+    "file": "文件",
+    "url_link": "链接",
+    "code": "代码",
+}
+
+
+def _render_artifacts_block(artifact_rows) -> str:
+    """「产物」块:按 attempt 分组列 Descriptor 渲染名 + 形态标签。"""
+
+    if not artifact_rows:
+        return (
+            '<section class="artifacts"><h2>产物</h2>'
+            '<p class="empty">暂无产物记录</p></section>'
+        )
+    rows_html: list[str] = []
+    for record in artifact_rows:
+        kind = str(getattr(record, "kind", "") or "?")
+        label = _ARTIFACT_KIND_LABEL.get(kind, kind)
+        attempt = getattr(record, "attempt", None)
+        attempt_html = (
+            f' <span class="nb-sub">attempt {html.escape(str(attempt))}</span>'
+            if attempt is not None
+            else ""
+        )
+        creator = getattr(record, "creator", None)
+        creator_html = f" · {html.escape(str(creator))}" if creator else ""
+        rows_html.append(
+            f'<li>{html.escape(_artifact_display_name(record))}{attempt_html}'
+            f'<span class="nb-mode" style="margin-left:8px">{html.escape(label)}</span>'
+            f'<span class="nb-sub">{creator_html}</span></li>'
+        )
+    return (
+        '<section class="artifacts"><h2>产物</h2><ul>'
+        + "".join(rows_html)
+        + "</ul></section>"
+    )
+
+
+def render_trajectory_html(
+    dto: "TaskTrajectoryDTO",
+    *,
+    do_analysis: bool = False,
+    artifact_rows=None,
+) -> str:
     """``TaskTrajectoryDTO`` → 自包含 HTML 页面(``display=html`` 时由路由返回)。
 
     纯函数 + 全转义;不触碰 ``response_model``(路由返回 ``HTMLResponse`` 时 FastAPI 跳过模型序列化)。
+    ``artifact_rows``(TaskArtifactRecord 序列)仅用于「产物」块渲染——只出渲染名,
+    不出任何 URL(前端基于既有读口自行拼接;spec 2026-10-20-task-artifact-domain §7)。
     """
     task_id = str(getattr(dto, "task_id", "") or "")
     timeline = list(getattr(dto, "timeline", []) or [])
@@ -453,6 +519,7 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
     gmt_modified = getattr(dto, "gmt_modified", None)
 
     events_html = _render_timeline_grouped(timeline)
+    artifacts_html = _render_artifacts_block(artifact_rows or [])
 
     head = f"""<!doctype html>
 <html lang="zh">
@@ -551,6 +618,7 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
 </header>
 <div class="wrap">
   {_render_analysis(analysis_raw, do_analysis=do_analysis)}
+  {artifacts_html}
   <section class="timeline"><h2>时间线</h2>{events_html}</section>
 </div>
 <footer>

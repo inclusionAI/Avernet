@@ -5,8 +5,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import {repairFailureRef,readRepairFailure} from '@avernet/workflow/server/contracts/repair-failure';
 import { WorkflowDeployHistoryRepository } from '@avernet/workflow/server/repositories/workflow-deploy-history-repository';
-import type { RepairBaseline } from '@avernet/workflow/server/contracts/repair-batch';
+import { digestRepairJson, type RepairBaseline } from '@avernet/workflow/server/contracts/repair-batch';
 import { repairProposalSpecDigest } from '@avernet/workflow/server/contracts/repair-baseline-identity';
 import type { RepairExecutionPort, RepairExecutionReadRequest, RepairGeneratedResult } from '@avernet/workflow/server/contracts/repair-workbench';
 import { RepairResultAbsentError } from '@avernet/workflow/server/contracts/repair-workbench';
@@ -69,7 +70,7 @@ export class RepairGitStore {
   }
 
   async baseline(row: { workflowId: string; packId: string; version: number; deployNumber: number;
-    tagName: string | null; specJson: string }): Promise<RepairBaseline> {
+    tagName: string | null; specJson: string }, purpose?: 'draft'): Promise<RepairBaseline> {
     if (!row.tagName || !/^deploy\/[A-Za-z0-9_-]+\/#\d+$/.test(row.tagName)) {
       throw new Error('Active deployment has no valid ClawFlows tag');
     }
@@ -85,13 +86,29 @@ export class RepairGitStore {
     const spec = await this.git(['show', `${commit}:${specPath}`]);
     const deployedSpec = parseYaml(row.specJson) as unknown;
     const taggedSpec = parseYaml(spec) as unknown;
-    const proposalSpecDigest = repairProposalSpecDigest(taggedSpec, deployedSpec);
+    const proposalSpecDigest = purpose === 'draft' ? digestRepairJson(deployedSpec) : repairProposalSpecDigest(taggedSpec, deployedSpec);
     return { workflowId: row.workflowId, packId: row.packId, releaseRevision: row.version,
       activeDeployNumber: row.deployNumber, specDigest: createHash('sha256').update(spec).digest('hex'),
       proposalSpecDigest, repoId: 'clawflows', specPath, packCommit: commit, packDigest: tree };
   }
 
   async result(request: RepairExecutionReadRequest): Promise<RepairGeneratedResult> {
+    let absent: unknown;
+    try{return await this.candidateResult(request);}catch(error){if(!(error instanceof RepairResultAbsentError))throw error;absent=error;}
+    const failureIdentity={taskId:request.input.taskId,revision:request.input.revision,...request.identity,
+      parentCandidateCommit:request.input.parentCandidateCommit??request.input.baseline.packCommit};
+    const failureRef=repairFailureRef(failureIdentity);
+    if((await this.git(['ls-remote','origin',failureRef],64*1024)).trim()){
+      const commit=await this.fetch(failureRef);
+      const parent=failureIdentity.parentCandidateCommit;
+      const parents=(await this.git(['rev-list','--parents','-n','1',commit])).trim().split(/\s+/).slice(1);
+      if(parents.length!==1||parents[0]!==parent
+        ||(await this.git(['rev-parse',`${commit}^{tree}`])).trim()!==(await this.git(['rev-parse',`${parent}^{tree}`])).trim())throw new Error('Failure metadata changed the frozen Pack');
+      return readRepairFailure(await this.git(['log','-1','--format=%B',commit],32*1024),failureIdentity);
+    }
+    throw absent;
+  }
+  private async candidateResult(request:RepairExecutionReadRequest):Promise<RepairGeneratedResult>{
     const branch = request.input.taskBranch;
     if (!safeBranch.test(branch)) throw new Error('Invalid repair task branch');
     const advertised = (await this.git(['ls-remote', 'origin', `refs/heads/${branch}`], 64 * 1024)).trim();
@@ -208,19 +225,33 @@ Promise<{ snapshotId: number; gitStore: RepairGitStore } | undefined> {
 }
 
 export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
-  git: RepairGitStore, snapshotId: number): RepairExecutionPort {
+  git: RepairGitStore, snapshotId: number, publicBaseUrl: string): RepairExecutionPort {
+  const base = new URL(publicBaseUrl);
+  const localHttp = base.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname);
+  if ((base.protocol !== 'https:' && !localHttp) || base.username || base.password
+    || base.pathname !== '/' || base.search || base.hash) {
+    throw new Error('Workflow Repair material service requires an HTTPS origin or local HTTP origin');
+  }
+  const materialBaseUrl = `${base.origin}/api/workflow-repairs/material-download`;
   return {
-    async resolveBaseline(workflowId) {
+    integrationVersion: 'workflow-proposal-plan/v1',
+    materialDeliveryVersion: 'repair-material-download/v1',
+    async resolveBaseline(workflowId, purpose) {
       const row = await new WorkflowDeployHistoryRepository(db).findActiveByWorkflowId(workflowId);
       if (!row) throw new Error('Workflow has no active deployment');
       return git.baseline({ workflowId, packId: row.pack_id, version: row.version,
-        deployNumber: row.deploy_number, tagName: row.tag_name, specJson: row.spec_json });
+        deployNumber: row.deploy_number, tagName: row.tag_name, specJson: row.spec_json }, purpose);
     },
     async dispatch(request) {
+      if (request.input.materials && !request.materialAccess) throw new Error('AIS executeSnapshot 失败: Frozen material access is required');
+      const materialAccess = request.materialAccess ? { ...request.materialAccess, baseUrl: materialBaseUrl } : undefined;
+      const action = materialAccess
+        ? (request.input.integration ? 'integrate_candidate_materials_v1' : 'generate_candidate_materials_v1')
+        : (request.input.integration ? 'integrate_candidate_v1' : 'generate_candidate');
       const envelope = { schemaVersion: 'clawevolve-task/v1', taskType: 'workflow_repair',
         taskId: request.input.taskId, stepId: request.identity.stepId, attempt: request.identity.attempt,
-        execution: { executor: 'ais', executionId: request.identity.executionId, action: request.input.integration ? 'integrate_candidate_v1' : 'generate_candidate' },
-        input: request.input };
+        execution: { executor: 'ais', executionId: request.identity.executionId, action },
+        input: request.input, ...(materialAccess ? { materialAccess } : {}) };
       const jobId = await ais.execute(request.actorId, { '${clawevolve_params}': JSON.stringify(envelope) }, snapshotId);
       return { jobId };
     },

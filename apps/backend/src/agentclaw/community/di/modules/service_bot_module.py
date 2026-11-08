@@ -26,6 +26,11 @@ bindings exist so production routes can use ``Injected(...)``.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_config import parse_fastdisk_publish_config
+from agentclaw.community.di.modules.config_module import read_user_config
+
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
 
 from typing import Annotated, Callable
@@ -34,6 +39,7 @@ from agentclaw.community.api.file_count_service import FileCountServiceProtocol
 from agentclaw.community.plugin_api.file_count_runtime import FileCountRuntime
 from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
+from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -159,7 +165,7 @@ from agentclaw.community.core.workspace.engines import create_engine_sandbox_reg
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
+from agentclaw.community.core.apply_engine.cli_tools.store import CliToolStore
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
 )
@@ -407,9 +413,29 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def artifact_transfer_registry(
+        self,
+        device_service: DeviceService,
+        device_binding_repo: DeviceBindingRepository,
+        object_storage: cfg.ObjectStorageConfig,
+        mount_config: cfg.OssToNasConfig,
+    ) -> ArtifactTransferRegistry:
+        """Register coding hooks; every other engine gets the default no-op."""
+        coding = AicodingArtifactTransferStrategy(
+            device_service, parse_fastdisk_publish_config(read_user_config().get("fastdisk_publish")),
+            bucket=object_storage.bucket_name,
+            endpoint=object_storage.endpoint, oss_mount_root=mount_config.oss_root,
+            bindings=device_binding_repo,
+        )
+        return ArtifactTransferRegistry({"aicoding": coding, "claude_code": coding})
+
+    @singleton
+    @provider
+    @inject
     def bot_build_service(
         self,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
+        user_list_repository: UserListRepositoryProtocol,
         device_service: DeviceService,
         baas_service: BaasService,
         path_factory: WorkspacePathFactory,
@@ -421,10 +447,13 @@ class ServiceBotModule(Module):
         baas: cfg.BaasConfig,
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
+        artifact_transfers: ArtifactTransferRegistry,
     ) -> BotBuildService:
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
+            artifact_transfers=artifact_transfers,
             build_ignore_repository=build_ignore_repository,
+            user_list_repository=user_list_repository,
             env=env_utils.get_current_env(),
             device_service=device_service,
             baas_service=baas_service,

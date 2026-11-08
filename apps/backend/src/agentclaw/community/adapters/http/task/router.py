@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -22,18 +21,33 @@ from agentclaw.community.adapters.http.task.schemas_relay_report import (
     TaskReportCommandDTO, report_result_to_dto,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
+from agentclaw.community.adapters.http.task.schemas_artifact import (
+    group_artifacts_by_node,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
-    graph_to_dto, op_result_to_dto, task_info_request_from_dto,
-    trajectory_to_dto,
+    graph_to_dto, op_result_to_dto,
+    task_info_request_from_dto, trajectory_to_dto,
+)
+from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
+from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
+    router as artifact_object_file_router,
+)
+from agentclaw.community.adapters.http.task.result_writeback_routes import (
+    router as result_writeback_api_router,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
+from agentclaw.community.adapters.http.task.benchmark_routes import router as benchmark_api_router
+from agentclaw.community.adapters.http.task.auto_routes import router as auto_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
+from agentclaw.community.adapters.http.task.task_read_routes import (
+    router as task_read_api_router,
+)
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
     emit_relay_report_reject_trajectory,
@@ -47,26 +61,16 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.api.task.task_artifact_service import TaskArtifactApiServiceProtocol
 from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
-from agentclaw.community.core.task.domain.models import TaskOpResult
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-    BcsBotTokenProvider,
-)
-from agentclaw.community.core.task.task_runner.client.ports import (
-    BcsClientPort,
-    OpenApiBotPort,
-)
-from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
-    build_benchmark_task_launch_message,
-    compose_benchmark_a2a_session_id,
-    format_benchmark_prompt,
-)
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 
@@ -85,6 +89,12 @@ router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 router.include_router(relay_api_router)
 router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
+router.include_router(benchmark_api_router)
+router.include_router(auto_api_router)
+router.include_router(task_read_api_router)
+router.include_router(artifact_api_router)
+router.include_router(artifact_object_file_router)
+router.include_router(result_writeback_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑一致 —— 内部调用方走此副本免 gateway spanner。改其一须同步。
@@ -102,191 +112,6 @@ async def execute_task_internal(
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
-    return envelope(op_result_to_dto(result), request)
-
-
-@router.post("/benchmark_execute", response_model=Envelope[TaskOpResultDTO])
-@envelope_errors
-async def benchmark_execute_task_internal(
-    body: TaskInfoRequestDTO,
-    request: Request,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    bot_port: OpenApiBotPort = Injected(OpenApiBotPort),  # noqa: B008
-    bcs_client: BcsClientPort = Injected(BcsClientPort),  # noqa: B008
-    bot_tokens: BcsBotTokenProvider = Injected(BcsBotTokenProvider),  # noqa: B008
-) -> Envelope[TaskOpResultDTO]:
-    """Benchmark 自动执行(内部副本,不经 spanner)。
-
-    评测会话由 API 创建,不能依赖前端挂载 task_ready 卡片触发 execute。端点先发送原
-    benchmark prompt 让 Bot 产出可回放的澄清卡片;随后创建正式任务,把副屏声明和 relay
-    根指令作为第二条消息发回同一会话,使评测不开会话也能自动执行。
-
-    A2A 分支第一个请求仍由 owner_bot(caller/proxy)发起;正式任务的 owner 绑定到
-    target_bot_id/target_user_id,并复用服务端生成的 benchmark session。
-    """
-    task_request = task_info_request_from_dto(body)
-    prompt = format_benchmark_prompt(body.task_spec.model_dump())
-    bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
-
-    a2a_target_bot = str(body.execution_config.target_bot_id or "").strip() or None
-    a2a_target_user = str(body.execution_config.target_user_id or "").strip() or None
-    a2a = bool(a2a_target_bot and a2a_target_user)
-
-    extend_props: dict[str, Any] = {
-        "benchmark_channel": "a2a" if a2a else "openapi",
-    }
-    caller_token: str | None = None
-    session_id = ""
-
-    def _send_failed(exc: Exception) -> TaskOpResult:
-        extend_props["benchmark_send"] = f"error: {exc}"
-        return TaskOpResult(
-            task_id="",
-            success=False,
-            run_id=0,
-            error=f"benchmark prompt send failed: {exc}",
-            extend_props=extend_props,
-        )
-
-    if a2a:
-        if bcs_client is None:
-            return envelope(
-                op_result_to_dto(
-                    TaskOpResult(
-                        task_id="",
-                        success=False,
-                        run_id=0,
-                        error="benchmark prompt send failed: BCS client is unavailable",
-                        extend_props={**extend_props, "benchmark_send": "error"},
-                    )
-                ),
-                request,
-            )
-        session_id = compose_benchmark_a2a_session_id()
-        extend_props["benchmark_session_id"] = session_id
-        caller_token = bot_tokens.get_token(bot_identity)
-        try:
-            sent = await bcs_client.send_message_a2a(
-                target_bot_id=str(a2a_target_bot),
-                target_user_id=str(a2a_target_user),
-                message=prompt,
-                session_id=session_id,
-                caller_bearer=caller_token,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return envelope(op_result_to_dto(_send_failed(exc)), request)
-        extend_props["benchmark_run_id"] = sent.run_id
-        extend_props["benchmark_send"] = "ok"
-        task_request = replace(
-            task_request,
-            owner_bot_id=str(a2a_target_bot),
-            owner_user_id=str(a2a_target_user),
-        )
-    else:
-        if bot_port is None:
-            return envelope(
-                op_result_to_dto(
-                    TaskOpResult(
-                        task_id="",
-                        success=False,
-                        run_id=0,
-                        error="benchmark prompt send failed: bot port is unavailable",
-                        extend_props={**extend_props, "benchmark_send": "error"},
-                    )
-                ),
-                request,
-            )
-        try:
-            await bot_port.ensure_grant(bot_identity)
-            sent = await bot_port.send_message(
-                bot_id=bot_identity,
-                message=prompt,
-                metadata={"benchmark": True},
-            )
-        except Exception as exc:  # noqa: BLE001
-            return envelope(op_result_to_dto(_send_failed(exc)), request)
-        if not (sent.session_id or "").strip():
-            return envelope(
-                op_result_to_dto(
-                    TaskOpResult(
-                        task_id="",
-                        success=False,
-                        run_id=0,
-                        error="benchmark prompt send failed: bot session id is unavailable",
-                        extend_props={
-                            **extend_props,
-                            "benchmark_run_id": sent.run_id,
-                            "benchmark_send": "error",
-                        },
-                    )
-                ),
-                request,
-            )
-        session_id = str(sent.session_id)
-        extend_props["benchmark_run_id"] = sent.run_id
-        extend_props["benchmark_session_id"] = session_id
-        extend_props["benchmark_send"] = "ok"
-
-    execution_config = dict(task_request.execution_config)
-    execution_config["main_session_id"] = session_id
-    task_request = replace(task_request, execution_config=execution_config)
-
-    result = await service.execute(task_request)
-    result_props = result.extend_props or {}
-    if not result.success:
-        result.extend_props = {**result_props, **extend_props}
-        return envelope(op_result_to_dto(result), request)
-    root_instruction = str(result_props.get("root_execution_instruction") or "")
-    result_mode = str(result_props.get("orchestration_mode") or "")
-    if result_mode == "relay" and not root_instruction.strip():
-        result = replace(
-            result,
-            success=False,
-            error="relay task creation returned no root execution instruction",
-        )
-        result.extend_props = result_props = {**result_props, **extend_props}
-        return envelope(op_result_to_dto(result), request)
-
-    launch_message = build_benchmark_task_launch_message(
-        task_id=result.task_id,
-        owner_user_id=task_request.owner_user_id,
-        task_spec=body.task_spec.model_dump(),
-        root_execution_instruction=root_instruction,
-    )
-    try:
-        if a2a:
-            launch_sent = await bcs_client.send_message_a2a(
-                target_bot_id=str(a2a_target_bot),
-                target_user_id=str(a2a_target_user),
-                message=launch_message,
-                session_id=session_id,
-                caller_bearer=caller_token,
-            )
-        else:
-            launch_sent = await bot_port.send_message(
-                bot_id=bot_identity,
-                message=launch_message,
-                metadata={"benchmark": True, "session_id": session_id},
-            )
-    except Exception as exc:  # noqa: BLE001
-        result = replace(
-            result,
-            success=False,
-            error=f"benchmark task launch send failed: {exc}",
-        )
-        result.extend_props = {
-            **result_props,
-            **extend_props,
-            "benchmark_launch_send": f"error: {exc}",
-        }
-        return envelope(op_result_to_dto(result), request)
-
-    result.extend_props = {
-        **result_props,
-        **extend_props,
-        "benchmark_launch_run_id": launch_sent.run_id,
-        "benchmark_launch_send": "ok",
-    }
     return envelope(op_result_to_dto(result), request)
 
 
@@ -313,6 +138,7 @@ async def get_task_trajectory_internal(
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
     ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 
@@ -330,7 +156,10 @@ async def get_task_trajectory_internal(
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
-        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+        artifact_rows = artifact_repo.list_by_task(task_id)
+        return HTMLResponse(
+            render_trajectory_html(dto, do_analysis=do_analysis, artifact_rows=artifact_rows)
+        )
     return envelope(dto, request)
 
 
@@ -495,7 +324,23 @@ async def report_callback(
     if isinstance(raw_event, dict) and "relay_token" in raw_event:
         try:
             command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
-        except ValidationError as exc:
+        except (ValidationError, ValueError) as exc:
+            # ValidationError ⊂ ValueError;捕获两者是因为 artifacts 列表的结构性
+            # 校验(§4 互斥/交叉/JSON 合法/上限)在 to_domain 的解析层以裸 ValueError
+            # 抛出——同样按 4xx 信封回执并留审计,不得落 500(评审修正)。
+            if not isinstance(exc, ValidationError):
+                _named = str(exc)
+                logger.warning(
+                    "[task_relay_report] artifact payload rejected: %s", _named
+                )
+                await persist_relay_report_audit(
+                    svc, raw=raw_event,
+                    error=f"invalid relay report payload: {_named}",
+                )
+                return error_response(
+                    422, f"Invalid relay report request: {_named}", request,
+                )
+            # —— 以下为 pydantic ValidationError 的既有 422 出口(行为不变)——
             # Manual parsing bypasses FastAPI's request validation, so surface
             # the caller's error as the endpoint's normal enveloped 422 instead
             # of letting Pydantic's exception become a 500. Loc/type/msg only:
@@ -900,12 +745,13 @@ async def set_dingtalk_config(
 
 # Keep this dynamic route after every static task route so names such as
 # ``benchmark_execute`` and ``discovery`` can never be consumed as task IDs.
-# The public-only query surfaces (dashboard/list) are intentionally absent
-# here, so their addresses must fall through to 404 rather than authenticate
-# as though they were task IDs.
+# /dashboard and /list now have real internal mirror routes above; /artifacts
+# likewise (POST/GET, artifact_routes.py); this guard stays as the safety net
+# keeping those words (if a static route is ever removed) from falling through
+# to the ID lookup.
 def reject_public_only_task_id(task_id: str) -> None:
     """Refuse historical public-only read paths from reaching the ID lookup."""
-    if task_id in {"dashboard", "list"}:
+    if task_id in {"dashboard", "list", "artifacts"}:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
@@ -920,8 +766,17 @@ async def get_task_internal(
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
-    return envelope(graph_to_dto(graph), request)
+    # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
+    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    return envelope(
+        graph_to_dto(
+            graph,
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
+        ),
+        request,
+    )

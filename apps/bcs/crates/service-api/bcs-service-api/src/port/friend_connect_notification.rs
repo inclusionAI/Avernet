@@ -31,9 +31,19 @@ pub struct FriendConnectNotificationCommand {
     /// Resolved display name of the target bot. When `None`, the adapter
     /// falls back to `target_bot_id`.
     pub target_bot_name: Option<String>,
-    /// Resolved `applicant_user_id` to send to the backend work-order API.
-    /// For a bot applicant this is the bot's owner (`created_by`); for a human
-    /// applicant it is left `None` and the adapter strips `human_` to a staff_no.
+    /// Resolved `applicant_user_id` to send to the backend work-order
+    /// API. Only meaningful for a HUMAN applicant: the adapter maps the
+    /// command value first, then strips `human_` to a staff_no.
+    ///
+    /// A BOT applicant never carries a Human applicant id — the
+    /// work-order intake derives the acting Human (the owner/manager who
+    /// performed the request) from the verified principal forwarded with
+    /// the notification, not from this field; the Bot's id and its
+    /// historical `created_by` are Bot facts, not the acting user, and
+    /// must not be offered here. Producers leave this `None` for Bot
+    /// applicants; the adapter additionally ignores any residual value
+    /// for them. The Bot applicant always travels separately in
+    /// `applicant_actor_id` / `biz_data.applicant_actor_id`.
     pub applicant_user_id: Option<String>,
 }
 

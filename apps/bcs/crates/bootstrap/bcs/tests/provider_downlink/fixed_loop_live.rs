@@ -144,15 +144,38 @@ impl LiveStory {
         };
         let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap();
         checked(client.post(format!("http://{addr}/me/ensure-human")).header("X-Mock-User-Id", HUMAN).json(&json!({}))).await;
-        let mut driver = MockBot::connect(addr).await;
+        // bot-authority ruling T6d-1: the driver's
+        // ownership is seeded through the TRUSTED
+        // register surface (`register_with_ownership`
+        // commits the authority owner edge) and the
+        // driver RESUMES via its token; the mock-user
+        // onboard never mints authority.
+        let register_token = checked(
+            client
+                .get(format!("http://{addr}/register/token"))
+                .header("X-Mock-User-Id", HUMAN),
+        )
+        .await["token"]
+            .as_str()
+            .expect("register token")
+            .to_string();
+        let registered = checked(
+            client.post(format!(
+                "http://{addr}/register?token={register_token}&bot-name=Loop-live-driver"
+            )),
+        )
+        .await;
+        let driver_bot_uuid = registered["bot_uuid"].as_str().expect("bot_uuid").to_string();
+        let driver_bot_token = registered["bot_token"].as_str().expect("bot_token").to_string();
+        let mut driver = MockBot::reconnect(addr, &driver_bot_token).await;
         driver.register("Loop live driver", &["drive"], addr).await;
         let provider = start_provider_webhook().await;
         let bot = register_provider_bot(&client, addr, provider.url(), "loop-live-worker", "worker").await;
         let definition = definition(scenario);
         let group = checked(client.post(format!("http://{addr}/groups")).header("X-Mock-User-Id", HUMAN)
-            .json(&json!({"driver_bot": driver.bot_id, "label": format!("Loop live {scenario}"),
+            .json(&json!({"driver_bot": driver_bot_uuid, "label": format!("Loop live {scenario}"),
                 "group_strategy": "state_machine", "collaboration_definition_yaml": definition, "start_initial_run": false,
-                "participants": [{"bot_uuid": driver.bot_id}, {"bot_uuid": bot.bot_uuid}],
+                "participants": [{"bot_uuid": driver_bot_uuid}, {"bot_uuid": bot.bot_uuid}],
                 "participant_bindings": {"worker": {"source": "manual", "bot_ids": [bot.bot_uuid]}}
             }))).await;
         let group_id = group["id"].as_str().unwrap().to_owned();
@@ -243,8 +266,39 @@ impl LiveStory {
 
     async fn respond(&self, pending: &Value, text: &str) {
         assert_eq!(pending["response_ref"], format!("{}/{}", self.run_id, pending["node_id"].as_str().unwrap()));
-        checked(self.client.post(format!("http://{}/state-machine-runs/{}/nodes/{}/respond", self.addr, self.run_id,
-            pending["node_id"].as_str().unwrap())).header("X-Mock-User-Id", HUMAN).json(&json!({"content": text}))).await;
+        let response = self.raw_response(pending, text).await;
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        assert!(status.is_success() || status == reqwest::StatusCode::CONFLICT,
+            "HTTP {status}: {body}");
+        if status == reqwest::StatusCode::CONFLICT {
+            // Recovery can complete our accepted output before the request's
+            // completion CAS. A 409 alone is not evidence of acceptance.
+            assert!(body["message"].as_str().unwrap_or_default()
+                .contains("state-machine transition changed concurrently")
+                || body["message"].as_str().unwrap_or_default()
+                    .contains("human Judge is already claimed or no longer active"), "{body}");
+        }
+        self.assert_committed_response(pending, text).await;
+    }
+
+    async fn assert_committed_response(&self, pending: &Value, text: &str) {
+        let path = format!("/state-machine-runs/{}/nodes/{}", self.run_id,
+            pending["node_id"].as_str().unwrap());
+        // A recovery worker may still be finishing the accepted Judge input.
+        // Observe completion without resubmitting the response.
+        let mut current = self.get(&path).await;
+        for _ in 0..200 {
+            if current["node"]["status"] == "completed" { break; }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            current = self.get(&path).await;
+        }
+        assert_eq!(current["node"]["run_id"], self.run_id);
+        assert_eq!(current["node"]["node_id"], pending["node_id"]);
+        assert_eq!(current["execution"], pending["execution"]);
+        assert_eq!(current["node"]["status"], "completed", "{current}");
+        assert_eq!(current["node"]["artifact_text"], text);
+        assert_eq!(current["node"]["responded_by"], format!("human_{HUMAN}"));
     }
 
     async fn notification(&self, pending: &Value) -> Value {
@@ -607,7 +661,20 @@ async fn nested_human_persistent_story_recovers_with_admission_disabled() {
         if index == 19 {
             story.execute_persistent_sql("CREATE TRIGGER reject_nested_skip BEFORE UPDATE ON bcs_state_machine_node_runs WHEN NEW.status='skipped' AND OLD.status<>'skipped' BEGIN SELECT RAISE(ABORT,'injected nested skip failure'); END").await;
             let failed = story.raw_response(&pending, "persistent-human-19").await;
-            assert!(failed.status().is_server_error(), "skip failure returned {}", failed.status());
+            let status = failed.status();
+            let body: Value = failed.json().await.unwrap();
+            assert!(status.is_server_error() || (status == reqwest::StatusCode::CONFLICT
+                && (body["message"].as_str().unwrap_or_default()
+                    .contains("human Judge is already claimed or no longer active")
+                    || body["message"].as_str().unwrap_or_default()
+                        .contains("state-machine transition changed concurrently"))),
+                "skip failure returned {status}: {body}");
+            story.assert_committed_response(&pending, "persistent-human-19").await;
+            let blocked = story.run().await;
+            assert_eq!(blocked["run"]["status"], "running");
+            assert_eq!(blocked["nodes"].as_array().unwrap().iter()
+                .filter(|node| node["status"] == "skipped").count(), 0,
+                "the injected failure must prevent all skip writes");
             story.execute_persistent_sql("DROP TRIGGER reject_nested_skip").await;
             story.restart(false).await;
             let stale = story.raw_response(&pending, "stale-after-skip-restart").await;

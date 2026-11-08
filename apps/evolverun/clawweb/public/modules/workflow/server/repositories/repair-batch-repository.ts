@@ -1,9 +1,11 @@
-import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { RepairMaterialRepository } from './repair-material-repository.js';
+import {historicalReference} from '../contracts/repair-version-scope.js';
+import { automaticAdvance, changedChainItems, isAutomaticBatch, retainedFeedbackCandidate } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
   RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson,
-  validateRepairBatchInput, validateRepairItem, MAX_FROZEN_BYTES, MAX_REPORT_BYTES, MAX_RESULT_BYTES,
+  validateRepairBatchInput, validateRepairMaterialItem, MAX_MATERIAL_BYTES, MAX_FROZEN_BYTES, MAX_REPORT_BYTES, MAX_RESULT_BYTES,
   type RepairBatchInput, type RepairDisposition, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
 
@@ -22,6 +24,13 @@ function itemFromRow(row: Row): StoredRepairItem {
     sources: JSON.parse(row.source_refs_json), state: row.state, stateVersion: Number(row.state_version),
     activeTaskId: row.active_task_id, activeRevision: row.active_revision == null ? null : Number(row.active_revision),
     disposition: row.disposition_json == null ? null : JSON.parse(row.disposition_json), updatedAtMs: Number(row.updated_at_ms) };
+}
+function historicalScope(input: RepairBatchInput): string | null {
+  if (!input.items.some(historicalReference)) return null;
+  return digestRepairJson({ target: input.items[0]?.context?.targetSnapshot ?? input.baseline,
+    sources: input.items.map(item => ({ itemId: item.itemId, contentRevision: item.contentRevision,
+      snapshot: item.context?.sourceSnapshot, sources: item.sources.map(canonicalRepairJson).sort() }))
+      .sort((a, b) => a.itemId.localeCompare(b.itemId)) });
 }
 function revisionFromRow(row: Row): RepairRevision {
   return { workflowId: row.workflow_id, taskId: row.task_id, revision: Number(row.revision), phase: row.phase,
@@ -82,20 +91,20 @@ export class RepairBatchRepository {
   }
 
   async materializeItem(tx: IDatabase, input: { workflowId: string; episodeKey: string; item: RepairItem }): Promise<StoredRepairItem> {
-    const item = validateRepairItem(input.item);
+    const item = validateRepairMaterialItem(input.item);
     if (!input.episodeKey?.trim() || input.episodeKey.length > 128) conflict('INVALID_INPUT', 'Invalid episodeKey');
     await this.lockWorkflow(tx, input.workflowId);
     if (item.previousItemId && !await this.readItem(tx, input.workflowId, item.previousItemId)) conflict('ITEM_NOT_FOUND', 'Previous item is not in this workflow');
     const identity = [input.workflowId, item.groupKey, item.proposalKey, input.episodeKey];
     const identityDigest = digestRepairJson(identity);
     const existing = (await tx.query<Row>('SELECT * FROM workflow_repair_items WHERE identity_digest = ?', [identityDigest]))[0];
-    const contentJson = boundedRepairJson(snapshotContent(item), MAX_FROZEN_BYTES);
+    const contentJson = boundedRepairJson(snapshotContent(item), MAX_MATERIAL_BYTES);
     if (existing) {
       if (canonicalRepairJson([existing.workflow_id, existing.group_key, existing.proposal_key, existing.episode_key]) !== canonicalRepairJson(identity)
         || canonicalRepairJson(content(itemFromRow(existing))) !== canonicalRepairJson(content(item))) conflict('CONTENT_MISMATCH', 'An immutable content identity cannot be replaced');
       const sources = [...new Map([...JSON.parse(existing.source_refs_json), ...item.sources].map(source => [canonicalRepairJson(source), source])).values()];
       await tx.exec('UPDATE workflow_repair_items SET source_refs_json = ?, content_json = ?, updated_at_ms = ? WHERE item_id = ?',
-        [boundedRepairJson(sources, MAX_FROZEN_BYTES), contentJson, Date.now(), existing.item_id]);
+        [boundedRepairJson(sources, MAX_MATERIAL_BYTES), contentJson, Date.now(), existing.item_id]);
       return (await this.readItem(tx, input.workflowId, existing.item_id))!;
     }
     const now = Date.now();
@@ -104,7 +113,7 @@ export class RepairBatchRepository {
        content_json, source_refs_json, state, state_version, updated_at_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
     [item.itemId, input.workflowId, item.groupKey, item.proposalKey, input.episodeKey, identityDigest,
-      item.contentRevision, item.previousItemId, contentJson, boundedRepairJson(item.sources, MAX_FROZEN_BYTES), now]);
+      item.contentRevision, item.previousItemId, contentJson, boundedRepairJson(item.sources, MAX_MATERIAL_BYTES), now]);
     return (await this.readItem(tx, input.workflowId, item.itemId))!;
   }
 
@@ -169,15 +178,37 @@ export class RepairBatchRepository {
   getRevision(workflowId: string, taskId: string, revision: number): Promise<RepairRevision | null> { return this.readRevision(this.db, workflowId, taskId, revision); }
   private async latest(tx: IDatabase, workflowId: string, taskId: string, successOnly = false): Promise<RepairRevision | null> {
     const row = (await tx.query<Row>(`SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? AND task_id = ?
-      ${successOnly ? "AND draft_json IS NOT NULL AND phase <> 'no_change'" : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
+      ${successOnly ? "AND draft_json IS NOT NULL AND (phase <> 'no_change' OR JSON_EXTRACT(input_json, '$.automation.roundId') IS NOT NULL)" : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
     return row ? revisionFromRow(row) : null;
   }
   latestSuccessfulRevision(workflowId: string, taskId: string): Promise<RepairRevision | null> { return this.latest(this.db, workflowId, taskId, true); }
 
+  /** Caller holds the workflow lock. Task records fence read-only historical
+   * references without taking ownership of the original items. */
+  async assertHistoricalScopeAvailable(tx: IDatabase, input: RepairBatchInput, publication = false): Promise<void> {
+    if (!input.items.some(historicalReference)) return;
+    const materials = new RepairMaterialRepository(tx);
+    const scope = historicalScope(await materials.expand(input));
+    const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
+    const revisions = (await tx.query<Row>(
+      `SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? ORDER BY revision DESC${lock}`, [input.baseline.workflowId],
+    )).map(revisionFromRow);
+    const seen = new Set<string>();
+    for (const other of revisions) {
+      if (!publication && seen.has(other.taskId)) continue;
+      seen.add(other.taskId);
+      if (other.taskId === input.taskId || (publication ? !['publishing', 'published'].includes(other.phase)
+        : ['cancelled', 'no_change'].includes(other.phase))) continue;
+      if (other.input.items.some(historicalReference) && historicalScope(await materials.expand(other.input)) === scope) throw new RepairBatchError('ITEM_BUSY',
+        '这些历史建议已用于其他迭代，请查看对应任务或取消后重新生成',
+        { reasonCode: 'HISTORICAL_TASK_EXISTS', taskId: other.taskId });
+    }
+  }
+
   async createRevision(tx: IDatabase, request: {
     input: RepairBatchInput; requestId: string; requestDigest: string; expectedAttemptRevision: number;
   }): Promise<RepairRevision> {
-    const input = validateRepairBatchInput(request.input);
+    const input = validateRepairBatchInput(await new RepairMaterialRepository(tx).freeze(request.input));
     if (!request.requestId?.trim() || request.requestId.length > 128 || !/^[a-f0-9]{64}$/.test(request.requestDigest)) conflict('INVALID_INPUT', 'Invalid revision request identity');
     const workflowId = input.baseline.workflowId;
     await this.lockWorkflow(tx, workflowId);
@@ -188,15 +219,18 @@ export class RepairBatchRepository {
       return revisionFromRow(retry);
     }
     const previous = await this.latest(tx, workflowId, input.taskId);
-    automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
+    if (isAutomaticBatch(input) || previous && isAutomaticBatch(previous.input)) automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
-      || (previous && !['review', 'blocked', 'failed', ...(isAutomaticBatch(input) ? ['no_change'] : [])].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
+      || (previous && !['review', 'blocked', 'failed', 'no_change'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
     const successful = isAutomaticBatch(input) ? (await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId)).find(r => r.draft !== null && r.phase !== 'failed') : await this.latest(tx, workflowId, input.taskId, true);
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
+    await this.assertHistoricalScopeAvailable(tx, input);
     const claims = [];
-    for (const frozenItem of input.items) {
+    // Claims must validate every retained original source, not just inline samples.
+    for (const frozenItem of (await new RepairMaterialRepository(tx).expand(input)).items) {
+      if(historicalReference(frozenItem)){if(!input.integration)conflict('INVALID_INPUT','Historical references require goal integration');continue;}
       const stored = await this.readItem(tx, workflowId, frozenItem.itemId);
       if (!stored) conflict('ITEM_NOT_FOUND', 'Selected item does not exist in this workflow');
       if (canonicalRepairJson(content(stored)) !== canonicalRepairJson(content(frozenItem))) conflict('CONTENT_MISMATCH', 'Selected content changed');
@@ -249,6 +283,11 @@ export class RepairBatchRepository {
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
     let releaseUnchanged = input.phase === 'no_change' && !isAutomaticBatch(current.input);
+    if (releaseUnchanged) {
+      const revisions=await new RepairBatchRepository(tx).listRevisions(input.workflowId,input.taskId);
+      const retained=retainedFeedbackCandidate(revisions);
+      if(retained&&(retained.phase==='review'||changedChainItems(revisions,retained,true).length>0))releaseUnchanged=false;
+    }
     const origin = current.input.automation;
     if (input.phase === 'no_change' && isAutomaticBatch(current.input) && origin!.batchIndex === origin!.batchCount! - 1) {
       const revisions = await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId);
@@ -279,7 +318,8 @@ export class RepairBatchRepository {
     await this.lockWorkflow(tx, input.workflowId);
     const current = await this.latest(tx, input.workflowId, input.taskId);
     if (!current || current.revision !== input.expectedAttemptRevision || current.stateVersion !== input.expectedStateVersion
-      || !['drafting', 'review', 'blocked', 'failed'].includes(current.phase)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
+      || !['drafting', 'review', 'blocked', 'failed', 'no_change'].includes(current.phase)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
+    if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已发布任务不能取消');
     const result = await tx.exec(`UPDATE workflow_repair_revisions SET phase = 'cancelled', state_version = state_version + 1, updated_at_ms = ?
       WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ?`,
     [Date.now(), input.workflowId, input.taskId, current.revision, current.stateVersion]);

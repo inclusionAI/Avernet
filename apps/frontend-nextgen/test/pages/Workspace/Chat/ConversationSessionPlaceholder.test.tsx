@@ -2,6 +2,7 @@
 import { Button } from '@/components/ui';
 import type { ConversationBotView } from '@/domain/conversation';
 import { ConversationSessionPlaceholder } from '@/pages/Workspace/Chat/components/ConversationSessionPlaceholder';
+import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
@@ -470,5 +471,37 @@ describe('无显式写点的选中(URL 深链/删除回退)在搜索下不关闭
     });
     expect(screen.getByTestId('chat-session')).toHaveTextContent('次会话');
     expect(screen.queryByText('Bot A 暂无会话')).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationSessionPlaceholder 一级导航内联入口', () => {
+  it('壳内渲染：占位顶行一级导航入口与「打开会话列表」同排且在其左侧（28px、<lg）', () => {
+    const primaryNavApi = {
+      openNav: jest.fn(),
+      mountNavEntry: jest.fn(),
+      unmountNavEntry: jest.fn(),
+    };
+    const model = {
+      botName: 'Bot B',
+      status: 'empty' as const,
+      error: undefined,
+      creating: false,
+      create: jest.fn(async () => undefined),
+      retry: jest.fn(),
+      showAll: jest.fn(),
+    };
+    render(
+      <PrimaryNavContext.Provider value={primaryNavApi}>
+        <ConversationSessionPlaceholder model={model} onOpenSessionList={onOpenList} />
+      </PrimaryNavContext.Provider>,
+    );
+
+    const navEntry = screen.getByRole('button', { name: '打开导航' });
+    const sessionListEntry = screen.getByRole('button', { name: '打开会话列表' });
+    expect(navEntry).toHaveClass('h-7', 'w-7', 'lg:hidden');
+    // 占位顶行两钮同排（同一 flex 行内 DOM 顺序）。
+    expect(navEntry.compareDocumentPosition(sessionListEntry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(navEntry);
+    expect(primaryNavApi.openNav).toHaveBeenCalledTimes(1);
   });
 });

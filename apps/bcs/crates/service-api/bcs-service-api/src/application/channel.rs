@@ -37,6 +37,7 @@ impl From<ServiceError> for ChannelUseCaseError {
 /// Failure category for normalized channel inbound processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelInboundFailureKind {
+    CallerExecutionUnavailable,
     InvalidInbound,
     UnsupportedAttachment,
     AttachmentProcessingFailed,
@@ -103,6 +104,8 @@ impl ChannelInboundError {
 /// 一条入站 IM 消息(已由 adapter 从 IM 原生 body 解析为中性结构)。
 #[derive(Debug, Clone)]
 pub struct InboundMessage {
+    /// Trusted callback credential; absent for unauthenticated ingress. Never persisted.
+    pub execution_token: Option<super::caller_execution::ExecutionToken>,
     pub channel_type: ChannelType,
     pub account_ref: String,
     pub im_conversation_id: String,

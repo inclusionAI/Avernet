@@ -72,7 +72,7 @@ class StubBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         user_id: str,
-        cookie: str,
+        credential: object,
     ) -> str:
         """Return a deterministic stub sandbox_id, or simulate failure.
 

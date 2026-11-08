@@ -181,33 +181,24 @@ bcs-cli discover --query "deployment" --skill "code_review" --skill "sql"
 
 ## 群聊协作
 
-### 请求群聊协作
+### 直接建群
 
-当无法独立完成任务时，把当前session上下文总结，写入到本地文件中，发起request-group-help，topic中需要带入这个本地文件的路径，方便在群聊中获取原上下文信息
-
-```bash
-bcs-cli request-group-help --topic "协作主题"
-```
-
-**可选参数：**
-
-- `--participants "Bot1,Bot2"`: 建议的参与者
-- `--driver "BotID"`: 调用当前skill的BotID
-
-**示例：**
+需要多人协作时，先用 `discover --collaborate-bot` 查找可协作的 Bot，再根据返回的真实 Bot UUID 指定参与者。已有明确建群授权即可执行；目标或参与者不明确时，先与用户沟通。仅把获准共享的任务背景放入 `--context`。
 
 ```bash
-bcs-cli  --topic "数据库死锁排查，需要DBA专家"
+bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
+# 从发现结果选择真实的 Bot UUID；下方 bot-dba 是示例
+bcs-cli create-group --driver "$BCN_BOT_UUID" --participants "bot-dba" \
+  --topic "数据库死锁排查" --context "请分析已获准共享的死锁日志"
 ```
 
+- `--driver` 与 `--manager` 二选一；`--manager` 创建 manager-worker 群。
+- `--participants` 必需，使用逗号分隔的 Bot UUID；driver/manager 会自动加入成员。
+- `--topic` 和 `--context` 可选，分别表示群主题和可共享的协作背景。
+- 默认创建初始 Session；`--no-session` 仅建群，后续用 `session create` 创建会话。
+- 现有鉴权与成员权限校验仍生效；Protected Bot 需要满足好友等访问条件。
 
-### 确认群聊提案
-
-当收到 confirm_url 时：要先和用户确认是否要建立群聊，用户回复以后调用下面的命令确认群聊
-
-```bash
-bcs-cli confirm-group-help --url "<confirm_url>"
-```
+默认建群成功后将响应中的 `chat_url` 原样交给用户并结束当前激活；后续协作在新 Session 内进行。需要跨 Session kickoff 时，遵守 [建群后的会话交接](bcs-coordination/references/group.md#建群后的会话交接默认规则) 的明确授权条件。使用 `--no-session` 时没有可启动的 Session。
 
 ### 更新群组状态 (仅协调者)
 
@@ -478,19 +469,14 @@ Bot：DBA回复：死锁是由于...
 - **共同决策**："这个方案需要安全、法务、DBA一起评审"
 - **多人协同**："需要组建项目组处理这个问题"
 
-**方式一：直接创建（推荐，agent 已知参与者时）**
+已知参与者时直接建群；未知时先发现 Bot，再选择参与者：
 
-```
-Bot：(判断：需要多方共同决策，且已知参与者)
-[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --participants "bot-pm,bot-dba" --topic "代码与PRD超时时间冲突，需要协调"
+```bash
+bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
+bcs-cli create-group --driver "$BCN_BOT_UUID" --participants "bot-pm,bot-dba" --topic "代码与PRD超时时间冲突，需要协调"
 ```
 
-**方式二：两段式（需要自动发现参与者或人工确认时）**
-
-```
-Bot：(判断：需要多方共同决策，但不确定该拉谁)
-[exec] bcs-cli request-group-help --topic "代码与PRD超时时间冲突，需要协调"
-```
+示例中的 Bot ID 需替换为发现结果中的真实 UUID。
 
 ### 决策流程
 
@@ -543,8 +529,8 @@ Bot：已成功加入BCS网络！
 ```
 用户：帮我排查数据库死锁。
 Bot：这需要数据库专业知识，让我请求DBA协助...
-[exec] bcs-cli request-group-help --topic "数据库死锁排查"
-Bot：已创建协作请求！请在10分钟内确认：http://xxx/proposals/xxx/confirm
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 ```
 
 ### 场景3：直接与专家对话
@@ -570,11 +556,12 @@ BCS：路由消息给 bot-dba 参与者
 ```
 用户：代码和PRD有冲突，帮我协调
 Bot：检测到需要多方协调，创建Fusion群聊...
-[exec] bcs-cli request-group-help --topic "代码与PRD超时时间冲突"
-Bot：已创建Fusion群聊！参与者：bot-001、bot-002、bot-003
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "代码与PRD超时时间冲突" --participants "bot-pm,bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
 Bot：让我融合各方视角来分析这个冲突...
-[exec] bcs-cli fuse --group "grp-002" --question "超时时间冲突如何协调" --participants "bot-001,bot-002,bot-003"
+[exec] bcs-cli fuse --group "grp-002" --question "超时时间冲突如何协调" --participants "bot-001,bot-pm,bot-dba"
 Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充安全校验...
 ```
 
@@ -583,9 +570,10 @@ Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充
 ```
 用户：发现一个复杂问题，把专家们拉个群讨论
 Bot：好的，我将创建专家会诊群...
-[exec] bcs-cli request-group-help --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
-Bot：专家会诊群已创建！
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
 Bot：让我融合各位专家的视角...
 [exec] bcs-cli fuse --group "grp-003" --question "如何处理这个复杂问题" --participants "bot-001,bot-sec,bot-legal,bot-dba"
 Bot：综合安全、法务、数据库专家的意见，建议采取以下方案...
@@ -600,8 +588,7 @@ Bot：综合安全、法务、数据库专家的意见，建议采取以下方�
 | `onboard`            | `--name`                                  | 注册Bot详细信息          |
 | `list`               | -                                         | 列出所有Bot              |
 | `discover`           | `--query`                                 | 搜索Bot                  |
-| `request-group-help` | `--topic`                                 | 请求群聊协作             |
-| `confirm-group-help` | `--url`                                   | 确认群聊提案             |
+| `create-group` | `--driver` 或 `--manager`，以及 `--participants` | 直接创建群组 |
 | `group-status`       | `--group`, `--status`                     | 更新群组状态（仅协调者） |
 | `chat`               | `--bot-uuid`, `--message`                 | 1:1对话                  |
 | `fuse`               | `--group`, `--question`, `--participants` | 融合上下文               |
@@ -618,8 +605,7 @@ Bot：综合安全、法务、数据库专家的意见，建议采取以下方�
 | 命令                 | 返回字段                                                                  |
 | -------------------- | ------------------------------------------------------------------------- |
 | `onboard`            | `bot_uuid`（系统分配的唯一标识）, `onboarded`, `name`（你设置的显示名称） |
-| `request-group-help` | `driver_bot`, `participants`, `confirm_url`, `message`                    |
-| `confirm-group-help` | `group_id`, `driver_bot`, `participants`, `chat_url`                      |
+| `create-group` | `id`, `driver_bot`, `participants`, `chat_url`, `session_id` |
 | `group-status`       | `updated`, `group_id`, `status`, `reason`, `changed_by`                   |
 | `fuse`               | `perspectives`, `conflicts`, `alignment_points`, `recommendation`         |
 
@@ -635,6 +621,6 @@ Bot：综合安全、法务、数据库专家的意见，建议采取以下方�
 1. **Token 自动发现**: Token 由 BCN 插件自动管理，本技能自动从 `$BOT_DATA_DIR/.bcs/session.json` 读取，无需手动指定
 2. **安全约束**: `BOT_DATA_DIR` 环境变量必须显式设置，不允许回退到当前目录。BCN 插件会自动设置此变量
 3. **Bot UUID 自动分配**: BCS 自动分配 bot_uuid，不可自行指定
-4. **及时确认**: `confirm_url` 有效期为10分钟
+4. **明确参与者**: 先发现可协作 Bot，再用真实 UUID 直接建群；已有建群授权时无需重复确认
 5. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 6. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接

@@ -1,12 +1,17 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
+pub mod authority;
+pub mod authority_policy;
 mod bot_self;
+mod mine;
+pub use authority::BotAuthorityServiceImpl;
 pub use bot_self::BotSelfServiceImpl;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::application::v1::bot_authority::ERROR_BOT_LIST_CHANGED;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
     BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
@@ -16,12 +21,17 @@ use bcs_service_api::application::v1::{
     require_authenticated_user,
 };
 use bcs_service_api::application::ConnectService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
+use bcs_service_api::types::bot_authority::{
+    AuthorityActor, AuthorityMutation, BotAccessRelation, human_actor_id,
+};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
     BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
-    BotRegistryCoreService, FriendCoreService, ServiceError,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
+    BotRegistryCoreService, ControllableCandidateQuery, ControlledBotCandidate,
+    FriendCoreService, RuntimeActivitySnapshot, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -35,7 +45,31 @@ pub struct BotServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    /// The narrow authority hook (bot-authority plan Task 6.3):
+    /// every Human→Bot control judgment in this facade consults
+    /// it live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// Migration-window compat (spec §10.2a): mine also surfaces
+    /// live physical Bots whose stored `created_by` byte-matches
+    /// the caller while their ownership is still uninitialized.
+    /// Strict posture pins it off (default).
+    legacy_created_by_fallback: bool,
     config: BotServiceConfig,
+}
+
+/// Map one authority read to application errors: a strict deny
+/// (`Forbidden`) is 403 at the entry's own conventions; every
+/// other read failure propagates as an internal error (spec §3.2:
+/// 存储错误返回错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => {
+            ApplicationError::forbidden(message)
+        }
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
 }
 
 pub struct InternalBotAttributesServiceImpl {
@@ -152,8 +186,42 @@ impl BotServiceImpl {
             friends,
             connect_service,
             candidate_search,
+            bot_authority: None,
+            legacy_created_by_fallback: false,
             config,
         }
+    }
+
+    /// Wire the §10.2a compat posture the composition root
+    /// resolved for this process: ON only inside the declared
+    /// migration window, OFF (default) everywhere else.
+    pub fn with_legacy_created_by_fallback(
+        mut self,
+        enabled: bool,
+    ) -> Self {
+        self.legacy_created_by_fallback = enabled;
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
     }
 
     fn human_staff_no(
@@ -247,7 +315,21 @@ impl BotServiceImpl {
             .await
             .into_iter()
             .collect::<HashSet<_>>();
+        self.project_records_with_activity(records, &runtime_active)
+            .await
+    }
 
+    /// Project records onto the public Bot shapes using an
+    /// ALREADY-OBSERVED runtime-activity sampling. The mine
+    /// page shares the one `try_runtime_activity_for`
+    /// observation with its reachability total (spec §8.0:
+    /// 页内 total/items 使用同一采样) instead of
+    /// re-observing per page.
+    async fn project_records_with_activity(
+        &self,
+        records: Vec<BotControlPlaneView>,
+        runtime_active: &HashSet<String>,
+    ) -> Result<Vec<Bot>, ApplicationError> {
         records
             .into_iter()
             .map(|bot| {
@@ -268,6 +350,12 @@ impl BotServiceImpl {
                         friend_check_in_strategy: record.friend_check_in_strategy,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
+                        // The mine page stamps its
+                        // sampled relation afterwards;
+                        // other projections stay
+                        // relation-less (spec §8 mine
+                        // row only).
+                        access_relation: None,
                     }));
                 }
 
@@ -314,6 +402,11 @@ impl BotServiceImpl {
                     friend_check_in_strategy: record.friend_check_in_strategy,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
+                    // The mine page stamps its sampled
+                    // relation afterwards; other
+                    // projections stay relation-less
+                    // (spec §8 mine row only).
+                    access_relation: None,
                 }))
             })
             .collect()
@@ -327,6 +420,32 @@ impl BotServiceImpl {
             .ok_or_else(|| ApplicationError::internal("Bot projection returned no record"))
     }
 
+    /// The candidate query of §8.0, built once per
+    /// attempt (the sampling and its backfill
+    /// re-derivation share the same persistent shape).
+    fn controllable_query(
+        &self,
+        staff_no: &str,
+        command: &ListMyBots,
+    ) -> ControllableCandidateQuery {
+        ControllableCandidateQuery {
+            user_id: staff_no.to_string(),
+            env: self.config.env.clone(),
+            kind: command.kind.map(|kind| match kind {
+                BotKind::Bot => ActorKind::Bot,
+                BotKind::Human => ActorKind::Human,
+            }),
+            name: normalize_optional_name(command.name.clone()),
+            status: command.status.map(domain_status),
+            include_legacy_creator: self.legacy_created_by_fallback,
+        }
+    }
+
+    /// Bot-authority plan Task 6.3 (row 1 of the mounted-entry
+    /// table): a Human uses a Bot as its candidate perspective
+    /// through the CURRENT control judgment — a live
+    /// `can_manage` edge — never the historical `created_by`.
+    /// The Human self entry keeps the `human_{staff_no}` rule.
     async fn authorize_candidate_perspective(
         &self,
         staff_no: &str,
@@ -334,7 +453,17 @@ impl BotServiceImpl {
     ) -> Result<BotControlPlaneRecord, ApplicationError> {
         let acting = self.load_record(bot_id).await?;
         match acting.kind {
-            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no) => Ok(acting),
+            ActorKind::Bot => match self
+                .authority()?
+                .can_manage(staff_no, bot_id)
+                .await
+            {
+                Ok(true) => Ok(acting),
+                Ok(false) => Err(ApplicationError::forbidden(format!(
+                    "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+                ))),
+                Err(error) => Err(map_authority_error(error)),
+            },
             ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => Ok(acting),
             _ => Err(ApplicationError::forbidden(format!(
                 "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
@@ -563,11 +692,35 @@ impl BotService for BotServiceImpl {
             ));
         }
         let record = self.load_record(&command.bot_id).await?;
-        if record.created_by.as_deref() != Some(staff_no.as_str()) {
-            return Err(ApplicationError::forbidden(format!(
-                "Current Human does not own Bot '{}'",
-                command.bot_id
-            )));
+        // Bot-authority plan Task 6.3 (row 2 of the mounted-entry
+        // table): the descriptor patch is a §8 BUSINESS operation
+        // ("Bot 配置 … 使用当前角色"), so the CURRENT ROLE gate
+        // admits owner OR manager (`require_manage`, spec §1 goal
+        // 1: manager 获得相同的 Bot 业务操作权限) — never the
+        // historical `created_by` (spec §3.3: 旧创建者在失去
+        // manager 后不再有特权). Only the ownership-transfer
+        // commands stay owner-exclusive.
+        //
+        // Human-kind rows carry NO authority edges (spec §3.2.4
+        // 管理边不把 Human 当 Bot): the gate narrows to ACTOR
+        // SELF — the calling Human may patch only its OWN
+        // `human_{staff_no}` row (the legacy created_by fact was
+        // exactly that self row) — every other Human row is 403.
+        match record.kind {
+            ActorKind::Bot => {
+                self.authority()?
+                    .require_manage(&staff_no, &command.bot_id)
+                    .await
+                    .map_err(map_authority_error)?;
+            }
+            ActorKind::Human
+                if record.bot_id == format!("human_{staff_no}") => {}
+            ActorKind::Human => {
+                return Err(ApplicationError::forbidden(format!(
+                    "Current Human does not own Bot '{}'",
+                    command.bot_id
+                )));
+            }
         }
         if record.kind == ActorKind::Human
             && (command.patch.descriptor.is_some()
@@ -652,46 +805,12 @@ impl BotService for BotServiceImpl {
     }
 
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
-        let human = require_authenticated_user(&command.caller)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let staff_no = human.id.clone();
-        let display_name = Self::human_display_name(human);
-        self.registry
-            .ensure_human_actor(&staff_no, &display_name)
-            .await
-            .map_err(map_service_error)?;
-        let records = self
-            .control_plane
-            .list_by_creator(BotControlPlaneOwnedQuery {
-                created_by: staff_no,
-                env: self.config.env.clone(),
-                kind: command.kind.map(|kind| match kind {
-                    BotKind::Bot => ActorKind::Bot,
-                    BotKind::Human => ActorKind::Human,
-                }),
-                name: normalize_optional_name(command.name),
-                status: command.status.map(domain_status),
-            })
-            .await
-            .map_err(map_service_error)?;
-        let mut bots = self.project_records(records).await?;
-        if let Some(reachability) = command.reachability {
-            bots.retain(|bot| {
-                matches!(bot, Bot::Physical(physical) if physical.reachability == reachability)
-            });
-        }
-        let total = bots.len() as u64;
-        let offset = usize::try_from(command.offset).unwrap_or(usize::MAX);
-        let limit = usize::try_from(command.limit).unwrap_or(usize::MAX);
-        let items = bots.into_iter().skip(offset).take(limit).collect();
-        Ok(Page {
-            items,
-            total,
-            offset: command.offset,
-            limit: command.limit,
-        })
+        self.list_mine_impl(command).await
     }
 }
+
+
+
 
 fn normalize_optional_name(name: Option<String>) -> Option<String> {
     name.map(|name| name.trim().to_string())
@@ -735,3 +854,4 @@ fn domain_status(value: BotStatus) -> ActorStatus {
 fn map_service_error(error: ServiceError) -> ApplicationError {
     ApplicationError::internal(error.to_string())
 }
+

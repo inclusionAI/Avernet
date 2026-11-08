@@ -28,7 +28,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
       'collaboration-square',
       'lab',
     ]);
-    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop']);
+    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop', 'evolution-factory']);
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
@@ -94,6 +94,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'bot-workshop',
       'capability-workshop',
       'market',
+      'evolution-factory',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');
   });

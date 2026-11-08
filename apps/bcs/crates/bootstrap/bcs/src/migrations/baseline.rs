@@ -35,7 +35,8 @@ pub(super) const SQLITE_DDL_STATEMENTS: &[&str] = &[
         task_dream_mode INTEGER NOT NULL DEFAULT 0,
         user_visibility TEXT NOT NULL DEFAULT 'protected',
         friend_ext TEXT DEFAULT NULL,
-        friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'
+        friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL',
+        ownership_version INTEGER NOT NULL DEFAULT 0
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",

@@ -3,12 +3,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_app_session::SessionFileApplicationServiceImpl;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_domain::{GroupStrategy, SystemMessageEvent};
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
     CompleteSessionFile, ListSessionFiles, PrepareSessionFile, SessionFileApplicationService,
-    SessionFileStatus, UploadSessionFileContent,
+    SessionFileStatus, ShareSessionFile, UploadSessionFileContent,
 };
 use bcs_service_api::application::session_files::SessionFileService;
 use bcs_service_api::port::repo::{
@@ -61,6 +62,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     session_repo: Arc<dyn SessionRepoPort>,
     notifications: Arc<RecordingSystemMessage>,
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 impl Fixture {
@@ -98,6 +100,7 @@ impl Fixture {
             },
         ));
         let notifications = Arc::new(RecordingSystemMessage::default());
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let service = SessionFileApplicationServiceImpl::new(
             legacy,
             sessions,
@@ -105,6 +108,9 @@ impl Fixture {
             bots.clone(),
             notifications.clone(),
             Arc::new(CompletionShareProjector),
+        )
+        .with_bot_authority_hook(
+            bcs_test_support::authority_hook_for(authority_repo.clone()),
         );
         Self {
             service,
@@ -112,6 +118,7 @@ impl Fixture {
             groups,
             session_repo,
             notifications,
+            authority_repo,
         }
     }
 
@@ -132,6 +139,10 @@ impl Fixture {
                 .save_created_by(bot, owner, true)
                 .await
                 .expect("save Bot creator");
+            // Row 7: the CURRENT owner edge replaces the
+            // historical `created_by`.
+            bcs_test_support::grant_owner_edge(&self.authority_repo, bot, owner)
+                .await;
         }
         let participants = vec![
             Participant::bot("bot-a", ParticipantRole::Driver),
@@ -185,6 +196,25 @@ fn human_caller(user_id: &str) -> AuthenticatedCaller {
         app: None,
         access_key: None,
     }
+}
+
+/// `prepare` mapped to its error outcome
+/// (callers assert the variant).
+async fn prepare_err(
+    fixture: &Fixture,
+    caller: AuthenticatedCaller,
+) -> Option<bcs_service_api::application::v1::ApplicationError> {
+    fixture
+        .service
+        .prepare(PrepareSessionFile {
+            caller,
+            session_id: "group-1:abcd1234".into(),
+            file_name: "report.txt".into(),
+            size: 3,
+            mime_type: "text/plain".into(),
+        })
+        .await
+        .err()
 }
 
 fn human_and_bot_caller(user_id: &str, bot_uuid: &str) -> AuthenticatedCaller {
@@ -465,4 +495,207 @@ async fn participant_id_collision_does_not_cross_actor_kinds() {
         .expect_err("Human must not inherit ownership through a Human participant ID collision");
 
     assert_eq!(error.code(), "forbidden");
+}
+
+/// The Human→Bot share matrix (GPT-review batch C
+/// finding #6): `share` passes the session in, so a
+/// Human whose membership ran through a controlled
+/// participant Bot carries that Bot identity, and the
+/// matrix follows the CURRENT edges.
+#[tokio::test]
+async fn share_carries_the_controlled_participant_identity() {
+    let fixture = Fixture::new().await;
+    fixture.seed().await;
+    let session_id = "group-1:00000003";
+    fixture
+        .session_repo
+        .create(
+            "group-1",
+            NewSessionParams {
+                id: Some(session_id.into()),
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("bot-a", ParticipantRole::Driver),
+                    Participant::bot("bot-b", ParticipantRole::Worker),
+                ],
+                created_by: Some("bot-a".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("store session");
+    let caller = bot_caller("bot-a", "alice");
+    let file_id = fixture
+        .service
+        .prepare(PrepareSessionFile {
+            caller: caller.clone(),
+            session_id: session_id.into(),
+            file_name: "report.txt".into(),
+            size: 3,
+            mime_type: "text/plain".into(),
+        })
+        .await
+        .expect("prepare file")
+        .file
+        .file_id;
+    fixture
+        .service
+        .upload_content(UploadSessionFileContent {
+            caller: caller.clone(),
+            session_id: session_id.into(),
+            file_id: file_id.clone(),
+            part_number: None,
+            body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
+            content_length: Some(3),
+        })
+        .await
+        .expect("upload file");
+    fixture
+        .service
+        .complete(CompleteSessionFile {
+            caller,
+            session_id: session_id.into(),
+            file_id: file_id.clone(),
+        })
+        .await
+        .expect("complete file");
+
+    // Constrain the scenario first: hand `bot-a` over
+    // to carol so alice's ONLY remaining control is the
+    // participant `bot-b` — exactly the shape the
+    // finding describes (member via controlled
+    // participant Bot, own identity alone cannot
+    // match the participants intersection).
+    bcs_test_support::grant_owner_edge(&fixture.authority_repo, "bot-a", "carol")
+        .await;
+
+    // A pure Human whose membership passed through its
+    // controlled participant `bot-b` SHARES: the
+    // controlled participant identity reaches
+    // `can_share`'s participants intersection.
+    fixture
+        .service
+        .share(ShareSessionFile {
+            caller: human_caller("alice"),
+            session_id: session_id.into(),
+            file_id: file_id.clone(),
+            ttl_seconds: Some(60),
+        })
+        .await
+        .expect("the controller shares");
+
+    // A→B handover: B's owner grant REPLACES A's; A's
+    // membership leg (live `can_manage` on bot-b) is
+    // gone → the share is denied fallback-free, and B
+    // (the CURRENT controller) shares instead.
+    bcs_test_support::grant_owner_edge(&fixture.authority_repo, "bot-b", "bob")
+        .await;
+    bcs_test_support::revoke_authority_edge(
+        &fixture.authority_repo,
+        "bot-b",
+        "alice",
+        bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Owner,
+    )
+    .await;
+    let denied = fixture
+        .service
+        .share(ShareSessionFile {
+            caller: human_caller("alice"),
+            session_id: session_id.into(),
+            file_id: file_id.clone(),
+            ttl_seconds: Some(60),
+        })
+        .await
+        .expect_err("the revoked controller cannot share");
+    assert!(matches!(
+        denied,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+    fixture
+        .service
+        .share(ShareSessionFile {
+            caller: human_caller("bob"),
+            session_id: session_id.into(),
+            file_id: file_id.clone(),
+            ttl_seconds: Some(60),
+        })
+        .await
+        .expect("the CURRENT controller shares");
+
+    // Manager polarity: a CURRENT manager grant re-opens
+    // the share for its holder.
+    bcs_test_support::grant_manager_edge(
+        &fixture.authority_repo,
+        "bot-b",
+        "alice",
+    )
+    .await;
+    fixture
+        .service
+        .share(ShareSessionFile {
+            caller: human_caller("alice"),
+            session_id: session_id.into(),
+            file_id,
+            ttl_seconds: Some(60),
+        })
+        .await
+        .expect("the current manager shares");
+}
+
+/// The facade (the internal session-file routes'
+/// delegated decision point, GPT-review batch C
+/// finding #5) decides the Human→Bot leg through the
+/// LIVE edge only: a hybrid credential whose
+/// historical `owner_id` claim survives a handover
+/// is denied, and a CURRENT manager's hybrid is
+/// admitted.
+#[tokio::test]
+async fn hybrid_file_calls_follow_the_current_edge() {
+    let fixture = Fixture::new().await;
+    fixture.seed().await;
+
+    // A(owner) hybrid: the current owner edge
+    // admits the Bot-lane call.
+    prepare(&fixture, human_and_bot_caller("alice", "bot-a"))
+        .await;
+
+    // A→B handover (B's grant REPLACES A's; A's
+    // edges withdrawn): the same hybrid is
+    // fallback-free denied — no claim-local
+    // history leaks through.
+    bcs_test_support::grant_owner_edge(&fixture.authority_repo, "bot-a", "bob")
+        .await;
+    bcs_test_support::revoke_authority_edge(
+        &fixture.authority_repo,
+        "bot-a",
+        "alice",
+        bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Owner,
+    )
+    .await;
+    let denied = prepare_err(
+        &fixture,
+        human_and_bot_caller("alice", "bot-a"),
+    )
+    .await
+    .expect("the revoked hybrid cannot use the Bot lane");
+    assert!(matches!(
+        denied,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+
+    // B (the CURRENT controller) proceeds.
+    prepare(&fixture, human_and_bot_caller("bob", "bot-a"))
+        .await;
+
+    // Manager polarity: a CURRENT manager's hybrid
+    // is admitted (the claim-local pre-check would
+    // have wrongly blocked it).
+    bcs_test_support::grant_manager_edge(
+        &fixture.authority_repo,
+        "bot-a",
+        "alice",
+    )
+    .await;
+    prepare(&fixture, human_and_bot_caller("alice", "bot-a"))
+        .await;
 }

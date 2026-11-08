@@ -3,8 +3,8 @@
 ## Best-effort policy (2026-10-12)
 
 Backup is attempted, but backup-only failures log sanitized warnings and do not
-block restart. This includes inventory, command, timeout, receipt and physical
-identity failures. Warnings carry `action=continue_restart` and
+block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
+failures. Changes to the captured Arca binding/sandbox target remain blocking. Warnings carry `action=continue_restart` and
 `data_loss_risk=true`; they are not successful backup receipts. Binding/engine
 checks, database failures and durable operation fences remain blocking.
 Restart can lose data newer than the last durable backup; a timeout does not
@@ -52,8 +52,30 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only
 
-- Direct ARCA bindings skip backup and retain their original stop/start flow.
-  Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
+- Direct ARCA bindings now attempt the same asynchronous helper protocol before
+  their strategy-owned replacement flow, reusing the original stop/start primitives. Their physical target comes directly from the
+  old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
+  inventory or sandbox-list query is involved. The existing provider execution
+  hook retains ownership of sandbox suffix/tenant translation.
+- `BoundArcaRestartExecutor` in `aicoding/restart_arca.py` is a strategy-owned
+  pinned `execute(command)` / `verify()` executor. It consumes the same module's
+  `ArcaRestartBindings` binding-read port and `ArcaRestartTransport` command
+  contract. A composition root supplies the transport from the existing Arca
+  provider hook; the shared router gains no new API. The executor has
+  no HTTP exposure or default-provider fallback. ACTIVE/PENDING/FAILED/STOPPED
+  bindings may still identify a live old sandbox and are eligible for backup.
+  Normal `exec_shell_new` keeps its existing ACTIVE/PENDING restriction. The
+  executor never modifies binding status and never re-resolves a new target by
+  logical device ID. Database failures, changed physical binding targets, and
+  released bindings remain blocking, even after a failed backup attempt.
+- Missing sandbox identity and unreachable/destroyed runtimes produce sanitized
+  best-effort warnings and continue recovery; neither is a successful backup.
+  New durable tasks capture `sandbox_id` (including its tenant suffix), in
+  addition to the existing binding/device/provider identity. Pre-rollout tasks
+  without this field capture the target at preparation and retain the existing
+  binding/device/provider checks. Repeated helper calls use the same operation
+  ID; backup waits outside the restart lock and verification runs under it.
+- Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
   unavailable FAILED/STOPPED containers warn and continue without execution.
 - Coding restart calls the existing `list_devices_by_bot_uuid` client and
   `GET /bots/{uuid}/devices` for both prepare and verification. The endpoint
@@ -84,7 +106,7 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   lookup failures degrade backup without blocking restart. Non-empty inventories always retain the
   physical-target backup checks, even for FAILED Bots. This coding-only policy
   also applies to published/caller instance preconditions; shared BaaS APIs,
-  direct ARCA restarts and other engine policies are unchanged by this change.
+  the direct ARCA stop/start lifecycle and other engine policies are unchanged.
 
 ## Runtime contract
 
@@ -149,3 +171,73 @@ The current polling interval is 2 seconds and the observation deadline is 1500
 seconds. This is not a hard transport timeout: an in-flight exec uses its existing
 transport timeout. These constants remain unchanged in this boundary-only patch;
 configuration and executor-capacity tuning are separate unresolved review items.
+
+## Direct ARCA rollout and propagation
+
+The coding strategy owns the pinned executor, transport contract,
+recovery-state eligibility and blocking target errors in `restart_arca.py`.
+The OCB composition root selects the registered Arca provider and supplies its
+existing `_exec_shell_new` hook; that hook and `SandboxRuntimeClient` retain
+sandbox suffix/tenant translation. No router API, SDK dependency, public HTTP
+contract, generic exec permission, queue type or database schema is introduced.
+OCB must update its Avernet gitlink to deploy the strategy and transport wiring
+together. Corp contract tests assert that exec and destruction select the same
+raw sandbox ID and tenant, including configured Coding suffixes.
+
+The helper must already be installed in direct-ARCA images. `start` must return
+promptly while container-side work continues; platform exec retains its existing
+transport timeout. Pre-rollout images use the existing strict legacy probe.
+Before rollout, verify helper ownership/sudo, committed receipts, durable storage
+and restore into a replacement sandbox in staging. Unit mocks do not prove
+those runtime/storage properties. This change does not install runtime scripts
+or introduce a new restore format.
+
+## Coding Arca replacement orchestration
+
+For admitted, bound Arca coding tasks, `AicodingArcaRestart` in
+`restart_arca_lifecycle.py` owns backup-before-lock ordering, under-lock target
+verification and mutation fencing, service-bot default-image selection, and
+stop/start orchestration. Like `AicodingBaasRestart`, it is invoked directly by
+the coding worker, not through `BotService.restart_bot`. Shared stop/start,
+provider selection and allocation remain existing lifecycle collaborators.
+
+A busy lock causes rescheduling without mutation. A preparation/verification
+failure never releases the old sandbox. Before allocation handoff, exceptions
+release only the acquired lock token; after successful handoff, the allocation
+worker retains lock-release ownership. Ambiguous post-fence failures are observed
+without replaying stop/start. Failed release retains the original restart warning.
+
+Non-coding engines, unbound recovery, and admission's activation-in-progress
+fallback retain the existing generic lifecycle. Direct synchronous callers also
+retain their existing strategy precondition hook. This change does not migrate
+all device lifecycle behavior into coding policy or change published/Caller flows.
+
+## Unified backup dependency assembly
+
+`RestartBackupDependencies` in `restart_dependencies.py` is the single backup
+dependency passed by BotService and both coding restart executors. Its immutable
+fields hold factories for the existing BaaS inventory/command runtime and the
+pinned Arca transport. `BotManagementModule` assembles these lazily; OCB keeps
+selecting the existing Arca hook in its composition root. Constructing the
+envelope does not resolve either provider, perform network I/O or introduce a
+BotService/DeviceService dependency cycle. Non-coding strategies and unbound
+recovery do not resolve its factories.
+
+The strategy resolves only the selected capability. BaaS resolution failures
+still degrade backup inside the existing best-effort boundary; missing Arca
+transport still blocks replacement. Binding/database checks stay outside that
+boundary. This is dependency consolidation, not a new common provider API: BaaS
+continues to use inventory and Arca continues to pin the old binding's sandbox.
+
+The `prepare_instance_restart` published/Caller dispatcher preserves its existing
+`target_runtime` argument and wraps it with `RestartBackupDependencies.for_instance`
+before invoking the engine hook. No provider-specific backup factory is passed
+through BotService or the engine hook anymore. BotService's existing BaaS service
+dependency remains for non-backup lifecycle operations; this change does not
+remove that shared functionality.
+
+Propagation: deploy the updated DI assembly, BotService, strategy and tests
+together. Direct internal constructors that exercise coding backup must supply
+the envelope instead of `arca_restart_transport_provider`; the default represents
+unavailable backup capabilities, not backup success. HTTP inputs, queue payloads,
+provider APIs and backup helper/receipt formats are unchanged.

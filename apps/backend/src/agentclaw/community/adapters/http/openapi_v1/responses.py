@@ -63,8 +63,8 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestTooLargeError,
     ManifestValidationError,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    ManifestApplyInProgressError,
+from agentclaw.community.api.apply_run_service import (
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -91,6 +91,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import GENOME_ENVELOPE_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -170,17 +171,20 @@ from agentclaw.community.core.cron.errors import (
 )
 from agentclaw.community.api.acli_cli_service import (
     AcliBotNotRunningError,
-    AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
-    AcliCliNotGrantedError,
     AcliDefaultCliError,
+    AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketNotConfiguredError,
     AcliMarketUnavailableError,
+    AcliOperationCancelledError,
     AcliOperationFailedError,
+    AcliOperationInProgressError,
+    AcliOperationNotActiveError,
+    AcliOperationNotFoundError,
     AcliRequestRejectedError,
-    AcliRollbackFailedError,
+    AcliStageNotAllowedError,
 )
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
@@ -293,6 +297,11 @@ from agentclaw.community.core.task.domain.errors import (
     GraphIntegrityError,
     NodeNotFoundError,
     TaskError,
+    TaskArtifactContentError,
+    TaskArtifactObjectNotFoundError,
+    TaskArtifactStorageError,
+    TaskArtifactStorageNotConfiguredError,
+    TaskArtifactUploadTooLargeError,
     TaskNotFoundError,
     TaskStateError,
     TrajectoryAnalysisError,
@@ -370,7 +379,10 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError
+
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    ExpertNotFoundError: (404, "Not found"),
     EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
     EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
@@ -387,18 +399,23 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallerMcpNotFoundError: (404, "Not found"),
     CallerMcpSyncError: (502, "Caller identity synchronization failed"),
     CallerCallTypeInvalidError: (500, "Internal error"),
-    AcliCliAlreadyGrantedError: (409, "CLI is already granted to this bot"),
-    AcliCliNotGrantedError: (404, "Not found"),
     AcliDefaultCliError: (409, "Default CLIs cannot be removed"),
     AcliCliNameMismatchError: (422, "Use the tool's acli market name"),
+    AcliStageNotAllowedError: (422, "Only service bots take a stage"),
+    AcliOperationInProgressError: (409, "Another CLI operation is in progress; try again later"),
+    AcliOperationNotActiveError: (409, "No such CLI operation is running"),
+    AcliOperationCancelledError: (409, "The CLI operation was cancelled"),
+    AcliOperationNotFoundError: (404, "Not found"),
     AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
     AcliBotNotRunningError: (409, "The bot has no running container"),
+    AcliEngineOutdatedError: (
+        409, "This bot's engine does not support CLI management yet; update its engine"
+    ),
     AcliRequestRejectedError: (422, "acli rejected the request"),
     AcliOperationFailedError: (502, "The acli operation failed"),
     AcliGrantSyncError: (502, "The CLI grant could not be synchronized"),
     AcliMarketNotConfiguredError: (501, "The acli market is not configured"),
     AcliMarketUnavailableError: (502, "The acli market is unavailable"),
-    AcliRollbackFailedError: (500, "The change could not be rolled back"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
@@ -626,6 +643,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
+    **GENOME_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
@@ -664,7 +682,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
-    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
+    ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
     # platform refused what it *named* — an unmatched digest, an absent archive
@@ -809,6 +827,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # and ENVELOPE_ERRORS returns on the first isinstance match in insertion order.
     TrajectoryAnalysisNotConfiguredError: (503, "Trajectory analysis bot is not configured"),
     TrajectoryAnalysisError: (504, "Trajectory analysis failed"),
+    # Artifact report contract violations (spec 2026-10-20 §4): attempt 失配等在
+    # relay 回调解析/发布路径抛给客户端的是请求问题,落 422 而非 TaskError 500 兜底
+    # (列在 TaskError 基类之前,同上 trajectory leaves)。
+    TaskArtifactContentError: (422, "Invalid artifact report"),
+    # OBJECT_FILE 上传/下载(spec 2026-10-26 修订):四个状态对应四个不同的运维
+    # 动作——413 调大 task_artifact_storage.max_upload_mb / 分块通道;502 查对象存储
+    # 本身;503 修列绑定(task_artifact_storage 块);404 行未知或对象已被清理。列在
+    # ``TaskError`` 基类之前(同上 trajectory leaves;ENVELOPE_ERRORS 首个 isinstance
+    # 命中即返回)。
+    TaskArtifactUploadTooLargeError: (413, "Artifact upload exceeds configured size cap"),
+    TaskArtifactObjectNotFoundError: (404, "Artifact object not found"),
+    TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
+    TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
@@ -828,7 +859,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
-    ManifestApplyInProgressError: 409109,
+    ApplyInProgressError: 409109,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,

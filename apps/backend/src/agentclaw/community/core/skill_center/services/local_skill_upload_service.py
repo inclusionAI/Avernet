@@ -18,6 +18,8 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -100,6 +102,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
+        self._bot_addresses = BotAddressResolver(bot_repo)
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
         self._edit_guard = edit_guard
@@ -210,6 +213,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
+            owner_id = stable_resource_owner_id(bot)
             validated = self._validate_zip(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             # Re-read same-name candidates, owner, readiness and default state
@@ -852,21 +856,25 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         )
 
     def _authorize(self, bot_id: str, owner_id: str, actor_id: str) -> dict[str, Any]:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
             from agentclaw.community.core.skill_center.errors import (
                 LocalSkillNotFoundError,
             )
 
             raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
+        current_owner = str(bot["owner_id"])
+        if actor_id != current_owner:
             # Uploading installs executable content on someone's Bot: the
             # edit/operations domain, where the Space-synthesized MEMBER has
             # no say (its openapi twin rows carry Check … explicit=True; a
             # space member could upload but not delete — the split-between
             # -writes wart the review caught).
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER, explicit=True
+                bot_id, current_owner, actor_id, PermissionLevel.MEMBER, explicit=True
             )
             if not permission.get("has_permission"):
                 from agentclaw.community.core.skill_center.errors import (

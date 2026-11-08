@@ -18,12 +18,17 @@ const unknownBot = {
   detailsResolved: false,
 } as unknown as CollaborationBotView;
 
-function makePicker(friends: CollaborationBotView[]): UseGroupCollaborationPickerResult {
+function makePicker(
+  friends: CollaborationBotView[],
+  overrides: Partial<UseGroupCollaborationPickerResult> = {},
+): UseGroupCollaborationPickerResult {
   return {
     tab: 'friends',
     setTab: jest.fn(),
     search: '',
     setSearch: jest.fn(),
+    filterMode: 'name',
+    setFilterMode: jest.fn(),
     friends,
     mine: [],
     candidates: [],
@@ -36,6 +41,13 @@ function makePicker(friends: CollaborationBotView[]): UseGroupCollaborationPicke
     candidatesHasMore: false,
     retry: jest.fn(),
     loadMore: jest.fn(),
+    recommendations: [],
+    isLoadingRecommend: false,
+    recommendError: undefined,
+    recommendSource: null,
+    recommendByGoal: jest.fn(),
+    retryRecommend: jest.fn(),
+    ...overrides,
   };
 }
 
@@ -161,4 +173,107 @@ it('does not show the redundant collaboration Bot range hint', () => {
   );
 
   expect(screen.queryByText('可协作 Bot 范围：公开 Bot 与已接受好友的集合。')).not.toBeInTheDocument();
+});
+
+it('shows the filter mode switch only on the candidates tab and switches modes', () => {
+  const setFilterMode = jest.fn();
+  const friendsPicker = makePicker([]);
+  const { rerender } = render(
+    <GroupParticipantPicker
+      picker={friendsPicker}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+  expect(screen.queryByText('按名称筛选')).not.toBeInTheDocument();
+  expect(screen.queryByText('按画像筛选')).not.toBeInTheDocument();
+
+  rerender(
+    <GroupParticipantPicker
+      picker={makePicker([], { tab: 'candidates', setFilterMode })}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('按名称筛选')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('按画像筛选'));
+  expect(setFilterMode).toHaveBeenCalledWith('profile');
+});
+
+it('renders profile recommendations with short profile summaries', () => {
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([], {
+        tab: 'candidates',
+        filterMode: 'profile',
+        search: '值班',
+        recommendations: [
+          {
+            id: 'b1',
+            name: '值班助手',
+            online: true,
+            status: 'online',
+            reachability: 'reachable',
+            visibility: 'public',
+            recommendScore: 0.9,
+            shortProfile: '负责值班告警响应',
+          },
+        ],
+      })}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('值班助手')).toBeInTheDocument();
+  expect(screen.getByText('负责值班告警响应')).toBeInTheDocument();
+});
+
+it('shows the empty recommendation hint when the profile search has no candidates', () => {
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([], {
+        tab: 'candidates',
+        filterMode: 'profile',
+        search: '值班',
+        recommendations: [],
+      })}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('暂无与该目标相关的可协作 Bot')).toBeInTheDocument();
+  expect(screen.getByText('清除关键词后恢复原可协作 Bot 列表。')).toBeInTheDocument();
+});
+
+it('shows the recommendation error with a retry action', () => {
+  const retryRecommend = jest.fn();
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([], {
+        tab: 'candidates',
+        filterMode: 'profile',
+        search: '值班',
+        recommendError: '推荐可协作 Bot 失败，请稍后重试。',
+        retryRecommend,
+      })}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('推荐可协作 Bot 失败，请稍后重试。')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(retryRecommend).toHaveBeenCalled();
 });

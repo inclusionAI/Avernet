@@ -4,6 +4,25 @@
 
 ## 审阅、部署与验证
 
+### 手动优化的最简动线
+
+选择建议 → 生成草稿 → 审阅改动 → 明确发布。手动草稿将建议当作生成目标，
+不要求建议来源摘要、原建议基线、DB/Git 配置或预先整合的方案一致；不要求先消除建议间的目标冲突。
+服务端读取当前生效标签的真实 Git Pack，把所选原始建议和现有证据交给生成过程。
+公开 Host 的 AIS 适配器和内源 Host 均将 `purpose='draft'` 透传至 Git 基线读取；仅该用途跳过部署 JSON 与 Git 配置相等检查，标签、Pack、工作流、路径及原始字节身份仍须有效。未指定该用途的读取保留原校验。
+证据不足在草稿中保留标记，不阻止生成。后台来源更新不清空选择、不增选其他方案成员。
+权限、资源大小边界、请求幂等及运行中的任务所有权仍有效；草稿不会自动应用或发布。
+自动定时筛选仍沿用其已有策略，发布端的精确候选及生效版本检查不因放宽手动草稿而删除。
+
+手动候选显示“待确认发布”；点击“审阅并发布”立即打开确认弹窗，阅读改动后一次确认审阅与发布，不另设审阅审批步骤。读取发布信息失败只重试读取，不描述为已提交发布；确认后的请求仍沿用同一幂等编号。
+
+生成新修订前读取生效部署包失败时，返回 `CAPABILITY_UNAVAILABLE`、
+`reasonCode=BASELINE_READ_FAILED`、`stage=baseline`、`outcome=not_created`。
+该标记仅适用于创建修订事务和派发之前的基线读取；不用于任意 500、网络断连或未知写入结果。
+前端明确提示“部署包读取失败，草稿未创建”，保留选择与要求，不进入“核对任务—重试”的循环。
+已创建请求先走原幂等查找，即使后续 Git 读取不可用也返回同一修订，不重复派发。
+已有结构化基线错误（如配置不一致）保留原分类。服务端记录底层诊断，客户端不暴露 Git 错误或凭据。
+
 1. Git Diff 仅展示真实变更行和少量上下文，提供前后行号与变更导航。读取失败、二进制和截断显式提示；截断不能确认。
 2. `POST /:taskId/confirm` 冻结最新可审阅候选的 commit、完整 Pack tree、报告摘要、当前部署基线和有权访问的目标 Bot。确认不部署；未覆盖的业务验证需明确确认风险。
 3. `POST /:taskId/deployment` 必须单独明确确认。先持久化发布身份，再交 Host 发布已审阅的完整 Pack。线上基线已变化时停止发布；不能自动覆盖或改用最新 saved 快照。
@@ -26,6 +45,8 @@
 建议接口返回完整可见范围的 `facets.nodes/failureModes`，在节点/类型筛选和分页之前计算；首屏即可选择后页的节点与问题类型，空筛选结果仍保留完整选项。工作区使用主题语义颜色，独立 Host 提供默认 token 映射，嵌入 Host 可通过现有 shadcn 变量覆盖品牌、表面和前景。
 节点和问题类型在服务端过滤后计数、分页，翻页必须更换问题行。不再把全局建议分页结果拼回完整问题列表。
 问题没有与建议一一对应的处理状态，因此主列表不混用建议状态统计或状态筛选。
+
+问题卡片只保留影响等级、近24小时/7天发现次数和最近发生时间。发现次数按问题关联 flowId 去重并使用真实运行时间；默认按影响等级、最近发生排序，“近7天发现次数”按次数排序，均先排序再分页。列表不扫描无关运行、不读取节点执行记录，不计算或展示分析覆盖率、发生率和趋势。
 建议预览每个问题最多展示 3 条，优先待处理且来源可用的建议，并展示准确总数及“查看全部”入口；不是截断后假装已加载全部。无建议的问题直接标明空状态。下述建议状态筛选和任务详情保留在详情区域：
 
 每个问题及其建议组成独立卡片，以卡片间距、外边框和浅色问题标题区区分归属，建议不再套同等强度的框。首次读取预览时保留带加载提示的建议占位区，不把尚未返回误显示为“无建议”。
@@ -46,23 +67,26 @@
 这是保守的前端冲突提示，不代表实际基线 diff 或语义兼容性检查；服务端仍校验来源、状态和权限，最终审核真实 Pack。
 生成成功后打开对应任务详情，不自动应用或部署。复制目标值使用带可访问名称和结果反馈的行内图标。
 详情分“问题原因 / 修复建议 / 证据与历史”，只在进入证据区时加载单次完整分析；带运行/分析深链时直接打开证据区。
-历史聚合摘要明确标注摘要覆盖运行数与当前问题运行数；长摘要、原因展开和待确认内容折叠，避免与可执行建议混淆。
+历史版本折叠预览仅使用该版本来源的分析文字，不复用跨版本聚合摘要或摘要元数据。历史聚合摘要明确标注摘要覆盖运行数与当前问题运行数；长摘要、原因展开和待确认内容折叠，避免与可执行建议混淆。
 无聚合摘要时按来源分别展示最近原始诊断、运行及时间，标注“尚未汇总”；原始原因也为空时明确提示未记录。聚合失败提示不能替代已有诊断正文，也不能把不同运行的原因合成统一结论。
 建议页和原因详情使用工作流隔离的查询缓存（30 秒有效、闲置 5 分钟回收）。来源摘要、聚合状态、权限、历史范围或处置刷新改变时使用新键；重开相同详情不反复清空。缓存仅用于展示，写入仍由服务端重读校验。
-修复建议按节点、问题类型、签名和状态在服务端筛选后分页，每页 20 条；统计和总数遵循节点/类型/签名范围，状态计数涵盖范围内所有状态。
+修复建议先在完整版本/快照范围内恢复整合方案，再按节点、问题类型、签名和状态在服务端筛选后分页，每页 20 条；统计和总数遵循节点/类型/签名范围，状态计数涵盖范围内所有状态。
 建议分页仅出现在建议区域并明确标注，不改变主列表的问题页码；无匹配建议时明确展示空结果。历史分析每页 10 条，可访问后续页。
 首屏问题请求使用 `view=summary&page=&pageSize=&nodeId=&failureMode=`，返回 groups、page 和全量节点/类型 facets；
 只返回本页短摘要与运行引用，不传 proposal、诊断长文本或 evidence payload。打开问题后按签名读取完整聚合，不带分页的默认接口保持兼容。
 聚合来源投影使用版本校验的只读缓存（最多 4 个工作流、每份 8 MiB、10 秒 TTL），先筛选分页再读取冻结摘要。
 每次请求仍鉴权；聚合生成始终重读当前来源。冷请求仍需扫描并归组完整来源，并非持久化投影的 SQL 分页，实际冷加载耗时须在目标环境验收。
 进入单条建议详情时只补齐该项证据，不再重建两遍来源；列表和抽屉共享该项缓存，来源摘要变化后失效。
-问题摘要与修复控制面独立展示加载/错误，不因任一请求失败或等待而整页阻塞。问题摘要、候选列表和单项详情读取在 30 秒后中止并允许显式重试；不自动重试写请求。
+问题列表后台刷新失败时隐藏缓存的问题行和其中的建议预览，显示明确错误与重试；等待刷新期间仍可保留上一页占位，不把失败当作空结果。问题摘要与修复控制面独立展示加载/错误，不因任一请求失败或等待而整页阻塞。问题摘要、候选列表和单项详情读取在 30 秒后中止并允许显式重试；不自动重试写请求。
 工作流修复上下文读取失败时清除上次快照、选择与详情缓存，不回退为旧建议计数，也不开放旧应用入口；问题内建议读取失败局部显示错误和重试，不伪装成空结果。
 401、403、读取超时与服务异常分别提示；403 只说明访问被拒绝，不据此断定用户固定缺少权限。
 列表明确标注节点和问题类型，历史摘要以“摘要待更新”短标签标识；详情集中展示摘要状态及来源范围，不承诺未确认的自动重试。
 生成候选稿时服务端仍重新读取并冻结所选项的完整证据，不以轻量列表代替任务输入。
 
-默认候选范围只读取最近 30 天仍出现的问题，避免早已不复现的历史原因持续占据待处理列表，也缩小大工作流的首屏扫描范围。
+默认宿主不再启动 AI 建议聚合 worker，也不等待聚合任务。列表只折叠同版本、同问题/节点且完整建议内容与约束相同的待处理项，保留原始成员 ID；不同目标和冲突取值不合并。
+手动和自动修复均把选中的原始建议与完整证据交给 AIS 联合修复，自动选择仍跳过冲突项。重复卡片和单项之间的冲突同样检查；已有任务的冻结输入与执行记录不重写。
+
+默认候选范围只读取最近 7 天仍出现的问题，避免早已不复现的历史原因持续占据待处理列表，也缩小大工作流的首屏扫描范围。
 用户可显式勾选“包含历史未复现”查看完整历史；处理中和待验证的旧建议始终保留。时间范围属于本次选择快照的一部分，
 生成候选稿或人工处置时沿用相同范围校验 inputDigest。系统不会仅因长期未复现就自动写成“暂不处理”，人工处置和审计状态保持不变。
 修复来源读取会跳过单条无法兼容的旧分析记录并记录服务端告警，其他有效来源继续展示；数据库整体不可用仍会失败，不伪装成空列表。
@@ -72,6 +96,17 @@
 
 任务详情分开显示“最近尝试”和“最近成功候选”。支持按版本查看逐项结果、静态/Mock 检查、未覆盖项，
 并比较任务基线或上一成功候选的文件差异。反馈下一版重新确认选择，但不改变原任务基线。
+页面分别展示优化任务与当前版本问题。任务入口按实际阶段显示数量和状态徽标，每条任务标明修订、建议条数与明确的查看/审阅按钮；原始建议或警告文字作为任务说明，不充当任务标题。
+当前版本无问题记录时只显示一个紧凑空态，收起无效排序筛选和分页；有筛选条件但无结果时保留筛选入口。未选择建议时不显示页面底部生成栏，历史版本浏览与全部建议查找入口保留。
+“本版处理范围”保留原始建议与证据，并折叠展示所选版本的实际模型核心输入和可选材料索引。
+新版 AIS 在现有结果的 `draft.modelInputs` 中按调用顺序返回 `{phase?, itemId, coreInput, materials}`：
+可选 `phase` 仅允许 `planning`（全局规划）或 `generation`（分组生成），省略时按旧版生成记录处理。全局规划可与后续生成记录使用同一所选建议 ID；每份结果最多一条全局规划记录，生成记录按建议 ID 唯一，省略阶段和显式 `generation` 不能为同一建议重复记账。现有输入展示按实际调用顺序标注显式阶段，旧记录保留原展示。
+`coreInput` 是交给模型 CLI 的原文，`materials` 是该次本地目录的 manifest 加 `root`，包含路径、用途、大小、哈希及来源归属，不传材料正文。
+记录随现有 draft 一起持久化并参与 `checks.candidateDigest`；沿用现有结果大小限制，不新增表、接口或下载入口。
+报告写入前校验可选 `modelInputs`：记录的建议 ID 必须属于冻结选择，按阶段和建议 ID 校验唯一性并限制最多一条全局规划记录，未知阶段无效，核心输入非空；材料索引须绑定同一任务与修订，校验文件元数据结构、非负整数字节数、SHA-256 格式、来源归属及唯一性，不读取 AIS 本地文件。
+异常记录返回 `INVALID_INPUT`，不保存该候选；省略字段、空数组、仅覆盖部分所选项的模型调用，以及包含多个原始成员或无成员公共参考文件的索引仍合法。
+没有记录的旧版、尚未回传或未调用模型的任务明确显示空态，不从冻结证据重建并冒充实际输入。
+材料路径只对应模型调用时的 AIS 本地文件，不能作为浏览器下载地址；展示记录不代表发布、执行或效果验证。
 取消释放建议占用且保留历史，不能等同于已终止远端 AIS 计算。AIS 明确拒绝派发时可重试同一冻结输入；网络超时或进程中断导致派发结果不确定时禁止盲目重试，需先核对 AIS Job，避免重复生成。
 
 公共 Host 在 `CLAWWEB_AISTUDIO_TOKEN`、`CLAWWEB_REPAIR_AIS_SNAPSHOT_ID`、`CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR` 均配置后装配 AIS/Git 执行提供方；Git 目录须为预先配置了 `origin`、能读取部署 Tag 和修复分支的独立镜像。Token 由 MIST 注入，不写入仓库或日志。两个修复专属配置项都未提供时，允许查看、整理和处置；只提供部分配置、Snapshot ID 无效或 Git 镜像不可用时启动失败，避免静默禁用生成。
@@ -114,7 +149,7 @@ OCB 已实现以上内容重建；部署历史事务激活前还会再次调用�
 
 | 请求 | 行为 |
 | --- | --- |
-| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&nodeId=&failureMode=&signature=` | 默认读取最近 30 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库 |
+| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&includeTasks=&nodeId=&failureMode=&signature=&versionScope=&snapshotKey=` | 默认读取最近 7 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库。`includeTasks` 默认 true，false 时跳过修复版本历史读取并返回空 tasks；POST 查询语义相同 |
 | `POST /candidates/query` | 只读查询，与 GET 使用相同 view 权限、过滤和快照；JSON 请求体包含 workflowId 和查询字段，批量 previewSignatures 最多 50 个，解压后请求体最多 256 KiB，避免长签名撑大 URL。返回每个问题的真实总数及最多 3 项预览，与全局建议页独立；先为基础响应和所有总数预留字节，再按剩余 4 MiB 响应预算添加完整项，不截断建议。预算不足时预览可少于 3 项或为空，仍可通过“查看全部”分页读取。旧 GET previewSignature 参数兼容保留，新客户端不再使用 |
 | `GET /items/:itemId?workflowId=` | 展开单条时读取该项完整建议、来源与证据 payload |
 | `POST /` | 校验当前来源摘要，原子写入处理项、修订、workflow_repair task 和 draft step，提交后派发，202 |
@@ -133,6 +168,7 @@ view/edit 在每条路由检查，任务请求先定位其真实 workflowId，�
 `RepairSourcePort.load(tx, workflowId, mode)` 的 `summary` 模式用于列表，`full` 模式用于单条详情和所有写事务。
 提供 `hydrate` 的来源适配器先读取 summary，再仅为所选项加载证据；提供 `readVersion` 的 Host 可复用版本校验的只读快照（最多 4 份、每份 8 MiB、10 秒 TTL）。
 每次请求仍鉴权并检查来源/处置版本，写事务始终重读并清除缓存；缓存不是授权或提交依据。冷请求仍需要整理完整来源，尚非持久化投影上的 SQL 分页。
+同一 Host 内相同工作流和历史范围的重叠读取共用一次在途快照（包含版本检查），避免重复查询；失败后下次请求可重试。写入会断开在途复用，旧读取不得重新填充写后的缓存。每个请求仍独立鉴权和分页，不能跨工作流/历史范围复用。
 两种模式的 inputDigest 只绑定建议身份、来源引用和处置轮次，不绑定 evidence payload 展开形式，因此分页读取和提交校验一致。
 新问题与历史任务并列展示；旧协议中已应用/验证/忽略的未迁移项作为只读历史，不自动变成新 pending 项。只有同建议的新证据时保留原状态，预览刷新 context；人工写入可刷新 item 的证据投影，但历史 revision.input_json 永不更新。
 
@@ -224,3 +260,121 @@ MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务�
 内部宿主兼容当前写入端的 `ClawMind workflow-repair-result/v1` 提交头，区分 Pack candidate commit 和承载结果元数据的 commit；同时保留旧 `ClawMind repair result v1` 读取。读取当前协议时校验任务、轮次、执行身份、候选父节点、Pack tree/digest、检查摘要及 manifest。`previousReportRef` 随读取请求传入，只有精确匹配上一成功轮次且绑定原父候选的旧结果，才可确认本轮尚未写结果。
 
 分支不存在必须由成功的远端 `ls-remote` 明确确认，不能从 fetch 失败推断。首次任务确认没有分支返回 `RepairResultAbsentError`；已有成功候选但分支消失、远端不可达或结果校验不通过仍属于未知状态，继续阻止重复生成。
+
+### 版本归属与历史读取
+
+建议的来源版本从冻结分析引用或原运行对应的唯一部署/保存快照读取，独立于补丁 `baseSpecDigest`；文字建议同样能关联版本，明确的身份不符仍保留未确认状态。原补丁和摘要不改写，自动生成继续执行既有补丁基线校验。
+
+历史区先按部署版本、保存测试和版本未确认分组，再展开问题；只有展开的问题读取建议。可选 `snapshotKey` 与 `versionScope=historical` 一起在计数、分页前过滤该来源版本。筛选、问题行与分页属于一个列表容器。
+
+版本列表读取复用有界的短期投影，部署、运行或分析版本变化使其失效；聚合任务准备和候选写入仍读取权威来源。摘要响应仅保留来源身份、版本和短文本，不传完整分析 facts/inferences。
+
+
+## 任务标题、来源与详情展示
+
+候选列表的任务摘要和任务详情增加可选展示字段 `title`、`source`（`automatic` / `manual`），旧消费者可忽略，不新增持久化字段。服务从首次冻结修订生成标题和来源，后续反馈或版本切换不改任务标题。单条有效简短建议摘要优先；多条建议按涉及节点概括，无法定位时显示“工作流优化（N 条建议）”。基线重评提醒和长指令不直接作为标题，不调用模型取名。旧自动分批任务未记录总建议数时仅标注批次数，不把首批数量当成任务总数。
+
+任务列表和详情把自动/手动来源与处理状态分开标注。详情依次提供“优化目标”“改动与发布”“发布后效果”；版本选择称“生成版本”，包含失败和无需变更的历史尝试。原始建议、证据和基线继续保留；实际模型核心输入及可选材料索引位于目标之后的折叠区，不用原始证据冒充实际输入。改动页先展示逐项目标处理结果和检查摘要，大批任务先展示前三项；文件差异、完整检查与 Git 记录仍可查看。生成修改与检查通过不表示业务效果已验证，发布仍需原有显式确认。
+
+自动分批任务末批为 `no_change`、但完整校验链仍包含修改待审时，列表任务摘要显示 `review`，详情保留各批真实 phase；用户仍可明确取消该任务，释放积累问题进入下一轮。
+
+
+待审阅和其他需跟进任务直接全部展示，任务入口统一为“查看任务”。详情任务操作区直接提供“重新优化”“取消本次任务”“发布此版本”；发布确认弹窗只负责最终发布确认。取消仍需明确确认，已发布任务不可取消。
+
+完整自动分批链校验通过后，允许同一任务接收人工反馈修订。新版本复用最后完整候选作为父提交和原冻结基线，保留自动来源标记、原建议与历史版本；使用既有人工修订请求，不增加执行协议字段。未完成、失败或校验不完整的自动链不可由人工修订绕过。反馈页通过已有历史分页读取完整原建议，单次 100 项上限保持不变，超出时要求用户明确调整范围，不自动删选。
+
+人工反馈返回 no_change 时，仅在候选 commit/Pack digest、父提交、基线和完整建议范围均与原成功候选一致且检查通过时，保留该候选供审阅；原记录及待处理占用保留。不同范围、失败或未完整校验的结果不会被当作这种保持不变的反馈。
+
+### 大证据的冻结与按需读取
+
+原始来源与核心包使用不同预算。请求仍限制为 64 KiB / 100 项，核心
+`workflow-repair/v2` 输入仍限制为 1 MiB。完整来源及单次冻结材料另有
+`16 MiB - 4 KiB` 上限，适配现有 MEDIUMTEXT 记录存储；不是无界放大核心包。
+
+当完整输入超过 256 KiB 且证据投影能减小输入时，同一事务将完整建议、诊断、报告与事件证据写入
+现有 `workflow_repair_release_records`（`record_kind=repair_material`），核心
+输入仅保留完整 proposal/instruction、前三个来源样本、代表证据摘要及
+`materials: {schemaVersion: 'repair-frozen-materials/v1', recordId, sha256, bytes, flowCount}`。
+不等到 1 MiB 才处理；核心总上限仍为 1 MiB。纯目标内容若投影无收益且仍在上限内，则保持内联。
+`context.evidenceSummary` 的 `sourceCount/sourceRefsSha256` 绑定完整来源数组
+（规范 JSON 的 SHA-256），`flowCount/eventCount` 保留总数，运行和事件编号各仅
+内联前三个样本。完整索引随原始材料保存；批次 `materials.flowCount` 是跨建议去重
+的运行总数，页面不能将样本数量误作覆盖范围。必要目标及操作不裁剪，超限错误
+返回各字段字节统计；日志每批只记录一条大小摘要，不输出材料正文。
+凭据/PII 脱敏继续执行，生成材料不再沿用
+聚合预览的文本/集合裁剪预算；完整材料超限会明确拒绝，不静默裁剪原文。
+
+记录与修订创建、建议占用原子提交，写入失败全部回滚。材料按任务/来源版本
+及 SHA-256 绑定，不会被实时来源覆盖。重试可以引用同一任务更早版本的不可变
+材料；读取时核对归属、字节数、哈希及其核心投影，缺失或损坏即拒绝派发。
+
+`GET /api/workflow-repairs/:taskId/revisions/:revision/materials/:itemId` 使用任务
+所属工作流的 view 授权，只返回该修订明确选择的冻结原始项。页面展开
+“原始建议与证据”才读取，不用实时材料填补读取失败。
+
+派发前服务端校验冻结材料，但不再把完整材料装回 AIS 参数。核心仍包含完整
+修改目标、用户约束、来源身份样本及完整索引摘要、代表诊断事实和关键错误摘录；完整报告作为参考。
+下载失败不能抹去核心依据，也不能把无法核实的目标宣称为已解决。
+
+支持 `repair-material-download/v1` 的执行端收到核心输入及逐条索引
+`materialAccess: {schemaVersion, token, files: [{itemId, bytes, sha256}]}`。
+Host 添加配置中的服务 baseUrl，以 `generate_candidate_materials_v1` 或
+`integrate_candidate_materials_v1` 动作派发；旧消费者会拒绝未知动作，不静默忽略材料。
+不支持下载的 Host 明确拒绝大材料任务，不回退为传完整报告。
+生产者与 TaskGuard 下载端需一同更新来源索引语义；本次不迁移旧冻结任务。
+
+一次执行的随机只读凭证仅以摘要保存到现有记录表（repair_material_access），
+绑定 task/revision/executionId，最长两小时；执行结束、取消或被重试替换即失效。
+凭证仅供 Python 下载层使用，不进入模型 Prompt、文件索引或日志。
+`GET /api/workflow-repairs/material-download/:taskId/:revision/:itemId?offset=N`
+使用 Authorization Bearer 凭证，只读本次执行的冻结选择；每块至多 64 KiB，返回
+base64 字节、offset/nextOffset/totalBytes/sha256，不提供任意 flowId 或实时数据查询。
+响应设置 no-store；页面查看材料仍使用原 view 授权接口。
+
+TaskGuard 构建当前建议或聚合方案的 Prompt 前，仅下载其原始 itemIds 的材料。
+校验各块身份、顺序、大小及最终 SHA-256，再使用既有本地材料机制脱敏、保存、
+建立 README/manifest，并向 Prompt 说明路径、用途、可用状态及缺失材料的判断限制。
+缓存命中仍验证完整哈希，不下载其他未处理建议；重定向、损坏、超限和越界均拒绝。
+下载失败保留核心输入并标注 unavailable，必要原文缺失时要求报告 unresolved。
+日志记录 start/complete/cache_hit/failed、执行/建议/方案身份、字节、哈希、耗时及
+安全失败分类；不输出凭证、完整报告或上游原始错误。
+
+需要 public Workflow、Host 和 TaskGuard 消费者配套上线。离线 HTTP 回放不代表
+真实 AIS 网络、参数注入或业务执行已经验证；不新增存储服务、队列或业务工具。
+
+Public ClawWeb 的 `createRepairAisExecution` 和 OCB Host 均装配上述下载协议。
+Public bootstrap 传入既有 `getClawWebPublicBaseUrl()` 的配置来源；远程地址必须为
+HTTPS origin，本地 HTTP 仅允许 loopback。无需把用户 Cookie 或凭据写入 URL。
+创建、反馈修订及失败重试在事务提交前检查执行端支持；不支持时回滚新修订、
+任务及材料写入，不留不可派发的新版本。派发时仍保留防御检查。
+
+
+### Manual joint generation and failure diagnostics
+
+Manual multi-selection is frozen as the existing `workflow-proposal-plan/v1` plan input.
+Suggestions with overlapping node scopes are reviewed together; multi-node sources stay
+atomic and connect their affected scopes. Unspecified/full-file scopes are reviewed
+with the other selected goals. Unselected originals are never added. Independent groups
+can generate separately, followed by the existing whole-candidate checks. Source and
+integrated-goal outcomes remain mandatory; conflicts or incomplete coverage remain
+unresolved. Retrying an older failed manual multi-selection adds this plan only to the
+new revision, preserving the original revision, baseline, goals and materials.
+
+The compatible optional `error.details` object carries safe parse reason/position,
+item IDs, item index/count and plan ID. Model preparation, invocation, parsing, checks
+and push errors identify their stage. The task page displays these details directly;
+raw Prompt/output files remain optional diagnostic evidence, not a prerequisite for
+understanding a failure. Historical errors without details remain readable.
+
+After checkout, TaskGuard may persist a <=32 KiB failure receipt as commit metadata:
+`refs/heads/repair-failure/<taskId>/<revision>-<executionId>`, with header
+`ClawMind workflow-repair-failure/v1\n`. It contains the failed
+`workflow-repair-result/v1` plus `parentCandidateCommit`; its sole parent and tree
+must match the requested semantic parent candidate or baseline. It is create-only,
+contains no candidate/files/Prompt/raw response, and never advances the task branch.
+Readers validate every execution identity field and prefer an already valid checked
+candidate result, including after an ambiguous push. Only confirmed result absence
+permits reading the failure receipt. Reconciliation retains the receipt's error when
+AIS reports failure. Older writers or Git transport failure retain the existing AIS
+error fallback; no new callback, credentials, DB schema or business execution is added.
+Failure refs follow the repository's diagnostic retention policy.

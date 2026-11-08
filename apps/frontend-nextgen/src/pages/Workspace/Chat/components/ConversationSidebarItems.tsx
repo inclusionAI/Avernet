@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import type { ConversationBotView, ConversationSessionListState } from '@/domain/conversation/types';
 import { ConversationBotItem } from './ConversationBotItem';
 import type { ConversationSidebarProps } from './ConversationSidebar';
@@ -13,10 +14,24 @@ const EMPTY_SESSION_LIST: ConversationSessionListState = {
   loadMoreError: null,
 };
 
+const CODING_BOT_SESSION_TITLE_MAX_LENGTH = 32;
+
+function codingBotSessionFeatures(bot: ConversationBotView['bot']) {
+  return bot.isAgentCodingBot &&
+    getCapabilities().getCodingBotConversationHost().value?.runSessionAction
+    ? {
+        share: true as const,
+        logs: true as const,
+        dima: true as const,
+        titleMaxLength: CODING_BOT_SESSION_TITLE_MAX_LENGTH,
+      }
+    : undefined;
+}
+
 /** 管理 Bot 行:归属(缺省 mine)与范围记忆均在 Store,缓存按 origin/scope 命中才展示。 */
 export function ManagedItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
   const botId = view.bot.botId;
-  const { store, sessions, others, onOpenSession, onOpenAgentCodingBot } = props;
+  const { store, sessions, others, onOpenSession, onOpenBotManagement, replyingSessionId } = props;
   const origin = store.originByManagedBotId[botId] ?? 'mine';
   const scope = store.effectiveScopeByManagedBotId[botId] ?? 'all';
   const cache = store.sessionsByBotId[botId];
@@ -55,9 +70,11 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       sessionActions={{
         run: (sessionId, action) => sessions.actions.run(botId, view.section, sessionId, action),
         pending: sessions.actions.isPending(botId, view.section),
+        features: codingBotSessionFeatures(view.bot),
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin={origin}
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
@@ -76,7 +93,8 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       onLoadMore={() => void sessions.loadMoreSessions(botId, view.section, scope)}
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, view.section, sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, view.section, sessionId)}
-      onOpenAgentCodingBot={onOpenAgentCodingBot}
+      onOpenBotManagement={onOpenBotManagement}
+      replyingSessionId={replyingSessionId}
     />
   );
 }
@@ -84,7 +102,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
 /** 好友 Bot 行:无归属概念,交互会话一律走好友 Bot 模型回调;会话范围读 scopeByFriendBotId。 */
 export function FriendItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
   const botId = view.bot.botId;
-  const { store, sessions, onOpenAgentCodingBot } = props;
+  const { store, sessions, replyingSessionId } = props;
   const scope = store.scopeByFriendBotId[botId] ?? 'all';
   const selectedBot = store.selectedBotId === botId && store.selectedSection === 'friend';
   return (
@@ -94,9 +112,11 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       sessionActions={{
         run: (sessionId, action) => sessions.actions.run(botId, 'friend', sessionId, action),
         pending: sessions.actions.isPending(botId, 'friend'),
+        features: codingBotSessionFeatures(view.bot),
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin="mine"
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
@@ -114,7 +134,7 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       onLoadMore={() => void sessions.loadMoreSessions(botId, 'friend', scope)}
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, 'friend', sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, 'friend', sessionId)}
-      onOpenAgentCodingBot={onOpenAgentCodingBot}
+      replyingSessionId={replyingSessionId}
     />
   );
 }

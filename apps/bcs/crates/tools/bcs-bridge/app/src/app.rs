@@ -25,7 +25,7 @@ pub struct CliDefaults {
     pub engine: &'static str,
     /// Default `register --model`; none leaves the model to the engine.
     pub model: Option<&'static str>,
-    /// Default `register --provider-auth`.
+    /// Legacy registration resolver used only when both CLI override and Token auth_mode are absent.
     pub provider_auth: &'static str,
 }
 
@@ -47,6 +47,7 @@ pub struct BridgeApp {
     credentials: Arc<dyn CredentialSource>,
     identities: BTreeMap<String, Arc<dyn IdentityResolver>>,
     defaults: CliDefaults,
+    registration_identities: BTreeMap<String, String>,
     registration_permission_modes: BTreeMap<String, String>,
     engines_without_model_default: BTreeSet<String>,
     initializers: BTreeMap<String, EngineInitializer>,
@@ -70,6 +71,7 @@ impl BridgeApp {
             credentials: Arc::new(EnvCredentials),
             identities,
             defaults: CliDefaults::default(),
+            registration_identities: BTreeMap::new(),
             registration_permission_modes: BTreeMap::new(),
             engines_without_model_default: BTreeSet::new(),
             initializers: BTreeMap::new(),
@@ -107,11 +109,18 @@ impl BridgeApp {
         cleanup(path, options)
     }
 
-    /// The identity resolver selected by `--provider-auth`.
+    /// Resolve a persisted runtime identity policy.
     pub fn identity(&self, id: &str) -> anyhow::Result<&dyn IdentityResolver> {
         self.identities.get(id).map(|resolver| resolver.as_ref()).with_context(|| format!(
-            "Unknown --provider-auth '{id}'; supported values: {}",
+            "Identity policy '{id}' is unavailable in this bridge; supported values: {}",
             self.identities.keys().map(String::as_str).collect::<Vec<_>>().join(", ")))
+    }
+
+    /// Select credential acquisition for the Provider mode declared by the token.
+    pub fn registration_identity(&self, auth_mode: &str) -> anyhow::Result<&dyn IdentityResolver> {
+        let id = self.registration_identities.get(auth_mode).map(String::as_str)
+            .unwrap_or(if matches!(auth_mode, "static_bearer" | "provider_admin") { "static-bearer" } else { auth_mode });
+        self.identity(id)
     }
 
     /// Parse the command line and run it; the process entry point of a binary.
@@ -171,6 +180,12 @@ impl BridgeAppBuilder {
     /// Add an identity resolver, or replace the one registered under the same id.
     pub fn identity(mut self, resolver: impl IdentityResolver + 'static) -> Self {
         self.0.identities.insert(resolver.id().to_owned(), Arc::new(resolver));
+        self
+    }
+
+    /// Bind a Provider wire mode to a distribution-specific credential resolver.
+    pub fn registration_identity(mut self, auth_mode: impl Into<String>, resolver: impl Into<String>) -> Self {
+        self.0.registration_identities.insert(auth_mode.into(), resolver.into());
         self
     }
 

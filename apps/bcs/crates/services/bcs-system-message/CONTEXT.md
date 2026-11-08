@@ -32,3 +32,9 @@ and this module does not schedule, select bounded history or own SQL transaction
 `bcs-message-flow/tests/conformance_queued_system.rs` wires the real dispatcher,
 producer, queue service and canonical store, then verifies Send preparation and
 that managed initialization never calls native chat.inject.
+
+Bootstrap supplies the shared tracked `BotRunContextPort`: direct system Send
+registration also installs its independent output lineage before Bot I/O, so
+SessionContext replies remain visible with protected Workbench delivery enabled.
+The dispatcher continues to depend only on the port, never on a concrete
+MessageFlow/tracker. Queued system preparation uses the same context instance.

@@ -111,30 +111,26 @@ impl BotRegistryLookup {
 #[async_trait::async_trait]
 impl BotLookupPort for BotRegistryLookup {
     async fn find_bot_by_token(&self, token: &str) -> Result<Option<BotInfo>, AuthError> {
-        match self.registry.find_bot_by_token(token).await {
-            Some(bot_uuid) => {
-                let owner_id = self
-                    .registry
-                    .get(&bot_uuid)
-                    .await
-                    .and_then(|b| b.created_by);
-                Ok(Some(BotInfo { bot_uuid, owner_id }))
-            }
-            None => Ok(None),
-        }
+        self.find_bot_by_token_for_actor(token, None).await
+    }
+    async fn find_bot_by_agent_code(&self, agent_code: &str) -> Result<Option<BotInfo>, AuthError> {
+        self.find_bot_by_agent_code_for_actor(agent_code, None).await
+    }
+    async fn find_bot_by_token_for_actor(&self, token: &str, actor: Option<&str>) -> Result<Option<BotInfo>, AuthError> {
+        self.registry.resolve_bot_token(token, actor).await.map(|bot| bot.map(|bot| BotInfo { bot_uuid: bot.bot.bot_id, owner_id: bot.owner_id })).map_err(identity_error)
+    }
+    async fn find_bot_by_agent_code_for_actor(&self, agent_code: &str, actor: Option<&str>) -> Result<Option<BotInfo>, AuthError> {
+        self.registry.resolve_agent_bot(agent_code, actor).await.map(|bot| bot.map(|bot| BotInfo { bot_uuid: bot.bot.bot_id, owner_id: bot.owner_id })).map_err(identity_error)
     }
 
-    async fn find_bot_by_agent_code(
-        &self,
-        agent_code: &str,
-    ) -> Result<Option<BotInfo>, AuthError> {
-        match self.registry.find_bot_by_agent_code(agent_code).await {
-            Some(bot_uuid) => {
-                let owner_id = self.registry.get(&bot_uuid).await.and_then(|b| b.created_by);
-                Ok(Some(BotInfo { bot_uuid, owner_id }))
-            }
-            None => Ok(None),
-        }
+}
+
+fn identity_error(error: bcs_service_api::ServiceError) -> AuthError {
+    match error {
+        bcs_service_api::ServiceError::Unauthorized(message) => AuthError::InvalidToken(message),
+        bcs_service_api::ServiceError::Forbidden(message) => AuthError::Forbidden(message),
+        bcs_service_api::ServiceError::Conflict(_) => AuthError::InvalidToken("Bot identity is ambiguous".into()),
+        _ => AuthError::LookupFailed("Bot identity lookup unavailable".into()),
     }
 }
 

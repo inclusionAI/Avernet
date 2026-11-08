@@ -14,6 +14,9 @@
   Group Service API.
 - Principal-aware authorization, V1 projections, and orchestration over the
   existing Group, Session, Friendship, Relation, and Collaboration contracts.
+- Read-only Group details for a selected Actor or Human-owned Bot participating
+  in a Session of that Group. A fallible, Group-scoped batch membership query
+  avoids per-Bot Session lookups; Group management authorization is unchanged.
 - Optional inline Group Event Subscription provisioning, including hidden
   provisional resources, atomic finalization, compensation, and crash
   reconciliation through injected service contracts.

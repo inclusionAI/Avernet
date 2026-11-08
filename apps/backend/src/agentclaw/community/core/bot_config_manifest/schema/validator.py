@@ -23,11 +23,11 @@ from typing import Any
 
 import yaml
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     SUPPORTED_SCHEMA_VERSIONS,
-    ManifestCapabilities,
-    ManifestCategory,
-    ManifestSection,
+    Capabilities,
+    Category,
+    Section,
     parse_category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
@@ -113,14 +113,14 @@ class ValidationResult:
 
 
 def validate_document(
-    document: str, capabilities: ManifestCapabilities
+    document: str, capabilities: Capabilities
 ) -> ValidationResult:
     """Validate a manifest document. Raises on anything short of acceptable.
 
     Args:
         document: The document exactly as submitted.
         capabilities: The verdicts from
-            :func:`~agentclaw.community.core.bot_config_manifest.capabilities.resolve_capabilities`.
+            :func:`~agentclaw.community.core.apply_engine.capabilities.resolve_capabilities`.
             Passed in rather than resolved here so the write path and W13's
             pre-creation preflight are provably answering from the same object.
 
@@ -283,7 +283,7 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
                 location,
                 "unknown_category",
                 f"unknown manifest category '{key}'; allowed: "
-                + ", ".join(c.value for c in ManifestCategory),
+                + ", ".join(c.value for c in Category),
             )
             continue
         if not ctx.capabilities.supports(category):
@@ -295,7 +295,7 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
             )
             # Still walked below: a caller fixing an unsupported category should
             # not then discover a second round of shape errors inside it.
-        if category is ManifestCategory.ENGINE_CONFIG:
+        if category is Category.ENGINE_CONFIG:
             _validate_engine_config(ctx, location, value)
             continue
         _validate_category_list(ctx, location, category, value)
@@ -332,7 +332,7 @@ def _validate_engine_config(ctx: Context, location: str, value: Any) -> None:
 
 
 def _validate_category_list(
-    ctx: Context, location: str, category: ManifestCategory, value: Any
+    ctx: Context, location: str, category: Category, value: Any
 ) -> None:
     """A list category: the count limit, then each entry, then cross-entry rules."""
     if not isinstance(value, list):
@@ -359,7 +359,7 @@ def _validate_category_list(
         entries.append((at, entry))
         _check_entry_placeholders(ctx, at, entry)
 
-    if category is ManifestCategory.MCP:
+    if category is Category.MCP:
         for at, entry in entries:
             validate_mcp_entry(ctx, at, entry)
         _check_duplicates(
@@ -369,15 +369,15 @@ def _validate_category_list(
             code="duplicate_server_code",
             what="MCP server_code",
         )
-    elif category is ManifestCategory.RESOURCES:
+    elif category is Category.RESOURCES:
         paths = [validate_resource_entry(ctx, at, entry) for at, entry in entries]
         _check_resource_layout(ctx, location, [p for p in paths if p])
-    elif category is ManifestCategory.SKILLS:
+    elif category is Category.SKILLS:
         names = [validate_skill_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx, location, [n for n in names if n], code="duplicate_name", what="skill name"
         )
-    elif category is ManifestCategory.IDENTITY:
+    elif category is Category.IDENTITY:
         for at, entry in entries:
             validate_identity_entry(
                 ctx, at, entry, engine_type=ctx.capabilities.engine_type
@@ -389,7 +389,7 @@ def _validate_category_list(
             code="duplicate_identity_type",
             what="identity type",
         )
-    elif category is ManifestCategory.CLI_TOOLS:
+    elif category is Category.CLI_TOOLS:
         commands = [validate_cli_tool_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx,
@@ -469,12 +469,12 @@ def _validate_script(ctx: Context, script: Any) -> None:
     if not isinstance(body, str):
         ctx.add("script.body", "invalid_script", "'script.body' must be a string")
         return
-    if not ctx.capabilities.supports(ManifestSection.SCRIPT):
+    if not ctx.capabilities.supports(Section.SCRIPT):
         ctx.add(
             "script",
             "unsupported_script",
             "a startup script is not supported for this bot: "
-            + ctx.capabilities.reason_for(ManifestSection.SCRIPT),
+            + ctx.capabilities.reason_for(Section.SCRIPT),
         )
     try:
         size = len(body.encode("utf-8"))

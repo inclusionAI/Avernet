@@ -17,13 +17,13 @@ use bcs_service_api::{
     GroupListCommand, GroupManagementService, GroupParticipantModeCommand,
     GroupQueryService, GroupRoutingPolicyCommand, GroupCoreService, GroupKind, GroupStatus,
     GroupStatusCommand, GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand,
-    GroupUseCaseError, GroupWorkspaceQueryCommand, RegisteredBot, RelationEdge, RelationCoreService,
+    GroupUpdateVisibilityCommand,
+    GroupUseCaseError, RegisteredBot, RelationEdge, RelationCoreService,
     Participant, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageDispatchOutcome,
     SystemMessageEvent, SystemMessageRecipientResult, SystemMessageService,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
-    WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
+    WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError,
 };
 use bcs_service_api::types::{MessageViewScope, OpeningMessage};
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
@@ -498,7 +498,7 @@ async fn create_state_machine_group_with_human_caller_adds_present_human_to_init
 }
 
 #[tokio::test]
-async fn query_methods_list_detail_bot_groups_and_workspace() {
+async fn query_methods_list_detail_and_bot_groups() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_bot("helper", "Helper", "public", None);
@@ -514,18 +514,6 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
         ))
         .await
         .unwrap();
-    service
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: created.group_id.clone(),
-            workspace: Workspace {
-                decisions: vec!["ship it".to_string()],
-                ..Workspace::default()
-            },
-        })
-        .await
-        .unwrap();
-
     let listed = service
         .list_groups(GroupListCommand {
             group_kind: Some(Default::default()),
@@ -562,13 +550,6 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
     assert_eq!(bot_groups.total, 1);
     assert_eq!(bot_groups.items[0].driver_bot_id, "driver");
 
-    let workspace = service
-        .get_workspace(GroupWorkspaceQueryCommand {
-            group_id: created.group_id,
-        })
-        .await
-        .unwrap();
-    assert_eq!(workspace.workspace.decisions, vec!["ship it".to_string()]);
 }
 
 // Step 1: legacy Group application projections expose the persisted
@@ -1341,10 +1322,15 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             message_view_scope: None,
         })
         .await;
+    // Row 14 cutover (bot-authority plan Task 6.3):
+    // acting THROUGH a Bot the Human does not
+    // control is rejected at the control leg, before
+    // the coordinator check that used to catch it via
+    // the legacy `created_by = None` auto-claim.
     assert!(matches!(
         non_coordinator,
         Err(GroupUseCaseError::Forbidden(message))
-            if message.contains("group coordinator")
+            if message.contains("Not authorized as bot 'other-bot'")
     ));
 
     let protected_stranger = service
@@ -2112,18 +2098,6 @@ async fn group_secondary_mutations_run_through_management_service() {
         .unwrap();
     assert_eq!(label.label.as_deref(), Some("Renamed"));
 
-    let workspace = service
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: "group-under-test".to_string(),
-            workspace: Workspace {
-                decisions: vec!["ship".to_string()],
-                ..Default::default()
-            },
-        })
-        .await
-        .unwrap();
-    assert_eq!(workspace.workspace.decisions, vec!["ship".to_string()]);
 
     let mut routes = HashMap::new();
     routes.insert("driver".to_string(), vec!["helper".to_string()]);
@@ -2616,6 +2590,46 @@ impl StaticSessionManagement {
     }
 }
 
+/// The strict Session authorization snapshot over the SAME
+/// static Session the management fake serves (F4): Workbench
+/// admission reads Session facts through the snapshot Core only.
+#[async_trait]
+impl bcs_service_api::core::SessionAuthorizationCoreService for StaticSessionManagement {
+    async fn read_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> bcs_service_api::ServiceResult<
+        Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>,
+    > {
+        use bcs_service_api::types::authorization_snapshot::{
+            ParticipantAuthorizationSnapshot, SessionAuthorizationSnapshot,
+        };
+        Ok((self.session.id == session_id).then(|| SessionAuthorizationSnapshot {
+            env: "dev".to_string(),
+            id: self.session.id.clone(),
+            live: true,
+            group_id: self.session.group_id.clone(),
+            status: self.session.status,
+            session_kind: self.session.session_kind,
+            created_by: self.session.created_by.clone(),
+            message_visibility_version: self.session.message_visibility_version,
+            participant_join_seq: self.session.participant_join_seq.clone(),
+            participants: self
+                .session
+                .participants
+                .iter()
+                .map(|participant| ParticipantAuthorizationSnapshot {
+                    actor_id: participant.bot_uuid.clone(),
+                    actor_kind: participant.actor_kind,
+                    role: participant.role,
+                    effective_mode: participant.effective_mode(),
+                    message_view_scope: participant.message_view_scope,
+                })
+                .collect(),
+        }))
+    }
+}
+
 #[async_trait]
 impl SessionManagementService for StaticSessionManagement {
     async fn create_or_reactivate(
@@ -2655,26 +2669,6 @@ impl SessionManagementService for StaticSessionManagement {
         _title_contains: Option<&str>,
         _participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
 
@@ -2746,7 +2740,6 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -2767,6 +2760,11 @@ struct Fixture {
     friend: Arc<FakeFriendCoreService>,
     relation: Arc<FakeRelationCoreService>,
     provider_downlink_bots: Arc<RwLock<HashSet<String>>>,
+    /// The authority chain backing the control
+    /// legs (rows 14/15/16): a LAZY-seed live hook
+    /// whose owner edges the sync `with_bot`
+    /// builder enqueues.
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
 }
 
 impl Fixture {
@@ -2777,6 +2775,7 @@ impl Fixture {
             friend: Arc::new(FakeFriendCoreService::default()),
             relation: Arc::new(FakeRelationCoreService::default()),
             provider_downlink_bots: Arc::new(RwLock::new(HashSet::new())),
+            authority: bcs_test_support::lazy_authority_chain().hook,
         }
     }
 
@@ -2803,7 +2802,7 @@ impl Fixture {
         max_group_members: usize,
         max_groups_as_driver: usize,
         max_groups_as_member: usize,
-        session_management: Arc<dyn SessionManagementService>,
+        session_management: Arc<StaticSessionManagement>,
     ) -> GroupManagement {
         GroupManagement::new(
             self.group.clone(),
@@ -2816,18 +2815,25 @@ impl Fixture {
                 max_groups_as_member,
                 relation_env: "dev".to_string(),
             },
-            session_management,
+            session_management.clone(),
             Arc::new(NoopSystemMessageService),
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_session_authorization(session_management)
     }
 
     fn service_with_system_message(
         &self,
         system_message: Arc<dyn SystemMessageService>,
     ) -> GroupManagement {
+        let session_management = Arc::new(StaticSessionManagement::new(test_session(
+            "group-under-test:abcdef12",
+            "group-under-test",
+            Vec::new(),
+        )));
         GroupManagement::new(
             self.group.clone(),
             self.registry.clone(),
@@ -2839,16 +2845,14 @@ impl Fixture {
                 max_groups_as_member: 10,
                 relation_env: "dev".to_string(),
             },
-            Arc::new(StaticSessionManagement::new(test_session(
-                "group-under-test:abcdef12",
-                "group-under-test",
-                Vec::new(),
-            ))),
+            session_management.clone(),
             system_message,
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_session_authorization(session_management)
     }
 
     fn with_bot(
@@ -2860,6 +2864,11 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        // Rows 14/15/16: the CURRENT owner edge
+        // replaces the historical `created_by`.
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self
     }
 
@@ -2877,6 +2886,9 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self.provider_downlink_bots
             .write()
             .unwrap()
@@ -2938,6 +2950,7 @@ fn create_cmd(
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
     GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-under-test".to_string()),
         caller_actor_id: caller_actor_id.map(str::to_string),
@@ -2951,7 +2964,6 @@ fn create_cmd(
         member_bot_ids: Vec::new(),
         participants,
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,
@@ -3049,6 +3061,14 @@ impl BotRegistryCoreService for FakeRegistry {
             .filter(|bot| bot.created_by.as_deref() == Some(created_by))
             .cloned()
             .collect()
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
     }
 
     async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {
@@ -3328,73 +3348,6 @@ impl FriendCoreService for FakeFriendCoreService {
     }
 }
 
-#[tokio::test]
-async fn create_group_persists_service_spec() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    service.create_group(cmd).await.unwrap();
-    let stored = fixture.group.get("group-under-test").await
-        .expect("group should be persisted");
-    let spec = stored.service_spec
-        .expect("service_spec should round-trip through create_group");
-    assert_eq!(spec.timeout_seconds, Some(60));
-    assert_eq!(spec.max_concurrency, Some(8));
-    assert!(spec.callback_config.is_none());
-}
-
-#[tokio::test]
-async fn create_group_rejects_private_baas_callback_base_url() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: Some(bcs_service_api::CallbackConfig {
-            channels: vec![bcs_service_api::CallbackChannelConfig::Baas {
-                base_url: "http://169.254.169.254/latest/meta-data".to_string(),
-                api_key: "sk-test".to_string(),
-                bot_id: "default:callback-test".to_string(),
-                metadata: None,
-            }],
-        }),
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    let err = service
-        .create_group(cmd)
-        .await
-        .expect_err("private BaaS callback base_url should be rejected");
-
-    assert!(matches!(err, GroupUseCaseError::InvalidProposal(message) if message.contains("base_url is not allowed")));
-    assert!(fixture.group.get("group-under-test").await.is_none());
-}
 
 #[tokio::test]
 async fn create_group_with_human_consultant_chat() {
@@ -4058,6 +4011,7 @@ async fn list_groups_filters_by_visibility() {
 
     // Create a public group
     let cmd2 = GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("public-group".to_string()),
         caller_actor_id: Some("bot_b".to_string()),
@@ -4071,7 +4025,6 @@ async fn list_groups_filters_by_visibility() {
         member_bot_ids: Vec::new(),
         participants: vec![participant("bot_b", Some("driver"))],
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: Some("public".to_string()),
         provisioning: false,
@@ -4230,6 +4183,14 @@ async fn workbench_chat_abort_allows_session_bot_owner_and_absent_target() {
         10,
         Arc::new(StaticSessionManagement::new(session)),
     );
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
 
     service
         .authorize_chat_abort(WorkbenchChatAbortAuthorizationCommand {
@@ -4271,6 +4232,14 @@ async fn workbench_chat_abort_rechecks_human_mode_and_authentication() {
         10,
         Arc::new(StaticSessionManagement::new(session)),
     );
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
 
     let absent = service
         .authorize_chat_abort(WorkbenchChatAbortAuthorizationCommand {

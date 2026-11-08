@@ -169,7 +169,12 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             )
             if row is None:
                 raise TransferNotFoundError(transfer_id)
-            else:
+            # Some backends report changed rows rather than matched rows.
+            # Accept an already-satisfied update, but do not hide an error
+            # message that was requested and has not been persisted.
+            if row.status != new_status or (
+                error_message is not None and row.error_message != error_message
+            ):
                 raise TransferStateConflictError(
                     f"Cannot transition from {row.status} to {new_status}: "
                     "ticket is in a conflicting or terminal state."

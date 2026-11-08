@@ -4,20 +4,21 @@ BotSelfPath:
     tags: ["Collaboration / Bots"]
     summary: Read the authenticated Agent's Bot registration.
     description: >-
-      BCS verifies Authorization Bearer with its injected Agent identity verifier before
-      reading registration. Gateway identity chains and signed Principal are not
-      required. The trusted agent_code is the only lookup identity; caller-supplied
-      bot_id, agent_code, provider_id, or other identity selectors are ignored.
-      A valid Agent may be unregistered. Token refresh does not change registration
-      when agent_code stays the same. The read selects persisted, non-deleted,
-      non-Human Bot rows in the current BCN environment; offline or disabled Bots
-      remain registered. Multiple matches return 409. Authentication or persistence
-      failures never become unregistered. No Bot is created or modified and no
-      raw identity, runtime, or Provider token is returned. Every response is
-      Cache-Control no-store.
+      BCN verifies the parent AgentPass credential or a concrete Bot Static Token.
+      X-BCN-Actor-Bot-Id optionally selects the authenticated Bot. Parent credentials
+      on agentpass-subbots require Actor, even with one child. Static Token binds
+      one Bot and needs no Actor; an explicit Actor must match. Ordinary AgentPass
+      implicitly selects one eligible Bot, rejecting ambiguity. Parent list
+      discovery is GET agents/me. Authentication errors never become unregistered.
+      No credentials are returned. Gateway passes raw credentials through to BCN.
     x-avernet-security: {}
     security:
       - AgentIdentityBearer: []
+    parameters:
+      - name: X-BCN-Actor-Bot-Id
+        in: header
+        required: false
+        schema: {type: string, minLength: 1, maxLength: 256}
     responses:
       "200":
         description: Trusted Agent identity and its current registration, which may be absent.

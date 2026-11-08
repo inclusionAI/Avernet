@@ -26,6 +26,7 @@ export function useGroupChatAutoReconnect(
   const attemptRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
+  const generationRef = useRef(0);
   const [isAutoReconnecting, setIsAutoReconnecting] = useState(false);
 
   useEffect(() => {
@@ -35,12 +36,19 @@ export function useGroupChatAutoReconnect(
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
     setIsAutoReconnecting(false);
+    return () => {
+      generationRef.current += 1;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+    };
   }, [provider]);
 
   useEffect(() => {
     if (!provider) return;
+    const generation = generationRef.current;
 
     const schedule = () => {
+      if (generation !== generationRef.current) return;
       if (
         !hasConnectedRef.current ||
         reconnectingRef.current ||
@@ -60,11 +68,12 @@ export function useGroupChatAutoReconnect(
         void provider
           .reconnect()
           .catch(() => {
+            if (generation !== generationRef.current) return;
             reconnectingRef.current = false;
             schedule();
           })
           .finally(() => {
-            reconnectingRef.current = false;
+            if (generation === generationRef.current) reconnectingRef.current = false;
           });
       }, delay);
     };

@@ -31,10 +31,10 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
   const unavailable = useRef(onUnavailable); unavailable.current = onUnavailable;
   const id = useId();
   useEffect(() => {
-    if (composing) return;
+    if (composing || draft.trim() === q) return;
     const timer = setTimeout(() => { setQ(draft.trim()); setCursor(null); }, 250);
     return () => clearTimeout(timer);
-  }, [draft, composing]);
+  }, [draft, composing, q]);
   useEffect(() => {
     const controller = new AbortController(); let active = true;
     const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
@@ -72,7 +72,7 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
       <label className="bot-search"><Icon name="search" /><input ref={input} type="search" aria-label="搜索 Bot" maxLength={200}
         placeholder={isAdmin ? '搜索 Bot 名称、Bot ID 或工号' : '搜索 Bot 名称或 Bot ID'} value={draft} onKeyDown={e => { if (e.key === 'ArrowDown' && !e.nativeEvent.isComposing && !composing) { e.preventDefault(); root.current?.querySelector<HTMLButtonElement>('.bot-card')?.focus(); } }} onCompositionStart={() => setComposing(true)} onCompositionEnd={e => { setDraft(e.currentTarget.value); setComposing(false); }} onChange={e => setDraft(e.target.value)} /></label>
       {isAdmin && <div className="scope-switch" role="group" aria-label="Bot 范围">{(['mine', 'monitored', 'all'] as const).map(value => <button type="button" key={value}
-        aria-pressed={scope === value} onClick={() => { setScope(value); setCursor(null); }}>{({ mine: '我的 Bot', monitored: '诊断范围', all: '全部 Bot' })[value]}</button>)}</div>}
+        aria-pressed={scope === value} onClick={() => { setScope(value); setCursor(null); }}>{({ mine: '我的 Bot', monitored: '诊断 Bot', all: '全部 Bot' })[value]}</button>)}</div>}
       <p className="summary-period">所选会话时间内的诊断摘要</p>
       <div className="bot-candidates" aria-busy={loading} onKeyDown={e => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;

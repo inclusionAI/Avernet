@@ -29,7 +29,7 @@ type SettingsTab = 'permissions' | 'facades' | 'automation' | 'notification' | '
 const SETTINGS_TABS: { key: SettingsTab; label: string }[] = [
   { key: 'permissions', label: '权限' },
   { key: 'facades', label: '命令' },
-  { key: 'automation', label: '自动分析' },
+  { key: 'automation', label: '自动化设置' },
   { key: 'notification', label: '通知' },
   { key: 'callback', label: '回调' },
 ]
@@ -189,7 +189,7 @@ export default function ManagementTab({ workflowId, workflowTitle, onDeleted }: 
             onFacadeChanged={() => void refetchFacades()}
           />
         )}
-        {settingsTab === 'automation' && <AutoAnalysisPanel workflowId={workflowId} />}
+        {settingsTab === 'automation' && <AutoAnalysisPanel key={workflowId} workflowId={workflowId} />}
         {settingsTab === 'notification' && <NotificationPanel workflowId={workflowId} />}
         {settingsTab === 'callback' && <HttpCallbackPanel workflowId={workflowId} />}
       </SectionCard> : (

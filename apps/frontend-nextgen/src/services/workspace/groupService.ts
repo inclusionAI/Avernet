@@ -2,6 +2,7 @@ import type {
   DeliveryPolicy,
   GroupKind,
   GroupSessionPage,
+  GroupUpdatePatch,
   GroupView,
   IdentityView,
   ParticipantRole,
@@ -23,7 +24,7 @@ import {
   loadGroupSessionsOrBcs as execLoadGroupSessionsOrBcs,
 } from './groupExecuteService';
 import type { DomainError, DomainResult } from './identityService';
-import { mapGroupListItem, mapSessionListItem } from './mappers';
+import { isHumanMentionNotifyMode, mapGroupListItem, mapSessionListItem } from './mappers';
 
 export interface PolicyResult {
   allowed: boolean;
@@ -160,6 +161,9 @@ export const groupService = {
         driverBotUuid: d.driver_bot_uuid,
         ...(d.initial_session_id ? { initialSessionId: d.initial_session_id } : {}),
         ...(d.membership ? { membership: d.membership } : {}),
+        ...(isHumanMentionNotifyMode(d.human_mention_notify_mode)
+          ? { humanMentionNotifyMode: d.human_mention_notify_mode }
+          : {}),
         isPublic: d.visibility === 'public',
         deliveryPolicy,
       };
@@ -312,17 +316,14 @@ export const groupService = {
 
   async updateGroup(
     groupId: string,
-    patch: {
-      name?: string;
-      visibility?: 'private' | 'public';
-      deliveryPolicy?: DeliveryPolicy;
-    },
+    patch: GroupUpdatePatch,
   ): Promise<DomainResult<GroupView>> {
     try {
       await updateGroup(groupId, {
         name: patch.name,
         visibility: patch.visibility,
         delivery_policy: patch.deliveryPolicy ? { bot_final_delivery: patch.deliveryPolicy } : undefined,
+        human_mention_notify_mode: patch.humanMentionNotifyMode,
       });
       return this.loadGroupDetail(groupId);
     } catch (err) {

@@ -130,11 +130,12 @@ bcs fuse --group "grp-002" --question "代码与PRD的超时时间冲突如何�
 ```
 用户：代码和PRD有冲突，帮我协调
 Bot：检测到需要多方协调，创建Fusion群聊...
-[exec] bcs request-group-help --topic "代码与PRD超时时间冲突"
-Bot：已创建Fusion群聊！参与者：bot-001、bot-002、bot-003
+[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "代码与PRD超时时间冲突" --participants "bot-pm,bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
 Bot：让我融合各方视角来分析这个冲突...
-[exec] bcs fuse --group "grp-002" --question "超时时间冲突如何协调" --participants "bot-001,bot-002,bot-003"
+[exec] bcs fuse --group "grp-002" --question "超时时间冲突如何协调" --participants "bot-001,bot-pm,bot-dba"
 Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充安全校验...
 ```
 
@@ -143,9 +144,10 @@ Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充
 ```
 用户：发现一个复杂问题，把专家们拉个群讨论
 Bot：好的，我将创建专家会诊群...
-[exec] bcs request-group-help --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
-Bot：专家会诊群已创建！
+[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
 Bot：让我融合各位专家的视角...
 [exec] bcs fuse --group "grp-003" --question "如何处理这个复杂问题" --participants "bot-001,bot-sec,bot-legal,bot-dba"
 Bot：综合安全、法务、数据库专家的意见，建议采取以下方案...

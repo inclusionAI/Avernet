@@ -1,5 +1,5 @@
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import type { DeliveryPolicy, GroupView, IdentityView, SessionView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -7,7 +7,7 @@ import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
 import { SessionManagePanel } from './ManagePanel/SessionManagePanel';
-import { ResizableWorkspaceSidebar } from './ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from './WorkspaceOverlayPanel';
 
 export interface WorkspaceManagePanelsProps {
   activePanel: GroupPanelKind;
@@ -20,16 +20,12 @@ export interface WorkspaceManagePanelsProps {
   authenticatedUserId?: string | null;
   authenticatedUserName?: string | null;
   onClose: () => void;
-  onUpdateGroup: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-    deliveryPolicy?: DeliveryPolicy;
-  }) => Promise<DomainResult<GroupView> | null> | void;
+  onUpdateGroup: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null> | void;
   onDissolveGroup: () => void;
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddGroupMember: (actorId: string) => Promise<boolean>;
   onRemoveGroupMember: (actorId: string) => Promise<boolean>;
-  onShareGroup: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareGroup: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   onSaveDingTalk: (config: GroupDingTalkConfig) => Promise<boolean>;
   onToggleDingTalkActive: (active: boolean) => Promise<boolean>;
   onDeleteDingTalk: () => Promise<boolean>;
@@ -40,7 +36,7 @@ export interface WorkspaceManagePanelsProps {
   onLeaveSession: (actorId: string) => Promise<boolean>;
   onAddSessionMember: (actorId: string) => Promise<boolean>;
   onRemoveSessionMember: (actorId: string) => Promise<boolean>;
-  onShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 /** 右侧群/会话管理面板渲染：只负责 UI 编排，写操作由父级 Hook 提供。 */
@@ -59,15 +55,14 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
 
   if (!group) return null;
 
-  // 不使用遮罩；公共侧栏处理外部点击，保留内部及 Portal 浮层交互。
+  // 会话局部遮罩由公共覆盖层处理，保留内部及 Portal 浮层交互。
   return (
     <>
       {activePanel === 'manage' ? (
-        <ResizableWorkspaceSidebar
+        <WorkspaceOverlayPanel
           ariaLabel="群管理面板"
           data-manage-panel="true"
           onDismiss={onClose}
-          side="right"
           {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
@@ -93,15 +88,14 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             dingTalkBinding={props.dingTalkBinding}
             dingTalkLoading={props.dingTalkLoading}
           />
-        </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
       ) : null}
 
       {activePanel === 'sessionManage' && session ? (
-        <ResizableWorkspaceSidebar
+        <WorkspaceOverlayPanel
           ariaLabel="会话管理面板"
           data-manage-panel="true"
           onDismiss={onClose}
-          side="right"
           {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
@@ -123,7 +117,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             onRemoveMember={props.onRemoveSessionMember}
             onShare={props.onShareSession}
           />
-        </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
       ) : null}
     </>
   );

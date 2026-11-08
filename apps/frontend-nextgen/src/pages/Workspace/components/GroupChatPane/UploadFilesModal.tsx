@@ -14,7 +14,6 @@ export interface UploadFilesModalProps {
   open: boolean;
   onClose: () => void;
   queue: UploadTask[];
-  isUploading: boolean;
   stageFiles: (files: File[]) => void;
   submitStaged: () => Promise<void>;
   cancelTask: (localId: string) => Promise<void>;
@@ -22,7 +21,6 @@ export interface UploadFilesModalProps {
   discardAll: () => Promise<void>;
   clearCompleted: () => void;
   hasPending: () => boolean;
-  onAddToSession: () => void;
 }
 
 export function UploadFilesModal(props: UploadFilesModalProps) {
@@ -30,7 +28,6 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
     open,
     onClose,
     queue,
-    isUploading,
     stageFiles,
     submitStaged,
     cancelTask,
@@ -38,7 +35,6 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
     discardAll,
     clearCompleted,
     hasPending,
-    onAddToSession,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -100,7 +96,7 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
         >
           <FileText className="mb-2 h-8 w-8 text-primary" />
           <p className="text-sm font-medium text-foreground">点击或拖拽选择文件</p>
-          <p className="mt-1 text-xs text-muted-foreground">选中文件后将自动上传，完成后可添加至会话</p>
+          <p className="mt-1 text-xs text-muted-foreground">选中文件后将自动上传</p>
           <p className="mt-0.5 text-xs text-muted-foreground">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} />
         </div>
@@ -193,12 +189,6 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
         <ModalFooter>
           <Button variant="secondary" onClick={() => void handleClose()}>
             关闭
-          </Button>
-          <Button
-            disabled={queue.every((task) => task.phase !== 'ready' || !task.fileId) || isUploading}
-            onClick={onAddToSession}
-          >
-            {isUploading ? '上传中…' : '添加至会话'}
           </Button>
         </ModalFooter>
       </ModalContent>

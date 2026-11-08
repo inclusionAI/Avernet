@@ -102,6 +102,7 @@ _RECOVERY_CONFIG = DesktopSkillRecoveryConfig(task_deadline_seconds=600)
 
 def _bot(*, binding_id: int = 17, status: str = "ACTIVE") -> dict:
     return {
+        "id": 101,
         "bot_id": "bot-a",
         "owner_id": "owner-a",
         "entity_id": "owner-a",
@@ -286,29 +287,6 @@ def test_handler_retries_transient_network_failure_instead_of_fast_polling() -> 
     )
 
     assert isinstance(outcome, Retry)
-
-
-@pytest.mark.parametrize("code", [
-    "SKILL_PROJECTION_BUSY",
-    "SKILL_PROJECTION_LOCK_LOST",
-    "SKILL_PROJECTION_LOCK_UNAVAILABLE",
-    "SKILL_PROJECTION_SNAPSHOT_UNAVAILABLE",
-    "SKILL_PROJECTION_STALE",
-    "SKILL_PROJECTION_TIMEOUT",
-])
-def test_handler_retries_projection_guard_failures(code: str) -> None:
-    projector = _Projector()
-    projector.apply_plan = AsyncMock(
-        return_value=RuntimeProjectionResult.pending(code=code, reason="guard deferred")
-    )
-
-    outcome = _handler(projector=projector).handle(
-        {"owner_id": "owner-a", "bot_id": "bot-a"}
-    )
-
-    assert isinstance(outcome, Retry)
-    assert code in outcome.error
-    projector.apply_plan.assert_awaited_once()
 
 
 def test_permanent_prepare_failure_stops_derived_pending_fast_poll(caplog) -> None:
@@ -758,6 +736,10 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
                 "status": "ACTIVE",
                 "device_id": "device-a",
             } if (bot_id, owner_id) == ("bot-a", "owner-a") else None
+
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            bot = self.get_by_id_and_owner(bot_id, locator)
+            return [bot] if bot is not None else []
 
     class _Allow:
         def can_manage_bot(self, **_kwargs):

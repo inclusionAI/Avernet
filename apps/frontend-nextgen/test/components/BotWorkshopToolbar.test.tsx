@@ -119,7 +119,51 @@ it('筛选器名常驻左侧标题,框内只反映当前选择', async () => {
   }
 });
 
-it('非个人空间置灰桌面 Bot 创建入口并展示限制原因', async () => {
+it('创建入口合并为「创建Bot」主按钮，气泡中选择创建云端/本地 Bot', async () => {
+  HTMLElement.prototype.hasPointerCapture = jest.fn(() => false);
+  HTMLElement.prototype.setPointerCapture = jest.fn();
+  HTMLElement.prototype.releasePointerCapture = jest.fn();
+  HTMLElement.prototype.scrollIntoView = jest.fn();
+  const onCreateCloud = jest.fn();
+  const onCreateLocal = jest.fn();
+  render(
+    <BotWorkshopToolbar
+      keyword=""
+      engine=""
+      onKeywordChange={jest.fn()}
+      onEngineChange={jest.fn()}
+      onDeploymentChange={jest.fn()}
+      onServiceModeChange={jest.fn()}
+      onCreateCloud={onCreateCloud}
+      onCreateLocal={onCreateLocal}
+      onReset={jest.fn()}
+    />,
+  );
+
+  // 只有一个「创建Bot」入口，两个创建按钮不再平铺
+  const trigger = screen.getByRole('button', { name: '创建Bot' });
+  expect(screen.queryByRole('button', { name: '创建云端 Bot' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '创建本地 Bot' })).toBeNull();
+
+  fireEvent.click(trigger);
+  expect(screen.getByRole('menuitem', { name: '创建云端Bot' })).toBeInTheDocument();
+  expect(screen.getByRole('menuitem', { name: '创建本地Bot' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('menuitem', { name: '创建云端Bot' }));
+  expect(onCreateCloud).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('menuitem', { name: '创建云端Bot' })).toBeNull();
+
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('menuitem', { name: '创建本地Bot' }));
+  expect(onCreateLocal).toHaveBeenCalledTimes(1);
+  expect(onCreateCloud).toHaveBeenCalledTimes(1);
+});
+
+it('非个人空间置灰气泡内的桌面 Bot 创建项并展示限制原因', async () => {
+  HTMLElement.prototype.hasPointerCapture = jest.fn(() => false);
+  HTMLElement.prototype.setPointerCapture = jest.fn();
+  HTMLElement.prototype.releasePointerCapture = jest.fn();
+  HTMLElement.prototype.scrollIntoView = jest.fn();
   const onCreateLocal = jest.fn();
   render(
     <BotWorkshopToolbar
@@ -136,11 +180,14 @@ it('非个人空间置灰桌面 Bot 创建入口并展示限制原因', async ()
     />,
   );
 
-  const button = screen.getByRole('button', { name: '创建本地 Bot' });
-  expect(button).toBeDisabled();
-  fireEvent.click(button);
+  fireEvent.click(screen.getByRole('button', { name: '创建Bot' }));
+  const localItem = screen.getByRole('menuitem', { name: '创建本地Bot' });
+  expect(localItem).toBeDisabled();
+  fireEvent.click(localItem);
   expect(onCreateLocal).not.toHaveBeenCalled();
+  // 云端入口不受本地限制影响
+  expect(screen.getByRole('menuitem', { name: '创建云端Bot' })).not.toBeDisabled();
 
-  fireEvent.focus(button.parentElement as HTMLElement);
+  fireEvent.focus(localItem.parentElement as HTMLElement);
   expect(await screen.findByText('桌面 Bot 仅支持在个人空间创建和运维')).toBeInTheDocument();
 });

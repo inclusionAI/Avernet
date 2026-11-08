@@ -1,7 +1,7 @@
 //! Bot Coordination Service (BCS) for Multi-Bot Collaboration
 //!
 //! This crate provides:
-//! - **BCS Server**: Bot registry, proposal generation, group management
+//! - **BCS Server**: Bot registry, group management
 //! - **WebSocket Support**: Bot connections via WebSocket protocol
 //! - **DingTalk Integration**: DingTalk channel support
 //!
@@ -18,7 +18,6 @@
 //! │                                                             │
 //! │  Services:                                                  │
 //! │  • Bot registry (bot_uuid → bot with TTL)                   │
-//! │  • Proposal generation (request-group-help → proposal)      │
 //! │  • Group management (Agent/Fusion modes)                    │
 //! │  • Context fusion (reads files, single LLM call)            │
 //! │  • Message routing (to driver or @mentioned bot)            │
@@ -61,7 +60,6 @@ pub use bcs_protocol::{
     ChatEventState,
     ChatSendParams,
     ChatSendResponse,
-    ConfirmProposalResponse,
     Conflict as WireConflict,
     ConflictPosition as WireConflictPosition,
     ContentBlock,
@@ -77,8 +75,6 @@ pub use bcs_protocol::{
     MessageContent,
     ParticipantInfo,
     ParticipantPerspective as WireParticipantPerspective,
-    ProposalContext,
-    ProposalResponse,
     RequestFrame,
     ResponseFrame,
     ResponseMode as WireResponseMode,
@@ -104,17 +100,17 @@ pub use bcs_services_container::{Services, ServicesBuilder};
 
 // Re-export service contract types from bcs_service_api
 pub use bcs_service_api::{
-    AuditEntry, BindingChannel, BindingChannels, BotCapabilities, BotContextSummary,
+    BindingChannel, BindingChannels, BotCapabilities, BotContextSummary,
     BotDynamicStatus, BotRegistryCoreService, BotSendResult as ServiceBotSendResult,
     ChatEventRouting, ContextConflict as Conflict, ContextConflictPosition as ConflictPosition,
     ContextFusionRequest as FusionRequest, ContextFusionResponse as FusionResponse,
     ContextParticipantPerspective as ParticipantPerspective, DynamicStatusResponse,
-    FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupMessage, GroupMessageType,
-    Participant, ParticipantKind, ParticipantRole, ProposalCoreService, RegisteredBot,
+    FusionCoreService, Group, GroupCoreService, GroupMessage, GroupMessageType,
+    Participant, ParticipantKind, ParticipantRole, RegisteredBot,
     ResponseMode, RouteAndSendResult as ServiceRouteAndSendResult, RouteSelectorWire,
     RoutingCoreService, RoutingDecision as ServiceRoutingDecision,
-    RoutingTarget as ServiceRoutingTarget, ServiceError, ServiceResult, Skill, Task, TaskStatus,
-    Workspace, deserialize_skills,
+    RoutingTarget as ServiceRoutingTarget, ServiceError, ServiceResult, Skill,
+    deserialize_skills,
 };
 
 // Re-export implementations
@@ -122,15 +118,16 @@ pub use bcs_bot::BotCore;
 pub use bcs_fusion::LocalFusionService;
 pub use bcs_group::GroupStore;
 pub use bcs_group_store::GroupBuilder;
-pub use bcs_proposal::{ProposalBuilder, ProposalStore};
 pub use bcs_routing::MessageRouter;
 
 // Server modules
 pub mod auth_wiring;
+pub mod bot_authority_wiring;
 mod bot_ws_admission_config;
 mod config;
+mod collaboration_drafts;
 mod config_loader;
-pub mod callback_recovery_scanner;
+
 mod env;
 mod error;
 mod eventing_wiring;
@@ -148,11 +145,13 @@ mod message_delivery_wiring;
 mod delivery_metrics;
 pub mod plugins;
 pub mod server;
+mod principal_state;
+mod browser_principal;
 pub mod state_machine_timeout_scanner;
 pub mod state_machine_progression_scanner;
 mod recovery_backoff;
 mod telemetry;
-pub mod timeout_scanner;
+
 pub mod token_expiry_scanner;
 
 pub mod leader_election {
@@ -166,7 +165,7 @@ pub mod logging;
 
 // Re-exports
 pub use config::{
-    AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
+    AuthSdkConfig, BcsConfig, BotAuthorityConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType,
     LoggingConfig, MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
     SecurityGatewayProviderConfig, StructuredOutputMode, TelemetryConfig, UserDirectoryConfig,

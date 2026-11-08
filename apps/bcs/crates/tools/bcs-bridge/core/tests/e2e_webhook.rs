@@ -2,11 +2,13 @@ use axum::http::StatusCode;
 use futures::StreamExt;
 use serde_json::json;
 
-mod support; // tests/support/mod.rs：spawn_app(config_toml: &str) -> String(base_url)
+mod support;
+#[path = "support/webhook.rs"]
+mod webhook_support;
 
 #[tokio::test]
 async fn ping_requires_auth_and_matching_provider() {
-    let url = support::spawn_app(r#"
+    let url = webhook_support::spawn_app(r#"
 provider_id = "bridge-1"
 listen = "127.0.0.1:0"
 bcs_to_provider_token = "tok-b2p"
@@ -85,7 +87,7 @@ async fn chat_send_streams_sse_to_final() {
     assert!(text.contains("\"state\":\"final\""), "missing final state: {text}");
     assert!(text.contains("完成了"), "missing final assistant text: {text}");
     // seq 单调递增
-    let seqs = support::extract_seqs(&text);
+    let seqs = webhook_support::extract_seqs(&text);
     assert!(!seqs.is_empty(), "no seq frames: {text}");
     assert!(seqs.windows(2).all(|w| w[0] < w[1]), "seq not monotonic: {seqs:?}");
 }
@@ -212,7 +214,7 @@ async fn permission_roundtrip(scenario: &str, decision: &str) {
             .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
             .find(|event| event["phase"] == "requested");
         if let Some(requested) = requested {
-            let iid = support::extract_first_interaction_id(&acc);
+            let iid = webhook_support::extract_first_interaction_id(&acc);
             break (iid, requested);
         }
     };
@@ -509,7 +511,7 @@ engine_bin = "{}"
 async fn wrapped_tool_result_is_unwrapped_in_sse_and_preserved_in_raw_trace() {
     let trace_dir = tempfile::tempdir().unwrap();
     let bin = format!("{}/tests/fixtures/mock_cc_wrapped_result.sh", env!("CARGO_MANIFEST_DIR"));
-    let url = support::spawn_app(&format!(r#"
+    let url = webhook_support::spawn_app(&format!(r#"
 provider_id = "bridge-1"
 listen = "127.0.0.1:0"
 bcs_to_provider_token = "tok-b2p"
@@ -517,6 +519,7 @@ trace_dir = "{}"
 [[bot]]
 provider_bot_ref = "worker-1"
 engine = "claude-code"
+engine_options = {{ completion_mode = "legacy" }}
 cwd = "/tmp"
 engine_bin = "{}"
 "#, trace_dir.path().display(), bin)).await;
@@ -767,7 +770,7 @@ async fn duplicate_send_reattaches_with_replay() {
             Err(_) => continue,
         }
     }
-    let replay_seqs = support::extract_seqs(&second_acc);
+    let replay_seqs = webhook_support::extract_seqs(&second_acc);
     assert_eq!(replay_seqs, vec![1, 2],
         "buffered replay covers seq 1 and 2 (replay precedes any live frame): {second_acc}");
 
@@ -798,7 +801,7 @@ async fn duplicate_send_reattaches_with_replay() {
         }
     }
     assert!(second_acc.contains("\"state\":\"aborted\""), "aborted terminal: {second_acc}");
-    let seqs = support::extract_seqs(&second_acc);
+    let seqs = webhook_support::extract_seqs(&second_acc);
     assert_eq!(seqs, vec![1, 2, 3],
         "seq continuity 1→2→3 across buffer→broadcast: {second_acc}");
     drop(first_stream);
@@ -896,4 +899,35 @@ async fn oversize_single_frame_becomes_chat_error() {
     assert!(text.len() < 9 * 1024 * 1024, "没有超限帧被发出: {}", text.len());
     // The error frame carries the "frame too large" diagnostic from push_frame.
     assert!(text.contains("\"errorMessage\":\"frame too large\""), "error cause: {text}");
+}
+
+#[tokio::test]
+async fn codex_web_search_final_snapshot_emits_matching_results_before_final() {
+    let url = support::spawn_app_with_mock("mock_codex_app_server.py", "codex").await;
+    let response = reqwest::Client::builder().no_proxy().build().unwrap()
+        .post(format!("{url}/webhook"))
+        .bearer_auth("tok-b2p")
+        .header("X-BCN-Protocol-Version", "2.0")
+        .json(&json!({"type":"req", "id":"web-search-run", "method":"chat.send",
+            "session_id":"web-search-session",
+            "to_bot":{"provider_id":"bridge-1", "provider_bot_ref":"worker-1"},
+            "message":{"role":"user", "content":[{"type":"text", "text":"WEB_SEARCH_FINAL:"}]}}))
+        .send().await.unwrap();
+    assert!(response.status().is_success());
+    let text = response.text().await.unwrap();
+    let frames: Vec<serde_json::Value> = text.lines().filter_map(|line| {
+        line.strip_prefix("data: ").and_then(|value| serde_json::from_str(value).ok())
+    }).collect();
+    for index in 0..3 {
+        let id = format!("web-{index}");
+        let events: Vec<_> = frames.iter().filter(|f| f["stream"] == "tool" && f["toolCallId"] == id).collect();
+        assert_eq!(events.len(), 2, "expected start/result pair: {text}");
+        assert_eq!(events[0]["phase"], "start");
+        assert_eq!(events[1]["phase"], "result");
+        assert_eq!(events[1]["result"]["query"], "Codex events");
+        assert_eq!(events[1]["isError"], false);
+    }
+    let result_pos = text.rfind("\"phase\":\"result\"").unwrap();
+    let final_pos = text.rfind("\"state\":\"final\"").unwrap();
+    assert!(result_pos < final_pos, "tool results must precede final: {text}");
 }

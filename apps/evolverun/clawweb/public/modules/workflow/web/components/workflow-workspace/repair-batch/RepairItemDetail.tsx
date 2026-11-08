@@ -50,18 +50,18 @@ function ChangeValue({ value }: { value: unknown }) {
   </div>
 }
 
-export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, limitReached, onDisposition, showSelection = true, embedded = false }: {
+export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, limitReached, onDisposition, showSelection = true, embedded = false, targetSnapshotKey }: {
   item: RepairInboxItem; detail?: RepairInboxItem; loading?: boolean; error?: string;
   onLoad: (id: string) => void; selected: boolean; onToggle: (id: string) => void; canEdit: boolean;
   limitReached: boolean; onDisposition: (item: RepairInboxItem, action: 'no_action' | 'restore') => void;
-  showSelection?: boolean;
+  targetSnapshotKey?: string; showSelection?: boolean;
   embedded?: boolean;
 }) {
   const loader = useRef(onLoad)
   loader.current = onLoad
   useEffect(() => { loader.current(item.itemId) }, [item.itemId])
   const shown = detail ?? item
-  const reason = exclusion(item)
+  const reason = exclusion(item, undefined, targetSnapshotKey)
   const operations = records(shown.proposal?.operations)
   const diagnoses = records(detail?.context?.diagnoses)
   const runs = sourceRunCount(shown)

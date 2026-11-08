@@ -567,3 +567,145 @@ def test_get_connection_by_bot_no_publish_raises():
         router.get_device_connection_by_bot(
             bot_id="bot-001", operator=_make_operator("owner-001")
         )
+
+
+@pytest.mark.parametrize("actor", ["super-admin", "member", "collaborator-admin"])
+def test_restart_device_allows_super_admin_and_explicit_collaborators(monkeypatch, actor):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"super-admin"}))
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(id=1001, entity_id="owner-001")
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
+    collaborators = MagicMock()
+    collaborators.check_collaborator_permission.return_value = {"has_permission": True}
+    baas = MagicMock()
+    baas.restart_devices.return_value = {"publish_id": 42}
+    router = _make_router(repo=repo, baas_service=baas, bot_repo=bot_repo)
+    monkeypatch.setattr(router, "_get_collaborator_service", lambda: collaborators)
+
+    result = router.restart_device(binding_id=1001, device_uuid="DEVICE-001", operator=_make_operator(actor))
+
+    assert result == {"publish_id": 42}
+    if actor != "super-admin":
+        bot_repo.get_by_id_and_owner.assert_called_once_with("bot-001", "owner-001")
+    assert baas.restart_devices.call_args.kwargs["operator"] == actor
+    if actor == "super-admin":
+        collaborators.check_collaborator_permission.assert_not_called()
+    else:
+        from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+        collaborators.check_collaborator_permission.assert_called_once_with(
+            bot_id="bot-001", owner_id="owner-001", user_id=actor,
+            required_level=PermissionLevel.MEMBER, env="dev", explicit=True,
+        )
+
+
+@pytest.mark.parametrize("missing", ["bot", "identity", "service", "membership"])
+def test_restart_device_denies_without_explicit_target_membership(monkeypatch, missing):
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(id=1001, entity_id="owner-001")
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = (
+        None if missing == "bot" else {} if missing == "identity"
+        else {"bot_id": "bot-001", "owner_id": "owner-001", "public": "1"}
+    )
+    collaborators = MagicMock()
+    collaborators.check_collaborator_permission.return_value = {"has_permission": False}
+    baas = MagicMock()
+    router = _make_router(repo=repo, baas_service=baas, bot_repo=bot_repo)
+    monkeypatch.setattr(router, "_get_collaborator_service", lambda: None if missing == "service" else collaborators)
+
+    with pytest.raises(InvalidDeviceStatusError):
+        router.restart_device(binding_id=1001, device_uuid="DEVICE-001", operator=_make_operator("other-bot-member"))
+    baas.restart_devices.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_restart_device_with_real_collaborator_permissions(world, monkeypatch, role):
+    """Runtime binding points at the draft Bot's identity, not its binding_id."""
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+    from tests.community.factories.bot_collaborator import make_bot, make_collaborator
+
+    make_bot(world, bot_id="live-bot", owner_id="owner-001")
+    collaborator = make_collaborator(world, bot_id="live-bot", owner_id="owner-001", user_id="editor", role=role, operator_id="owner-001")
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(
+        id=1001, entity_id="owner-001", device_props={"bolt_id": "live-bot"},
+    )
+    baas = MagicMock()
+    baas.restart_devices.return_value = {"publish_id": 42}
+    router = _make_router(repo=repo, baas_service=baas, bot_repo=world.get(BotRepository))
+    collaborators = world.get(CollaboratorService)
+    monkeypatch.setattr(router, "_get_collaborator_service", lambda: collaborators)
+    assert router.restart_device(
+        binding_id=1001, device_uuid="DEVICE-001", operator=_make_operator("editor"),
+    ) == {"publish_id": 42}
+
+    collaborators.remove_collaborator(
+        collaborator_id=collaborator.id, operator_id="owner-001",
+    )
+    baas.reset_mock()
+    with pytest.raises(InvalidDeviceStatusError):
+        router.restart_device(binding_id=1001, device_uuid="DEVICE-001", operator=_make_operator("editor"))
+    baas.restart_devices.assert_not_called()
+
+
+@pytest.mark.parametrize("record_changes", [{"env": "prod"}, {"status": "RELEASED"}, {"device_provider": "teclaw"}])
+def test_restart_device_super_admin_cannot_bypass_binding_validation(monkeypatch, record_changes):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"super-admin"}))
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(id=1001, **record_changes)
+    baas = MagicMock()
+    router = _make_router(repo=repo, baas_service=baas)
+    with pytest.raises(BindingNotFoundError):
+        router.restart_device(binding_id=1001, device_uuid="DEVICE-001", operator=_make_operator("super-admin"))
+    baas.restart_devices.assert_not_called()
+
+
+@pytest.mark.parametrize("actor", ["owner-001", "super-admin", "editor", "stranger"])
+def test_restart_http_applies_real_service_authorization(monkeypatch, caplog, actor):
+    from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+    from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+    from agentclaw.community.core.access import admin_scopes
+    from tests.community.adapters.http.devices.test_multi_instance_router import _client
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"super-admin"}))
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(id=12934, entity_id="owner-001")
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
+    collaborators = MagicMock()
+    collaborators.check_collaborator_permission.return_value = {"has_permission": actor == "editor"}
+    baas = MagicMock()
+    baas.restart_devices.return_value = {"publish_id": 42}
+    service = _make_router(repo=repo, baas_service=baas, bot_repo=bot_repo)
+    monkeypatch.setattr(service, "_get_collaborator_service", lambda: collaborators)
+    client = _client(service)
+    client.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=actor, staffId=actor, operatorName=actor, nickName=actor,
+    )
+    caplog.set_level("INFO")
+    response = client.post(
+        "/api/v1/devices/12934/restart", json={"device_uuid": "DEVICE-001"},
+        headers={"Authorization": "synthetic-auth-header"},
+    )
+    assert "synthetic-auth-header" not in caplog.text
+    assert "device.restart.request" in caplog.text
+    assert "elapsed_ms=" in caplog.text
+    body = response.json()
+    if actor == "stranger":
+        assert "device.restart.failed" in caplog.text
+        assert "device.restart.success" not in caplog.text
+        assert body["success"] is False
+        assert body["error_code"] == 40301
+        baas.restart_devices.assert_not_called()
+    else:
+        assert "device.restart.success" in caplog.text
+        assert body["success"] is True
+        assert body["data"]["publish_id"] == 42
+        assert baas.restart_devices.call_args.kwargs["operator"] == actor

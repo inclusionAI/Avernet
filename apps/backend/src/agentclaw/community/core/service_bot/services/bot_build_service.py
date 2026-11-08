@@ -29,11 +29,18 @@ from injector import inject
 
 from agentclaw.community.core.channel.channel_service_protocol import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
+from agentclaw.community.core.service_bot.services.runtime_artifact_policy import resolve_runtime_artifacts
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
 from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     extra_root_rules,
     is_excluded,
     validate_required_paths,
+)
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
+    restore_agentclaw_artifact,
+    sync_agentclaw_artifact,
 )
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
@@ -177,7 +184,9 @@ class BotBuildService:
         baas_template_resolver: "BaasTemplateResolverProtocol",
         teclaw_template_uuid: str,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
+        user_list_repository: UserListRepositoryProtocol,
         env: str,
+        artifact_transfers: ArtifactTransferRegistry,
     ):
         """初始化 BotBuildService。
 
@@ -203,6 +212,8 @@ class BotBuildService:
         self._baas_template_resolver = baas_template_resolver
         self._build_ignore_repository = build_ignore_repository
         self._env = env
+        self._user_list_repository = user_list_repository
+        self._artifact_transfers = artifact_transfers
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -294,6 +305,9 @@ class BotBuildService:
         entity_id = bot.get("entity_id", "")
         entity_type = bot.get("entity_type", "staff")
         device_id = bot.get("device_id")
+        include_runtime_artifacts = resolve_runtime_artifacts(
+            self._user_list_repository, bot_id=bot_id, entity_id=entity_id, env=self._env,
+        )
         provider = self._resolve_sandbox_provider(bot)
 
         # 从 bot.ext 解析 build_rsync_excludes 配置
@@ -360,7 +374,7 @@ class BotBuildService:
 
         try:
             # ============================================================
-            # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
+            # Step 1: 计算源目录和目标目录
             # ============================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
             nas_storage_id = get_bot_nas_dir(
@@ -399,7 +413,11 @@ class BotBuildService:
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                migration_success = self._migrate_bot_instance(
+                migration_success = self._artifact_transfers.resolve(build_plan.engine_type).publish(
+                    device_id=device_id, plan=build_plan, provider=provider,
+                    target_dir=target_dir, ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
+                ) or self._migrate_bot_instance(
                     device_id=device_id,
                     source_dir=source_dir,
                     target_dir=target_dir,
@@ -409,6 +427,7 @@ class BotBuildService:
                     build_plan=build_plan,
                     provider=provider,
                     build_ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
                 )
             finally:
                 logger.info(
@@ -420,7 +439,7 @@ class BotBuildService:
                     int((time.monotonic() - transfer_started) * 1000),
                 )
 
-            # The host-side engine-root rsync is the sole writer of the
+            # Unless handled by the engine transfer strategy, host-side rsync writes the
             # versioned artifact. It preserves active symlinks and local Skill
             # payloads while each engine build plan excludes mounted repo
             # corpora. Do not make the Draft runtime write this target again:
@@ -1355,6 +1374,7 @@ class BotBuildService:
         build_plan: EngineBuildPlan | None = None,
         provider: EngineSandboxProvider | None = None,
         build_ignore_paths: tuple[str, ...] = (),
+        include_runtime_artifacts: bool = False,
     ) -> bool:
         """Step 2.3: 执行 Bot 实例 rsync 迁移。
 
@@ -1446,6 +1466,17 @@ class BotBuildService:
                     version=version_str,
                     build_ignore_paths=build_ignore_paths,
                     run_command=self._run_local_command,
+                    enabled=include_runtime_artifacts,
+                )
+
+                sync_agentclaw_artifact(
+                    source_home=source_dir.parent,
+                    target_dir=target_dir,
+                    device_id=device_id,
+                    version=version_str,
+                    build_ignore_paths=build_ignore_paths,
+                    run_command=self._run_local_command,
+                    enabled=include_runtime_artifacts,
                 )
 
             # Device-side fallback for extra-include files that are unreadable
@@ -1855,7 +1886,7 @@ class BotBuildService:
     ) -> Dict[str, Any]:
         """Restore an ARCA/BAAS mounted draft from a historical artifact.
 
-        The historical version is restored host-side with ``rsync --delete``
+        Unless handled by the engine strategy, restore with host-side ``rsync --delete``
         into the draft NAS workspace; runtime/session exclusions are preserved.
         Only versioned ``migration_path`` artifacts participate in this operation.
         """
@@ -1899,6 +1930,14 @@ class BotBuildService:
             entity_type=entity_type,
         )
         draft_dir = draft_nas_dir / build_plan.source_root_name
+        restored = self._artifact_transfers.resolve(build_plan.engine_type).restore(
+            bot=bot, source_version=source_version, plan=build_plan,
+            provider=provider, artifact_dir=artifact_dir,
+            migration_path_base=self._get_migration_path_base,
+            remaining_timeout=remaining_timeout, migration_error=BotBuildMigrationError,
+        )
+        if restored is not None:
+            return restored
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 
@@ -1965,6 +2004,15 @@ class BotBuildService:
             )
 
         restore_local_bin_artifact(
+            artifact_dir=artifact_dir,
+            target_home=draft_dir.parent,
+            bot_id=bot_id,
+            version=source_version,
+            run_command=self._run_local_command,
+            timeout_seconds=remaining_timeout(),
+        )
+
+        restore_agentclaw_artifact(
             artifact_dir=artifact_dir,
             target_home=draft_dir.parent,
             bot_id=bot_id,

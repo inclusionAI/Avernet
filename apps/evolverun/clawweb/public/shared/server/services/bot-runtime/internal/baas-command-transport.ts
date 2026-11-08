@@ -68,20 +68,22 @@ export async function executeBaasCommand<TBody extends BaasCommandResponse = Baa
   timeoutSeconds: number;
   env?: Record<string, string>;
   deviceAffinity?: string;
+  providerDeviceId?: string;
   signal?: AbortSignal;
 }): Promise<{ response: Response; body: TBody }> {
   const endpoint = new URL(
-    `/api/v1/bots/${encodeURIComponent(input.tenant)}/${encodeURIComponent(input.deviceId)}/execute-command`,
+    input.providerDeviceId ? `/api/v1/paas/devices/${encodeURIComponent(input.providerDeviceId)}/commands`
+      : `/api/v1/bots/${encodeURIComponent(input.tenant)}/${encodeURIComponent(input.deviceId)}/execute-command`,
     input.config.baseUrl,
   );
-  if (input.deviceAffinity) endpoint.searchParams.set("device_affinity", input.deviceAffinity);
+  if (!input.providerDeviceId && input.deviceAffinity) endpoint.searchParams.set("device_affinity", input.deviceAffinity);
   const response = await fetch(endpoint, {
     method: "POST",
     headers: baasRequestHeaders(input.config),
     body: JSON.stringify({
       cmd: input.cmd,
       ...(input.env ? { env: input.env } : {}),
-      timeout_seconds: input.timeoutSeconds,
+      ...(!input.providerDeviceId ? { timeout_seconds: input.timeoutSeconds } : {}),
     }),
     signal: input.signal,
   });

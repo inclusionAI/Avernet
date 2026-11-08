@@ -233,7 +233,7 @@ async def test_pool_get_with_ws_cleanup_on_failure():
     pool._clients = [client]
     pool._initialized = True
 
-    with patch.object(client, "connect", side_effect=ConnectionError("refused")):
+    with patch.object(client, "_connect", side_effect=ConnectionError("refused")):
         with pytest.raises(ConnectionError, match="All pool connections failed"):
             await pool.get()
 
@@ -275,7 +275,7 @@ def test_get_shared_client_creates_first_slot_when_empty():
     """get_shared_client() creates a client if pool has no slots yet."""
     gateway_client._pool = None
 
-    with patch("engine.community.openclaw.client.gateway_client.get_config") as mock_cfg:
+    with patch("engine.community.openclaw.client.gateway_connection.get_config") as mock_cfg:
         mock_cfg.return_value = MagicMock(ws_pool_size=3)
         result = get_shared_client()
 

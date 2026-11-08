@@ -10,7 +10,7 @@ use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Json, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use bcs_domain::{GroupContextPolicy, GroupContextTime, ScopeLevel};
+use bcs_domain::{GroupContextOwners, GroupContextPolicy, GroupContextTime, ScopeLevel};
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck, GroupContextGetResponse,
     GroupContextListResponse, GroupContextRequestContext, GroupContextStatus, ListGroupContexts,
@@ -34,7 +34,7 @@ pub(crate) struct GroupContextQuery {
 impl GroupContextQuery {
     fn request_context(&self) -> GroupContextRequestContext {
         GroupContextRequestContext {
-            group_id: self.group_id.clone().unwrap_or_default(),
+            group_id: self.group_id.clone(),
             session_id: self.session_id.clone(),
             round_id: self.round_id.clone(),
         }
@@ -47,7 +47,8 @@ pub(crate) struct AddRequest {
     scope_level: ScopeLevel,
     content: String,
     visible_to: GroupContextPolicy,
-    collect_from: GroupContextPolicy,
+    #[serde(default)]
+    collect_from: Option<GroupContextPolicy>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
     valid_from: Option<GroupContextTime>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
@@ -66,6 +67,8 @@ pub(crate) struct UpdateRequest {
     visible_to: Option<GroupContextPolicy>,
     #[serde(default)]
     collect_from: Option<GroupContextPolicy>,
+    #[serde(default)]
+    owners: Option<GroupContextOwners>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
     valid_from: Option<GroupContextTime>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
@@ -143,6 +146,7 @@ pub(crate) async fn update(
             change_reason: body.change_reason,
             visible_to: body.visible_to,
             collect_from: body.collect_from,
+            owners: body.owners,
             valid_from: body.valid_from,
             valid_to: body.valid_to,
         })

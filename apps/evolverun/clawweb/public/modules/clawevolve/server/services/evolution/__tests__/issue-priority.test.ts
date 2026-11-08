@@ -1,39 +1,32 @@
 import { expect, it } from 'vitest';
-import { issuePriority } from '../issue-priority.js';
+import { compareIssuePriority, issuePriority } from '../issue-priority.js';
+import type { IssueGroup } from '../issue-aggregation.js';
 const now = 1_800_000_000_000;
-it('makes affected runs and complete sample hits independently reconcilable', () => {
-  const group = { signature: 's', flowIds: Array.from({ length: 33 }, (_, i) => `r${i}`),
-    sources: [{ analysisId: 'real', severity: 'high', nodeId: 'n', diagnosisId: 'd' }] } as never;
-  const runs = Array.from({ length: 168 }, (_, i) => ({ flowId: `r${i}`, startedAtMs: now - 1000, nodes: ['n'], analyzed: false,
-    coverage: { whole: { at: now, id: i, completed: i < 46, complete: i < 14 || i >= 33 && i < 46 }, nodes: {}, legacyNodes: [] } }));
-  expect(issuePriority(group, runs, now).week).toMatchObject({ affected: 33, related: 168, analyzed: 46, complete: 27,
-    sampleHits: 14, sampleHitRate: 14 / 27, occurrenceRate: null });
+const group = (flowIds: string[], severity: 'high' | 'critical' | null = 'high') => ({ signature: 's', flowIds,
+  sources: [{ analysisId: severity ? 'real' : 'legacy', severity, nodeId: 'n', diagnosisId: 'd' }] }) as IssueGroup;
+it('deduplicates affected runs using actual run times and excludes missing, future and unrelated runs', () => {
+  const value = issuePriority(group(['a', 'a', 'week', 'old', 'missing', 'future']), new Map([
+    ['a', now - 100], ['week', now - 2 * 86_400_000], ['old', now - 9 * 86_400_000],
+    ['future', now + 100], ['unrelated', now - 1],
+  ]), now);
+  expect(value).toMatchObject({ severity: 'high', day: { affected: 1 }, week: { affected: 2 }, lastOccurredAtMs: now - 100, missingRunTimes: 1 });
+  expect(value.week).toMatchObject({ related: null, analyzed: null, complete: null, sampleHitRate: null, occurrenceRate: null });
+  expect(value.trend).toBeNull();
+  expect(value.previousWeek).toBeNull();
 });
-it('deduplicates actual run times, separates analyzed samples, and preserves unknown severity', () => {
-  const group = { signature: 's', flowIds: ['a', 'a', 'old', 'missing'], sources: [{ analysisId: 'legacy', severity: null, flowId: 'a', nodeId: 'n' }] } as never;
-  const value = issuePriority(group, [
-    { flowId: 'a', startedAtMs: now - 100, nodes: ['n'], analyzed: true },
-    { flowId: 'b', startedAtMs: now - 200, nodes: ['n'], analyzed: false },
-    { flowId: 'old', startedAtMs: now - 9 * 86_400_000, nodes: ['n'], analyzed: true },
-    { flowId: 'other', startedAtMs: now - 100, nodes: ['other'], analyzed: true },
-  ], now);
+it('preserves unknown severity and unknown run times', () => {
+  const value = issuePriority(group(['missing'], null), new Map(), now);
   expect(value.severity).toBeNull();
-  expect(value.day).toMatchObject({ affected: 1, related: 2, analyzed: 1, sampleHitRate: 1, occurrenceRate: null });
-  expect(value.week.affected).toBe(1);
-  expect(value.missingRunTimes).toBe(1);
-  expect(value.trend).toBeNull(); // prior coverage is incomplete
+  expect(value.lastOccurredAtMs).toBeNull();
+  expect(value.week.affected).toBe(0);
 });
-it('reports a trend only when both periods have complete relevant analysis coverage', () => {
-  const group = { signature: 's', flowIds: ['a'], sources: [{ analysisId: 'real', diagnosisId: 'd', severity: 'critical', flowId: 'a', nodeId: 'n' }] } as never;
-  const value = issuePriority(group, [
-    { flowId: 'a', startedAtMs: now - 100, nodes: ['n'], analyzed: true },
-    { flowId: 'b', startedAtMs: now - 8 * 86_400_000, nodes: ['n'], analyzed: true },
-  ], now);
-  expect(value.severity).toBe('critical'); expect(value.severitySources).toEqual(['d']);
-  expect(value.trend).toBe('worsening'); expect(value.week.occurrenceRate).toBe(1);
-});
-it('does not reuse the current week as a historical comparison when prior runs are absent', () => {
-  const group = { signature: 's', flowIds: ['a'], sources: [{ analysisId: 'real', severity: 'high', flowId: 'a', nodeId: 'n' }] } as never;
-  const value = issuePriority(group, [{ flowId: 'a', startedAtMs: now - 100, nodes: ['n'], analyzed: true }], now);
-  expect(value.previousWeek.related).toBe(0); expect(value.trend).toBeNull();
+it('sorts impact by severity then recency and frequency by observed seven-day counts', () => {
+  const times = new Map([['old', now - 1000], ['recent', now - 100], ['extra', now - 200]]);
+  const severe = issuePriority(group(['old'], 'critical'), times, now);
+  const recent = issuePriority(group(['recent']), times, now);
+  const frequent = issuePriority(group(['old', 'extra']), times, now);
+  expect(compareIssuePriority(severe, frequent, 'priority')).toBeLessThan(0);
+  expect(compareIssuePriority(recent, frequent, 'priority')).toBeLessThan(0);
+  expect(compareIssuePriority(frequent, recent, 'frequency')).toBeLessThan(0);
+  expect(compareIssuePriority(recent, frequent, 'recent')).toBeLessThan(0);
 });

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 interface MessageSenderMetaProps {
   name: string;
+  nameBadge?: ReactNode;
   time?: string;
   align: 'left' | 'right';
 }
@@ -12,7 +13,7 @@ interface MessageSenderMetaProps {
  *  名称 13px——时间在左、名称在右 / Bot 名称在左、时间在右；
  *  2026-10-10 用户反馈：用户侧名称不加重颜色，与 Bot 侧统一用 content-strong；
  *  时间 12px #71717A，名称与时间小空隙并排（无分隔点）。 */
-export function MessageSenderMeta({ name, time, align }: MessageSenderMetaProps) {
+export function MessageSenderMeta({ name, nameBadge, time, align }: MessageSenderMetaProps) {
   const alignmentClass = align === 'right' ? 'justify-end text-right' : 'justify-start text-left';
   const isUser = align === 'right';
   const timeNode = time ? <span className="shrink-0 text-xs leading-4 text-muted-foreground">{time}</span> : null;
@@ -31,10 +32,12 @@ export function MessageSenderMeta({ name, time, align }: MessageSenderMetaProps)
         <>
           {timeNode}
           {nameNode}
+          {nameBadge}
         </>
       ) : (
         <>
           {nameNode}
+          {nameBadge}
           {timeNode}
         </>
       )}

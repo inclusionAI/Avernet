@@ -193,7 +193,7 @@ class DeviceService:
         """Execute shell command on device (hook — subclasses override)."""
         return f"Command executed on {device.device_id}: {shell_cmd}"
 
-    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str):
+    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str, *, timeout_seconds: int | None = None):
         """Execute shell command on device and return CommandResult (hook — subclasses override).
 
         Returns:
@@ -846,10 +846,16 @@ class DeviceService:
 
         entity_id = current.entity_id
         entity_type = current.entity_type
+        device_props = current.device_props
+        if current.device_provider == BAAS_DEVICE_PROVIDER and isinstance(device_props, dict):
+            # The release caller is transient, never trusted from stored props.
+            device_props = {k: v for k, v in device_props.items() if k != "_release_operator"}
+            if not device_props.get("entity_id") and operator.staff_id:
+                device_props["_release_operator"] = operator.staff_id
         allocated_device = AllocatedDevice(
             device_id=current.device_id,
             device_provider=current.device_provider,
-            device_props=current.device_props,
+            device_props=device_props,
         )
 
         # 物理释放与 DB 状态更新解耦：即使物理释放失败，也要更新 DB 状态为 RELEASED，
@@ -1017,11 +1023,19 @@ class DeviceService:
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
         Validates the binding exists and is not FAILED, checks permission,
         then delegates to _compose_device_conn_info for provider-specific logic.
+
+        ``caller_id`` is the authenticated user to use for user-level gray
+        decisions when the entry surface deliberately re-labels ``operator``
+        as the resolved owner (engine_runtime connections). Surfaces whose
+        ``operator`` already *is* the caller (the devices HTTP face) leave it
+        None and the gray gate falls back to ``operator.staff_id``. Local
+        providers ignore it — they issue no a2a face.
 
         ``device_uuid`` (optional) targets a specific instance in the multi-instance
         BaaS provider (see ``BaasDeviceService.get_device_connection``); local /
@@ -1557,7 +1571,7 @@ class DeviceService:
             f"{type(self).__name__} does not support multi-instance restart"
         )
 
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, timeout_seconds: int | None = None):
         """Execute shell command on device and return CommandResult.
 
         Args:
@@ -1588,6 +1602,10 @@ class DeviceService:
             device_provider=current.device_provider,
             device_props=current.device_props,
         )
+        if timeout_seconds is not None:
+            if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+                raise ValueError("timeout_seconds must be a positive integer")
+            return self._exec_shell_new(device=allocated_device, shell_cmd=shell_cmd, timeout_seconds=timeout_seconds)
         return self._exec_shell_new(device=allocated_device, shell_cmd=shell_cmd)
 
     def batch_set_env(self, *, binding_ids: list[int], env: str) -> tuple[int, list[int]]:

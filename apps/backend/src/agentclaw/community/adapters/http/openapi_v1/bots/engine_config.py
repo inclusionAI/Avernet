@@ -29,9 +29,9 @@ than inside it.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -123,7 +123,7 @@ async def get_bot_engine_config(
 @envelope_errors
 async def update_bot_engine_config(
     bot_id: BotIdPath,
-    body: dict[str, Any],
+    body: Annotated[dict[str, Any], Body(min_length=1, description="Non-empty engine configuration JSON object.")],
     request: Request,
     owner_id: UserIdDep,
     stage: WriteStageQuery = RuntimeStage.DRAFT,

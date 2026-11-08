@@ -388,6 +388,7 @@ async fn update_sends_change_reason() {
                 "name": "player_state",
                 "scope_level": "session",
                 "content": "张三出局",
+                "owners": {"userIds": ["bot-a", "bot-b"]},
                 "change_reason": "第一轮投票"
             }),
         )
@@ -397,6 +398,10 @@ async fn update_sends_change_reason() {
     let body = capture.lock().unwrap().take().unwrap();
     assert_eq!(body["name"], "player_state");
     assert_eq!(body["content"], "张三出局");
+    assert_eq!(
+        body["owners"],
+        serde_json::json!({"userIds": ["bot-a", "bot-b"]})
+    );
     assert_eq!(body["change_reason"], "第一轮投票");
 }
 

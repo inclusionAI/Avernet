@@ -30,6 +30,24 @@ pub struct UserIdentityInfo {
 pub trait BotLookupPort: Send + Sync {
     async fn find_bot_by_token(&self, token: &str) -> Result<Option<BotInfo>, AuthError>;
 
+    async fn find_bot_by_token_for_actor(
+        &self, token: &str, expected_actor: Option<&str>,
+    ) -> Result<Option<BotInfo>, AuthError> {
+        let bot = self.find_bot_by_token(token).await?;
+        if let Some(bot) = &bot { crate::validate_actor(expected_actor, &bot.bot_uuid)?; }
+        else if expected_actor.is_some() { return Err(AuthError::InvalidToken("matching Bot token is required".into())); }
+        Ok(bot)
+    }
+
+    async fn find_bot_by_agent_code_for_actor(
+        &self, agent_code: &str, expected_actor: Option<&str>,
+    ) -> Result<Option<BotInfo>, AuthError> {
+        let bot = self.find_bot_by_agent_code(agent_code).await?;
+        if let Some(bot) = &bot { crate::validate_actor(expected_actor, &bot.bot_uuid)?; }
+        else if expected_actor.is_some() { return Err(AuthError::InvalidToken("matching AgentPass Bot is required".into())); }
+        Ok(bot)
+    }
+
     /// Resolve a provider-registered bot by its `agent_code` (set to the bot's
     /// `provider_bot_ref` at registration). Auth plugins can use this as a
     /// fallback when token-native bot identity resolution does not produce a

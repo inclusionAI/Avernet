@@ -11,7 +11,7 @@ pub async fn provider_registration_core_service_contract_tests(
     provider_id: &str,
     owner: &str,
 ) {
-    let modes = core.authorize(provider_id, owner).await.unwrap();
+    let modes = core.authorize(provider_id, owner).await.unwrap().allowed_modes;
     assert!(modes.contains(&ProviderRegistrationMode::Plugin));
     assert!(modes.contains(&ProviderRegistrationMode::Gateway));
     assert!(matches!(
@@ -19,6 +19,7 @@ pub async fn provider_registration_core_service_contract_tests(
         Err(ServiceError::Forbidden(_))
     ));
     let request = RegisterProviderBot {
+        token_auth_mode: None,
         provider_id: provider_id.into(),
         provider_bot_ref: "contract-upstream".into(),
         owner: owner.into(),

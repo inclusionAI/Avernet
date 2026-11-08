@@ -20,6 +20,8 @@ function toChatBotView(bot: {
   engine?: string;
   botType?: string;
   detailsResolved?: boolean;
+  /** Bot 实例运行状态(ACTIVE/PENDING/FAILED);2026-10-21 起从 metadata 详情透传,缺省视为可用。 */
+  botStatus?: string;
 }): ChatBotView {
   const { realBotId, ownerId } = splitBotId(bot.id);
   return {
@@ -33,6 +35,7 @@ function toChatBotView(bot: {
     engine: bot.engine,
     botType: bot.botType,
     isFriendBot: true,
+    status: bot.botStatus,
   };
 }
 

@@ -9,6 +9,8 @@ a 500. A mock would assert that the code calls itself the way it was written.
 
 from __future__ import annotations
 
+from agentclaw.community.plugin_api.models import BotModel
+
 from contextlib import contextmanager
 
 import pytest
@@ -40,7 +42,7 @@ def sessions():
     """A fresh in-memory database with only this feature's two tables."""
     engine = create_engine("sqlite://")
     Base.metadata.create_all(
-        engine, tables=[BotAppGrantModel.__table__, BotAppGrantLogModel.__table__]
+        engine, tables=[BotModel.__table__, BotAppGrantModel.__table__, BotAppGrantLogModel.__table__]
     )
     yield sessionmaker(bind=engine)
     engine.dispose()
@@ -111,6 +113,14 @@ class _LiveBots:
             return set()
         self.queries += 1
         return {pair for pair in pairs if pair in self.live}
+
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        matches = self.filter_live_bots([(bot_id, locator)])
+        return [{"id": 1, "bot_id": bid, "entity_id": entity, "owner_id": entity}
+                for bid, entity in matches]
+
+    def get_live_bot_owners_by_entity(self, pairs):
+        return {pair: pair[1] for pair in self.filter_live_bots(pairs)}
 
 
 @pytest.fixture

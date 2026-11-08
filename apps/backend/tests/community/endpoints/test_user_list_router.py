@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agentclaw.community.core.user_list.models import EntityUserListModel
+from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
@@ -18,8 +19,7 @@ _ENTITY_ID = "caller_rollout_user"
 _OTHER_ENTITY_ID = "another_user"
 _USER_LIST_TYPE = "caller_identity"
 _CORRECTION_TARGET = "corrected_rollout_user"
-_CORRECTION_ACTOR = "first_authenticated_corrector"
-_SECOND_CORRECTION_ACTOR = "second_authenticated_corrector"
+_CORRECTION_ACTOR = "100000"
 
 
 def _seed_user(world) -> None:
@@ -92,7 +92,7 @@ def _seed_manual_correction_actor(world) -> None:
 
 
 def _seed_second_correction_actor_with_member(world) -> None:
-    make_staff_user(world, user_id=_SECOND_CORRECTION_ACTOR)
+    make_staff_user(world, user_id=_CORRECTION_ACTOR)
     with world.get(DatabasePlugin).orm_session() as session:
         session.add(
             EntityUserListModel(
@@ -105,6 +105,7 @@ def _seed_second_correction_actor_with_member(world) -> None:
 
 def _seed_non_correction_user(world) -> None:
     make_staff_user(world, user_id=_ENTITY_ID)
+    world.get(AuthPlugin).set_response("is_operator_allowed", False)
 
 
 def _assert_ctoken_not_exposed(response, world) -> None:
@@ -308,8 +309,8 @@ def user_list_check_requires_an_entity_id():
     ),
     extra_assertions=(_assert_ctoken_not_exposed,),
 )
-def user_list_correction_allows_an_authenticated_user_to_add():
-    """An authenticated user may enable a current-environment entry."""
+def user_list_correction_allows_a_super_admin_to_add():
+    """A super admin may enable a current-environment entry."""
 
 
 @endpoint_test(
@@ -317,7 +318,7 @@ def user_list_correction_allows_an_authenticated_user_to_add():
     path="/api/v1/user-lists/correct",
     scenario="authenticated_user_removes_member",
     input=CaseInput(
-        headers={"x-user-id": _SECOND_CORRECTION_ACTOR},
+        headers={"x-user-id": _CORRECTION_ACTOR},
         json_body={
             "entity_id": _CORRECTION_TARGET,
             "user_list_type": _USER_LIST_TYPE,
@@ -330,8 +331,8 @@ def user_list_correction_allows_an_authenticated_user_to_add():
         json_contains={"success": True, "data": {"in_whitelist": False}},
     ),
 )
-def user_list_correction_allows_another_authenticated_user_to_remove():
-    """Another authenticated user may disable an exact entry."""
+def user_list_correction_allows_a_super_admin_to_remove():
+    """A super admin may disable an exact entry."""
 
 
 @endpoint_test(
@@ -380,7 +381,7 @@ def user_list_correction_rejects_invalid_environment():
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="any_authenticated_user_adds_member",
+    scenario="non_super_admin_cannot_add_member",
     input=CaseInput(
         headers={"x-user-id": _ENTITY_ID},
         json_body={
@@ -390,13 +391,10 @@ def user_list_correction_rejects_invalid_environment():
         },
     ),
     seed=_seed_non_correction_user,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": True, "data": {"in_whitelist": True}},
-    ),
+    expect=ExpectError(status=403),
 )
-def user_list_correction_allows_every_authenticated_user():
-    """The correction endpoint has no user-number-specific authorization."""
+def user_list_correction_rejects_non_super_admin():
+    """Authentication alone does not authorize membership writes."""
 
 
 @endpoint_test(
@@ -417,3 +415,17 @@ def user_list_correction_allows_every_authenticated_user():
 )
 def user_list_correction_rejects_extra_request_fields():
     """The correction write schema remains strict."""
+
+
+@endpoint_test(
+    method="PUT", path="/api/v1/user-lists/correct",
+    scenario="server_managed_runtime_artifacts_cannot_be_enabled",
+    input=CaseInput(
+        headers={"x-user-id": _ENTITY_ID},
+        json_body={"entity_id": "*", "user_list_type": "service_bot_runtime_artifact", "in_whitelist": True},
+    ),
+    seed=_seed_non_correction_user,
+    expect=ExpectError(status=403),
+)
+def user_list_correction_rejects_server_managed_runtime_artifact_type():
+    """An ordinary login cannot opt all users into a server-side build feature."""

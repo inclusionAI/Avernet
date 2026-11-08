@@ -40,6 +40,25 @@ function fixture() {
 }
 
 describe('Workflow Repair Git-backed AIS execution', () => {
+  it.each(['valid','wrong-execution','changed-tree'])('reads failure diagnostics without a candidate and rejects invalid binding: %s',async(mode)=>{
+    const f=fixture();
+    const identity={stepId:'step',attempt:1,executionId:'execution'};
+    const error={code:'CANDIDATE_WRITE_FAILED',message:'模型结果不是合法 JSON',stage:'parse_model_output',details:{line:1,column:2,itemIds:['item-1']}};
+    const payload={schemaVersion:'workflow-repair-result/v1',taskId:'task',revision:1,...identity,parentCandidateCommit:f.baseline,status:'failed',error};
+    if(mode==='wrong-execution')payload.executionId='other';
+    if(mode==='changed-tree'){writeFileSync(join(f.source,'workflows/wf.yaml'),'partial change');f.git(f.source,'add','.');}
+    f.git(f.source,'commit','--allow-empty','-qm','ClawMind workflow-repair-failure/v1\n'+JSON.stringify(payload));
+    f.git(f.source,'push','-q','origin','HEAD:refs/heads/repair-failure/task/1-execution');
+    const request={actorId:'owner',jobId:'job',identity,input:{taskId:'task',revision:1,taskBranch:'repair/wf/task',baseline:{packCommit:f.baseline}}} as never;
+    const result=new RepairGitStore(f.reader).result(request);
+    if(mode==='valid')await expect(result).resolves.toEqual({status:'failed',error});
+    else await expect(result).rejects.toThrow();
+  });
+  it('declares its existing v1 integration transport for historical goal generation', () => {
+    const adapter = createRepairAisExecution({} as IDatabase, {} as AistudioService, {} as RepairGitStore, 1, 'https://clawweb.example');
+    expect(adapter.integrationVersion).toBe('workflow-proposal-plan/v1');
+  });
+
   it('rejects partial or invalid repair configuration but permits an unconfigured optional provider', async () => {
     await expect(resolveRepairAisConfiguration('fixture')).resolves.toBeUndefined();
     await expect(resolveRepairAisConfiguration('fixture', 'not-a-number', '/missing/repair-mirror.git'))
@@ -60,6 +79,27 @@ describe('Workflow Repair Git-backed AIS execution', () => {
       candidateCommit: 'a'.repeat(40), parentCandidateCommit: 'b'.repeat(40),
       packDigest: 'c'.repeat(40), summary: '修复建议', itemResults: [] }))
       .toBe('441d2670ec7322879c1dd954da12c3ca2b98ef4c0b58cdb6262c9a621229903c');
+  });
+  it('reads both draft and background baselines without a configuration-equality gate and retains Pack identity checks', async () => {
+    const f = fixture();
+    const deployedSpec = { id: 'wf', nodes: [{ id: 'changed-in-history' }] };
+    const row = { pack_id: 'pack', version: 4, deploy_number: 1, tag_name: 'deploy/wf/#1', spec_json: JSON.stringify(deployedSpec) };
+    const db = { query: async () => [row] } as unknown as IDatabase;
+    const execute = vi.fn();
+    const store = new RepairGitStore(f.reader);
+    const adapter = createRepairAisExecution(db, { execute } as unknown as AistudioService, store, 28720256, 'https://clawweb.example');
+    await expect(adapter.resolveBaseline('wf', 'draft')).resolves.toMatchObject({
+      workflowId: 'wf', packId: 'pack', packCommit: f.baseline,
+      packDigest: f.git(f.source, 'rev-parse', 'HEAD^{tree}'), specPath: 'workflows/wf.yaml',
+      specDigest: createHash('sha256').update(f.spec).digest('hex'), proposalSpecDigest: digestRepairJson(deployedSpec),
+    });
+    await expect(adapter.resolveBaseline('wf')).resolves.toMatchObject({
+      workflowId: 'wf', packCommit: f.baseline, proposalSpecDigest: digestRepairJson(deployedSpec),
+      specDigest: createHash('sha256').update(f.spec).digest('hex'),
+    });
+    row.pack_id = 'wrong-pack';
+    await expect(adapter.resolveBaseline('wf', 'draft')).rejects.toThrow('expected Pack workflow');
+    expect(execute).not.toHaveBeenCalled();
   });
   it('resolves a frozen active tag and reads only identity-bound Git result metadata', async () => {
     const f = fixture();
@@ -87,6 +127,10 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const request = { actorId: '123', identity: { stepId: 'WR-1-draft-2', attempt: 1, executionId: 'WRX-1' },
       input: { taskId: 'WR-1', revision: 2, parentCandidateCommit: null, taskBranch: branch, baseline } } as Parameters<typeof store.result>[0];
     expect(await store.result(request)).toMatchObject({ status: 'succeeded', draft });
+    const failure={...result,status:'failed',draft:undefined,checks:undefined,parentCandidateCommit:f.baseline,error:{code:'CANDIDATE_WRITE_FAILED',message:'late push error'}};
+    const failureCommit=f.git(f.source,'commit-tree',f.git(f.source,'rev-parse',`${f.baseline}^{tree}`),'-p',f.baseline,'-m','ClawMind workflow-repair-failure/v1\n'+JSON.stringify(failure));
+    f.git(f.source,'push','-q','origin',`${failureCommit}:refs/heads/repair-failure/WR-1/2-${request.identity.executionId}`);
+    expect(await store.result(request)).toMatchObject({status:'succeeded',draft});
     expect(await store.diff({ workflowId: 'wf', taskId: 'WR-1', revision: 1,
       baseCommit: f.baseline, candidateCommit: candidate })).toMatchObject({
         files: [{ path: 'workflows/wf.yaml', status: 'M', before: f.spec, after: 'id: wf\nnodes: [fixed]\n',
@@ -177,7 +221,7 @@ describe('Workflow Repair Git-backed AIS execution', () => {
   it('dispatches the frozen v2 envelope as one AIS global parameter', async () => {
     const execute = vi.fn().mockResolvedValue('job-1');
     const adapter = createRepairAisExecution({} as IDatabase, { execute } as unknown as AistudioService,
-      {} as RepairGitStore, 28720256);
+      {} as RepairGitStore, 28720256, 'https://clawweb.example');
     const input = { taskId: 'WR-1', revision: 1, excludedSources: { count: 3, digest: 'a'.repeat(64) } };
     expect(await adapter.dispatch({ actorId: '123', identity: { stepId: 'WR-1-draft-2', attempt: 1,
       executionId: 'WRX-1' }, input } as Parameters<typeof adapter.dispatch>[0])).toEqual({ jobId: 'job-1' });
@@ -187,4 +231,30 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     expect(JSON.parse(globals['${clawevolve_params}'])).toMatchObject({ schemaVersion: 'clawevolve-task/v1',
       taskType: 'workflow_repair', input });
   });
+  it.each([false,true])('dispatches core and scoped materials through the production adapter (integration=%s)',async(integrated)=>{
+    const execute=vi.fn().mockResolvedValue('job-materials');
+    const adapter=createRepairAisExecution({} as IDatabase,{execute} as unknown as AistudioService,{} as RepairGitStore,99,'https://clawweb.example');
+    const input={taskId:'WR-1',revision:1,materials:{schemaVersion:'repair-frozen-materials/v1',recordId:'a'.repeat(64),sha256:'b'.repeat(64),bytes:5600000},items:[{itemId:'item-1',instruction:'keep original goal',context:{facts:['expected string, actual object']}}],...(integrated?{integration:{schemaVersion:'workflow-proposal-plan/v1'}}:{})};
+    const materialAccess={schemaVersion:'repair-material-download/v1',token:'dummy',files:[{itemId:'item-1',bytes:5600000,sha256:'c'.repeat(64)}]};
+    await adapter.dispatch({actorId:'owner',identity:{stepId:'step',attempt:1,executionId:'exec'},input,materialAccess} as Parameters<typeof adapter.dispatch>[0]);
+    const envelope=JSON.parse(execute.mock.calls[0][1]['${clawevolve_params}']);
+    expect(adapter.materialDeliveryVersion).toBe('repair-material-download/v1');
+    expect(envelope.input).toEqual(input);
+    expect(envelope.materialAccess).toEqual({...materialAccess,baseUrl:'https://clawweb.example/api/workflow-repairs/material-download'});
+    expect(envelope.execution.action).toBe(integrated?'integrate_candidate_materials_v1':'generate_candidate_materials_v1');
+    expect(Buffer.byteLength(JSON.stringify(envelope))).toBeLessThan(10000);
+  });
+
+  it.each(['http://remote.example','https://clawweb.example/path','https://clawweb.example/?token=example'])('rejects an unsafe material service origin before any AIS call: %s',(origin)=>{
+    const execute=vi.fn();
+    expect(()=>createRepairAisExecution({} as IDatabase,{execute} as unknown as AistudioService,{} as RepairGitStore,99,origin)).toThrow('origin');
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('refuses a frozen material reference without download access before calling AIS',async()=>{
+    const execute=vi.fn();
+    const adapter=createRepairAisExecution({} as IDatabase,{execute} as unknown as AistudioService,{} as RepairGitStore,99,'https://clawweb.example');
+    await expect(adapter.dispatch({input:{materials:{}},identity:{stepId:'step',attempt:1,executionId:'exec'},actorId:'actor'} as Parameters<typeof adapter.dispatch>[0])).rejects.toThrow('Frozen material access');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
 });

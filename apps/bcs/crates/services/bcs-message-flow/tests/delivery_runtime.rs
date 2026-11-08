@@ -490,8 +490,7 @@ fn command(id: &str, session: &str) -> AdmitMessageDeliveries {
             target_bot_id: "bot".into(),
             kind: DeliveryType::Send,
             max_queued: 10,
-            semantic_projection_json: serde_json::json!({"version":1}),
-        }],
+            semantic_projection_json: serde_json::json!({"version":1}), run_id: None,}],
     }
 }
 

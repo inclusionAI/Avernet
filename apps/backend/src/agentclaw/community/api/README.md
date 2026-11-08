@@ -3,7 +3,7 @@
 **The Service API surface.** A flat collection of modules, one per
 public service, that re-export the `@runtime_checkable Protocol` any
 consumer (HTTP, CLI, in-process embedder) calls against. FastAPI routers
-live next door under [`adapters/http/`](../adapters/http/README.md); they
+live next door under `adapters/http/`; they
 Inject a Protocol from this layer rather than the concrete service class
 in `core/`.
 
@@ -56,6 +56,8 @@ api/
 
 ## Enforcement
 
+Current conventions and authority: [Backend development guide](../../../../README.md).
+
 Five gates under `tests/community/architecture/`:
 
 - `test_protocol_base_ordering.py` — a Protocol base never precedes a
@@ -103,7 +105,7 @@ purpose: "Service API Protocols — transport-agnostic contracts between adapter
 provides:
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
-  - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
@@ -116,15 +118,24 @@ provides:
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
+  - ForumInteractionServiceProtocol
+  - ForumAuthorStatsServiceProtocol
+  - ForumPersonalCenterActivityServiceProtocol
   - FeedbackServiceProtocol
+  - ForumDigestReportServiceProtocol
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
   - AcliCliServiceProtocol
+  - AgentSwarmServiceProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.expert_market
+  - agentclaw.community.core.bot_knowledge
+  - agentclaw.community.core.space_knowledge
+  - agentclaw.community.core.bot_management.owner_handoff.contracts
   - agentclaw.community.core.bot_management.engine_version.protocol
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow
@@ -181,6 +192,7 @@ internal_dependencies:
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
+  - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
@@ -189,6 +201,7 @@ internal_dependencies:
   - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.agentswarm.service.protocols  # AgentSwarm Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.architect_rebind_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.data_proxy_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -213,8 +226,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
+  - agentclaw.community.core.apply_engine.compiler  # StateRef — the (kind, reference) pair apply_run_service's start_apply takes, re-exported beside the Protocol; each producer declares its own (MANIFEST_STATE via bot_config_manifest_service, genome_state in core.bot_genome.compile)
+  - agentclaw.community.core.apply_engine.run.service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_genome.genome_registry_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_genome.promotion.promotion_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.apply_engine.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
   - agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_credential_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_iam_token_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -235,6 +251,7 @@ internal_dependencies:
   - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.task.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.forum.digest.report_service_protocol  # ForumDigestReportServiceProtocol — defined in its owning core module, re-exported here
   - agentclaw.community.core.task.feedback.service_protocol  # FeedbackServiceProtocol — defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.content_scanner_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.health_diagnosis_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -309,3 +326,17 @@ The 100-character name and 65,535-byte description limits match the current
 `ac_skill` persistence columns. Legacy no-frontmatter upload remains a
 compatibility fallback outside the canonical Protocol; removing that fallback
 would require a separate migration and compatibility review.
+
+
+## User-list Service API V2
+
+UserListServiceProtocol retains exact legacy is_in_user_list reads (user/all).
+correct_membership adds subject_type=user|department (default user) and
+bot_type=service|personal|all (default all), and changes only the specified complete
+scope. matches_user requires a trusted actual Bot type (service or personal),
+checks that type or all, then combines user membership OR department ancestry.
+It resolves departments through StaffDeptPlugin only when applicable rules exist;
+missing data or directory failure grants nothing. Path segments are case-sensitive,
+subject to explicit legacy unique-collation write conflicts (409). No public rule
+listing is exposed. The real DI provider supplies repository plus staff directory.
+The signature gate and real SQLite/HTTP behavior tests cover this contract.

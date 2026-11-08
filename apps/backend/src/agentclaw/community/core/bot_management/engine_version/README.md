@@ -15,7 +15,9 @@ consumes:
   - CollaboratorServiceProtocol
   - DeviceContextResolver
   - EngineReleaseProbe
+  - ServiceLifecyclePort
 internal_dependencies:
+  - agentclaw.community.core.bot_inventory
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.services
@@ -47,10 +49,20 @@ Hints depend only on release facts: older/legacy recommends restart, same/newer
 needs none, and failed reads, missing targets or incomparable branches remain
 unknown. Provider and image Pin/template policy do not gate this advisory.
 The service does not read template policy or change existing restart behavior.
-Restricted remains in the response type for compatibility but is not emitted.
+Restricted is emitted when inspection/restart eligibility is not established.
 Deployment acceptance must keep default images aligned with the paired release
 and prevent independent version-marker overrides.
 
 Conformance is exercised at the Service API and signed HTTP seam in
 `tests/community/core/engine_version/` and
 `tests/community/adapters/http/openapi_v1/test_engine_version.py`.
+
+Visible readers without explicit restart standing receive not_applicable /
+restart_not_permitted, unknown comparison and restricted restart_hint before
+any device access. Visibility follows the existing effective Space read or
+explicit collaboration directory relation; neither is an operation grant.
+Strangers and absent Bots remain masked 404. Service draft evidence is read
+through the existing ServiceLifecyclePort and must carry draft restart action.
+The advisory owns this two-outcome authorization because a raising HTTP Check
+cannot represent a normal restricted result. Active restart authorization and
+edit-lock checks remain unchanged. No wire fields or enum values are added.

@@ -18,6 +18,21 @@ beforeEach(() => {
   jest.useFakeTimers();
 });
 
+it('unmount cancels retries even if an in-flight reconnect rejects later', async () => {
+  let reject!: (error: Error) => void;
+  const provider = makeProvider();
+  provider.reconnect = jest.fn<() => Promise<void>>().mockImplementation(
+    () => new Promise((_, fail) => { reject = fail; }),
+  );
+  const { rerender, unmount } = render(provider, 'connected');
+  rerender({ connectionStatus: 'disconnected' });
+  act(() => jest.advanceTimersByTime(1000));
+  unmount();
+  await act(async () => reject(new Error('late')));
+  act(() => jest.advanceTimersByTime(30_000));
+  expect(provider.reconnect).toHaveBeenCalledTimes(1);
+});
+
 afterEach(() => {
   jest.useRealTimers();
 });

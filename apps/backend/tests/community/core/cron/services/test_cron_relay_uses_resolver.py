@@ -48,6 +48,8 @@ def _make_service(
 ):
     """构造 CronRelayService — 注入 resolver。"""
     return CronRelayService(
+        runtime_bindings=MagicMock(),
+        collaborators=MagicMock(),
         bot_provider=bot_provider or MagicMock(),
         device_provider=device_provider or MagicMock(),
         transport=transport or MagicMock(),
@@ -636,7 +638,7 @@ class TestListServiceBotRuntimeStages:
         resolver.resolve_for_binding.assert_any_call(30, "owner-1", bot_id="service-bot")
 
     @pytest.mark.asyncio
-    async def test_service_bot_online_list_stays_at_stage_level(self):
+    async def test_service_bot_online_list_preserves_each_instance(self):
         bot_provider = MagicMock()
         bot_list = {
             "items": [
@@ -718,22 +720,21 @@ class TestListServiceBotRuntimeStages:
             item for item in result["data"]
             if item["runtime_stage"] == "online"
         ]
-        assert len(online_rows) == 1
-        assert "device_uuid" not in online_rows[0]
+        assert len(online_rows) == 2
+        assert {row["device_uuid"] for row in online_rows} == {"DEVICE-001", "DEVICE-002"}
         assert "provider_device_id" not in online_rows[0]
         assert "bot_uuid" not in online_rows[0]
         assert "instance_health_status" not in online_rows[0]
         assert {item["id"] for item in online_rows} == {"shared-task"}
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
-        device_provider.list_devices_by_runtime_binding.assert_not_called()
-        resolver.resolve_for_binding_invoke.assert_called_once_with(
-            30, "owner-1", bot_id="service-bot"
-        )
+        device_provider.list_devices_by_runtime_binding.assert_called_once()
+        assert resolver.resolve_for_binding_invoke.call_count == 2
+        assert {call.kwargs["device_uuid"] for call in resolver.resolve_for_binding_invoke.call_args_list} == {"DEVICE-001", "DEVICE-002"}
         resolver.resolve_for_binding.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_service_bot_list_does_not_query_instances(self):
+    async def test_service_bot_list_reports_instance_query_failure(self):
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
             "bot_id": "service-bot",
@@ -805,11 +806,10 @@ class TestListServiceBotRuntimeStages:
         assert result["success"] is True
         assert [item["id"] for item in result["data"]] == [
             "draft-task",
-            "online-task",
         ]
-        assert result["failed_targets"] == []
+        assert result["failed_targets"][0]["reason"] == "instances_query_failed"
         device_provider.get_instances.assert_not_called()
-        device_provider.list_devices_by_runtime_binding.assert_not_called()
+        device_provider.list_devices_by_runtime_binding.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_service_bot_list_records_failed_runtime_without_failing_result(self):

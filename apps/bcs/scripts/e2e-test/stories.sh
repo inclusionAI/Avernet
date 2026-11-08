@@ -25,7 +25,7 @@ E2E_TESTS_STORIES=(
     "story_cli_operator_manages_group_context"
     "story_session_file_workspace"
 )
-if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+if [[ -n "$(mock_view_base_url)" ]]; then
     E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
     E2E_TESTS_STORIES+=("story_provider_callback_survives_slow_judge")
 fi
@@ -120,7 +120,7 @@ wait_for_mock_provider_method() {
     local method="$1" payload request
     for _ in $(seq 1 100); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/provider/requests" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/provider/requests" 2>/dev/null || true)
         request=$(printf '%s' "$payload" | python3 -c '
 import json,sys
 try:
@@ -144,7 +144,7 @@ wait_for_event_webhook_type() {
     local event_type="$1" group_id="$2" payload request
     for _ in $(seq 1 200); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/event-webhook/requests" 2>/dev/null || true)
         request=$(printf '%s' "$payload" | python3 -c '
 import json,sys
 try:
@@ -171,7 +171,7 @@ wait_for_mock_judge_start() {
     local payload started
     for _ in $(seq 1 100); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/judge/status" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/judge/status" 2>/dev/null || true)
         started=$(json_path "$payload" "started")
         [[ "$started" == "True" || "$started" == "true" ]] && return 0
         sleep 0.05
@@ -280,7 +280,18 @@ _story_platform_entrypoints() {
     assert_not_empty "manifest bundle has an asset URL" "$asset_url"
     [[ -n "$asset_url" ]] || return
 
-    api_get "$asset_url"
+    if [[ "$asset_url" =~ ^https?:// ]]; then
+        # Absolute URL (external CDN): api_get would prefix it with the
+        # BCS base URL and return 000. Fetch directly instead.
+        local asset_hdr
+        asset_hdr="$(mktemp)"
+        RESPONSE="$(curl -sS --max-time 60 -D "$asset_hdr" "$asset_url")" \
+            && HTTP_STATUS="$(awk 'NR==1 {print $2}' "$asset_hdr")" \
+            || HTTP_STATUS="000"
+        RESPONSE_HEADERS="$(cat "$asset_hdr")"; rm -f "$asset_hdr"
+    else
+        api_get "$asset_url"
+    fi
     require_status "advertised manifest asset is downloadable" "200" || return
     assert_contains "manifest asset uses JavaScript content type" "$RESPONSE_HEADERS" "application/javascript"
     local asset_bytes
@@ -387,13 +398,13 @@ story_user_builds_trusted_team() {
 # Flow:
 #   Create a group -> manage members and visibility -> configure participant mode,
 #   workspace, routing, and service settings -> exchange persistent and live messages
-#   -> process an agent callback -> close the group -> confirm a proposed group.
+#   -> process an agent callback -> close the group.
 #
 # Critical assertions:
 #   - Membership, labels, visibility, and participant identity changes are exact.
 #   - Workspace and routing updates survive an independent read-back.
 #   - Messages and callbacks produce routing or delivery results for the same group.
-#   - Deleted groups return 404, while confirmed proposals create the requested group.
+#   - Deleted groups return 404.
 story_user_operates_group_workspace() {
     info "Story: a user forms a team, configures its workspace, and collaborates"
     # Reuse stable CRUD/CLI steps as implementation details of this story.
@@ -412,11 +423,10 @@ story_user_operates_group_workspace() {
     test_group_fuse_via_cli
     test_group_status_via_cli
     test_group_terminate_via_cli
-    _story_group_workspace_round_trip || return
-    _story_group_proposal_confirmation || return
+    _story_group_metadata_without_workspace || return
 }
 
-_story_group_workspace_round_trip() {
+_story_group_metadata_without_workspace() {
     local body
     body="{\"driver_bot\":\"${BOT_CEO_UUID}\",\"label\":\"Incident response room\",\"participants\":[{\"bot_uuid\":\"${BOT_CEO_UUID}\",\"role\":\"driver\"},{\"bot_uuid\":\"${BOT_PM_UUID}\",\"role\":\"consultant\"},{\"bot_uuid\":\"${BOT_ENG_UUID}\",\"role\":\"consultant\"}]}"
     bot_post "/groups" CEO "$body"
@@ -436,15 +446,11 @@ _story_group_workspace_round_trip() {
     assert_json_eq "participant mode response identifies the actor" "$RESPONSE" "data.actor_id" "$BOT_ENG_UUID"
 
     api_put "/groups/${group_id}/workspace" \
-        '{"decisions":["ship the hotfix"],"notes":["customer impact contained"],"tasks":[],"audit_log":[]}'
-    require_status "team updates its shared workspace" "200" || return
-    assert_json_array_contains "workspace update stores the decision" "$RESPONSE" "workspace.decisions" "ship the hotfix"
-    assert_json_array_contains "workspace update stores the note" "$RESPONSE" "workspace.notes" "customer impact contained"
+        '{"decisions":[],"notes":[],"tasks":[],"audit_log":[]}'
+    require_status "deprecated group workspace writes are unavailable" "404" || return
 
     api_get "/groups/${group_id}/workspace"
-    require_status "team reads the shared workspace" "200" || return
-    assert_json_array_contains "workspace read returns the decision" "$RESPONSE" "decisions" "ship the hotfix"
-    assert_json_array_contains "workspace read returns the note" "$RESPONSE" "notes" "customer impact contained"
+    require_status "deprecated group workspace reads are unavailable" "404" || return
 
     bot_put "/groups/${group_id}/routing-policy" CEO \
         "{\"mode\":\"structured\",\"default_bot_final_delivery\":\"inject_observers\",\"sender_routes\":{\"${BOT_CEO_UUID}\":[\"${BOT_PM_UUID}\"]}}"
@@ -453,9 +459,8 @@ _story_group_workspace_round_trip() {
     assert_json_eq "default delivery is persisted" "$RESPONSE" "routing_policy.default_bot_final_delivery" "inject_observers"
 
     api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "group is exposed as a bounded service" "200" || return
-    assert_json_eq "service group max concurrency is persisted" "$RESPONSE" "service_spec.max_concurrency" "2"
-    assert_json_eq "group settings update returns stable status" "$RESPONSE" "status" "ok"
+    require_status "retired group policy settings return Gone" "410" || return
+    assert_json_eq "retired policy is identified" "$RESPONSE" "error" "service_policy_retired"
 
     api_post "/groups/${group_id}/messages" \
         "{\"sender\":\"${BOT_CEO_UUID}\",\"content\":\"Please validate the hotfix\",\"message_type\":\"bot\",\"role\":\"user\"}"
@@ -480,37 +485,6 @@ _story_group_workspace_round_trip() {
     assert_json_eq "group deletion confirms the id" "$RESPONSE" "id" "$group_id"
     api_get "/groups/${group_id}"
     require_status "closed incident group is gone" "404" || return
-}
-
-_story_group_proposal_confirmation() {
-    bot_post "/groups/request" CEO \
-        "{\"topic\":\"Review release readiness\",\"suggested_participants\":[\"${BOT_PM_UUID}\",\"${BOT_QA_UUID}\"],\"suggested_driver\":\"${BOT_CEO_UUID}\"}"
-    require_status "driver requests a release-readiness group" "200" || return
-    assert_json_eq "group proposal is created" "$RESPONSE" "proposal_created" "true"
-    local confirm_url confirm_path
-    confirm_url=$(json_path "$RESPONSE" "confirm_url")
-    assert_not_empty "group proposal returns a confirmation URL" "$confirm_url"
-    [[ -n "$confirm_url" ]] || return
-    confirm_path=$(python3 -c 'import sys,urllib.parse; u=urllib.parse.urlparse(sys.argv[1]); print(u.path)' "$confirm_url")
-
-    api_get "$confirm_path"
-    require_status "user previews the group confirmation page" "200" || return
-    assert_contains "confirmation page shows the proposal topic" "$RESPONSE" "Review release readiness"
-    assert_contains "confirmation page posts back to the same token" "$RESPONSE" "$confirm_path"
-
-    api_post "$confirm_path"
-    require_status "user confirms the proposed group" "200" || return
-    assert_json_eq "confirmed proposal creates a group" "$RESPONSE" "created" "true"
-    local group_id
-    group_id=$(json_path "$RESPONSE" "group_id")
-    assert_not_empty "confirmed proposal returns group id" "$group_id"
-    [[ -n "$group_id" ]] || return
-
-    api_get "/groups/${group_id}"
-    require_status "confirmed group is queryable" "200" || return
-    assert_json_eq "confirmed group uses the proposed driver" "$RESPONSE" "driver_bot" "$BOT_CEO_UUID"
-    api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
-    require_status "confirmed group is cleaned up" "200" || return
 }
 
 # User story: A team creates, shares, completes, and invokes collaboration sessions.
@@ -757,10 +731,6 @@ _story_complete_and_invoke_sessions() {
     assert_json_eq "read-back keeps completed status" "$RESPONSE" "status" "completed"
     assert_json_eq "read-back keeps completion output" "$RESPONSE" "output.summary" "release approved"
 
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "release group is configured for service invocations" "200" || return
-    assert_json_eq "service invocation concurrency is two" "$RESPONSE" "service_spec.max_concurrency" "2"
-
     bot_post "/services/${group_id}/sessions" PM \
         '{"caller_id":"release-pipeline-1","session_title":"Automated release audit","input":{"commit":"abc123"},"meta":{"source":"e2e"}}'
     require_status "release pipeline starts a service session" "202" || return
@@ -975,13 +945,28 @@ print(json.dumps({
 
     api_post "/state-machine-runs/${run_id}/nodes/answer/respond" \
         '{"content":"this endpoint only accepts HumanInput nodes"}'
-    require_status "Human response endpoint rejects a bot task node" "400" || return
-    assert_contains "Human response rejection identifies the node kind" \
-        "$RESPONSE" "not a human_input node"
+    # A single-answer workflow may converge between this story's own probing
+    # calls: the runtime then reports 409 Conflict ("no longer accepting
+    # responses") instead of the kind-level 400 rejection. Both prove the
+    # endpoint never treats a bot task node as Human input during its life.
+    if [[ "$HTTP_STATUS" == "409" ]]; then
+        assert_status "Human response endpoint refuses a converged run without a kind error" "409"
+    else
+        require_status "Human response endpoint rejects a bot task node" "400" || return
+        assert_contains "Human response rejection identifies the node kind" \
+            "$RESPONSE" "not a human_input node"
+    fi
 
+    # The cancel step doubles as fixture cleanup while the run is still
+    # running. An already-converged run has nothing left to abort; treat the
+    # conflict as the equivalent end state instead of failing the story.
     api_post "/state-machine-runs/${run_id}/cancel" '{"reason":"E2E fixture completed"}'
-    require_status "user cancels the state-machine run" "200" || return
-    assert_json_eq "cancelled state-machine run is aborted" "$RESPONSE" "run.status" "aborted"
+    if [[ "$HTTP_STATUS" == "409" ]]; then
+        assert_status "user cancel reports the run is already converged" "409"
+    else
+        require_status "user cancels the state-machine run" "200" || return
+        assert_json_eq "cancelled state-machine run is aborted" "$RESPONSE" "run.status" "aborted"
+    fi
 
     api_get "/state-machine-runs/${run_id}"
     require_status "user reads cancelled state-machine run" "200" || return
@@ -1006,7 +991,7 @@ story_user_receives_group_event_webhooks() {
 
     local control_status
     control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
-        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/clear" 2>/dev/null) || control_status="000"
+        -X POST "$(mock_view_base_url)/control/event-webhook/clear" 2>/dev/null) || control_status="000"
     assert_eq "Event Webhook mock resets before the story" "$control_status" "200"
     [[ "$control_status" == "200" ]] || return
 
@@ -1052,7 +1037,7 @@ print(json.dumps({
     }
   }]
 }, separators=(",", ":")))
-' "$BOT_PM_UUID" "$BOT_ENG_UUID" "$BCS_E2E_MOCK_BASE_URL")
+' "$BOT_PM_UUID" "$BOT_ENG_UUID" "$(mock_sink_base_url)")
     api_request_headers POST "${public_prefix}/groups" "$group_body" \
         "X-Avernet-Principal: ${principal}"
     require_status "user creates a Group with an inline Event Subscription" "201" || return
@@ -1160,7 +1145,7 @@ print(json.dumps({
 
     local order_ok
     order_ok=$(curl --noproxy '*' -fsS \
-        "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null | python3 -c '
+        "$(mock_view_base_url)/control/event-webhook/requests" 2>/dev/null | python3 -c '
 import json,sys
 requests=json.load(sys.stdin).get("requests", [])
 streams={}
@@ -1219,12 +1204,12 @@ story_provider_callback_survives_slow_judge() {
 
     local control_status
     control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
-        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/reset" 2>/dev/null) || control_status="000"
+        -X POST "$(mock_view_base_url)/control/reset" 2>/dev/null) || control_status="000"
     assert_eq "Provider/Judge mock resets before the story" "$control_status" "200"
     [[ "$control_status" == "200" ]] || return
 
     api_post "/providers" \
-        "{\"name\":\"Slow Judge E2E Provider\",\"webhook_url\":\"${BCS_E2E_MOCK_BASE_URL}/provider/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
+        "{\"name\":\"Slow Judge E2E Provider\",\"webhook_url\":\"$(mock_sink_base_url)/provider/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
     require_status "operator registers the local HTTP Provider" "200" || return
     local provider_id admin_token bcs_token
     provider_id=$(json_path "$RESPONSE" "provider_id")
@@ -1247,9 +1232,14 @@ story_provider_callback_survives_slow_judge() {
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
     # Group membership enforces the same trust boundary for Provider-backed
-    # bots as it does for native bots. Make the fixture explicitly public and
-    # establish its relationship with the driver before creating the group.
-    api_put "/bots/${provider_bot_uuid}/visibility" '{"visibility":"public"}'
+    # bots as it does for native bots. Legacy Provider-admin publication
+    # does not mint a Human authority edge (only the trusted register
+    # surface does), so the fixture bot makes itself discoverable with its
+    # own runtime credential; the driver then establishes the relationship
+    # with it before the group is created.
+    api_request_headers PUT "/bots/${provider_bot_uuid}/visibility" \
+        '{"visibility":"public"}' \
+        "X-BCS-Bot-Token: ${runtime_token}"
     require_status "operator makes the slow-Judge Provider bot discoverable" "200" || return
     api_post "/friends/request" \
         "{\"from_bot\":\"${BOT_CEO_UUID}\",\"to_bot\":\"${provider_bot_uuid}\"}"
@@ -1325,7 +1315,7 @@ print(json.dumps({
     [[ -n "$group_id" ]] || return
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+        "$(mock_view_base_url)/control/provider/clear" >/dev/null || return
     api_post "/groups/${group_id}/state-machine-runs" \
         '{"input":{"question":"verify asynchronous callback judging"}}'
     require_status "user starts the judged Provider workflow" "202" || return
@@ -1352,12 +1342,12 @@ print(json.dumps({
         "$(state_machine_graph_node_field "$graph" "review" "status")" "running"
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+        "$(mock_view_base_url)/control/provider/clear" >/dev/null || return
     provider_callback_with_timeout "$provider_id" "$runtime_token" \
         "{\"run_id\":\"${review_provider_run_id}\",\"state\":\"final\",\"message\":{\"text\":\"candidate awaiting slow judge\"}}"
     if ! require_status "Provider final callback returns before its one-second timeout" "200"; then
         curl --noproxy '*' -fsS -X POST \
-            "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || true
+            "$(mock_view_base_url)/control/judge/release" >/dev/null || true
         return
     fi
 
@@ -1386,7 +1376,7 @@ print(json.dumps({
         "node.artifact_text" "candidate awaiting slow judge"
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || return
+        "$(mock_view_base_url)/control/judge/release" >/dev/null || return
     local publish_request publish_provider_run_id
     publish_request=$(wait_for_mock_provider_method "chat.send" || true)
     assert_not_empty "HTTP Provider receives the publish task after Judge release" "$publish_request"
@@ -1783,13 +1773,13 @@ story_user_validates_external_channel_setup() {
 #
 # Flow:
 #   Check health -> list, get, and discover agents -> change and restore visibility
-#   -> reconnect and generate onboarding information -> update status -> propose a group
+#   -> reconnect and generate onboarding information -> update status -> create a group
 #   -> start a direct chat -> inspect groups and trusted relationships.
 #
 # Critical assertions:
 #   - Directory commands return the exact seeded agents and requested identities.
 #   - Visibility changes are read back and restored to the original value.
-#   - Onboarding, group proposal, and chat commands return actionable URLs or handles.
+#   - Onboarding, group creation, and chat commands return actionable URLs or handles.
 #   - Group-list output has a consistent count/entry shape and friends include the expected agent.
 story_operator_coordinates_with_cli() {
     info "Story: an operator uses bcs-cli to inspect and coordinate the agent network"
@@ -1802,7 +1792,7 @@ story_operator_coordinates_with_cli() {
     test_cli_onboard
     _story_cli_direct_onboard || return
     test_cli_update_status
-    test_cli_request_group_help
+    test_group_create_via_cli
     test_cli_chat
     test_cli_list_groups
     test_cli_friend

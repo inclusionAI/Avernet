@@ -27,15 +27,13 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
-from sqlalchemy import Column, DateTime, Index, String, UniqueConstraint
-from sqlalchemy.sql import func
-
 from agentclaw.community.core.base import Base
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 from agentclaw.community.utils.env_utils import get_current_env
-
+from pydantic import BaseModel, Field
+from sqlalchemy import Column, DateTime, Index, String, UniqueConstraint
+from sqlalchemy.sql import func
 
 #: How much of an application's display name a grant row keeps.
 #:
@@ -94,7 +92,8 @@ class BotAppGrantRecord(BaseModel):
     app_name: str = Field(..., description="App display name as at consent time")
     bot_id: str = Field(..., description="The authorized bot")
     user_id: str = Field(..., description="The delegating user, resolved server-side")
-    owner_id: str = Field(..., description="Bot owner, resolved server-side")
+    owner_id: str = Field(..., description="Stable Bot entity locator in the legacy owner_id column")
+    current_owner_id: str | None = Field(default=None, description="Live personnel projection; absent on unenriched grant records")
     avernet_tenant: str = Field(..., description="Data-isolation tenant")
     env: str = Field(..., description="Environment marker")
     gmt_create: datetime = Field(..., description="When this authorization began")

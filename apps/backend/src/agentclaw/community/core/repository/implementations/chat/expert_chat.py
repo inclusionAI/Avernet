@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -66,6 +67,7 @@ class ExpertChatRepository(
         """Atomic upsert on uk_user_bot_owner_env (prod parity)."""
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             # get_bind() is the documented session→engine accessor in
             # both SA 1.4 and 2.0 (Session.bind has no 2.0 guarantee).
             # Dialect branch (not mode branch): both arms perform the
@@ -161,6 +163,7 @@ class ExpertChatRepository(
     ) -> bool:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             rowcount = (
                 db.query(self.Model)
                 .filter(
@@ -201,6 +204,7 @@ class ExpertChatRepository(
     ) -> Optional[str]:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             row = (
                 db.query(self.Model)
                 .filter(
@@ -219,6 +223,7 @@ class ExpertChatRepository(
         # Single blind UPDATE — no-op if the row is absent (prod parity).
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             db.query(self.Model).filter(
                 self.Model.user_id == user_id,
                 self.Model.bot_id == bot_id,
@@ -237,6 +242,7 @@ class ExpertChatRepository(
     ) -> bool:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             rowcount = (
                 db.query(self.Model)
                 .filter(
@@ -261,6 +267,7 @@ class ExpertChatRepository(
         """Atomically add or reactivate one multi-session index row."""
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             dialect = db.get_bind().dialect.name
             table = self.OwnedSessionModel.__table__
             values = {
@@ -320,6 +327,7 @@ class ExpertChatRepository(
     ) -> List[Dict[str, Any]]:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             query = db.query(self.OwnedSessionModel).filter(
                 self.OwnedSessionModel.user_id == user_id,
                 self.OwnedSessionModel.bot_id == bot_id,
@@ -351,6 +359,7 @@ class ExpertChatRepository(
     ) -> bool:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             rowcount = (
                 db.query(self.OwnedSessionModel)
                 .filter(
@@ -376,6 +385,7 @@ class ExpertChatRepository(
     ) -> int:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             return (
                 db.query(self.OwnedSessionModel)
                 .filter(

@@ -25,8 +25,8 @@ pub mod message;
 pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
-pub mod proposal;
 pub mod provider;
+pub mod provider_identity;
 pub mod provider_registration_token;
 pub mod register;
 pub mod registry;
@@ -68,12 +68,13 @@ pub use fusion::{
     ContextFusionResponse, ContextParticipantPerspective,
 };
 pub use group_context::{
-    GroupContextEntry, GroupContextEntryMeta, GroupContextPermission, GroupContextPolicy, GroupContextTime, ScopeLevel,
+    GroupContextEntry, GroupContextEntryMeta, GroupContextOwners, GroupContextPermission, GroupContextPolicy,
+    GroupContextTime, ScopeLevel,
 };
 pub use group::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
-    RoutingPolicy, SenderRoutesValidationError, Workspace,
+    RoutingPolicy, SenderRoutesValidationError,
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
@@ -82,14 +83,13 @@ pub use group_id::{
 };
 pub use message::{
     CHAT_ERROR_MESSAGE_TYPE,
-    AuditEntry, BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+    BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, DeliveryType,
     GroupMessage, GroupMessageType, HumanMessageView, MessageAttachment, MessageAudience, MessageOwnerFilter,
     MessagePage, MessageQuery, MessageRole, MessageVisibilityDomain, NewMessage, PersistedMessage,
     PersistedMessageStatus, SESSION_OPENING_MESSAGE_TYPE,
     STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
     STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_OUTPUT_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
-    Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
 pub use opening_message::{
@@ -97,7 +97,6 @@ pub use opening_message::{
     MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
     OpeningMessageRenderContext, OpeningMessageScope, RenderedOpeningMessage,
 };
-pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
@@ -113,8 +112,7 @@ pub use routing::{
     RouteParticipantOverlay, RouteSelectorWire, RoutingDecision, RoutingTarget,
 };
 pub use session::{
-    CallbackChannelConfig, CallbackConfig, Session, SessionKind, SessionStatus, ServiceSpec,
-};
+    Session, SessionKind, SessionStatus, };
 pub use system_message::{
     PersistMode, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind,
     system_message_visibility,

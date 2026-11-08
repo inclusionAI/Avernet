@@ -2,10 +2,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import SessionRecoveryDetail from '../SessionRecoveryDetail';
+import { MemoryRouter } from 'react-router-dom';
+import { RecoveryTaskLinks } from '../RecoveryTaskLinks';
 import { api } from '@avernet/clawweb-shared/web/api/client';
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { evolve: { listTaskLogArchives: vi.fn(), getTaskLogArchiveDownloadUrl: vi.fn() } } }));
 import { sessionRecoveryApi } from '../../../../../api/session-recovery';
-vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn() } }));
+vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), list: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn(), terminate: vi.fn() } }));
 const task = { taskId: 'task', shared: false, canOperate: true, canManageShare: true, status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
   judgment: { effect: 'not_recovered', summary: '原问题仍存在' }, plan: { digest: 'plan-digest', approvedAt: null, summary: '完整修复方案', basis: '原失败证据', scope: '当前目标', verification: '原操作成功', actions: [{ actionId: 'fix', summary: '修正配置', risk: '局部变更', verification: '读取配置', command: 'printf fixture', rollback: '恢复原值' }], owner_cooperation: [{ request: '确认权限已开放', basis: '权限缺失' }] },
   timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
@@ -18,6 +20,34 @@ beforeEach(() => {
   vi.mocked(sessionRecoveryApi.decide).mockResolvedValue({ ok: true });
   vi.mocked(sessionRecoveryApi.annotate).mockResolvedValue({ ok: true });
   vi.mocked(sessionRecoveryApi.setTaskShared).mockResolvedValue(task as never);
+  vi.mocked(sessionRecoveryApi.terminate).mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+});
+it('confirms stopping the task and then removes all continuation controls', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+    const stop = await screen.findByRole('button', { name: '停止任务' });
+    fireEvent.click(stop); expect(sessionRecoveryApi.terminate).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+    fireEvent.click(stop);
+    await waitFor(() => expect(sessionRecoveryApi.terminate).toHaveBeenCalledWith('task', '用户手动停止任务'));
+    await screen.findByText('本次自愈已停止');
+    expect(screen.getByText(/AIS 已停止/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案|重试停止 AIS/ })).toBeNull();
+  } finally { confirm.mockRestore(); }
+});
+it('keeps a failed AIS stop visible and lets the Owner retry stopping the same task', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce({ ...task, status: 'canceled', termination: { status: 'remote_stop_failed', aisJobId: 'job' } } as never)
+    .mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+  try {
+    render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('AIS 停止请求未成功');
+    fireEvent.click(screen.getByRole('button', { name: '重试停止 AIS' }));
+    await waitFor(() => expect(sessionRecoveryApi.terminate).toHaveBeenCalledOnce());
+    await screen.findByText(/AIS 已停止/);
+  } finally { confirm.mockRestore(); }
 });
 it('lets the Owner open and close sharing using the existing task controls', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce(task as never).mockResolvedValue({ ...task, shared: true } as never);
@@ -35,7 +65,7 @@ it('shows shared tasks read-only without approval, Owner cooperation, annotation
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   await screen.findByText('共享的只读自愈任务');
   expect(screen.getByText('完整修复方案')).toBeVisible();
-  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$|停止任务|重试停止 AIS/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(api.evolve.listTaskLogArchives).not.toHaveBeenCalled();
@@ -97,7 +127,7 @@ it('retains audited evidence and shows a simple collapsed review only after task
   const review = screen.getByText('人工复核').closest('details')!;
   expect(review).not.toHaveAttribute('open');
   expect(review.closest('[role="tabpanel"]')).toBeNull();
-  expect(screen.getByRole('region', { name: '任务概览' }).nextElementSibling).toBe(review.closest('section'));
+  expect(screen.getByRole('region', { name: '任务总结' }).nextElementSibling).toBe(review.closest('section'));
   fireEvent.click(screen.getByText('人工复核'));
   expect(screen.queryByText('引用证据')).toBeNull();
   fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } });
@@ -378,4 +408,121 @@ it('shows an Owner-only plan as one complete arrangement without fabricating an 
   expect(within(arrangement).queryByText('自愈 Agent')).toBeNull();
   expect(screen.queryByText('方案未列出具体操作。')).toBeNull();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
+});
+
+
+it('shows normal user handoff without a recovery claim or continuation controls', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', completionReason: 'user_continued',
+    judgment: { effect: 'unknown', summary: '用户已继续对话，本次已让路', evidence_ids: [] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findAllByText('已让路');
+  expect(screen.getByText('用户已继续对话，本次自愈已让路，不再自动干预。')).toBeVisible();
+  expect(screen.queryByText('原任务已恢复，可查看下方处理过程和判断依据。')).toBeNull();
+  expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案/ })).toBeNull();
+});
+
+
+it('labels the diagnosis task link as a normal handoff', async () => {
+  vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [{ task_id: 'task', status: 'completed', phase: 'assess', effect: 'unknown', completion_reason: 'user_continued' }] });
+  render(<MemoryRouter><RecoveryTaskLinks eventId="event" /></MemoryRouter>);
+  expect(await screen.findByRole('link', { name: '查看自愈任务 已让路 task' })).toHaveAttribute('href', '/insight?module=monitoring&recoveryTaskId=task');
+  expect(screen.getByText('已让路')).toBeVisible();
+});
+
+it('shows simulation decisions and the complete proposed message with only assess/plan stages', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', plan: null,
+    simulation: { batchId: 'fixture', cutoffAtMs: 10000, cutoffNode: { messageId: 'M100' }, inputDigest: 'digest' },
+    timeline: [{ event_id: 'decision', at_ms: 1, kind: 'assessment', actor: 'agent', summary: '原任务可从失败步骤继续',
+      payload: { phase: 'assess', decision: 'message', message: '请核对原调用参数并继续原任务，避免重复已完成操作。' } }] } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('heading', { name: '自愈离线仿真详情' });
+  expect(screen.getAllByRole('tab')).toHaveLength(2);
+  expect(screen.getByText('拟发送的干预消息（未发送）')).toBeVisible();
+  expect(screen.getByText('请核对原调用参数并继续原任务，避免重复已完成操作。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|保存标注|创建仿真/ })).toBeNull();
+});
+
+
+it('shows target unavailability as an ended workflow with unknown recovery effect', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', completionReason: 'target_unavailable',
+    judgment: { effect: 'unknown', summary: 'Provider确认目标沙箱已销毁', evidence_ids: [] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findAllByText('目标不可用');
+  expect(screen.getByText('目标运行环境已不可用，本次自愈已结束；')).toBeVisible();
+  expect(screen.getByText('原任务恢复效果未知。')).toBeVisible();
+  expect(screen.queryByText('原任务已恢复，可查看下方处理过程和判断依据。')).toBeNull();
+  expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案/ })).toBeNull();
+});
+
+
+it.each(['owner_handoff', 'mcp_permission_required'].flatMap(reason => [true, false].map(sent => ({ reason, sent }))))('shows Owner instructions with accurate notification status: $reason / $sent', async ({ reason, sent }) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: reason, plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请 Owner 在管理页面恢复已停用的业务资源，再继续原任务。', evidence_ids: ['evidence'] },
+    timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: sent ? '钉钉通知已发送' : '钉钉通知未确认', payload: { kind: 'result', sent } }],
+  } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('region', { name: 'Owner 处理指引' });
+  expect(screen.queryByText(/MCP 服务权限需要 Owner/)).toBeNull();
+  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请 Owner 在管理页面恢复已停用的业务资源/)).toBeVisible();
+  if (sent) expect(screen.getAllByText('已通知 Owner 自行处理').length).toBeGreaterThan(0);
+  else expect(screen.queryByText('已通知 Owner 自行处理')).toBeNull();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务|查看方案/ })).toBeNull();
+  expect(sessionRecoveryApi.decide).not.toHaveBeenCalled();
+  expect(screen.queryByText('人工复核')).toBeNull();
+});
+
+it.each([true, false])('shows a recovered Owner handoff as nonblocking suggestions, notification sent: %s', async sent => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'owner_handoff', plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'none', effect: 'recovered', summary: '原任务已完成；建议后续补充 Skill 参数示例，无需重跑。', evidence_ids: ['evidence'] },
+    timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: 'Owner 通知回执', payload: { kind: 'result', sent } }],
+  } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const suggestions = await screen.findByRole('region', { name: 'Owner 优化建议' });
+  expect(suggestions).toHaveTextContent('原任务已完成');
+  expect(screen.getAllByText(sent ? '已恢复，已通知 Owner' : '已恢复，有后续建议').length).toBeGreaterThan(0);
+  expect(screen.queryByText('需 Owner 自行处理')).toBeNull();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务/ })).toBeNull();
+});
+
+it('shows an expanded overall summary independently of full judgment', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', final_summary: '原任务需读取资料。核实为调用参数错误，发送纠正指引后已恢复推进。' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const title = await screen.findByRole('heading', { name: '任务总结' });
+  const summary = title.closest('section')!;
+  expect(summary).toHaveTextContent('原任务需读取资料。');
+  expect(within(summary).getByText('核实为调用参数错误，发送纠正指引后已恢复推进。')).toBeVisible();
+  expect(summary.querySelector('details')).toBeNull();
+});
+it('shows an explicit unavailable summary for legacy completed tasks', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText(/摘要暂不可用/)).toBeVisible();
+  expect(screen.getByText('原问题仍存在')).toBeInTheDocument();
+});
+it.each([
+  ['waiting_owner', 'apply', '待验证', 'neutral', '等待方案确认'],
+  ['running', 'plan', '待验证', 'neutral', '等待完整方案'],
+  ['running', 'verify', '验证中', 'info', '正在核对原任务'],
+  ['completed', 'verify', '未恢复', 'warning', '原任务仍受阻'],
+] as const)('distinguishes business effect from execution status: %s/%s', async (status, phase, label, tone, hint) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status, phase } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('heading', { name: '恢复效果' });
+  const metric = screen.getByText('效果', { selector: '.sr-judgment-label' }).closest('.sr-judgment-item')!;
+  expect(metric).toHaveClass(tone); expect(metric).not.toHaveClass('danger');
+  expect(within(metric as HTMLElement).getByText(label)).toBeVisible();
+  expect(metric).toHaveTextContent(hint);
+});
+it('keeps an unrecovered business outcome separate from an execution error', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'failed', phase: 'verify' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('heading', { name: '恢复效果' });
+  expect(screen.queryByText('自愈执行失败')).not.toBeInTheDocument();
+  const metric = screen.getByText('效果', { selector: '.sr-judgment-label' }).closest('.sr-judgment-item')!;
+  expect(metric).toHaveClass('warning'); expect(metric).toHaveTextContent('原任务仍受阻');
+});
+it('retains the red execution alert for an actual execution failure', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'failed', phase: 'verify', judgment: { ...task.judgment, effect: 'unknown' } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText('自愈执行失败')).toBeVisible();
 });

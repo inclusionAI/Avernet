@@ -877,9 +877,7 @@ class TestLogEvent:
         # Should not raise
 
     @pytest.mark.asyncio
-    async def test_log_event_bypass_hits_logs_full_payload(
-        self, mock_bot_ws
-    ):
+    async def test_log_event_bypass_hits_logs_full_payload(self, mock_bot_ws):
         client = AsyncChatClient(
             uri="ws://host/ws",
             sensitive_bypass_keys_loader=lambda: ("sk1",),
@@ -898,9 +896,7 @@ class TestLogEvent:
         assert "secret-content" in logged
 
     @pytest.mark.asyncio
-    async def test_log_event_bypass_miss_filters_sensitive(
-        self, mock_bot_ws
-    ):
+    async def test_log_event_bypass_miss_filters_sensitive(self, mock_bot_ws):
         client = AsyncChatClient(
             uri="ws://host/ws",
             sensitive_bypass_keys_loader=lambda: ("other-sess",),
@@ -2680,9 +2676,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.close()
 
     @pytest.mark.asyncio
-    async def test_waiter_timeout_keeps_v3_ownership(
-        self, mock_bot_ws, stub_v3_patch
-    ):
+    async def test_waiter_timeout_keeps_v3_ownership(self, mock_bot_ws, stub_v3_patch):
         """wait_result=True 超时：等待方虽收口，engine 侧 run 仍在执行
         ——归属必须存活（abort 仍路由 v3），由后台终态帧释放。"""
         acc = self._acc_with_owned_a2a_main()
@@ -2714,8 +2708,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
                 "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
             )
         )
-        await self._wait_until(lambda: acc._v3_fallback is not None
-                               and bool(acc._v3_fallback.chat_send_calls))
+        await self._wait_until(
+            lambda: (
+                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+            )
+        )
         chat_handler = acc._v3_fallback._event_handlers["chat"]
         chat_handler(
             {
@@ -2823,8 +2820,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
             )
         )
         await self._wait_until(
-            lambda: acc._v3_fallback is not None
-            and bool(acc._v3_fallback.chat_send_calls)
+            lambda: (
+                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+            )
         )
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -2836,9 +2834,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.close()
 
     @pytest.mark.asyncio
-    async def test_stream_early_close_keeps_ownership(
-        self, mock_bot_ws, stub_v3_patch
-    ):
+    async def test_stream_early_close_keeps_ownership(self, mock_bot_ws, stub_v3_patch):
         """R8-F2b：流式消费方在终态 chunk 之前提前关闭（break/超时/异常）
         ——引擎侧 run 仍在执行，finally 不得清归属。"""
         acc = self._acc_with_owned_a2a_main()
@@ -2861,8 +2857,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
         t = asyncio.create_task(consume())
         await self._wait_until(
-            lambda: acc._v3_fallback is not None
-            and bool(acc._v3_fallback.chat_send_calls)
+            lambda: (
+                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+            )
         )
         acc._v3_fallback._event_handlers["chat"](
             {
@@ -2881,9 +2878,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.close()
 
     @pytest.mark.asyncio
-    async def test_terminal_before_send_returns_releases_ownership(
-        self, mock_bot_ws
-    ):
+    async def test_terminal_before_send_returns_releases_ownership(self, mock_bot_ws):
         """R8-F3：终态帧在 chat_send() 等待方恢复前被 WS 接收循环分派
         （state 仍在、终态走有 state 分支）——归属释放不得依赖"state
         已被等待方 pop"的形态，否则此后再无终态可触发清理，标记永久残留
@@ -2898,9 +2893,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
                 "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
             )
 
-        assert "sk-att" not in acc._v3_routed_sessions, (
-            "终态已到达但归属永久残留"
-        )
+        assert "sk-att" not in acc._v3_routed_sessions, "终态已到达但归属永久残留"
         assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
         assert acc.has_active_sessions is False, "终态后连接仍不可排空"
         await acc.close()
@@ -2964,9 +2957,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         )
         assert "sk-att" in acc._v3_routed_sessions
         acc._v3_fallback._event_handlers["chat"](final_frame)
-        assert "sk-att" not in acc._v3_routed_sessions, (
-            "装饰 key 的后台终态未释放归属"
-        )
+        assert "sk-att" not in acc._v3_routed_sessions, "装饰 key 的后台终态未释放归属"
         assert acc.has_active_sessions is False
 
         # 等待中态：装饰 key 终态唤醒等待方，归属同样释放
@@ -2979,7 +2970,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
         acc._v3_fallback._event_handlers["chat"](final_frame)
         content, _payloads = await task
         assert content == "done"
-        assert "sk-att" not in acc._v3_routed_sessions, "装饰 key 的等待中终态未释放归属"
+        assert "sk-att" not in acc._v3_routed_sessions, (
+            "装饰 key 的等待中终态未释放归属"
+        )
         await acc.close()
 
     @pytest.mark.asyncio
@@ -3007,9 +3000,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             acc._v3_fallback._event_handlers["agent"](
                 {"sessionKey": "sk-att", "stream": "assistant", "state": "final"}
             )
-            assert "sk-att" not in acc._v3_routed_sessions, (
-                "agent final 通道未释放归属"
-            )
+            assert "sk-att" not in acc._v3_routed_sessions, "agent final 通道未释放归属"
 
             # error 通道（后台态）
             await acc.send_message(
@@ -3040,8 +3031,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
             )
         )
         await self._wait_until(
-            lambda: acc._v3_fallback is not None
-            and bool(acc._v3_fallback.chat_send_calls)
+            lambda: (
+                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+            )
         )
         acc._v3_fallback._event_handlers["agent"](
             {
@@ -3052,9 +3044,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             }
         )
         await task
-        assert "sk-att" not in acc._v3_routed_sessions, (
-            "agent final 唤醒后归属未释放"
-        )
+        assert "sk-att" not in acc._v3_routed_sessions, "agent final 唤醒后归属未释放"
         assert acc.has_active_sessions is False
         await acc.close()
 

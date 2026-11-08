@@ -4,7 +4,8 @@ use async_trait::async_trait;
 
 use crate::types::{
     BotCandidateReadQuery, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery, ServiceResult,
+    BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery,
+    ControllableCandidateQuery, ControlledBotCandidate, ServiceResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +66,23 @@ pub trait BotControlPlaneCoreService: Send + Sync {
         &self,
         query: BotControlPlaneOwnedQuery,
     ) -> ServiceResult<Vec<BotControlPlaneView>>;
+
+    /// Mine-union candidate read (bot-authority spec §8.0,
+    /// plan §3 frozen contract): persistent-only filtering,
+    /// role dedup and stable order over ONE store snapshot.
+    /// Deliberately NO reachability, offset or limit — the
+    /// application applies the §8.0 dynamic algorithm and
+    /// pagination. `list_by_creator` keeps its literal
+    /// historical meaning beside this.
+    async fn list_controllable(
+        &self,
+        query: ControllableCandidateQuery,
+    ) -> ServiceResult<Vec<ControlledBotCandidate>> {
+        let _ = query;
+        Err(crate::types::ServiceError::InternalError(
+            "the controllable candidate read is not configured".into(),
+        ))
+    }
 
     /// Read physical bots by the task-mode toggles. The default returns an empty result so
     /// test stubs keep compiling; concrete core services override to delegate to the repo

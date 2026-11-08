@@ -42,6 +42,16 @@ pub trait ChannelProvider: Send + Sync {
 
     fn validate_config(&self, config: &serde_json::Value) -> ChannelProviderResult<()>;
 
+    /// Validate provider config against its binding target, including execution scope.
+    fn validate_binding_config(&self, config: &serde_json::Value, _target: &bcs_service_api::types::BindingTarget) -> ChannelProviderResult<()> {
+        self.validate_config(config)
+    }
+
+    /// Opt-in caller execution policy. Public orchestration enforces Bot-only scope.
+    fn requires_caller_execution(&self, _config: &serde_json::Value) -> ChannelProviderResult<bool> {
+        Ok(false)
+    }
+
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value;
 
     /// Resolve a BCS Human actor into a provider-native direct-message recipient.

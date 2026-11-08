@@ -1,0 +1,582 @@
+{
+  "skills": [
+    {
+      "path": "/api/skills/upload",
+      "methods": [
+        "POST"
+      ],
+      "name": "upload_skill",
+      "response_model": "UploadSkillResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_skills",
+      "response_model": "PaginatedSkillListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_skill",
+      "response_model": "SkillDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/active/list",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_active_skills",
+      "response_model": "ActiveSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/skillset/current",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_current_skill_set",
+      "response_model": "CurrentSkillSetResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/skillset/sync",
+      "methods": [
+        "POST"
+      ],
+      "name": "sync_skill_set",
+      "response_model": "SwitchSkillSetResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/skillset/activate",
+      "methods": [
+        "POST"
+      ],
+      "name": "activate_skill_set",
+      "response_model": "ActivateSkillSetResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/skillset/deactivate",
+      "methods": [
+        "POST"
+      ],
+      "name": "deactivate_skill_set",
+      "response_model": "DeactivateSkillSetResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/skillset/active",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_active_skill_sets",
+      "response_model": "ActiveSkillSetsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/readme",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_readme",
+      "response_model": "SkillReadmeResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/sync-from-git",
+      "methods": [
+        "POST"
+      ],
+      "name": "sync_skills_from_git",
+      "response_model": "SyncSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/local",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_local_market_skills",
+      "response_model": "MarketListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/tree",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_market_tree",
+      "response_model": "MarketTreeResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/list",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_market_skills",
+      "response_model": "MarketListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/activate-batch",
+      "methods": [
+        "POST"
+      ],
+      "name": "activate_skills_batch",
+      "response_model": "ActivateSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/search",
+      "methods": [
+        "POST"
+      ],
+      "name": "search_market_skills",
+      "response_model": "SearchResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/sync",
+      "methods": [
+        "POST"
+      ],
+      "name": "sync_market",
+      "response_model": "SyncStatusResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/sync-status",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_sync_status",
+      "response_model": "SyncStatusResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/user/my-skills",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_user_skills",
+      "response_model": "SkillListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill",
+      "response_model": "SkillDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_skill",
+      "response_model": "SkillDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/risk-tags",
+      "methods": [
+        "POST"
+      ],
+      "name": "update_skill_risk_tags",
+      "response_model": "SkillDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/mcp-dependencies",
+      "methods": [
+        "POST"
+      ],
+      "name": "update_skill_mcp_dependencies",
+      "response_model": "SkillDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{link_name}/id",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_id_by_link_name",
+      "response_model": "dict",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_skill",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/parameters",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_parameters",
+      "response_model": "SkillParametersResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/parameters",
+      "methods": [
+        "POST"
+      ],
+      "name": "save_skill_parameters",
+      "response_model": "SkillParametersResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/publish",
+      "methods": [
+        "POST"
+      ],
+      "name": "publish_skill",
+      "response_model": "PublishStatusResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/publish/upgrade",
+      "methods": [
+        "POST"
+      ],
+      "name": "publish_upgrade_skill",
+      "response_model": "PublishStatusResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/publish/status",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_publish_status",
+      "response_model": "PublishStatusResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/versions",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_skill_versions",
+      "response_model": "VersionListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/center/search",
+      "methods": [
+        "GET"
+      ],
+      "name": "search_market_center",
+      "response_model": "MarketSearchResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/center/tags",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_market_tags_center",
+      "response_model": "MarketTagsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/market/center/{skill_code}/install",
+      "methods": [
+        "POST"
+      ],
+      "name": "install_market_skill",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/versions/{version_number}/download-url",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_version_download_url",
+      "response_model": "DownloadUrlResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/file-structure",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_file_structure",
+      "response_model": "FileStructureResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_id}/file-content",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_file_content",
+      "response_model": "FileContentResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_uuid}/members",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_members",
+      "response_model": "SkillMemberListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_uuid}/members",
+      "methods": [
+        "POST"
+      ],
+      "name": "add_skill_member",
+      "response_model": "SkillMemberOperationResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_uuid}/members/batch",
+      "methods": [
+        "POST"
+      ],
+      "name": "add_skill_members_batch",
+      "response_model": "BatchAddMembersResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_uuid}/members/{user_id}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "remove_skill_member",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skills/{skill_uuid}/members/{user_id}/role",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_skill_member_role",
+      "response_model": "SkillMemberOperationResponse",
+      "status_code": null
+    }
+  ],
+  "skillsets": [
+    {
+      "path": "/api/skillsets",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_skill_sets",
+      "response_model": "SkillSetListResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_skill_set",
+      "response_model": "SkillSetDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/with-mcps",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_skill_sets_with_mcps",
+      "response_model": "SkillSetsWithMCPsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/resources",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_skill_set_resources",
+      "response_model": "SkillSetResourcesResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_set",
+      "response_model": "SkillSetDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_skill_set",
+      "response_model": "SkillSetDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_skill_set",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/skills",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_set_skills",
+      "response_model": "SkillSetSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/skills",
+      "methods": [
+        "POST"
+      ],
+      "name": "add_skills_to_set",
+      "response_model": "AddSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/skills/{skill_id}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "remove_skill_from_set",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/default/ensure",
+      "methods": [
+        "POST"
+      ],
+      "name": "ensure_default_skill_set",
+      "response_model": "SkillSetDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/default/current",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_default_skill_set",
+      "response_model": "SkillSetDetailResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/admin/init-and-sync",
+      "methods": [
+        "GET"
+      ],
+      "name": "init_and_sync_default_skills",
+      "response_model": "InitAndSyncResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/admin/set-default-skills",
+      "methods": [
+        "POST"
+      ],
+      "name": "set_default_skills",
+      "response_model": "SetDefaultSkillsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/admin/set-default-skills-fast",
+      "methods": [
+        "POST"
+      ],
+      "name": "set_default_skills_fast",
+      "response_model": "SetDefaultSkillsFastResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/admin/fix-git-path",
+      "methods": [
+        "POST"
+      ],
+      "name": "fix_git_path",
+      "response_model": "FixGitPathResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/mcps",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_skill_set_mcps",
+      "response_model": "SkillSetMCPsResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/mcps",
+      "methods": [
+        "POST"
+      ],
+      "name": "add_mcp_to_skill_set",
+      "response_model": "AddMCPResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/mcps/{server_code}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "remove_mcp_from_skill_set",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/{skill_set_id}/clis/{resource_code}",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "remove_cli_from_default_skill_set",
+      "response_model": "MessageResponse",
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/sync-skills",
+      "methods": [
+        "POST"
+      ],
+      "name": "sync_skills_to_device",
+      "response_model": null,
+      "status_code": null
+    },
+    {
+      "path": "/api/skillsets/admin/set-skillset-active",
+      "methods": [
+        "POST"
+      ],
+      "name": "set_skillset_active",
+      "response_model": "SetSkillSetActiveResponse",
+      "status_code": null
+    }
+  ]
+}

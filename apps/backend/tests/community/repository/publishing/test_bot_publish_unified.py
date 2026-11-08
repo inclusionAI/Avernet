@@ -382,6 +382,22 @@ def test_get_latest_by_source_bot_id_and_owner_and_status_returns_none_when_miss
     assert got is None
 
 
+def test_source_bot_pk_queries_ignore_owner_snapshot(repo):
+    first = repo.insert(
+        _data(source_bot_pk=9, owner_id="owner-a", status="SUCCESS", version=1)
+    )
+    latest = repo.insert(
+        _data(source_bot_pk=9, owner_id="owner-b", status="SUCCESS", version=2)
+    )
+    repo.insert(
+        _data(source_bot_pk=10, owner_id="owner-b", status="SUCCESS", version=3)
+    )
+
+    assert repo.get_by_source_bot_and_version(9, 1, "dev").id == first.id
+    assert repo.get_latest_by_source_bot(9, "dev").id == latest.id
+    assert repo.get_latest_by_source_bot_and_status(9, "SUCCESS", "dev").id == latest.id
+
+
 def test_get_latest_success_by_source_bot_id_owner_agnostic_returns_latest(repo):
     """Multi-instance bot_id → binding_id resolution: latest success row,
     owner-agnostic (org bot entity_id may differ from create owner_id)."""

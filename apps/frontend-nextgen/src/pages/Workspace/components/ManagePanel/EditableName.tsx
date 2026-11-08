@@ -38,7 +38,13 @@ export function EditableName({ value, canEdit, editLabel, onSave }: EditableName
   if (!editing) {
     return (
       <div className="flex items-center gap-1">
-        <p className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-foreground">{value}</p>
+        {/* 值态对齐基础信息卡口径（12px 弱灰）；data-testid 供回归测试定位。 */}
+        <p
+          data-testid="editable-name-value"
+          className="m-0 min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
+        >
+          {value}
+        </p>
         {canEdit ? (
           // 入口视觉降噪：常态灰色铅笔，悬停仅变色不出底色块（避免标题行右上角出现圆角矩形块）。
           <IconButton

@@ -2,13 +2,18 @@ import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError, digestRepairJson, type RepairRevision } from '../contracts/repair-batch.js';
 import type { RepairWorkbenchService } from '../contracts/repair-workbench.js';
-import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
+import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest, RepairTrialStartFailure } from '../contracts/repair-trial.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { redactTrial, redactTrialInput, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
 import { normalizeTrialInputDefinition } from '../contracts/repair-trial-input-definition.js';
 
 function conflict(message: string): never { throw new RepairBatchError('STATE_CONFLICT', message); }
+const startFailureMessages = {
+  REQUEST_READ_FAILED: 'Bot 无法读取本次试跑请求，工作流未启动',
+  REQUEST_INVALID: 'Bot 收到的试跑请求内容不完整或不匹配，工作流未启动',
+  START_FAILED: '候选准备或运行登记失败，请查看 Bot 原试跑会话',
+};
 function candidate(workflowId: string, taskId: string, revision: RepairRevision): RepairTrialCandidate {
   const { candidateCommit, packDigest } = revision.draft ?? {};
   if (typeof candidateCommit !== 'string' || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(candidateCommit)
@@ -71,6 +76,23 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       const rows = await db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'trial' ORDER BY created_at_ms DESC, record_id DESC LIMIT 20 OFFSET ?", [taskId, offset]);
       return Promise.all(rows.map(row => view(JSON.parse(row.body_json))));
     },
+    async stop(taskId: string, id: string) {
+      const before = await find(id);
+      if (before.taskId !== taskId) conflict('试跑请求不属于当前任务');
+      const result = await db.transaction(async tx => {
+        const locked = await lock(tx, taskId), latest = await find(id, tx);
+        // The same workflow lock fences native registration. Closing first prevents
+        // late commands from registering; registration first must retain its run.
+        if (latest.mode !== 'pinned' || latest.flowId) conflict('该试跑已有运行或不支持结束，请查看原运行记录');
+        if (latest.status === 'failed') return latest;
+        if (!['dispatching', 'awaiting_run', 'unknown'].includes(latest.status)) conflict('当前试跑不能结束');
+        const stopped: RepairTrial = { ...latest, status: 'failed', error: '已结束未启动请求，可以重新发起试跑',
+          stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() };
+        await locked.records.update(stopped, latest.stateVersion);
+        return stopped;
+      });
+      return view(result);
+    },
     async start(actorId: string, taskId: string, request: RepairTrialRequest) {
       if (!request || typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.requestId)
         || !Number.isSafeInteger(request.revision) || !Number.isSafeInteger(request.expectedStateVersion)) throw new RepairBatchError('INVALID_INPUT', '试跑请求身份无效');
@@ -98,7 +120,9 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
           || selected.draft?.candidateCommit !== frozen.candidateCommit || selected.draft?.packDigest !== frozen.packDigest
           || fresh.find(r => r.draft !== null && r.phase !== 'no_change')?.revision !== request.revision) conflict('保存期间候选已变化，请重新审阅');
         const active = (await locked.records.list<RepairTrial>(taskId, 'trial')).find(t => t.revision === request.revision && ['dispatching', 'awaiting_run', 'unknown'].includes(t.status) && !t.flowId);
-        if (active) conflict('同一候选存在待核对的试跑，请先核对该请求');
+        if (active) conflict(active.mode === 'pinned'
+          ? '存在尚未登记运行的试跑，请在试跑记录中结束未启动请求后重试'
+          : '同一候选存在待核对的试跑，请先核对该请求');
         const id = randomUUID();
         const trial: RepairTrial = { ...frozen, mode: 'pinned', id, flowId: null, requestId: request.requestId, actorId, target,
           stateVersion: 1, status: 'dispatching', input: request.input, inputDigest: digestRepairJson(request.input), inputSchemaDigest: request.inputSchemaDigest,
@@ -127,6 +151,26 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       return { requestId: request.id, purpose: 'trial' as const, workflowId: request.workflowId, packId: request.options.packId,
         candidateRef: request.options.candidateRef, candidateCommit: request.candidateCommit, packDigest: request.packDigest,
         input: request.input, inputDigest: request.inputDigest };
+    },
+    async reportStartFailure(feedback: RepairTrialStartFailure) {
+      if (!Object.hasOwn(startFailureMessages, feedback.code)
+        || feedback.httpStatus !== undefined && feedback.httpStatus !== 0 && (!Number.isInteger(feedback.httpStatus) || feedback.httpStatus < 400 || feedback.httpStatus > 599)) {
+        throw new RepairBatchError('INVALID_INPUT', '试跑失败原因无效');
+      }
+      const before = await find(feedback.requestId);
+      if (feedback.botId !== before.target.botId || feedback.ownerId !== before.target.ownerId) conflict('运行请求的 Bot 身份不匹配');
+      await authorized(before);
+      const result = await db.transaction(async tx => {
+        const locked = await lock(tx, before.taskId), latest = await find(before.id, tx);
+        // Native registration wins: late/duplicate startup feedback cannot overwrite a run.
+        if (latest.flowId || latest.status === 'failed' || latest.status === 'succeeded') return latest;
+        const error = startFailureMessages[feedback.code as keyof typeof startFailureMessages]
+          + (feedback.httpStatus ? `（HTTP ${feedback.httpStatus}）` : '');
+        const failed = { ...latest, status: 'failed' as const, error, stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() };
+        await locked.records.update(failed, latest.stateVersion);
+        return failed;
+      });
+      return { requestId: result.id, flowId: result.flowId, status: result.status };
     },
   };
 }

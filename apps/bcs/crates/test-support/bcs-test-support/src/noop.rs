@@ -174,28 +174,6 @@ impl FriendRequestCoreService for NoopFriendRequestCoreService {
 }
 
 #[derive(Debug, Default)]
-pub struct NoopProposalCoreService;
-
-#[async_trait]
-impl ProposalCoreService for NoopProposalCoreService {
-    async fn store(&self, proposal: GroupChatProposal) -> String {
-        proposal.token
-    }
-
-    async fn get(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn take(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn cleanup_expired(&self) -> usize {
-        0
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct NoopBotRegistryCoreService;
 
 #[async_trait]
@@ -218,6 +196,14 @@ impl BotRegistryCoreService for NoopBotRegistryCoreService {
 
     async fn list_active(&self) -> Vec<RegisteredBot> {
         Vec::new()
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
     }
 
     async fn list_bots_by_creator(&self, _created_by: &str) -> Vec<RegisteredBot> {
@@ -987,23 +973,11 @@ impl GroupCoreService for NoopGroupCoreService {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
     async fn update_label(&self, id: &str, _label: Option<String>) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
     async fn update_status(&self, id: &str, _status: GroupStatus) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        _service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
@@ -1077,19 +1051,6 @@ pub struct NoopGroupDispatchContextPort;
 impl GroupDispatchContextPort for NoopGroupDispatchContextPort {
     async fn participants(&self, _group_id: &str) -> Option<Vec<Participant>> {
         None
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct NoopSessionCallbackDispatchPort;
-
-#[async_trait]
-impl SessionCallbackDispatchPort for NoopSessionCallbackDispatchPort {
-    async fn maybe_dispatch(
-        &self,
-        _session: Session,
-        _session_management: std::sync::Arc<dyn SessionManagementService>,
-    ) {
     }
 }
 
@@ -1728,32 +1689,6 @@ impl A2aChatRunService for NoopA2aChatRunService {
     }
 }
 
-pub struct NoopGroupProposalService;
-
-#[async_trait]
-impl GroupProposalService for NoopGroupProposalService {
-    async fn create_proposal(
-        &self,
-        _cmd: GroupProposalCreateCommand,
-    ) -> Result<GroupProposalCreateResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn confirm_proposal(
-        &self,
-        _cmd: GroupProposalConfirmCommand,
-    ) -> Result<GroupProposalConfirmResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn preview_proposal(
-        &self,
-        _cmd: GroupProposalPreviewCommand,
-    ) -> Result<GroupProposalPreviewResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-}
-
 pub struct NoopGroupQueryService;
 
 #[async_trait]
@@ -1779,12 +1714,6 @@ impl GroupQueryService for NoopGroupQueryService {
         Err(service_not_configured("group query service").into())
     }
 
-    async fn get_workspace(
-        &self,
-        _cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        Err(service_not_configured("group query service").into())
-    }
 }
 
 pub struct NoopGroupManagementService;
@@ -1851,13 +1780,6 @@ impl GroupManagementService for NoopGroupManagementService {
         Err(service_not_configured("group management service").into())
     }
 
-    async fn update_workspace(
-        &self,
-        _cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        Err(service_not_configured("group management service").into())
-    }
-
     async fn update_routing_policy(
         &self,
         _cmd: GroupRoutingPolicyCommand,
@@ -1872,12 +1794,6 @@ impl GroupManagementService for NoopGroupManagementService {
         Err(service_not_configured("group management service").into())
     }
 
-    async fn patch_group_settings(
-        &self,
-        _cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        Err(service_not_configured("group management service").into())
-    }
 }
 
 #[derive(Debug, Default)]

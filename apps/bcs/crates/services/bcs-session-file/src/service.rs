@@ -927,7 +927,6 @@ mod tests {
                         input: None,
                         output: None,
                         error_message: None,
-                        callback_status: None,
                         activation_count: 1,
                         message_visibility_version: 1,
                         caller_principal: None,
@@ -953,8 +952,6 @@ mod tests {
             self.sessions.read().await.get(session_id).cloned()
         }
         async fn belongs_to_group(&self, _session_id: &str, _group_id: &str) -> bool { true }
-        async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> { vec![] }
-        async fn count_running_service(&self, _group_id: &str) -> u64 { 0 }
 
         async fn create(
             &self,
@@ -1009,13 +1006,6 @@ mod tests {
             _mode: bcs_service_api::types::ParticipantMode,
         ) -> bcs_service_api::ServiceResult<Session> {
             Err(bcs_service_api::ServiceError::InternalError("unsupported".into()))
-        }
-        async fn update_callback_status(
-            &self,
-            _session_id: &str,
-            _status: &str,
-        ) -> bcs_service_api::ServiceResult<()> {
-            Ok(())
         }
         async fn update_title(
             &self,

@@ -268,8 +268,8 @@ Bot：好友请求已发送！请等待DBA接受。
 
 (DBA接受后)
 Bot：DBA已接受好友请求，现在可以拉群协作了！
-[exec] bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-uuid"
-Bot：协作群已创建！
+[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba-uuid"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 ```
 
 ### 场景：管理Bot可见性

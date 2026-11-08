@@ -19,6 +19,13 @@ Event namespace is introduced. The catalog and schema are authoritative.
   projection with sensitive-field removal and UTF-8-safe content limits.
 - Lease-based fanout, bounded-concurrency Webhook dispatch, full-jitter retry,
   DLQ, safe retention, and managed worker lifecycle policy.
+- Persistent integration-asset semantics for subscriptions
+  (bot-authority spec §8.4): the subscription belongs to the
+  Group/Bot, not its creating Human's live authorization; delivery
+  continues after the creator's management edge is revoked, and
+  management (list/disable/delete) stays under the CURRENT resource
+  admin's authorization, each call re-consulted. No per-delivery
+  webhook re-authorization or Human delivery-binding field exists.
 - Group Event Subscription preparation/recovery and deterministic
   `group.created`/initial `session.created` construction for an owning Group
   repository to finalize atomically.
@@ -76,3 +83,7 @@ with upper-quarter jitter. Missing ceilings preserve base polling. A nonempty
 iteration or error resets to the base; errors remain visible. Retention uses a
 fixed interval. Cancellation interrupts idle waits without cancelling a claimed
 batch. Bootstrap injects validated limits; Eventing does not read configuration.
+
+## Provider collaboration scope
+
+Group Event Subscription authorization checks current participants and the authenticated Human/Bot against the live Provider boundary before accepting a management actor. Existing subscription authority cannot widen same_owner.

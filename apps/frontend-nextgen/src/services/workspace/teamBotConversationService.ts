@@ -1,5 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
+import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
 
@@ -29,7 +30,10 @@ function readTemplateType(dto: CollaboratingBotDto): string | undefined {
 /** 历史引擎按工坊契约归一模板副维度；例如 aicoding 缺省对应 personalCoding。 */
 function normalizeTemplateType(engine: string, templateType: string | undefined) {
   if (templateType) return templateType;
-  const normalizedEngine = engine.trim().toLowerCase().replace(/[\s_-]/g, '');
+  const normalizedEngine = engine
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, '');
   if (normalizedEngine === 'aicoding') return 'personalCoding';
   if (normalizedEngine === 'applicationcoding') return 'applicationCoding';
   return undefined;
@@ -60,6 +64,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
+  const permissions = mapBotActionPermissions(undefined, undefined);
   const runtime = resolveBotRuntime({
     botId: realBotId,
     engine: dto.engine,
@@ -71,16 +76,23 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     botId,
     realBotId,
     ownerId,
+    engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
+    // 实例运行状态透传(2026-10-21):FAILED/PENDING 供行级禁用与悬停提示感知,团队成员不再对不可用 Bot 盲操作。
+    status: dto.status,
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
+    ...permissions,
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    spaceId: dto.space?.space_id,
+    spaceName: dto.space?.name,
   };
 }
 
@@ -93,7 +105,10 @@ export const teamBotConversationService = {
       const bots = new Map<string, ChatBotView>();
       for (let page = 1; ; page += 1) {
         if (signal?.aborted) throw new Error('请求已取消');
-        const response = await listCollaboratingBots({ user_id: requester, page, page_size: PAGE_SIZE }, signal);
+        const response = await listCollaboratingBots(
+          { user_id: requester, page, page_size: PAGE_SIZE, stage: 'online' },
+          signal,
+        );
         const data = response.data;
         if (
           response.code !== 200000 ||
@@ -111,6 +126,7 @@ export const teamBotConversationService = {
         }
         if (!data.items.length || page * PAGE_SIZE >= data.total) break;
       }
+      if (signal?.aborted) throw new Error('请求已取消');
       return { ok: true, data: [...bots.values()] };
     } catch {
       return {

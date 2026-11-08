@@ -23,7 +23,7 @@ import type { CreateGroupInput } from './groupCreateRequest';
 import type { SessionPageOpts } from './groupService';
 import { buildExecuteRequestFromGroup } from './groupTaskAdapter';
 import type { DomainError, DomainResult } from './identityService';
-import { mapBcsSessionItem, type BcsParticipantRaw, type BcsSessionRaw } from './mappers';
+import { isHumanMentionNotifyMode, mapBcsSessionItem, type BcsParticipantRaw, type BcsSessionRaw } from './mappers';
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
   return { code, friendlyMessage, canRetry: false };
@@ -61,6 +61,8 @@ export interface BcsGroupDetailRaw {
   driver_bot_owner?: string;
   membership?: 'direct' | 'session_only';
   visibility?: 'private' | 'public';
+  /** @Human 消息外部渠道通知来源；历史 BCS raw 详情可能缺省。 */
+  human_mention_notify_mode?: 'all' | 'driver_bot_only' | 'none';
 }
 
 /**
@@ -171,6 +173,9 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
       participantCount: participants.length,
       ownerUserId: safeString(g.originator, safeString(g.originator_actor_id, safeString(g.driver_bot_owner))),
       ...(g.membership ? { membership: g.membership } : {}),
+      ...(isHumanMentionNotifyMode(g.human_mention_notify_mode)
+        ? { humanMentionNotifyMode: g.human_mention_notify_mode }
+        : {}),
       isPublic: g.visibility === 'public',
       deliveryPolicy: 'send_to_driver',
     };

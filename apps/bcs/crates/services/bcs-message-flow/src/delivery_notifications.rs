@@ -65,6 +65,8 @@ fn hint(row: &PersistedMessageDelivery) -> Option<(&'static str, &'static str)> 
         Status::Cancelling => Some(("cancelling", "正在停止处理")),
         Status::Failed if row.last_error_code.as_deref()
             == Some(crate::managed_delivery::BOT_TERMINAL_ERROR_CODE) => None,
+        Status::Failed if row.semantic_projection_json.get("caller_execution").is_some_and(|v| !v.is_null()) =>
+            Some(("failed", "调用者模式处理失败，身份凭证可能已过期，请重新发送消息。")),
         Status::Failed => Some(("failed", "处理失败")),
         Status::Cancelled => Some(("cancelled", "消息已取消")),
         Status::Expired => None,
@@ -169,6 +171,9 @@ async fn publish_status(
         if let Some(direct) = &flow.direct_chat { direct.reconcile_direct(row).await?; }
         return Ok(());
     }
+    // Idempotent fallback for independently composed notification consumers;
+    // production also performs this inside the retained post-commit task.
+    flow.release_unsent_output(row).await;
     crate::queued_task::restore(flow, row).await?;
     use bcs_service_api::{
         FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryTarget, ServiceError,
@@ -216,6 +221,10 @@ async fn publish_status(
         run_fallback: None, exclude_conn_id: None,
         visibility_domain: message.visibility_domain.unwrap_or(bcs_domain::MessageVisibilityDomain::ManagerWorker),
         audience: message.audience.clone(),
+        // Delivery-status updates are independent resource events:
+        // authorized per event against current facts.
+        operation_id: None, terminal: false,
+        run_id: None,
     }).await?;
     Ok(())
 }

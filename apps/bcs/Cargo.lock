@@ -265,6 +265,7 @@ dependencies = [
  "bcs-api-http",
  "bcs-app-bot",
  "bcs-app-collaboration-definition",
+ "bcs-app-collaboration-draft",
  "bcs-app-collaboration-template",
  "bcs-app-group",
  "bcs-app-group-context",
@@ -285,12 +286,12 @@ dependencies = [
  "bcs-cache-api",
  "bcs-cache-local",
  "bcs-cache-redis",
- "bcs-callback",
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
  "bcs-chat-run-store",
  "bcs-cli",
+ "bcs-collaboration-draft",
  "bcs-collaboration-runtime",
  "bcs-collaboration-store",
  "bcs-collaboration-template",
@@ -330,7 +331,6 @@ dependencies = [
  "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
- "bcs-proposal",
  "bcs-protocol",
  "bcs-provider-http",
  "bcs-relation",
@@ -375,6 +375,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "rand 0.8.7",
  "regex",
  "reqwest",
  "secrecy",
@@ -407,7 +408,9 @@ version = "0.1.4-beta.3"
 dependencies = [
  "anyhow",
  "bcs",
+ "bcs-bot",
  "bcs-bot-store",
+ "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
@@ -427,6 +430,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -435,7 +439,11 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-auth-api",
+ "bcs-bot-store",
+ "bcs-config",
  "bcs-config-api",
+ "bcs-db-api",
  "bcs-domain",
  "bcs-service-api",
  "bcs-storage-api",
@@ -469,12 +477,16 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
+ "tracing",
+ "ulid",
 ]
 
 [[package]]
@@ -484,6 +496,15 @@ dependencies = [
  "async-trait",
  "bcs-service-api",
  "tokio",
+]
+
+[[package]]
+name = "bcs-app-collaboration-draft"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "chrono",
 ]
 
 [[package]]
@@ -503,6 +524,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-db-api",
+ "bcs-db-local",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -511,8 +533,10 @@ dependencies = [
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
+ "hex",
  "secrecy",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
  "tracing",
@@ -538,6 +562,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
@@ -571,12 +596,19 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-api-http",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-config",
+ "bcs-db-api",
  "bcs-domain",
  "bcs-service-api",
+ "bcs-test-support",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -587,10 +619,12 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
+ "bcs-jwt",
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",
@@ -600,7 +634,9 @@ dependencies = [
  "bcs-storage-api",
  "bcs-test-support",
  "bytes",
+ "hex",
  "serde_json",
+ "sha2",
  "time",
  "tokio",
  "tracing",
@@ -743,6 +779,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-group-store",
  "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
@@ -766,13 +803,21 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
+ "bcs-domain",
+ "bcs-edge-permission-store",
+ "bcs-group-store",
  "bcs-observability",
  "bcs-service-api",
  "bcs-test-support",
+ "hex",
+ "mysql_async",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-test",
@@ -911,16 +956,8 @@ dependencies = [
 name = "bcs-callback"
 version = "0.1.4-beta.3"
 dependencies = [
- "async-trait",
- "bcs-observability",
- "bcs-route-security",
- "bcs-service-api",
- "futures",
- "reqwest",
- "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -997,6 +1034,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "async-trait",
+ "base64 0.22.1",
  "bcs-config",
  "bcs-config-api",
  "bcs-protocol",
@@ -1006,13 +1044,16 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "futures",
+ "hex",
  "inventory",
  "predicates",
  "reqwest",
  "serde",
  "serde_json",
  "serial_test",
+ "sha2",
  "tempfile",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1023,11 +1064,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-collaboration-draft"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-app-collaboration-draft",
+ "bcs-collaboration-runtime",
+ "bcs-collaboration-store",
+ "bcs-config-api",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-mysql",
+ "bcs-service-api",
+ "bcs-services-container",
+ "bcs-test-support",
+ "chrono",
+ "hex",
+ "mysql_async",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "bcs-collaboration-runtime"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
- "bcs-callback",
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
@@ -1041,7 +1106,6 @@ dependencies = [
  "bcs-group-store",
  "bcs-message-store",
  "bcs-protocol",
- "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-store",
@@ -1188,15 +1252,19 @@ name = "bcs-edge-permission"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
  "bcs-edge-permission-store",
  "bcs-friend",
+ "bcs-group-store",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",
@@ -1207,11 +1275,14 @@ name = "bcs-edge-permission-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-domain",
  "bcs-service-api",
  "bcs-test-support",
+ "mysql_async",
  "serde_json",
  "sha2",
  "tokio",
@@ -1339,17 +1410,21 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",
  "bcs-relation",
- "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
  "chrono",
+ "hex",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -1380,14 +1455,18 @@ name = "bcs-group-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
  "bcs-service-api",
  "bcs-test-support",
  "chrono",
  "hex",
+ "mysql_async",
  "serde_json",
  "sha2",
  "tempfile",
@@ -1404,18 +1483,21 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bcs-app-collaboration-draft",
  "bcs-app-session",
  "bcs-auth-api",
  "bcs-auth-local",
  "bcs-bot",
  "bcs-bot-store",
- "bcs-callback",
  "bcs-channel-api",
  "bcs-cli",
+ "bcs-collaboration-draft",
  "bcs-collaboration-runtime",
  "bcs-collaboration-store",
  "bcs-config",
  "bcs-config-api",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
@@ -1626,6 +1708,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-domain",
  "bcs-group",
  "bcs-message-store",
@@ -1635,6 +1718,7 @@ dependencies = [
  "bcs-system-message",
  "bcs-test-support",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -1644,7 +1728,9 @@ name = "bcs-message-flow"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-app-group",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-cache-api",
  "bcs-cache-local",
  "bcs-channel-api",
@@ -1653,11 +1739,16 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-event-store",
+ "bcs-friend",
+ "bcs-group",
  "bcs-group-store",
  "bcs-message-store",
  "bcs-observability",
  "bcs-protocol",
+ "bcs-relation",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-store",
@@ -1742,33 +1833,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
-]
-
-[[package]]
-name = "bcs-proposal"
-version = "0.1.4-beta.3"
-dependencies = [
- "async-trait",
- "bcs-proposal-store",
- "bcs-service-api",
- "bcs-test-support",
- "serde_json",
- "tokio",
- "tokio-test",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "bcs-proposal-store"
-version = "0.1.4-beta.3"
-dependencies = [
- "async-trait",
- "bcs-service-api",
- "bcs-test-support",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1936,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -2032,14 +2096,19 @@ name = "bcs-session-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
+ "bcs-group-store",
  "bcs-service-api",
  "bcs-test-support",
  "fastrand",
  "hex",
+ "mysql_async",
  "serde_json",
  "sha2",
  "tokio",
@@ -2130,13 +2199,23 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-bot",
+ "bcs-app-register",
  "bcs-auth-api",
+ "bcs-bot",
+ "bcs-bot-store",
  "bcs-cache-api",
+ "bcs-config",
  "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-human-notify-api",
  "bcs-llm-api",
  "bcs-observability",
+ "bcs-relation",
+ "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-file",
@@ -2145,6 +2224,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -2193,15 +2273,22 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
- "bcs-callback",
+ "bcs-app-session",
+ "bcs-bot",
+ "bcs-bot-store",
  "bcs-domain",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-group-store",
  "bcs-interaction",
  "bcs-observability",
  "bcs-protocol",
+ "bcs-relation",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-services-container",
  "bcs-session",
+ "bcs-session-store",
  "bcs-telemetry",
  "bcs-test-support",
  "chrono",

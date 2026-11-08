@@ -1,8 +1,12 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
+import type { BotLifecycle } from '@/domain/botWorkshop';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
-import { listBots as listOwnedBotsApi, type OwnedBotDto } from '@/services/backendApi/bots/botController';
+import {
+  listBots as listOwnedBotsApi,
+  type OwnedBotDto,
+} from '@/services/backendApi/bots/botController';
 import {
   createBotSession,
   deleteBotSession,
@@ -20,10 +24,13 @@ import {
 } from '@/services/backendApi/bots/privateBotSessionController';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
+import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface ChatBotView {
+  /** Runtime APIs address the owning user; team chat ownerId may be a record entity. */
+  engineOwnerId?: string;
   botId: string; // mine 原始 bot_id(可能复合)
   realBotId: string; // 拆分 head
   ownerId?: string; // 拆分 tail(staffNo)
@@ -35,13 +42,19 @@ export interface ChatBotView {
   reachability?: 'reachable' | 'unreachable';
   chatable: boolean;
   engine?: string;
+  actions?: string[];
+  disabledActions?: Record<string, string>;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
+  /** Inventory-backed lifecycle for service engine checks; request stage is not lifecycle proof. */
+  serviceLifecycle?: BotLifecycle;
   isAgentCodingBot?: boolean;
   templateType?: string;
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 当前对话所连接的运行阶段；普通工作台会话缺省使用 online。 */
+  /** 会话运行阶段；对话页目录中的服务 Bot 使用 online，个人 Bot 使用 draft；调试页可显式选择阶段。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -96,16 +109,28 @@ export function resolveUserId(userId: string): string {
   return resolveOpenApiUserId(userId);
 }
 
-/** 好友请求补 f_user_id；团队请求仅补实体 owner_id，不混入好友身份。 */
-export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string }>(
+/** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
+export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
+  if (bot.botType === 'service' && (bot.isTeamBot || bot.isFriendBot)) return 'online';
+  if (bot.isFriendBot || bot.botType === 'personal') return 'draft';
+  return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
+}
+
+/** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
+export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { f_user_id?: string } {
-  if (!bot.isFriendBot && !bot.isTeamBot) return params;
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  const { stage: requestedStage, ...baseParams } = params;
+  const stage =
+    bot.isFriendBot || bot.isTeamBot || bot.runtimeStage === 'online'
+      ? resolveChatRuntimeStage(bot)
+      : requestedStage ?? resolveChatRuntimeStage(bot);
   return {
-    ...params,
-    ...(bot.ownerId ? { owner_id: bot.ownerId } : {}),
+    ...baseParams,
+    ...(bot.botType === 'service' ? { stage } : {}),
+    ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
 }
@@ -220,6 +245,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   const { realBotId, ownerId } = splitBotId(botId);
   const templateType = readTemplateType(dto);
   const templateName = readTemplateName(dto, templateType);
+  const permissions = mapBotActionPermissions(dto.actions, dto.disabled_actions);
   const runtime = resolveBotRuntime({
     engine: dto.engine_type ?? dto.engine,
     templateType,
@@ -237,12 +263,14 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: COMPOUND_ID_RE.test(botId),
     engine: dto.engine_type ?? dto.engine,
+    ...permissions,
     botType: dto.bot_type,
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
-    spaceId: dto.space_id === undefined ? undefined : String(dto.space_id),
-    spaceName: dto.space_name,
+    spaceId: dto.space?.space_id,
+    spaceName: dto.space?.name,
   };
 }
 
@@ -250,10 +278,12 @@ async function fetchOwnedBots(
   userId: string,
 ): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
   try {
-    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
+    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100, stage: 'online' });
     // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
     // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
-    const items = (resp.data?.items ?? []).map(toOwnedBotView);
+    const owned = resp.data?.items ?? [];
+    // Engine metadata is resolved only for the selected conversation.
+    const items = owned.map(toOwnedBotView);
     return {
       ok: true,
       data: {

@@ -104,10 +104,12 @@ engine's `PATH`, so a tool installed there is runnable without a restart.
 
 ### Backend — application service (`core/acli_clis/service.py`)
 
-Guard, shared by every write: the actor owns the bot; the bot is an `ACTIVE`
-`service` bot; its engine is openclaw or claude_code. This is the check
-`CallerIdentityService.update_cli_call_type` performs today, extracted into
-`core/caller_identity/guard.py` and used by both (that service is 789 lines).
+Guard, run before every write: the bot is `ACTIVE` (else `409 not_running`);
+the actor owns it; its engine is openclaw or claude_code. Any bot type
+qualifies: device bootstrap reconciles a Passport CLI scope for every bot, and
+adding a tool involves no caller identity. The identity switch keeps its own
+service-bot rule (`core/caller_identity/guard.py`); `load_bot` and the
+lock-epoch check are shared.
 The collaborator lock epoch is resolved by the router exactly as the call-type
 route does.
 
@@ -154,7 +156,10 @@ before the `{bot_id}` wildcard. It calls the market API directly
 ?status=published&q=<keyword>` answers `{success, data: [ … ]}` with every match
 at once, so paging is done in the backend. The URL is deployment config (prod
 and pre differ); empty means `501` not configured.
-Status mapping: `not_running` → `409`; `engine_unsupported` → `501`;
+Status mapping: `not_running` → `409`; `engine_outdated` (the engine's own
+route-miss `404`: a supported engine type whose build predates acli) → `409`;
+`engine_unsupported` (an unsupported engine type, or an engine `501`) → `501`;
+a `404` from the gateway rather than the engine → `engine_unreachable`;
 `not_found`, `cli_name_mismatch` → `422`; `install_failed`,
 `uninstall_failed`, `engine_unreachable`, `timeout` → `502`; guard errors reuse
 the caller-identity statuses. Registration everywhere the call-type route
@@ -162,6 +167,28 @@ appears: `openapi_v1/__init__.py`, `authorization_rules.py` (MEMBER read,
 owner write), `admission_routes.py`, inventories, the shared status map,
 schema snapshots; DI wiring beside `CliPassportScopeReconciler` in the four
 device modules.
+
+### Backend — internal router (`adapters/http/acli_clis/router.py` + `schemas.py`)
+
+The same four operations on `/api/bots`, for users authenticated by
+`get_current_user` (added 2026-10-20). The actor is always `user.staffId`;
+`entity_id` is a required query parameter that only locates the bot; the
+service refuses a list to anyone below MEMBER on the bot, the same bar as the
+`/openapi/v1` list route. Following
+the internal caller-identity routes, the client sends its edit-lock epoch:
+`lock_epoch` in the `POST` body and as a query parameter on `DELETE`.
+
+| Method | Path | Input | Answer |
+| --- | --- | --- | --- |
+| GET | `/api/bots/market/clis` | `keyword`, `page_no`, `page_size` | `{items, total, has_more}` |
+| GET | `/api/bots/{bot_id}/clis` | `entity_id` | `[{cli_code, cli_name, cli_desc, identity_mode, default}]` |
+| POST | `/api/bots/{bot_id}/clis` | `entity_id`; body `{cli_code, lock_epoch}` | `{cli_code, command, version}` |
+| DELETE | `/api/bots/{bot_id}/clis/{cli_code}` | `entity_id`, `lock_epoch` | `{cli_code, deleted}` |
+
+Answers are plain models, as on the other internal routes. Errors are the same
+domain errors with the same statuses, through the app-level map
+(`adapters/http/acli_cli_status.py`). The market route is declared before the
+`{bot_id}` routes.
 
 ### Docs
 

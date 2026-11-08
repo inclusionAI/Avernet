@@ -29,7 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     ServiceChecked,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_config_manifest.apply.registry import (
+from agentclaw.community.core.apply_engine.registry import (
     build_materialisers,
 )
 
@@ -136,8 +136,9 @@ def test_apply_declares_the_bar_w10_settled():
             upload_service=object(),
             capability_reader=object(),
             package_validator=object(),
-            entry_fetcher=object(),
+            content=object(),
             resource_service=object(),
+            resource_rows=object(),
             cli_tool_service=object(),
         )
     ),
@@ -195,8 +196,9 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         upload_service=object(),
         capability_reader=object(),
         package_validator=object(),
-        entry_fetcher=object(),
+        content=object(),
         resource_service=object(),
+        resource_rows=object(),
         cli_tool_service=object(),
     ):
         for path in _CATEGORY_WRITE_PATHS[construct.value]:

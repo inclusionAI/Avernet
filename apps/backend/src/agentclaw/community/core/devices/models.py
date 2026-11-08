@@ -169,6 +169,20 @@ class DeviceConnectionInfo:
     与 ``expires_at`` 分开是因为它们描述的是两个 token：http-info 不给
     过期时间，ws-info 给，二者不能互相顶替。
     """
+    a2a_base_url: str = ""
+    """设备 A2A 面（agent-card / ``/rpc``）的权威 HTTP base——浏览器直连可达。
+
+    由 BaaS 在 ws-info 里签发（加性字段；供应商未提供即空串）。空串语义是
+    "该设备没有可交付的 A2A 地址"，caller 按原行为回落；网关 relay ws URL
+    推不出等价的 A2A 面（route 404，正是本字段引入的原因），不得代填。
+    """
+    a2a_withheld: bool = False
+    """服务端治理后明确拒绝为本连接签发 A2A 面（用户灰度未命中）。
+
+    与空串是两个语义：空串而非 withheld 是"旧服务端/该设备没有地址"
+    （客户端仍可走 ws url 直连推导兜底）；withheld=True 是"明确拒绝"——
+    客户端必须禁用推导与探测，稳定回落 v3，不得绕开用户灰度控制。
+    """
 
 
 @dataclass

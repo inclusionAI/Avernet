@@ -25,6 +25,8 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.center_skill_access import (
     CenterSkillAccessRepositoryProtocol,
@@ -152,6 +154,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
+        self._bot_addresses = BotAddressResolver(bot_repo)
         self._collaborators = collaborators
         self._reader = reader
         self._skill_service_factory = skill_service_factory
@@ -199,7 +202,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
         member_ids = self._reader.member_skill_ids(bot=bot)
         return self._skill_repo.list_bot_skills(
             bot_id=bot_id,
-            user_id=owner_id,
+            user_id=stable_resource_owner_id(bot),
             skill_set_member_ids=member_ids,
             page=page,
             page_size=page_size,
@@ -221,7 +224,9 @@ class SkillQueryService(SkillQueryServiceProtocol):
             raise LocalSkillNotFoundError()
         owner_id = str(skill["user_id"])
         bot_id = str(skill["bolt_id"])
-        self._require_view_access(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        _, _, owner_id = self._resolve_local(
+            skill=skill, bot_id=bot_id, owner_id=owner_id, user_id=actor_id
+        )
         record = self._skill_repo.get_bot_local_skill(
             skill_id=skill_id, bot_id=bot_id, user_id=owner_id
         )
@@ -382,17 +387,11 @@ class SkillQueryService(SkillQueryServiceProtocol):
         owner_id = str(skill.get("user_id") or "")
         if not bot_id or not owner_id:
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        bot = self._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+        if stable_resource_owner_id(bot) != owner_id:
             raise LocalSkillNotFoundError()
-        if str(bot.get("owner_id") or "") != owner_id:
-            raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
 
         storage = self._local_storage(skill, bot, owner_id)
         for filename in ("SKILL.md", "README.md"):
@@ -473,40 +472,32 @@ class SkillQueryService(SkillQueryServiceProtocol):
         owner_id: str,
         user_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        skill_owner_id = str(skill.get("user_id") or "")
+        bot = self._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=user_id
+        )
+        resource_id = stable_resource_owner_id(bot)
         if (
-            not skill_owner_id
-            or skill_owner_id != owner_id
+            str(skill.get("user_id") or "") != resource_id
             or str(skill.get("bolt_id")) != bot_id
         ):
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if user_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, user_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
-        return skill, bot, owner_id
+        return skill, bot, resource_id
 
     def _require_view_access(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
-        """Refuse an invisible Bot, and hand back the one row it took to say so.
-
-        Returning the Bot rather than ``None`` is what keeps the listing to a
-        single Bot read: the engine that scopes its SkillSets and the env its
-        Installation rows are keyed on are both on it.
-        """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if actor_id == owner_id:
+        """Resolve a locator, then authorize against the current Bot owner."""
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise LocalSkillNotFoundError() from None
+        current_owner = str(bot["owner_id"])
+        if actor_id == current_owner:
             return bot
         permission = self._collaborators.check_collaborator_permission(
-            bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+            bot_id, current_owner, actor_id, PermissionLevel.MEMBER
         )
         if not permission.get("has_permission"):
             raise LocalSkillNotFoundError()
@@ -664,20 +655,11 @@ class _RepoAssetAdapter:
             "git://"
         ):
             raise LocalSkillNotFoundError()
-        bot = self._service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if str(bot.get("owner_id") or "") != owner_id:
-            raise LocalSkillNotFoundError()
-        if user_id != owner_id:
-            permission = self._service._collaborators.check_collaborator_permission(
-                bot_id, owner_id, user_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
-        # The HTTP adapter's grant checker is intentionally record-shaped.
-        # Enrich a copy only; shared Repo persistence remains bot-independent.
-        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
+        bot = self._service._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=user_id
+        )
+        resource_id = stable_resource_owner_id(bot)
+        return {**skill, "bolt_id": bot_id, "user_id": resource_id}, bot, resource_id
 
 
 class _CenterAssetAdapter:
@@ -698,4 +680,5 @@ class _CenterAssetAdapter:
             bot_id=bot_id, owner_id=owner_id, actor_id=user_id
         )
         self._service._require_center_access(skill=skill, actor_id=user_id)
-        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
+        resource_id = stable_resource_owner_id(bot)
+        return {**skill, "bolt_id": bot_id, "user_id": resource_id}, bot, resource_id

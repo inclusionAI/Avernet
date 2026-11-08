@@ -1,7 +1,8 @@
 //! Provider identity: how `register` obtains the Bot's `provider_bot_ref`.
 //!
-//! The resolver is selected with `register --provider-auth <id>` and must
-//! match how the Provider authenticates its Bots. The default `static-bearer`
+//! An explicit --provider-auth selects the resolver; otherwise Token auth_mode
+//! selects it, with a distribution default for historical Tokens without metadata.
+//! Distributions map that mode to their credential source. The `static-bearer`
 //! resolver uses `--provider-bot-ref`; distributions add resolvers for other
 //! Provider types (for example one that reads a trusted agent identity).
 
@@ -21,11 +22,13 @@ pub struct IdentityContext<'a> {
 
 #[async_trait::async_trait]
 pub trait IdentityResolver: Send + Sync {
-    /// Value accepted by `--provider-auth`.
+    /// Stable resolver ID, also used by saved runtime configuration.
     fn id(&self) -> &str;
     /// Environment checks run before any configuration or network access.
     fn preflight(&self) -> Result<()> { Ok(()) }
-    /// Resolve a local identity from the selected engine and canonical workspace.
+    /// Resolve a local identity from the selected engine and canonical pre-registration directory.
+    /// For a managed subbot workspace this is the workspace root: the final Bot UUID
+    /// and directory are not known until registration succeeds. Explicit --cwd is unchanged.
     /// Distributions may discover an existing identity; the default preserves CLI input.
     async fn registration_ref(&self, explicit_ref: Option<&str>, _engine: &str, _cwd: &std::path::Path) -> Result<Option<String>> {
         Ok(explicit_ref.map(str::to_owned))

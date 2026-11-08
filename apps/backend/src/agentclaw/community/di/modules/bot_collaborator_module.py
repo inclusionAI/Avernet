@@ -15,6 +15,7 @@ bindings exist so production routes can use ``Injected(...)``.
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolverProtocol
 from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.collaborator_lock_service import (
@@ -107,12 +108,14 @@ class BotCollaboratorModule(Module):
         lock_repo: BotCollabLockRepositoryProtocol,
         collab_service: CoreCollaboratorServiceProtocol,
         bot_service: BotServiceProtocol,
+        bot_addresses: BotAddressResolverProtocol,
     ) -> CollaboratorLockService:
         """Construct ``CollaboratorLockService``."""
         return CollaboratorLockService(
             lock_repo=lock_repo,
             collab_service=collab_service,
             bot_service=bot_service,
+            bot_addresses=bot_addresses,
         )
 
     @singleton

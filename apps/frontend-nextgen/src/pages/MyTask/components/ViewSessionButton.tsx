@@ -10,7 +10,7 @@ import { MessageCircle } from 'lucide-react';
  *   groupId 优先取 source_group_id，缺失时从 bcs_grp session 截取前缀(协作群页亦可异步反查)。
  * - 单 bot → 对话页(/workspace/chat)，需 owner_bot_id + owner_user_id 拼成 bot_id:user_id。
  */
-export function ViewSessionButton({ record }: { record: TaskListItem }) {
+export function ViewSessionButton({ record, label = '查看会话' }: { record: TaskListItem; label?: string }) {
   const sessionId =
     record.execution_config?.main_session_id?.trim() ||
     record.task_spec?.context?.extend_props?.teamclaw_context?.main_session_id?.trim();
@@ -42,7 +42,7 @@ export function ViewSessionButton({ record }: { record: TaskListItem }) {
       leftIcon={<MessageCircle className="size-4" />}
       onClick={() => history.push(conversationUrl)}
     >
-      查看会话
+      {label}
     </Button>
   );
 }

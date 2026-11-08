@@ -17,6 +17,11 @@ legacy admin responses deserialize with null slug and version 1.0.
   inline event-subscription combinations are unsupported. StateMachine retains its
   definition and bindings; initial run startup requires an initial Session. Nullable initial Session/run
   response fields represent a successfully created sessionless Group.
+- `CreateGroupRequest.human_mention_notify_mode` defaults to `all` and accepts
+  `all`, `driver_bot_only`, or `none`; null and other values fail deserialization.
+  Only normal Group creation applies it. The legacy shared DTO also validates
+  this field on DM requests, but DM creation ignores valid values. V1 has a
+  separate DM request variant and rejects the field entirely.
 
 ## Consumes
 

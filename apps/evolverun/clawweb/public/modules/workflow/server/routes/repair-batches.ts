@@ -84,10 +84,20 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     return actor;
   }
   async function taskAccess(request: Request, response: Response, mode: 'view' | 'edit') {
-    const task = await service.task(text(request.params.taskId, 'taskId'));
+    const task = await repairStage('task_detail', () => service.task(text(request.params.taskId, 'taskId')));
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
+  // Machine read capability is restricted to immutable material and its active execution.
+  router.get('/material-download/:taskId/:revision/:itemId',handle(async(req,res)=>{
+    res.setHeader('Cache-Control','no-store');
+    if(!service.materialChunk)throw new RepairBatchError('CAPABILITY_UNAVAILABLE','Material download unavailable');
+    const offset=req.query.offset===undefined?0:Number(req.query.offset);
+    const token=/^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.get('Authorization')??'')?.[1]??'';
+    const chunk=await service.materialChunk(text(req.params.taskId,'taskId'),revision(req.params.revision),text(req.params.itemId,'itemId'),token,offset);
+    if(!chunk){res.status(401).json({code:'MATERIAL_ACCESS_DENIED'});return;}
+    res.json(chunk);
+  }));
   router.post('/proposal-integration/retry', handle(async (req, res) => {
     const workflowId = text(req.body?.workflowId, 'workflowId');
     if (!await access(req, res, workflowId, 'edit')) return;
@@ -117,8 +127,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const workflowId = text(query?.workflowId, 'workflowId');
     const actor = await access(req, res, workflowId, 'view');
     const state = query.state ?? 'all';
+    const versionScope = query.versionScope;
+    if (versionScope !== undefined && !['current', 'historical', 'all'].includes(versionScope)) throw new RepairBatchError('INVALID_INPUT', 'Invalid version scope');
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
-    if (actor) res.json({ ...await service.candidates(workflowId, { state: state as RepairInboxFilter,
+    if (actor) res.json({ ...await service.candidates(workflowId, { versionScope, snapshotKey: query.snapshotKey === undefined ? undefined : text(query.snapshotKey, 'snapshotKey'), state: state as RepairInboxFilter,
+      includeTasks: boolean(query.includeTasks, 'includeTasks', true),
       metadataPage: positive(query.metadataPage, 'metadataPage', 1), page: positive(query.page, 'page', 1), pageSize: positive(query.pageSize, 'pageSize', 20, 200),
       nodeId: query.nodeId === undefined ? undefined : text(query.nodeId, 'nodeId'),
       failureMode: query.failureMode === undefined ? undefined : text(query.failureMode, 'failureMode'),
@@ -159,7 +172,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.get('/:taskId', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
     if (selected) res.json(projectTaskHistory({ ...selected.task,
-      ...(input.release ? { release: await input.release.detail(selected.task.taskId),
+      ...(input.release ? { release: await repairStage('release_detail', () => input.release!.detail(selected.task.taskId, selected.task.latestSuccessful?.revision ?? null)),
         capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) }, positive(req.query.revisionPage, 'revisionPage', 1), positive(req.query.revisionPageSize, 'revisionPageSize', 20, 20)));
   }));
   function release() {
@@ -192,6 +205,12 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
     res.status(202).json(await input.trials.start(selected.actor.actorId, selected.task.taskId, req.body));
   }));
+  router.post('/:taskId/trials/:trialId/stop', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
+    res.json(await input.trials.stop(selected.task.taskId, text(req.params.trialId, 'trialId')));
+  }));
   router.get('/:taskId/deployment-targets', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.json({ targets: await release().targets(selected.actor.actorId, selected.task.taskId) });
@@ -223,6 +242,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.post('/:taskId/deployment/:deploymentId/reconcile', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.json(await release().reconcile(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId')));
+  }));
+  router.get('/:taskId/revisions/:revision/materials/:itemId',handle(async(req,res)=>{
+    const selected=await taskAccess(req,res,'view');if(!selected)return;
+    if(!service.material)throw new RepairBatchError('CAPABILITY_UNAVAILABLE','冻结材料读取尚未配置');
+    res.json(await service.material(selected.task.taskId,revision(req.params.revision),text(req.params.itemId,'itemId')));
   }));
   router.get('/:taskId/revisions/:revision', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');

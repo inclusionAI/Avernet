@@ -52,6 +52,7 @@ from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
     aliyun_ack_plugin_factory,
 )
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
+    A2aUrlDiscoveryState,
     local_k8s_plugin_factory,
 )
 from secbaas.community.plugins.sandbox.arca.local_proc import (
@@ -208,6 +209,10 @@ class PluginContainer(containers.DeclarativeContainer):
         local_k8s=providers.Singleton(
             local_k8s_plugin_factory,
             arca_utils=arca_utils,
+            # review P2：local_k8s 插件实例按请求创建（逐请求 credentials），
+            # A2A 发现缓存/负缓存/in-flight/并发额度必须应用级共享——以
+            # Singleton 注入工厂，绝不把插件实例整体做成单例
+            discovery_state=providers.Singleton(A2aUrlDiscoveryState),
         ),
         aliyun_ack=providers.Singleton(
             aliyun_ack_plugin_factory,

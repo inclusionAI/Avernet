@@ -44,7 +44,10 @@ from secbaas.community.api.bot_manage import (
     UpdateDevicesResponse,
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
-from secbaas.community.api.device_manage import DeviceListResponse
+from secbaas.community.api.device_manage import (
+    DeviceListResponse,
+    to_public_device_response,
+)
 from secbaas.community.api.publish_manage import (
     BotPublishSummary,
     PublishService,
@@ -565,6 +568,8 @@ async def get_bot_devices_by_uuid(
         tenant=tenant,
         bot_uuid=bot_uuid,
     )
+    for batch in result:
+        batch.items = [to_public_device_response(d) for d in batch.items]
     return ApiResponse(data=result)
 
 

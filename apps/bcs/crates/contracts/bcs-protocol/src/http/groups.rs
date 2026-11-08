@@ -2,48 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
 
-use bcs_domain::{MessageViewScope, OpeningMessage};
-
-/// Context for a proposal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalContext {
-    pub user_query: Option<String>,
-    pub detected_gap: Option<String>,
-    pub relevant_history: Vec<String>,
-}
-
-/// Response from proposal evaluation.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProposalResponse {
-    pub proposal_created: bool,
-    /// Mode is deprecated - may not be present in new responses
-    #[serde(default)]
-    pub mode: String,
-    pub driver_bot: String,
-    pub participants: Vec<String>,
-    pub member_intros: String,
-    pub confirm_url: String,
-    pub expires_in_seconds: u64,
-    pub message: String,
-}
-
-/// Response from proposal confirmation.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ConfirmProposalResponse {
-    pub created: bool,
-    pub group_id: String,
-    /// Mode is deprecated - may not be present in new responses
-    #[serde(default)]
-    pub mode: Option<String>,
-    pub driver_bot: String,
-    pub participants: Vec<String>,
-    /// Chat page URL (present when botchat_url is configured on server).
-    #[serde(default)]
-    pub chat_url: Option<String>,
-    /// Initial BCS session created for the group.
-    #[serde(default)]
-    pub session_id: Option<String>,
-}
+use bcs_domain::{HumanMentionNotifyMode, MessageViewScope, OpeningMessage};
 
 /// Participant info for group creation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,9 +108,9 @@ pub struct CreateGroupRequest {
     /// Group kind: "normal" (default) or "dm" (1:1 direct message).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_kind: Option<String>,
-    /// Service-as-a-Group configuration. None for regular groups.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_spec: Option<serde_json::Value>,
+    /// Accepted legacy input; ignored and absent from responses and runtime configuration.
+    #[serde(default, rename = "service_spec", skip_serializing, deserialize_with = "ignore_retired_service_spec")]
+    pub retired_service_spec: (),
     /// Group strategy: "chat" (default), "manager_worker", or "state_machine".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_strategy: Option<String>,
@@ -160,6 +119,9 @@ pub struct CreateGroupRequest {
     /// event subscriptions; it does not prevent later explicit Session creation.
     #[serde(default = "default_create_initial_session")]
     pub create_initial_session: bool,
+    /// External Human-mention notifications for normal Groups. Defaults to all.
+    #[serde(default)]
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     /// Actor (bot_uuid or human_xxx) that initiated group creation.
     /// Defaults to driver_bot when not specified (backward compatible).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +192,28 @@ pub struct CreateGroupResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_group_request_notify_mode_defaults_and_accepts_known_values() {
+        for mode in [None, Some("all"), Some("driver_bot_only"), Some("none")] {
+            let mut value = serde_json::json!({"driver_bot": "driver"});
+            if let Some(mode) = mode {
+                value["human_mention_notify_mode"] = serde_json::json!(mode);
+            }
+            let request: CreateGroupRequest = serde_json::from_value(value).unwrap();
+            assert_eq!(serde_json::to_value(request.human_mention_notify_mode).unwrap(), mode.unwrap_or("all"));
+        }
+    }
+
+    #[test]
+    fn create_group_request_rejects_invalid_notify_modes() {
+        for mode in [serde_json::Value::Null, serde_json::json!("invalid"), serde_json::json!(1),
+            serde_json::json!(false), serde_json::json!([]), serde_json::json!({})] {
+            assert!(serde_json::from_value::<CreateGroupRequest>(serde_json::json!({
+                "driver_bot": "driver", "human_mention_notify_mode": mode
+            })).is_err());
+        }
+    }
 
     #[test]
     fn create_group_request_defaults_to_creating_initial_session() {
@@ -323,15 +307,6 @@ mod tests {
         .expect("create response session alias should deserialize");
         assert_eq!(created.session_id.as_deref(), Some("group_1:initial"));
 
-        let confirmed: ConfirmProposalResponse = serde_json::from_value(serde_json::json!({
-            "created": true,
-            "group_id": "group_2",
-            "driver_bot": "bot_a",
-            "participants": ["bot_a", "bot_b"],
-            "session_id": "group_2:initial"
-        }))
-        .expect("confirm response session id should deserialize");
-        assert_eq!(confirmed.session_id.as_deref(), Some("group_2:initial"));
     }
 
     #[test]
@@ -352,11 +327,7 @@ mod tests {
     }
 }
 
-/// Request to evaluate a proposal.
-#[derive(Debug, Serialize)]
-pub struct EvaluateProposalRequest {
-    pub topic: String,
-    pub suggested_participants: Vec<String>,
-    pub suggested_driver: Option<String>,
-    pub context: Option<ProposalContext>,
+fn ignore_retired_service_spec<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    let _ = <serde::de::IgnoredAny as Deserialize>::deserialize(deserializer)?;
+    Ok(())
 }

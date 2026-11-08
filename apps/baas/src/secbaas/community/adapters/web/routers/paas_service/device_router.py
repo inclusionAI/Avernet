@@ -17,6 +17,7 @@ from secbaas.community.api.device_manage import (
     DeviceResponse,
     DeviceService,
     ProviderDevicePropsResponse,
+    to_public_device_response,
 )
 from secbaas.community.bootstrap import ApplicationContainer, Provide
 from secbaas.community.logger import get_logger
@@ -86,6 +87,7 @@ async def get_device_info(
             f"Device info retrieved successfully: device_uuid={device_uuid}, "
             f"status={result.status}, tenant={result.tenant}"
         )
+        result = to_public_device_response(result)
         return ApiResponse(data=result)
 
     except HTTPException:

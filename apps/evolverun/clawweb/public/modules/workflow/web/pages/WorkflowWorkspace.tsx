@@ -13,6 +13,7 @@ import StatusBadge from '../components/StatusBadge'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
 import Dashboard from './Dashboard'
+import { confirmDiscardEditor } from '../editor/navigation'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
 const VIEW_META: Record<Exclude<WorkspaceView, 'dashboard'>, { title: string; description: string }> = {
@@ -66,6 +67,7 @@ export default function WorkflowWorkspace() {
   }, [legacyOpen])
 
   const changeView = useCallback((view: WorkspaceView) => {
+    if (activeView === 'editor' && view !== 'editor' && !confirmDiscardEditor()) return
     const next = new URLSearchParams(searchParams)
     if (selectedWorkflow) next.set('workflowId', selectedWorkflow.workflow_id)
     if (view === 'dashboard' || view === 'overview' || view === 'editor' || view === 'management') {
@@ -76,15 +78,15 @@ export default function WorkflowWorkspace() {
       next.set('evoTab', view)
     }
     setSearchParams(next)
-  }, [searchParams, selectedWorkflow, setSearchParams])
+  }, [searchParams, selectedWorkflow, setSearchParams, activeView])
 
   const selectWorkflow = (id: string) => {
+    if (activeView === 'editor' && id !== workflowId && !confirmDiscardEditor()) return
     setSelectedId(id)
     const next = new URLSearchParams(searchParams)
     next.set('workflowId', id)
     if (id !== selectedWorkflow?.workflow_id) {
-      next.delete('baseline')
-      next.delete('current')
+      for (const key of ['baseline', 'current', 'repairTaskId', 'runId', 'analysisId', 'issueSignature']) next.delete(key)
     }
     if (activeView === 'dashboard') {
       next.set('tab', 'evolution')
@@ -108,7 +110,7 @@ export default function WorkflowWorkspace() {
   if (isError) return <div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>
 
   return <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-50">
-    <Sidebar activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} />
+    <Sidebar compact={activeView === 'editor'} activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} />
 
     <main className="flex min-w-0 flex-1 flex-col bg-slate-50">
       {activeView === 'dashboard' && isAdmin ? (
@@ -124,7 +126,7 @@ export default function WorkflowWorkspace() {
                 <button
                   type="button"
                   aria-label="新建工作流"
-                  onClick={() => setCreateOpen(true)}
+                  onClick={() => { if (activeView !== 'editor' || confirmDiscardEditor()) setCreateOpen(true) }}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
                 >
                   <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
@@ -150,7 +152,7 @@ export default function WorkflowWorkspace() {
                 </span>
               )}
               <button type="button" onClick={() => setLegacyOpen((open) => !open)} title="旧版入口" className="rounded-lg px-2 py-1 text-sm text-slate-300 hover:bg-slate-100 hover:text-slate-500">···</button>
-              {legacyOpen && <><div className="fixed inset-0 z-10" onClick={() => setLegacyOpen(false)} /><div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"><button onClick={() => { setLegacyOpen(false); navigate('/workflows') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流</button><button onClick={() => { setLegacyOpen(false); navigate('/editor') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版编辑器</button>{isAdmin && <button onClick={() => { setLegacyOpen(false); navigate('/workflow-management') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流管理</button>}</div></>}
+              {legacyOpen && <><div className="fixed inset-0 z-10" onClick={() => setLegacyOpen(false)} /><div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"><button onClick={() => { if (activeView === 'editor' && !confirmDiscardEditor()) return; setLegacyOpen(false); navigate('/workflows') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流</button><button onClick={() => { if (activeView === 'editor' && !confirmDiscardEditor()) return; setLegacyOpen(false); navigate('/editor') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版编辑器</button>{isAdmin && <button onClick={() => { if (activeView === 'editor' && !confirmDiscardEditor()) return; setLegacyOpen(false); navigate('/workflow-management') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流管理</button>}</div></>}
             </div>
           </header>
           {activeView === 'editor' ? <div className="min-h-0 flex-1 overflow-hidden"><EditorTab workflowId={workflowId} /></div> : <div className="min-h-0 flex-1 overflow-y-auto p-6">

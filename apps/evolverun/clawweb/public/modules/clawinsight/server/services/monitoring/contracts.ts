@@ -1,12 +1,20 @@
 /** Service API: CV reports immutable events; the UI reads projections. No transport dependencies. */
+import type { RecoveryTaskResult } from "../repair/session-recovery/task-contracts.js";
+/** Callback wire contract shared with the existing recovery sender. */
+export type MonitoringRecoveryResult = RecoveryTaskResult;
+export type RecoveryResultAck = {
+  accepted: true; eventId: string; taskId: string; resultVersion: number; duplicate: boolean;
+};
 export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v2";
+export const DIAGNOSIS_V3_VERSION = "claw-monitoring/diagnosis-event/v3";
+export const DIAGNOSIS_V4_VERSION = "claw-monitoring/diagnosis-event/v4";
+export type RuntimeIdentity = Record<string, string>;
 export const CHECK_VERSION = "claw-monitoring/bot-check/v2";
 export type Engine = "OC" | "TE";
 export type Decision = "ALERT" | "PASS" | "UNRESOLVED";
 export type CheckStatus = "HEALTHY" | "ERROR" | "UNKNOWN" | "PAUSED";
 export type MonitoringBot = { botId: string; engine: Engine };
-export type DiagnosisEvent = {
-  schemaVersion: typeof DIAGNOSIS_VERSION;
+type DiagnosisFields = {
   eventId: string;
   diagnosisId: string;
   botId: string;
@@ -15,6 +23,8 @@ export type DiagnosisEvent = {
   engine: Engine;
   sessionKey: string | null;
   sessionId: string | null;
+  /** Optional first-write-only NAS metadata; stored internally, never exposed in page DTOs. */
+  sessionNasPath?: string;
   traceId: string | null;
   occurredAt: string | null;
   diagnosedAt: string;
@@ -28,6 +38,10 @@ export type DiagnosisEvent = {
   handlerName: string | null;
   humanIntervention: boolean;
 };
+export type DiagnosisEvent = DiagnosisFields & (
+  | { schemaVersion: typeof DIAGNOSIS_VERSION; runtimeIdentity?: never }
+  | { schemaVersion: typeof DIAGNOSIS_V3_VERSION | typeof DIAGNOSIS_V4_VERSION; runtimeIdentity: RuntimeIdentity | null }
+);
 export type BotCheck = {
   schemaVersion: typeof CHECK_VERSION;
   botId: string;
@@ -38,7 +52,7 @@ export type BotCheck = {
   lastSuccessfulCheckAt: string | null;
   status: CheckStatus;
 };
-export type DiagnosisItem = Omit<DiagnosisEvent, "schemaVersion" | "eventId" | "engine">;
+export type DiagnosisItem = Omit<DiagnosisEvent, "eventId" | "engine" | "runtimeIdentity" | "sessionNasPath">;
 export type DiagnosisQuery = {
   startMs: number | null;
   endMs: number | null;
@@ -81,6 +95,8 @@ export interface MonitoringStore {
   listTargets(): Promise<MonitoringTarget[]>;
   summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow): Promise<(MonitoringSummary | null)[]>;
   insertDiagnosis(event: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean>;
+  /** Append once per event/task/version; true means inserted, false means identical replay. */
+  appendRecoveryResult(result: MonitoringRecoveryResult): Promise<boolean>;
   applyCheck(check: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean>;
   readStatus(target: MonitoringTarget): Promise<{ check: BotCheck | null; count: number }>;
   listDiagnoses(target: MonitoringTarget, query: DiagnosisQuery): Promise<DiagnosisPage>;
@@ -88,6 +104,7 @@ export interface MonitoringStore {
 export interface MonitoringApi {
   bots(): Promise<{ items: MonitoringTarget[] }>;
   reportDiagnosis(input: unknown, key: string | undefined): Promise<DiagnosisAck>;
+  reportRecoveryResult(input: unknown): Promise<RecoveryResultAck>;
   reportCheck(input: unknown): Promise<CheckAck>;
   status(botId: string): Promise<BotStatus>;
   diagnoses(botId: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
@@ -96,6 +113,7 @@ export type MonitoringErrorCode = "INVALID_EVENT" | "INVALID_IDENTITY"
   | "BOT_IDENTITY_UNAVAILABLE" | "BOT_IDENTITY_AMBIGUOUS" | "CHECK_CONFLICT"
   | "TARGET_UNRESOLVED" | "TARGET_AMBIGUOUS" | "TARGET_BINDING_CONFLICT"
   | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_ENROLLED" | "ALREADY_ENROLLED" | "ENROLLMENT_NOT_IMPLEMENTED"
+  | "INVALID_RESULT" | "RESULT_TARGET_NOT_FOUND" | "RESULT_CONFLICT"
   | "EVENT_CONFLICT" | "PAYLOAD_TOO_LARGE" | "NOT_READY" | "BOT_NOT_FOUND";
 export class MonitoringError extends Error {
   constructor(readonly code: MonitoringErrorCode, message: string) { super(message); }

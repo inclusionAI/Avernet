@@ -91,6 +91,14 @@ def _declined_execution() -> TaskReportCommand:
     )
 
 
+def test_node_context_projects_current_graph_attempt() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.extend_props["harness_retries"] = 1
+
+    assert service.get_node_context("task-1", "task-1").attempt == 1
+
+
 def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     service = _graph_service()
     execution = _execution()
@@ -137,6 +145,42 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
         NodeAction.TRANSITION,
     ]
 
+
+def test_report_accepts_latest_skill_fact_after_infra_hung_state() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.status = Status.HUNG
+    node.run_info.failure_reason = "infra_reported_hung"
+    graph = service.query_task_dashboard("task-1")
+    graph.status = Status.HUNG
+    graph.extend_props["hung_reason"] = "infra_reported_hung"
+
+    assert service.apply_relay_report(_execution()).status == TaskReportStatus.APPLIED
+
+    complete = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-after-hung",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
+        task_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+    )
+    result = service.apply_relay_report(complete)
+    assert result.task_completed
+    assert result.status == TaskReportStatus.APPLIED
+
+    graph = service.query_task_dashboard("task-1")
+    assert graph.status == Status.DONE
+    assert node.status == Status.SUCCESS
+    assert node.run_info.failure_reason is None
+    assert "hung_reason" not in graph.extend_props
+    transitions = [
+        event for event in graph.tasks[0].run_info.action_log
+        if event.action == NodeAction.TRANSITION
+    ]
+    assert transitions[-1].status_from == Status.HUNG
+    assert transitions[-1].status_to == Status.SUCCESS
 
 def test_report_rejects_conflicting_replay_and_invalid_plan_branch() -> None:
     service = _graph_service()

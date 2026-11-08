@@ -14,6 +14,11 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    stable_resource_owner_id,
+)
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
@@ -58,6 +63,7 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
+        self._bot_address_resolver = BotAddressResolver(bot_repo)
         self._pool_skills = pool_skills
         self._version_resolver = version_resolver
         self._read_config = read_config
@@ -65,7 +71,7 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
         return self._repository.list_member_skill_ids(
             bot_id=str(bot["bot_id"]),
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             engine_type=bot_engine_type(bot),
             default_engine_types=bot_default_engine_types(bot),
         )
@@ -85,9 +91,10 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         initial Installation facts.
         """
         resolved_bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        resource_owner_id = stable_resource_owner_id(resolved_bot)
         self._repository.initialize_installations(
             bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=resource_owner_id,
             env=str(resolved_bot["env"]),
             engine_type=bot_engine_type(resolved_bot),
             default_engine_types=bot_default_engine_types(resolved_bot),
@@ -105,7 +112,7 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         self._flush(
             bot=resolved_bot,
             bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=stable_resource_owner_id(resolved_bot),
         )
 
     def active_skill_assets(
@@ -116,10 +123,13 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         bot: Mapping[str, Any] | None = None,
     ) -> tuple[RegisteredSkillAsset, ...]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        resource_owner_id = stable_resource_owner_id(bot)
         self.synchronize_installations(
-            bot_id=bot_id, owner_id=owner_id, bot=bot
+            bot_id=bot_id, owner_id=resource_owner_id, bot=bot
         )
-        return self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        return self._read_skill_assets(
+            bot_id=bot_id, owner_id=resource_owner_id, bot=bot
+        )
 
     def local_skill_assets(
         self,
@@ -130,10 +140,11 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     ) -> tuple[RegisteredSkillAsset, ...]:
         """Read the complete Bot-owned Local asset catalog without activation filtering."""
         resolved_bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        resource_owner_id = stable_resource_owner_id(resolved_bot)
         return tuple(
             self._pool_skills.list_bot_local_assets(
                 env=str(resolved_bot["env"]),
-                owner_id=owner_id,
+                owner_id=resource_owner_id,
                 bot_id=bot_id,
             )
         )
@@ -160,13 +171,20 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         bot: Mapping[str, Any] | None = None,
     ) -> BotCapabilitySnapshot:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
-        self.synchronize_installations(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        resource_owner_id = stable_resource_owner_id(bot)
+        self.synchronize_installations(
+            bot_id=bot_id, owner_id=resource_owner_id, bot=bot
+        )
         return BotCapabilitySnapshot(
             bot_id=bot_id,
-            owner_id=owner_id,
-            skills=self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot),
+            owner_id=resource_owner_id,
+            skills=self._read_skill_assets(
+                bot_id=bot_id, owner_id=resource_owner_id, bot=bot
+            ),
             installed_mcp_server_codes=frozenset(
-                self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+                self._repository.list_installed_mcps(
+                    bot_id=bot_id, owner_id=resource_owner_id
+                )
             ),
         )
 
@@ -178,11 +196,14 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         bot: Mapping[str, Any] | None = None,
     ) -> frozenset[str]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        resource_owner_id = stable_resource_owner_id(bot)
         self.synchronize_installations(
-            bot_id=bot_id, owner_id=owner_id, bot=bot
+            bot_id=bot_id, owner_id=resource_owner_id, bot=bot
         )
         return frozenset(
-            self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+            self._repository.list_installed_mcps(
+                bot_id=bot_id, owner_id=resource_owner_id
+            )
         )
 
     def _bot(
@@ -191,10 +212,13 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         """A caller-supplied row is trusted; otherwise the exact Bot must exist."""
         if bot is not None:
             return bot
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        try:
+            resolved = self._bot_address_resolver.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            )
+        except BotAddressNotFoundError:
             raise LocalSkillNotFoundError()
-        return bot
+        return resolved.bot
 
     def _flush(
         self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str

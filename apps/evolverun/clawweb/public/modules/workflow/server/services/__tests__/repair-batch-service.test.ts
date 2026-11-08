@@ -16,6 +16,52 @@ describe('repair workbench control service', () => {
     const request = { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: inbox.inputDigest, instructions: '', requestId: 'create-1' };
     return { ...f, service, inbox, request };
   }
+  it('reconciles all manually selected goals together without adding unselected suggestions', async () => {
+    const f = await setup(3);
+    const selected = ['item-0', 'item-2'];
+    const revision = await f.service.create('human', { ...f.request, itemIds: selected });
+    expect(revision.input.integration?.plans).toHaveLength(1);
+    expect(revision.input.integration?.plans[0].originalItemIds).toEqual(selected);
+    expect(revision.input.items.map(item => item.itemId)).toEqual(selected);
+    const legacyInput={...revision.input};delete legacyInput.integration;
+    await f.db.exec('UPDATE workflow_repair_revisions SET input_json = ? WHERE task_id = ? AND revision = 1',[JSON.stringify(legacyInput),revision.taskId]);
+    await f.service.report({ workflowId: 'wf-1', taskId: revision.taskId, revision: 1,
+      expectedStateVersion: revision.stateVersion, status: 'failed', error: { code: 'CANDIDATE_WRITE_FAILED' } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: null });
+    const retry = await f.service.retryGeneration('human', revision.taskId, { expectedRevision: 1, requestId: 'retry-joint' });
+    expect(retry.input.integration?.plans[0].originalItemIds).toEqual(selected);
+    expect(retry.input.baseline).toEqual(revision.input.baseline);
+    expect((await f.service.task(revision.taskId)).revisions.find(row=>row.revision===1)!.input.integration).toBeUndefined();
+  });
+  it('settles failed AIS from its status without fetching a Git failure branch', async () => {
+    const f = await setup(1);
+    const revision = await f.service.create('human', f.request);
+    const error = { code: 'CANDIDATE_WRITE_FAILED', message: '模型结果不是合法 JSON',
+      stage: 'parse_model_output', details: { reasonCode: 'MODEL_OUTPUT_INVALID_JSON', itemIds: ['item-0'], line: 1, column: 2 } };
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'container exited with code 1' });
+    f.setGeneratedResult({ status: 'failed', error });
+    const read = vi.spyOn(f.executionPort, 'readResult');
+    await f.service.reconcile();
+    expect(read).not.toHaveBeenCalled();
+    expect((await f.service.task(revision.taskId)).latestAttempt.error).toMatchObject({ code: 'AIS_FAILED', message: 'container exited with code 1' });
+  });
+  it('groups node overlaps transitively while keeping a multi-node source atomic',async()=>{
+    const f=await setup(4);
+    const scopes=[['a'],['b'],['a','b'],['c']];
+    f.items.forEach((item,index)=>{item.proposal={operations:scopes[index].map(nodeId=>({nodeId,path:'/executor/prompt',op:'replace',value:'selected goal'}))};});
+    const inbox=await f.service.candidates('wf-1');
+    const revision=await f.service.create('human',{...f.request,inputDigest:inbox.inputDigest});
+    const groups=revision.input.integration!.plans.map(plan=>plan.originalItemIds).sort((a,b)=>a[0].localeCompare(b[0]));
+    expect(groups).toEqual([['item-0','item-1','item-2'],['item-3']]);
+  });
+  it('reviews workflow-level constraints together with selected node changes',async()=>{
+    const f=await setup(2);
+    f.items[0].proposal={operations:[{nodeId:'query',path:'/executor/prompt',op:'replace',value:'goal'}]};
+    f.items[1].proposal={operations:[{nodeId:'',path:'/inputs',op:'replace',value:{}}]};
+    const inbox=await f.service.candidates('wf-1');
+    const revision=await f.service.create('human',{...f.request,inputDigest:inbox.inputDigest});
+    expect(revision.input.integration?.plans.map(plan=>plan.originalItemIds)).toEqual([['item-0','item-1']]);
+  });
   it('fits large previews within the shared response budget without losing issue totals or full item data', async () => {
     const f = await repairFixture(7); fixtures.push(f);
     f.items.forEach((item, i) => {
@@ -213,14 +259,15 @@ describe('repair workbench control service', () => {
     expect(revision.input).not.toHaveProperty('excludedSourceRefs');
     expect(JSON.stringify(revision.input).length).toBeLessThan(20_000);
   });
-  it('rejects >100, stale digest, byte limits and cross-workflow selections before persisting tasks', async () => {
+  it('rejects oversized and cross-workflow requests without using a stale list digest as a manual gate', async () => {
     const f = await setup(101);
     await expect(f.service.create('human', f.request)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) })).rejects.toMatchObject({ code: 'SOURCE_CHANGED' });
     await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], instructions: '界'.repeat(22000) })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
     const other = await f.service.candidates('wf-2');
     await expect(f.service.create('human', { ...f.request, workflowId: 'wf-2', itemIds: ['item-0'], inputDigest: other.inputDigest })).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
     expect(await f.db.query('SELECT * FROM ce_tasks')).toEqual([]);
+    const created = await f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) });
+    expect(created.input.items.map(item=>item.itemId)).toEqual(['item-0']);
   });
   it('arbitrates concurrent create attempts and rejects reused requests with changed instructions', async () => {
     const f = await setup();
@@ -330,6 +377,72 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('drafting');
     expect((await f.service.task(created.taskId)).execution?.status).toBe('dispatched');
   });
+  const modelInput = (taskId: string, itemId = 'item-0') => ({ itemId, coreInput: 'Exact application prompt', materials: {
+    schemaVersion: 'repair-local-materials/v1', taskId, revision: 1, root: '/ais/repair-materials/one',
+    files: [{ kind: 'item', path: 'item.json', bytes: 42, sha256: 'a'.repeat(64), purpose: 'Read original goal', itemIds: [itemId] }],
+  } });
+  const invalidModelInputs: Array<[string, (entry: ReturnType<typeof modelInput>) => unknown]> = [
+    ['non-array records', entry => entry],
+    ['null records', () => null],
+    ['missing item ID', entry => [Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'itemId'))]],
+    ['unknown item ID', entry => [{ ...entry, itemId: 'not-selected' }]],
+    ['duplicate item records', entry => [entry, entry]],
+    ['unknown model phase', entry => [{ ...entry, phase: 'review' }]],
+    ['null model phase', entry => [{ ...entry, phase: null }]],
+    ['duplicate generation records', entry => [{ ...entry, phase: 'generation' }, { ...entry, phase: 'generation' }]],
+    ['legacy and explicit generation records', entry => [entry, { ...entry, phase: 'generation' }]],
+    ['explicit and legacy generation records', entry => [{ ...entry, phase: 'generation' }, entry]],
+    ['duplicate planning records', entry => [{ ...entry, phase: 'planning' }, { ...entry, phase: 'planning' }]],
+    ['multiple task planning records', entry => [{ ...entry, phase: 'planning' }, { ...entry, phase: 'planning', itemId: 'item-1' }]],
+    ['empty core prompt', entry => [{ ...entry, coreInput: '  ' }]],
+    ['partially corrupt records', entry => [entry, null]],
+    ['null material index', entry => [{ ...entry, materials: null }]],
+    ['array material index', entry => [{ ...entry, materials: [] }]],
+    ['incomplete material index', entry => [{ ...entry, materials: {} }]],
+    ['unknown material schema', entry => [{ ...entry, materials: { ...entry.materials, schemaVersion: 'unknown' } }]],
+    ['another task index', entry => [{ ...entry, materials: { ...entry.materials, taskId: 'another-task' } }]],
+    ['another revision index', entry => [{ ...entry, materials: { ...entry.materials, revision: 2 } }]],
+    ['missing material root', entry => [{ ...entry, materials: { ...entry.materials, root: '' } }]],
+    ['non-array file index', entry => [{ ...entry, materials: { ...entry.materials, files: {} } }]],
+    ['null file entry', entry => [{ ...entry, materials: { ...entry.materials, files: [null] } }]],
+    ['negative material bytes', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], bytes: -1 }] } }]],
+    ['invalid material hash', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], sha256: 'invalid' }] } }]],
+    ['unknown material source', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['not-selected'] }] } }]],
+    ['duplicate material sources', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['item-0', 'item-0'] }] } }]],
+    ['duplicate material paths', entry => [{ ...entry, materials: { ...entry.materials, files: [entry.materials.files[0], entry.materials.files[0]] } }]],
+  ];
+  it.each(invalidModelInputs)('rejects %s even with a matching candidate digest, leaving the revision unsettled', async (_name, corrupt) => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), modelInputs: corrupt(modelInput(created.taskId)) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await expect(f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt).toMatchObject({ phase: 'drafting', draft: null, checks: null, stateVersion: 0 });
+    expect(task.execution?.status).toBe('dispatched');
+  });
+  it.each(['omitted', 'empty', 'multiple', 'integrated', 'phases', 'planning-legacy', 'generation'])('preserves %s model inputs through report validation and persistence', async mode => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const first = modelInput(created.taskId);
+    first.materials.files[0].itemIds = ['item-0', 'item-1'];
+    first.materials.files.push({ ...first.materials.files[0], kind: 'engine-reference', path: 'engine.json', itemIds: [] });
+    const records = mode === 'empty' ? [] : mode === 'multiple' ? [first, modelInput(created.taskId, 'item-1')]
+      : mode === 'phases' ? [{ ...first, phase: 'planning' }, { ...first, phase: 'generation' }, { ...modelInput(created.taskId, 'item-1'), phase: 'generation' }]
+      : mode === 'planning-legacy' ? [{ ...first, phase: 'planning' }, first]
+      : mode === 'generation' ? [{ ...first, phase: 'generation' }] : [first];
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), ...(mode === 'omitted' ? {} : { modelInputs: records }) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt.draft).toEqual(draft);
+    expect(task.latestAttempt.checks?.candidateDigest).toBe(digestRepairJson(draft));
+    expect(task.latestAttempt.input).toEqual(created.input);
+  });
   it('polls the stored AIS job and settles a Git-backed result without a callback', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
@@ -348,16 +461,16 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('review');
     expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'succeeded', jobId: 'job-1' });
   });
-  it('fails after bounded waiting when AIS succeeds but Git never publishes a valid result', async () => {
+  it('fails explicitly when AIS succeeds but Git has no valid result, without automatic rereads', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
     f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
-    expect(await f.service.reconcile(10)).toBe(0);
+    expect(await f.service.reconcile(10)).toBe(1);
     const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
     const output = JSON.parse(row.output_json);
     expect(output.successObservedAtMs).toEqual(expect.any(Number));
     await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({ ...output, successObservedAtMs: Date.now() - 301_000 })]);
-    expect(await f.service.reconcile(10)).toBe(1);
+    expect(await f.service.reconcile(10)).toBe(0);
     expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
   });
   it('settles a timed-out AIS job and requests remote stop', async () => {

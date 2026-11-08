@@ -9,6 +9,9 @@
 
 已接受的决策：[DR-1](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)。
 基于 Bot Config Manifest（`apps/backend/docs/bot-config-manifest/`）构建。
+规范格式（工作项 RSI-02）：
+[`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md)。本设计文档
+与该契约不一致时，以契约为准。
 
 ## 1. 目的与范围
 
@@ -29,7 +32,7 @@ Bot 的变更都是对某个修订版的应用。
 - **基因组补丁**（Genome Patch）：其模式、将其应用到基础修订版，以及记录补丁时执行的
   结构性检查（它能干净地应用到其基础修订版，并保持在策略配置范围内，§6.2）。变更是否
   *良好*不在此处检查：那是[验证](07-verification.zh-CN.md)的职责；
-- **基因组策略配置**（锁定基因、可变基因、固定项、风险覆盖），以及在记录补丁时
+- **基因组策略配置**（可变基因、固定项、风险覆盖），以及在记录补丁时
   对其进行的结构性强制执行；
 - 内容寻址：文件字节通过摘要在现有 manifest 内容存储中被引用；
 - 将修订版**编译**为一份已固定版本的 Manifest 文档，供应用和评估 Bot 使用。
@@ -53,8 +56,8 @@ Bot 的变更都是对某个修订版的应用。
 
 **放置位置。** 放在 Backend 中，作为新的核心包 `core/bot_genome/`，与
 `core/bot_config_manifest/` 并列，因为 Backend 负责期望状态，且 Manifest
-已经位于此处。内容复用 manifest 内容存储
-（`core/bot_config_manifest/content/service.py`）。晋升同样位于 Backend 中、
+已经位于此处。内容复用内容存储
+（`core/content_store/`，自 #3064 起为独立组件）。晋升同样位于 Backend 中、
 与其相邻，因为晋升必须与应用放在一起。
 
 **分层。** 基因组构建在 Manifest 之上。Manifest 不感知修订版：它只获得格式特性
@@ -74,33 +77,42 @@ Bot 的变更都是对某个修订版的应用。
 - 一个 Bot 有多个**修订版**。每个修订版持有一个 `spec`（可进化内容）和一个
   `policy`（所有者的规则），外加平台写入的元数据。
 - 除 Bot 的第一个修订版外，每个修订版恰好有一个**父代**。**补丁**（一组操作）
-  就是把父代变成新修订版的东西。所有者也可以从一份完整的 Manifest 文档记录修订版，
+  就是把父代变成新修订版的东西。所有者也可以把 Bot 的当前状态**捕获**为一个修订版，
   而不使用补丁。
 - **引用**是指向修订版的名字（`active`、`draft`……）。
-- **编译**一个修订版会得到 `CompiledManifest`，供应用和评估 Bot 使用。
+- **编译**一个修订版会得到应用引擎的类型化期望状态（`DesiredState`），供应用和评估 Bot 使用。
 - 文件内容从不内联存储：`spec` 中的每个文件都是一个**摘要**，即其字节在内容存储中的
   地址。
 
 | 类型 | 含义 | 负责方 | 生命周期 |
 | --- | --- | --- | --- |
-| `GenomeRevision` | Bot 定义的一个不可变版本：`spec` + `policy`，加上平台写入的元数据（`revision`） | 基因组注册表 | 只记录一次（来自补丁或 Manifest 文档），从不编辑；只有其 `status` 和注解会变化；从不删除 |
+| `GenomeRevision` | Bot 定义的一个不可变版本：`spec` + `policy`，加上平台写入的元数据（`revision`） | 基因组注册表 | 只记录一次（来自补丁或通过捕获），从不编辑；只有其 `status`、注解和只追加的 `evaluations` 列表会变化；从不删除 |
 | `GenomeSpec` | 修订版的可进化内容：人设、技能、记忆、资源、工具、引擎配置、脚本 | 基因组注册表（由所有者编写，由进化策略提议） | 修订版的一部分；参与哈希 |
-| `GenomePolicy` | 不可进化的部分：锁定基因、可变基因、固定项、风险覆盖 | Bot 所有者 / 租户管理员 | 修订版的一部分；参与哈希；由平台原样向后复制；任何补丁都不得触及 |
-| `RevisionMetadata` | Id、每个 Bot 的 `seq`、父代、来源、状态、证据与评估 id、注解 | 基因组注册表（平台写入） | 在记录时写入；状态/注解之后更新；不参与哈希 |
+| `GenomePolicy` | 不可进化的部分：可变基因、固定项、风险覆盖 | Bot 所有者 / 租户管理员 | 修订版的一部分；参与哈希；由平台原样向后复制；任何补丁都不得触及 |
+| `RevisionMetadata` | Id、每个 Bot 的 `seq`、父代、来源、状态、证据与评估 id、注解 | 基因组注册表（平台写入） | 在记录时写入；状态/注解之后更新，评估 id 由验证追加；不参与哈希 |
 | `Provenance` | 谁或什么创建了修订版（某个人、某次进化策略运行、以后可能是某个 Bot） | 基因组注册表 | 在记录时写入一次 |
 | `GenomeRef` | 指向某个修订版的具名、可移动指针（`active`、`previous`、`canary`、`draft`、`candidate/<run>/<n>`） | 基因组注册表；每个引用恰好有一种移动者 | 通过比较并交换移动；每次移动都是一个被审计的事件 |
 | `GenomePatch` | 针对具名基础修订版的、带类型的逐项变更；进化策略唯一可提交的内容 | 由进化策略（通过[进化运行](06-evolution-run.zh-CN.md)）或人提交；由注册表校验 | 以内容寻址方式存储；其摘要即候选 id |
 | `PatchOp` | 补丁中的一项（`file.edit`、`skill.add`、`memory.add`……） | 补丁的一部分 | 每个操作映射到一个风险等级 |
 | `MemoryItem` | 一条精选记忆事实/规则/教训，带键 | 基因组（精选记忆） | 由补丁操作添加、更新和退役 |
-| `CompiledManifest` | 渲染为一份普通 Manifest 文档（已固定版本，每个类别都存在）的修订版，另附修订版 id 和该文档的摘要用于记账 | 基因组注册表（派生而来，不作为事实存储） | 按需为应用和评估 Bot 生成 |
+| `DesiredState` | 修订版渲染成的应用引擎类型化期望状态：它覆盖的每个类别都有声明（空列表即声明「没有」），`cli_tools` 与 `engine_config` 不声明；Manifest 文档也编译成同一种状态 | 应用引擎（`core/apply_engine/desired_state.py`）；由基因组注册表派生，不作为事实存储 | 按需为应用和评估 Bot 生成 |
 
 ### 2.1 基因
 
-**基因**（gene）是 `spec` 中一个具名、可寻址的部分，策略配置和绑定可以引用它：
-可以是一个类别（`persona`、`skills`、`memory`、`resources`、`tools.mcp`、
-`tools.cli_tools`、`engine_config`、`script`），类别中的一个键
-（`engine_config.reasoning_effort`），或一个条目（`skills.refund-policy`）。
-基因路径语法由 RSI-02 确定。
+**基因**（gene）是 `spec` 中一个具名、可寻址的部分，策略配置和绑定可以引用它。
+**基因路径**为它命名：先是一个类别（`persona`、`skills`、`memory`、`resources`、
+`tools`、`engine_config`、`script`），然后是以 `/` 分隔的段：`tools/mcp`、一个条目
+（`skills/refund-policy`、`memory/returns-window`、`tools/mcp/mcp.x.meet`），或条目中
+的一个文件（`skills/refund-policy/SKILL.md`、`resources/data/kb/faq.md`）。策略配置、
+绑定的 `allowed_genes`、每个补丁操作的目标以及差异输出都使用同一套语法。
+
+- `/` 是唯一的分隔符，因此带点的名称（`SOUL.md`、`mcp.x.meet`）是单个段。
+- 当 `X == P` 或 `X` 以 `P/` 开头时，路径 `P` 覆盖 `X`，因此匹配按完整的段进行：
+  `skills/pdf` 覆盖 `skills/pdf/SKILL.md`，但不覆盖 `skills/pdf-tools`。
+- MCP 的 `server_code` 可以包含任意字符；`A–Z a–z 0–9 . _ -` 之外的字节使用百分号
+  编码，并且只有规范写法有效。
+
+完整语法见[契约 README §2](../../api-contracts/genome/v1/README.md#2-gene-paths)。
 
 ### 2.2 GenomeSpec
 
@@ -117,7 +129,7 @@ Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the by
                    # Example: "sha256:3f9a…" is the address of one SOUL.md file;
                    # GET …/genome/content/sha256:3f9a… returns "# Soul\nYou are a patient support agent…" (§9.1).
                    # One store and one endpoint serve every digest below (persona file, skill, memory items,
-                   # resource, MCP config, CLI tool, script); the field that holds a digest says what the bytes are.
+                   # resource, script); the field that holds a digest says what the bytes are.
 # RiskTier (T0 < T1 < T2 < T3) is defined once in 08-promotion.md §5.
 # BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
 # across users); defined once in 09-evolution-api.md §2.6.
@@ -128,8 +140,8 @@ Digest = str       # address of stored bytes: "sha256:" + 64 hex chars of the by
 ```python
 class PersonaFileType(StrEnum):
     """The persona files a bot may have: VALID_IDENTITY_FILES in core/services/identity.py,
-    minus MEMORY.md and IDENTITY.md (reserved, §7), plus the proposed platform-managed
-    LESSONS.md (§7 interim)."""
+    minus MEMORY.md and IDENTITY.md (reserved, §7). Which of these an engine accepts is
+    checked when a revision is recorded (claude_code: CLAUDE.md only)."""
     SOUL = "SOUL.md"
     AGENTS = "AGENTS.md"
     RULES = "RULES.md"
@@ -144,30 +156,23 @@ class PersonaFileType(StrEnum):
     CLAUDE = "CLAUDE.md"
     GREETING = "GREETING.md"
     README = "README.md"
-    LESSONS = "LESSONS.md"
 
 @dataclass(frozen=True)
 class PersonaFile:
     type: PersonaFileType            # which persona file, e.g. PersonaFileType.SOUL ("SOUL.md")
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
-class SkillOriginKind(StrEnum):
+class SkillOrigin(StrEnum):
     CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
-    LOCAL = "local"                  # a bot-owned skill (uploaded, or created by a patch): stored by digest
-    GIT = "git"                      # fetched from a git source when the revision was recorded: stored by digest
-    OSS = "oss"                      # fetched from object storage when the revision was recorded: stored by digest
-
-@dataclass(frozen=True)
-class SkillOrigin:
-    kind: SkillOriginKind
-    version: str | None = None       # CENTER only: the pinned version, e.g. "center://refund-policy@v7"
+    LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
+                                     # by a patch); where they were fetched from is not part of the revision (§4.2)
 
 @dataclass(frozen=True)
 class SkillEntry:
-    name: str                        # the skill's name, e.g. "refund-policy"
+    name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
-    digest: Digest | None = None     # where the skill's stored files are, e.g. "sha256:0c55…" for the bot-owned
-                                     # "quality-check" skill; None for CENTER skills, which Skill Center resolves by version
+    digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
+    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
 ```
 
 精选记忆：
@@ -238,70 +243,72 @@ within 14 days."，以及一个新条目 `vip-contact`。在下一次应用时�
 ```python
 @dataclass(frozen=True)
 class ResourceEntry:
-    path: str                        # where the resource appears in the bot's workspace, e.g. "data/kb/"
-    digest: Digest                   # where its stored bytes are (how a directory is stored: open decision G-1)
+    path: str                        # where the resource appears in the bot's workspace, the entry's key;
+                                     # a trailing "/" marks a directory, e.g. "data/kb/"
+    digest: Digest                   # a file's bytes, or the acm-tree-v1 encoding of a directory (§9.1)
+
+@dataclass(frozen=True)
+class McpConfig:
+    """The bot-level override, the Manifest's own closed set. Absent fields are not overridden."""
+    url: str | None = None           # absolute http(s) URL
+    headers: dict[str, str] | None = None   # header names and values as written (#2860)
+    endpoint_env: str | None = None  # "PROD" | "PRE"
+    transport_protocol: str | None = None   # "SSE" | "STREAMABLE_HTTP"
 
 @dataclass(frozen=True)
 class McpServerEntry:
-    server_code: str                 # the MCP server's registered code, e.g. "mcp.x.meet"
-    digest: Digest                   # where this bot's stored config for that server is
-
-@dataclass(frozen=True)
-class CliToolEntry:
-    name: str                        # e.g. "shopctl"
-    digest: Digest                   # where the tool's stored package is
-    version: str                     # the tool's own version, e.g. "2.3.0"
+    server_code: str                 # the MCP server's registered code, the entry's key, e.g. "mcp.x.meet"
+    config: McpConfig | None = None  # inline: an MCP entry has no stored bytes; None means no bot override
 
 @dataclass(frozen=True)
 class ToolsSpec:
-    mcp: list[McpServerEntry]
-    cli_tools: list[CliToolEntry]
+    mcp: list[McpServerEntry]        # CLI tools are not part of genome v1 (acli replaces them)
 
 @dataclass(frozen=True)
 class ScriptEntry:
-    digest: Digest                   # where the bot's startup script is; locked by default (§4.5)
+    digest: Digest                   # the startup script body, after placeholder substitution; not mutable by default (§4.5)
 
 @dataclass(frozen=True)
 class GenomeSpec:
-    persona: list[PersonaFile]
+    persona: list[PersonaFile]       # every list is sorted by its key, keys unique (canonical order, §9.3)
     skills: list[SkillEntry]
     memory: MemorySpec | None        # None until RSI-05 lands (§7)
     resources: list[ResourceEntry]
     tools: ToolsSpec
-    engine_config: dict[str, str]    # allowlisted key -> value, e.g. {"reasoning_effort": "medium"};
-                                     # values are strings because hashed content has no floats (§9.3)
+    engine_config: dict[str, str]    # always {} in v1: nothing applies engine_config yet (#2858)
     script: ScriptEntry | None       # None when the bot has no startup script
 ```
 
 每个修订版中都包含所有类别。空列表表示“无”；它从不表示“保持原样”
-（完整性，§4.3）。
+（完整性，§4.3）。每个条目由一个**键**（为它命名的字段：`type`、`name`、`path`、
+`server_code`）和一个**值**组成：条目有存储字节时值是摘要，没有存储字节时值是内联
+字段（MCP 服务器的配置、Center 技能的版本）。文件内容总是摘要，无论它是获取得到的、
+在 Manifest 中内联书写的，还是由补丁产出的。通过 Manifest 构建的 CLI 工具不属于
+基因组 v1；在修订版功能上线之前由 acli 取代。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// The normative schema is work item RSI-02.
+// Normative schema: apps/backend/api-contracts/genome/v1/genome-revision.schema.json.
 {
-  "persona": [                                    // == manifest.identity, but pinned
-    {"type": "SOUL.md", "digest": "sha256:3f9a…"},
-    {"type": "AGENTS.md", "digest": "sha256:81bd…"}
+  "persona": [                                    // == manifest.identity, but pinned; sorted by type
+    {"type": "AGENTS.md", "digest": "sha256:81bd…"},
+    {"type": "SOUL.md", "digest": "sha256:3f9a…"}
   ],
-  "skills": [
-    {"name": "refund-policy", "origin": {"kind": "center", "version": "center://refund-policy@v7"}},  // pinned Center version, not copied
-    {"name": "quality-check", "digest": "sha256:0c55…", "origin": {"kind": "local"}}                  // bot-owned: stored, referenced by digest
+  "skills": [                                     // sorted by name
+    {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
+    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
     "items_digest": "sha256:9e20…"                // the stored list of memory items
   },
-  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
+  "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],   // a directory: acm-tree-v1 of its files
   "tools": {
-    "mcp": [{"server_code": "mcp.x.meet", "digest": "sha256:52c8…"}],
-    "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
+    "mcp": [{"server_code": "mcp.x.meet",                           // no bytes, so the config is inline
+             "config": {"endpoint_env": "PRE", "transport_protocol": "STREAMABLE_HTTP"}}]
   },
-  "engine_config": {                              // allowlisted keys only; no floats in hashed content
-    "model": "provider/model-x",
-    "reasoning_effort": "medium"
-  },
-  "script": {"digest": "sha256:e1f0…"}            // carried, but LOCKED for evolution by default
+  "engine_config": {},                            // always {} until #2858
+  "script": {"digest": "sha256:e1f0…"}            // carried, but not mutable by default
 }
 ```
 
@@ -311,48 +318,54 @@ class GenomeSpec:
 负责，从不由进化策略负责，平台会拒绝任何触及它的补丁。
 
 **为什么需要策略配置。** 策略配置保存所有者为*该* Bot 的进化设定的边界规则：哪些
-基因被锁定、哪些可变、哪些条目被固定，以及哪些基因使用更高的风险等级。它位于修订版
+基因可变、哪些条目被固定，以及哪些基因使用更高的风险等级。它位于修订版
 内部并参与其哈希，因此每个修订版都记录了它在何种规则下产生并通过验证；查看一个旧
 修订版，就能知道当时自动化参与者被允许变更什么。进化策略可以读取它（以避免提议会被
 拒绝的变更），但任何补丁都不能修改它：只有所有者可以通过一次记录新修订版的常规编辑
 来修改（§4.4）。因此，自动化参与者无法放宽自身的限制。示例：在一个面向客户的支持
-Bot 上，所有者固定 `persona.RULES.md`（经法务签字确认的退款与升级规则），并保持
-`tools.mcp` 和 `tools.cli_tools` 锁定，这样夜间运行的进化策略可以改进 `SOUL.md`
-中的语气并添加技能，但永远无法改写这些规则，也无法为 Bot 添加新工具。
+Bot 上，所有者固定 `persona/RULES.md`（经法务签字确认的退款与升级规则）；没有任何
+补丁操作能触及 `tools/mcp`，这样夜间运行的进化策略可以改进 `SOUL.md` 中的语气并添加
+技能，但永远无法改写这些规则，也无法为 Bot 添加新工具。
+
+策略配置有两个列表。`mutable_genes` 是允许列表：只有当某个条目覆盖操作的基因路径时，
+操作才被允许，未列出的一切都不可触及。`pins` 保护可变基因中的单个条目：当操作的基因
+路径与某个固定项重叠（任一方覆盖另一方）时，操作被拒绝，因此当某个技能的文件被固定时，
+删除该技能也会被拒绝。新 Bot 的默认策略配置使 `persona`、`skills`、`memory` 和
+`resources` 可变，并固定 `persona/SAFETY.md`；`script` 和 `tools/mcp` 不可变，而
+`policy` 根本不是基因路径（待定决策 G-3，已关闭）。
 
 ```python
 @dataclass(frozen=True)
 class GenomePolicy:
-    locked_genes: list[str]          # gene paths (§2.1) no patch may change; default includes "script", "tools.mcp", "policy"
     mutable_genes: list[str]         # gene paths (§2.1) a patch may touch; everything else is off limits
-    pins: list[str]                  # single items inside a mutable gene that stay write-protected, e.g. "skills.refund-policy"
-    risk_overrides: dict[str, RiskTier]   # gene path -> tier to use instead of the default; may only RAISE a tier (proposed)
+    pins: list[str]                  # items inside a mutable gene that stay write-protected, e.g. "skills/refund-policy"
+    risk_overrides: dict[str, RiskTier]   # gene path -> a higher tier for ops overlapping it; can only RAISE a tier
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
-  "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
-  "pins": ["skills.refund-policy", "persona.RULES.md"],
-  "risk_overrides": {"persona.SOUL.md": "T2"}     // owner raises the default tier for this file
+  "mutable_genes": ["memory", "persona", "resources", "skills"],   // the default; script and tools/mcp are not listed
+  "pins": ["persona/RULES.md", "persona/SAFETY.md", "skills/refund-policy"],   // the default pins only SAFETY.md
+  "risk_overrides": {"persona/SOUL.md": "T3"}     // owner raises the tier of ops on this file
 }
 ```
 
 策略配置的使用方式：
 
-- **在记录补丁时**（§6.2）：针对锁定基因的操作、`mutable_genes` 之外的操作，
-  以及针对固定条目的操作都会被拒绝。
+- **在记录补丁时**（§6.2）：`mutable_genes` 之外的操作，以及与固定项重叠的操作
+  都会被拒绝。
 - **在配置绑定时**：一个**绑定**把一个进化策略挂接到该 Bot 上：用哪个策略、何时
   运行、可以修改哪些基因（`allowed_genes`）以及它的预算。一个 Bot 有一组绑定（即它的
   绑定列表），例如每晚针对人设和技能运行的 ClawEvolve。绑定的 `allowed_genes`
-  必须保持在该 Bot 的策略配置范围内（锁定基因保持锁定）；不匹配会在任何付费运行
+  必须保持在该 Bot 的 `mutable_genes` 范围内；不匹配会在任何付费运行
   开始前被拒绝。绑定的定义见 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。
 - **在提交候选时**：晋升的静态底线检查（`FloorCheck`）会在花费任何验证成本之前
-  再次检查“未触及任何锁定基因或固定条目”；见 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)。
+  再次检查“只触及可变基因，未触及固定条目”；见 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)。
 
 正是在这里，“工具和权限变更只能由人完成”得以**结构性地**而非靠约定来强制执行：
-工具变更默认位于锁定基因中，而策略配置本身处于补丁可触及的范围之外。
+不存在针对工具或脚本的补丁操作，因此它们只能在所有者编辑 Bot 并捕获它时
+变更，而策略配置本身处于补丁可触及的范围之外。
 更改策略配置是一项所有者操作，会记录一个新的修订版（§4.4）。
 
 ### 2.4 GenomeRevision
@@ -391,14 +404,15 @@ class RevisionMetadata:
                                      # 42nd is 42 ("r42"). UIs show it, and paths accept it
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
-    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
-                                     # when a whole document was recorded; None only for the bot's first revision
+    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or `active` when the
+                                     # bot was captured or its policy changed (the latest revision while there is no
+                                     # `active` yet); None only for the bot's first revision
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
     patch_digest: Digest | None      # digest of the stored GenomePatch that turned `parent` into this revision
-                                     # (= the candidate id, §6.5); None when the revision was recorded from a whole
-                                     # Manifest document instead of a patch (§4.1)
+                                     # (= the candidate id, §6.5); None when the revision was captured or is a
+                                     # policy change instead of a patch (§4.1)
     evidence: list[EvidenceRef]      # the Experience records that motivated the change, e.g.
                                      # ["episode:ep_91", "feedback:fb_311"]; [] for most manual edits
     evaluations: list[EvaluationId]  # the Verification evaluations run on this revision, e.g. ["ev_301", "ev_302"];
@@ -441,10 +455,9 @@ class GenomeRevision:
     "annotations": {"experiment": "escalation-wording"}
   },
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:3f9a…"}], "skills": [], "memory": null,
-           "resources": [], "tools": {"mcp": [], "cli_tools": []},
-           "engine_config": {"reasoning_effort": "medium"}, "script": null},
-  "policy": {"locked_genes": ["script", "tools.mcp", "tools.cli_tools", "policy"],
-             "mutable_genes": ["persona", "skills", "memory"], "pins": [], "risk_overrides": {}}
+           "resources": [], "tools": {"mcp": []}, "engine_config": {}, "script": null},
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"],
+             "risk_overrides": {}}
 }
 ```
 
@@ -498,16 +511,19 @@ class RefUpdate:
 ### 2.6 GenomePatch 与 PatchOp
 
 ```python
-class EditKind(StrEnum):             # full set fixed by RSI-02
+class EditKind(StrEnum):
     REPLACE_SECTION = "replace_section"   # replace everything under a Markdown heading; the heading line stays
     INSERT_AFTER = "insert_after"         # insert text directly below one exact line
+    DIFF = "diff"                         # a unified diff of the file: expresses any text change, so a sandbox's
+                                          # edits can always be turned into a patch (03-strategy.md, to_patch)
 
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
-    content: str                     # the new text to write
+    content: str | None = None       # REPLACE_SECTION, INSERT_AFTER: the new text to write
     heading: str | None = None       # REPLACE_SECTION only: the heading line, e.g. "## Escalation"
     anchor: str | None = None        # INSERT_AFTER only: the line to insert below, e.g. "## Tone"
+    diff: str | None = None          # DIFF only: hunks starting at "@@", no ---/+++ header lines
 
 @dataclass(frozen=True)
 class DigestRef:
@@ -520,9 +536,21 @@ class FileDiff:
 
 @dataclass(frozen=True)
 class FileEdit:
-    """Op "file.edit": structured edits to one text file (persona md, SKILL.md, resource text)."""
-    target: str                      # the file, e.g. "persona/SOUL.md", "skills/refund-policy/SKILL.md"
+    """Op "file.edit": edits to one existing text file (persona md, a file in a local skill, resource text)."""
+    target: str                      # the file's gene path, e.g. "persona/SOUL.md", "skills/refund-policy/SKILL.md",
+                                     # "resources/data/kb/faq.md"
     edits: list[TextEdit]
+
+@dataclass(frozen=True)
+class PersonaAdd:
+    """Op "persona.add": a persona file the bot does not have yet."""
+    type: PersonaFileType
+    content: str | DigestRef         # small text inline, or a larger file uploaded first
+
+@dataclass(frozen=True)
+class PersonaRemove:
+    """Op "persona.remove"."""
+    type: PersonaFileType
 
 @dataclass(frozen=True)
 class SkillAdd:
@@ -532,9 +560,26 @@ class SkillAdd:
 
 @dataclass(frozen=True)
 class SkillUpdate:
-    """Op "skill.update": changes files of an existing bot-owned skill."""
+    """Op "skill.update": changes files of an existing local skill (at least one of the two fields)."""
     name: str                        # the skill, e.g. "refund-policy"
-    file_diffs: list[FileDiff]
+    file_diffs: list[FileDiff] | None = None          # text changes, one unified diff per file
+    files: dict[str, str | DigestRef | None] | None = None   # whole-file writes; None deletes (never SKILL.md)
+
+@dataclass(frozen=True)
+class SkillRemove:
+    """Op "skill.remove": removes a local or Center skill."""
+    name: str
+
+@dataclass(frozen=True)
+class ResourceAdd:
+    """Op "resource.add": a file resource, or a directory resource from an uploaded acm-tree-v1 blob."""
+    path: str                        # e.g. "data/returns.md", or "data/faq/" for a directory
+    content: str | DigestRef         # a directory always takes a DigestRef
+
+@dataclass(frozen=True)
+class ResourceRemove:
+    """Op "resource.remove"."""
+    path: str
 
 @dataclass(frozen=True)
 class MemoryAdd:
@@ -543,7 +588,7 @@ class MemoryAdd:
 
 @dataclass(frozen=True)
 class MemoryUpdate:
-    """Op "memory.update" (proposed): replaces the text, tags, and source of an existing key."""
+    """Op "memory.update": replaces the text, tags, and source of an existing key."""
     item: MemoryItem
 
 @dataclass(frozen=True)
@@ -552,12 +597,14 @@ class MemoryRetire:
     key: str                         # the item to retire
 
 @dataclass(frozen=True)
-class EngineConfigSet:
-    """Op "engine_config.set": one allowlisted engine config key."""
-    key: str                         # e.g. "reasoning_effort" (allowlist: open decision G-4)
-    value: str                       # always a string, e.g. "high" (no floats in hashed content)
+class MemorySetMode:
+    """Op "memory.set_mode": T1 for seed or merge, T3 for replace."""
+    mode: MemoryMode
 
-PatchOp = FileEdit | SkillAdd | SkillUpdate | MemoryAdd | MemoryUpdate | MemoryRetire | EngineConfigSet
+# No op reaches tools, script, engine_config or the policy: MCP servers and the script change only when
+# an owner edits the bot and captures it; the policy has its own operation; engine_config waits for #2858.
+PatchOp = (FileEdit | PersonaAdd | PersonaRemove | SkillAdd | SkillUpdate | SkillRemove | ResourceAdd
+           | ResourceRemove | MemoryAdd | MemoryUpdate | MemoryRetire | MemorySetMode)
 
 @dataclass(frozen=True)
 class GenomePatch:
@@ -586,18 +633,20 @@ class GenomePatch:
      "file_diffs": [{"path": "SKILL.md", "diff": "@@ -12,3 +12,4 @@ partial refunds…"}]},
     {"op": "memory.add",                                  // itemized memory, see §7
      "item": {"key": "customer-tier-rules", "text": "Gold customers get free return shipping.", "tags": ["billing"], "source": ["episode:ep_91"]}},
-    {"op": "memory.update",                               // proposed op, see §6.1
+    {"op": "memory.update",
      "item": {"key": "returns-window", "text": "Returns are accepted within 30 days.", "tags": ["returns"], "source": ["episode:ep_97"]}},
     {"op": "memory.retire", "key": "old-shipping-sla"},
-    {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
+    {"op": "resource.add", "path": "data/returns.md", "content": {"digest": "sha256:91c0…"}}
   ],
   "rationale": "Partial-refund requests were escalated too late in 6 of 9 failing episodes.",
   "evidence": ["feedback:fb_311", "episode:ep_91"]
 }
 ```
 
-此示例一次性展示了所有操作类型。按照 §2.3 的策略配置，它会被拒绝，因为
-`skills.refund-policy` 在那里被固定（§6.2）；真实的补丁只会触及可变且未固定的基因。
+此示例同时展示了多种操作类型。按照 §2.3 的示例策略配置，它会被拒绝，因为
+`skills/refund-policy` 在那里被固定（§6.2）；真实的补丁只会触及可变且未固定的基因。
+每种操作各有一个示例，见
+[`api-contracts/genome/v1/examples/patches/`](../../api-contracts/genome/v1/examples/patches/)。
 
 下面用上例中的两处编辑，说明两种 `file.edit` 如何修改文件：
 
@@ -617,46 +666,50 @@ Always apologise first.                                                         
 `skill.update` 则为每个变更的文件携带一个 unified diff：即 `git diff` 和 `diff -u`
 输出的标准文本差异格式，用 `@@` 标出 hunk 头，`-` 表示删除的行，`+` 表示新增的行。
 
-### 2.7 CompiledManifest
+### 2.7 编译后的期望状态
 
 ```python
+# core/apply_engine/desired_state.py — 应用引擎唯一的输入，与 Manifest 编译器共用
 @dataclass(frozen=True)
-class CompiledManifest:
-    revision_id: RevisionId          # bookkeeping: which revision this was compiled from (not inside the document)
-    document: dict                   # a plain Manifest document, exactly what apply consumes (shape below)
-    document_digest: Digest          # digest of that document; apply reports record it (§8 item 5), and the
-                                     # Registry maps it back to `revision_id`
+class DesiredState:
+    script: Declaration[DesiredScript] | None            # None = 未声明：apply 不动 Bot 的脚本
+    identity: Declaration[DesiredIdentityFile] | None    # Declaration(()) = 声明为空：apply 删除现有内容
+    resources: Declaration[DesiredResource] | None
+    skills: Declaration[DesiredSkill] | None
+    mcp: Declaration[DesiredMcpServer] | None
+    engine_config: Declaration[DesiredEngineConfig] | None
+    cli_tools: Declaration[DesiredCliTool] | None
 ```
 
-`document` 就是一份 Manifest 文档。除 §8 列出的 Manifest 变更外，编译不会给
-Manifest 格式增加任何东西：每个类别都存在，文件条目按摘要指向内容存储（§8 第 1
-项），精选记忆就是 Manifest 新增的 `memory` 类别（§8 第 3 项）。另外两个字段是
-放在文档旁边用于记账的信息，不会发送给应用。当晋升应用该文档时，应用报告会记录
-其摘要（§8 第 5 项），注册表也会记录该修订版编译出了这个摘要，因此该摘要可以
-映射回该修订版（§5.5）。
+编译一个修订版（`core/bot_genome/compile.py` 的 `compile_spec`）得到的是这个
+类型化状态，而不是一份 Manifest 文档：修订版覆盖的每个类别都有声明——
+`identity`、`resources`、`skills`、`mcp` 和 `script`，空列表即声明「没有」，
+引擎会通过删除现有内容来收敛到它——修订版从不覆盖的两个类别（`cli_tools`、
+`engine_config`）保持未声明。每个条目以摘要指向内容存储中的字节
+（`ContentRef`），Skill Center 技能以固定版本表示，共享仓库技能以路径表示；
+精选记忆在引擎记忆投影落地（§7，RSI-05）之前不投递。Bot Config Manifest 文档
+通过自己的编译器编译成同一种状态，两者之间从不互相转换：契约测试把每个示例
+用例按两条路各编译一次并比较
+（`api-contracts/genome/v1/manifest-v1-compatibility.md`）。
 
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:f27a…",
-  "document": {
-    "schema_version": 1,
-    "manifest": {
-      "identity": [{"type": "SOUL.md", "source": {"content_store": "sha256:3f9a…"}}],
-      "skills": [{"name": "refund-policy", "center_version": "v7"},
-                 {"name": "quality-check", "source": {"content_store": "sha256:0c55…"}}],
-      "resources": [{"path": "data/kb/", "source": {"content_store": "sha256:d4a7…"}}],
-      "mcp": [],
-      "cli_tools": [{"name": "shopctl", "source": {"content_store": "sha256:a613…"}}],
-      "memory": {"mode": "seed", "items": {"source": {"content_store": "sha256:9e20…"}}}   // new category, §8 item 3
-    }
-  }
-}
+```python
+# 示意：r42 编译出的结果
+DesiredState(
+    script=Declaration(()),                                             # 修订版没有脚本：删除现有脚本
+    identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef("sha256:3f9a…")),)),
+    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(ContentRef("sha256:0c55…"))),
+                        DesiredSkill("refund-policy", CenterSkillVersion("v7")))),                # §8 第 6 项
+    resources=Declaration((DesiredResourceTree("data/kb/", ContentRef("sha256:d4a7…")),)),
+    mcp=Declaration(()),
+    engine_config=None, cli_tools=None,                                 # 从不在修订版中：保持原样
+)
 ```
 
-`document` 中确切的 Manifest 字段名遵循 Manifest schema v1 以及 §8 中新增的
-内容存储来源；上面的结构仅为示意。
+该状态不携带自身的摘要，也不会被记录下来：Bot 运行的是哪个修订版，靠读取
+Bot 来观察（§5.5），而不是通过文档摘要来追踪。本文及相邻文档中旧有的
+「已编译文档」指的就是这个状态。每个 Manifest v1 字段在修订版中的位置，以及
+修订版在该状态中的位置，见
+[`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md)。
 
 ## 3. 为什么 Manifest 还不够
 
@@ -694,9 +747,9 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **一个通过独立路径交付的单独进化产物（例如 ClawEvolve Pack）。** 否决原因：
   两个事实来源，而且 Pack 是 OpenClaw 专属的工作区快照，无法触达 teclaw。
 - **在 Manifest 之外做版本管理，并让 Manifest 完全保持不变。** 否决原因：如果
-  没有内容存储来源以及应用报告上的已应用文档摘要，应用仍会重新获取可移动的来源，
-  也无法说明它应用了哪份文档，因此行为无法归因到某个版本。基因组确实构建在
-  Manifest 之上，但 Manifest 会获得这些格式特性（§8）。
+  没有按摘要寻址的已存储内容，应用仍会重新获取可移动的来源，也无法说明它应用了
+  哪些字节，因此行为无法归因到某个版本。基因组确实构建在 Manifest 之上，但两者
+  现在都编译成应用引擎的同一种类型化期望状态（§2.7、§8）。
 - **每个 Bot 一个 Git 仓库作为事实来源。** 暂缓；见 §9.2。
 
 ## 4. 修订版
@@ -712,11 +765,12 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 3. **固定版本的内容**：每个来源都解析为提交 SHA 或内容摘要，因此同一修订版总是
    产生相同的字节（§4.2）。
 4. **完整性**：每个修订版中都包含所有类别（§4.3）。
-5. **自动化参与者只能通过补丁变更**：进化策略针对具名基础修订版提交带类型的
-   逐项补丁（§6）。人仍然可以通过基因组 API（`POST …/genome/revisions` 并携带
-   `{manifest}`，§12），从一份完整的 **Manifest 文档**（Bot Config Manifest API
-   所接受的完整 YAML 文档）记录修订版，而不是使用补丁。这样的修订版没有
-   `patch_digest`。直接发送到 `PUT /config-manifest` 的文档不会记录修订版（§5.5）。
+5. **自动化参与者只能通过补丁变更**：进化策略针对补丁自身的基础修订版提交带类型的
+   逐项补丁（§6）。人仍然可以用任何方式编辑 Bot（控制台、`PUT /config-manifest`），
+   然后通过基因组 API（`POST …/genome/revisions:capture`，§12）把它的当前状态
+   **捕获**为一个修订版；所有者的策略配置则通过它自己的操作
+   （`PUT …/genome/policy`）变更。这样的修订版没有 `patch_digest`，其父代是
+   `active`。发送到 `PUT /config-manifest` 的文档本身不会记录修订版（§5.5）。
 6. **一个新的内容类别：精选记忆**（§7），这需要新的引擎契约。
 
 刻意**不**增加的内容：
@@ -732,8 +786,15 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **摘要，而非内容。** `digest`（`sha256:…`）是文件字节的*地址*，而不是字节本身。
   字节在现有 manifest 内容存储中只存储一次，需要时按摘要获取（§9.1）。共享同一
   文件的两个修订版共享其字节，因此存储被去重，差异计算也很廉价。
-- **固定，而非浮动。** 当从一份使用带可移动引用的 `sources` 的 Manifest 记录修订版时，
-  平台会解析它们并存储字节。浮动的 Manifest 是一种*输入*；修订版是一项*事实*。
+- **固定，而非浮动。** 当一份 `sources` 指向可移动引用的 Manifest 被应用、随后 Bot
+  被捕获时，修订版按摘要持有应用所获取到的字节。浮动的 Manifest 是一种*输入*；
+  修订版是一项*事实*。
+- **地址不参与哈希。** 字节从哪里获取（git 的 `url`、`ref`、`subpath`；OSS 的
+  `bucket`、`key`；`auth` 凭证名）不属于 `spec`，因此从迁移后的仓库获取到相同的字节
+  会得到相同的修订版。Manifest 自己的应用报告把它们作为来源信息保留。`${BOT_*}`
+  占位符已由应用使用该 Bot 的值解析过。
+- **目录是一棵树。** 技能或目录资源以其文件的 `acm-tree-v1` 编码存储和计算哈希
+  （§9.1），因此其摘要永远不取决于归档的压缩方式。
 - **Center 技能被固定，而不是被复制。** Skill Center 已经存储了不可变、受治理的版本
   （ADR 0010）。修订版记录 Center 版本；只有 Bot 自有技能和来自 git/OSS 的内容
   才存入内容存储。修订版中的 `center://` 版本是对一个受治理、已发布版本的固定
@@ -741,16 +802,21 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 ### 4.3 完整性
 
-从一份不完整的 Manifest 文档记录修订版时，所有被省略的类别都会从父修订版
-（对于 Bot 的第一个修订版，则从 Bot 的当前状态）中补齐，因此存储的修订版是完整的。
-为应用而编译修订版时，总会输出每个类别。`[]` 表示“无”。与 Manifest 文档不同，
-修订版从不把某个类别留给先前状态，因此同一修订版的两次应用总是产生相同的 Bot。
+捕获会记录 Bot 当前状态的每个类别，而补丁从一个完整的基础修订版出发，因此存储的
+修订版总是完整的。为投递而编译修订版时，总会输出每个类别。`[]` 表示“无”。与
+Manifest 文档不同，修订版从不把某个类别留给先前状态，因此同一修订版的两次投递
+总是产生相同的 Bot。
 
 ### 4.4 标识、序号与状态
 
 - **Id。** `id = "sha256:" + hex(SHA-256(RFC8785({spec, policy})))`。`revision`
   元数据被排除在外，因此相同的内容总是具有相同的 id，无论由谁产生。记录已存在的
   内容会返回已有的修订版；不会创建重复项，也不会分配新的 `seq`。
+  运行的候选是唯一的例外：候选 id 就是其补丁摘要，指向该修订版的补丁，所以当候选补丁
+  的结果是由另一个补丁（或一次捕获）记录的修订版时会被拒绝（`already_recorded`），
+  而不是被交给那个修订版；候选补丁的结果若是另一个运行或所有者已用同一补丁记录的修订版，
+  同样被拒绝；应改为晋升已有的修订版。只有最初记录该候选的运行以同一补丁重试时才会得到其
+  修订版（同一运行用产生相同内容的另一补丁提交也会被拒绝：修订版的 `patch_digest` 指向第一个补丁）。
 - **`seq`。** 一个每 Bot 计数器，在新的 id 首次被记录时分配，供人阅读：Bot 第一个
   记录的修订版是 `r1`，下一个新修订版是 `r2`，依此类推。示例：进化策略提交了一个内容
   全新的候选，于是它成为 `r42`；同一提交的重试会再次返回 `r42`，而不是创建 `r43`。
@@ -758,8 +824,8 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
   `seq` 是记录的先后顺序，而不是父子关系：`r42` 的父代是它的 base，可以是 `r39`
   （例如一次在 `r39` 为 `active` 时开始的运行），而 `r41` 的父代可以是 `r38`。
 - **父代。** 除 Bot 的第一个修订版外，每个修订版恰好有一个 `parent`：补丁所针对的基础
-  修订版，或记录整份文档时给出的 `base`。沿着 `parent` 链接可以得到 Bot 的历史，
-  它呈树状（由 `r41` 生成的两个候选互为兄弟）。
+  修订版，或捕获 Bot 或更改其策略配置时的 `base`。沿着 `parent` 链接可以得到 Bot
+  的历史，它呈树状（由 `r41` 生成的两个候选互为兄弟）。
 - **状态**是平台写入的元数据，位于哈希之外：
 
 | 状态 | 含义（提议） | 设置者 |
@@ -779,10 +845,12 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 ### 4.5 `script` 与 `engine_config`
 
-- **`script` 默认锁定。** 命令式启动脚本是最危险的可进化面，并且已经在 teclaw 上
-  被拒绝。它们仍是基因组的一部分，以保证修订版完整，但除非所有者解锁，否则保持锁定。
-- **`engine_config`** 只携带白名单中的键，在参与哈希的内容中使用字符串值
-  （例如 `"temperature": "0.2"`，见 §9.3）。
+- **`script` 不可进化。** 命令式启动脚本是最危险的面，并且已经在 teclaw 上被拒绝。
+  它们仍是基因组的一部分，以保证修订版完整，但没有任何补丁操作能触及它们：脚本只能在
+  所有者编辑 Bot 并捕获它时变更。
+- **`engine_config`** 在 v1 中总是 `{}`，因为目前没有任何东西应用它（Manifest 对每个
+  Bot 都拒绝该类别）。它的键和值类型与 Manifest 一起在
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858) 中确定。
 
 ## 5. 引用
 
@@ -871,20 +939,22 @@ CAS 引用移动和编译步骤。
 
 Manifest 不感知修订版，现有的 `/config-manifest` 端点也与今天完全一样继续工作。
 直接的 `PUT /config-manifest` 会绕过基因组：它不记录修订版，也不移动任何引用。
-想要保留历史的所有者应改为通过基因组 API 编辑：记录一个修订版（这会移动 `draft`），
-然后晋升它。基因组 API 也可以从一份完整的 Manifest 文档记录修订版
-（`POST …/genome/revisions` 并携带 `{manifest}`，§12）；那是一项基因组操作，而不是
-Manifest 操作。
+想要保留历史的所有者应通过基因组 API 记录一个修订版并晋升它：要么提交一个补丁
+（`POST …/genome/revisions`），要么用任意方式编辑之后再捕获该 Bot
+（`POST …/genome/revisions:capture`，§12）。捕获是一项基因组操作，而不是 Manifest
+操作。
 
-**注册表如何知道 Bot 在运行什么。** 每份应用报告（个人 Bot）和每条发布记录（服务
-Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。当晋升应用一个已编译的
-修订版时，注册表会记录该修订版编译出了这个摘要（`CompiledManifest.document_digest`，
-§2.7）。给定 Bot 最近一次应用的摘要，注册表就知道 Bot 运行的是哪个修订版。
+**注册表如何知道 Bot 在运行什么。** 读取 Bot。晋升和应用时都不会记录 Bot 持有
+哪个修订版——应用报告上没有文档摘要，晋升行上也没有应用 id。
+`GenomeRegistry.drift(bot)` 像 `capture` 那样捕获 Bot 的当前状态（什么都不记录，
+捕获到的字节随即丢弃），计算该状态在 `active` 的策略配置下会记录成的修订版 id，
+再与 `active` 比较。相等说明 Bot 持有其 active 修订版；不等说明它持有别的东西，
+而这个 id 说明是什么。
 
-**漂移。** 当 Bot 最近一次应用的文档摘要（来自最新的应用报告，或正在提供服务的
-版本的发布记录）与 `active` 编译出的摘要不同时，该 Bot 就*发生了漂移*。漂移通常
-发生在直接的 Manifest 编辑之后。漂移是被检测的，而不是被阻止的。注册表在运行开始
-和晋升时检查漂移：
+**漂移。** 当 Bot 当前状态会记录成的修订版 id 与 `active` 不同时，该 Bot 就
+*发生了漂移*。漂移通常发生在直接的 Manifest 编辑或设备上的手工编辑之后。漂移是被
+检测的，而不是被阻止的，也从不被追踪：每当有调用方询问时才去观察。注册表在运行
+开始和晋升时检查漂移：
 
 - **运行开始。** 运行不会在已漂移的 Bot 上启动：进化运行以结束原因
   `out_of_band_change` 结束它（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
@@ -907,8 +977,8 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
    应用成功；其报告记录 `sha256:b7e3…`，没有任何修订版编译为该摘要。Bot 发生了漂移。
 2. 10 月 10 日 02:00，夜间绑定触发。注册表报告漂移，因此 `run_8a1` 在预留任何预算
    之前就以 `out_of_band_change` 结束。
-3. 所有者将当前的 Manifest 记录为一个修订版（`POST …/genome/revisions` 并携带
-   `{manifest}`，base 为 `r42`），它成为 `r46`，然后晋升 `r46`。其应用报告记录
+3. 所有者将当前的 Manifest 记录为一个修订版（`POST …/genome/revisions:capture`；
+   其父代是 `active`，即 `r42`），它成为 `r46`，然后晋升 `r46`。其应用报告记录
    `r46` 编译出的摘要，也正是 `active` 现在编译出的摘要。下一次夜间运行从 `r46`
    开始。
 
@@ -918,21 +988,27 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
 
 基因组补丁是进化策略唯一可以提交的东西。它是逐项且带类型的，这遵循了 ACE 的发现：
 增量更新可以避免上下文坍缩（整体重写会逐渐抹去累积的细节）。不支持自动化参与者进行
-整份文档替换。人也可以提交补丁（通过 `POST …/genome/revisions`，§12），或记录一份完整文档。
+整份文档替换。人也可以提交补丁（通过 `POST …/genome/revisions`，§12），或编辑 Bot 然后捕获它。
 
-来源中展示的操作（完整操作集由 RSI-02 确定）：
+操作集（待定决策 G-2 和 G-10，已关闭；规范定义见
+[契约 README §6](../../api-contracts/genome/v1/README.md#6-patches)）：
 
 | 操作 | 变更内容 | 说明 |
 | --- | --- | --- |
-| `file.edit` | 一个文本文件：人设 md、`SKILL.md`、资源文本文件 | 结构化编辑：`replace_section`（按标题）、`insert_after`（按锚点） |
-| `skill.add` | 一个新的 Bot 自有技能 | 小型文本内联；较大的文件先通过 `PUT …/genome/content` 上传，再按摘要引用 |
-| `skill.update` | 一个现有 Bot 自有技能的文件 | 每个变更的文件一个 unified diff（`git diff` 格式） |
+| `file.edit` | 一个现有文本文件：人设 md、本地技能中的文件、文件资源、目录资源中的文件 | 种类 `replace_section`（按标题）、`insert_after`（按锚点）和 `diff`（unified diff），后者能表达任何文本变更 |
+| `persona.add` / `persona.remove` | 一个人设文件 | 内容内联或按摘要引用 |
+| `skill.add` | 一个新的本地技能 | 小型文本内联；较大的文件先通过 `PUT …/genome/content` 上传，再按摘要引用 |
+| `skill.update` | 一个现有本地技能的文件 | 每个变更的文本文件一个 unified diff，或整文件写入与删除 |
+| `skill.remove` | 一个本地技能或 Center 技能 | |
+| `resource.add` / `resource.remove` | 一个资源条目 | 目录通过已上传的 `acm-tree-v1` blob 添加 |
 | `memory.add` | 添加一条精选记忆条目 | 条目携带 `key`、`text`、`tags`、`source` 证据 |
-| `memory.update` *（提议）* | 按键替换一条现有条目的文本、标签和来源 | 记忆整合需要它（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；旧版本保留在历史中 |
+| `memory.update` | 按键替换一条现有条目的文本、标签和来源 | 记忆整合需要它（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；旧版本保留在历史中 |
 | `memory.retire` | 按键退役一条条目 | 已退役的条目不会从历史中删除 |
-| `engine_config.set` | 一个白名单中的引擎配置键 | 字符串值 |
+| `memory.set_mode` | 记忆模式 | `replace` 为 T3 |
 
-基因组补丁操作是否映射到 JSON Patch（RFC 6902）由 RSI-02 决定。
+没有任何操作能触及 `tools`、`script`、`engine_config` 或策略配置。操作不映射到 JSON
+Patch（RFC 6902）：它们修改的是存储 blob 中的文件内容，而不是 JSON 值，而且风险等级
+取决于每个操作的含义。
 
 ### 6.2 记录补丁时强制执行的规则
 
@@ -941,12 +1017,13 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
 
 - **基础必须匹配。** `base` 必须等于父代；操作必须能干净地应用，否则补丁被拒绝。
   v1 中没有模糊合并。
-- **策略配置。** 针对锁定基因、`mutable_genes` 之外的基因或固定条目的操作会被拒绝。
-  任何触及 `policy` 的操作都会被拒绝。
+- **策略配置。** 针对 `mutable_genes` 之外的基因或与固定项重叠的操作会被拒绝。没有
+  任何操作能触及策略配置。
 - **绑定范围。** 为某次运行记录时，操作还必须保持在该运行的 `allowed_genes` 范围内
   （由[进化运行](06-evolution-run.zh-CN.md)传入）。
-- **重写检测。** 变更超过文件可配置比例（默认 40%）的 `file.edit` 会被标记为
-  `rewrite`，并提升风险等级。
+- **重写检测。** 变更超过现有文本文件 2/5 行数的操作（按行的精确最长公共子序列
+  计算，见契约 README §6.3）会被标记为 `rewrite`，并提升风险等级。补丁中先删除
+  再以同一基因路径重新添加的条目也是如此：它按替换判断，而不是按新条目判断。
 - **限制。** 补丁大小、文件数量和文件大小限制与 Manifest 的限制一致。
 - **理由与证据。** `rationale` 是必需的；对于非平凡的操作，`evidence` 是必需的。
 
@@ -954,26 +1031,39 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
 
 每个操作映射到一个**风险等级**；补丁取其所有操作中的最高等级。
 每个等级对晋升意味着什么（自动还是人工评审、所有者上限）在
-[08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。默认映射以数据形式携带在补丁
-模式中（工作项 RSI-02：“每个补丁操作都有明确的风险等级”）；08-promotion.zh-CN.md
-中的表格是同一个映射，必须与此处保持一致：
+[08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。规范映射是
+[`risk-tiers.json`](../../api-contracts/genome/v1/risk-tiers.json)：对每个操作，取第一条
+目标覆盖该操作基因路径且条件成立的规则。下表和 08-promotion.zh-CN.md 中的表格就是该
+文件的内容，如有偏差，契约测试会失败。修订版记录上的注解变更不是补丁（T0）；没有任何
+操作能触及 `tools`、`script` 或策略配置。
 
-| 操作 | 目标 | 等级 |
-| --- | --- | --- |
-| 修订版记录上的注解变更 | — | T0 |
-| `memory.add`、`memory.update`、`memory.retire`（模式 `seed`、`merge`） | `memory` | T1 |
-| 仅触及技能描述的 `skill.update` | `skills/<name>` | T1 |
-| `file.edit` | `resources/...` | T1 |
-| `file.edit` | `persona/*`（SOUL、AGENTS、RULES） | T2 |
-| `skill.add`、`skill.update`（内容） | `skills/<name>` | T2 |
-| `engine_config.set`（白名单中的键） | `engine_config.<key>` | T2 |
-| 针对 `tools.mcp`、`tools.cli_tools`、`script` 的任何操作；记忆 `replace` 模式；权限变更 | 锁定基因 | T3 |
-| 针对 `policy` 的任何操作 | `policy` | 被底线拒绝（永远不可晋升） |
+<!-- risk-tiers:begin -->
+| Op | Target | Condition | Tier |
+| --- | --- | --- | --- |
+| `file.edit` | `persona` | — | T2 |
+| `file.edit` | `skills` | `description_only` | T1 |
+| `file.edit` | `skills` | — | T2 |
+| `file.edit` | `resources` | — | T1 |
+| `persona.add` | `persona` | — | T2 |
+| `persona.remove` | `persona` | — | T2 |
+| `skill.add` | `skills` | — | T2 |
+| `skill.update` | `skills` | `description_only` | T1 |
+| `skill.update` | `skills` | — | T2 |
+| `skill.remove` | `skills` | — | T2 |
+| `resource.add` | `resources` | — | T1 |
+| `resource.remove` | `resources` | — | T1 |
+| `memory.add` | `memory` | — | T1 |
+| `memory.update` | `memory` | — | T1 |
+| `memory.retire` | `memory` | — | T1 |
+| `memory.set_mode` | `memory` | `mode=replace` | T3 |
+| `memory.set_mode` | `memory` | — | T1 |
+<!-- risk-tiers:end -->
 
 在此映射之后应用的等级提升（被标记为 `rewrite` 的编辑，以及触及类护栏文本的编辑，
 至少为 T2）在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中说明。
 
-`policy.risk_overrides` 允许所有者提升某个基因的等级（提议：它永远不能降低等级）。
+`policy.risk_overrides` 允许所有者提升所有与覆盖路径重叠的操作的等级；它永远不能
+降低等级（待定决策 G-7，已关闭）。
 
 ### 6.4 组合
 
@@ -1034,29 +1124,44 @@ class EngineMemoryProjection(Protocol):
 - 这修改了“保留文件从不被触碰”的规则。它是 DR-1 的一项明确后果（建立在 Manifest
   之上的 Bot 基因组是进化的单元，因此精选记忆必须是其一部分），必须与引擎负责人
   确认。
-- **过渡方案：** 在 RSI-05 落地之前，记忆进化仅限于一个由平台管理、并声明为人设
-  文件的文件（例如 `LESSONS.md`）。这无需引擎变更；在此之前 `spec.memory` 保持为空。
+- **过渡方案：** 在 RSI-05 落地之前，记忆进化仅限于一个由平台管理的人设文件，
+  `spec.memory` 保持为 `null`。之前提议的 `LESSONS.md` 不是 Manifest 的身份文件类型
+  （`VALID_IDENTITY_FILES`），使用它需要先扩展该白名单；在此之前过渡方案只能使用现有
+  的人设文件，例如 `KNOWLEDGE.md`。
 
 ## 8. Manifest 变更
 
-Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以及一项自身的事实，全部
-与 schema v1 文档保持向后兼容。完整清单如下：
+Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增任何来源类型**：已编译的
+修订版被**直接**投递进应用引擎的各物化器（RSI-04），中间不经过 Manifest 文档。
+注册表为此留下一个 `RevisionApplier` 接缝；在它落地之前，晋升不移动任何引用，并以
+`not_appliable` 被拒绝（RSI-03）。Manifest 一侧仍然获得的内容如下，全部与 schema v1
+文档保持向后兼容：
 
-1. **内容存储来源。** 条目可以指向平台自身 manifest 内容存储中的摘要，而不是外部
-   来源。应用从存储中读取字节，并跳过获取步骤。已编译的修订版总是使用它，因此
-   已编译的文档是完全可复现的（P1）。
+1. **已编译修订版的直接投递。** 应用引擎从两个编译器之一——Manifest 的或
+   基因组的——接收同一种类型化期望状态（§2.7），运行服务按 apply 携带的状态
+   引用（`StateRef("manifest")`，或指明某次晋升的 `StateRef("genome", promotion_id)`）查找编译器。
+   各物化器从内容存储读取字节，并按类型化条目解析 Center 技能与仓库技能；
+   已编译的修订版是完全可复现的。编译器和引擎已经就位；RSI-04 把晋升的 applier
+   绑定到一次 apply 运行，并解析 Center 与仓库技能（P1；RSI-04）。
 2. **`engine_config` 生效。** 该类别已经存在于 Manifest 模式中
    （`schema/validator.py` 会校验 `engine_config.config` 映射），但目前没有任何东西
-   应用它：它已被移出第一批，也没有物化器。这项变更是为白名单中的键提供一个物化器
-   （待定决策 G-4；P3/P4）。
+   应用它：它已被移出第一批，也没有物化器。这项变更是为白名单中的键提供一个物化器，
+   与基因组的值类型一起确定（待定决策 G-4，
+   [#2858](https://github.com/inclusionAI/Avernet/issues/2858)；在 RSI 工作之后）。
 3. **`memory` 类别**：精选条目加一种模式，由应用交给引擎适配器
    （`EngineMemoryProjection`，§7；P5，依赖 RSI-05）。
 4. **产出型内容写入路径。** manifest 内容存储接受带补丁来源的**产出型**（非获取
    得到的）内容，例如由补丁创建的内容（§9.1；P2）。
-5. **应用报告上的已应用文档摘要。** 应用完成时，应用报告记录它所应用的确切
-   Manifest 文档的哈希（例如 `sha256:f27a…`）。对于服务 Bot，发布记录记录所发布
-   文档的摘要。这是一项不含修订版概念的 Manifest 事实；基因组注册表把摘要映射到
-   修订版（§5.5）（P1）。
+5. **应用报告上不记录摘要。** 已取消：应用报告记录它应用的是哪个状态引用
+   （Manifest，或某次晋升）以及逐条目的结果；Bot 运行哪个修订版靠读取 Bot 来
+   观察（§5.5），因此任何应用事实都不需要携带文档摘要。
+
+两个破坏完整性的 Manifest 缺陷已经修复：应用引擎整体拥有资源根目录（即 workspace 根目录，减去 `core/workspace/protected_entries` 中的受保护条目），
+每次 apply 先清空再写入声明的内容，因此从文档中省略的资源——或 Bot 自己写进去的
+文件——都会被删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）；
+`script: null` 声明「没有脚本」，因此文档（或修订版）会删除 Bot 现有的脚本，而
+省略 `script` 仍然是「不动它」
+（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。
 
 修订版、引用、比较并交换、固定版本、来源和注解都无需修改 Manifest：它们存放在
 基因组注册表中，位于 Manifest 之上。
@@ -1066,10 +1171,14 @@ Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以
 ### 9.1 内容：复用 manifest 内容存储
 
 manifest 应用流水线已经为其获取的所有内容保留了平台自己的持久副本
-（`core/bot_config_manifest/content/service.py`）：
+（`core/content_store/`，作为 Manifest 的 W11 构建，#3064 起独立为组件）：
 
 - **字节**存放在一个内容寻址的 blob 目录中，
-  `<root>/blobs/<hex[:2]>/<hex64>`，只原子地写入一次，并在读取时校验哈希。根目录为
+  `<root>/blobs/<hex[:2]>/<hex64>`，只原子地写入一次，并在读取时校验哈希。一个目录
+  （技能或目录资源）是一个 blob：其文件的 `acm-tree-v1` 编码（`canonical_tree_bytes`），
+  它是确定性的、未压缩的，并且可以解码回各个文件。因此编辑目录中的一个文件会为整棵树
+  存储一个新的 blob；每个文件一个 blob 可以避免这一点，这是已记录的后续工作（待定决策
+  G-1，对 v1 已关闭）。根目录为
   `user_config.bot_config_manifest.content_store_dir`（默认
   `./data/manifest_content`；部署时将其指向共享卷）。
 - **来源**存放在 `ac_manifest_content` 中，这是一个仅追加的存储事件日志（Bot、
@@ -1080,7 +1189,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 如何根据摘要获取内容：
 
-- **在 Backend 内部，** `ManifestContentService.read(digest)` 返回字节，并在读取时
+- **在 Backend 内部，** `ContentStoreService.read(digest)` 返回字节，并在读取时
   重新校验哈希。
 - **在 Backend 外部**（UI、流水线、进化策略、评估器），注册表 API 提供
   `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
@@ -1092,9 +1201,11 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 需要三项扩展：
 
-1. **产出型内容的写入路径。** 目前每个存储事件都是一次*获取*（`source_url` 是必需的）。
-   由进化策略创建的内容，例如编辑过的 `SKILL.md` 或新的记忆条目，从未被获取过。
-   它需要一个存储调用，其来源为产出它的补丁和运行。
+1. **产出型内容的写入路径**（已在 RSI-03 交付，`ContentStoreService.store_produced`）。
+   在此之前，每个存储事件都是一次*获取*（`source_url` 是必需的）。由进化策略创建的
+   内容（例如编辑过的 `SKILL.md` 或新的记忆条目）、从 Bot 捕获的内容，或上传的内容，
+   都以其来历（`capture`、`patch`、`upload`）和记录它的参与者作为来源信息存储，
+   每个 Bot 和摘要一行；一个摘要只有通过这样的一行才能被某个 Bot 读取。
 2. **归档的保留策略。** 归档保留每一个候选。大多数 blob 是小型文本且可去重，但
    manifest 资源每个可能有 100–200 MiB。v1 可以接受无条件保留。之后的任何清扫
    都只能删除没有任何修订版引用的 blob，并且绝不能删除可从 `promoted` 修订版
@@ -1102,20 +1213,22 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 3. **Backend 外部的读取方。** `apps/evolution` 中的进化策略和评估器通过注册表 API
    （或一个已物化的沙箱）读取内容，从不直接读取 blob 目录。
 
-### 9.2 修订版：数据库，而非 git（待定决策 D-6）
+### 9.2 修订版：数据库，而非 git（决策 D-6，已关闭）
 
 | 选项 | 优点 | 缺点 |
 | --- | --- | --- |
 | **数据库修订版 + 现有的内容寻址存储**（推荐） | 租户隔离、ACL、可对谱系和状态进行查询、复用 manifest 内容存储、符合 Backend 的模式 | 需要自己的 diff/merge 工具 |
 | 每个 Bot 一个 Git 仓库 | 免费获得历史、diff、blame；编码智能体本就熟悉 git | 多租户托管、ACL、跨 Bot 查询、GC：一项新的基础设施依赖 |
 
-建议：原生数据库方案，外加 **修订版历史的 git 导出**（提议；§12 中尚无对应端点），使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
+决策（RSI-03）：原生数据库方案。**修订版历史的 git 导出**（提议；§12 中尚无对应端点）
+可以随后跟进，使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
 （Meta-Harness 的经验），而无需让 git 成为事实来源。
 
-提议的表（名称仅为示意，由 RSI-03 确定）：`ac_genome_revision`
-（id、owner_id、bot_id、seq、父代、来源、状态、`{spec, policy}` 的规范
-JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 的版本），
-`ac_genome_ref_event`（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）。
+表（`core/bot_genome/sql/2026_10_19_bot_genome.sql`）：`ac_genome_revision`
+（id、env、entity、bot、seq、父代、来源、状态、`{spec, policy}` 的规范 JSON、注解），
+`ac_genome_ref`（每个名称一行，含修订版和用于 CAS 的版本），`ac_genome_ref_event`
+（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）以及
+`ac_genome_promotion`（移动的引用与投递接缝的答复；该行不携带它所投递状态的任何内容）。
 
 ### 9.3 序列化：规范 JSON
 
@@ -1124,6 +1237,9 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
 
 - **规范形式。** 记录在哈希之前使用 JSON 规范化方案（RFC 8785）进行序列化。
   修订版 `id` 是 `{spec, policy}` 规范形式的 SHA-256；`revision` 元数据被排除在外。
+  RFC 8785 保留数组顺序，因此 `spec` 和 `policy` 中的每个列表都按其键排序且没有重复；
+  规则与测试向量见
+  [契约 README §3](../../api-contracts/genome/v1/README.md#3-canonical-json-and-identity)。
 - **参与哈希的内容中不使用浮点数。** RFC 8785 将数字格式化为 IEEE 双精度数，因此
   参与哈希的内容只使用整数、字符串和枚举（例如 `max_wall_clock_s: 7200`、
   `temperature: "0.2"`）。
@@ -1131,10 +1247,9 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
   `BotConfigArtifact` 已在使用的机制（`artifact.schema.json`）相同，也是 OpenAPI
   所基于的机制。
 - **所有新内容都只使用 JSON**，无论是编写时还是存储时。
-- **Bot Config Manifest 仍使用 YAML。** 它是一个现有契约，不做改变。从 Manifest
-  文档记录修订版时，YAML 只被解析一次，省略的类别被补齐，来源被固定，然后存储规范
-  JSON。原始 YAML 作为来源记录保留，因此其中的注释不会丢失，但它从不作为参与哈希
-  或用于交换的形式。
+- **Bot Config Manifest 仍使用 YAML。** 它是一个现有契约，不做改变。注册表从不解析
+  Manifest 文档：文档像今天一样被应用，捕获再把 Bot 由此产生的状态记录为规范 JSON。
+  YAML 从不作为参与哈希或用于交换的形式。
 
 为什么不使用 YAML 作为存储形式：它没有规范序列化（同样的数据可以有多种写法，因此
 无法直接哈希）；其隐式类型在 YAML 1.1 与 1.2 之间以及不同库之间存在差异（`no`、`on`、
@@ -1155,7 +1270,7 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
 
 ## 11. 服务接口
 
-基因组注册表是一个 Backend 核心服务，与传输无关，提供 `GenomeRegistry` Protocol。
+基因组注册表是一个 Backend 核心服务，与传输无关，提供 `GenomeRegistryProtocol`。
 Backend 中的调用方（晋升）在进程内使用它；
 `apps/evolution` 中的调用方（进化运行、验证）通过 §12 中的 API 使用它。
 
@@ -1169,7 +1284,7 @@ class GeneChangeKind(StrEnum):
 
 @dataclass(frozen=True)
 class GeneChange:
-    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
+    gene: str                        # gene path (§2.1), e.g. "persona/SOUL.md"
     kind: GeneChangeKind
     diff: str | None = None          # unified diff for modified text files; None otherwise
 
@@ -1183,67 +1298,107 @@ class GenomeDiff:
 
 # Page[T] {total, items}: the shared pagination shape, 09-evolution-api.md.
 
-class GenomeRegistry(Protocol):
+@dataclass(frozen=True)
+class RecordedRevision:
+    revision: GenomeRevision
+    created: bool                    # False when the content already existed (same id, seq and parent)
+    risk_tier: RiskTier | None = None   # a patch's tier; None for a capture or a policy change
+    flags: list[str] = ()            # gene paths of files the patch rewrote (§6.2)
+    ref: str | None = None           # the candidate ref a run's candidate was named
+
+@dataclass(frozen=True)
+class RunScope:
+    run_id: str                      # 命名 candidate/<run_id>/<n>
+    strategy: str                    # "<id>@<version>"：记录为候选的 actor
+    allowed_genes: list[str]         # 运行的绑定允许其改动的基因
+    step: str | None = None          # 策略自己给该步骤的标签
+
+class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
-    def get_revision(self, bot: BotRef, rev: RevisionId | str) -> GenomeRevision:
-        """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
+    def get_revision(self, bot: BotRef, rev: str) -> GenomeRevision:
+        """Accepts a revision id, "r<seq>", or a ref name. Raises RevisionNotFound."""
 
     def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
                        parent: RevisionId | None = None,
-                       page: int = 1, page_size: int = 20) -> Page[RevisionMetadata]:
+                       page: int = 1, page_size: int = 20) -> RevisionPage:
         """Metadata only, newest seq first."""
 
-    def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
-                     status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
-                     allowed_genes: list[str] | None = None) -> GenomeRevision:
-        """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
-        and record the resulting revision. Idempotent: the same patch returns the same
-        revision. `allowed_genes` is None for owner patches (policy only), a list for runs.
-        Raises BaseMismatch, PatchRejected(reasons), LimitExceeded."""
+    async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
+        """Record the bot's current state; parent `active` (the latest revision until there is one; none for the first); policy copied from `active`.
+        Idempotent: unchanged state returns the existing revision with created=False.
+        Raises CaptureRefused naming what cannot be recorded."""
 
-    def record_manifest(self, bot: BotRef, manifest_yaml: str, *, created_by: Provenance,
-                        base: RevisionId | None) -> GenomeRevision:
-        """Parse a Manifest document, fill omitted categories from `base` (or current state),
-        pin every source, store canonical JSON, keep the YAML as provenance. Status `draft`."""
+    async def commit_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
+                           status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
+                           run: RunScope | None = None) -> RecordedRevision:
+        """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).
+        A CANDIDATE needs `run`, whose allowed_genes bound the ops and whose run_id names
+        candidate/<run>/<n>. Idempotent for the recorder: the same run retrying the same patch gets its
+        revision; a candidate whose result another run, a draft or a capture recorded is refused.
+        Raises RevisionNotFound (the base), PatchRejected(reasons), LimitExceeded, ContentNotReachable."""
 
-    def set_status(self, bot: BotRef, rev: RevisionId, status: RevisionStatus,
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
+        """Record a revision with `active`'s spec and the new policy. Raises PolicyRejected(reasons)."""
+
+    def set_status(self, bot: BotRef, revision_id: RevisionId, status: RevisionStatus,
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> GenomeDiff:
+    def diff(self, bot: BotRef, rev: str, against: str) -> GenomeDiff:
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
     def list_refs(self, bot: BotRef) -> list[GenomeRef]: ...
 
-    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance) -> GenomeRef:
-        """Compare-and-swap. Raises RefConflict(current) if the ref moved.
-        Only the designated mover may move each ref kind (§5.1); `active`, `previous`,
-        `canary` are moved only by Promotion."""
+    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance, mover: RefMover) -> GenomeRef:
+        """Compare-and-swap. Raises RefConflict(current) if the ref moved, MoverNotAllowed when
+        `mover` is not the ref kind's designated mover (§5.1): `active` and `previous` move only
+        through Promotion, `draft` through the owner, candidate refs through the registry itself."""
 
     # --- content ---------------------------------------------------------
     def read_content(self, bot: BotRef, digest: Digest) -> bytes:
-        """Access-checked against the bot; the digest must be reachable from one of its revisions
-        or uploads. Hash re-verified on read."""
+        """Access-checked against the bot: the digest must have been stored for it (captured, written
+        by a patch or uploaded). Hash re-verified on read. Raises ContentNotReachable."""
 
-    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> Digest:
-        """Produced content (§9.1 extension 1). Idempotent by digest."""
+    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> ContentReceipt:
+        """Produced content (§9.1 extension 1). Idempotent by digest; the receipt says whether it was new."""
 
-    # --- apply / materialisation -----------------------------------------
-    def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
-        """Pinned, total Manifest document (curated memory in its `memory` category). Used by Promotion (apply,
-        service-bot publish) and Verification (eval bot materialisation)."""
+    # --- delivery --------------------------------------------------------
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
+        """The revision as the apply engine's typed desired state (§2.7): every category it covers
+        declared, cli_tools and engine_config undeclared. Used by Promotion and Verification (eval
+        bot materialisation). Raises NotAppliable for a revision the state model refuses as recorded."""
 
-    def applied_revision(self, bot: BotRef) -> RevisionId | None:
-        """The revision the bot runs: its last applied document digest (Manifest apply report or service-bot
-        publish record) mapped back through the digests recorded at promotion. None when that digest maps to
-        no revision. The bot is drifted when this differs from `active` (§5.5); Evolution Run checks it at run
-        start and Promotion before promoting."""
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than `active`, found by reading the bot: capture its
+        state as `capture` would, compute the revision id it would record under `active`'s policy,
+        compare with `active`. None without an `active` or while they agree; else Drift(active,
+        observed). Nothing is recorded; CaptureRefused propagates. Evolution Run asks at run start,
+        Promotion before an automated promotion (§5.5)."""
+
+class GenomePromotionServiceProtocol(Protocol):   # core/bot_genome/promotion/promotion_service_protocol.py
+    async def promote(self, bot: BotRef, *, revision: str, ref: str, expected_revision: RevisionId | None,
+                      actor: Provenance, reason: str) -> Promotion:
+        """Move `ref` (`active`) by compare-and-swap, record the promotion (the moved refs and the seam's
+        answer; nothing of the state), hand the revision's desired state to the RevisionApplier seam.
+        The seam's preflight runs before any ref moves; a delivery that fails to start after the move is
+        recorded as apply_failed.
+        Raises RevisionNotFound, NotPromotable, Drifted (automated actors only), NotAppliable,
+        PromotionUnsupported, RefConflict."""
+
+    def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion: ...
+    def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
 ```
 
-错误是带类型的，并映射到 §12 中的 HTTP 状态码：`NotFound` → 404，
-`RefConflict` / `BaseMismatch` → 409，`PatchRejected` → 422，
-`LimitExceeded` → 413，`MoverNotAllowed` → 403。
+进程内调用方通过 Service API 的再导出（`api/bot_genome_registry_service.py`、
+`api/bot_genome_promotion_service.py`）使用这两个接口。
+
+错误是带类型的，并映射到 §12 中的 HTTP 状态码：`RevisionNotFound` /
+`RefNotFound` / `ContentNotReachable` → 404，`RefConflict` / `Drifted` → 409，
+`PatchRejected`（以及 `PolicyRejected`）/ `CaptureRefused` / `NotPromotable` /
+`NotAppliable` / `PromotionUnsupported` → 422，`LimitExceeded` → 413，
+`MoverNotAllowed` → 403。不是该 Bot 的修订版的 base 属于 `RevisionNotFound`，
+而不是单独的一种冲突。
 
 ## 12. API
 
@@ -1280,18 +1435,20 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 
 ### POST /bots/{bot_id}/genome/revisions
 
-从补丁（`{base, patch}`）或 Manifest 文档（`{manifest}`）记录修订版。调用方：
-进化运行（当进化策略调用 `ctx.candidates.submit` 时；进化策略从不直接调用此接口），
-以及通过 UI 或 API 操作的所有者。返回该修订版；记录已存在的
-内容时，以 `200` 返回已有修订版。
+通过把基因组补丁应用到它自己的 `patch.base` 上来记录修订版。请求级别没有 `base`：
+由补丁指明它。调用方：进化运行（当进化策略调用 `ctx.candidates.submit` 时；
+进化策略从不直接调用此接口），以及通过 UI 或 API 操作的所有者。返回该修订版；
+记录已存在的内容时，以 `200` 和 `created: false` 返回已有修订版。记录者即审计身份：
+用户记录写入调用者（被准入的应用写为 `app:<id>:on-behalf-of:<user>`）；运行的候选写入
+策略（`id@version`）及其运行 id，代表运行提交它的应用由运行记录保存
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），而不是每个修订版都保存。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a patch, recorded as a run candidate (internal caller: Evolution Run)
+// Request: a patch recorded as a run candidate (internal caller: Evolution Run)
 {
-  "base": "sha256:a90b…",
   "status": "candidate",
-  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
+  "run": {"run_id": "run_7f3", "strategy": "clawevolve/bot-evolution@2.0.0", "step": "propose", "allowed_genes": ["persona", "skills"]},
   "patch": {
     "patch_schema": 1,
     "base": "sha256:a90b…",
@@ -1300,16 +1457,6 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
     "rationale": "Partial-refund requests were escalated too late.",
     "evidence": ["episode:ep_91"]
   }
-}
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a Manifest document (owner edit); YAML carried as a string, stored as provenance
-{
-  "base": "sha256:a90b…",
-  "status": "draft",
-  "manifest": {"format": "yaml", "document": "schema_version: 1\nmanifest:\n  identity:\n    - type: SOUL.md\n      source: {git: support-bot, path: SOUL.md, ref: main}\n"}
 }
 ```
 
@@ -1324,13 +1471,52 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
   "patch_digest": "sha256:c41e…",
   "risk_tier": "T2",
   "flags": [],
-  "ref": "candidate/run_7f3/1"
+  "ref": "candidate/run_7f3/1",
+  "created": true
 }
 ```
 
-错误：409 `base_mismatch`（base 不是当前父代，或操作无法干净地应用）；
-422 `patch_rejected` 并附带原因（`locked_gene`、`pinned_item`、`gene_not_allowed`、
-`missing_rationale`、`schema`）；413 `limit_exceeded`。
+错误：404 补丁的 `base` 不是此 Bot 的修订版；422 `patch_rejected` 并附带全部原因
+（`does_not_apply`、`gene_not_mutable`、`pinned_item`、`gene_not_allowed`、
+`missing_rationale`、`missing_evidence`、`schema`、`not_canonical`、候选结果为已有
+修订版时的 `already_recorded`，以及契约 §6.4 的各项应用判定）；413 `limit_exceeded`。
+请求体超出规范 JSON 子集（重复成员名、浮点数、孤立代理项）会在解析前被拒绝（契约 §3.1）。
+审计身份超过 1024 个字符（内容存储 `modifier` 列的宽度；应用的身份为
+`app:<id>:on-behalf-of:<user>`）会在写入任何内容前以 413 `limit_exceeded` 拒绝。
+
+### POST /bots/{bot_id}/genome/revisions:capture
+
+把 Bot 的当前状态记录为一个修订版：父代为 `active`（Bot 的第一个修订版没有父代），
+策略配置从 `active` 复制，状态为 `draft`。无请求体。在基因组之外做出的编辑
+（控制台、`PUT /config-manifest`）正是通过它成为修订版，Bot 也正是通过它获得第一个
+修订版。调用方：通过 UI 或 API 操作的所有者，以及在 Manifest 应用之后的流水线。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Response 201 Created (200 with `created: false` when nothing changed since the last record)
+{"id": "sha256:7c1e…", "seq": 42, "status": "draft", "parent": "sha256:a90b…",
+ "patch_digest": null, "risk_tier": null, "flags": [], "ref": null, "created": true}
+```
+
+错误：422 `capture_refused`，指明无法记录的内容（资源路径不符合 Manifest 的路径
+规则，契约 §7；由平台管理的 Bot）。
+
+### PUT /bots/{bot_id}/genome/policy
+
+用 `active` 的内容和这份策略配置记录一个修订版（§2.3、§4.4）。策略配置不是 Bot
+状态，因此它有自己的操作，而不是一种补丁操作。调用方：通过 UI 或 API 操作的所有者。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Request
+{"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
+```
+
+响应与捕获相同（`201`；当 `active` 已经持有这份策略配置时为 `200`）。错误：422
+`policy_rejected` 并附带策略配置自身的原因（`schema`、`not_canonical`、`order`），
+或者——由于该记录携带的是 `active` 的 spec——当该内容已不再可应用时附带 spec 的
+应用期原因（契约 §7）：收紧策略配置同样会被拒绝，原因会说明需要先修复什么。低于某个操作
+自身等级的覆盖不是错误；它没有效果，因为覆盖只能提升（§6.3）。
 
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 
@@ -1350,10 +1536,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
                "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_digest": null,
                "evidence": [], "evaluations": ["ev_288"], "annotations": {}},
   "spec": {"persona": [{"type": "SOUL.md", "digest": "sha256:2b77…"}], "skills": [], "memory": null,
-           "resources": [], "tools": {"mcp": [], "cli_tools": []},
-           "engine_config": {"reasoning_effort": "medium"}, "script": null},
-  "policy": {"locked_genes": ["script", "tools.mcp", "policy"], "mutable_genes": ["persona", "skills", "memory"],
-             "pins": [], "risk_overrides": {}}
+           "resources": [], "tools": {"mcp": []}, "engine_config": {}, "script": null},
+  "policy": {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"],
+             "risk_overrides": {}}
 }
 ```
 
@@ -1376,14 +1561,14 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
   "risk_tier": "T2",
   "rewrite_flags": [],
   "changes": [
-    {"gene": "persona.SOUL.md", "kind": "modified",
+    {"gene": "persona/SOUL.md", "kind": "modified",
      "diff": "@@ -14,3 +14,3 @@ ## Escalation\n-Escalate when the customer asks.\n+Escalate to a human when a refund exceeds the policy limit.\n"},
-    {"gene": "skills.invoice-lookup", "kind": "added"}
+    {"gene": "skills/invoice-lookup", "kind": "added"}
   ]
 }
 ```
 
-错误：404 任一修订版不存在；422 修订版属于不同的 Bot。
+错误：404 任一修订版不存在（属于另一个 Bot 的修订版在这里视为不存在）。
 
 ### GET /bots/{bot_id}/genome/refs
 
@@ -1410,8 +1595,9 @@ GET /openapi/v1/bots/bot_123/genome/refs
 
 ### PUT /bots/{bot_id}/genome/refs/draft
 
-以比较并交换方式移动所有者的 `draft` 引用。由所有者通过 UI 或 API 调用。
-（`active`、`previous`、`canary` 不能在此移动；它们只能通过
+以比较并交换方式移动所有者的 `draft` 引用。记录修订版不会移动它：由所有者把它指向
+自己正在处理的修订版。由所有者通过 UI 或 API 调用。（`active`、`previous`、`canary`
+不能在此移动；`active` 和 `previous` 只能通过
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的 `POST /bots/{bot_id}/genome/promotions`
 移动。）
 
@@ -1454,7 +1640,7 @@ Content-Type: application/octet-stream
 You are the support agent for …
 ```
 
-错误：404 未知摘要，或该摘要无法从此 Bot 到达。
+错误：404 未知摘要，或该摘要从未为此 Bot 存储过（为它捕获、由补丁写入或上传）。
 
 ### PUT /bots/{bot_id}/genome/content
 
@@ -1471,20 +1657,23 @@ def lookup(order_id): ...
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Response 201 (200 if the bytes already exist)
-{"digest": "sha256:6b1d…", "size": 1834}
+// Response 201 (200 with `created: false` if this bot already held the bytes)
+{"digest": "sha256:6b1d…", "size": 1834, "created": true}
 ```
 
 错误：413 超过 Manifest 文件大小限制。
 
 ### 由其他组件负责的相关端点
 
-`POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版）。
-它位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
+`POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版），
+`GET …/genome/promotions` 和 `GET …/genome/promotions/{promotion_id}` 读取晋升记录。
+它们位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
+在直接投递落地之前（RSI-04），每次晋升都会在移动任何引用之前以 `422 not_appliable`
+被拒绝。
 
 ### 内部接口
 
-- 进程内的 `GenomeRegistry`（§11），供 Backend 中的晋升使用。
+- 进程内的 `GenomeRegistryProtocol`（§11），供 Backend 中的晋升使用。
 - 引擎记忆投影契约（§7），一个由引擎适配器实现的 Plugin API（RSI-05）。
 
 ## 13. 示例
@@ -1513,7 +1702,6 @@ def lookup(order_id): ...
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Request body of step 2
 {
-  "base": "sha256:a90b…",
   "status": "draft",
   "patch": {
     "patch_schema": 1,
@@ -1534,8 +1722,8 @@ def lookup(order_id): ...
 async def submit_candidate(run: Run, candidate: Candidate) -> str:
     rev = await genome_api.record_revision(
         bot_id=run.bot.bot_id, entity_id=run.bot.owner_id,   # the run's bot: id in the path, owner as entity_id
-        base=candidate.patch["base"], status="candidate",
-        run={"run_id": run.id, "binding_id": run.binding_id, "allowed_genes": run.allowed_genes},
+        status="candidate",
+        run={"run_id": run.id, "strategy": run.strategy, "step": candidate.step, "allowed_genes": run.allowed_genes},
         patch=candidate.patch,
         idempotency_key=f"{run.id}/candidate/{candidate.patch_digest}",
     )
@@ -1551,25 +1739,27 @@ async def submit_candidate(run: Run, candidate: Candidate) -> str:
 
 ```python
 # Illustrative only: inside Backend promotion, after the gate accepted r42
-bot = BotRef(owner_id="user_owner_5", bot_id="bot_123")
-compiled = registry.compile(bot, "sha256:7c1e…")
-registry.move_ref(bot, RefUpdate(name="previous", revision=current_active,
-                  expected_revision=current_previous, reason=reason), actor=actor)
-registry.move_ref(bot, RefUpdate(name="active", revision=compiled.revision_id,
-                  expected_revision=current_active, reason=reason), actor=actor)
-apply_service.apply(bot=bot, document=compiled.document)
-# The apply report records the digest of the applied document (compiled.document_digest, §8 item 5);
-# the Manifest knows nothing about r42. Promotion keeps the revision <-> digest mapping on its own
-# record and in the Registry (§5.5).
+bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5", engine_type="openclaw", bot_type="personal")
+state = registry.compile(bot, "sha256:7c1e…")          # the typed desired state (§2.7)
+if actor.kind is not ProvenanceKind.USER and await registry.drift(bot):   # automated actors may not promote
+    raise Drifted(...)                                 # over a bot that has moved by hand; an owner may
+applier.preflight(bot, state)                          # the delivery seam refuses here, before any ref moves
+promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
+                                                       # active <- r42 (CAS), r42 promoted, the promotion row
+await applier.start(bot, state, actor=actor, reason=reason)   # direct delivery (RSI-04): an apply run whose state
+                                                       # reference is StateRef("genome", promotion_id); the genome
+                                                       # compiler resolves it back to r42 while the promotion is current
+# The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```
 
-顺序、失败处理和服务 Bot 发布路径由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责。
+顺序、失败处理和服务 Bot 发布路径由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责；
+目前唯一绑定的 applier 会以 `not_appliable` 拒绝一切，并指明 RSI-04。
 
 ## 14. 交互
 
 | 其他组件 / 服务 | 方向 | 传递内容 |
 | --- | --- | --- |
-| Bot Config Manifest（现有） | 基因组 → Manifest | 通过基因组 API 从 Manifest 文档记录修订版；编译后的修订版通过 Manifest 应用进行应用；应用报告携带所应用文档的摘要，由注册表映射到修订版；直接的 Manifest 编辑会绕过基因组，并作为漂移被检测到（§5.5） |
+| Bot Config Manifest（现有） | 基因组 → Manifest | 基因组从不读取 Manifest 文档：文档像今天一样被应用，然后捕获该 Bot；修订版编译成与 Manifest 相同的类型化期望状态，并被直接投递进应用引擎（RSI-04）；直接的 Manifest 编辑会绕过基因组，并通过读取 Bot 作为漂移被检测到（§5.5） |
 | Manifest 内容存储（现有） | 基因组 → 存储 | 按摘要的字节；面向产出型内容的新写入路径 |
 | Skill Center（现有） | 基因组 → Center | 在编译/应用时解析固定的 Center 版本 |
 | [经验](02-experience.zh-CN.md) | 经验 → 基因组（按 id） | 每个片段和反馈记录都携带产生它的修订版 id，该 id 通过注册表的摘要 → 修订版映射归因得到；Bot 处于漂移状态期间为 `null` |
@@ -1577,7 +1767,7 @@ apply_service.apply(bot=bot, document=compiled.document)
 | [实验记录](05-experiment-ledger.zh-CN.md) | 基因组 → 实验记录 | 修订版记录、引用移动事件、供实验记录归档视图和审计使用的谱系 |
 | [进化运行](06-evolution-run.zh-CN.md) | 运行 → 基因组 | 运行开始时的漂移检查（§5.5）；解析绑定的 `parent`；以 `allowed_genes` 记录候选；上传产出型内容；针对 `policy` 检查绑定 |
 | [验证](07-verification.zh-CN.md) | 验证 → 基因组 | 将父代和候选编译/物化为评估 Bot；将评估链接到修订版 |
-| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；记录已应用的修订版编译出了哪个文档摘要；发生漂移时拒绝（§5.5） |
+| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；自动晋升前询问漂移（§5.5） |
 | [进化 API](09-evolution-api.zh-CN.md) | 调用方 → 基因组 | 公共基因组端点 |
 | [元进化](10-meta-evolution.zh-CN.md) | 之后 | 用于机制修订版的同一套修订版/引用/补丁机制 |
 | 引擎适配器 | 基因组 → 引擎 | 记忆投影（`project_memory`、`export_memory`）；物理布局 |
@@ -1587,19 +1777,19 @@ apply_service.apply(bot=bot, document=compiled.document)
 
 | ID | 决策 | 说明 |
 | --- | --- | --- |
-| D-6 | 基因组存储：数据库修订版 + 内容存储（推荐）与每个 Bot 一个 git 仓库 | §9.2；RSI-03 |
-| G-1 | 目录资源（来自 git 的 `path: data/kb/`）目前如何存储：一个归档 blob 还是每个文件一个 blob | 决定针对资源的 `file.edit` 补丁能有多细粒度；必须在 RSI-02 确定补丁模式之前确认 |
-| G-2 | 完整的补丁操作集，以及操作是否映射到 JSON Patch（RFC 6902） | RSI-02 |
-| G-3 | 锁定基因的默认值 | RSI-02 “完成标准”：评审者就锁定基因的默认值达成一致 |
-| G-4 | `engine_config` 键白名单 | P3/P4 |
-| G-5 | 引擎记忆投影契约（引擎负责人在接受 DR-1 时已签字认可修改保留文件规则） | RSI-05；DR-1 的后果；过渡方案 `LESSONS.md` |
+| D-6 | 基因组存储：数据库修订版 + 内容存储与每个 Bot 一个 git 仓库 | **已关闭（RSI-03）：** 数据库修订版（`ac_genome_revision`、`ac_genome_ref`、`ac_genome_ref_event`、`ac_genome_patch`、`ac_genome_promotion`）加上用于存放字节的 manifest 内容存储（§9.2）；git 导出可以随后跟进 |
+| G-1 | 目录如何存储 | **已关闭（RSI-02）：** 每个目录一个 `acm-tree-v1` blob；如果编辑大型目录树变得常见，后续改为每个文件一个 blob（§9.1） |
+| G-2 | 完整的补丁操作集，以及操作是否映射到 JSON Patch（RFC 6902） | **已关闭（RSI-02）：** §6.1 中的操作集；不使用 JSON Patch |
+| G-3 | 策略配置默认值 | **已关闭（RSI-02）：** `mutable_genes` = persona、skills、memory、resources；`pins` = `persona/SAFETY.md`；没有 `locked_genes` 列表（§2.3） |
+| G-4 | `engine_config` 键白名单与值类型 | [#2858](https://github.com/inclusionAI/Avernet/issues/2858)，在 RSI 工作之后 |
+| G-5 | 引擎记忆投影契约（引擎负责人在接受 DR-1 时已签字认可修改保留文件规则） | RSI-05；DR-1 的后果；过渡方案：一个由平台管理的人设文件（§7） |
 | G-6 | 当补丁产生与已有修订版完全相同的内容时的谱系（相同 id、不同的父代路径） | 提议：返回已有修订版，并将额外的派生关系记录为一个实验记录事件 |
-| G-7 | `risk_overrides` 是否可以降低等级 | 提议：只能提升 |
+| G-7 | `risk_overrides` 是否可以降低等级 | **已关闭（RSI-02）：** 只能提升，由构造保证（§6.3） |
 | G-8 | 归档的 blob 保留清扫 | v1 无条件保留；任何清扫都必须保留可从任意修订版到达的 blob，绝不能删除 `promoted` 修订版的 blob |
 | G-9 | 候选 id 与修订版 id | 提议：保留两种标识。候选 id 是存储的补丁的内容哈希（§6.5）；记录的候选修订版 id 是 `{spec, policy}` 的内容哈希（§4.4）。两者都出现在判定（[07-verification.zh-CN.md](07-verification.zh-CN.md)）和实验记录条目中。替代方案：只使用修订版 id 作为句柄 |
-| G-10 | `memory.update` 操作 | 在 §6.1 中为记忆整合而提议；等级与 `memory.add` / `memory.retire` 相同，为 T1。替代方案：将更新表示为 retire + add |
+| G-10 | `memory.update` 操作 | **已关闭（RSI-02）：** 保留，等级 T1 |
 
 相关：DR-1 已在 RSI-01 中被接受（[ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)），
 RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
-（面向基因组的 Manifest 变更）因此可以开始；见
+（已编译修订版的直接投递）因此可以开始；见
 [work-items.zh-CN.md](work-items.zh-CN.md)。

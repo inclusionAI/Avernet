@@ -1041,7 +1041,7 @@ async def search_profiles(request: SearchRequest):
 
     # 处理 Reranker 配置
     # 获取默认模型（从环境变量，未设置则使用默认值）
-    default_reranker_model = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
+    default_reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B")
 
     if request.enable_rerank is not None:
         if request.enable_rerank:

@@ -84,11 +84,13 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", (endpoin
     vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
     vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
     vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValue(0);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
     vi.spyOn(gitClient, "commitAndPushSaved").mockResolvedValue({ branch: `saved/${spec.id}`, commit: "abc123" });
     vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(async (_dir, workflowId, deployNumber) => ({
       branch: `wf/${workflowId}`, tagName: `deploy/${workflowId}/#${deployNumber}`, commit: "abc123", deployNumber,
     }));
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
   });
 
   afterEach(async () => {
@@ -129,7 +131,8 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", (endpoin
     ]);
     if (endpoint === "deploy") {
       expect(deps.triggerRun).toHaveBeenCalledTimes(2);
-      expect(deps.triggerRun).toHaveBeenLastCalledWith(spec.id, "operator");
+      // Third argument carries the source run; absent here, so the re-run has no target Bot.
+      expect(deps.triggerRun).toHaveBeenLastCalledWith(spec.id, "operator", null);
     }
     expect(deps.gitConfig).toEqual(fallbackGitConfig);
     expect(deps.gitAuthor).toEqual(fallbackAuthor);

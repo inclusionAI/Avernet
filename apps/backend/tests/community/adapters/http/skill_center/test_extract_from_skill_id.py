@@ -1,4 +1,5 @@
 """Tests for extract_from_skill_id and delete_skill interceptor integration."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock
@@ -10,7 +11,10 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     PermissionParams,
     CollaboratorPermissionInterceptor,
 )
-from agentclaw.community.adapters.http.skill_center.skills import extract_from_skill_id, delete_skill
+from agentclaw.community.adapters.http.skill_center.skills import (
+    extract_from_skill_id,
+    delete_skill,
+)
 
 
 @pytest.mark.unit
@@ -21,6 +25,7 @@ class TestExtractFromSkillId:
     async def test_returns_empty_when_skill_id_is_empty(self):
         """skill_id 为空时返回空 PermissionParams。"""
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         result = await extract_from_skill_id(skill_id="", ctx=ctx)
@@ -32,6 +37,7 @@ class TestExtractFromSkillId:
     async def test_returns_empty_when_skill_id_is_none(self):
         """skill_id 为 None 时返回空 PermissionParams。"""
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         result = await extract_from_skill_id(skill_id=None, ctx=ctx)
@@ -43,6 +49,7 @@ class TestExtractFromSkillId:
     async def test_returns_empty_when_injector_is_none(self):
         """injector 为 None 时返回空 PermissionParams。"""
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = None
 
         result = await extract_from_skill_id(skill_id="skill-123", ctx=ctx)
@@ -54,6 +61,7 @@ class TestExtractFromSkillId:
     async def test_returns_empty_when_factory_get_fails(self):
         """injector.get 抛出异常时返回空 PermissionParams。"""
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
         ctx.injector.get.side_effect = Exception("DI error")
 
@@ -65,9 +73,12 @@ class TestExtractFromSkillId:
     @pytest.mark.asyncio
     async def test_returns_empty_when_skill_not_found(self):
         """skill 不存在时返回空 PermissionParams。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -85,9 +96,12 @@ class TestExtractFromSkillId:
     @pytest.mark.asyncio
     async def test_returns_params_when_skill_found(self):
         """skill 存在时返回正确 PermissionParams。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -110,9 +124,12 @@ class TestExtractFromSkillId:
     @pytest.mark.asyncio
     async def test_handles_missing_bolt_id(self):
         """skill 缺少 bolt_id 时 bot_id 为 None。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -134,9 +151,12 @@ class TestExtractFromSkillId:
     @pytest.mark.asyncio
     async def test_handles_missing_user_id(self):
         """skill 缺少 user_id 时 owner_id 为 None。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -158,9 +178,12 @@ class TestExtractFromSkillId:
     @pytest.mark.asyncio
     async def test_handles_service_exception(self):
         """service.get_skill 抛出异常时返回空 PermissionParams。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -182,11 +205,16 @@ class TestExtractFromSkillIdWithInterceptor:
     @pytest.mark.asyncio
     async def test_interceptor_uses_extractor_correctly(self):
         """测试 CollaboratorPermissionInterceptor 使用 extract_from_skill_id 提取参数。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-        from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
+        from agentclaw.community.core.bot_collaborator.interceptor import (
+            CollaboratorPermissionInterceptor,
+        )
 
         # 准备 mock
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -221,10 +249,15 @@ class TestExtractFromSkillIdWithInterceptor:
     @pytest.mark.asyncio
     async def test_owner_can_pass_permission_check(self):
         """Owner 可以通过权限检查。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-        from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
+        from agentclaw.community.core.bot_collaborator.interceptor import (
+            CollaboratorPermissionInterceptor,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -259,10 +292,15 @@ class TestExtractFromSkillIdWithInterceptor:
     @pytest.mark.asyncio
     async def test_non_owner_without_collaborators_rejected(self):
         """非 owner 且无协作者时返回 403。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-        from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
+        from agentclaw.community.core.bot_collaborator.interceptor import (
+            CollaboratorPermissionInterceptor,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -298,10 +336,15 @@ class TestExtractFromSkillIdWithInterceptor:
     @pytest.mark.asyncio
     async def test_skill_not_found_skips_permission_check(self):
         """skill 未找到时跳过权限检查（返回空 PermissionParams）。"""
-        from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-        from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor
+        from agentclaw.community.api.skill_service_factory import (
+            SkillServiceFactoryProtocol,
+        )
+        from agentclaw.community.core.bot_collaborator.interceptor import (
+            CollaboratorPermissionInterceptor,
+        )
 
         ctx = MagicMock()
+        ctx.request = None  # Library interceptor context, not an HTTP write request.
         ctx.injector = MagicMock()
 
         mock_factory = MagicMock(spec=SkillServiceFactoryProtocol)
@@ -337,19 +380,21 @@ class TestDeleteSkillRouteInterceptor:
         """验证 delete_skill 路由已添加拦截器装饰器。"""
         # 检查 delete_skill 是否被 with_interceptors 装饰
         # with_interceptors 会在 __wrapped__ 属性中保存原始函数
-        assert hasattr(delete_skill, '__wrapped__'), \
+        assert hasattr(delete_skill, "__wrapped__"), (
             "delete_skill 应该被 with_interceptors 装饰"
+        )
 
     def test_delete_skill_has_user_id_parameter(self):
         """验证 delete_skill 路由添加了 user_id 参数。"""
         import inspect
+
         # __wrapped__ 保存了被装饰的原始函数
-        wrapped_func = getattr(delete_skill, '__wrapped__', delete_skill)
+        wrapped_func = getattr(delete_skill, "__wrapped__", delete_skill)
         sig = inspect.signature(wrapped_func)
         params = sig.parameters
 
-        assert 'user_id' in params, "delete_skill 应该有 user_id 参数"
-        user_id_param = params['user_id']
+        assert "user_id" in params, "delete_skill 应该有 user_id 参数"
+        user_id_param = params["user_id"]
         # 检查参数类型注解包含 Optional 或 None
         param_str = str(user_id_param)
-        assert 'str' in param_str, f"user_id 参数应该是 str 类型，实际为: {param_str}"
+        assert "str" in param_str, f"user_id 参数应该是 str 类型，实际为: {param_str}"

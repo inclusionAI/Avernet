@@ -153,13 +153,20 @@ class _BotRepository:
         if (bot_id, owner_id) != ("bot-a", "owner-a"):
             return None
         return {
+            "id": 101,
+            "bot_id": "bot-a",
             "owner_id": "owner-a",
             "entity_id": "owner-a",
             "entity_type": "staff",
             "bot_type": "personal",
             "status": "ACTIVE",
             "active_engine": "openclaw",
+            "env": "pre",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        return [bot] if bot is not None else []
 
 
 class _Authorization:

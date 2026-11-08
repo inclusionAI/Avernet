@@ -563,6 +563,8 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                     "root_execution_instruction": instruction,
                 },
             )
+            if self._harness is not None:
+                self._harness.register(task_id)
             return result
         if task_type == TaskType.WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)

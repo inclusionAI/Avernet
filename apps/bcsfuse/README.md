@@ -162,7 +162,7 @@ export EMBEDDING_DIMENSION="1024"
 # Reranker Provider (optional)
 export RERANKER_BASE_URL="http://your-reranker-service:19998"
 export RERANKER_API_KEY="your-reranker-key-here"
-export RERANKER_MODEL="rerank-1"
+export RERANKER_MODEL="Qwen3-Reranker-4B"
 
 # LLM Provider (optional)
 export LLM_BASE_URL="http://your-llm-service:19998"
@@ -171,6 +171,33 @@ export LLM_ENABLED="true"
 export LLM_FAST_MODEL="claude-3-5-sonnet-20241022"
 export LLM_REASONING_MODEL="claude-3-5-sonnet-20241022"
 ```
+
+### Reranker Inputs
+
+When reranking is enabled, the built-in default model is `Qwen3-Reranker-4B`.
+An explicit request model takes precedence over `RERANKER_MODEL`, which takes
+precedence over the built-in default. BGE remains available through either
+override. Disabling reranking still bypasses the model.
+
+The reranker receives the Bot name and valid profile text. Default capabilities,
+skill sets, generated worker IDs, retrieval scores, and empty configuration
+placeholders are excluded. The selected model determines the HTTP input format:
+
+- `bge-reranker-v2-m3`: send the original query and documents without adding
+  `Passage:` prefixes, trailing newlines, or a chat template.
+- `Qwen3-Reranker-4B`: format the query with the system prefix and
+  `<Instruct>`, `<Query>`, and `<Document>` fields; append the assistant suffix
+  and empty think block to each document. Use the official default instruction,
+  `Given a web search query, retrieve relevant passages that answer the query`.
+
+Preserve document whitespace. This adapter targets a `/rerank` endpoint that
+accepts client-formatted Qwen inputs; an SDK that already adds the model template
+must not wrap those inputs again. Model scores are returned without local
+normalization. Thresholds need evaluation for each model and instruction;
+scores are not calibrated probabilities of a Bot solving a task.
+
+References: [BAAI BGE usage](https://huggingface.co/BAAI/bge-reranker-v2-m3#usage)
+and [Qwen usage](https://huggingface.co/Qwen/Qwen3-Reranker-4B#usage).
 
 ## Runtime Storage
 

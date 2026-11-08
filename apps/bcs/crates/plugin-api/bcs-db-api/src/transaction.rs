@@ -1,6 +1,41 @@
 //! SQL statements and transaction execution controls.
 
 use crate::{DbError, DbResult, DbRow, DbValue};
+use std::time::Duration;
+
+/// Execution options for [`crate::DbPlugin::transaction_with_options`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DbTransactionOptions {
+    /// Whole-transaction soft deadline (Task-0 方案 A).
+    /// When set, the executor checks elapsed time BETWEEN two
+    /// steps (and before commit); on overrun it returns
+    /// [`DbError::Timeout`] and rolls the transaction back.
+    /// A single statement that is still running is not
+    /// interruptible — statement sizes stay the caller's
+    /// responsibility.
+    pub deadline: Option<Duration>,
+}
+
+impl DbTransactionOptions {
+    /// Options with no deadline (behaves like
+    /// [`crate::DbPlugin::transaction`]).
+    pub fn unbounded() -> Self {
+        Self::default()
+    }
+
+    /// Options that stop the transaction once `deadline` of
+    /// elapsed between-step time is exceeded.
+    pub fn with_deadline(deadline: Duration) -> Self {
+        Self {
+            deadline: Some(deadline),
+        }
+    }
+
+    /// Whether a between-step deadline must be enforced.
+    pub fn deadline(&self) -> Option<Duration> {
+        self.deadline
+    }
+}
 
 /// A positional parameter used only inside [`crate::DbPlugin::transaction`].
 ///

@@ -90,15 +90,21 @@ class TestScaleDeployConfig:
         device_uuid = new_device.get("device_uuid")
         assert device_uuid is not None
 
-        detail_resp = await api.client.get(
-            api.device_url(device_uuid), params=api.params()
+        # `deploy_config` is no longer exposed by GET /api/v1/devices/{uuid}
+        # (masked by `to_public_device_response` for AC-1 / AC-2). Read it
+        # from the publish's own extra_config, which is the authoritative
+        # source for the scale request's deploy_config.
+        publish_resp = await api.client.get(
+            api.publish_url(publish_id), params=api.params()
         )
-        assert detail_resp.status_code == 200
-        detail = detail_resp.json()["data"]
-        device_deploy_config = detail.get("extra_config", {}).get("deploy_config") or {}
+        assert publish_resp.status_code == 200
+        publish = publish_resp.json()["data"]
+        publish_deploy_config = (
+            publish.get("extra_config", {}).get("deploy_config") or {}
+        )
 
-        assert device_deploy_config.get("docker_image") == "test-image:v2"
-        assert device_deploy_config.get("ttl_in_minutes") == 999
-        assert device_deploy_config.get("envs") == {"SCALE_KEY": "scale_value"}
+        assert publish_deploy_config.get("docker_image") == "test-image:v2"
+        assert publish_deploy_config.get("ttl_in_minutes") == 999
+        assert publish_deploy_config.get("envs") == {"SCALE_KEY": "scale_value"}
 
         await cleanup_bot(api, bot["bot_uuid"])

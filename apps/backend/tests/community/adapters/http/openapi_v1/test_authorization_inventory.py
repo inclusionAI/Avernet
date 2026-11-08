@@ -319,7 +319,7 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — twenty-seven of them, deferred for seven reasons recorded in
+#: lands — twenty-eight of them, deferred for seven reasons recorded in
 #: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
 #: engine-runtime and bot-chat traces added the rest, each for a reason the
 #: table could not have shown. That is what this set is for.
@@ -331,6 +331,12 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
+        # IAM friend preparation is not operator authorization: the adapter
+        # verifies friendship plus own session and the service confines writes
+        # to that subject's Caller instance. Operator MEMBER alone is not enough.
+        ("POST", "/openapi/v1/bots/{bot_id}/iam-token"),
+        # Advisory needs visibility + non-raising restart eligibility in core.
+        ("GET", "/openapi/v1/bots/{bot_id}/engine-version"),
         # Not a structural limit: these routes do carry {bot_id} on the path.
         # Each also carries an entity_id the gate would not adjudicate — from
         # the body for apply/diagnose/preview/rollback, from the query string
@@ -369,9 +375,12 @@ _DEFERRED_OPERATIONS = frozenset(
         # relocate it. The seam adjudicates one level; this is a disjunction,
         # and expressing it is not a question this feature settles.
         #
-        # The six *file* operations under the same prefix are not here: they
-        # call ``resolve_operable_bot`` directly, with no fallback, and did
-        # migrate.
+        # File reads now have the same disjunction: authorize_file_list
+        # checks MEMBER or BCN friendship plus Backend-owned session identity.
+        # Upload/delete operations keep Check(MEMBER).
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
         ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
@@ -516,6 +525,8 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
         ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
+        # Promotion reaches the running bot the way apply does, so it takes apply's bar.
+        ("POST", "/openapi/v1/bots/{bot_id}/genome/promotions"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
@@ -530,6 +541,8 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
         ("POST", "/openapi/v1/bots/{bot_id}/clis"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+        ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
@@ -1031,11 +1044,14 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "they no longer reach the check they are exempted on account of"
     )
     get_source = inspect.getsource(query_service.SkillQueryService.get_local_skill)
-    assert "_require_view_access" in get_source, (
-        "get_local_skill no longer calls _require_view_access, so _bot_behind "
+    assert "_resolve_local" in get_source, (
+        "get_local_skill no longer calls _resolve_local, so _bot_behind "
         "reaches no collaborator check and the four exempted legacy skills "
         "twins are unguarded — the ends of the chain being intact is not enough"
     )
+
+    resolve_source = inspect.getsource(query_service.SkillQueryService._resolve_local)
+    assert "_require_view_access" in resolve_source
 
     source = inspect.getsource(query_service.SkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
@@ -1087,6 +1103,8 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
         ),
     }
     for name, source in guarded.items():
+        assert "_require_view_access" in source, f"{name} must reach the shared ACL"
+        source = inspect.getsource(asset_service.SkillQueryService._require_view_access)
         assert "check_collaborator_permission" in source, (
             f"{name} no longer performs a collaborator check. The seven "
             "{skill_id} rows are fine — the seam adjudicates them — but the "

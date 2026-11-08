@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
     BUSINESS_TIMEOUT,
     KEY,
@@ -121,6 +123,12 @@ def setup(monkeypatch):
     # and shared-service isolation are exercised by test_restart_service.py.
     monkeypatch.setattr(AicodingBaasRestart, "preflight", lambda *args: None)
     monkeypatch.setattr(AicodingBaasRestart, "execute", lambda self, bot, execution:
+        self.service.restart_bot(bot_id=execution.state.bot_id,
+                                 user_id=execution.state.owner_id,
+                                 nick_name=execution.payload.get("nick_name")))
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca_lifecycle import AicodingArcaRestart
+
+    monkeypatch.setattr(AicodingArcaRestart, "execute", lambda self, bot, execution:
         self.service.restart_bot(bot_id=execution.state.bot_id,
                                  user_id=execution.state.owner_id,
                                  nick_name=execution.payload.get("nick_name")))
@@ -672,7 +680,7 @@ async def test_real_backup_failure_keeps_durable_restart_running_without_failed_
     def restart(**kwargs):
         verify = s.strategy.prepare_restart(
             s.ctx, binding_id=7, device_service=devices, bot_repository=s.repo,
-            target_runtime_provider=lambda: runtime,
+            restart_dependencies=RestartBackupDependencies(baas_runtime=lambda: runtime),
         )
         verify()
         assert not current_restart.get().fenced
@@ -714,7 +722,7 @@ async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup,
     devices.get_device.return_value = s.binding
     try:
         verify = s.strategy.prepare_restart(s.ctx, binding_id=7, device_service=devices,
-                                            bot_repository=s.repo, target_runtime_provider=lambda: runtime)
+                                            bot_repository=s.repo, restart_dependencies=RestartBackupDependencies(baas_runtime=lambda: runtime))
         verify()
         if failure == 'database':
             s.repo.failed_write = True
@@ -897,3 +905,32 @@ async def test_lost_enqueue_response_does_not_undo_completed_task_status(setup, 
     with pytest.raises(ConnectionError):
         await submit(s)
     assert s.repo.bot["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_arca_admission_pins_physical_sandbox_and_duplicate_keeps_operation(setup):
+    s = setup
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
+    await submit(s)
+    first = deepcopy(task(s).payload)
+    await submit(s)
+    assert task(s).payload == first
+    assert first["sandbox_id"] == "old-sandbox@8"
+    s.service.restart_bot.assert_not_called()
+
+    # Even with the same logical binding/device, a different physical sandbox
+    # must not receive the old operation's backup or stop/start.
+    s.binding["device_props"]["sandbox_id"] = "replacement@1"
+    assert isinstance(s.handler.handle(task(s).payload), Fail)
+    s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_arca_pre_rollout_task_without_sandbox_snapshot_can_recover(setup):
+    s = setup
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
+    await submit(s)
+    task(s).payload.pop("sandbox_id")
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()

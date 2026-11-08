@@ -4,11 +4,14 @@ import { FeedbackModal } from '@/components/Community/FeedbackModal';
 import { Button } from '@/components/ui/Button';
 import { history } from '@umijs/max';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowRight, MessagesSquare } from 'lucide-react';
+import { ArrowRight, MessagesSquare, Target } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
+import { TrackExpo } from '@/tracking/TrackExpo';
 
-/** 实验室功能卡内容（当前仅社区；任务等待后续实验性功能加入）。文案对齐原型 …/lab。 */
+/** 实验室功能卡内容（社区 + 任务）。文案对齐原型 TeamClaw-demo …/Lab(最新任务产品 PRD)。 */
 interface LabFeature {
   id: string;
   title: string;
@@ -29,6 +32,14 @@ const FEATURES: LabFeature[] = [
     href: '/lab/community',
     headerExtra: <BotBrowseConfigButton />,
   },
+  {
+    id: 'tasks',
+    title: '任务',
+    description: '查看跨Bot、跨群的协同任务，可在对话或协作群中发起此类任务。',
+    icon: Target,
+    // 任务类别入口:实验室二级页 /lab/tasks(协同任务列表,状态类别筛选 + V2 详情副屏)。
+    href: '/lab/tasks',
+  },
 ];
 
 function LabFeatureCard({
@@ -40,7 +51,10 @@ function LabFeatureCard({
 }) {
   const Icon = feature.icon;
   return (
-    <article className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md">
+    <article
+    aria-label={feature.title}
+    className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
+  >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden>
@@ -54,7 +68,11 @@ function LabFeatureCard({
       <div className="flex items-center justify-between">
         <Button
           className="h-9 px-4 text-xs"
-          onClick={() => history.push(feature.href)}
+          onClick={() => {
+            if (feature.id === 'tasks') Tracert.click(Points.lab.openTasks);
+            if (feature.id === 'community') Tracert.click(Points.lab.openCommunity);
+            history.push(feature.href);
+          }}
           rightIcon={<ArrowRight className="size-3.5" aria-hidden />}
         >
           开始体验
@@ -72,9 +90,10 @@ function LabFeatureCard({
 }
 
 /**
- * 实验室落地页：功能卡网格（当前承载社区；任务等待后续实验性功能加入）。
+ * 实验室落地页：功能卡网格（承载社区与任务）。
  * 一级导航「实验室」(/lab) 进入此落地页；点卡片的「开始体验」进入对应功能页。
  * 社区卡的「Bot 访问社区配置」齿轮置于进入社区前的此页右上角，避免进入社区后才可配置。
+ * 任务卡进入 /lab/tasks：跨Bot、跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
  */
 export default function LabLandingPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -90,6 +109,7 @@ export default function LabLandingPage() {
             aria-label="实验室功能"
             className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(auto-fill,minmax(420px,1fr))]"
           >
+            <TrackExpo point={Points.lab.cardsExpo} />
             {FEATURES.map((feature) => (
               <LabFeatureCard key={feature.id} feature={feature} setFeedbackOpen={setFeedbackOpen} />
             ))}

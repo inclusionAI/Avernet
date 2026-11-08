@@ -146,7 +146,7 @@ class NestedStory(Story):
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
         self.provider = self.post("/providers", {
-            "name": "Nested Loop E2E provider", "webhook_url": self.args.mock_url + "/provider/webhook",
+            "name": "Nested Loop E2E provider", "webhook_url": (self.args.mock_sink_url or self.args.mock_url) + "/provider/webhook",
             "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
             "coordination": {"mode": "native_tool"},
         })
@@ -156,6 +156,10 @@ class NestedStory(Story):
             "owners": [self.args.human], "provider_bot_ref": "nested-loop-e2e-" + uuid.uuid4().hex,
             "domains": ["release"], "skills": ["review"], "scopes": ["local"],
         }, headers={"Authorization": "Bearer " + self.provider["provider_admin_token"]})
+        # Provider-admin publication mints the declared owner's Human
+        # authority edge (trusted delegation), so the story's owner can
+        # publish visibility with the regular human headers — this keeps
+        # the admin-minted edge under live e2e coverage.
         self.request(f"/bots/{segment(self.bot['bot_uuid'])}/visibility", {"visibility": "public"}, method="PUT")
         self.args.driver = self.bot["bot_uuid"]
         self.token = self.bot["bot_runtime_token"]
@@ -327,6 +331,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     for name in ("base-url", "mock-url", "cli", "driver", "human"):
         parser.add_argument("--" + name, required=True)
+    # BCS-facing sink URL for the provider webhook registration. Falls back to
+    # --mock-url when the harness and BCS share one network viewpoint.
+    parser.add_argument("--mock-sink-url", required=False)
     story = NestedStory(parser.parse_args())
     try:
         story.setup()

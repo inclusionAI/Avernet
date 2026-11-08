@@ -1,0 +1,179 @@
+AgentSelfPath:
+  get:
+    operationId: get_agent_self
+    tags:
+    - Collaboration / Bots
+    summary: Verify AgentPass parent and list its undeleted Bots.
+    description: 'Parent-only discovery: zero or multiple Bots succeeds without Actor.
+      Bounded pagination lists undeleted Bots, including offline and disabled registrations.
+      Status is persisted Actor status, not connection liveness. No runtime Tokens
+      are exposed.'
+    x-avernet-security: {}
+    security:
+    - AgentIdentityBearer: []
+    parameters:
+    - name: provider_id
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    - name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    responses:
+      '200':
+        description: Trusted Agent identity and its current registration, which may
+          be absent.
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              - message
+              - data
+              - request_id
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message:
+                  type: string
+                request_id:
+                  type: string
+                data:
+                  type: object
+                  required:
+                  - agent_code
+                  - bots
+                  - next_cursor
+                  properties:
+                    agent_code:
+                      type: string
+                    bots:
+                      type: array
+                      maxItems: 100
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required:
+                        - bot_uuid
+                        - name
+                        - summary
+                        - provider_id
+                        - provider_bot_ref
+                        - auth_mode
+                        - status
+                        - provider_disabled
+                        - binding_disabled
+                        properties:
+                          bot_uuid:
+                            type: string
+                          name:
+                            type:
+                            - string
+                            - 'null'
+                          summary:
+                            type:
+                            - string
+                            - 'null'
+                          provider_id:
+                            type:
+                            - string
+                            - 'null'
+                          provider_bot_ref:
+                            type:
+                            - string
+                            - 'null'
+                          auth_mode:
+                            type:
+                            - string
+                            - 'null'
+                          status:
+                            type: string
+                            enum:
+                            - online
+                            - hidden
+                          provider_disabled:
+                            type: boolean
+                          binding_disabled:
+                            type: boolean
+                    next_cursor:
+                      type:
+                      - string
+                      - 'null'
+      '401':
+        description: Missing, malformed, invalid, or expired Agent identity Bearer
+          token.
+        x-error-codes:
+        - unauthenticated
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: The authenticated identity is not the required Agent identity.
+        x-error-codes:
+        - forbidden
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '409':
+        description: The trusted agent_code matches multiple active Bot registrations.
+        x-error-codes:
+        - agent_registration_conflict
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Registration storage is unavailable or persisted data cannot
+          be decoded.
+        x-error-codes:
+        - internal_error
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '502':
+        description: Agent identity verification is unavailable or the identity resolver
+          failed.
+        x-error-codes:
+        - agent_identity_unavailable
+        headers:
+          Cache-Control:
+            $ref: ./bot-self.yaml#/NoStoreHeader
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope

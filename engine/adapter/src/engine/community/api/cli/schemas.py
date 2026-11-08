@@ -9,7 +9,7 @@ the platform's next apply.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InstallRequest(BaseModel):
@@ -49,25 +49,22 @@ class ReplaceRequest(BaseModel):
     tools: list[ReplaceToolItem] = Field(default_factory=list)
 
 
-class AcliInstallRequest(BaseModel):
-    """``POST /api/cli/acli/install`` — install one tool from the acli market.
+class AcliOperationRequest(BaseModel):
+    """``POST /api/cli/acli/{install,uninstall}`` and their ``/cancel``.
 
     The caller names only the tool. Where it is installed is the engine's
-    choice (``ACLI_INSTALL_DIR``), shared by every engine.
+    choice (``ACLI_INSTALL_DIR``), shared by every engine. ``async`` returns
+    at once; omitted, the call waits for the operation, up to 30 s.
     """
 
-    name: str
-
-
-class AcliUninstallRequest(BaseModel):
-    """``POST /api/cli/acli/uninstall`` — remove a tool acli installed."""
+    model_config = ConfigDict(populate_by_name=True)
 
     name: str
+    run_async: bool = Field(default=False, alias="async")
 
 
 __all__ = [
-    "AcliInstallRequest",
-    "AcliUninstallRequest",
+    "AcliOperationRequest",
     "DeleteRequest",
     "InstallRequest",
     "ReplaceRequest",

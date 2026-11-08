@@ -85,15 +85,28 @@ impl RegistrationClient {
         Ok(())
     }
 
-    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str) -> anyhow::Result<BotRegistration> {
+    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str, slug: Option<&str>) -> anyhow::Result<BotRegistration> {
         let mut url = self.endpoint(if self.legacy_registration { "register" } else { "openapi/v1/collaboration/register" })?;
+        let provider_bot_ref = composed_ref(agent_code, slug)?;
         let mut pairs = vec![
-            ("token", token), ("bot-name", name), ("provider_bot_ref", agent_code), ("mode", mode),
+            ("token", token), ("bot-name", name), ("provider_bot_ref", provider_bot_ref.as_str()), ("mode", mode),
         ];
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
         url.query_pairs_mut().extend_pairs(pairs);
         let response = self.client.post(url).headers(self.headers.clone()).send().await
-            .map_err(|_| anyhow::anyhow!("Registration request failed; its outcome may be unknown. Check registration status before retrying"))?;
+            .map_err(|_| anyhow::anyhow!("Registration outcome is unknown; a Bot may already exist. Check agents/me before creating another Bot"))?;
+        if response.status() == reqwest::StatusCode::CONFLICT && slug.is_some() {
+            let bytes = read_body(response, "Registration").await?;
+            let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+            let confirmed = if self.legacy_registration {
+                error.get("error").and_then(serde_json::Value::as_str) == Some("registration_conflict")
+            } else {
+                error.get("code").and_then(serde_json::Value::as_u64) == Some(40900)
+                    && error.pointer("/data/error_code").and_then(serde_json::Value::as_str) == Some("registration_conflict")
+            };
+            if confirmed { return Err(RegistrationConflict.into()); }
+            bail!("Registration API returned HTTP 409");
+        }
         let bytes = body(response, "Registration").await?;
         #[derive(Deserialize)]
         struct Envelope { code: u32, data: Option<serde_json::Value> }
@@ -111,15 +124,47 @@ impl RegistrationClient {
         if [&registration.bot_uuid, &registration.bot_token, &registration.registration.provider_id]
             .iter().any(|value| value.trim().is_empty())
             || registration.registration.provider_id != provider_id
-            || registration.registration.provider_bot_ref != agent_code || registration.registration.mode != mode {
+            || registration.registration.provider_bot_ref != provider_bot_ref
+            || registration.registration.mode != mode
+            || slug.is_some_and(|s| !registration.bot_uuid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                || registration.registration.auth_mode.as_deref() != Some("agentpass-subbots")
+                || registration.registration.agent_code.as_deref() != Some(agent_code)
+                || registration.registration.bot_slug.as_deref() != Some(s)) {
             bail!("Registration succeeded but returned invalid credentials or a mismatched binding");
         }
         Ok(registration)
     }
 }
 
-async fn body(mut response: Response, operation: &str) -> anyhow::Result<Vec<u8>> {
+/// Compose the stable Provider reference used for this registration request.
+pub(super) fn composed_ref(parent: &str, slug: Option<&str>) -> anyhow::Result<String> {
+    if !super::valid_provider_bot_ref(parent) { bail!("Invalid Provider identity"); }
+    let reference = if let Some(slug) = slug {
+        if slug.is_empty() || slug.len() > 32 || !slug.as_bytes()[0].is_ascii_alphanumeric()
+            || slug.bytes().any(|b| !(b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')) {
+            bail!("Invalid generated Bot suffix");
+        }
+        format!("{parent}:{slug}")
+    } else { parent.to_owned() };
+    if reference.len() > 128 { bail!("Composed provider_bot_ref exceeds 128 bytes"); }
+    Ok(reference)
+}
+
+#[derive(Debug)]
+pub(super) struct RegistrationConflict;
+impl std::fmt::Display for RegistrationConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Registration API returned HTTP 409 (registration_conflict)")
+    }
+}
+impl std::error::Error for RegistrationConflict {}
+
+async fn body(response: Response, operation: &str) -> anyhow::Result<Vec<u8>> {
     if !response.status().is_success() { bail!("{operation} API returned HTTP {}", response.status().as_u16()); }
+    read_body(response, operation).await
+}
+
+async fn read_body(mut response: Response, operation: &str) -> anyhow::Result<Vec<u8>> {
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| anyhow::anyhow!("Cannot read {operation} response"))? {
         if body.len() + chunk.len() > 1024 * 1024 { bail!("{operation} response exceeds 1 MiB"); }
@@ -140,6 +185,12 @@ pub struct RegistrationScope {
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: String,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub agent_code: Option<String>,
+    #[serde(default)]
+    pub bot_slug: Option<String>,
 }
 
 #[cfg(test)]
@@ -201,7 +252,7 @@ mod tests {
         }.with_headers(headers);
         let client = if legacy { client.with_legacy_registration() } else { client };
         client.get("api/v1/collaboration/bots/me", "Identity", "Request failed").await.unwrap();
-        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test").await.unwrap();
+        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test", None).await.unwrap();
         server.join().unwrap();
         }
     }

@@ -220,6 +220,13 @@ describe('botSessionFileService.uploadOne', () => {
 });
 
 describe('botSessionFileService 列表/删除/下载', () => {
+  it('好友文件列表传递规范化的 f_user_id，保留 Bot owner_id', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_149608', '146836', 'human_149608');
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', {
+      user_id: '149608', owner_id: '146836', f_user_id: '149608',
+    });
+  });
   it('loadReady 映射 view', async () => {
     mocked.listReady.mockResolvedValue({
       files: [
@@ -247,5 +254,22 @@ describe('botSessionFileService 列表/删除/下载', () => {
     mocked.deleteFile.mockResolvedValue({ deleted: true });
     const res = await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', 'user-1');
     expect(res.ok).toBe(true);
+  });
+});
+
+describe('会话文件 online stage 贯穿读写与内容地址', () => {
+  it('文件列表、删除和内容读取使用显式 stage，保留好友列表身份', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    mocked.deleteFile.mockResolvedValue({ deleted: true });
+    mocked.getContentBlob.mockResolvedValue(new Blob(['text']));
+    const params = { user_id: 'viewer', owner_id: 'entity', stage: 'online' };
+    await botSessionFileService.loadReady('bot', 's1', 'human_viewer', 'entity', 'human_viewer', 'online');
+    expect(mocked.listReady).toHaveBeenLastCalledWith('bot', 's1', { ...params, f_user_id: 'viewer' });
+    await botSessionFileService.remove('bot', 's1', 'r1', 'human_viewer', 'entity', 'online');
+    expect(mocked.deleteFile).toHaveBeenLastCalledWith('bot', 's1', 'r1', params);
+    await botSessionFileService.fetchBlob('bot', 's1', 'r1', 'human_viewer', 'entity', 'inline', 'online');
+    expect(mocked.getContentBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', params, 'inline');
+    botSessionFileService.resolveContentUrl('bot', 's1', 'r1', 'human_viewer', 'entity', 'attachment', 'online');
+    expect(mocked.buildBotSessionFileContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', params, 'attachment');
   });
 });

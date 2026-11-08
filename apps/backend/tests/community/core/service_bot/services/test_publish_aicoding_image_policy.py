@@ -83,9 +83,13 @@ def test_bot_identity_uses_persisted_context_without_uuid_resolution():
     service = BotService.__new__(BotService)
     service._repository = MagicMock()
     service._repository.get_by_id_and_owner.return_value = {
+        "id": 1, "bot_id": "source", "entity_id": "owner", "owner_id": "owner", "env": "pre",
         "active_engine": "claude_code", "bot_type": "service",
         "template_type": "applicationCoding",
     }
+    service._repository.list_matches_by_legacy_locator.return_value = [
+        service._repository.get_by_id_and_owner.return_value,
+    ]
     service._template_service = MagicMock()
     config = {"template_uid": "aicoding_bot_template", "image": "untouched:image"}
     service._template_service.get_template_config_strict.return_value = config

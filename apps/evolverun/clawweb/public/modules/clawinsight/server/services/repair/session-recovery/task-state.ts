@@ -1,8 +1,8 @@
-import { validateActionScope, assertActionScope } from "./action-scope.js";
+import { validateRecoveryAction } from "./action-scope.js";
 import { createHash } from "node:crypto";
-import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
+import { containsSecret, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
-import type { RecoveryJudgment, RecoveryPlan, RecoveryTaskResult, RecoveryTaskState } from "./task-contracts.js";
+import type { RecoveryJudgment, RecoveryPlan, RecoveryStoredTask, RecoveryTaskResult, RecoveryTaskState } from "./task-contracts.js";
 
 function conflict(message: string): never {
   throw new SessionRecoveryError(409, "recovery_state_conflict", message);
@@ -15,12 +15,18 @@ function next(state: RecoveryTaskState, changes: Partial<RecoveryTaskState>): Re
   return { ...state, ...changes, version: state.version + 1 };
 }
 
+/** Evidence references are opaque IDs, not abbreviations or model-generated aliases. */
+export function validateRecoveryEvidenceReferences(state: RecoveryTaskState, ids: string[]): void {
+  const saved = new Set(state.evidence.map(item => item.evidence_id));
+  const missing = ids.filter(id => !saved.has(id));
+  if (missing.length) invalid(`证据 ID 未留存：${redactPersistableText(JSON.stringify(missing.slice(0, 5)), 1000)}。请原样使用工具返回的完整 evidenceId，不要省略或改写 UUID；只纠正引用，保留已核实的业务判断。`);
+}
+
 /** Observation timeout preserves the business phase; it never authorizes an environment repair. */
 export function observeRecovery(state: RecoveryTaskState, judgment: RecoveryJudgment, now: number): RecoveryTaskState {
   active(state);
   if (!["observe", "verify"].includes(state.phase)) conflict("当前阶段不能提交效果判断");
-  const evidenceIds = new Set(state.evidence.map(item => item.evidence_id));
-  if (judgment.evidence_ids.some(id => !evidenceIds.has(id))) invalid("效果判断引用了未留存证据");
+  validateRecoveryEvidenceReferences(state, judgment.evidence_ids);
   if (judgment.effect !== "unknown" && !judgment.evidence_ids.length) invalid("确定效果结论必须有证据");
   if (state.level === "debug") conflict("Debug 应回报未实际干预，不能回报真实效果");
   if (judgment.effect === "not_intervened") conflict("实际干预任务不能以 Debug 结论收口");
@@ -48,8 +54,7 @@ export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan,
       || action.engineOperation !== undefined && (!action.engineOperation || typeof action.engineOperation.path !== "string" || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(action.engineOperation.method))
       || action.operation !== undefined && (!action.operation || typeof action.operation.type !== "string")
       || [action.command, action.engineOperation, action.operation].filter(value => value !== undefined).length > 1) invalid("方案操作格式无效");
-    if (action.operationScope) validateActionScope(action.operationScope);
-    if (action.engineOperation) assertActionScope(action, action.engineOperation);
+    validateRecoveryAction(action);
   }
   if (!plan.summary.trim() || !plan.basis.trim() || !plan.scope.trim() || !plan.verification.trim()) invalid("方案必须说明依据、范围与验证方法");
   if (containsSecret(JSON.stringify(plan))) invalid("方案不得包含凭据");
@@ -60,12 +65,13 @@ export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan,
   return next(state, {
     plan: { ...plan, digest, approvedAt: requiresOwner || state.level === "debug" ? null : now },
     status: requiresOwner ? "waiting_owner" : state.level === "debug" ? "completed" : "running",
-    phase: "apply", ownerDeadlineAt: null,
+    phase: state.simulation ? "plan" : "apply", ownerDeadlineAt: null,
     ...(state.level === "debug" ? { judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: "未实际干预", evidence_ids: [] } as RecoveryJudgment } : {}),
   });
 }
 
 export function decideRecoveryPlan(state: RecoveryTaskState, digest: string, approved: boolean, now: number): RecoveryTaskState {
+  if (state.simulation) conflict("仿真方案不可批准执行");
   if (state.status !== "waiting_owner" || !state.plan || state.plan.digest !== digest) conflict("决策不对应当前待确认方案");
   return next(state, approved
     ? { status: "running", ownerDeadlineAt: null, plan: { ...state.plan, approvedAt: now } }
@@ -75,19 +81,28 @@ export function decideRecoveryPlan(state: RecoveryTaskState, digest: string, app
 }
 
 export function resumeRecoveryObservation(state: RecoveryTaskState): RecoveryTaskState {
+  if (state.simulation) conflict("仿真不可等待或恢复在线效果观察");
   if (state.status !== "waiting_effect") conflict("只有等待效果的任务可以由上游继续");
   // Do not reset the deadline here: first consume new evidence and preserve the paused phase.
-  return next(state, { status: "running", requiresFreshObservation: true });
+  return next(state, { status: "running", requiresFreshObservation: true, final_summary: undefined });
 }
 
-export function recoveryTaskResult(state: RecoveryTaskState): RecoveryTaskResult {
-  if (state.status !== "waiting_effect" && state.status !== "completed" && state.status !== "failed") {
+export function terminateRecoveryTask(state: RecoveryTaskState): RecoveryTaskState {
+  if (!["running", "waiting_owner", "waiting_effect"].includes(state.status)) conflict("当前状态不允许停止任务");
+  return next(state, { status: "canceled", observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
+    ...(state.executionRetry ? { executionRetry: { ...state.executionRetry, retryAt: 0 } } : {}) });
+}
+
+export function recoveryTaskResult(state: RecoveryTaskState & Pick<RecoveryStoredTask, "interventionStatus">, terminationReason?: string): RecoveryTaskResult {
+  if (state.status !== "waiting_effect" && state.status !== "completed" && state.status !== "failed" && state.status !== "canceled") {
     conflict("只有效果等待超时或任务结束才回传上游");
   }
   return { event_id: state.request.event_id, task_id: state.taskId, result_version: state.version,
     status: state.status, phase: state.phase,
     waiting_reason: state.status === "waiting_effect" ? "effect" : null,
-    effect: state.judgment?.effect ?? "unknown", result_text: state.judgment?.summary ?? "",
+    ...(state.completionReason ? { completion_reason: state.completionReason } : {}),
+    effect: state.judgment?.effect ?? "unknown", intervention_status: state.level === "debug" ? "none" : state.interventionStatus ?? "unknown",
+    result_text: state.status === "canceled" ? terminationReason ?? "用户停止本次自愈任务" : state.judgment?.summary ?? "",
     evidence_ids: state.judgment?.evidence_ids ?? [], evidence: state.evidence.filter(item => state.judgment?.evidence_ids.includes(item.evidence_id)),
     ...(state.delivery ? { delivery: state.delivery.delivery } : {}) };
 }

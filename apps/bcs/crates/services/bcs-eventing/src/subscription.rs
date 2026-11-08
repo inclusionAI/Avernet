@@ -16,7 +16,6 @@ use bcs_service_api::application::v1::{
     ListEventDeliveries, ListEventSubscriptions, PatchEventSinkInput, PatchEventSubscription,
     PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, Principal, ReplayEventDelivery,
     ReplayEventDeliveryResult, SkipEventDelivery, SkipEventDeliveryResult, TestEventSubscription,
-    select_principal,
 };
 use bcs_service_api::port::repo::{
     AppendEventRecord, CancelPendingEventSubscriptions, CreateEventReplayTarget,
@@ -49,6 +48,70 @@ use crate::authorization::{
 use crate::matcher::{validate_event_filter, validate_subscription_scope};
 
 const MAX_NAME_CHARACTERS: usize = 128;
+
+/// Inert hook used ONLY where the resolver never consults
+/// the authority (pure-Human / pure-Bot identities). The
+/// hybrid leg goes through the wired hook or fails closed.
+struct UnwiredBotAuthorityFallback;
+
+#[async_trait]
+impl bcs_service_api::port::bot_authority::BotAuthorityPort for UnwiredBotAuthorityFallback {
+    async fn role(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<
+        Option<bcs_service_api::types::bot_authority::BotAccessRelation>,
+    > {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
+
+    async fn roles_for(
+        &self,
+        _queries: &[bcs_service_api::types::bot_authority::BotRoleQuery],
+    ) -> bcs_service_api::ServiceResult<
+        Vec<Option<bcs_service_api::types::bot_authority::BotAccessRelation>>,
+    > {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
+
+    async fn can_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
+
+    async fn require_owner(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
+
+    async fn require_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
+}
+
+static UNWIRED_BOT_AUTHORITY_FALLBACK: UnwiredBotAuthorityFallback =
+    UnwiredBotAuthorityFallback;
 const MAX_WEBHOOK_URL_BYTES: usize = 2_048;
 const MIN_REQUEST_TIMEOUT_MS: u64 = 1_000;
 const MILLIS_PER_DAY: u64 = 86_400_000;
@@ -96,6 +159,11 @@ pub struct EventSubscriptionApplicationService {
     policy: EventSubscriptionPolicy,
     env: String,
     group_provisioning: Option<GroupProvisioningRuntime>,
+    /// Narrow bot-authority hook for the inline
+    /// provisioner's identity resolution (bot-authority
+    /// plan Task 6.5); the Hybrid credential leg fails
+    /// closed without it.
+    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     new_id: Arc<dyn Fn(&str) -> String + Send + Sync>,
 }
@@ -124,6 +192,7 @@ impl EventSubscriptionApplicationService {
             policy,
             env: env.into(),
             group_provisioning: None,
+            bot_authority: None,
             now_ms: Arc::new(system_now_ms_for_workers),
             new_id: Arc::new(|prefix| format!("{prefix}_{}", Uuid::new_v4())),
         }
@@ -138,6 +207,17 @@ impl EventSubscriptionApplicationService {
             groups,
             event_retention_days,
         });
+        self
+    }
+
+    /// Wire the narrow bot-authority hook (Task 6.5);
+    /// the inline provisioner consults it for mixed
+    /// User+Bot credentials (spec §8).
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    ) -> Self {
+        self.bot_authority = hook;
         self
     }
 
@@ -844,7 +924,27 @@ impl GroupEventSubscriptionProvisioner for EventSubscriptionApplicationService {
         requests: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<PreparedGroupEventSubscriptions, ApplicationError> {
         self.ensure_enabled()?;
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let requested_bot_id = caller
+            .bot
+            .as_ref()
+            .map(|bot| bot.bot_uuid.clone())
+            .unwrap_or_default();
+        // The resolver consults the hook ONLY for the hybrid
+        // User+Bot leg; pure Human / pure Bot legs keep their
+        // claim selection, so an unwired hook stays inert for
+        // them and fails closed for the hybrid leg.
+        let hook = self
+            .bot_authority
+            .as_deref()
+            .unwrap_or(&UNWIRED_BOT_AUTHORITY_FALLBACK);
+        let principal = bcs_service_api::application::v1::resolve_authorized_principal(
+            caller,
+            IdentityPolicy::HumanOrAuthorizedBot {
+                bot_id: requested_bot_id,
+            },
+            hook,
+        )
+        .await?;
         let actor = match principal {
             Principal::Human(human) => EventActor {
                 actor_type: EventActorType::Human,

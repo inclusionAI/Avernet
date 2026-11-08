@@ -122,6 +122,7 @@ def _forbidden_query(**extra) -> dict:
 #: What each relayed engine route answers, keyed by the path the handler
 #: forwards to. Written in the engine's own shapes — see the module docstring.
 _ENGINE_PAYLOADS: dict[str, object] = {
+    "/api/engine/default-model": {"model_id": "provider/model"},
     "/api/approvals/mode/get": {"sessionKey": _SESSION_KEY, "mode": "on-miss"},
     # ``ok: True``: the write reports application separately from the call, and
     # ``_reject_refused_set`` raises on ``ok is False``.
@@ -266,6 +267,14 @@ _HAPPY_CASES = (
     ),
     (
         "GET",
+        f"{_BOTS}/engine/default-model",
+        CaseInput(
+            path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS
+        ),
+        200,
+    ),
+    (
+        "GET",
         f"{_BOTS}/engine/default-config",
         CaseInput(
             path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS
@@ -331,6 +340,7 @@ _HAPPY_CASES = (
 #: ``fallback`` → ``unavailable`` rename, the unwrapped ``{"models": …}`` page —
 #: so a route that 200s with an empty body cannot pass for covered.
 _HAPPY_BODIES: dict[tuple[str, str], dict] = {
+    ("GET", f"{_BOTS}/engine/default-model"): {"data": {"model_id": "provider/model"}},
     ("GET", f"{_BOTS}/approvals/mode"): {
         "data": {"session_key": _SESSION_KEY, "mode": "on-miss"}
     },

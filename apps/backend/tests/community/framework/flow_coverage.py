@@ -221,6 +221,19 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "exercises the feedback submission end-to-end."
     ),
     "approval": _EXEMPT_REASON,
+    "apply_engine": (
+        "The engine the Manifest's and the genome's compilers feed: the "
+        "materialisers, the orchestrator, the delivery strategies and the "
+        "apply run (lock, task, report), extracted from bot_config_manifest "
+        "(#3083). Every singlebox-visible flow it has runs through the "
+        "manifest and apply routes, which are blocked on the same missing "
+        "gateway-signed principal as bot_config_manifest below; covered "
+        "meanwhile by tests/community/core/apply_engine/ (the engine over "
+        "fakes that count every write, the run service over a real database, "
+        "the delivery strategies and their port forwarding) and by the apply "
+        "routes in tests/community/endpoints/test_openapi_config_manifest_apply.py. "
+        "Drain this with bot_config_manifest."
+    ),
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
     "bot_config_manifest": (
@@ -235,11 +248,11 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "own, covered by the security matrix in "
         "tests/community/core/bot_config_manifest/fetch/ and the store "
         "contract tests in "
-        "tests/community/core/bot_config_manifest/content/ (plus its "
+        "tests/community/core/content_store/ (plus its "
         "repository over a real database in "
-        "tests/community/repository/bot/test_manifest_content_repository.py), "
+        "tests/community/repository/bot/test_content_store_repository.py), "
         "by the materialiser suites in "
-        "tests/community/core/bot_config_manifest/apply/ (the two fetching "
+        "tests/community/core/apply_engine/ (the two fetching "
         "categories over fakes that count every write, and the entry-fetch "
         "pipeline's pinned/unpinned/keep_last policy), "
         "and by W1's own cover meanwhile: "
@@ -251,6 +264,40 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "manifest routes through the assembled app) plus the apply routes in "
         "tests/community/endpoints/test_openapi_config_manifest_apply.py. "
         "Drain this when singlebox fronts the backend with a gateway."
+    ),
+    "content_store": (
+        "The content-addressed store behind the Manifest's fetch pipeline and "
+        "the Genome Registry (moved out of bot_config_manifest in #3064): "
+        "storage behaviour with no singlebox-visible flow of its own, reached "
+        "only through the two consumers above, whose exemptions name why "
+        "neither can run in singlebox yet. Covered by the store contract tests "
+        "in tests/community/core/content_store/ (the receipt-before-write, "
+        "verified-read, sanitised-URL and produced-row rules, and the "
+        "acm-tree-v1 framing), by its repository over a real database in "
+        "tests/community/repository/bot/test_content_store_repository.py "
+        "(append-only, tenant guard, DDL/ORM agreement), and by its wiring in "
+        "tests/community/di/test_content_store_module_wiring.py. Drain with "
+        "bot_config_manifest or bot_genome, whichever gains a flow first."
+    ),
+    "bot_genome": (
+        "Blocked on the same missing minter as _GATEWAY_PRINCIPAL_EXEMPT_REASON "
+        "above — every route in the group is /openapi/v1/bots/{bot_id}/genome "
+        "and needs a gateway-signed principal, which singlebox has no way to "
+        "produce; and the one flow worth driving (capture a bot, patch it, diff, "
+        "move draft, promote) needs a persona file on the bot's device first, "
+        "which a FlowStep cannot seed. Covered meanwhile by "
+        "tests/community/e2e/test_genome_flows.py, which runs exactly that story "
+        "through the assembled app with a forged principal and a local device "
+        "binding up to the delivery seam (promotion refused as not_appliable "
+        "until RSI-04), by tests/community/core/bot_genome/ (canonical JSON, "
+        "patches, policy and risk, the apply-time predicates, capture, compile, "
+        "the registry and promotion services over fakes and the real "
+        "repositories), tests/community/repository/bot/test_genome_repository.py "
+        "(the five tables over a real database, CAS included), "
+        "tests/community/di/test_bot_genome_module_wiring.py and "
+        "tests/community/adapters/http/openapi_v1/test_genome_routes.py (bars, "
+        "admission, envelopes). Drain this when singlebox fronts the backend "
+        "with a gateway and RSI-04 gives promotion something to deliver to."
     ),
     "bot_startup_script": (
         "The script's effect is only observable inside a provisioned container: "
@@ -267,6 +314,14 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "with one). Drain this when singlebox can provision a container."
     ),
     "channel": _EXEMPT_REASON,
+    "agentswarm": (
+        "Emergent agent-swarm module. A real singlebox flow needs a working LLM "
+        "provider and the swarm worker running end to end; reachable routes are "
+        "covered meanwhile by tests/community/core/agentswarm/service/test_service.py "
+        "and tests/community/adapters/http/agentswarm/test_http_adapter.py (submit/list/cancel plus the router DTO and "
+        "error mapping through the assembled FastAPI app). Drain this when "
+        "singlebox binds an LLM config and drives a full run through the router."
+    ),
     "caller_identity": (
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "
         "covered by local API/core tests until a singlebox-compatible external seam exists."

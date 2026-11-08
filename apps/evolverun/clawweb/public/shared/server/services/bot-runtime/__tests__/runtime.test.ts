@@ -60,3 +60,17 @@ it.each(["darwin", "linux"])("BaaS HTTP preserves local proxy identity only on %
   expect(forwarded.Authorization).toBeUndefined();
   expect(forwarded["x-proxypass-token"]).toBe("test-token");
 });
+
+it("pins HTTP to the diagnosed device without an Owner affinity fallback", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 0,
+    data: { http_url: "https://proxy.example.test/proxypass/exact/api/engine/status", token: "test-token" } })))
+    .mockResolvedValueOnce(new Response("{}"));
+  vi.stubGlobal("fetch", fetchMock);
+  const provider = new BaasRuntimeProvider({ commandTenant: "test", environments: { pre: { baseUrl: "https://baas.example.test", apiKey: "test-key" } } } as any);
+  await provider.request({ target: { ...target, provider: "baas", deviceUuid: "DEVICE-" + "a".repeat(32) }, method: "GET", path: "/api/engine/status" });
+  const url = new URL(fetchMock.mock.calls[0][0]);
+  expect(url.searchParams.get("device_uuid")).toBe("DEVICE-" + "a".repeat(32));
+  expect(url.searchParams.has("device_affinity")).toBe(false);
+  await expect(provider.executeShell({ target: { ...target, provider: "baas", deviceUuid: "DEVICE-" + "a".repeat(32) }, command: "true" })).rejects.toMatchObject({ code: "missing_instance_target" });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});

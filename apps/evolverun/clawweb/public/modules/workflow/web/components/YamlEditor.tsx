@@ -1,288 +1,231 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { stringify as stringifyYaml, parse as parseYaml } from 'yaml'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { stringify } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
-import type { WorkflowSpec, WorkflowValidationResult, WorkflowValidationIssue } from '@avernet/clawweb-shared/web/types'
+import type { WorkflowSpec, WorkflowValidationIssue } from '@avernet/clawweb-shared/web/types'
+import { useEditorStore } from '../editor/store'
+import { clearDraft, readDraft, writeDraft } from '../editor/draftCache'
+import { normalizationChanges, parseWorkflowYaml } from '../editor/yamlDraft'
 
 interface YamlEditorProps {
   spec: WorkflowSpec | null
   onImport: (spec: WorkflowSpec) => void
 }
-
-interface ApplyFeedback {
-  type: 'success' | 'error'
-  summary: string
-  issues?: WorkflowValidationIssue[]
-  normalizedSummary?: string
+interface NormalizationReview {
+  spec: WorkflowSpec
+  paths: string[]
+  revision: number
 }
 
+const serialize = (spec: WorkflowSpec | null) => spec ? stringify(spec, { lineWidth: 0 }) : ''
+
 export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
-  const [yamlText, setYamlText] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [isDirty, setIsDirty] = useState(false)
-  const [isValidating, setIsValidating] = useState(false)
-  const [applyFeedback, setApplyFeedback] = useState<ApplyFeedback | null>(null)
-  const syncingFromSpec = useRef(false)
-  const successTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const { setPendingEdit, sessionId } = useEditorStore()
+  const [restored] = useState(() => {
+    const draft = readDraft(sessionId, 'yaml')
+    let error: string | null = null
+    if (draft) {
+      try { parseWorkflowYaml(draft.text) }
+      catch (reason) { error = reason instanceof Error ? reason.message : 'YAML 语法错误' }
+    }
+    return { draft, error }
+  })
+  const [text, setText] = useState(() => restored.draft?.text ?? serialize(spec))
+  const [dirty, setDirty] = useState(!!restored.draft)
+  const [error, setError] = useState<string | null>(restored.error)
+  const [conflict, setConflict] = useState(() => !!restored.draft && restored.draft.baseline !== serialize(spec))
+  const [localInvalid, setLocalInvalid] = useState(!!restored.error)
+  const [validating, setValidating] = useState(false)
+  const [issues, setIssues] = useState<WorkflowValidationIssue[]>([])
+  const [notice, setNotice] = useState<string | null>(null)
+  const [review, setReview] = useState<NormalizationReview | null>(null)
+  const dirtyRef = useRef(!!restored.draft)
+  const revision = useRef(0)
+  const mounted = useRef(true)
+  const owner = useRef(restored.draft ? restored.draft.owner : spec?.id ?? null)
+  const baseline = useRef(restored.draft?.baseline ?? serialize(spec))
+  const session = useRef(sessionId)
+  const previousSpec = useRef(spec)
+  const currentSpec = useRef(spec)
+  currentSpec.current = spec
 
-  // Sync from spec to YAML text (when spec changes from visual editor)
   useEffect(() => {
-    if (syncingFromSpec.current) {
-      syncingFromSpec.current = false
-      return
-    }
-    if (spec) {
-      const yaml = stringifyYaml(spec, { lineWidth: 0 })
-      setYamlText(yaml)
-      setIsDirty(false)
-    }
-  }, [spec])
-
-  // Clear feedback when user edits
-  useEffect(() => {
-    if (isDirty) {
-      setApplyFeedback(null)
-      if (successTimerRef.current) {
-        clearTimeout(successTimerRef.current)
-        successTimerRef.current = null
-      }
-    }
-  }, [isDirty])
-
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value
-      setYamlText(value)
-      setIsDirty(true)
-      setError(null)
-
-      // Try parsing on every change to show live validation
-      try {
-        const parsed = parseYaml(value) as WorkflowSpec
-        if (!parsed.id || !parsed.version || !parsed.title || !Array.isArray(parsed.nodes)) {
-          setError('无效：必须包含 id、version、title 和 nodes 数组')
-          return
-        }
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'YAML 语法错误')
-      }
-    },
-    [],
-  )
-
-  const handleApply = useCallback(async () => {
-    // Step 1: Local YAML parse check
-    let parsed: WorkflowSpec
-    try {
-      parsed = parseYaml(yamlText) as WorkflowSpec
-      if (!parsed.id || !parsed.version || !parsed.title || !Array.isArray(parsed.nodes)) {
-        setError('无效：必须包含 id、version、title 和 nodes 数组')
-        setApplyFeedback({
-          type: 'error',
-          summary: '基础结构校验失败',
-          issues: [
-            { path: '', message: 'YAML 必须包含 id、version、title 和 nodes 数组', severity: 'error' },
-          ],
-        })
-        return
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'YAML 解析错误'
-      setError(msg)
-      setApplyFeedback({
-        type: 'error',
-        summary: 'YAML 语法解析失败',
-        issues: [{ path: '', message: msg, severity: 'error' }],
-      })
-      return
-    }
-
-    // Step 2: Call backend validate API for detailed validation
-    setIsValidating(true)
-    setApplyFeedback(null)
-    try {
-      const result: WorkflowValidationResult = await api.workflows.validate(parsed)
-
-      if (result.valid) {
-        // Success — import the normalized spec
-        syncingFromSpec.current = true
-        const specToImport = result.normalizedSpec ?? parsed
-        onImport(specToImport)
-        setIsDirty(false)
-        setError(null)
-
-        // Build success summary
-        const ns = specToImport
-        const nodeCount = ns.nodes?.length ?? 0
-        const nodeIds = ns.nodes?.map((n) => n.id).join(', ') ?? ''
-        const summary = nodeCount > 0
-          ? `${nodeCount} 个节点${nodeCount <= 8 ? `：${nodeIds}` : ''}`
-          : '0 个节点'
-
-        setApplyFeedback({
-          type: 'success',
-          summary: `✓ 校验通过 — ${summary}`,
-          normalizedSummary: `id: ${ns.id} | version: ${ns.version} | title: ${ns.title}`,
-        })
-
-        // Auto-dismiss success after 4 seconds
-        if (successTimerRef.current) clearTimeout(successTimerRef.current)
-        successTimerRef.current = setTimeout(() => {
-          setApplyFeedback(null)
-          successTimerRef.current = null
-        }, 4000)
-      } else {
-        // Validation failed — show detailed issues
-        const issues = result.issues ?? []
-        setApplyFeedback({
-          type: 'error',
-          summary: `校验失败 — 发现 ${issues.length} 个问题`,
-          issues,
-          normalizedSummary: result.normalizedSpec
-            ? `部分解析结果: id=${result.normalizedSpec.id}, title=${result.normalizedSpec.title}`
-            : undefined,
-        })
-      }
-    } catch (err) {
-      // API error fallback
-      const msg = err instanceof Error ? err.message : '校验请求失败'
-      setApplyFeedback({
-        type: 'error',
-        summary: '校验请求失败',
-        issues: [{ path: '', message: msg, severity: 'error' }],
-      })
-    } finally {
-      setIsValidating(false)
-    }
-  }, [yamlText, onImport])
-
-  const handleReset = useCallback(() => {
-    if (spec) {
-      const yaml = stringifyYaml(spec, { lineWidth: 0 })
-      setYamlText(yaml)
-      setIsDirty(false)
-      setError(null)
-      setApplyFeedback(null)
-      if (successTimerRef.current) {
-        clearTimeout(successTimerRef.current)
-        successTimerRef.current = null
-      }
-    }
-  }, [spec])
-
-  const handleDismissFeedback = useCallback(() => {
-    setApplyFeedback(null)
-    if (successTimerRef.current) {
-      clearTimeout(successTimerRef.current)
-      successTimerRef.current = null
-    }
+    mounted.current = true
+    return () => { mounted.current = false; revision.current++ }
   }, [])
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-gray-600">YAML</span>
-          {isDirty && <span className="text-xs text-amber-500">已修改</span>}
-          {error && <span className="max-w-xs truncate text-xs text-red-500">{error}</span>}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {isDirty && (
-            <button
-              onClick={handleReset}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
-            >
-              Reset
-            </button>
-          )}
-          <button
-            onClick={() => void handleApply()}
-            disabled={!!error || !isDirty || isValidating}
-            className="rounded bg-blue-600 px-2.5 py-0.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
-          >
-            {isValidating ? '校验中…' : 'Apply'}
-          </button>
-        </div>
+  useEffect(() => {
+    const sessionChanged = session.current !== sessionId
+    if (!sessionChanged && previousSpec.current === spec) return
+    session.current = sessionId
+    previousSpec.current = spec
+    if (sessionChanged) {
+      // A confirmed discard/new load starts a different editor lifetime, even
+      // when a cached workflow has the same ID. View changes do not reach here.
+      revision.current++
+      dirtyRef.current = false
+      setDirty(false)
+      setLocalInvalid(false)
+      setValidating(false)
+      setIssues([])
+      setNotice(null)
+    } else if (dirtyRef.current) {
+      setConflict(true)
+      revision.current++
+      setValidating(false)
+      setReview(null)
+      return
+    }
+    owner.current = spec?.id ?? null
+    baseline.current = serialize(spec)
+    setText(baseline.current)
+    setError(null)
+    setConflict(false)
+    setReview(null)
+  }, [spec, sessionId])
+
+  const changeText = useCallback((value: string) => {
+    if (session.current !== useEditorStore.getState().sessionId) return
+    revision.current++
+    dirtyRef.current = true
+    writeDraft(session.current, 'yaml', { text: value, baseline: baseline.current, owner: owner.current })
+    setText(value)
+    setDirty(true)
+    setNotice(null)
+    setIssues([])
+    setReview(null)
+    setValidating(false)
+    setPendingEdit('yaml', 'YAML 有未应用的修改，请先校验并应用或放弃草稿')
+    try { parseWorkflowYaml(value); setError(null); setLocalInvalid(false) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'YAML 语法错误'); setLocalInvalid(true) }
+  }, [setPendingEdit])
+
+  const applySpec = useCallback((value: WorkflowSpec) => {
+    if (session.current !== useEditorStore.getState().sessionId) return
+    const otherDrafts = Object.keys(useEditorStore.getState().pendingEdits ?? {}).filter(key => key !== 'yaml')
+    if (otherDrafts.length) { setError('请先应用或放弃其他配置草稿，再应用 YAML'); return }
+    setPendingEdit('yaml', null)
+    try {
+      onImport(value)
+    } catch (reason) {
+      setPendingEdit('yaml', 'YAML 尚未应用，请修正错误后重试或放弃草稿')
+      setError(reason instanceof Error ? reason.message : 'YAML 应用失败')
+      return
+    }
+    clearDraft(session.current, 'yaml')
+    dirtyRef.current = false
+    setDirty(false)
+    setLocalInvalid(false)
+    setConflict(false)
+    setReview(null)
+    setIssues([])
+    setError(null)
+    owner.current = value.id
+    baseline.current = serialize(value)
+    setText(baseline.current)
+    setNotice(`已应用 ${value.nodes.length} 个节点的配置。尚未保存到服务器。`)
+  }, [onImport, setPendingEdit])
+
+  const apply = useCallback(async () => {
+    if (!dirtyRef.current || validating || session.current !== useEditorStore.getState().sessionId) return
+    if (owner.current !== currentSpec.current?.id) {
+      setError('工作流已切换，请先放弃旧工作流的 YAML 草稿，避免覆盖其他工作流')
+      return
+    }
+    let parsed: WorkflowSpec
+    try { parsed = parseWorkflowYaml(text) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'YAML 语法错误'); return }
+    const requestRevision = revision.current
+    const requestOwner = currentSpec.current?.id
+    const requestSession = session.current
+    // Read the live store, not only a render/effect ref: reset + same-ID reload
+    // can happen in one batch before React observes the new props/session.
+    const isCurrentRequest = () => mounted.current && requestRevision === revision.current
+      && requestSession === useEditorStore.getState().sessionId && currentSpec.current?.id === requestOwner
+    setValidating(true)
+    setIssues([])
+    setNotice(null)
+    setReview(null)
+    try {
+      const result = await api.workflows.validate(parsed)
+      if (!isCurrentRequest()) return
+      if (!result.valid) {
+        setIssues(result.issues ?? [])
+        setError('服务端校验未通过，请修正后重试')
+        return
+      }
+      const normalized = result.normalizedSpec
+      const paths = normalized ? normalizationChanges(parsed, normalized) : []
+      if (normalized && paths.length) {
+        setReview({ spec: normalized, paths, revision: requestRevision })
+      } else {
+        applySpec(parsed)
+      }
+    } catch (reason) {
+      if (isCurrentRequest()) {
+        setError(reason instanceof Error ? reason.message : '校验请求失败')
+      }
+    } finally {
+      if (isCurrentRequest()) setValidating(false)
+    }
+  }, [text, validating, applySpec])
+
+  const discard = () => {
+    if (session.current !== useEditorStore.getState().sessionId) return
+    revision.current++
+    clearDraft(session.current, 'yaml')
+    dirtyRef.current = false
+    setDirty(false)
+    setLocalInvalid(false)
+    setValidating(false)
+    setConflict(false)
+    setError(null)
+    setIssues([])
+    setNotice(null)
+    setReview(null)
+    owner.current = spec?.id ?? null
+    baseline.current = serialize(spec)
+    setText(baseline.current)
+    setPendingEdit('yaml', null)
+  }
+
+  return <section className="flex h-full min-h-0 flex-col bg-background" aria-label="YAML 编辑器">
+    <header className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
+      <div className="text-xs text-muted-foreground">YAML 配置 {dirty && <span className="ml-2 text-warning">未应用草稿</span>}</div>
+      <div className="flex gap-2">
+        {dirty && <button type="button" onClick={discard} className="rounded-md border border-input px-2 py-1 text-xs text-muted-foreground">放弃 YAML 草稿</button>}
+        <button type="button" onClick={() => void apply()} disabled={!spec || !dirty || localInvalid || validating}
+          className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-40">
+          {validating ? '校验中…' : '校验并应用'}
+        </button>
       </div>
-
-      {/* Validation feedback banner */}
-      {applyFeedback && (
-        <div
-          className={`border-b px-3 py-2 text-xs ${
-            applyFeedback.type === 'success'
-              ? 'border-green-200 bg-green-50 text-green-800'
-              : 'border-red-200 bg-red-50 text-red-800'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium">{applyFeedback.summary}</p>
-              {applyFeedback.normalizedSummary && (
-                <p className="mt-0.5 text-[11px] opacity-70">{applyFeedback.normalizedSummary}</p>
-              )}
-              {applyFeedback.issues && applyFeedback.issues.length > 0 && (
-                <ul className="mt-1.5 space-y-1">
-                  {applyFeedback.issues.map((issue, i) => (
-                    <li key={i} className="flex items-start gap-1.5">
-                      <span className="mt-0.5 shrink-0 text-[10px]">
-                        {issue.severity === 'warning' ? '⚠' : '✗'}
-                      </span>
-                      <span className="min-w-0">
-                        {issue.path ? (
-                          <>
-                            <span className="font-mono font-medium">{issue.path}</span>
-                            <span className="mx-1">→</span>
-                            <span>{issue.message}</span>
-                          </>
-                        ) : (
-                          <span>{issue.message}</span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {applyFeedback.type === 'error' && (
-              <button
-                onClick={handleDismissFeedback}
-                className="shrink-0 rounded p-0.5 text-xs opacity-50 hover:opacity-100"
-                title="关闭"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      <textarea
-        value={yamlText}
-        onChange={handleChange}
-        onKeyDown={(e) => {
-          // Ctrl/Cmd+Enter to apply
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-            e.preventDefault()
-            void handleApply()
-          }
-          // Tab inserts 2 spaces
-          if (e.key === 'Tab') {
-            e.preventDefault()
-            const start = e.currentTarget.selectionStart
-            const end = e.currentTarget.selectionEnd
-            const newText = yamlText.substring(0, start) + '  ' + yamlText.substring(end)
-            setYamlText(newText)
-            setIsDirty(true)
-            // Restore cursor position after state update
-            requestAnimationFrame(() => {
-              e.currentTarget.selectionStart = start + 2
-              e.currentTarget.selectionEnd = start + 2
-            })
-          }
-        }}
-        spellCheck={false}
-        className="flex-1 resize-none bg-gray-900 p-3 font-mono text-xs leading-relaxed text-green-100 focus:outline-none"
-      />
-    </div>
-  )
+    </header>
+    {conflict && <p className="border-b border-border bg-warning/10 px-4 py-2 text-xs text-warning-foreground">画布配置已变化，当前 YAML 草稿已保留。请核对后应用，或放弃草稿以同步画布。</p>}
+    {error && <div role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-xs text-destructive">
+      <p>{error}</p>
+      {issues.length > 0 && <ul className="mt-1 list-inside list-disc">{issues.map((issue, index) => <li key={`${issue.path}-${index}`}>{issue.path ? `${issue.path}：` : ''}{issue.message}</li>)}</ul>}
+    </div>}
+    {notice && <p role="status" className="border-b border-border bg-success/10 px-4 py-2 text-xs text-success">{notice}</p>}
+    {review && <div className="max-h-52 overflow-auto border-b border-border bg-warning/10 px-4 py-3 text-xs">
+      <p className="font-medium">服务端规范化将改变 {review.paths.length} 项字段，尚未应用。</p>
+      <p className="mt-1 text-muted-foreground">包含字段增删或类型变化。保留原文并返回编辑，或明确采用这些变更。</p>
+      <ul className="my-2 list-inside list-disc font-mono">{review.paths.map(path => <li key={path}>{path}</li>)}</ul>
+      <button type="button" onClick={() => {
+        if (revision.current === review.revision) applySpec(review.spec)
+      }} className="rounded-md border border-input bg-card px-2 py-1">确认采用规范化结果</button>
+    </div>}
+    <textarea aria-label="工作流 YAML" value={text} onChange={event => changeText(event.target.value)} spellCheck={false}
+      disabled={!spec}
+      onKeyDown={event => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void apply() }
+        if (event.key === 'Tab') {
+          event.preventDefault()
+          const input = event.currentTarget
+          const start = input.selectionStart
+          changeText(text.slice(0, start) + '  ' + text.slice(input.selectionEnd))
+          requestAnimationFrame(() => { if (input.isConnected) input.setSelectionRange(start + 2, start + 2) })
+        }
+      }}
+      className="min-h-0 flex-1 resize-none bg-muted/30 p-4 font-mono text-xs leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" />
+    <footer className="border-t border-border px-4 py-2 text-[10px] text-muted-foreground">先应用到编辑器，再保存到服务器。数据库 JSON 无法恢复原始 YAML 注释和排版。</footer>
+  </section>
 }

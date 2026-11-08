@@ -1,6 +1,11 @@
 import { recoveryTaskContextMigration } from "./schema-session-recovery.js";
 import type { IDatabase } from './db.js';
 import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
+import {
+  reconcilePreBaselineSkillHistory,
+  reconcileProviderNeutralSkillIdentifierColumns,
+  reconcileRunArchiveCreatedAt,
+} from './migrations/evolve-schema-reconciliation.js';
 /**
  * Schema DDL for ClawWeb.
  *
@@ -24,6 +29,7 @@ import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
  */
 
 import { repairBatchMigrations } from "./schema-repair-batch.js";
+import { repairDeployTagMigrations } from "./schema-repair-deploy-tag.js";
 import { repairReleaseMigrations } from "./schema-repair-release.js";
 
 export type DbType = "sqlite" | "mysql" | "zdas";
@@ -101,7 +107,22 @@ export const sqliteTriggers: string[] = [
  * OceanBase/MySQL cannot index TEXT columns. SQLite treats VARCHAR
  * identically to TEXT so this is fully compatible.
  */
-export const migrations: ReadonlyArray<{ version: number; description: string; sql: string[]; sqliteOnly?: boolean; mysqlOnly?: boolean; migrate?: (db: IDatabase) => Promise<void> }> = [
+export const migrations: ReadonlyArray<{
+  version: number;
+  description: string;
+  sql: string[];
+  sqliteOnly?: boolean;
+  mysqlOnly?: boolean;
+  /**
+   * Run even when `schema_version` reports the migration as already applied,
+   * and even when the progress table is unavailable (managed MySQL denies DDL,
+   * so the table stays empty and every version looks "already applied").
+   * The migration must therefore be idempotent. Reserved for repairing a
+   * physical schema that drifted from the declared one.
+   */
+  selfHealing?: boolean;
+  migrate?: (db: IDatabase) => Promise<void>;
+}> = [
   {
     version: 1,
     description: "ClawFlow: flow_events, flow_metrics, triggered_alerts",
@@ -2538,7 +2559,7 @@ END`,
 
       `CREATE TABLE IF NOT EXISTS suggestion_outcomes (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-  lesson_id INTEGER NOT NULL COMMENT '关联的lessons.id',
+  lesson_id BIGINT NOT NULL COMMENT '关联的lessons.id',
   workflow_id VARCHAR(255) NOT NULL COMMENT '工作流ID',
   node_id VARCHAR(255) NOT NULL DEFAULT '' COMMENT '节点ID',
   failure_signature VARCHAR(256) NOT NULL COMMENT '失败签名',
@@ -2553,8 +2574,7 @@ END`,
   UNIQUE INDEX uk_outcome_lesson_wf_node_lesson (lesson_id, workflow_id, node_id),
   INDEX idx_outcome_lesson (lesson_id),
   INDEX idx_outcome_sig (failure_signature),
-  INDEX idx_outcome_verdict (verdict, gmt_create),
-  CONSTRAINT fk_outcome_lesson FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+  INDEX idx_outcome_verdict (verdict, gmt_create)
 ) COMMENT='强化信号表: 跨快慢两环的成绩单'`,
 
       `CREATE TABLE IF NOT EXISTS failure_signatures (
@@ -2912,6 +2932,7 @@ END`,
   {
     version: 121,
     description: "ClawWeb: run_archive_records table for persisted run archives with AI analysis",
+    migrate: reconcileRunArchiveCreatedAt,
     sql: [
       `CREATE TABLE IF NOT EXISTS run_archive_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2923,7 +2944,7 @@ END`,
   archive_version VARCHAR(32) NOT NULL DEFAULT '3.1.0',
   status VARCHAR(32) NOT NULL DEFAULT 'completed',
   run_status VARCHAR(32) NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
   run_process_json MEDIUMTEXT,
   workflow_spec_json MEDIUMTEXT,
   workflow_deploy_history_json MEDIUMTEXT,
@@ -3112,6 +3133,7 @@ END`,
   {
     version: 128,
     description: "Normalize Skill history into one business event per task",
+    migrate: reconcilePreBaselineSkillHistory,
     sql: [
       `CREATE TABLE IF NOT EXISTS ce_skill_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3225,6 +3247,7 @@ END`,
   {
     version: 131,
     description: "Reconcile run archives for pre-rebase Evolve feature databases",
+    migrate: reconcileRunArchiveCreatedAt,
     sql: [
       `CREATE TABLE IF NOT EXISTS run_archive_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3236,7 +3259,7 @@ END`,
   archive_version VARCHAR(32) NOT NULL DEFAULT '3.1.0',
   status VARCHAR(32) NOT NULL DEFAULT 'completed',
   run_status VARCHAR(32) NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
   run_process_json MEDIUMTEXT,
   workflow_spec_json MEDIUMTEXT,
   workflow_deploy_history_json MEDIUMTEXT,
@@ -3262,11 +3285,8 @@ END`,
   {
     version: 132,
     description: "Use provider-neutral Skill identifiers without changing stored values",
-    sql: [
-      `ALTER TABLE ce_skill_assets RENAME COLUMN ocb_skill_id TO external_skill_id`,
-      `ALTER TABLE ce_skill_audit_events RENAME COLUMN ocb_skill_id TO external_skill_id`,
-      `ALTER TABLE ce_skill_events RENAME COLUMN ocb_skill_id TO external_skill_id`,
-    ],
+    migrate: reconcileProviderNeutralSkillIdentifierColumns,
+    sql: [],
   },
   {
     version: 133,
@@ -3316,4 +3336,5 @@ END`,
     description: "Bind Bench Domains to host spaces while preserving personal history",
     sql: [`ALTER TABLE cm_bench_domains ADD COLUMN space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID；NULL保留原Owner个人归属'`],
   },
+  ...repairDeployTagMigrations,
 ];

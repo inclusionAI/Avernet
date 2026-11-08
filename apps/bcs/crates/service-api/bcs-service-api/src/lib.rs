@@ -12,6 +12,7 @@ pub mod application;
 pub mod bot_runtime_use_cases;
 pub mod bot_use_cases;
 pub mod core;
+pub use bcs_domain::provider::ProviderCollaborationScope;
 pub mod friends;
 pub mod group_use_cases;
 pub mod human_actors;
@@ -73,8 +74,7 @@ pub use application::invite::{
     InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult,
 };
 pub use application::session::{
-    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
-    CompleteSessionCallbackCommand, CreateOrReactivateCommand, CreateOrReactivateOutcome,
+    CreateOrReactivateCommand, CreateOrReactivateOutcome,
     SessionManagementService, SessionUseCaseError,
 };
 pub use application::session_launch::{
@@ -148,15 +148,12 @@ pub use group_use_cases::{
     GroupHistoryResult, GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantModeResult,
     InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState, MessageHistoryOptions,
-    GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
-    GroupPatchSettingsResult, GroupProposalConfirmCommand, GroupProposalConfirmResult,
-    GroupProposalCreateCommand, GroupProposalCreateResult, GroupProposalPreviewCommand,
-    GroupProposalPreviewResult, GroupProposalService, GroupQueryService, GroupRemoveMemberCommand,
+    GroupParticipantView,
+    GroupQueryService, GroupRemoveMemberCommand,
     GroupRemoveMemberResult, GroupRoutingPolicyCommand, GroupRoutingPolicyResult,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, GroupWorkspaceResult, ProposalContext,
-    ServiceSpecPatchConflictField, SessionHistoryCommand, SessionHistoryResult,
+    GroupUpdateVisibilityCommand, GroupUseCaseError,
+    SessionHistoryCommand, SessionHistoryResult,
 };
 pub use human_actors::{
     CurrentHumanActorCommand, EnsureCurrentHumanActorError, EnsureCurrentHumanActorResult,
@@ -226,6 +223,7 @@ pub use port::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort, NoopFriendAuthSyncPort,
     FriendRepoPort, FriendRequestRepoPort, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupDispatchContextPort,
+    OutputAdmissionPort, OutputOperationAdmission,
     GroupHistoryBotRequestPort, GroupMetricCount, GroupMetricsSnapshotPort, GroupRepoPort,
     GroupRuntimeBindingRepoPort, GroupSessionMetricCount, GroupSessionMetricsSnapshotPort,
     HumanInputReadyEvent, ImParticipantRepoPort, InteractionFrontendPort, JudgeArtifact,
@@ -240,7 +238,7 @@ pub use port::{
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
     UpsertOrganizationMemberRecord,
     RelationRepoPort, RunFallbackDelivery,
-    SessionCallbackDispatchPort, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
@@ -261,7 +259,8 @@ pub use types::{
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
     BotTaskModesQuery, TaskModeMatch,
-    BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
+    ControllableCandidateQuery, ControlledBotCandidate,
+    BotDeliveryTarget, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
     ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
     ProviderRecord, RedactedToken,
@@ -278,10 +277,10 @@ pub use types::{
 };
 
 pub use core::{
-    ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
+    ActorKind, ActorStatus, AgentCredentials, BindingChannel, BindingChannels,
     BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
-    BotConnectResult, BotControlPlaneCandidate,
+    BotConnectResult, BotControlPlaneCandidate, RuntimeActivitySnapshot,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
     BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,
@@ -289,11 +288,13 @@ pub use core::{
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
     DeliveryType, DmActorSpec, DynamicStatusResponse, EnsureHumanResult, EnsureOwnerEdgesResult,
     EdgePermissionFriendSyncService, FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
-    FriendRequestStatus, Friendship, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
+    FriendRequestStatus, Friendship, FusionCoreService, Group, GroupCoreService, GroupKind,
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy,
     HumanMentionNotifyMode, MessageRole,
-    Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
-    ProviderBasicInfo, ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
+    Participant, ParticipantKind, ParticipantMode, ParticipantRole,
+    ProviderBasicInfo, ProviderBotCoreService, ProviderCoreService, ProviderRetire,
+    ProviderRetireBranch, ProviderRetirement, RegisterProviderBotParams, RegisteredBot,
+    RetireProviderBotParams,
     RegisteredProvider, UpdateProviderBotCoreResult, AuthorizedOrganizationPair,
     OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,
@@ -303,11 +304,11 @@ pub use core::{
     ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,
-    ServiceError, ServiceResult, ServiceSpec, Session, SessionKind, SessionStatus, Skill,
+    ServiceError, ServiceResult, Session, SessionKind, SessionStatus, Skill,
     StructuredRoutingError, MOCK_TOKEN_PREFIX, mock_token, is_mock_token,
     SystemGroupMessage, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
-    SystemMessageRecipientResult, Task, TaskStatus, Workspace, backfill_bot_names,
+    SystemMessageRecipientResult, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
 };
 

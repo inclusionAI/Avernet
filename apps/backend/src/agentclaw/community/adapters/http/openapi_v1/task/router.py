@@ -31,6 +31,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
+from agentclaw.community.adapters.http.task.schemas_artifact import (
+    group_artifacts_by_node,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -49,10 +52,16 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.api.task.task_context_service import (
     TaskContextServiceProtocol,
 )
@@ -121,8 +130,9 @@ async def get_task_dashboard(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+    """任务执行详情可视化(整图或按 node_id 子树投影)。
 
     include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
@@ -132,7 +142,16 @@ async def get_task_dashboard(
         graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
     else:
         graph = service.get_task_dashboard(task_id, node_id)
-    return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
+    # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
+    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    return envelope(
+        graph_to_dto(
+            graph,
+            include_action_log=include_action_log,
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
+        ),
+        request,
+    )
 
 
 @router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
@@ -159,6 +178,7 @@ async def get_task_trajectory(
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
     ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(与 adapters/http/task/router.py 内部副本同一
     TaskContextServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
@@ -182,7 +202,10 @@ async def get_task_trajectory(
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
-        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+        artifact_rows = artifact_repo.list_by_task(task_id)
+        return HTMLResponse(
+            render_trajectory_html(dto, do_analysis=do_analysis, artifact_rows=artifact_rows)
+        )
     return envelope(dto, request)
 
 

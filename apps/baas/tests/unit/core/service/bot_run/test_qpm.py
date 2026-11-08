@@ -7,6 +7,7 @@ import time
 import pytest
 
 from secbaas.community.core.service.bot_run._bot_concurrency import (
+    TECLAW_DEFAULT_CONCURRENCY,
     BotConcurrencyManager,
 )
 
@@ -53,6 +54,30 @@ def test_get_qpm_configured():
     mgr = BotConcurrencyManager(_FakeRepo({"bot-1": 120}))
     assert mgr.get_concurrency_num("bot-1") == 120
     assert mgr.get_concurrency_num("bot-2") is None
+
+
+def test_teclaw_exact_missing_skips_wildcard_and_uses_default():
+    mgr = BotConcurrencyManager(_FakeRepo({"*": 60}))
+    assert mgr.get_concurrency_num("bot-1", engine_type="teclaw") == (
+        TECLAW_DEFAULT_CONCURRENCY
+    )
+    assert TECLAW_DEFAULT_CONCURRENCY == 5000
+
+
+def test_teclaw_exact_row_still_wins():
+    mgr = BotConcurrencyManager(_FakeRepo({"bot-1": 120, "*": 60}))
+    assert mgr.get_concurrency_num("bot-1", engine_type="teclaw") == 120
+
+
+def test_teclaw_zero_exact_row_still_wins():
+    mgr = BotConcurrencyManager(_FakeRepo({"bot-1": 0, "*": 60}))
+    assert mgr.get_concurrency_num("bot-1", engine_type="teclaw") == 0
+
+
+def test_non_teclaw_and_unknown_keep_wildcard_fallback():
+    mgr = BotConcurrencyManager(_FakeRepo({"*": 60}))
+    assert mgr.get_concurrency_num("bot-1", engine_type="openclaw") == 60
+    assert mgr.get_concurrency_num("bot-1", engine_type=None) == 60
 
 
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")

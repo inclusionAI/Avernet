@@ -1,3 +1,4 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
@@ -72,7 +73,7 @@ export type FlowRunInsert = {
 
 export type FlowRunCompletion = {
   status: string;
-  /** Omitted by legacy clients, which are allowed only on the initial attempt. */
+  /** Optional compatibility field for already deployed epoch-aware clients. */
   retryEpoch?: number;
   resultJson?: string | null;
   inputJson?: string | null;
@@ -311,37 +312,42 @@ export class FlowRunRepository {
 
   async insert(run: FlowRunInsert): Promise<boolean> {
     try {
-      const now = this.db.dialect.now();
-      await this.db.exec(
-        `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          run.flowId,
-          run.workflowId,
-          run.workflowTitle ?? null,
-          run.status,
-          run.stateJson ?? null,
-          run.paramsJson ?? null,
-          run.inputJson ?? null,
-          run.nodeCount ?? 0,
-          run.triggeredBy ?? null,
-          run.identityKey ?? null,
-          run.currentPhase ?? null,
-          run.startedAt,
-          run.credentialsJson ?? null,
-          run.originSessionKey ?? null,
-          run.originSessionId ?? null,
-          run.originBotId ?? null,
-          run.userId ?? null,
-          run.pluginVersion ?? null,
-          run.engine ?? null,
-          run.workflowVersion ?? null,
-          run.workflowDeployNumber ?? null,
-          now,
-          now,
-        ],
-      );
-      return true;
+      // The run must not survive a failed snapshot read/write. Transaction-bound
+      // repositories reuse their caller's transaction for purpose registration.
+      return await this.db.transaction(async tx => {
+        const now = tx.dialect.now();
+        await tx.exec(
+          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            run.flowId,
+            run.workflowId,
+            run.workflowTitle ?? null,
+            run.status,
+            run.stateJson ?? null,
+            run.paramsJson ?? null,
+            run.inputJson ?? null,
+            run.nodeCount ?? 0,
+            run.triggeredBy ?? null,
+            run.identityKey ?? null,
+            run.currentPhase ?? null,
+            run.startedAt,
+            run.credentialsJson ?? null,
+            run.originSessionKey ?? null,
+            run.originSessionId ?? null,
+            run.originBotId ?? null,
+            run.userId ?? null,
+            run.pluginVersion ?? null,
+            run.engine ?? null,
+            run.workflowVersion ?? null,
+            run.workflowDeployNumber ?? null,
+            now,
+            now,
+          ],
+        );
+        await new WorkflowSnapshotRepository(tx).associateRun(run.flowId);
+        return true;
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.insert failed: ${msg}`);
@@ -405,15 +411,15 @@ export class FlowRunRepository {
       sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
       values.push(flowId);
     }
-    values.push(flowId, completion.retryEpoch ?? 0);
-    const result = await this.db.exec(
-      // Legacy TaskGuard can complete before its delayed running-status write.
-      // For a fenced retry, a failed row with completed_at set was claimed by
-      // the watchdog and must stay terminal. A normal fail() status write has
-      // no completed_at yet, so its completion may still provide final details.
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+    values.push(flowId);
+    // New and legacy clients use the original completion contract. Explicit
+    // epochs remain supported for already deployed clients during upgrade.
+    const epochGuard = completion.retryEpoch === undefined ? '' : ` AND COALESCE(retry_epoch, 0) = ?
        AND status NOT IN ('succeeded', 'cancelled', 'canceled')
-       AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`,
+       AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`;
+    if (completion.retryEpoch !== undefined) values.push(completion.retryEpoch);
+    const result = await this.db.exec(
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?${epochGuard}`,
       values,
     );
     return result.affectedRows > 0;
@@ -435,17 +441,39 @@ export class FlowRunRepository {
   }): Promise<boolean> {
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
-      [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId, fields.retryEpoch ?? 0],
+       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')${fields.retryEpoch === undefined ? '' : ' AND COALESCE(retry_epoch, 0) = ?'}`,
+      [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId,
+        ...(fields.retryEpoch === undefined ? [] : [fields.retryEpoch])],
     );
     return result.affectedRows > 0;
   }
 
-  async updateStatus(flowId: string, status: string, retryEpoch = 0): Promise<boolean> {
+  async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
     const now = this.db.dialect.now();
+    if (retryEpoch === undefined) {
+      if (status === 'running') {
+        try {
+          // Reopening through the original API retires the preceding explicit
+          // epoch. Do this in the same write, before assigning the new status.
+          const result = await this.db.exec(
+            `UPDATE flow_runs SET retry_epoch = CASE WHEN status <> 'running' AND retry_epoch > 0 THEN 0 ELSE retry_epoch END,
+             status = ?, gmt_modified = ?, completed_at = NULL WHERE flow_id = ?`,
+            [status, now, flowId],
+          );
+          return result.affectedRows > 0;
+        } catch (error) {
+          if (!/unknown column.*retry_epoch|no such column: retry_epoch\b/i.test(String(error))) throw error;
+          // Older schemas have no epoch to invalidate; keep their original API.
+        }
+      }
+      const result = await this.db.exec(
+        `UPDATE flow_runs SET status = ?, gmt_modified = ?${status === 'running' ? ', completed_at = NULL' : ''} WHERE flow_id = ?`,
+        [status, now, flowId],
+      );
+      return result.affectedRows > 0;
+    }
     const result = await this.db.exec(
-      // Legacy clients, including TaskGuard, resume failed runs through /status.
-      // New ClawMind retries use /retry-resume and keep their own timeout fence.
+      // Compatibility with already deployed clients that explicitly send an epoch.
       status === 'running'
         ? `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
            AND status IN ('failed', 'blocked', 'waiting', 'running')
@@ -553,12 +581,11 @@ export class FlowRunRepository {
   async resetFailedForRetry(
     flowId: string,
     resetFailedNodes: (tx: IDatabase) => Promise<number>,
-  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' } | { status: 'conflict' }> {
+  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' }> {
     return this.db.transaction(async tx => {
       await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?", [flowId]);
-      const rows = await tx.query<{ status: string; retry_epoch: number | null }>("SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?", [flowId]);
+      const rows = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
       if (!rows.length) return { status: 'not_found' };
-      if ((rows[0].retry_epoch ?? 0) !== 0) return { status: 'conflict' };
       const resetCount = await resetFailedNodes(tx);
       const now = this.db.dialect.now();
       const result = await tx.exec(
@@ -575,7 +602,7 @@ export class FlowRunRepository {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'running', retry_epoch = ?, completed_at = NULL, gmt_modified = ?
-       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status IN ('failed', 'blocked', 'waiting', 'running')`,
+       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?`,
       [retryEpoch, now, flowId, retryEpoch - 1],
     );
     if (result.affectedRows > 0) return 'resumed';

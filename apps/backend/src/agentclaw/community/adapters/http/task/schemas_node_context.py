@@ -39,6 +39,7 @@ class AcceptedPlanReportDTO(BaseModel):
 class NodeTaskContextDTO(BaseModel):
     task_id: str
     node_id: str
+    attempt: int
     root_task_spec: TaskSpecDTO
     current_task_spec: TaskSpecDTO
     actual_goal: GoalDTO | None = None
@@ -103,6 +104,7 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
     return NodeTaskContextDTO(
         task_id=context.task_id,
         node_id=context.node_id,
+        attempt=context.attempt,
         root_task_spec=_spec_to_dto(context.root_task_spec),
         current_task_spec=_spec_to_dto(context.current_task_spec),
         actual_goal=_goal_to_dto(context.actual_goal) if context.actual_goal else None,

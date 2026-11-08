@@ -313,10 +313,6 @@ fn group_use_case_error_to_legacy(error: GroupUseCaseError) -> LegacyGroupError 
         GroupUseCaseError::ActorNotFound(actor_id) => {
             LegacyGroupError::not_found(format!("Actor '{}' not found", actor_id))
         }
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => {
-            LegacyGroupError::not_found(format!("Proposal '{}' not found or expired", proposal_id))
-        }
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => {
             LegacyGroupError::bad_request(format!(
                 "mode '{:?}' is not valid for actor_kind '{:?}'",
@@ -335,7 +331,7 @@ pub(crate) async fn resolve_group_chat_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<GroupChatCaller, LegacyGroupError> {
-    if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await {
+    if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await.map_err(|error| LegacyGroupError::new(StatusCode::from(error), "Bot authentication failed"))? {
         return Ok(GroupChatCaller::Bot { bot_uuid });
     }
 

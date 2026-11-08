@@ -5,6 +5,14 @@ pub(super) async fn publish_incoming_event(
     cmd: &BotEventCommand,
     task_id: Option<&str>,
 ) -> ServiceResult<Vec<FrontendDeliveryResult>> {
+    // Run output is not an independent resource notification. A missing local
+    // producer binding (including cleaned canonical/alias identities) must not
+    // trigger fresh admission for subscribers that arrived after completion.
+    let binding = flow.message_tracker.output_binding(&cmd.run_id).await;
+    if flow.output_admission.is_some() && binding.is_none() {
+        return Ok(Vec::new());
+    }
+    let operation_id = binding.flatten();
     let frontend_event = workbench_event_name(&cmd.event_type, &cmd.state);
     let frame = serde_json::json!({
         "type": "event",
@@ -33,6 +41,12 @@ pub(super) async fn publish_incoming_event(
         )))?,
     };
     let (visibility_domain, audience) = incoming_event_visibility(flow, cmd, task_id).await;
+    // Trusted producer metadata (spec §8.2): the operation this run
+    // was admitted under. Admitted operations keep their frozen
+    // per-connection permits even through mid-run revocation, so the
+    // terminal frame below still drains to them. Runs outside an
+    // admitted operation (internal drains, relay/task continuations)
+    // carry no tag and authorize per event against current facts.
     let result = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
@@ -43,6 +57,12 @@ pub(super) async fn publish_incoming_event(
             exclude_conn_id: None,
             visibility_domain,
             audience,
+            operation_id,
+            terminal: is_terminal_state(&cmd.state),
+            // Trusted producer metadata (spec §8.2): the canonical
+            // run THIS frame belongs to — its terminal ends only
+            // this stream, never the whole operation's siblings.
+            run_id: Some(cmd.run_id.clone()),
         })
         .await?;
     Ok(vec![result])
@@ -191,6 +211,11 @@ pub(super) async fn publish_system_event(
             exclude_conn_id: None,
             visibility_domain,
             audience,
+            // Independent resource event: authorized per event against
+            // current facts, never borrowing an operation's permit.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
 }

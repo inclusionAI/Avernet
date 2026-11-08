@@ -1,0 +1,56 @@
+{
+  "genome_schema": 1,
+  "revision": {
+    "id": "sha256:9e6ca680a7ef52521cadf438c13141b972e3323f230f254dfe277a8a3af0be09",
+    "seq": 1,
+    "bot": {
+      "owner_id": "user_owner_5",
+      "bot_id": "bot_123"
+    },
+    "parent": null,
+    "created_by": {
+      "kind": "user",
+      "actor": "user_owner_5"
+    },
+    "created_at": "2026-10-18T09:00:00Z",
+    "status": "draft",
+    "patch_digest": null,
+    "evidence": [],
+    "evaluations": [],
+    "annotations": {}
+  },
+  "spec": {
+    "persona": [],
+    "skills": [
+      {
+        "name": "order-lookup",
+        "origin": "local",
+        "digest": "sha256:856a34188a0db0f72fceb2f23f7194778dfd9e986d24c63b408423f12cc94466"
+      },
+      {
+        "name": "quality-check",
+        "origin": "local",
+        "digest": "sha256:145f1c4eb7d746fd5d30cf2e57df40ed3fc4ebdc836456aacf62a6c020e29d65"
+      }
+    ],
+    "memory": null,
+    "resources": [],
+    "tools": {
+      "mcp": []
+    },
+    "engine_config": {},
+    "script": null
+  },
+  "policy": {
+    "mutable_genes": [
+      "memory",
+      "persona",
+      "resources",
+      "skills"
+    ],
+    "pins": [
+      "persona/SAFETY.md"
+    ],
+    "risk_overrides": {}
+  }
+}

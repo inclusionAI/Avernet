@@ -105,6 +105,13 @@ structured_output = "json_schema"
 [database]
 type = "mysql"
 
+[collaboration_drafts]
+# Disabled by default, including when this section or enabled is omitted.
+# Restart to apply. Disabled Draft endpoints report DRAFT_SERVICE_UNAVAILABLE.
+# Set enabled = true for SQLite or MySQL; no Draft signing keys are required.
+# Revision availability persists in the database across replicas and restarts.
+enabled = false
+
 # Select a linked secret backend in deployments that do not use environment
 # variables. Group-session WebSocket JWT signing material is resolved through
 # [group_session_ws].signing_key_secret. The default logical name remains

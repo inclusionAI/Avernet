@@ -5,6 +5,7 @@ POST/DELETE /api/skillsets/{id}/skills, GET /api/skillsets/with-mcps,
 POST/DELETE /api/skillsets/{id}/mcps 等接口响应字段。
 """
 from __future__ import annotations
+from tests.community.bot_address_fakes import support_legacy_locator
 
 from unittest.mock import MagicMock
 
@@ -82,6 +83,8 @@ def _bind_skillset_deps(app):
     # BotRepository 由 _get_path_params 调用，mock 以避免数据库访问。
     # 删 CLI 的分支还要用 bot 主键去查 MCP 调用身份，所以这里给出持久化行。
     mock_bot_repo = MagicMock(spec=BotRepository)
+    support_legacy_locator(mock_bot_repo)
+    mock_bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: mock_bot_repo.get_by_id_and_owner(bid, eid)
     mock_bot_repo.get_by_id_and_owner.return_value = {
         "id": 42, "bot_type": "personal",
     }

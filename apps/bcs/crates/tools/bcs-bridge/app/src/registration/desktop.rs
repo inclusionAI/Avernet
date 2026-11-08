@@ -1,13 +1,13 @@
 use std::{fs, path::{Path, PathBuf}};
 use anyhow::{Context, bail};
 
-use crate::config;
+use crate::multi_config::Document;
 
 fn options(path: &Path, engine: &str) -> anyhow::Result<Option<toml::Table>> {
-    let source = config::read_registration_source(path, true)?;
-    let Some(previous) = source.previous else { return Ok(None); };
-    let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) else { return Ok(None); };
-    if bots.len() != 1 || bots[0].get("engine").and_then(toml::Value::as_str) != Some(engine) { return Ok(None); }
+    let source = Document::load(path)?;
+    let bots: Vec<_> = source.groups.iter().filter_map(|group| group.get("bot").and_then(toml::Value::as_array))
+        .flatten().filter(|bot| bot.get("engine").and_then(toml::Value::as_str) == Some(engine)).collect();
+    if bots.len() != 1 { return Ok(None); }
     let mut options = bots[0].get("engine_options").and_then(toml::Value::as_table).cloned();
     if engine == "qwenwork" {
         if let Some(settings) = options.as_ref().and_then(|o| o.get("settings_path")).and_then(toml::Value::as_str) {

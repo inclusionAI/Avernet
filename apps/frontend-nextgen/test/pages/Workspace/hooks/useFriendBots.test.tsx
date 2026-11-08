@@ -60,6 +60,25 @@ it('marks a friend Bot as unavailable when metadata details are unresolved', asy
   });
 });
 
+it('passes through the friend Bot instance status for row-level unavailability (2026-10-21)', async () => {
+  mockedListFriends.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [{ id: 'failed-friend-bot:900003', name: '挂掉的好友 Bot', online: false, botStatus: 'FAILED' }],
+      total: 1,
+    },
+  });
+
+  const { result } = renderHook(() => useFriendBots('human_900003', true, true));
+  await act(async () => Promise.resolve());
+
+  expect(result.current.friendBots[0]).toMatchObject({
+    botId: 'failed-friend-bot:900003',
+    status: 'FAILED',
+    online: false,
+  });
+});
+
 it('queries Bot friends with the full Bot uuid as actor_id', async () => {
   const { result } = renderHook(() => useFriendBots('friend-owner-bot:900003', false, true));
 

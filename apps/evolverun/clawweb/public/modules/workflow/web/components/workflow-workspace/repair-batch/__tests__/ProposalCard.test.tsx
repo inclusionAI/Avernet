@@ -22,10 +22,11 @@ it('shows one plan/selection and keeps all original text and evidence folded',()
  expect(proposalChecked(card,['a'])).toBe(false);expect(proposalPending([selected[0]])).toBe(true);expect(proposalChecked(card,['a','b','c'])).toBe(true);
  expect(proposalConflicts(selected)).toEqual([]);expect(proposalPending(selected)).toBe(false);
 });
-it('distinguishes queued/failed aggregation from business conflicts',()=>{
+it('shows background aggregation status without blocking manual goal selection',()=>{
  const queued={...card,aggregation:{...card.aggregation!,status:'retryable' as const}};
  render(<IssueRepairPreview items={[queued]} total={1} selected={[]} canEdit limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
- expect(screen.getByText('整理待重试')).toBeVisible();expect(proposalConflicts(expandProposalCards([queued]))).toEqual([]);
+ expect(screen.getByText('聚合待重试')).toBeVisible();expect(proposalConflicts(expandProposalCards([queued]))).toEqual([]);
+ expect(screen.getByRole('checkbox')).toBeEnabled();
  expect(proposalPending(expandProposalCards([queued]))).toBe(true);
 });
 it('keeps the complete plan run count on a full member detail without using its smaller original count',()=>{

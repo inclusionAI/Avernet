@@ -94,6 +94,10 @@ class _Bots:
     def get_bot(self, bot_id, owner_id):
         return self.get_by_id_and_owner(bot_id, owner_id)
 
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [] if row is None else [{"id": 1, "bot_id": bot_id, "entity_id": locator, **row}]
+
 
 class _Collaborators:
     """Answers one level for the caller, or fails, as the test dictates."""

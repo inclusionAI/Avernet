@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, FlaskConical, MessagesSquare, Users } from 'lucide-react';
+import { Bot, Compass, FlaskConical, MessagesSquare, Users, Zap } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 产品侧栏只展示协作与 Bot 两个固定分组。 */
@@ -19,6 +19,8 @@ export interface NavigationItem {
   icon: LucideIcon;
   section: NavigationSection;
   description: string;
+  /** Optional overlay placement, after the baseline section ordering. */
+  placement?: 'last';
 }
 
 // Open Core 基线一级导航项。内部专属入口已剥离（capability 注入），
@@ -57,7 +59,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/collaboration-square',
     icon: Compass,
     section: 'collab',
-    description: '发现公开 Bot、协作群与任务',
+    description: '发现专家模板、公开 Bot 与协作群',
   },
   {
     id: 'lab',
@@ -65,7 +67,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/lab',
     icon: FlaskConical,
     section: 'collab',
-    description: '实验性能力空间，当前承载社区',
+    description: '实验性能力空间，承载社区与任务',
   },
   {
     id: 'bot-workshop',
@@ -74,6 +76,14 @@ export const navigationItems: NavigationItem[] = [
     icon: Bot,
     section: 'bot',
     description: '创建、配置和发布 Bot',
+  },
+  {
+    id: 'evolution-factory',
+    label: '智能进化',
+    path: '/evolution-factory',
+    icon: Zap,
+    section: 'bot',
+    description: '诊断、评估和优化 Bot',
   },
 ];
 
@@ -99,7 +109,13 @@ export function getMergedNavigationItems(): NavigationItem[] {
       if (grouped[item.section]) grouped[item.section].push(item);
     }
   }
-  return [...grouped.collab, ...grouped.bot];
+  // Evolution stays last in the Bot group, including after internal overlays.
+  const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
+  if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
+  return [grouped.collab, grouped.bot].flatMap((items) => [
+    ...items.filter((item) => item.placement !== 'last'),
+    ...items.filter((item) => item.placement === 'last'),
+  ]);
 }
 
 export function getNavigationItem(pathname: string) {

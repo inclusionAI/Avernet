@@ -58,8 +58,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request
-
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.authorized_apps.gating import (
+    resolve_delegable_bot,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps.schemas import (
     AuthorizedApp,
     AuthorizedBot,
@@ -83,28 +85,27 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
-    deleted as deleted_envelope,
     envelope_errors,
     page,
 )
-from agentclaw.community.adapters.http.openapi_v1.authorized_apps.gating import (
-    resolve_delegable_bot,
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    deleted as deleted_envelope,
 )
 from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.user_app_grant_service import (
     UserAppGrantServiceProtocol,
 )
-from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantRecord,
     UserAppGrantRecord,
 )
 from agentclaw.community.core.gateway_principal import PrincipalType
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 #: The bot-scoped group — the owner's three operations. All three are
 #: ``REFUSED`` to a machine caller: delegation is a human act, so an
@@ -221,13 +222,13 @@ def _calling_app(principal: Principal) -> tuple[int, str]:
     raise MissingPrincipalError("no verified application identity on this request")
 
 
-def _to_authorized_app(record: BotAppGrantRecord) -> AuthorizedApp:
+def _to_authorized_app(record: BotAppGrantRecord, *, current_owner_id: str) -> AuthorizedApp:
     return AuthorizedApp(
         app_id=record.app_id,
         user_id=record.user_id,
         app_name=record.app_name,
         bot_id=record.bot_id,
-        owner_id=record.owner_id,
+        owner_id=current_owner_id,
         granted_at=record.gmt_create,
     )
 
@@ -242,9 +243,11 @@ def _to_user_authorized_app(record: UserAppGrantRecord) -> UserAuthorizedApp:
 
 
 def _to_authorized_bot(record: BotAppGrantRecord) -> AuthorizedBot:
+    if record.current_owner_id is None:
+        raise ValueError("Live grant is missing its current Owner projection")
     return AuthorizedBot(
         bot_id=record.bot_id,
-        owner_id=record.owner_id,
+        owner_id=record.current_owner_id,
         granted_at=record.gmt_create,
     )
 
@@ -262,7 +265,7 @@ async def grant_authorized_app(
     user_id: UserIdDep,
     principal: UserAndAppDep,
     owner_id: OwnerIdQuery = None,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[AuthorizedApp]:
@@ -286,19 +289,20 @@ async def grant_authorized_app(
     """
     # Existence check and authority in one: raises BotNotFoundError -> 404 for a
     # bot that is absent or that this caller may not operate, indistinguishably.
-    resolved_owner, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
-        owner_id=owner_id,
+    context = resolve_delegable_bot(
+        collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id, bot_repository=bot_repo,
     )
+    resolved_owner = context.current_owner_id
     app_id, app_name = _calling_app(principal)
     record = grants.grant(
         bot_id=bot_id,
         user_id=user_id,
-        owner_id=resolved_owner,
+        owner_id=context.entity_id,
         app_id=app_id,
         app_name=app_name,
     )
-    return created(_to_authorized_app(record), request)
+    return created(_to_authorized_app(record, current_owner_id=resolved_owner), request)
 
 
 @router.get(
@@ -311,7 +315,7 @@ async def list_authorized_apps(
     user_id: UserIdDep,
     principal: PrincipalDep,
     owner_id: OwnerIdQuery = None,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Page[AuthorizedApp]]:
@@ -329,14 +333,15 @@ async def list_authorized_apps(
     owner still sees only what they themselves delegated.
     """
     del principal  # authority comes from the adjudicated bot resolve below
-    resolved_owner, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
-        owner_id=owner_id,
+    context = resolve_delegable_bot(
+        collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id, bot_repository=bot_repo,
     )
-    records = grants.list_for_bot(bot_id=bot_id, owner_id=resolved_owner)
+    resolved_owner = context.current_owner_id
+    records = grants.list_for_bot(bot_id=bot_id, owner_id=context.entity_id)
     if user_id != resolved_owner:
         records = [record for record in records if record.user_id == user_id]
-    items = [_to_authorized_app(record) for record in records]
+    items = [_to_authorized_app(record, current_owner_id=resolved_owner) for record in records]
     return page(len(items), items, request)
 
 
@@ -355,7 +360,7 @@ async def revoke_authorized_app(
         description="The application whose authorization to revoke — its "
         "`app_id` as listed on the bot's authorized apps.",
     ),
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Deleted]:
@@ -393,15 +398,16 @@ async def revoke_authorized_app(
     # segment, or a parameter. Deliberately not added here — it is a new
     # operation on the public surface, not a fix.
     del principal
-    resolved_owner, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
-        owner_id=owner_id,
+    context = resolve_delegable_bot(
+        collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id, bot_repository=bot_repo,
     )
+    resolved_owner = context.current_owner_id
     if user_id == resolved_owner:
-        grants.revoke_app(bot_id=bot_id, owner_id=resolved_owner, app_id=app_id)
+        grants.revoke_app(bot_id=bot_id, owner_id=context.entity_id, app_id=app_id)
     else:
         grants.revoke(
-            bot_id=bot_id, user_id=user_id, owner_id=resolved_owner, app_id=app_id
+            bot_id=bot_id, user_id=user_id, owner_id=context.entity_id, app_id=app_id
         )
     return deleted_envelope(request)
 

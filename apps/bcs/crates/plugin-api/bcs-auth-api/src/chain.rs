@@ -37,6 +37,8 @@ impl AuthPluginChain {
 
     /// Run the chain. First plugin to return `Some` wins. All `None` => anonymous.
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<AuthResult, AuthError> {
+        let expected_actor = crate::expected_actor_id(headers)?;
+        crate::validate_bot_credentials(headers)?;
         let chain_started = std::time::Instant::now();
         for (plugin_index, plugin) in self.plugins.iter().enumerate() {
             let name = plugin.name();
@@ -54,6 +56,11 @@ impl AuthPluginChain {
                 "auth.plugin.finished");
             match result {
                 Ok(Some(principal)) => {
+                    crate::credentials::validate_resolved_credentials(headers, &principal)?;
+                    if let Some(expected) = expected_actor {
+                        let Some(actual) = principal.bot_uuid.as_deref() else { continue; };
+                        crate::validate_actor(Some(expected), actual)?;
+                    }
                     tracing::info!(
                         plugin = name,
                         user_id = principal.user_id.as_deref().unwrap_or(""),
@@ -75,6 +82,9 @@ impl AuthPluginChain {
             }
         }
         tracing::info!(duration_ms = chain_started.elapsed().as_secs_f64() * 1000.0, "auth: anonymous (no plugin matched)");
+        if expected_actor.is_some() {
+            return Err(AuthError::InvalidToken("matching Bot identity is required".into()));
+        }
         Ok(AuthResult { principal: None })
     }
 

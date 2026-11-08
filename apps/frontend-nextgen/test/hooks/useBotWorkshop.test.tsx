@@ -313,9 +313,13 @@ it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
   expect(result.current.canOpenConversation(restrictedBot)).toBe(false);
 });
 
-it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID', () => {
+it('Coding Bot 点击去使用时进入统一对话页，并携带 canonical Bot ID', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({
+    identities: [{ id: 'human_u1', kind: 'user', displayName: '我', online: true }],
+    activeIdentityId: 'human_u1',
+  });
   const { result } = renderHook(() => useBotWorkshop());
   const bot = {
     id: 'coding-bot:2088',
@@ -329,7 +333,7 @@ it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID'
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
+  expect(history.push).toHaveBeenCalledWith('/workspace/chat?section=managed&bot=coding-bot%3A2088&origin=mine');
 });
 
 it('点击对话时跳转到用户单聊并展开对应 Bot', () => {

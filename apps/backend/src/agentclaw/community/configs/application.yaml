@@ -1,12 +1,12 @@
 # 基础配置
-# app_name also names this deployment's rows in the shared ac_task_queue table:
-# another, independently deployed backend runs against the same table, every row
+# app_name names this deployment's durable queue and Relay-state rows:
+# another, independently deployed backend runs against these tables, every row
 # carries its owner, and each fleet claims only its own — so neither runs the
 # other's tasks and fails them for a task_type its registry never saw. Two
 # deployments must therefore not share an app_name, and a deployment needs its
 # own name before it starts enqueueing, since that name is what its own claims
-# will look for. Empty, padded, or over 32 characters fails the boot rather than
-# falling back (see ConfigModule.task_queue).
+# will look for. task_queue rejects an invalid value during boot; executor-app
+# scoping validates the same deployment name when Relay rows are written/read.
 app_name: "agentclaw"
 enable_sidecar: true
 workers: 6
@@ -243,9 +243,11 @@ user_config:
   # 100–200MiB，放 BLOB 列是自毁形态（max_allowed_packet/行宽/备份放大）。
   # 中性默认落在进程工作目录（同 skill_scan.storage_dir 形态）；部署需要
   # 共享卷（NAS）时由各环境 overlay 覆写为绝对路径。v1 留存策略：行与字节
-  # 一律不删，理由与机件见 sql/2026_08_31_manifest_content.sql 头注释。
-  # 读取方：core/bot_config_manifest/content/settings.py 的
-  # content_store_root_from_config（W4 组合根在装配存储服务时调用）。
+  # 一律不删，理由与机件见 core/content_store/sql/2026_08_31_manifest_content.sql
+  # 头注释。存储本身自 #3064 起是独立组件 core/content_store/（Manifest 与
+  # Genome Registry 共用），键名保持不变。读取方：core/content_store/settings.py 的
+  # content_store_root_from_config（manifest_fetch_module 解析，content_store_module
+  # 装配存储服务时注入）。
   #
   # teclaw_platform_managed（W8 #1476）：teclaw 系 bot 的 manifest 走「平台管理」
   # 投递——每个类目物化进平台状态（数据库行 + bot-data 对象存储里的托管文件，
@@ -262,3 +264,25 @@ user_config:
     fetch_transport_allowlist: []
     content_store_dir: "./data/manifest_content"
     teclaw_platform_managed: false
+
+  # Community identity (passport) mode — the switch that selects which
+  # passport plugin the community columns run. Flip passport_mode to
+  # manual_consent to exercise the full bot create → human confirm →
+  # creation-complete lifecycle in the simulator stack: applyAgentPassport
+  # then mirrors prod tcauthmng — it leaves a PENDING application with the
+  # simulator's mock-services AgentPass service and returns that service's
+  # consent-page URL, and only a human click on that page flips the status.
+  # The default self_issued keeps the existing apply-answers-ISSUED
+  # behavior, identical to before the knob existed.
+  # Accepted values: self_issued | manual_consent (case-insensitive,
+  # whitespace-trimmed; anything else fails the boot). manual_consent
+  # additionally requires consent_base_url (trimmed, must start with
+  # http:// or https://, no trailing slash) — the base URL of the
+  # mock-services AgentPass service (the external simulator service that
+  # owns the passport application registry, the consent page, and the
+  # approve/reject decisions; the backend binds only its HTTP client).
+  # No hostname is hardcoded in code. Read by community_identity_from_block
+  # in di/community_identity_config.py, invoked when CommunityIdentityModule
+  # is assembled.
+  community_identity:
+    passport_mode: self_issued

@@ -12,6 +12,9 @@ import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import { DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION } from "../../services/monitoring/contracts.js";
+import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
+import { MonitoringError } from "../../services/monitoring/contracts.js";
 import type { MonitoringRecoveryTrigger } from "../../services/monitoring/contracts.js";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { fixtureIntegration } from "../../services/monitoring/__tests__/identity-fixtures.js";
@@ -176,7 +179,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect(body).toMatchObject({ total: 2, counts: { all: 2, alert: 1, pass: 1, unresolved: 0 } });
     expect(body.items.map((x: { humanIntervention: boolean }) => x.humanIntervention)).toEqual([false, true]);
     expect(body.items[0]).not.toHaveProperty("notificationStatus");
-    for (const field of ["schemaVersion", "eventId", "engine"]) expect(body.items[0]).not.toHaveProperty(field);
+    for (const field of ["eventId", "engine"]) expect(body.items[0]).not.toHaveProperty(field);
     expect((await db.query("SELECT event_id FROM insight_monitoring_diagnose")).length).toBe(3);
     expect((await get("mock-bot-oc")).body.items[0].occurredAt).toBeNull();
   });
@@ -374,12 +377,12 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
 });
 
 describe("diagnosis report -> allowlist -> durable recovery task", () => {
-  async function automaticRecovery() {
+  async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
     await runMigrations(db, "sqlite");
     const config = new AppConfigRepository(db);
     await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: "mock-bot-te", entity_id: "001234", env: "prod" }],
+      allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
     }) });
     const objects = new Map<string, Buffer>();
     const artifacts = {
@@ -387,13 +390,14 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
       getObject: async (key: string) => ({ content: objects.get(key)!, etag: null, contentType: "application/json" }),
     };
     const tasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifacts);
-    const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]) };
+    const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]),
+      terminate: vi.fn().mockResolvedValue({ status: "remote_stopped", aisJobId: "job" }) };
     const service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent,
       notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000 });
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
     return { config, tasks, service, agent, artifacts,
-      input: { ...alert, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
+      input: { ...alert, botId, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: null, humanIntervention: false, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
   }
 
   it("keeps the diagnosis on task storage failure, then creates exactly one task on duplicate retry", async () => {
@@ -414,6 +418,29 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
   });
 
+  it.each([
+    { humanIntervention: true },
+    { decision: "PASS", handlerName: "COMPLETED" },
+    { decision: "PASS", tcFaultLabel: null, confidence: null },
+    { schemaVersion: "claw-monitoring/diagnosis-event/v3" },
+  ])("stores valid ineligible reports without creating recovery: %j", async patch => {
+    const { input, agent } = await automaticRecovery();
+    const value = { ...input, ...patch };
+    expect((await post(value)).status).toBe(201);
+    expect((await post(value)).body.duplicate).toBe(true);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
+    expect(agent.start).not.toHaveBeenCalled();
+    const rows = await db.query("SELECT schema_version, tc_fault_label, decision FROM insight_monitoring_diagnose");
+    expect(rows[0]).toMatchObject({ schema_version: value.schemaVersion, tc_fault_label: value.tcFaultLabel, decision: value.decision });
+    expect((await post({ ...check, env: "prod", botId: input.botId }, "bot-checks")).status).toBe(200);
+    principal.allowedTargetEnvs = ["test", "prod"];
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const ref = createMonitoringReferences().encode({ botId: input.botId, entityId: input.entityId, env: 'prod' }, 'test');
+    const page = await call(`/monitoring/targets/${ref}/diagnoses?start=all&end=all`);
+    expect(page.status).toBe(200);
+    expect(page.body.items[0]).toMatchObject({ schemaVersion: value.schemaVersion, tcFaultLabel: value.tcFaultLabel, confidence: value.confidence, humanIntervention: value.humanIntervention });
+  });
+
   it("deduplicates concurrent reports and retries after an acknowledgment is lost", async () => {
     const { input, agent } = await automaticRecovery();
     const responses = await Promise.all(Array.from({ length: 10 }, () => post(input)));
@@ -422,6 +449,50 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect((await post(input)).body.duplicate).toBe(true);
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
+  it("creates one durable OC v4 recovery task with normalized instance locators", async () => {
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const event = { ...input, schemaVersion: DIAGNOSIS_V4_VERSION, engine: "OC",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId } };
+    expect((await post(event)).status).toBe(201);
+    expect((await post(event)).body.duplicate).toBe(true);
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target).toEqual({ bot_id: input.botId, entity_id: input.entityId, env: "prod", engine: "OC",
+      runtime_identity: { stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16" } });
+    const [stored] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(task?.request.target.runtime_identity).not.toHaveProperty("TOKEN");
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
+  it("corrects online service CLIENT_ID from the persisted NAS path while retaining the stored credentials", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const deviceUuid = `DEVICE-${"b".repeat(32)}`;
+    const event = { ...input, engine: "OC", sessionId: "physical-session",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId },
+      sessionNasPath: `/nas/prod/prod_staff_different-entity_openclaw_${input.botId}_${deviceUuid}/.openclaw/agents/main/sessions/physical-session.jsonl`,
+    };
+    expect((await post(event)).status).toBe(201);
+    expect(await post(event)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target.runtime_identity).toEqual({ stage: "online", version: "V16", deviceUuid });
+    expect(task?.request).not.toHaveProperty("sessionNasPath");
+    const [stored] = await db.query("SELECT runtime_identity, session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(stored.session_nas_path).toBe(event.sessionNasPath);
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+    expect(warning.mock.calls.filter(([message]) => message === "[monitoring] recovery instance corrected")).toHaveLength(2);
+    // Existing task idempotency rejects a later hint that tries to switch instances.
+    expect((await post({ ...event, sessionNasPath: event.sessionNasPath.replace(deviceUuid, `DEVICE-${"c".repeat(32)}`) })).status).toBe(409);
+    const [replayed] = await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(replayed.session_nas_path).toBe(event.sessionNasPath);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
   });
 
   it("acknowledges nonmembers normally and retries enabled configuration failures without losing diagnostics", async () => {
@@ -436,5 +507,124 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect(await post(next)).toMatchObject({ status: 200, body: { duplicate: true } });
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
     expect(agent.start).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("recovery result receiver HTTP contract", () => {
+  const result = { event_id: alert.eventId, task_id: "SR-http", result_version: 3,
+    status: "completed", phase: "verify", waiting_reason: null, effect: "recovered", result_text: "已恢复", evidence_ids: [] };
+  const report = (body: Record<string, unknown>) => post(body, "session-recovery-results");
+  it.each(["none", "performed", "unknown"])("accepts and stores intervention_status=%s over HTTP with legacy results", async intervention_status => {
+    await post(alert);
+    expect((await report(result)).status).toBe(200);
+    const updated = { ...result, result_version: 4, intervention_status };
+    expect(await report(updated)).toMatchObject({ status: 200, body: { accepted: true, duplicate: false } });
+    expect(await report(updated)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const [row] = await db.query("SELECT self_healing_results FROM insight_monitoring_diagnose WHERE event_id = ?", [alert.eventId]);
+    expect(JSON.parse(String(row.self_healing_results))).toEqual([result, updated]);
+    expect((await report({ ...updated, result_version: 5, intervention_status: true })).status).toBe(422);
+  });
+  it("persists and acknowledges identical replay without requiring an extra token", async () => {
+    await post(alert);
+    expect(await report(result)).toMatchObject({ status: 200, body: { accepted: true, eventId: alert.eventId, taskId: "SR-http", resultVersion: 3, duplicate: false } });
+    expect(await report(result)).toMatchObject({ status: 200, body: { duplicate: true } });
+    expect(await report({ ...result, result_text: "conflict" })).toMatchObject({ status: 409, body: { error: { code: "MONITORING_RESULT_CONFLICT" } } });
+    expect(await post(alert)).toMatchObject({ status: 200, body: { duplicate: true } });
+  });
+  it("returns actionable errors without fabricating success", async () => {
+    expect(await report(result)).toMatchObject({ status: 404, body: { error: { code: "MONITORING_RESULT_TARGET_NOT_FOUND" } } });
+    expect(await report({ ...result, result_version: 0 })).toMatchObject({ status: 422, body: { error: { code: "MONITORING_INVALID_RESULT" } } });
+    await post(alert);
+    await db.exec("UPDATE insight_monitoring_diagnose SET self_healing_results = ?", ["broken"]);
+    expect(await report(result)).toMatchObject({ status: 503, body: { error: { code: "MONITORING_NOT_READY" } } });
+  });
+  it.each([true, false])("enforces exact 128 KiB bytes with host parser=%s", async parent => {
+    await stop(); await start(parent); await post(alert);
+    const base = { ...result, result_text: "" };
+    const padding = 128 * 1024 - Buffer.byteLength(JSON.stringify(base));
+    expect((await report({ ...base, result_text: "x".repeat(padding) })).status).toBe(200);
+    expect((await report({ ...base, result_text: "x".repeat(padding + 1) })).status).toBe(413);
+  });
+});
+
+
+it("stores the complete v3 snapshot without leaking it in ACKs, UI DTOs or rejection responses", async () => {
+  await stop();
+  recovery = { trigger: vi.fn().mockRejectedValue(new MonitoringError("INVALID_EVENT", "Recovery rejected; diagnostic saved")) };
+  await start();
+  const event = { ...unresolved, decision: "ALERT", handlerName: "NOT_COMPLETED", schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...runtimeIdentity, BOT_ID: unresolved.botId } };
+  const rejected = await post(event);
+  expect(rejected.status).toBe(400);
+  const [stored] = await db.query("SELECT runtime_identity, entity_id FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+  expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+  expect(stored.entity_id).toBe(event.entityId);
+  expect(recovery.trigger).toHaveBeenCalledWith(expect.objectContaining({ runtimeIdentity: event.runtimeIdentity, entityId: event.entityId }));
+  await stop(); recovery = undefined; await start();
+  const ack = await post(event);
+  expect(ack.status).toBe(200);
+  expect(ack.body.duplicate).toBe(true);
+  const page = await get(event.botId);
+  expect(page.body.items[0]).not.toHaveProperty("runtimeIdentity");
+  for (const response of [rejected, ack, page]) {
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.TOKEN);
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.CLIENT_ID);
+  }
+});
+
+describe("sessionNasPath monitoring storage and trigger boundary", () => {
+  const path = "/nas/instance-b/.openclaw/agents/main/sessions/original.jsonl";
+  const event = { ...unresolved, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity,
+    handlerName: null, sessionNasPath: path };
+  it("persists before triggering, retries original metadata after 503 and omits it from ACK/pages", async () => {
+    await stop();
+    const trigger = vi.fn(async (input) => {
+      expect(input.sessionNasPath).toBe(path);
+      expect(input.runtimeIdentity).toEqual(runtimeIdentity);
+      const [row] = await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [input.eventId]);
+      expect(row.session_nas_path).toBe(path);
+      if (trigger.mock.calls.length === 1) throw new MonitoringError("NOT_READY", "temporary");
+    });
+    recovery = { trigger }; await start();
+    expect((await post(event)).status).toBe(503);
+    const retry = await post(event);
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ accepted: true, stored: true, duplicate: true });
+    expect(retry.body).not.toHaveProperty("sessionNasPath");
+    expect(trigger).toHaveBeenCalledTimes(2);
+    expect(trigger.mock.calls[0][0]).toEqual(trigger.mock.calls[1][0]);
+    const page = await get(event.botId);
+    expect(page.status).toBe(200);
+    expect(page.body.items[0]).not.toHaveProperty("sessionNasPath");
+    expect(JSON.stringify(page.body)).not.toContain(path);
+    expect((await db.query("SELECT COUNT(*) AS n FROM insight_monitoring_diagnose"))[0].n).toBe(1);
+  });
+  it("returns 201 then 200 without changing the ACK schema", async () => {
+    const first = await post(event), duplicate = await post(event);
+    expect(first.status).toBe(201); expect(duplicate.status).toBe(200);
+    expect(first.body).toEqual({ ...duplicate.body, duplicate: false });
+    expect(first.body).not.toHaveProperty("sessionNasPath");
+  });
+  it.each([null, undefined])("persists absent/null as SQL NULL and keeps the original trigger behavior (%j)", async value => {
+    await stop(); const trigger = vi.fn().mockResolvedValue(undefined); recovery = { trigger }; await start();
+    expect((await post({ ...event, sessionNasPath: value })).status).toBe(201);
+    expect((await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose"))[0].session_nas_path).toBeNull();
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger.mock.calls[0][0]).not.toHaveProperty("sessionNasPath");
+  });
+  it.each([42, {}, "", "relative/file", "/a\\b", "/a/./b", "/a/../b", "/a\n", "/a\u0000", "/a\u007f", "/a\u0085", "/a\u009f", "/a\ud800", "/" + "😀".repeat(4096)])(
+    "rejects invalid metadata without writes or trigger (%j)", async value => {
+      await stop(); const trigger = vi.fn(); recovery = { trigger }; await start();
+      const result = await post({ ...event, sessionNasPath: value });
+      expect(result.status).toBe(typeof value === "string" && [...value].length > 4096 ? 413 : 400);
+      expect(trigger).not.toHaveBeenCalled();
+      expect((await db.query("SELECT COUNT(*) AS n FROM insight_monitoring_diagnose"))[0].n).toBe(0);
+    });
+  it("does not trigger or acknowledge storage when the new column is missing", async () => {
+    await stop(); const trigger = vi.fn(); recovery = { trigger }; await start();
+    await db.exec("ALTER TABLE insight_monitoring_diagnose RENAME COLUMN session_nas_path TO missing_nas_path");
+    expect((await post(event)).status).toBe(503);
+    expect(trigger).not.toHaveBeenCalled();
   });
 });

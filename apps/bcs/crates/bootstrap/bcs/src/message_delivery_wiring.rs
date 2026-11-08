@@ -69,6 +69,7 @@ pub async fn wire_with_leader(
     let durable = repository.is_durable();
     config.provider_http.validate().map_err(|e| invalid(&e))?;
     flow.queue_persistable_headers = config.provider_http.queue_persistable_headers.clone();
+    flow.new_participant_visible_limit = config.message_history.new_participant_visible_limit;
     let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone()));
     let service = ManagedMessageDelivery::new(repository).with_policy(live.clone());
     let metrics = Arc::new(crate::delivery_metrics::DeliveryMetrics::default());
@@ -81,6 +82,7 @@ pub async fn wire_with_leader(
     flow = flow.with_managed_deliveries(service.clone());
     let flow = Arc::new(flow);
     flow.retain_terminal_events();
+    service.bind_output_cleanup(Arc::downgrade(&flow))?;
     // Durable storage always installs an idle scheduler, even when all policy
     // switches are off. Only the current master's epoch may consume work.
     if !durable {
@@ -204,6 +206,19 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn delivery_queries_receive_configured_history_window() {
+        let fixture = wiring_support::FlowTestSupport::new_group_with_driver_and_observer().await;
+        let flow = BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry,
+            fixture.bot_delivery, fixture.frontend_delivery)
+            .with_message_repo(Arc::new(bcs_message_store::MemoryMessageRepo::new()));
+        let mut config = crate::BcsConfig::default();
+        assert_eq!(flow.new_participant_visible_limit, config.message_history.new_participant_visible_limit);
+        config.message_history.new_participant_visible_limit = 3;
+        let flow = wire(flow, &config).await.unwrap();
+        assert_eq!(flow.new_participant_visible_limit, 3);
+    }
+
+    #[tokio::test]
     async fn master_reconciles_policy_after_five_seconds() {
         use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort;
         let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
@@ -289,6 +304,7 @@ mod tests {
         let enabled = flow.replace_delivery_policy(admin(), 0, policy).await.unwrap();
         assert_eq!(enabled.version, 1);
         let admission = flow.handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
             group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
             from_name: None, message: "@Driver dynamically enabled".into(), mentions: vec!["bot-driver".into()],
@@ -309,6 +325,7 @@ mod tests {
         expiring_policy.queue_ttl_ms = Some(100);
         let enabled = flow.replace_delivery_policy(admin(), 1, expiring_policy).await.unwrap();
         flow.handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
             group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
             from_name: None, message: "@Driver expire after takeover".into(), mentions: vec!["bot-driver".into()],
@@ -390,6 +407,7 @@ mod tests {
                     kind: DeliveryType::Send,
                     max_queued: 10,
                     semantic_projection_json: serde_json::json!({"version":1}),
+                    run_id: None,
                 }],
                 message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None,
                     group_id: "group-1".into(),
@@ -442,6 +460,7 @@ mod tests {
         );
         let rejected = flow
             .handle_web_send(WebSendCommand {
+                caller_execution: None,
                 caller: CallerContext::Human(HumanActor {
                     actor_id: "human_1".into(),
                     staff_no: "1".into(),

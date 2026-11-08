@@ -107,22 +107,25 @@ def resolve_callback_timeout(
 
 def merge_deploy_config(
     current: DeployConfig | None,
-    override: DeployConfig | dict,
-) -> DeployConfig:
+    override: DeployConfig | dict | None,
+) -> DeployConfig | None:
     """Merge override fields into current deploy_config at field level.
 
-    Only non-None fields from ``override`` replace corresponding fields
-    in ``current``. This prevents a partial override (e.g. only
-    docker_image) from zeroing out unrelated fields (envs, mount_points,
-    resource_spec, etc.) that already exist on the current config.
+    Preserve unrelated fields when applying a sparse override. Unlike the
+    other fields, ``docker_image`` is request-scoped: omission or None clears
+    the previous override so template/provider defaults can apply.
     """
+    if current is None and override is None:
+        return None
     current_data = current.model_dump(exclude_none=True) if current else {}
     override_data = (
         override.model_dump(exclude_none=True)
         if isinstance(override, DeployConfig)
-        else override
+        else override or {}
     )
-    return DeployConfig.model_validate({**current_data, **override_data})
+    merged = {**current_data, **override_data}
+    merged["docker_image"] = override_data.get("docker_image")
+    return DeployConfig.model_validate(merged)
 
 
 class DefaultBotManagementService(BotManageService):
@@ -1021,14 +1024,14 @@ class DefaultBotManagementService(BotManageService):
                 if record and record.extra_config
                 else BotConfig()
             )
+            stored_config.deploy_config = merge_deploy_config(
+                stored_config.deploy_config,
+                bot_config.deploy_config if bot_config is not None else None,
+            )
+
             if bot_config is not None:
                 if bot_config.share_policy is not None:
                     stored_config.share_policy = bot_config.share_policy
-                if bot_config.deploy_config is not None:
-                    stored_config.deploy_config = merge_deploy_config(
-                        stored_config.deploy_config,
-                        bot_config.deploy_config,
-                    )
                 if bot_config.entity_id:
                     stored_config.entity_id = bot_config.entity_id
                 if bot_config.entity_type:
@@ -1293,13 +1296,13 @@ class DefaultBotManagementService(BotManageService):
                 if record and record.extra_config
                 else BotConfig()
             )
+            stored_config.deploy_config = merge_deploy_config(
+                stored_config.deploy_config,
+                config.deploy_config,
+            )
+
             if config.share_policy is not None:
                 stored_config.share_policy = config.share_policy
-            if config.deploy_config is not None:
-                stored_config.deploy_config = merge_deploy_config(
-                    stored_config.deploy_config,
-                    config.deploy_config,
-                )
             if config.entity_id:
                 stored_config.entity_id = config.entity_id
             if config.entity_type:
@@ -1338,6 +1341,9 @@ class DefaultBotManagementService(BotManageService):
                 BotConfig.model_validate(record.extra_config)
                 if record and record.extra_config
                 else BotConfig()
+            )
+            existing_config.deploy_config = merge_deploy_config(
+                existing_config.deploy_config, None
             )
             publish_config = PublishConfig(
                 auto_approve=auto_approve_publish,

@@ -217,7 +217,7 @@ class TestFailClosedSkillMutationPermissionInterceptor:
         )
 
         with patch(
-            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            "agentclaw.community.adapters.http.skill_center.skills_common.skill_admin",
             return_value={"admin"},
         ):
             assert await interceptor.before(ctx) is ctx
@@ -235,7 +235,7 @@ class TestFailClosedSkillMutationPermissionInterceptor:
         )
 
         with patch(
-            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            "agentclaw.community.adapters.http.skill_center.skills_common.skill_admin",
             return_value=set(),
         ), patch.object(
             CollaboratorPermissionInterceptor,
@@ -265,7 +265,7 @@ class TestFailClosedSkillMutationPermissionInterceptor:
         )
 
         with patch(
-            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            "agentclaw.community.adapters.http.skill_center.skills_common.skill_admin",
             return_value=set(),
         ), patch.object(
             CollaboratorPermissionInterceptor,

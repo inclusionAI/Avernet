@@ -1,5 +1,6 @@
 import { Button, Checkbox, Input, Switch } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { GroupLeaderSelect, type GroupLeaderOption } from './GroupLeaderSelect';
 import { YamlCodeEditor } from './YamlEditor';
@@ -29,6 +30,7 @@ export interface GroupConfigFieldsProps {
   yamlValidated: boolean;
   templateSlot?: ReactNode;
   bindingSlot?: ReactNode;
+  humanNotifySlot?: ReactNode;
   leaderOptions: GroupLeaderOption[];
   supportsStateMachine: boolean;
   /** 是否以任务执行(走 task execute 建群链路):仅 自定义协作(task_dag) 出现的勾选框值。 */
@@ -37,6 +39,10 @@ export interface GroupConfigFieldsProps {
   onKindChange: (kind: GroupStrategyKind) => void;
   onNameChange: (value: string) => void;
   onContextChange: (value: string) => void;
+  /** 协作目标智能推荐是否可触发（目标为空时置灰）；不传 onRecommend 则不显示推荐按钮。 */
+  canRecommend?: boolean;
+  /** 点击智能推荐：以协作目标为关键词推荐可协作 Bot。 */
+  onRecommend?: () => void;
   onDriverChange: (value: string) => void;
   onManagerChange: (value: string) => void;
   onDeliveryChange: (value: DeliveryPolicy) => void;
@@ -56,6 +62,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     yamlValidated,
     templateSlot,
     bindingSlot,
+    humanNotifySlot,
     leaderOptions,
     supportsStateMachine,
     viaExecute,
@@ -63,6 +70,8 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     onKindChange,
     onNameChange,
     onContextChange,
+    canRecommend,
+    onRecommend,
     onDriverChange,
     onManagerChange,
     onDeliveryChange,
@@ -88,13 +97,29 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
           <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor="create-group-context">
             协作目标
           </label>
-          <Input
-            id="create-group-context"
-            value={context}
-            onChange={(event) => onContextChange(event.target.value)}
-            placeholder="请输入协作目标"
-            className="h-9 rounded-md"
-          />
+          <div className="flex min-w-0 gap-2">
+            <Input
+              id="create-group-context"
+              value={context}
+              onChange={(event) => onContextChange(event.target.value)}
+              placeholder="请输入协作目标"
+              className="h-9 min-w-0 rounded-md"
+            />
+            {onRecommend && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canRecommend}
+                onClick={onRecommend}
+                aria-label="智能推荐可协作 Bot"
+                className="h-9 shrink-0 gap-1 rounded-md"
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                智能推荐
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -171,7 +196,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       {kind === 'free_chat' && (
         <div
           data-testid="free-chat-settings-grid"
-          className="grid min-w-0 grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)] gap-3"
+          className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]"
         >
           <div className="min-w-0">
             <GroupLeaderSelect
@@ -192,18 +217,19 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                 aria-label="自动回复"
                 onCheckedChange={(checked) => onDeliveryChange(checked ? 'send_to_driver' : 'inject_observers')}
               />
-              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground lg:whitespace-nowrap">
+              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground">
                 {deliveryPolicy === 'send_to_driver'
                   ? '群主 Bot 将默认回复每一条消息'
                   : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
               </p>
             </div>
           </div>
+          <div className="min-w-0">{humanNotifySlot}</div>
         </div>
       )}
 
       {kind === 'task_master_slave' && (
-        <div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <GroupLeaderSelect
             id="create-group-manager"
             label="主节点（Manager Bot）"
@@ -212,6 +238,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             placeholder="选择 Manager Bot"
             onChange={onManagerChange}
           />
+          <div className="min-w-0">{humanNotifySlot}</div>
         </div>
       )}
 

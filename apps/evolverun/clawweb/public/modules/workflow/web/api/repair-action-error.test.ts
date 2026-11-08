@@ -1,6 +1,17 @@
 import { expect, it } from 'vitest'
 import { repairActionFailure } from './repair-action-error'
 
+it('does not send a confirmed pre-creation baseline rejection into the check/retry loop', () => {
+  const result = repairActionFailure({ status: 503, body: JSON.stringify({ code: 'CAPABILITY_UNAVAILABLE',
+    reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created', error: 'private git diagnostic' }) })
+  expect(result.action).toBeNull()
+  expect(result.message).toContain('未创建')
+  expect(result.message).not.toContain('private')
+  const unknown = repairActionFailure({ status: 500, body: JSON.stringify({ reasonCode: 'BASELINE_READ_FAILED' }) })
+  expect(unknown.action).toBe('refresh-task')
+  expect(unknown.message).not.toContain('未创建')
+})
+
 it.each([
   [{ code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' }, 'retry-result', '核对原结果'],
   [{ code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'EXECUTION_RUNNING' }, 'retry-result', '上一轮仍在执行'],
@@ -25,3 +36,13 @@ it('preserves the real baseline error without treating it as source mutation', (
   expect(result.message).toContain('原建议基线已变化')
   expect(result.message).toContain('保留')
 })
+
+it('identifies frozen core size errors with safe sizes and request identity',()=>{
+ const result=repairActionFailure({status:413,body:JSON.stringify({code:'PAYLOAD_TOO_LARGE',stage:'frozen_batch',limit:1048576,actualBytes:1112074,requestId:'1dd0fc30-37da-49bd-b65c-599f704d2eb4',error:'private payload'})});
+ expect(result.message).toContain('核心输入');
+ expect(result.message).toContain('1,112,074');
+ expect(result.message).toContain('1,048,576');
+ expect(result.message).toContain('1dd0fc30-37da-49bd-b65c-599f704d2eb4');
+ expect(result.message).not.toContain('缩小范围');
+ expect(result.message).not.toContain('private payload');
+});

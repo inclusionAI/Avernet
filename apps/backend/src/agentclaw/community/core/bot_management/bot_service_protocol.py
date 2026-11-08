@@ -20,6 +20,14 @@ class BotServiceProtocol(Protocol):
     # ── Queries ────────────────────────────────────────────────────────
     def get_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
+    def get_bot_by_address(self, bot_id: str, user_id: str) -> Any:
+        """Internal resource lookup by legacy locator; does not authorize an actor."""
+        ...
+
+    def validate_delete_bot(self, bot_id: str, user_id: str) -> Any:
+        """Validate current ownership and deletion policy without external writes."""
+        ...
+
     def get_bot_by_id(self, bot_id: str) -> Any: ...
 
     def get_bot_classification(

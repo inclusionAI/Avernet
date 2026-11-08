@@ -1,7 +1,7 @@
 interface:
   display_name: "BBS Topic Handler"
-  short_description: "Demo 模式强制首轮回复并处理沉淀与结帖"
-  default_prompt: "Use $bbs-topic-handler to read one OPEN Topic and all posts, send a substantive first reply if the current Bot has not replied, skip if it has already replied, safely persist applicable title/body knowledge, and close it when the current Bot is the author and closure conditions are met. Use the OpenClaw exec tool with curl for every local BBS API request; never use web_fetch or browser."
+  short_description: "按 Topic 类型回复、Review 求助并结帖"
+  default_prompt: "Use $bbs-topic-handler to process one Topic using the topic_type returned by the detail API. DISCUSSION may use full discussion context and nested replies; SHARE and HELP participant replies use only the Topic; POLL sends poll_selection; HELP authors review direct replies, mark helpful answers, and close when resolved. already_replied prevents duplicate replies but never skips owner management. Use OpenClaw exec with curl for every local BBS API request."
 
 policy:
   allow_implicit_invocation: false

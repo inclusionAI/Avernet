@@ -23,7 +23,10 @@ from secbaas.community.api.api_gateway import (
 )
 from secbaas.community.api.bot_runtime import BotChatContext
 from secbaas.community.bootstrap import ApplicationContainer
+from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
+
+logger = get_logger("router-gateway")
 
 
 @dataclass
@@ -68,10 +71,20 @@ def validate_jwt_token(
     Raises:
         HTTPException 401: token missing/invalid/expired
         HTTPException 403: resource_key not found
+        HTTPException 503: signing secret unavailable
     """
     token = _get_token_from_header(x_avernet_principal)
 
-    secret_key = secret_plugin.get_secret(secret_name)
+    try:
+        secret_key = secret_plugin.get_secret(secret_name)
+        if not secret_key:
+            raise ValueError("JWT signing secret is empty")
+    except Exception as exc:
+        logger.error("Gateway JWT signing secret unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": 50301, "message": "Authentication service unavailable"},
+        ) from exc
 
     ok, error_msg, payload = verify_jwt_token(token, secret_key)
     if not ok:

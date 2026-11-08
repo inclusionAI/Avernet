@@ -9,6 +9,8 @@ import type { ServicePublication, ServicePublicationAction } from '@/domain/botE
 import { useServicePublications } from '@/hooks/useServicePublications';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowRight, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 const statusLabel: Record<ServicePublication['status'], string> = {
   draft: '草稿',
@@ -30,8 +32,14 @@ export function ServicePublicationDrawer({
 }) {
   const publications = useServicePublications(bot?.id);
   const run = (action: ServicePublicationAction, item: ServicePublication) => {
-    if (action === 'publish_staging') return publications.advance('prestable');
-    if (action === 'publish_online') return publications.advance('online');
+    if (action === 'publish_staging') {
+      Tracert.click(Points.botWorkshop.publishPre, { bot_id: bot?.id });
+      return publications.advance('prestable');
+    }
+    if (action === 'publish_online') {
+      Tracert.click(Points.botWorkshop.publishOnline, { bot_id: bot?.id });
+      return publications.advance('online');
+    }
     if (action === 'cancel_staging') return publications.cancel();
     if (action === 'offline') return publications.offline();
     if (action === 'retry') return publications.retry();

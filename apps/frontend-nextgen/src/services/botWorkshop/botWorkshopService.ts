@@ -17,6 +17,7 @@ import {
 } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { runAfterCreateActions } from './agentCodingAfterCreateService';
 import { agentCodingTemplateService, type AgentCodingTemplate } from './agentCodingTemplateService';
 import { botAvatarService } from './botAvatarService';
@@ -97,7 +98,12 @@ export const botWorkshopService = {
     if (!dto) return undefined;
     const result = mapBotDto(dto as BackendUnknownRecord, id);
     if (!result.item.runtime.visibleInOpenCore) return undefined;
-    if (result.item.avatarUrl || !currentUserId || result.item.ownerId !== currentUserId) return result.item;
+    if (
+      result.item.avatarUrl ||
+      !currentUserId ||
+      !isSameHumanIdentity(result.item.ownerId, currentUserId, 'human')
+    )
+      return result.item;
     // 详情接口尚未稳定回传 avatar_url；复用头像资源接口，保证编辑页与列表展示同一份 Bot 头像。
     try {
       const avatarUrl = await botAvatarService.get(id);

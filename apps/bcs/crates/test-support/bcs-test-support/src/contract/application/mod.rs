@@ -12,7 +12,7 @@ use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDiscoveryService,
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
     CreateOrganizationCommand, FriendService, GroupFusionService, GroupManagementService,
-    GroupMessageHistoryService, GroupProposalService, GroupQueryService, HumanActorService,
+    GroupMessageHistoryService, GroupQueryService, HumanActorService,
     InteractionService, MessageFlowService, OrganizationAuth, OrganizationManagementService,
     OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
 };
@@ -124,8 +124,6 @@ pub async fn group_message_history_service_contract_tests<
     _svc: &T,
 ) {
 }
-
-pub async fn group_proposal_service_contract_tests<T: GroupProposalService + ?Sized>(_svc: &T) {}
 
 pub async fn group_query_service_contract_tests<T: GroupQueryService + ?Sized>(_svc: &T) {}
 

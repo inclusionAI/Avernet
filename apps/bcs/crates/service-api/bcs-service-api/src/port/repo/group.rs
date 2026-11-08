@@ -3,8 +3,7 @@ use async_trait::async_trait;
 use crate::types::{
     EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
     GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
-    ServiceResult, ServiceSpec, Workspace,
-};
+    ServiceResult, };
 
 use super::AppendEventRecord;
 
@@ -41,7 +40,6 @@ pub enum GroupEventfulMutation {
         mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
-    UpdateServiceSpec(Option<ServiceSpec>),
     Delete,
 }
 
@@ -63,6 +61,13 @@ pub struct CommitGroupEventfulMutation {
 /// behavior and orchestration.
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
+    /// Process-local membership projection for Provider policy tightening.
+    /// Persistent Provider stores enforce the equivalent condition atomically
+    /// in their metadata UPDATE instead of issuing a separate Group read.
+    async fn has_public_group_with_members(&self, _actor_ids: &[String]) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError("public group membership lookup is not configured".into()))
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
     /// Atomically make a provisioning Group available, activate its pending
     /// inline subscriptions, and append the ordered creation Events.
@@ -121,17 +126,8 @@ pub trait GroupRepoPort: Send + Sync {
         actor_id: &str,
         message_view_scope: MessageViewScope,
     ) -> ServiceResult<()>;
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
-    /// Persist a `service_spec` patch onto the group. `Some(spec)` installs or
-    /// replaces the spec; `None` removes it. Validation (route-field lock,
-    /// callback_config immutability) is the caller's responsibility.
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()>;
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>>;
     async fn list(&self) -> Vec<Group>;
     /// List groups ordered by `updated_at` descending, then apply pagination.
@@ -224,6 +220,24 @@ pub trait GroupRepoPort: Send + Sync {
     ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
         Err(ServiceError::InternalError(
             "current Group human-notify policy read is not implemented".to_string(),
+        ))
+    }
+
+    /// Read the Group's authorization-fact snapshot (spec §8.3).
+    ///
+    /// `Ok(None)` means Group not found. This is a strict read
+    /// against the MASTER data source: implementations must NOT
+    /// consult an ordinary `try_get` display cache and must NOT
+    /// fall back to that cache on a read failure. A storage or
+    /// decoding failure is always `Err`. The default keeps
+    /// unconfigured repository implementations fail-closed.
+    async fn read_authorization_snapshot(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::GroupAuthorizationSnapshot>>
+    {
+        Err(ServiceError::InternalError(
+            "Group authorization snapshot reads are not implemented".to_string(),
         ))
     }
 }

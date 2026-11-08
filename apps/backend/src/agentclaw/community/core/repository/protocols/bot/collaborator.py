@@ -311,6 +311,16 @@ class BotCollabLockRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
+    def steal(self, lock_key: str, holder_user_id: str) -> BotCollabLockRecord:
+        """Atomically create or replace the current environment's lock holder.
+
+        Reset acquisition timestamps for the new holder. Concurrent steals
+        serialize on the unique (lock_key, env) row; an existing lock is not
+        a conflict. Other persistence failures propagate to the caller.
+        """
+        ...
+
     # ========================================================================
     # Query Operations
     # ========================================================================

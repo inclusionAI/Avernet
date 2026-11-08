@@ -1,3 +1,4 @@
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { Button, Empty, IconButton, Skeleton } from '@/components/ui';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { useBotSessionFilePreview } from '@/pages/Workspace/hooks/useBotSessionFilePreview';
@@ -20,6 +21,7 @@ export interface BotSessionFilesPanelProps {
   sessionId?: string;
   userId?: string;
   ownerId?: string;
+  stage?: BotRuntimeStage;
   onClose: () => void;
   onUploadClick: () => void;
   onOpen: () => void;
@@ -44,6 +46,7 @@ export function BotSessionFilesPanel({
   sessionId,
   userId,
   ownerId,
+  stage,
   onClose,
   onUploadClick,
   onOpen,
@@ -95,6 +98,7 @@ export function BotSessionFilesPanel({
     sessionId: sessionId ?? null,
     userId: userId ?? null,
     ownerId,
+    stage,
   });
 
   const previewFile: { name: string; size: number } | null = selectedFile

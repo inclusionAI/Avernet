@@ -10,7 +10,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.render_screen.models import (
@@ -55,7 +55,11 @@ class BotRepository(Protocol):
         execution_options: dict | None = None,
         env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """Get bot by bot_id and owner_id.
+        """Get bot by bot_id and its current owner_id.
+
+        This method retains its authorization-sensitive historical meaning.
+        Boundary code that accepts an old field named ``owner_id`` as either
+        an entity locator or current owner must use ``BotAddressResolver``.
 
         ``execution_options`` is forwarded to the SQLAlchemy query via
         ``Query.execution_options`` so callers can opt out of cross-cutting
@@ -105,6 +109,23 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def get_by_pk(self, bot_pk: int) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by its immutable database primary key in this env."""
+        ...
+
+    @abstractmethod
+    def list_matches_by_legacy_locator(
+        self, bot_id: str, locator: str
+    ) -> List[Dict[str, Any]]:
+        """List live Bots whose entity or current owner matches ``locator``.
+
+        This is the compatibility lookup for old API fields named
+        ``owner_id``.  Returning every match lets the caller reject ambiguous
+        data instead of selecting an arbitrary row with ``first()``.
+        """
+        ...
+
+    @abstractmethod
     def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get one live Bot by id or raise when the caller scope is ambiguous."""
         ...
@@ -135,6 +156,26 @@ class BotRepository(Protocol):
         soft-deleted rows — so "in this list" means "live for this owner right
         now".
         """
+        ...
+
+    @abstractmethod
+    def page_live_bots_by_pks(
+        self, bot_pks: list[int], *, exclude_owner_id: str, entity_pairs: list[tuple[str, str]] | None,
+        page: int, page_size: int, stage: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Page live relation targets by stable PK; optional app scope is exact entity pairs.
+
+        None means a human listing, an empty list means no application scope.
+        Historical collaborator owner snapshots are never used to locate Bots.
+        Current Owners are excluded from their own collaboration collection.
+        Optional stage filters only service Bots before count/pagination, using
+        the canonical published-runtime selection. Other kinds are unchanged.
+        """
+        ...
+
+    @abstractmethod
+    def get_live_bot_owners_by_entity(self, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Current personnel owners for exact stable Bot addresses, in one scoped read."""
         ...
 
     @abstractmethod
@@ -194,6 +235,7 @@ class BotRepository(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        stage: str | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
 
@@ -206,6 +248,8 @@ class BotRepository(Protocol):
         business Space (exact after canonical string persistence), ``engine``
         filters on the active engine (exact), and ``status`` filters on lifecycle
         status (exact). All are optional and additive.
+        ``stage`` selects service Bots with that runtime before pagination;
+        other Bot kinds retain the existing matching behavior.
         """
         ...
 

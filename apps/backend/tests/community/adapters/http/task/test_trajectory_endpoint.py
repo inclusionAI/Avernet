@@ -41,6 +41,9 @@ from agentclaw.community.adapters.http.task.router import (
 from agentclaw.community.api.task.task_context_service import (
     TaskContextServiceProtocol,
 )
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisError,
     TrajectoryAnalysisNotConfiguredError,
@@ -88,6 +91,17 @@ class _StubTrajectoryService:
 
 
 class _StubModule(Module):
+    @singleton
+    @provider
+    def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
     """Binds ``TaskContextServiceProtocol`` to a stub instance (injector-level
     override, mirroring ``test_dashboard_assignee_bot_info.py``'s ``_StubModule``)."""
 

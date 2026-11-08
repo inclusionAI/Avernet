@@ -69,14 +69,10 @@ pub(super) async fn complete_session_target(
 
 pub(super) async fn complete_service_session_if_needed(
     flow: &BcsMessageFlow,
-    group: &Group,
     group_id: &str,
     status: &str,
     payload: &Value,
 ) -> ServiceResult<Option<Session>> {
-    if group.service_spec.is_none() {
-        return Ok(None);
-    }
     let Some(session_management) = flow.session_management.as_ref() else {
         return Ok(None);
     };
@@ -260,6 +256,12 @@ pub(super) async fn publish_task_message_to_workbench(
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::ManagerWorker,
             audience: Some(audience),
+            // Task progress notices are independent finite events
+            // (spec §7.3 boundary): authorized per event against
+            // current facts.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await;
 

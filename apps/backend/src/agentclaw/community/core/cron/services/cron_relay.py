@@ -16,7 +16,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.cron.services.cron_targeted_operations import CronTargetedOperationsMixin
+
 from injector import inject
+
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
@@ -54,7 +60,7 @@ logger = get_logger()
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
 
 
-class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
+class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject
@@ -66,6 +72,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
         resolver: DeviceContextResolver,
         template_repo: TemplateRepository,
         publish_repo: BotPublishRepositoryProtocol,
+        runtime_bindings: RuntimeBindingResolutionService,
+        collaborators: CollaboratorService,
     ):
         """Initialise.
 
@@ -88,6 +96,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
         self._resolver = resolver
         self._template_repo = template_repo
         self._publish_repo = publish_repo
+        self._runtime_bindings = runtime_bindings
+        self._collaborators = collaborators
         # Cron 批量查询共用限流器，控制同步设备连接准备占用的线程数。
         self._runtime_query_prepare_semaphore = asyncio.Semaphore(
             RUNTIME_QUERY_PREPARE_CONCURRENCY
@@ -99,6 +109,9 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
         nick_name: str,
         bot_id: Optional[str] = None,
         runtime_stage: Optional[str] = None,
+        device_uuid: str | None = None,
+        operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取用户所有 Bots 的定时任务（平铺展示）
 
@@ -107,11 +120,20 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
             nick_name: 用户花名
             bot_id: 如果为 "all" 或 None，返回所有 bots 的任务；否则返回指定 bot 的任务
             runtime_stage: 仅返回该运行态的任务；None 表示全部运行态。openapi_v1
-                传 draft——公开面只操作草稿态；内部控制台不传，保持全运行态聚合。
+                传 draft——公开面只操作草稿态；内部控制台不传，聚合全部普通运行态，
+                Caller 服务 Bot 则读取当前认证用户已有的 online Caller 实例。
 
         Returns:
             {"success": True, "data": [...], "total": N}
         """
+        if device_uuid is not None or operator_id is not None:
+            if not bot_id or bot_id == "all" or not runtime_stage:
+                raise CronRelayError("targeted listing requires bot_id and runtime_stage", 400)
+            return await self._forward_targeted_cron_request(
+                bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage,
+                device_uuid=device_uuid, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
+                method="GET", path="/api/cron",
+            )
         if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
             raise CronRelayError(
                 f"Invalid runtime_stage: {runtime_stage}", error_code=400
@@ -132,11 +154,49 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
             return {"success": True, "data": [], "total": 0}
 
         # 2. 获取每个 bot 的 runtime target，再并发获取 cron 配置列表。
-        # Cron 配置在同一运行态的多实例间保持一致，列表只展示到 stage 维度；
-        # running/runs/启停/触发才需要实例维度。
+        # Container-local configuration requires instance-level listing.
         targets: list[CronRuntimeTarget] = []
         failed_targets: list[dict[str, Any]] = []
         for bot in bots:
+            if (
+                bot.get("bot_type") == "service"
+                and bot.get("call_type") == "caller"
+                and runtime_stage in (None, RUNTIME_STAGE_ONLINE)
+                and str(bot.get("active_engine") or "").strip().lower()
+                not in _CRON_UNSUPPORTED_ENGINES
+            ):
+                # COSEC: Caller identity comes from authentication, never the Bot owner.
+                actor = authenticated_user_id or user_id
+                owner = bot.get("owner_id") or user_id
+                try:
+                    resolved = self._runtime_bindings.resolve(
+                        RuntimeBindingRequest(
+                            bot_id=bot["bot_id"], owner_id=owner,
+                            actor_user_id=actor, stage=RUNTIME_STAGE_ONLINE,
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "cron.list.caller_unavailable bot_id=%s owner_id=%s actor_user_id=%s exception_type=%s error=%s",
+                        bot["bot_id"], owner, actor, type(exc).__name__, exc,
+                    )
+                    failed_targets.append(self._failed_target_from_values(
+                        bot_id=bot["bot_id"], bot_name=bot.get("bot_name", ""),
+                        owner_id=owner, runtime_stage=RUNTIME_STAGE_ONLINE,
+                        publish_id=None, reason="caller_unavailable", message=str(exc),
+                    ))
+                    continue
+                logger.info(
+                    "cron.list.caller_selected bot_id=%s owner_id=%s actor_user_id=%s binding_id=%s",
+                    bot["bot_id"], owner, actor, resolved.binding_id,
+                )
+                targets.append(CronRuntimeTarget(
+                    bot_id=bot["bot_id"], bot_name=bot.get("bot_name", ""),
+                    owner_id=owner, bot_type="service", runtime_stage=RUNTIME_STAGE_ONLINE,
+                    binding_id=resolved.binding_id, operator_id=actor,
+                    authenticated_user_id=actor, fixed_binding=True, caller_binding=True,
+                ))
+                continue
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
@@ -148,9 +208,23 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
                 t for t in failed_targets if t.get("runtime_stage") == runtime_stage
             ]
 
+        # Tasks are container-local; query every instance so none disappear from the list.
+        targets, instance_failed_targets = await self._expand_runtime_targets(targets)
+        failed_targets.extend(instance_failed_targets)
+
         tasks = []
         for target in targets:
-            task = self._fetch_runtime_target_crons(target, user_id)
+            if target.caller_binding:
+                # The binding and membership snapshot were validated before expansion.
+                task = self._forward_targeted_cron_request(
+                    bot_id=target.bot_id, user_id=target.owner_id,
+                    runtime_stage=target.runtime_stage, device_uuid=target.device_uuid,
+                    operator_id=target.operator_id,
+                    authenticated_user_id=target.authenticated_user_id,
+                    method="GET", path="/api/cron", _resolved_target=target,
+                )
+            else:
+                task = self._fetch_runtime_target_crons(target, user_id)
             tasks.append(task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -240,12 +314,24 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronR
         bot_id: str,
         runtime_stage: str | None = None,
         device_uuid: str | None = None,
+        operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取指定 Bot 的运行中任务。
 
         服务 Bot 必须指定 runtime_stage，并按运行实例聚合；个人 Bot 不接收
         runtime_stage 或 device_uuid。
         """
+        # Without a Caller identity, preserve the existing UUID-filtered response.
+        if operator_id is not None:
+            result = await self._forward_targeted_cron_request(
+                bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
+                device_uuid=device_uuid, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
+                method="GET", path="/api/cron/running",
+            )
+            data = result.get("data", {})
+            running = data.get("running", []) if isinstance(data, dict) else data
+            return {**result, "data": running}
         # running 只查询一个 Bot，不接受聚合全部 Bot 的 all 参数。
         if not bot_id or bot_id == "all":
             raise CronRelayError("a specific bot_id is required", error_code=400)

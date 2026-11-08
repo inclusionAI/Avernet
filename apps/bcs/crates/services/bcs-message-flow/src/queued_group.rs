@@ -43,6 +43,9 @@ enum TextProjection {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueuedGroupProjection {
+    /// Presence means caller execution is required; missing cache must fail closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_execution: Option<crate::caller_execution::ExecutionRef>,
     version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
@@ -78,6 +81,8 @@ pub struct QueuedGroupProjection {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueuedTransportContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_expires_at_ms: Option<u64>,
     pub version: u32,
     pub owner: BotRunTransportOwner,
     pub connection_id: Option<String>,
@@ -165,6 +170,9 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
                 .ok_or_else(|| invalid("queue send-start transport metadata missing"))?,
         )
         .map_err(|_| invalid("invalid queue transport metadata"))?;
+        if transport.caller_expires_at_ms.is_some_and(|expiry| expiry <= bcs_protocol::now_ms()) {
+            return Err(invalid("caller credential expired; resend the message"));
+        }
         if transport.version != 1
             || !delivery.state.may_have_been_sent
             || command.target_bot_id() != delivery.target_bot_id
@@ -390,6 +398,7 @@ fn invalid(message: &str) -> ServiceError {
 impl QueuedGroupProjection {
     pub(crate) fn timeout_notice(row: &PersistedMessageDelivery, manager: &str) -> ServiceResult<Self> {
         let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
+        projection.caller_execution = None;
         projection.task = None;
         projection.mentions = vec![manager.to_string()];
         projection.target_tags.clear();
@@ -403,6 +412,7 @@ impl QueuedGroupProjection {
     }
     pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>) -> ServiceResult<Self> {
         let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
+        projection.caller_execution = None;
         projection.sender_name = task.worker_name.clone();
         projection.target_tags = tags;
         projection.mentions = vec![task.manager.clone()];
@@ -421,6 +431,7 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("system queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
+            caller_execution: None,
             version: 1, task: None, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
@@ -478,6 +489,7 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
+            caller_execution: crate::caller_execution::ExecutionRef::from_command(command),
             task: None,
             required_context: false,
             drain_context: false,
@@ -819,6 +831,12 @@ async fn prepare_queued_group_bounded(
             },
         );
     }
+    let caller_expires_at_ms = if let Some(scope) = &projection.caller_execution {
+        if row.flow_kind != DeliveryFlowKind::Group { return Err(invalid("caller execution cannot propagate to task/system delivery")); }
+        Some(crate::caller_execution::apply(flow, scope, &delivery_target, &row.target_bot_id,
+            &row.group_id, &row.session_id,
+            source.content.get("source_im_message_id").and_then(|v| v.as_str()), &mut frame).await?)
+    } else { None };
     let owner = match &delivery_target {
         BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
         BotDeliveryTarget::HttpProvider {
@@ -831,6 +849,7 @@ async fn prepare_queued_group_bounded(
         },
     };
     let transport = QueuedTransportContext {
+        caller_expires_at_ms,
         provider_route_headers: provider_route_headers.clone(),
         relay_route_headers: Some(relay_route_headers),
         version: 1,

@@ -10,14 +10,9 @@ export interface TaskStoreState {
   lastTaskId: string | null;
   lastTaskRecord: TaskRecord | null;
   error: string | null;
-  /** UI 偏好：上次选的 panel tab / progress view，可持久化。 */
-  preferredTab: 'info' | 'artifacts' | 'progress';
-  preferredView: 'node' | 'dag';
   setSubmitting: (v: boolean) => void;
   setLastTask: (record: TaskRecord) => void;
   setError: (msg: string | null) => void;
-  setPreferredTab: (t: 'info' | 'artifacts' | 'progress') => void;
-  setPreferredView: (v: 'node' | 'dag') => void;
   reset: () => void;
 }
 
@@ -26,8 +21,6 @@ const initial = {
   lastTaskId: null,
   lastTaskRecord: null,
   error: null,
-  preferredTab: 'progress' as const,
-  preferredView: 'node' as const,
 };
 
 export const useTaskStore = create<TaskStoreState>((set) => ({
@@ -35,7 +28,5 @@ export const useTaskStore = create<TaskStoreState>((set) => ({
   setSubmitting: (submitting) => set({ submitting }),
   setLastTask: (record) => set({ lastTaskRecord: record, lastTaskId: record.task_id, error: null }),
   setError: (error) => set({ error }),
-  setPreferredTab: (preferredTab) => set({ preferredTab }),
-  setPreferredView: (preferredView) => set({ preferredView }),
   reset: () => set(initial),
 }));

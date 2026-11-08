@@ -32,11 +32,6 @@ pub(crate) fn legacy_create_group_spec(
             "id cannot be supplied when event_subscriptions are requested".to_string(),
         ));
     }
-    if req.service_spec.is_some() {
-        return Err(HttpAdapterError::BadRequest(
-            "service_spec is not supported with event_subscriptions".to_string(),
-        ));
-    }
 
     let group_kind = req
         .group_kind
@@ -185,6 +180,7 @@ pub(crate) fn legacy_create_group_spec(
         .or_else(|| req.label.clone());
 
     Ok(CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+        human_mention_notify_mode: req.human_mention_notify_mode,
         name,
         context: req.context.clone(),
         opening_message: req.opening_message.clone(),

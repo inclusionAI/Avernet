@@ -2,8 +2,11 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import './ChatPanel.css';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
@@ -12,6 +15,7 @@ import {
   buildQuotePrompt,
   useMessageInteractions,
 } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { SubmitContext } from '@tc-chat/ui/es/Sender';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
@@ -46,6 +50,7 @@ export function ChatPanel({
   modelSelector,
   fileChip,
   command,
+  composerHeader,
   fileToolbar,
   senderRef,
   mode,
@@ -63,6 +68,9 @@ export function ChatPanel({
   onToggleSidePane,
   onSidePaneIsOpenChange,
 }: ChatPanelProps) {
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
+  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
     messages,
@@ -172,7 +180,15 @@ export function ChatPanel({
   return (
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <ChatLayout className="min-h-0 flex-1">
+      <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
+        {linkedSession ? (
+          <TaskLinkedSession
+            target={linkedSession}
+            userId={authenticatedUserId ?? undefined}
+            onClose={closeLinkedSession}
+          />
+        ) : (
+          <>
         <ChatPanelHeader
           target={target}
           sessionTitle={sessionTitle}
@@ -236,6 +252,7 @@ export function ChatPanel({
             placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
             fileChip={fileChip}
             command={command}
+            slots={{ header: composerHeader }}
             toolbar={{
               left:
                 taskComposer || modelSelector || connectionCopy.detail || fileToolbar ? (
@@ -258,16 +275,21 @@ export function ChatPanel({
             }}
           />
         </div>
+          </>
+        )}
 
         <ChatLayoutPanelSlot
           ref={panelRef}
           onAction={onPanelAction}
           bridge={chatBridge}
+          dismissOnOutside={false}
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>
       {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
     </section>
   );
 }

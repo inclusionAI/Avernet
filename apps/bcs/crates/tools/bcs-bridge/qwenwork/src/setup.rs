@@ -32,12 +32,10 @@ fn deinitialize_at(config_path: &Path, options: &toml::Table, home: &Path) -> Re
     if options.keys().any(|key| key != "settings_path") { bail!("Deinit accepts only --option settings_path"); }
     let _lock = configuration_lock(config_path)?;
     let original = fs::read(config_path).context("Keep the registered configuration until deinit completes")?;
-    let config: toml::Table = toml::from_str(std::str::from_utf8(&original).context("Configuration must be UTF-8")?)
+    let mut config: toml::Table = toml::from_str(std::str::from_utf8(&original).context("Configuration must be UTF-8")?)
         .map_err(|_| anyhow::anyhow!("Invalid bridge TOML"))?;
-    let bots = config.get("bot").and_then(toml::Value::as_array).context("No registered Bots")?;
-    let candidates: Vec<_> = bots.iter().filter(|bot| bot.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")).collect();
-    if candidates.len() != 1 { bail!("Deinit requires exactly one qwenwork Bot"); }
-    let engine = candidates[0].get("engine_options").and_then(toml::Value::as_table).context("QwenWork is not initialized")?;
+    let bot = unique_qwenwork_bot(&mut config)?;
+    let engine = bot.get("engine_options").and_then(toml::Value::as_table).context("QwenWork is not initialized")?;
     let engine = desktop_options(engine)?;
     let listen = engine.get("listen").and_then(toml::Value::as_str).context("Missing listener")?;
     let secret = engine.get("hook_secret").and_then(toml::Value::as_str).filter(|s| !s.is_empty()).context("Missing Hook credential")?;
@@ -74,10 +72,7 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     let original = fs::read(config_path).context("Register the qwenwork Bot before initializing")?;
     let text = std::str::from_utf8(&original).context("Bridge configuration must be UTF-8")?;
     let mut document: toml::Table = toml::from_str(text).map_err(|_| anyhow::anyhow!("Invalid bridge TOML"))?;
-    let bots = document.get_mut("bot").and_then(toml::Value::as_array_mut).context("No registered Bots in configuration")?;
-    let indexes: Vec<_> = bots.iter().enumerate().filter(|(_, b)| b.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")).map(|(i, _)| i).collect();
-    if indexes.len() != 1 { bail!("Initialization requires exactly one qwenwork Bot in the selected configuration"); }
-    let bot = bots[indexes[0]].as_table_mut().context("Invalid Bot configuration")?;
+    let bot = unique_qwenwork_bot(&mut document)?;
     let mut engine = bot.get("engine_options").and_then(toml::Value::as_table).cloned().unwrap_or_default();
     if let Some(value) = overrides.get("database_path") { engine.insert("database_path".into(), value.clone()); }
     if !engine.contains_key("database_path") {
@@ -328,3 +323,26 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 #[path = "setup_tests.rs"]
 mod tests;
+
+/// Keep the single-QwenWork initialization contract across V1 and V2 layouts.
+fn unique_qwenwork_bot(document: &mut toml::Table) -> Result<&mut toml::Table> {
+    let groups: Vec<&mut toml::Table> = if document.contains_key("provider") || document.contains_key("schema_version") {
+        if document.get("schema_version").and_then(toml::Value::as_integer) != Some(2)
+            || document.keys().any(|key| !["schema_version", "provider"].contains(&key.as_str())) {
+            bail!("Invalid V2 bridge configuration");
+        }
+        document.get_mut("provider").and_then(toml::Value::as_array_mut).context("Missing Providers")?
+            .iter_mut().map(|group| group.as_table_mut().context("Invalid Provider")).collect::<Result<_>>()?
+    } else { vec![document] };
+    let mut candidates = Vec::new();
+    for group in groups {
+        for bot in group.get_mut("bot").and_then(toml::Value::as_array_mut).context("No registered Bots")? {
+            let bot = bot.as_table_mut().context("Invalid Bot")?;
+            if bot.get("engine").and_then(toml::Value::as_str) == Some("qwenwork") {
+                candidates.push(bot);
+            }
+        }
+    }
+    if candidates.len() != 1 { bail!("Initialization/deinit requires exactly one qwenwork Bot in the selected configuration"); }
+    Ok(candidates.remove(0))
+}

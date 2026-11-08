@@ -150,6 +150,49 @@ def test_get_by_id_and_entity_selects_the_correct_default_bot(repo):
     assert selected["caller_config_revision"] == 0
 
 
+def test_get_by_pk_returns_exact_live_bot(repo):
+    inserted = repo.insert(
+        _data(bot_id="service-bot", entity_id="entity-a", owner_id="owner-b")
+    )
+
+    selected = repo.get_by_pk(inserted["id"])
+
+    assert selected is not None
+    assert selected["id"] == inserted["id"]
+    assert selected["entity_id"] == "entity-a"
+
+
+def test_legacy_locator_lists_entity_and_current_owner_matches(repo):
+    by_entity = repo.insert(
+        _data(bot_id="shared-id", entity_id="legacy", owner_id="owner-b")
+    )
+    by_owner = repo.insert(
+        _data(bot_id="shared-id", entity_id="entity-c", owner_id="legacy")
+    )
+
+    matches = repo.list_matches_by_legacy_locator("shared-id", "legacy")
+
+    assert {row["id"] for row in matches} == {by_entity["id"], by_owner["id"]}
+
+
+def test_get_by_owner_remains_strict_after_owner_handoff(repo):
+    inserted = repo.insert(
+        _data(bot_id="service-bot", entity_id="owner-a", owner_id="owner-b")
+    )
+
+    assert repo.get_by_id_and_owner("service-bot", "owner-a") is None
+    assert repo.get_by_id_and_owner("service-bot", "owner-b")["id"] == inserted["id"]
+
+
+def test_legacy_locator_exposes_cross_match_ambiguity_to_resolver(repo):
+    repo.insert(_data(bot_id="shared-id", entity_id="owner-a", owner_id="owner-b"))
+    repo.insert(_data(bot_id="shared-id", entity_id="entity-c", owner_id="owner-a"))
+
+    matches = repo.list_matches_by_legacy_locator("shared-id", "owner-a")
+
+    assert len(matches) == 2
+
+
 def test_get_unique_by_id_rejects_duplicate_default_bots(repo):
     repo.insert(_data(bot_id="default", entity_id="entity-one"))
     repo.insert(_data(bot_id="default", entity_id="entity-two"))

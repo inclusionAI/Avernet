@@ -10,6 +10,7 @@ async function legacyDatabase() {
   const db = new SqliteDatabase(new Database(':memory:'));
   await db.exec('CREATE TABLE schema_version (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER NOT NULL, description TEXT, gmt_create INTEGER, gmt_modified INTEGER)');
   for (const migration of migrations.filter(item => item.version <= 134 && !item.mysqlOnly)) {
+    if (migration.migrate) await migration.migrate(db);
     for (const sql of migration.sql) {
       try { await db.exec(db.dialect.renderDdl(sql)); }
       catch (error) {

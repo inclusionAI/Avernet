@@ -1,13 +1,21 @@
 /** @jest-environment jsdom */
 import { ChatPanel, resolveSingleSender } from '@/components/Workspace/ChatPanel/index';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
-import { describe, expect, it, jest } from '@jest/globals';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { ChatBridge } from '@tc-chat/core';
 import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
+
+let mockWorkspacePanelDismissCalls: Array<[boolean, unknown, unknown]> = [];
+jest.mock('@/hooks/useWorkspacePanelDismiss', () => ({
+  useWorkspacePanelDismiss: (...args: [boolean, unknown, unknown]) => {
+    mockWorkspacePanelDismissCalls.push(args);
+  },
+}));
 
 // 捕获 <ChatLayout.Panel> 收到的 props（断言 bridge 透传）。mock 前缀通过 jest.factory 检查。
 let mockPanelRenders: Array<Record<string, unknown>> = [];
@@ -93,6 +101,16 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
 jest.mock('@tc-chat/ui/es/SystemNotice', () => ({
   SystemNotice: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
+jest.mock('@/components/Workspace/TaskLinkedSession', () => ({
+  TaskLinkedSession: ({ target, onClose }: { target: { sessionId: string }; onClose: () => void }) => (
+    <div data-testid="task-linked-session">
+      {target.sessionId}
+      <button type="button" onClick={onClose}>
+        close-linked
+      </button>
+    </div>
+  ),
+}));
 
 const demoTarget: ConversationTarget = {
   id: 'octopus',
@@ -124,6 +142,47 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  beforeEach(() => {
+    useTaskSidePanelStore.getState().resetAll();
+    mockPanelRenders.length = 0;
+    mockWorkspacePanelDismissCalls.length = 0;
+  });
+
+  it('任务节点联动只替换左侧会话内容，右侧 ChatLayout.Panel 保持挂载', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'agent:main:session:s-1',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    expect(screen.getByTestId('task-linked-session')).toHaveTextContent('agent:main:session:s-1');
+    expect(screen.queryByTestId('sender')).not.toBeInTheDocument();
+    expect(mockPanelRenders).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-linked' }));
+    expect(screen.queryByTestId('task-linked-session')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sender')).toBeInTheDocument();
+    expect(mockPanelRenders.length).toBeGreaterThanOrEqual(2);
+  });
   it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
     const onToggleSidePane = jest.fn();
     const { rerender } = render(
@@ -289,9 +348,12 @@ describe('ChatPanel interactive', () => {
         {...baseProps}
       />,
     );
-    expect(screen.getByText('已连接')).toBeInTheDocument();
+    const status = screen.getByRole('status', { name: '已连接' });
+    expect(status).toHaveTextContent('已连接');
     // v1.4：超长标题下连接状态不换行不被挤占（shrink-0 + nowrap，收缩只由标题承担）
-    expect(screen.getByText('已连接')).toHaveClass('shrink-0', 'whitespace-nowrap');
+    expect(status).toHaveClass('shrink-0', 'whitespace-nowrap');
+    // v1.5 窄宽收纳：已连接文案 <lg 仅保绿点，可访问名由 aria-label 承接。
+    expect(screen.getByText('已连接')).toHaveClass('hidden', 'lg:inline');
   });
 
   it('sessionTitle 传入时顶栏显示会话标题（与协作群顶栏一致），缺省回退 Bot 名称', () => {
@@ -688,6 +750,35 @@ describe('ChatPanel interactive', () => {
     expect(typeof onLoadMore).toBe('function');
     onLoadMore?.();
     expect(onLoadMoreMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('副屏展开后不订阅点外收起，仅允许显式按钮关闭', () => {
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    const panelProps = mockPanelRenders.at(-1) as { onIsOpenChange?: (open: boolean) => void };
+    act(() => panelProps?.onIsOpenChange?.(true));
+
+    expect(mockWorkspacePanelDismissCalls.at(-1)).toEqual([
+      false,
+      expect.any(Function),
+      expect.any(Function),
+    ]);
   });
 
   it('把 chatBridge 透传给 ChatLayout.Panel（主→副通道接线）', () => {

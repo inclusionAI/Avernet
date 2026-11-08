@@ -527,7 +527,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         return service.exec_shell(device_id, shell_cmd)
 
     @override
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, timeout_seconds: int | None = None):
         """在设备上执行 shell 命令 - 根据 device_id 路由.
 
         Args:
@@ -538,6 +538,8 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
             命令执行结果
         """
         service = self._get_provider_for_device_id(device_id)
+        if timeout_seconds is not None:
+            return service.exec_shell_new(device_id, shell_cmd, timeout_seconds=timeout_seconds)
         return service.exec_shell_new(device_id, shell_cmd)
 
     @override
@@ -563,6 +565,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
@@ -571,11 +574,15 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
         有意义;其余 provider 忽略。
+
+        ``caller_id`` 是经认证的实际访问用户，供用户级灰度门判定;operator 在
+        engine_runtime 连接面被有意重标为 owner，不能作为灰度身份。
         """
         service = self._get_provider_for_binding(binding_id)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
             device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
+            caller_id=caller_id,
         )
 
     @override
@@ -777,6 +784,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
                 providers=self._providers,
                 publish_repo=self._publish_repo,
                 bot_repo=self._bot_repo,
+                collaborator_service_factory=self._get_collaborator_service,
             )
         return self._instance_svc
 
@@ -871,7 +879,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         device_uuid: str,
         operator: OperatorContext,
     ) -> dict[str, Any]:
-        """指定设备重启（binding_id 入口，仅 owner）。委托 DeviceInstanceService。"""
+        """指定设备重启（Owner、超级管理员或显式协作者）。委托 DeviceInstanceService。"""
         return self._instance_service().restart_device(
             binding_id=binding_id,
             device_uuid=device_uuid,

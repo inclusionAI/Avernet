@@ -295,14 +295,18 @@ def test_finalize_mounts_the_di_conditional_routers(preload_then_finalize):
     """The one route registration that waits for the worker's injector.
 
     Under DEPLOY_PROFILE=test the column binds a populated ``OptionalRouters``,
-    so finalize adds exactly the local-mode surface on top of what construction
-    registered — and touches nothing else.
+    so finalize adds the local tooling and generic knowledge selection surfaces
+    on top of construction, without changing previously registered routes.
     """
     got = preload_then_finalize
     before = {row[0] for row in got["before"]["routes"]}
     after = {row[0] for row in got["after_one"]["routes"]}
 
-    assert after - before == {"/local/sql/execute"}, (
+    assert after - before == {
+        "/local/sql/execute",
+        "/api/bot-knowledge/{bot_id}",
+        "/api/bot-knowledge/{bot_id}/{kb_id}",
+    }, (
         "finalize should mount exactly the profile's OptionalRouters on top of "
         f"the constructed surface; it added {sorted(after - before)}"
     )

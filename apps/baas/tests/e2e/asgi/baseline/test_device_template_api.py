@@ -106,22 +106,6 @@ class TestDeviceTemplateApi:
         )
         assert resp.status_code == 404
 
-    async def test_list_templates(self, http_client, test_tenant):
-        """WHEN listing templates, THEN returns paginated results."""
-        resp = await http_client.get(
-            "/api/v1/device-templates",
-            params={"tenant": test_tenant, "page": 1, "page_size": 10},
-        )
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert "items" in data
-        assert "total" in data
-        assert "page" in data
-        assert "page_size" in data
-        assert isinstance(data["items"], list)
-        assert data["page"] == 1
-        assert data["page_size"] == 10
-
     async def test_update_template(self, http_client, test_tenant):
         """WHEN updating a template, THEN returns updated template data."""
         template_id = _unique_template_id()

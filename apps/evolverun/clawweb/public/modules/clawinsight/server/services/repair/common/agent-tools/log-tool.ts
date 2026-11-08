@@ -9,6 +9,11 @@ import type {
 import { AgentToolError, agentToolUnavailable, agentToolValidation } from "./errors.js";
 import { containsSecret, redactPersistableText, redactText } from "@avernet/clawweb-shared/server/services/redaction";
 
+type AgentLogContext = Pick<AgentToolContext, "taskId" | "issue"> & {
+  target: Pick<AgentToolContext["target"], "botId" | "ownerId">;
+  notAfterMs?: number;
+};
+
 const IDENTIFIERS = new Set<AgentLogIdentifier>(["botId", "ownerId", "traceId", "relatedTaskId", "errorText"]);
 const DISCOVERED_KEYS = new Map<string, AgentDiscoveredIdentifierKind>([
   ["bindingid", "bindingId"],
@@ -71,7 +76,7 @@ function extractDiscoveredIdentifiers(
   return [...found.values()];
 }
 
-function identifierValue(input: AgentToolContext, identifier: AgentLogIdentifier): string | null {
+function identifierValue(input: AgentLogContext, identifier: AgentLogIdentifier): string | null {
   if (identifier === "botId") return input.target.botId;
   if (identifier === "ownerId") return input.target.ownerId;
   if (identifier === "traceId") return input.issue.traceId;
@@ -283,7 +288,7 @@ export class AgentLogTool {
   }
 
   async search(
-    run: AgentToolContext,
+    run: AgentLogContext,
     request: AgentLogSearchInput,
     verifiedDiscovered: AgentDiscoveredIdentifierCandidate[] = [],
   ): Promise<Record<string, unknown>> {
@@ -319,7 +324,8 @@ export class AgentLogTool {
       return agentToolUnavailable("repair_antlogs_sources_not_configured", "Repair 没有可用的默认日志源");
     }
     const from = safeEpoch(request.from, run.issue.timeRange.from, "from");
-    const to = safeEpoch(request.to, run.issue.timeRange.to, "to");
+    const requestedTo = safeEpoch(request.to, run.issue.timeRange.to, "to");
+    const to = run.notAfterMs === undefined ? requestedTo : Math.min(requestedTo, Math.floor(run.notAfterMs / 1000));
     if (from >= to) agentToolValidation("invalid_log_time_range", "日志查询 from 必须早于 to");
     const limit = request.limit == null ? 100 : Number(request.limit);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
@@ -347,7 +353,12 @@ export class AgentLogTool {
         "AntLogs 查询失败",
       );
     }
-    const entries = result.entries.slice(0, limit);
+    const entries = result.entries.slice(0, limit).filter(entry => {
+      if (run.notAfterMs === undefined) return true;
+      const raw = String(entry.timestamp), number = Number(raw);
+      const at = Number.isFinite(number) && raw.trim() ? (number < 1e12 ? number * 1000 : number) : Date.parse(raw);
+      return Number.isFinite(at) && at <= run.notAfterMs;
+    });
     const sourceResults = result.sourceResults.map((source) => ({
       name: source.source.name,
       status: source.status,
@@ -365,6 +376,7 @@ export class AgentLogTool {
         from,
         to,
         limit,
+        ...(run.notAfterMs === undefined ? {} : { notAfterMs: run.notAfterMs, omittedOutsideRange: result.entries.slice(0, limit).length - entries.length }),
       },
       entries: entries.map((entry) => ({
         timestamp: redactPersistableText(entry.timestamp, 128),

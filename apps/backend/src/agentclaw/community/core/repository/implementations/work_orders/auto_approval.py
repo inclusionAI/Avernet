@@ -301,12 +301,7 @@ class _AutoApprovalWorkOrderRepository:
             space_id = int(order.biz_id)
         except (TypeError, ValueError) as exc:
             raise WorkOrderNotFoundError("invalid Space id in work order") from exc
-        space = (
-            db.query(self._Space)
-            .filter(self._Space.id == space_id, self._Space.env == env)
-            .with_for_update()
-            .one_or_none()
-        )
+        space = self._effects.lock_space(db, space_id=space_id, environment=env)
         if space is None:
             raise WorkOrderNotFoundError("work-order Space not found")
         member = (
@@ -331,6 +326,7 @@ class _AutoApprovalWorkOrderRepository:
                 created_by=SYSTEM_REVIEWER_USER_ID,
             )
         )
+        self._effects.record_membership(db, space)
 
     def _insert_auto_result_notifications(
         self,

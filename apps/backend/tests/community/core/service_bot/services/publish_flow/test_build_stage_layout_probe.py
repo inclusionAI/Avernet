@@ -111,7 +111,7 @@ def _runner(producer, *, ext=None):
         dict(ext or {}),
     )
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "b1",
         "owner_id": "u1",
         "entity_id": "u1",

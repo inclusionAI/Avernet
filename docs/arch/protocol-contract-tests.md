@@ -1,15 +1,16 @@
 # Protocol Contract Tests (Rule 25)
 
-Every Plugin Protocol under `agentclaw.plugins` has a conformance test
-suite under `apps/backend/tests/contracts/test_<plugin>.py`. The arch
-test `tests/architecture/test_protocol_contracts.py` enforces the
-mapping with a shrinking `EXEMPT_PROTOCOLS` set.
+Plugin capability contracts live under `agentclaw.community.plugin_api`.
+Their consumer-level suites live under `apps/backend/tests/community/contracts/`;
+enterprise-specific suites live under the host's `apps/backend/tests/corp/contracts/`.
+The current mapping, named exemptions and corp-resident handling are enforced by
+`apps/backend/tests/community/architecture/test_protocol_contracts.py`.
+In an enterprise checkout, that public gate is in `submodules/avernet/`.
 
-**Quality gate:** the arch test only enforces that a suite *exists*. It
-cannot verify the suite is meaningful — that's `OWNERS`' job. The
-`tests/contracts/OWNERS` file lists the gatekeeper reviewers (same set
-as `src/agentclaw/plugins/OWNERS`); they approve every change under
-`tests/contracts/` to keep the suites honest.
+**Quality gate:** the mapping check verifies suite presence and test functions;
+it cannot establish meaningful consumer coverage. Follow the relevant suite's
+`OWNERS` and review expectations. The runtime/behavioral assertions below remain
+necessary even if discovery passes.
 
 ## What conformance means here
 
@@ -29,7 +30,7 @@ impl-authoring time and code review.
 
 ## Suite shape
 
-1. Use the `world` fixture (from `tests/framework/fixtures.py`).
+1. Use the `world` fixture (from `tests/community/framework/fixtures.py`).
 2. `world.get(SomeConsumer)` returns the upper-layer service / domain
    function under test, wired against a per-test injector with local
    plugin impls.
@@ -40,9 +41,9 @@ impl-authoring time and code review.
    recorded calls. Without this, a consumer could silently bypass the
    plugin and the test would still pass.
 
-If the local impl in the wired graph can't record calls, upgrade it to
-a mock-flavored impl (`@plugin_impl(mode=Mode.LOCAL, flavor=Flavor.MOCK)`)
-or add a sibling Mock and swap the binding.
+If the selected implementation cannot expose calls, bind a recording test
+double through the test injector. Keep profile selection at the composition
+root; a test must not add environment branches to the consumer.
 
 ## When to write one
 
@@ -53,11 +54,11 @@ or add a sibling Mock and swap the binding.
 
 ## Worked example
 
-`tests/contracts/test_cache.py` is the canonical reference:
+`tests/community/contracts/test_cache.py` is the canonical reference:
 
 ```python
-from agentclaw.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.plugins.cache import CachePlugin
+from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
+from agentclaw.community.plugin_api.cache import CachePlugin
 
 
 def test_marketcache_set_then_get_round_trips_through_cache_plugin(world) -> None:
@@ -80,18 +81,19 @@ Copy this shape for new plugins: pick a real consumer, exercise it
 through `world`, then assert both (a) the consumer's observable
 outcome and (b) some observable state on the plugin that proves the
 consumer actually routed through it. Note: contract suites use the
-`world` fixture (re-exported via `tests/contracts/conftest.py`); async
+`world` fixture (re-exported via `tests/community/contracts/conftest.py`); async
 tests need `@pytest.mark.asyncio` since pytest-asyncio runs in strict
 mode.
 
 ## Out of scope (per spec)
 
-- Service API Protocols under `agentclaw.api`.
+- Service API Protocols under `agentclaw.community.api`.
 - Prod impl execution in CI.
 - Concurrency / performance / fuzz testing.
 
 ## See also
 
 - `docs/arch/arch.rules.md` § Rule 25.
-- `docs/arch/arch-diagnosis-backend.md` § 2.25 / § 4.5.
-- `specs/2026-05-24-rule25-protocol-contract-tests/` — SDD artifacts.
+- `docs/arch/arch-diagnosis-backend.md` — historical diagnosis, not current path authority.
+- Historical Rule 25 migration specs explain the original rollout; use the
+  current gate and suites above for paths and exceptions.

@@ -51,17 +51,17 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
 )
@@ -282,8 +282,8 @@ async def get_bot_create_with_manifest_status(
     request: Request,
     owner_id: UserIdDep,
     bot_repo: BotRepository = Injected(BotRepository),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
     manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
 ) -> Envelope[BotCreateWithManifestStatus]:

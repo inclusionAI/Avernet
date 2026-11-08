@@ -5,6 +5,9 @@ export type RepairTrialCandidate = { workflowId: string; taskId: string; revisio
 export type RepairTrialOptions = { source?: 'saved'; packId: string; workflowIds?: string[]; candidateRef: string; inputSchema: Record<string, unknown> | null;
   inputDefinition?: 'defined' | 'none' | 'missing' };
 export type RepairTrialStatus = 'dispatching' | 'awaiting_run' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'unknown';
+/** Signed Bot feedback for a request that failed before native run registration. */
+export type RepairTrialStartFailure = { requestId: string; botId: string; ownerId: string;
+  code: string; httpStatus?: number };
 export type RepairTrial = RepairTrialCandidate & {
   mode?: 'pinned' | 'saved';
   id: string; flowId: string | null; requestId: string; actorId: string; target: RepairTrialTarget;

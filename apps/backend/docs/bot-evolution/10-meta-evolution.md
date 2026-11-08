@@ -591,7 +591,7 @@ Run on submission, before any money is spent on verification:
 | Check | Rejects |
 | --- | --- |
 | Verifier boundary | Any op whose target is a suite, split, grader, verification profile, mechanism verification profile, gate floor, significance threshold, or the meta-verification protocol |
-| Policy and safety envelope | Any op touching budgets, kill switches, the risk-tier table, locked genes, or bot genome `policy` sections |
+| Policy and safety envelope | Any op touching budgets, kill switches, the risk-tier table, or bot genome `policy` sections |
 | Self-reference | A patch from a meta-run whose family equals the meta-strategy's own family |
 | Capabilities | A resulting registration whose `needs` adds capabilities, or names a capability outside the catalog |
 | Hidden-data references | Prompt edits that reference hidden suite ids or case content (the same diff audit as for guardrail-like text in bot patches) |
@@ -707,7 +707,7 @@ disabled its own hallucination checker).
 | Never changed by any automated loop | Why |
 | --- | --- |
 | The **verifier**: suites, splits, graders, platform gate floor, meta-verification protocol, significance thresholds | It defines "better". If the loop can edit it, gains become meaningless |
-| Locked genes and `policy` sections of bot genomes | Owner authority |
+| The `policy` sections of bot genomes | Owner authority |
 | Budgets, kill switches, risk-tier table | Safety envelope |
 | The meta-strategy's ability to modify itself or its own verifier | Prevents unbounded self-reference |
 

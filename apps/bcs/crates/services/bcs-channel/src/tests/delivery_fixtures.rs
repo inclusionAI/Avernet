@@ -34,7 +34,6 @@ impl SessionRepoPort for RecordingSessionRepo {
             input: params.input,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: params.message_visibility_version,
             caller_principal: params.caller_principal,
@@ -92,34 +91,6 @@ impl SessionRepoPort for RecordingSessionRepo {
             .await
             .into_iter()
             .next()
-    }
-
-    async fn count_running_service(&self, group_id: &str) -> u64 {
-        self.list_by_group(
-            group_id,
-            Some(SessionStatus::Running),
-            0,
-            u64::MAX,
-            None,
-            None,
-        )
-        .await
-        .into_iter()
-        .filter(|session| session.session_kind == SessionKind::ServiceInvocation)
-        .count() as u64
-    }
-
-    async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .await
-            .values()
-            .filter(|session| {
-                session.status == SessionStatus::Running
-                    && session.session_kind == SessionKind::ServiceInvocation
-            })
-            .cloned()
-            .collect()
     }
 
     async fn complete_if_running(
@@ -214,19 +185,6 @@ impl SessionRepoPort for RecordingSessionRepo {
         Ok(session.clone())
     }
 
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> ServiceResult<()> {
-        let mut sessions = self.sessions.lock().await;
-        let Some(session) = sessions.get_mut(session_id) else {
-            return Err(ServiceError::SessionNotFound(session_id.to_string()));
-        };
-        session.callback_status = Some(status.to_string());
-        Ok(())
-    }
-
     async fn update_title(
         &self,
         session_id: &str,
@@ -278,6 +236,7 @@ impl MessageFlowService for RecordingMessageFlow {
         let failed_count = *self.failed_dispatch_count.lock().await;
         let active_run_ids = self.active_run_ids.lock().await.clone();
     Ok(WebSendOutcome {
+            operation_id: "op-test".to_string(),
         queue_admission: None,
             primary_run_id: "run_1".to_string(),
             status: "accepted".to_string(),
@@ -480,6 +439,18 @@ impl ChannelProvider for RecordingProvider {
             ));
         }
         Ok(())
+    }
+
+    fn validate_binding_config(&self, config: &serde_json::Value, target: &BindingTarget) -> ChannelProviderResult<()> {
+        self.validate_config(config)?;
+        if self.requires_caller_execution(config)? && !matches!(target, BindingTarget::Bot { .. }) {
+            return Err(ChannelProviderError::InvalidConfig("caller requires a Bot binding".into()));
+        }
+        Ok(())
+    }
+
+    fn requires_caller_execution(&self, config: &serde_json::Value) -> ChannelProviderResult<bool> {
+        Ok(config.get("execution_mode").and_then(|v| v.as_str()) == Some("caller"))
     }
 
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value {

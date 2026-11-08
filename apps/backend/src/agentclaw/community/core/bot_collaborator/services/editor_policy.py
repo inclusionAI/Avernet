@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from collections.abc import Mapping
 from typing import Any
 
@@ -46,10 +48,12 @@ class EditorPolicy:
         )
 
     def resolve_bot(self, *, bot_id: str, owner_id: str) -> dict[str, Any]:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
-        return bot
+        try:
+            return BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}") from None
 
     def require_capability(self, *, bot: dict[str, Any], bot_id: str) -> None:
         # COSEC: mirroring the work-order entry point, a Bot assigned to a Team
@@ -92,12 +96,11 @@ class EditorPolicy:
         if record is None:
             raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")
         # COSEC: a public record id is never authority. Bind it back to the
-        # addressed Bot, owner and environment before any mutation so an admin
+        # addressed Bot PK and environment before any mutation so an admin
         # cannot operate another Bot's collaborator by guessing an integer id.
         if (
             record.bot_pk != bot["id"]
             or record.bot_id != bot_id
-            or record.owner_id != bot["owner_id"]
             or record.env != env
         ):
             raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")

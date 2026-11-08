@@ -53,10 +53,39 @@ impl GroupContextPolicy {
         self.user_ids.is_empty() || self.user_ids.iter().any(|id| id == actor_id)
     }
 
-    /// `collect_from.userIds` is a membership list; empty is invalid at the
-    /// application boundary and never means everyone.
+    /// `collect_from.userIds` is a membership list. Empty means there are no
+    /// additional policy writers; it never means everyone.
     pub fn contains_user(&self, actor_id: &str) -> bool {
         self.user_ids.iter().any(|id| id == actor_id)
+    }
+}
+
+/// Multi-value Group Context ownership.
+///
+/// Newly created and API-supplied owner lists must be non-empty. Rows that
+/// predate this field can have no owners: SQL stores that legacy state as
+/// `NULL`, and the store maps it to an empty list here. Empty lists never
+/// grant owner permissions. `userIds` is the stable wire field name and is
+/// not reused from the generic policy type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupContextOwners {
+    #[serde(rename = "userIds")]
+    pub user_ids: Vec<String>,
+}
+
+impl GroupContextOwners {
+    pub fn new(user_ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            user_ids: user_ids.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn contains(&self, actor_id: &str) -> bool {
+        self.user_ids.iter().any(|id| id == actor_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_ids.is_empty()
     }
 }
 
@@ -66,6 +95,7 @@ pub enum GroupContextPermission {
     R,
     W,
     WR,
+    WRO,
 }
 
 impl GroupContextPermission {
@@ -89,6 +119,7 @@ pub struct GroupContextEntryMeta {
     pub scope: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
+    pub owners: GroupContextOwners,
     pub gmt_create: GroupContextTime,
     pub gmt_modified: GroupContextTime,
 }
@@ -110,6 +141,7 @@ pub struct GroupContextEntry {
     pub creator: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
+    pub owners: GroupContextOwners,
     /// Physical `id` of the old version superseded by this row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<i64>,

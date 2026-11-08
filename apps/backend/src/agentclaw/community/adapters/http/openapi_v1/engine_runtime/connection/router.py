@@ -174,9 +174,9 @@ async def get_connection(
     if f_user_id is not None and device_uuid is not None:
         raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
     if f_user_id is not None:
-        if stage is not RuntimeStage.DRAFT or not session_id:
+        if not session_id:
             raise EngineResourceNotFoundError(
-                "friend connection requires a draft session_id"
+                "friend connection requires a session_id"
             )
         await authorize_friend_chat(
             request=request,
@@ -186,6 +186,7 @@ async def get_connection(
             friend_user_id=f_user_id,
             friendships=friendships,
             expert=expert,
+            stage=stage.value,
         )
         try:
             result = await expert.connect_chat_session(
@@ -240,6 +241,9 @@ async def get_connection(
         (DesktopConnection if result.transport_mode else Connection)(
             engine=result.engine,
             expires_at=result.expires_at,
+            # 用户灰度负结果必须透传到 wire——schema default False 会在缺席时
+            # 把核心层的"明确拒绝"冲掉，名单外用户在可推导直连拓扑下绕回 A2A。
+            a2a_withheld=result.a2a_withheld,
             **(
                 {"transport_mode": result.transport_mode}
                 if result.transport_mode

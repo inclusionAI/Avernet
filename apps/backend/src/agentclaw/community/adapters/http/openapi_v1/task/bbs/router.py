@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Annotated
-
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -11,16 +10,32 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
     PageParamsDep,
+    USER_SCOPED_ERROR_RESPONSES,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.core.errors import Forbidden
+from agentclaw.community.core.errors import Forbidden, ValidationError
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.models import (
+    PersonalCenterActivityQuery,
+)
 from agentclaw.community.core.task.forum.models import (
+    MAX_AUTHOR_ID_LENGTH,
+    MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
@@ -30,17 +45,41 @@ from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_names,
 )
 
+from .interaction_schemas import (
+    CreateInteractionRequest,
+    InteractionRecorded,
+    InteractionSummaryBatchRequest,
+    InteractionSummaryItemRequest,
+    InteractionSummaryBatchResponse,
+    InteractionSummaryResponse,
+    domain_summary_query,
+)
+from .personal_center_schemas import (
+    PersonalCenterActivityItem,
+    PersonalCenterActivityPage,
+    PersonalCenterActivityTypeWire,
+    PersonalCenterActorScopeWire,
+    PersonalCenterTargetTypeWire,
+)
+
 from .schemas import (
     BrowseReportCreated,
     CloseTopicRequestUnified,
     CreateBrowseReportRequest,
+    DeleteTopicRequestUnified,
+    UpdateTopicRequestUnified,
     CreateReplyRequestUnified,
+    domain_poll_selection,
     CreateTopicRequestUnified,
+    PostHelpfulUpdated,
     PostItem,
+    SetPostHelpfulRequest,
+    domain_topic_config,
     ReplyCreated,
     SubscriptionItem,
     TopicClosed,
     TopicCreated,
+    TopicDeleted,
     TopicDetail,
     TopicListItem,
     author_display_fields,
@@ -60,6 +99,7 @@ TopicIdPath = Annotated[
         description="Stable topic id exactly as returned by BBS APIs.",
     ),
 ]
+
 
 @read_router.get(
     "/topics",
@@ -83,14 +123,14 @@ async def list_topics(
     topic_type: str | None = Query(
         default=None,
         max_length=16,
-        description="Optional Topic type: DISCUSSION, POLL, or NOTICE.",
+        description="Optional Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
     ),
     author_id: str | None = Query(
         default=None,
         max_length=256,
         description="Optional author filter: return only Topics authored by "
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
-        "\'my topics\' view, server-side paginated.",
+        "'my topics' view, server-side paginated.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
@@ -120,10 +160,24 @@ async def list_topics(
 async def get_topic(
     topic_id: TopicIdPath,
     request: Request,
+    viewer_author_type: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Optional viewer author kind: HUMAN or BOT.",
+    ),
+    viewer_author_id: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Optional viewer author id used to request personalized state.",
+    ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicDetail]:
     """Return one Topic with its full description, but without replies."""
-    topic = service.get_topic(topic_id=topic_id)
+    topic = service.get_topic(
+        topic_id=topic_id,
+        viewer_author_type=viewer_author_type,
+        viewer_author_id=viewer_author_id,
+    )
     topic = enrich_bot_display_name(topic, request=request)
     return envelope(TopicDetail.from_record(topic), request)
 
@@ -140,7 +194,7 @@ async def list_posts(
     page_params: PageParamsDep,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[PostItem]]:
-    """Page through a Topic's replies in stable chronological order."""
+    """Page first-level replies; child replies follow their parent floor."""
     result = service.list_posts(
         topic_id=topic_id,
         page=page_params.page,
@@ -183,6 +237,8 @@ async def create_topic_unified(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
+        topic_type=body.topic_type,
+        topic_config=domain_topic_config(body.topic_config),
         **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)
@@ -217,11 +273,93 @@ async def create_reply_unified(
         author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
+        reply_to_post_id=body.reply_to_post_id,
+        poll_selection=domain_poll_selection(body.poll_selection),
         **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.put(
+    "/topics/{topic_id}",
+    response_model=Envelope[TopicDetail],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def update_topic_unified(
+    body: UpdateTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDetail]:
+    """Edit one OPEN Topic with the declared author and title/body values."""
+
+    updated = service.update_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        title=body.title,
+        body=body.body,
+    )
+    updated = enrich_bot_display_name(updated, request=request)
+    return envelope(TopicDetail.from_record(updated), request)
+
+
+@read_router.delete(
+    "/topics/{topic_id}",
+    response_model=Envelope[TopicDeleted],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def delete_topic_unified(
+    body: DeleteTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDeleted]:
+    """Delete one non-LOCKED Topic and its replies as its declared author."""
+
+    deleted = service.delete_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+    )
+    return envelope(TopicDeleted(topic_id=topic_id, deleted=deleted), request)
+
+
+@read_router.put(
+    "/topics/{topic_id}/posts/{post_id}/helpful",
+    response_model=Envelope[PostHelpfulUpdated],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def set_post_helpful_unified(
+    body: SetPostHelpfulRequest,
+    topic_id: TopicIdPath,
+    post_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=128,
+            description="Stable Post id exactly as returned by BBS APIs.",
+        ),
+    ],
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostHelpfulUpdated]:
+    """Mark or unmark one direct HELP reply as the declared Topic author."""
+    post = service.set_post_helpful(
+        topic_id=topic_id,
+        post_id=post_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        helpful=body.helpful,
+    )
+    return envelope(
+        PostHelpfulUpdated(post_id=post.post_id, helpful=post.helpful), request
+    )
 
 
 @read_router.post(
@@ -249,7 +387,10 @@ async def close_topic_unified(
     topic = service.get_topic(topic_id=topic_id)
     declared_author_type = body.author_type.strip().upper()
     declared_author_id = body.author_id.strip()
-    if topic.author_type != declared_author_type or topic.author_id != declared_author_id:
+    if (
+        topic.author_type != declared_author_type
+        or topic.author_id != declared_author_id
+    ):
         raise Forbidden("only the topic author may close the topic")
     closed = service.close_topic(topic_id=topic_id)
     return envelope(
@@ -299,6 +440,173 @@ async def list_bbs_browse_subscriptions(
         request,
     )
 
+
+@read_router.post(
+    "/interactions",
+    response_model=Envelope[InteractionRecorded],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def create_interaction(
+    body: CreateInteractionRequest,
+    request: Request,
+    response: Response,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionRecorded]:
+    """Append one valid BBS interaction event in the current environment."""
+    result = service.record_interaction(
+        actor_type=body.actor_type,
+        actor_id=body.actor_id,
+        action_type=body.action_type,
+        target_type=body.target_type,
+        target_id=body.target_id,
+    )
+    response.status_code = 201
+    return created(InteractionRecorded.from_record(result), request)
+
+
+_SUMMARY_QUERY_KEYS = frozenset(
+    {
+        "actor_type",
+        "actor_id",
+        "target_type",
+        "target_id",
+    }
+)
+
+
+@read_router.get(
+    "/interactions/summary",
+    response_model=Envelope[InteractionSummaryResponse],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_interaction_summary(
+    request: Request,
+    actor_type: str | None = Query(
+        default=None,
+        max_length=16,
+        description="Optional actor dimension type: HUMAN or BOT. Required with actor_id.",
+    ),
+    actor_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Optional stable HUMAN work-no or BOT id used as the actor dimension.",
+    ),
+    target_type: str | None = Query(
+        default=None,
+        max_length=16,
+        description="Optional target dimension type: TOPIC, POST, HUMAN, or BOT. Required with target_id.",
+    ),
+    target_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Optional stable target id used as the target dimension.",
+    ),
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryResponse]:
+    """Read one actor, target, or actor-target summary."""
+    _reject_unknown_query_keys(request, _SUMMARY_QUERY_KEYS)
+    result = service.get_summary(
+        domain_summary_query(
+            InteractionSummaryItemRequest(
+                actor_type=actor_type,  # type: ignore[arg-type]
+                actor_id=actor_id,
+                target_type=target_type,  # type: ignore[arg-type]
+                target_id=target_id,
+            )
+        )
+    )
+    return envelope(InteractionSummaryResponse.from_result(result), request)
+
+
+@read_router.post(
+    "/interactions/summary/batch",
+    response_model=Envelope[InteractionSummaryBatchResponse],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_interaction_summary_batch(
+    body: InteractionSummaryBatchRequest,
+    request: Request,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryBatchResponse]:
+    """Read at most 100 mixed summary dimensions; this operation is read-only."""
+    result = service.get_summary_batch(
+        tuple(domain_summary_query(item) for item in body.items)
+    )
+    return envelope(
+        InteractionSummaryBatchResponse(
+            items=[InteractionSummaryResponse.from_result(item) for item in result]
+        ),
+        request,
+    )
+
+
+@read_router.get(
+    "/personal-center/activities",
+    response_model=Envelope[PersonalCenterActivityPage],
+    responses=USER_SCOPED_ERROR_RESPONSES,
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_personal_center_activities(
+    request: Request,
+    page_params: PageParamsDep,
+    owner_user_id: str = Query(
+        min_length=1,
+        max_length=256,
+        description="The current human owner whose own and authorized-Bot activities are returned.",
+    ),
+    actor_scope: PersonalCenterActorScopeWire = Query(
+        default="ALL",
+        description="Which activities to include: the current HUMAN, authorized Bots, or both.",
+    ),
+    activity_type: PersonalCenterActivityTypeWire = Query(
+        default="ALL",
+        description="Activity kind filter, or ALL for every supported activity.",
+    ),
+    target_type: PersonalCenterTargetTypeWire = Query(
+        default="ALL",
+        description="Content target type filter, or ALL for Topics and Posts.",
+    ),
+    principal: Principal = Depends(require_principal),
+    service: ForumPersonalCenterActivityServiceProtocol = Injected(
+        ForumPersonalCenterActivityServiceProtocol
+    ),
+) -> Envelope[PersonalCenterActivityPage]:
+    """Return the current Human's server-paged BBS activity summary."""
+    if owner_user_id.strip() != principal.user_id:
+        raise Forbidden("owner_user_id must match the current human")
+    result = service.get_personal_center_activities(
+        PersonalCenterActivityQuery(
+            owner_user_id=owner_user_id,
+            actor_scope=actor_scope,
+            activity_type=activity_type,
+            target_type=target_type,  # type: ignore[arg-type]
+            page=page_params.page,
+            page_size=page_params.page_size,
+        )
+    )
+    return page_envelope(
+        result.total,
+        [PersonalCenterActivityItem.from_record(item) for item in result.items],
+        request,
+    )
+
+
+def _reject_unknown_query_keys(request: Request, allowed: frozenset[str]) -> None:
+    unexpected = set(request.query_params) - allowed
+    if unexpected:
+        raise ValidationError(
+            "unknown query parameter: " + ", ".join(sorted(unexpected))
+        )
 
 
 @read_router.post(

@@ -3,6 +3,15 @@ declare module '*.less';
 /** 仅 PRESET=local 注入；非本地构建固定为空字符串。 */
 declare const TEAMCLAW_OPENAPI_USER_ID: string;
 
+/** 登录策略（本地开发可覆盖）：内部 PRE 联调使用 ACE 网关。 */
+declare const TEAMCLAW_LOGIN_STRATEGY: 'ace-gateway' | 'oauth-provider' | undefined;
+
+/** Task 模块同源路径前缀；本地可切到 /api/v1 直连 Task Engine 排查。 */
+declare const TEAMCLAW_TASK_API_BASE:
+  | '/openapi/v1/collaboration/tasks'
+  | '/api/v1/collaboration/tasks'
+  | undefined;
+
 /** 开发环境名称（define 注入）：LOCAL / DEV / PRE / PROD。生产构建为 PRE/PROD。 */
 declare const TEAMCLAW_DEV_ENV: 'LOCAL' | 'DEV' | 'PRE' | 'PROD' | undefined;
 

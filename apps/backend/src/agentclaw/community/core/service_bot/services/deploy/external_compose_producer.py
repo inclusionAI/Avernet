@@ -93,14 +93,16 @@ class ExternalComposeProducer(DeployArtifactProducer):
         """
         artifact = self._composer.compose(self._compose_request(bot, version, occasion))
         # Enrich the engine's opaque payload with the backend-owned identity + stage
-        # keys. ``bot_id`` / ``owner_id`` / ``bot_name`` come from the same bot-row
+        # keys. The legacy ``owner_id`` runtime locator is the stable Bot entity;
+        # it must not move to the new administrator after Owner handoff.
+        # ``bot_id`` / ``bot_name`` come from the same bot-row
         # fields ``_compose_request`` reads; build is always the draft stage
         # (verify/online re-stamp later). Shared with the runtime device-sync plugin
         # via the helper.
         engine_ext = enrich_engine_ext(
             self._fetch_engine_ext(bot),
             bot_id=bot.get("bot_id", ""),
-            owner_id=bot.get("owner_id", ""),
+            owner_id=bot.get("entity_id") or bot.get("owner_id", ""),
             bot_name=bot.get("bot_name", ""),
             stage=PublishStage.DRAFT,
         )

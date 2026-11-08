@@ -14,7 +14,28 @@ const statusLabels: Record<SessionRecoveryTask['status'], string> = {
   waiting_effect: '等待效果',
   completed: '已完成',
   failed: '执行失败',
+  canceled: '已停止',
 };
+
+function isOwnerHandoff(task: SessionRecoveryTask | null | undefined): boolean {
+  return task?.completionReason === 'owner_handoff' || task?.completionReason === 'mcp_permission_required';
+}
+
+function ownerNotificationSent(task: SessionRecoveryTask): boolean {
+  return task.timeline.some(event => event.kind === 'notification' && event.payload.kind === 'result'
+    && event.payload.channel !== 'group_webhook' && event.payload.sent === true);
+}
+
+function unrecoveredOutcome(task: SessionRecoveryTask): boolean {
+  return task.status === 'failed' && task.phase === 'verify' && task.judgment?.effect === 'not_recovered';
+}
+
+function taskStatusLabel(task: SessionRecoveryTask): string {
+  if (unrecoveredOutcome(task)) return '处理结束';
+  if (isOwnerHandoff(task) && task.judgment?.effect === 'recovered') return ownerNotificationSent(task) ? '已恢复，已通知 Owner' : '已恢复，有后续建议';
+  if (isOwnerHandoff(task)) return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
+  return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status];
+}
 
 const effectLabels: Record<NonNullable<SessionRecoveryTask['judgment']>['effect'], string> = {
   recovered: '已恢复',
@@ -52,6 +73,11 @@ const decisionLabels: Record<string, string> = {
   observe: '继续观察', message: '发送恢复消息', environment: '制定修复方案',
 };
 
+const simulationDecisionLabels: Record<string, string> = {
+  observe: '无需干预', message: '提出消息干预建议', environment: '制定拟议修复方案',
+  insufficient_evidence: '历史证据不足', user_continued: '历史用户续聊，建议让路',
+};
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -72,7 +98,7 @@ function groupPhaseEvents(task: SessionRecoveryTask | null): Record<RecoveryPhas
     grouped[phase].push(event);
     active = phase;
     // Business events delimit the next stage; tool calls retain their chronological order.
-    if (event.kind === 'assessment') active = event.payload.decision === 'environment' ? 'plan' : 'observe';
+    if (event.kind === 'assessment') active = event.payload.decision === 'environment' ? 'plan' : task.simulation ? phase : 'observe';
     else if (event.kind === 'plan') active = task.level === 'automatic' && task.plan?.owner_cooperation.length === 0 ? 'apply' : 'plan';
     else if (event.kind === 'owner_decision' && event.payload.approved === true) active = 'apply';
     else if (event.kind === 'operation' && event.payload.success === true) active = 'verify';
@@ -100,16 +126,30 @@ function safeJson(value: unknown): string {
 }
 
 function StatusPill({ status, children }: { status: string; children: ReactNode }) {
-  const tone = status === 'failed' || status === 'not_recovered'
+  const tone = status === 'failed'
     ? 'danger'
     : status === 'completed' || status === 'succeeded' || status === 'recovered'
       ? 'success'
-      : status === 'waiting_owner' || status === 'waiting_effect' || status === 'unknown'
+      : status === 'waiting_owner' || status === 'waiting_effect' || status === 'unknown' || status === 'not_recovered'
         ? 'warning'
         : status === 'running' || status === 'executing'
           ? 'running'
           : 'neutral';
   return <span className={`sr-pill ${tone}`}>{children}</span>;
+}
+
+function recoveryEffectView(task: SessionRecoveryTask | null) {
+  const effect = task?.judgment?.effect ?? 'unknown';
+  if (effect === 'recovered') return { value: '已恢复', tone: 'success', hint: '原任务已恢复推进' };
+  if (effect === 'not_intervened') return { value: '未实际干预', tone: 'neutral', hint: '仅分析，未验证恢复效果' };
+  if (task?.status === 'waiting_owner') return { value: '待验证', tone: 'neutral', hint: '等待方案确认与执行后再验证' };
+  if (task?.status === 'running') {
+    if (['observe', 'verify'].includes(task.phase)) return { value: '验证中', tone: 'info', hint: '正在核对原任务的实际进展' };
+    return { value: '待验证', tone: 'neutral', hint: task.phase === 'plan' ? '等待完整方案，尚未验证恢复效果' : task.phase === 'apply' ? '等待方案执行后验证' : '正在调查，尚未验证恢复效果' };
+  }
+  if (task?.status === 'waiting_effect') return { value: '待验证', tone: 'neutral', hint: '等待原任务出现新的执行结果' };
+  if (effect === 'not_recovered') return { value: '未恢复', tone: 'warning', hint: '原任务仍受阻，需继续处理' };
+  return { value: effectLabels[effect], tone: 'neutral', hint: '原任务恢复情况尚无充分证据' };
 }
 
 function DetailRow({ label, children, mono = false }: { label: string; children: ReactNode; mono?: boolean }) {
@@ -196,7 +236,8 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
   children?: ReactNode;
   actions?: ReactNode;
 }) {
-  const selectedPhase = phases.find(phase => phase.key === selected)!;
+  const visiblePhases = task.simulation ? phases.filter(phase => phase.key === 'assess' || phase.key === 'plan') : phases;
+  const selectedPhase = visiblePhases.find(phase => phase.key === selected)!;
   const events = grouped[selected];
   const tabsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -205,24 +246,24 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
     if (tabs && tab && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = tab.offsetLeft - tabs.offsetLeft;
   }, [selected]);
   return <section className="sr-card sr-workflow-card">
-    <CardHeader title="自愈流程" description="自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。" right={<StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill>} />
+    <CardHeader title="自愈流程" description={task.simulation ? '根据历史证据提出首次干预消息或完整方案，不执行实际干预。' : '自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。'} right={<StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill>} />
     <div className="sr-workflow" ref={tabsRef} role="tablist" aria-label="自愈流程阶段">
-      {phases.map((phase, index) => {
+      {visiblePhases.map((phase, index) => {
         const current = currentPhase === phase.key;
         const visited = grouped[phase.key].length > 0;
-        const failed = current && task.status === 'failed';
+        const failed = current && task.status === 'failed' && !unrecoveredOutcome(task);
         const className = ['sr-workflow-step', selected === phase.key ? 'selected' : '', current ? 'current' : '', failed ? 'failed' : ''].filter(Boolean).join(' ');
         return <button type="button" role="tab" key={phase.key} id={`recovery-phase-${phase.key}`} className={className} aria-controls="recovery-stage-process" aria-selected={selected === phase.key} aria-current={current ? 'step' : undefined} tabIndex={selected === phase.key ? 0 : -1} onClick={() => onSelect(phase.key)} onKeyDown={(event) => {
           const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
           if (!offset && event.key !== 'Home' && event.key !== 'End') return;
           event.preventDefault();
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? phases.length - 1 : (index + offset + phases.length) % phases.length;
-          onSelect(phases[next].key);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? visiblePhases.length - 1 : (index + offset + visiblePhases.length) % visiblePhases.length;
+          onSelect(visiblePhases[next].key);
           (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
         }}>
-          <div className="sr-step-top"><span className="sr-step-index">{index + 1}</span><span className="sr-step-state">{current ? statusLabels[task.status] : visited ? '有记录' : '未进入'}</span></div>
+          <div className="sr-step-top"><span className="sr-step-index">{index + 1}</span><span className="sr-step-state">{current ? (taskStatusLabel(task)) : visited ? '有记录' : '未进入'}</span></div>
           <span className="sr-step-title">{phase.title}</span>
-          <span className="sr-step-description">{phase.description}</span>
+          <span className="sr-step-description">{task.simulation && phase.key === 'plan' ? '查看拟议动作及配合安排' : phase.description}</span>
           <span className="sr-step-count">{visited ? `${grouped[phase.key].length} 条记录 · 点击查看` : '点击查看阶段记录'}</span>
         </button>;
       })}
@@ -273,12 +314,13 @@ function eventEvidenceIds(event: RecoveryEvent): unknown[] {
 }
 
 function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAction }: { task: SessionRecoveryTask; event: RecoveryEvent; index: number; rawEvidence: Record<string, unknown>; loadEvidence: (id: string) => void; onViewAction: (id: string) => void }) {
-  if (['plan', 'notification', 'owner_decision', 'created', 'execution', 'waiting', 'resumed', 'result', 'annotation'].includes(event.kind)) {
+  if (['plan', 'notification', 'owner_decision', 'created', 'execution', 'waiting', 'resumed', 'result', 'annotation', 'termination'].includes(event.kind)) {
     const execution = event.kind === 'execution' ? task.executions?.find(item => item.executionId === event.payload.execution_id) : undefined;
     const jobUrl = execution?.jobUrl && /^https?:\/\//i.test(execution.jobUrl) ? execution.jobUrl : null;
     const submitted = record(event.payload.plan);
     const counts = [Array.isArray(submitted.actions) ? `Agent 操作 ${submitted.actions.length} 项` : '', Array.isArray(submitted.owner_cooperation) ? `Owner 事项 ${submitted.owner_cooperation.length} 项` : ''].filter(Boolean).join(' · ');
-    const outcome = event.kind === 'plan' ? `方案已提交${counts ? ` · ${counts}` : ''}`
+    const outcome = event.kind === 'termination' && isOwnerHandoff(task) ? taskStatusLabel(task)
+      : event.kind === 'plan' ? `方案已提交${counts ? ` · ${counts}` : ''}`
       : event.kind === 'notification' ? event.payload.sent === true ? '钉钉通知已发送' : event.payload.sent === false ? '钉钉通知发送失败' : event.summary
       : event.kind === 'owner_decision' ? event.payload.approved === true ? 'Owner 已确认完整方案' : event.payload.approved === false ? 'Owner 已拒绝方案' : event.summary
       : event.summary;
@@ -342,12 +384,13 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
     // Retain old, unlinked evidence with the task's initial record rather than dropping it.
     || event === task.timeline[0] && !task.timeline.some(entry => entry.payload.raw_tool_call_id === item.tool_call_id || eventEvidenceIds(entry).includes(item.evidence_id)));
   const effect = typeof judgment.effect === 'string' && judgment.effect in effectLabels ? judgment.effect as keyof typeof effectLabels : undefined;
-  const decision = event.kind === 'assessment' && typeof event.payload.decision === 'string' ? decisionLabels[event.payload.decision] : undefined;
+  const decision = event.kind === 'assessment' && typeof event.payload.decision === 'string' ? (task.simulation ? simulationDecisionLabels : decisionLabels)[event.payload.decision] : undefined;
   const conclusionSummary = event.kind !== 'assessment' && typeof detailText === 'string' && detailText !== resultSummary ? detailText : undefined;
   return <li className={`sr-process-action ${status}`}>
     <div className="sr-process-index">{index + 1}</div>
     <article>
       <div className="sr-process-header"><h3>{title}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
+      {task.simulation && event.kind === 'assessment' && typeof event.payload.message === 'string' && <div className="sr-operation-field"><h4>拟发送的干预消息（未发送）</h4><PlanMarkdown text={event.payload.message} /></div>}
       {decision && <div className="sr-assessment-decision"><span>处理方式：</span><strong>{decision}</strong></div>}
       {typeof error === 'string' && <p className="sr-process-error"><strong>失败原因：</strong>{error}</p>}
       {resultSummary && <div className="sr-process-result sr-result-preview"><span>结果：</span><PlanMarkdown text={resultSummary} />{typeof result.httpStatus === 'number' && <span className="sr-receipt-code">HTTP {result.httpStatus}</span>}{typeof result.exitCode === 'number' && <span className="sr-receipt-code">退出码 {result.exitCode}</span>}</div>}
@@ -410,16 +453,16 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       <h3>执行安排</h3>
       <ol className="sr-plan-body sr-plan-steps">
         {plan.owner_cooperation.map((item, index) => <li key={`owner-${index}`} className="sr-plan-step owner" id={index === 0 ? 'recovery-owner-cooperation' : undefined}>
-          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">方案确认前处理</span></div>
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">{task.simulation ? '拟议配合事项' : '方案确认前处理'}</span></div>
           <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
           <details className="sr-disclosure"><summary>查看这项安排的依据</summary><PlanMarkdown text={item.basis} /></details>
-          {task.canOperate && task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
+          {!task.simulation && task.canOperate && task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
             <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写处理进度或补充信息，供 Agent 继续处理时参考" /></label>
             <label className="sr-check"><input type="checkbox" checked={cooperationDone} onChange={(event) => onCooperation(event.target.checked)} />我已处理方案中的配合事项</label>
           </div>}
         </li>)}
         {plan.actions.map(action => <li key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-plan-step agent">
-          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="bot" />自愈 Agent</span><span className="sr-note">按确认的方案继续执行</span></div>
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="bot" />自愈 Agent</span><span className="sr-note">{task.simulation ? '拟议执行安排' : '按确认的方案继续执行'}</span></div>
           <div className="sr-action-description"><PlanMarkdown text={action.summary} /></div>
           <details className="sr-disclosure sr-action-safeguards"><summary>查看风险、验证与回退</summary>
             <div className="sr-action-grid">
@@ -441,7 +484,7 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       <h3>验收与确认</h3>
       <div className="sr-plan-body">
       <PlanMarkdown text={plan.verification} />
-      {task.canOperate && task.status === 'waiting_owner' && <div className="sr-decision-panel">
+      {!task.simulation && task.canOperate && task.status === 'waiting_owner' && <div className="sr-decision-panel">
         <h4>确认完整方案</h4>
         <p>请核对上述分工、处理安排与验收标准，确认后 Agent 将继续执行。</p>
         {plan.owner_cooperation.length === 0 && <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写补充信息" /></label>}
@@ -483,6 +526,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [revision, setRevision] = useState(0);
   const [annotationLayer, setAnnotationLayer] = useState<'delivery' | 'response' | 'effect'>('effect');
   const [annotationCorrect, setAnnotationCorrect] = useState('true');
@@ -590,16 +634,17 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const judgments = [
     { key: 'delivery', label: '触达', hint: '消息是否进入原会话', value: delivery === 'confirmed' ? '已确认' : '尚未确认', tone: delivery === 'confirmed' ? 'success' : 'neutral' },
     { key: 'response', label: '响应', hint: 'Bot 是否响应或采取行动', value: response === 'acted' ? '已采取行动' : response === 'replied' ? '已有回复' : response === 'none' ? '暂无响应' : '尚未确认', tone: response === 'acted' || response === 'replied' ? 'success' : 'neutral' },
-    { key: 'effect', label: '效果', hint: '原任务是否已恢复', value: effectLabels[effect], tone: effect === 'recovered' ? 'success' : effect === 'not_recovered' ? 'danger' : 'neutral' },
+    { key: 'effect', label: '效果', ...recoveryEffectView(task) },
   ];
   const stageSummary = task ? {
-    completed: effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
-    failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
+    completed: isOwnerHandoff(task) ? (effect === 'recovered' ? (ownerNotificationSent(task) ? '原任务已恢复，已通知 Owner 后续建议，本次自愈已结束。' : '原任务已恢复，本次自愈已结束；Owner 通知未确认，请查看后续建议。') : ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    failed: task && unrecoveredOutcome(task) ? '自愈处理已结束，原任务仍受阻，需继续处理。' : '本次自愈未完成，请查看失败说明和相关操作记录。',
+    canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
     waiting_effect: '恢复效果尚未确定，等待原会话出现新的执行结果。',
     running: lastEvent?.summary || '等待任务执行记录。',
   }[task.status] : '';
-  const review = task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
+  const review = !isOwnerHandoff(task) && !task?.simulation && task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
   const toggleSharing = async () => {
     if (!task?.canManageShare || sharingBusy) return;
     setSharingBusy(true);
@@ -609,22 +654,36 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     } catch (failure) { setError(monitoringErrorText(failure)); }
     finally { setSharingBusy(false); }
   };
+  const terminate = async () => {
+    if (!task?.canOperate || stopping) return;
+    if (!window.confirm('确定停止本次自愈任务吗？\n\n将停止自愈 Agent 并取消后续处理，已经完成的操作不会撤销。')) return;
+    setStopping(true);
+    try {
+      const updated = await sessionRecoveryApi.terminate(taskId, '用户手动停止任务');
+      setLoaded({ taskId, task: updated });
+      setRevision(value => value + 1);
+    } catch (failure) { setError(monitoringErrorText(failure)); }
+    finally { setStopping(false); }
+  };
   const viewPlan = () => {
     setPhaseSelection({ taskId, phase: 'plan' });
     window.requestAnimationFrame(() => document.getElementById('recovery-plan')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
-  return <main className="session-recovery-detail">
+  return <main className={`session-recovery-detail${task?.simulation ? ' sr-simulation' : ''}`}>
     <button type="button" onClick={onBack} className="sr-back"><MonitoringIcon name="arrow" />返回监控</button>
     <header className="sr-hero">
       <div>
-        <div className="sr-kicker">{task && <StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill>}<span>会话自愈</span><code>{taskId}</code></div>
-        <h1>自愈任务详情</h1>
-        {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
+        <div className="sr-kicker">{task && <StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill>}<span>{task?.simulation ? '离线仿真' : '会话自愈'}</span><code>{taskId}</code></div>
+        <h1>{task?.simulation ? '自愈离线仿真详情' : '自愈任务详情'}</h1>
+        {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, task.simulation ? '离线仿真' : levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
       </div>
       <div className="sr-hero-actions">
         {task?.shared && <StatusPill status="completed">已公开分享</StatusPill>}
         {task?.canManageShare && <button type="button" className="sr-button" disabled={sharingBusy} onClick={() => void toggleSharing()}>{sharingBusy ? '更新中…' : task.shared ? '关闭分享' : '分享'}</button>}
+        {task?.canOperate && (['running', 'waiting_owner', 'waiting_effect'].includes(task.status)
+          || task.status === 'canceled' && task.termination?.status !== 'remote_stopped') && <button type="button" className="sr-button" disabled={stopping}
+          onClick={() => void terminate()}>{stopping ? '停止中…' : task.status === 'canceled' ? '重试停止 AIS' : '停止任务'}</button>}
         <button type="button" className="sr-button" onClick={() => setRevision((value) => value + 1)}><MonitoringIcon name="refresh" />刷新任务</button>
       </div>
     </header>
@@ -636,31 +695,47 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
 
     {!task ? <div role="status" className="sr-empty large">{error ? '任务未能加载，请重试。' : '正在读取任务…'}</div> : <>
       {!task.canOperate && <section role="status" className="sr-alert"><MonitoringIcon name="user" /><div><strong>共享的只读自愈任务</strong><p>可查看方案、执行过程与恢复结果；方案确认、配合事项和人工标注仅任务 Owner 可操作。</p></div></section>}
-      {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
+      {task.status === 'canceled' && <section role={task.termination?.status === 'remote_stop_failed' ? 'alert' : 'status'} className="sr-alert">
+        <div><strong>本次自愈已停止</strong><p>{task.termination?.status === 'remote_stopped' ? 'AIS 已停止，后续自愈处理已取消。'
+          : task.termination?.status === 'remote_stop_failed' ? '后续干预已禁止，但 AIS 停止请求未成功，可重试停止 AIS。'
+          : '后续干预已禁止；AIS 尚未返回作业编号，派发回执返回后会补停。'}已完成的操作和调查记录保留。</p></div>
+      </section>}
+      {task.status === 'failed' && !unrecoveredOutcome(task) && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
         setPhaseSelection({ taskId, phase: currentPhaseKey });
         window.requestAnimationFrame(() => document.getElementById('recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       }}>查看执行记录</button></section>}
       {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>{task.canOperate ? '需要确认修复方案' : '等待 Owner 确认修复方案'}</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
       <section className="sr-summary-grid" aria-label="任务概览">
         <article className="sr-summary-card sr-stage-summary">
-          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill></div>
+          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill></div>
           <strong className="sr-summary-value">{currentPhase?.title || '—'}</strong>
           <div className="sr-summary-note"><PlanMarkdown text={stageSummary} /></div>
           <p className="sr-summary-updated">最近更新 · {formatTime(lastEvent?.at_ms)}</p>
         </article>
         <article className="sr-summary-card sr-effect-summary">
-          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="pulse" /></span><h2>恢复效果</h2></div>
+          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="pulse" /></span><h2>{task.simulation ? '仿真判断' : '恢复效果'}</h2></div>
           <div className="sr-judgment-grid">
-            {judgments.map(judgment => <div key={judgment.key} className={`sr-judgment-item ${judgment.tone}`}>
+            {(task.simulation ? [{ key: 'simulation', label: '执行方式', hint: '仅保存拟议决策和方案', value: '未执行实际干预', tone: 'neutral' }] : judgments).map(judgment => <div key={judgment.key} className={`sr-judgment-item ${judgment.tone}`}>
               <span className="sr-judgment-label">{judgment.label}</span>
-              <strong className="sr-judgment-value"><MonitoringIcon name={judgment.tone === 'success' ? 'check' : judgment.tone === 'danger' ? 'alert' : 'question'} />{judgment.value}</strong>
+              <strong className="sr-judgment-value"><MonitoringIcon name={judgment.tone === 'success' ? 'check' : judgment.tone === 'warning' ? 'alert' : judgment.tone === 'info' ? 'clock' : 'question'} />{judgment.value}</strong>
               <span className="sr-judgment-hint">{judgment.hint}</span>
             </div>)}
           </div>
-          {!task.judgment?.summary && <p className="sr-summary-pending">等待 Agent 提交效果判断和证据。</p>}
+          {!task.judgment?.summary && <p className="sr-summary-pending">{task.status === 'canceled' ? '任务已停止，尚无恢复效果结论。' : '等待 Agent 提交效果判断和证据。'}</p>}
           {task.judgment?.summary && <details className="sr-disclosure sr-summary-details"><summary>查看完整判断与依据</summary><PlanMarkdown text={task.judgment.summary} /></details>}
         </article>
       </section>
+
+      <section className="sr-card" aria-label="任务总结">
+        <CardHeader title="任务总结" description={task.simulation ? '整体判断与拟议处理方式；未执行实际干预。' : '原问题、判断依据、处理方式与最终进展。'} />
+        {task.final_summary ? <div className="sr-plan-body"><PlanMarkdown text={task.final_summary} /></div>
+          : <p className="sr-empty">{['completed', 'failed', 'canceled', 'waiting_effect'].includes(task.status) ? '摘要暂不可用，可查看下方完整判断、方案与处理记录。' : '任务结束后由 Agent 生成整体摘要。'}</p>}
+      </section>
+
+      {isOwnerHandoff(task) && <section className="sr-card" aria-label={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'}>
+        <CardHeader title={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'} description={task.judgment?.effect === 'recovered' ? '原任务已恢复，后续建议可按需处理，本次自愈已结束。' : '剩余事项需 Owner 自行处理，本次自愈已结束。'} />
+        <div className="sr-plan-body"><PlanMarkdown text={task.judgment?.summary ?? '请查看调查记录中的问题依据与处理指引。'} /></div>
+      </section>}
 
       {review}
 
@@ -668,7 +743,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
         <div className="sr-main">
           <RecoveryWorkflow task={task} currentPhase={currentPhaseKey} selected={selectedPhase} onSelect={(phase) => setPhaseSelection({ taskId, phase })} grouped={grouped} rawEvidence={rawEvidence} loadEvidence={(id) => void loadEvidence(id)}
             actions={task.plan && selectedPhase === 'verify' && review && <button type="button" className="sr-button" onClick={viewPlan}>查看修复方案</button>}>
-            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
+            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy || stopping} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
           </RecoveryWorkflow>
         </div>
         <aside className="sr-side">
@@ -678,7 +753,8 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
               <DetailRow label="目标 Bot" mono>{task.request.target.bot_id}</DetailRow>
               <DetailRow label="目标环境">{task.request.target.env}</DetailRow>
               <DetailRow label="引擎">{task.request.target.engine}</DetailRow>
-              <DetailRow label="执行权限">{levelLabels[task.level]}</DetailRow>
+              <DetailRow label="执行权限">{task.simulation ? '离线仿真' : levelLabels[task.level]}</DetailRow>
+              {task.simulation && <DetailRow label="历史截止点">{formatTime(task.simulation.cutoffAtMs)} · {task.simulation.cutoffNode.messageId ?? task.simulation.cutoffNode.observationId ?? task.simulation.cutoffNode.traceId}</DetailRow>}
               <DetailRow label="故障标签" mono>{task.request.tc_fault_label}</DetailRow>
               <DetailRow label="创建时间">{formatTime(task.timeline[0]?.at_ms)}</DetailRow>
               <DetailRow label="最新记录">{formatTime(lastEvent?.at_ms)}</DetailRow>

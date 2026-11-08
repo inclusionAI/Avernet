@@ -1,0 +1,24 @@
+schema_version: 1
+
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+
+manifest:
+  resources:
+    - path: data/faq.csv
+      from: content
+      subpath: kb/faq.csv
+      on_fetch_failure: keep_last
+    - path: data/kb/
+      from: content
+      subpath: kb/
+      on_fetch_failure: keep_last

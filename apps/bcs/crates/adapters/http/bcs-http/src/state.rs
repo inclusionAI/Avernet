@@ -452,12 +452,6 @@ pub struct HttpAppState {
     pub strict_container_validation: bool,
     pub onboard_binding_enabled: bool,
     pub default_visibility: Option<String>,
-    pub bcs_endpoint: Option<String>,
-    pub bind: String,
-    pub port: u16,
-    pub max_groups_as_driver: usize,
-    pub max_group_members: usize,
-    pub max_groups_as_member: usize,
     pub store_messages: bool,
     pub max_group_messages: u64,
     pub group_chat_delay_min_ms: u64,
@@ -512,12 +506,6 @@ impl HttpAppState {
             strict_container_validation: false,
             onboard_binding_enabled: false,
             default_visibility: None,
-            bcs_endpoint: None,
-            bind: "127.0.0.1".to_string(),
-            port: 21000,
-            max_groups_as_driver: 3,
-            max_group_members: 5,
-            max_groups_as_member: 10,
             store_messages: true,
             max_group_messages: 100,
             group_chat_delay_min_ms: 0,
@@ -633,24 +621,6 @@ impl HttpAppState {
         let _sync_task = tokio::spawn(async move {
             visibility_sync.sync_visibility(request).await;
         });
-    }
-
-    pub fn with_group_request_config(
-        mut self,
-        bcs_endpoint: Option<String>,
-        bind: String,
-        port: u16,
-        max_groups_as_driver: usize,
-        max_group_members: usize,
-        max_groups_as_member: usize,
-    ) -> Self {
-        self.bcs_endpoint = bcs_endpoint;
-        self.bind = bind;
-        self.port = port;
-        self.max_groups_as_driver = max_groups_as_driver;
-        self.max_group_members = max_group_members;
-        self.max_groups_as_member = max_groups_as_member;
-        self
     }
 
     pub fn with_message_config(
@@ -805,20 +775,29 @@ impl HttpAppState {
     /// default to `["local"]`), resolve a non-JWT session token directly via the
     /// registry — mirroring the legacy `SessionTokenPlugin` non-JWT branch. JWT
     /// tokens without a chain are not resolvable (production always has a chain).
-    pub async fn bot_uuid_from_headers(&self, headers: &HeaderMap) -> Option<String> {
+    pub async fn bot_uuid_from_headers(&self, headers: &HeaderMap) -> Result<Option<String>, crate::error::HttpAdapterError> {
+        let actor = bcs_auth_api::expected_actor_id(headers)?;
+        bcs_auth_api::validate_bot_credentials(headers)?;
         if let Some(chain) = self.auth_chain.as_ref() {
-            if let Ok(result) = chain.authenticate(headers).await {
-                if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
-                    return Some(bot_uuid);
-                }
+            let result = chain.authenticate(headers).await?;
+            if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
+                return Ok(Some(bot_uuid));
             }
         }
-
-        let token = bot_token_from_headers(headers)?;
+        let Some(token) = bot_token_from_headers(headers) else {
+            return if actor.is_some() { Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())) } else { Ok(None) };
+        };
         if bcs_auth_api::is_jwt_format(&token) {
-            return None;
+            return if actor.is_some() { Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())) } else { Ok(None) };
         }
-        self.services.registry.find_bot_by_token(&token).await
+        let bot = self.services.registry.resolve_bot_token(&token, actor).await?;
+        if bot.is_none() && actor.is_none() && self.auth_chain.is_none() {
+            // Local legacy heartbeat can precede its registered row. Production
+            // always has a chain and uses the authoritative identity snapshot.
+            return Ok(self.services.registry.find_bot_by_token(&token).await);
+        }
+        if actor.is_some() && bot.is_none() { return Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())); }
+        Ok(bot.map(|bot| bot.bot.bot_id))
     }
 }
 
@@ -865,12 +844,6 @@ impl std::fmt::Debug for HttpAppState {
             )
             .field("onboard_binding_enabled", &self.onboard_binding_enabled)
             .field("default_visibility", &self.default_visibility)
-            .field("bcs_endpoint", &self.bcs_endpoint)
-            .field("bind", &self.bind)
-            .field("port", &self.port)
-            .field("max_groups_as_driver", &self.max_groups_as_driver)
-            .field("max_group_members", &self.max_group_members)
-            .field("max_groups_as_member", &self.max_groups_as_member)
             .field("store_messages", &self.store_messages)
             .field("max_group_messages", &self.max_group_messages)
             .field("group_chat_delay_min_ms", &self.group_chat_delay_min_ms)

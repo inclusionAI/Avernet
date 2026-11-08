@@ -399,6 +399,38 @@ class TestGetChatSession:
         assert data["success"] is False
         assert data["error_code"] == 5001
 
+    def test_get_chat_session_permission_denied(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.get_chat_session.side_effect = ChatPermissionError("No chat access")
+
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as logger:
+            response = client.post("/api/v1/expert-chats/test_bot/test_owner/session")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "success": False,
+            "message": "No chat access",
+            "error_code": 403,
+            "data": None,
+        }
+        mock_service.get_chat_session.assert_awaited_once_with(
+            user_id="test_user", bot_id="test_bot", owner_id="test_owner", iam_token=None
+        )
+        logger.warning.assert_called_once()
+        logger.error.assert_not_called()
+
+    def test_get_chat_session_unexpected_error_keeps_diagnostics(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.get_chat_session.side_effect = RuntimeError("unexpected")
+
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as logger:
+            response = client.post("/api/v1/expert-chats/test_bot/test_owner/session")
+
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert response.json()["error_code"] == 5999
+        assert logger.error.call_count == 2
+
 
 class TestDeleteChatSession:
     """Tests for DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session endpoint."""

@@ -9,7 +9,6 @@ cannot drift.
 from __future__ import annotations
 
 from typing import Annotated, Any
-
 from fastapi import APIRouter, Body, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
@@ -17,18 +16,41 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseReportCreated,
     CloseTopicRequestUnified,
     CreateBrowseReportRequest,
+    DeleteTopicRequestUnified,
+    UpdateTopicRequestUnified,
     CreateReplyRequestUnified,
+    domain_poll_selection,
     CreateTopicRequestUnified,
+    PostHelpfulUpdated,
     PostItem,
+    SetPostHelpfulRequest,
+    domain_topic_config,
     ReplyCreated,
     SubscriptionDeleted,
     SubscriptionItem,
     TopicClosed,
     TopicCreated,
+    TopicDeleted,
     TopicDetail,
     TopicListItem,
     BrowsSubscriptionJoinRequest,
     author_display_fields,
+)
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.interaction_schemas import (
+    CreateInteractionRequest,
+    InteractionRecorded,
+    InteractionSummaryItemRequest,
+    InteractionSummaryBatchRequest,
+    InteractionSummaryBatchResponse,
+    InteractionSummaryResponse,
+    domain_summary_query,
+)
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.personal_center_schemas import (
+    PersonalCenterActivityItem as PersonalCenterActivityItemWire,
+    PersonalCenterActivityPage as PersonalCenterActivityPageWire,
+    PersonalCenterActivityTypeWire,
+    PersonalCenterActorScopeWire,
+    PersonalCenterTargetTypeWire,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
@@ -36,23 +58,41 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
     created,
     envelope,
     envelope_errors,
     page as page_envelope,
 )
 from agentclaw.community.core.task.forum.models import (
+    MAX_AUTHOR_ID_LENGTH,
+    MAX_AUTHOR_TYPE_LENGTH,
     MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopScheduler
-from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
 )
-from agentclaw.community.core.errors import Forbidden, NotFound
+from agentclaw.community.core.errors import Forbidden, NotFound, ValidationError
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.models import (
+    PersonalCenterActivityQuery,
+)
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
@@ -60,7 +100,9 @@ from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_names,
 )
 
-router = APIRouter(prefix="/api/v1/collaboration/tasks/bots/{bot_id}/bbs", tags=["bbs-internal"])
+router = APIRouter(
+    prefix="/api/v1/collaboration/tasks/bots/{bot_id}/bbs", tags=["bbs-internal"]
+)
 read_router = APIRouter(prefix="/api/v1/collaboration/tasks/bbs", tags=["bbs-internal"])
 
 BotIdPath = Annotated[
@@ -99,7 +141,7 @@ async def list_topics_internal(
     topic_type: str | None = Query(
         default=None,
         max_length=16,
-        description="Optional Topic type: DISCUSSION, POLL, or NOTICE.",
+        description="Optional Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
     ),
     author_id: str | None = Query(
         default=None,
@@ -132,10 +174,24 @@ async def list_topics_internal(
 async def get_topic_internal(
     topic_id: TopicIdPath,
     request: Request,
+    viewer_author_type: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Optional viewer author kind: HUMAN or BOT.",
+    ),
+    viewer_author_id: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Optional viewer author id used to request personalized state.",
+    ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicDetail]:
     """Return one Topic with its full description, but without replies."""
-    topic = service.get_topic(topic_id=topic_id)
+    topic = service.get_topic(
+        topic_id=topic_id,
+        viewer_author_type=viewer_author_type,
+        viewer_author_id=viewer_author_id,
+    )
     topic = enrich_bot_display_name(topic, request=request)
     return envelope(TopicDetail.from_record(topic), request)
 
@@ -148,7 +204,7 @@ async def list_posts_internal(
     page_params: PageParamsDep,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[PostItem]]:
-    """Page through a Topic's replies in stable chronological order."""
+    """Page first-level replies; child replies follow their parent floor."""
     result = service.list_posts(
         topic_id=topic_id,
         page=page_params.page,
@@ -187,6 +243,8 @@ async def create_topic_internal(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
+        topic_type=body.topic_type,
+        topic_config=domain_topic_config(body.topic_config),
         **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)
@@ -210,11 +268,88 @@ async def create_reply_internal(
         author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
+        reply_to_post_id=body.reply_to_post_id,
+        poll_selection=domain_poll_selection(body.poll_selection),
         **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.put(
+    "/topics/{topic_id}", response_model=Envelope[TopicDetail]
+)
+@envelope_errors
+async def update_topic_internal(
+    body: UpdateTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDetail]:
+    """Edit one OPEN Topic with the declared author and title/body values."""
+
+    updated = service.update_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        title=body.title,
+        body=body.body,
+    )
+    updated = enrich_bot_display_name(updated, request=request)
+    return envelope(TopicDetail.from_record(updated), request)
+
+
+@read_router.delete(
+    "/topics/{topic_id}", response_model=Envelope[TopicDeleted]
+)
+@envelope_errors
+async def delete_topic_internal(
+    body: DeleteTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDeleted]:
+    """Delete one non-LOCKED Topic and its replies as its declared author."""
+
+    deleted = service.delete_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+    )
+    return envelope(TopicDeleted(topic_id=topic_id, deleted=deleted), request)
+
+
+@read_router.put(
+    "/topics/{topic_id}/posts/{post_id}/helpful",
+    response_model=Envelope[PostHelpfulUpdated],
+)
+@envelope_errors
+async def set_post_helpful_internal(
+    body: SetPostHelpfulRequest,
+    topic_id: TopicIdPath,
+    post_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=MAX_ID_LENGTH,
+            description="Stable Post id exactly as returned by BBS APIs.",
+        ),
+    ],
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostHelpfulUpdated]:
+    """Mark or unmark one direct HELP reply as the declared Topic author."""
+    post = service.set_post_helpful(
+        topic_id=topic_id,
+        post_id=post_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        helpful=body.helpful,
+    )
+    return envelope(
+        PostHelpfulUpdated(post_id=post.post_id, helpful=post.helpful), request
+    )
 
 
 @read_router.post("/topics/{topic_id}/close", response_model=Envelope[TopicClosed])
@@ -233,7 +368,10 @@ async def close_topic_internal(
     topic = service.get_topic(topic_id=topic_id)
     declared_author_type = body.author_type.strip().upper()
     declared_author_id = body.author_id.strip()
-    if topic.author_type != declared_author_type or topic.author_id != declared_author_id:
+    if (
+        topic.author_type != declared_author_type
+        or topic.author_id != declared_author_id
+    ):
         raise Forbidden("only the topic author may close the topic")
     closed = service.close_topic(topic_id=topic_id)
     return envelope(
@@ -246,7 +384,16 @@ async def close_topic_internal(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/browse-subscription", response_model=Envelope[SubscriptionItem])
+@router.post(
+    "/browse-subscription",
+    response_model=Envelope[SubscriptionItem],
+    responses={
+        202: {
+            "model": Envelope[SubscriptionItem],
+            "description": "新订阅已接受，异步装配成功后才持久化",
+        }
+    },
+)
 @envelope_errors
 async def upsert_subscription_internal(
     bot_id: BotIdPath,
@@ -265,31 +412,31 @@ async def upsert_subscription_internal(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
-    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
-    cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
-    scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionItem]:
     """加入/更新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
-    mode 后端恒定 openclaw，不接受请求体里的触发模式选择；owner 来自必填的
-    owner_user_id query（不取自登录人，与外部 openapi 面签名一一对齐）。装配
-    OpenClaw cron；若该 Bot 此前是旧 framework 订阅则一并卸下旧 scheduler job，
-    保证任一时刻仅一份触发。新订阅 201，更新已有 200。
+    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才
+    写入订阅记录。若装配失败，本次尝试不会留下数据库开关，用户可以重试。已存在的
+    OpenClaw 订阅仍同步保存备注并后台修复两条 cron。
     """
-    old = service.get_subscription(bot_id=bot_id)
-    result = service.upsert_subscription(
+    note = body.note if body is not None else None
+    result = provisioner.join_or_refresh(
         bot_id=bot_id,
         owner_user_id=owner_user_id,
-        mode=BROWSE_MODE_OPENCLAW,
-        note=body.note if body is not None else None,
+        note=note,
     )
-    sub = result.subscription
-    await cron_manager.ensure_cron(bot_id=bot_id, owner_user_id=owner_user_id)
-    if old is not None and old.mode == BROWSE_MODE_FRAMEWORK:
-        scheduler.unregister_bot(bot_id=bot_id)
-    payload = SubscriptionItem.from_record(sub)
-    response.status_code = 201 if result.created else 200
-    return created(payload, request) if result.created else envelope(payload, request)
+    payload = SubscriptionItem.from_record(result.subscription)
+    if result.persisted:
+        response.status_code = 201 if result.created else 200
+        return (
+            created(payload, request) if result.created else envelope(payload, request)
+        )
+
+    response.status_code = 202
+    return accepted(payload, request)
 
 
 @router.get("/browse-subscription", response_model=Envelope[SubscriptionItem])
@@ -313,13 +460,23 @@ async def delete_subscription_internal(
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
     cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
+    digest_cron_manager: BbsDigestCronManager = Injected(BbsDigestCronManager),
     scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionDeleted]:
     """退出逛论坛订阅（不存在也返回 deleted=false，幂等）；同时卸下定时触发。"""
+    await provisioner.cancel_pending(bot_id=bot_id)
     sub = service.get_subscription(bot_id=bot_id)
     if sub is not None:
         if sub.mode == BROWSE_MODE_OPENCLAW:
-            await cron_manager.remove_cron(bot_id=bot_id, owner_user_id=sub.owner_user_id)
+            await cron_manager.remove_cron(
+                bot_id=bot_id, owner_user_id=sub.owner_user_id
+            )
+            await digest_cron_manager.remove_cron(
+                bot_id=bot_id, owner_user_id=sub.owner_user_id
+            )
         else:
             scheduler.unregister_bot(bot_id=bot_id)
     deleted = service.delete_subscription(bot_id=bot_id)
@@ -413,6 +570,25 @@ async def list_subscriptions_internal(
 
 
 @router.post(
+    "/skills/install",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def trigger_skills_install_internal(
+    bot_id: BotIdPath,
+    request: Request,
+    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """向已订阅的 Bot 重发一次 BBS skill 安装/自检消息。
+
+    输入只有 path 中的 product Bot id。owner 从持久化订阅读取，并由 service
+    层拼成 BaaS OpenAPI 的复合 Bot 身份，调用方不需要理解 BaaS host。
+    """
+    result = await runner.trigger_install_bbs_skills(bot_id=bot_id)
+    return envelope(dict(result), request)
+
+
+@router.post(
     "/browse-loop/trigger-framework",
     response_model=Envelope[dict[str, Any]],
 )
@@ -485,7 +661,130 @@ async def trigger_cron_remove_internal(
     return envelope(dict(result), request)
 
 
+@read_router.post("/interactions", response_model=Envelope[InteractionRecorded])
+@envelope_errors
+async def create_interaction_internal(
+    body: CreateInteractionRequest,
+    request: Request,
+    response: Response,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionRecorded]:
+    """Trusted internal mirror of the public interaction write contract."""
+    result = service.record_interaction(
+        actor_type=body.actor_type,
+        actor_id=body.actor_id,
+        action_type=body.action_type,
+        target_type=body.target_type,
+        target_id=body.target_id,
+    )
+    response.status_code = 201
+    return created(InteractionRecorded.from_record(result), request)
 
+
+_SUMMARY_QUERY_KEYS = frozenset({"actor_type", "actor_id", "target_type", "target_id"})
+
+
+@read_router.get(
+    "/interactions/summary", response_model=Envelope[InteractionSummaryResponse]
+)
+@envelope_errors
+async def get_interaction_summary_internal(
+    request: Request,
+    actor_type: str | None = Query(default=None, max_length=16),
+    actor_id: str | None = Query(default=None, max_length=256),
+    target_type: str | None = Query(default=None, max_length=16),
+    target_id: str | None = Query(default=None, max_length=256),
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryResponse]:
+    """Trusted internal mirror of the single summary read contract."""
+    _reject_unknown_query_keys(request, _SUMMARY_QUERY_KEYS)
+    result = service.get_summary(
+        domain_summary_query(
+            InteractionSummaryItemRequest(
+                actor_type=actor_type,  # type: ignore[arg-type]
+                actor_id=actor_id,
+                target_type=target_type,  # type: ignore[arg-type]
+                target_id=target_id,
+            )
+        )
+    )
+    return envelope(InteractionSummaryResponse.from_result(result), request)
+
+
+@read_router.post(
+    "/interactions/summary/batch",
+    response_model=Envelope[InteractionSummaryBatchResponse],
+)
+@envelope_errors
+async def get_interaction_summary_batch_internal(
+    body: InteractionSummaryBatchRequest,
+    request: Request,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryBatchResponse]:
+    """Trusted internal mirror of the batch summary read contract."""
+    result = service.get_summary_batch(
+        tuple(domain_summary_query(item) for item in body.items)
+    )
+    return envelope(
+        InteractionSummaryBatchResponse(
+            items=[InteractionSummaryResponse.from_result(item) for item in result]
+        ),
+        request,
+    )
+
+
+@read_router.get(
+    "/personal-center/activities",
+    response_model=Envelope[PersonalCenterActivityPageWire],
+)
+@envelope_errors
+async def get_personal_center_activities_internal(
+    request: Request,
+    page_params: PageParamsDep,
+    owner_user_id: str = Query(min_length=1, max_length=256),
+    actor_scope: PersonalCenterActorScopeWire = Query(default="ALL"),
+    activity_type: PersonalCenterActivityTypeWire = Query(default="ALL"),
+    target_type: PersonalCenterTargetTypeWire = Query(default="ALL"),
+    service: ForumPersonalCenterActivityServiceProtocol = Injected(
+        ForumPersonalCenterActivityServiceProtocol
+    ),
+) -> Envelope[PersonalCenterActivityPageWire]:
+    """Trusted internal mirror of the user activity projection.
+
+    This surface is reached by gateway-signed service callers, not the public
+    user route; the service contract still receives the explicit owner id it
+    must scope subscriptions by. Authorization against a user principal remains
+    the public surface's responsibility.
+    """
+    result = service.get_personal_center_activities(
+        PersonalCenterActivityQuery(
+            owner_user_id=owner_user_id,
+            actor_scope=actor_scope,
+            activity_type=activity_type,
+            target_type=target_type,  # type: ignore[arg-type]
+            page=page_params.page,
+            page_size=page_params.page_size,
+        )
+    )
+    return page_envelope(
+        result.total,
+        [PersonalCenterActivityItemWire.from_record(item) for item in result.items],
+        request,
+    )
+
+
+def _reject_unknown_query_keys(request: Request, allowed: frozenset[str]) -> None:
+    unexpected = set(request.query_params) - allowed
+    if unexpected:
+        raise ValidationError(
+            "unknown query parameter: " + ", ".join(sorted(unexpected))
+        )
 
 
 @read_router.post("/browse-reports", response_model=Envelope[BrowseReportCreated])

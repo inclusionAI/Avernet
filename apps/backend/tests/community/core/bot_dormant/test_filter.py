@@ -154,7 +154,7 @@ def test_filter_candidates_returns_only_qualifying_bots():
     # Add bot_wl to whitelist
     wl_entry = DormantWhitelist(
         bot_id="bot_wl",
-        owner_id="owner1",
+        owner_id="111",
         reason="manual whitelist",
     )
     session.add(wl_entry)
@@ -335,7 +335,7 @@ def test_filter_candidates_empty_when_all_excluded():
     )
     session.add(bot_wl)
 
-    wl = DormantWhitelist(bot_id="only_wl", owner_id="owner1")
+    wl = DormantWhitelist(bot_id="only_wl", owner_id="999")
     session.add(wl)
     session.commit()
 

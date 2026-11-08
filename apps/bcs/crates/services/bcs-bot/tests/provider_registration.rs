@@ -13,6 +13,9 @@ use bcs_service_api::{
 };
 use std::sync::Arc;
 
+#[path = "provider_registration/subbots.rs"]
+mod subbots;
+
 struct Fixture {
     core: ProviderRegistrationCore,
     registry: Arc<BotCore>,
@@ -45,6 +48,18 @@ async fn fixture_with_auth(
     let providers = Arc::new(MemoryProviderStore::new());
     let credentials = credentials.unwrap_or_else(|| providers.clone());
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    // Trusted registration needs the owners' live Human
+    // ACTOR rows (spec §10.2/§3.1); the fixture presets
+    // them through the same production ensure path. The
+    // tests register as alice or bob.
+    {
+        use bcs_service_api::port::repo::BotRepoPort;
+        for staff in ["alice", "bob"] {
+            bots.ensure_human_actor(staff, staff)
+                .await
+                .expect("ensure fixture Human actor row");
+        }
+    }
     let membership = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
     let relations = Arc::new(RelationCore::new());
     let registry = Arc::new(BotCore::with_provider_repos(
@@ -52,7 +67,7 @@ async fn fixture_with_auth(
         providers.clone(),
         credentials.clone(),
         providers.clone(),
-    ));
+    ).with_bot_provider_repo(membership.clone()));
     let admin = ProviderCore::new(
         providers.clone(),
         providers.clone(),
@@ -300,7 +315,7 @@ async fn disabled_downlink_preserves_issuance_and_upstream_registration() {
         disable_downlink(&f).await;
 
         assert_eq!(
-            f.core.authorize(&f.provider, "alice").await.unwrap(),
+            f.core.authorize(&f.provider, "alice").await.unwrap().allowed_modes,
             vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway]
         );
         let registered = f
@@ -399,6 +414,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
 
 fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
     RegisterProviderBot {
+        token_auth_mode: None,
         provider_id: f.provider.clone(),
         provider_bot_ref: "stable-ref".into(),
         owner: "alice".into(),
@@ -486,21 +502,27 @@ async fn upstream_persists_membership_without_delivery_binding_and_rejects_dupli
             .as_deref(),
         Some(first.record.bot_uuid.as_str())
     );
-    assert!(
-        f.relations
-            .get_edge("human_alice", &first.record.bot_uuid, "prod")
+    // Trusted registration: the owner edge lives in the
+    // authority projection (unified owner grant), the
+    // created_by stays the legacy creator signal; the
+    // legacy relation creator edge is no longer written
+    // by the trusted chain (plan §3.1).
+    assert_eq!(
+        f.registry
+            .try_get(&first.record.bot_uuid)
             .await
             .unwrap()
-            .unwrap()
-            .is_creator
+            .expect("bot")
+            .created_by
+            .as_deref(),
+        Some("alice")
     );
-    assert!(
-        f.relations
-            .get_edge(&first.record.bot_uuid, "human_alice", "prod")
-            .await
-            .unwrap()
-            .is_some()
-    );
+    let relation = f
+        .relations
+        .get_edge("human_alice", &first.record.bot_uuid, "prod")
+        .await
+        .unwrap();
+    assert!(relation.is_none(), "legacy relation edge retired");
 }
 
 #[tokio::test]
@@ -734,4 +756,19 @@ async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
     another.provider_bot_ref = "another-ref".into();
     f.core.register(another).await.unwrap();
     assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn signed_mode_mismatch_is_rejected_before_creating_a_bot() {
+    for mode in [ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway] {
+        let f = fixture(Some("https://shared.example.com/hook"), false).await;
+        let authorization = f.core.authorize(&f.provider, "alice").await.unwrap();
+        assert_eq!(authorization.auth_mode, ProviderAuthMode::StaticBearer);
+        let mut command = request(&f, mode);
+        command.token_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
+        assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::InvalidOperation { .. })));
+        assert!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().is_empty());
+        command.token_auth_mode = Some(authorization.auth_mode);
+        assert!(f.core.register(command).await.is_ok());
+    }
 }

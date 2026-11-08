@@ -77,6 +77,10 @@ pub struct DeliveryAdmissionView {
     pub deliveries: Vec<DeliveryStatusView>,
 }
 
+/// Read-only status for the authenticated Session participant. Recorded Chat
+/// join anchors use the configured history window, not a strict post-join cutoff.
+/// Private-message and Human audience checks still apply to every selected source;
+/// any forbidden source fails the batch. This does not grant mutation authority.
 #[derive(Debug, Clone)]
 pub struct DeliveryStatusQuery {
     pub caller: super::CallerContext,
@@ -192,6 +196,11 @@ pub trait ManagedMessageDeliveryService: Send + Sync {
         now_ms: i64,
     ) -> Result<Option<PersistedMessageDelivery>, ManagedDeliveryError>;
 
+    /// Atomically admit work. Conflict and Repository(Conflict | Invalid)
+    /// are definitive rejections: no new work from this call was committed.
+    /// Other errors (notably Storage, including a lost COMMIT acknowledgement)
+    /// do not prove rollback. Callers must retain potentially committed Run
+    /// identities/output permits and must not retry under fresh identities.
     async fn admit(
         &self,
         command: AdmitMessageDeliveries,

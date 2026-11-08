@@ -8,8 +8,9 @@
  * - 出：TaskPanel onInteraction 上报（节点交互/打开子任务），经 onInteraction 转 InteractionRecord。
  */
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { TaskPanel, type TaskPanelProps } from './TaskPanel';
+import type { TaskPanelNav } from './v2/taskPanelNav';
 
 type TaskPanelParams = {
   apiBaseUrl?: string;
@@ -18,7 +19,6 @@ type TaskPanelParams = {
   bcsBaseUrl?: string;
   userId?: string;
   taskId?: string;
-  initialTab?: 'info' | 'artifacts' | 'progress';
   onTogglePanelName?: string;
   taskInfoFallback?: TaskPanelProps['taskInfoFallback'];
 };
@@ -39,15 +39,24 @@ function normalizePanelBaseUrl(value?: string): string {
 export function TaskPanelAdapter({
   params,
   onInteraction,
+  nav,
+  switcher,
   className,
   style,
-}: PanelContentProps & { className?: string; style?: CSSProperties }) {
+}: PanelContentProps & {
+  /** 业务层 wrapper 注入的 V2 导航与切换条(非 params 透传:params 需可序列化落库) */
+  nav?: TaskPanelNav;
+  switcher?: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
   const p = (params ?? {}) as TaskPanelParams;
   const apiBaseUrl = normalizePanelBaseUrl(p.apiBaseUrl);
   const bcsBaseUrl = normalizePanelBaseUrl(p.bcsBaseUrl);
   if (!p.taskId) {
     return (
       <div
+        data-task-panel-root="true"
         style={{ padding: 24, color: '#86909C', fontSize: 13, textAlign: 'center', ...(style as object) }}
         className={className}
       >
@@ -64,7 +73,6 @@ export function TaskPanelAdapter({
       userId={p.userId}
       taskId={p.taskId}
       taskInfoFallback={p.taskInfoFallback}
-      initialTab={p.initialTab}
       onOpenSubTask={(subTaskId) => {
         onInteraction({
           source: { type: 'panel', target: 'taskPanel.TaskLoopView' },
@@ -75,6 +83,8 @@ export function TaskPanelAdapter({
       }}
       style={style}
       className={className}
+      nav={nav}
+      switcher={switcher}
     />
   );
 }

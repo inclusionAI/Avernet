@@ -1,17 +1,15 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
-import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
-import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
-import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
+import { resolveChatRuntimeStage, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
 import { FileIcon, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -45,9 +43,21 @@ export function useBotSessionFilesFeature(
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
+  // 在线服务 Bot 的文件与会话使用同一运行阶段；草稿调试及个人 Bot 保留既有请求形态。
+  const stage =
+    bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot || bot.runtimeStage === 'online')
+      ? resolveChatRuntimeStage(bot)
+      : undefined;
 
-  const files = useBotSessionFiles(botId, sessionId, userId, ownerId);
-  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
+  const files = useBotSessionFiles(
+    botId,
+    sessionId,
+    userId,
+    ownerId,
+    bot?.isFriendBot ? userId ?? undefined : undefined,
+    ...(stage ? ([stage] as const) : []),
+  );
+  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
   const skillsState = useBotSkills(bot, userId);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
@@ -110,9 +120,17 @@ export function useBotSessionFilesFeature(
     [enabled],
   );
 
-  const fileSubItems = useMemo<CommandItem[]>(
-    () =>
-      files.readyFiles.map((f) => ({
+  // /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新最新清单(数据最新鲜);
+  // query 为 /file 后的过滤词(空串=刚唤起)。refresh 后从 store 读最新列表(闭包快照滞后)。
+  const onSearchFiles = useCallback(
+    async (query: string): Promise<CommandItem[]> => {
+      await files.refresh();
+      const { readyFiles } = useBotSessionFileStore.getState();
+      const keyword = query.trim().toLowerCase();
+      const matched = keyword
+        ? readyFiles.filter((f) => f.displayName.toLowerCase().includes(keyword))
+        : readyFiles;
+      return matched.map((f) => ({
         id: `__file__${f.resourceId}`,
         name: f.displayName,
         description: '引用到输入框',
@@ -120,8 +138,9 @@ export function useBotSessionFilesFeature(
         data: { resource_id: f.resourceId, display_name: f.displayName },
         preventInsert: true,
         onSelect: () => handleReference(f),
-      })),
-    [files.readyFiles, handleReference],
+      }));
+    },
+    [files, handleReference],
   );
 
   const skillItems = useMemo<CommandItem[]>(
@@ -142,13 +161,13 @@ export function useBotSessionFilesFeature(
       buildBotSessionCommandItems({
         canUseSkills,
         skillItems,
-        fileSubItems,
+        onSearchFiles,
         skillsLoading: skillsState.isLoading,
         filesLoading: files.isLoadingList,
         onClear,
         onSelectSkill: handleSelectSkill,
       }),
-    [canUseSkills, skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [canUseSkills, skillItems, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
   );
 
   const command = useMemo<CommandConfig>(
@@ -175,46 +194,22 @@ export function useBotSessionFilesFeature(
   const openUpload = useCallback(() => setUploadOpen(true), []);
 
   const featureNode = (
-    <>
-      <BotUploadFilesModal
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        queue={upload.tasks}
-        isUploading={upload.isUploading}
-        stageFiles={upload.stageFiles}
-        submit={async () => {
-          await upload.submit();
-        }}
-        onAddToSession={addReadyUploadsToSession}
-        removeTask={upload.removeTask}
-      />
-      {drawerOpen && (
-        // 验收微调：单聊资源管理由全屏 Modal 改为右侧副屏（与协作群 SessionFilesPanel 同构容器）；
-        // 宽度与 dmore artboard-008（387px）对齐，仍可拖拽调整。
-        <ResizableWorkspaceSidebar
-          ariaLabel="资源管理面板"
-          side="right"
-          onDismiss={closeFileDrawer}
-          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-          className="z-30 bg-background"
-        >
-          <BotSessionFilesPanel
-            readyFiles={files.readyFiles}
-            isLoadingList={files.isLoadingList}
-            botId={botId ?? undefined}
-            sessionId={sessionId ?? undefined}
-            userId={userId ?? undefined}
-            ownerId={ownerId}
-            onClose={closeFileDrawer}
-            onUploadClick={() => setUploadOpen(true)}
-            onOpen={() => void files.refresh()}
-            onDelete={(f) => void files.deleteFile(f)}
-            onDownload={(f) => void files.downloadFile(f)}
-            onReference={handleReference}
-          />
-        </ResizableWorkspaceSidebar>
-      )}
-    </>
+    <BotSessionFileOverlays
+      botId={botId}
+      sessionId={sessionId}
+      userId={userId}
+      ownerId={ownerId}
+      stage={stage}
+      files={files}
+      upload={upload}
+      drawerOpen={drawerOpen}
+      uploadOpen={uploadOpen}
+      onCloseDrawer={closeFileDrawer}
+      onCloseUpload={() => setUploadOpen(false)}
+      onOpenUpload={openUpload}
+      onAddToSession={addReadyUploadsToSession}
+      onReference={handleReference}
+    />
   );
 
   return {

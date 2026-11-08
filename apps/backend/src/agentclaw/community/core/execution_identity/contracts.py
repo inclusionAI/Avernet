@@ -19,6 +19,19 @@ class ExecutionIdentityStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class OwnerHandoffExecutionPlan:
+    """Read-only plan; never changes Bot ownership or issues credentials."""
+
+    bot_pk: int
+    bot_id: str
+    entity_id: str
+    current_owner_id: str
+    new_owner_id: str
+    execution_workno: str
+    requires_reissue: bool
+
+
+@dataclass(frozen=True)
 class ExecutionIdentityBinding:
     id: int
     bot_pk: int
@@ -48,6 +61,7 @@ class ExecutionIdentityOperationNotAllowedError(ExecutionIdentityError):
 
 
 __all__ = [
+    "OwnerHandoffExecutionPlan",
     "ExecutionIdentityBinding",
     "ExecutionIdentityChangeInProgressError",
     "ExecutionIdentityError",

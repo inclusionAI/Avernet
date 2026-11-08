@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { execFile, type ExecFileOptions, type ExecFileException } from "node:child_process";
+import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
@@ -9,16 +10,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, removeTempRepo,
+  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, ensurePackManifest,
+  prepareBranchBase, pruneLegacyPackCopy, removeTempRepo, writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
 } from "../clawflows-git-client.js";
+import type { WorkflowSpec } from "../../workflow.js";
 import {
   createLocalRemote, credentialFiles, credentialInput, gitEnvironment, runGit,
 } from "./clawflows-git-client-fixture.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+  return { ...actual, execFile: vi.fn(actual.execFile) };
 });
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -27,8 +30,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const realWriteFile = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).writeFile;
-const realExecFileSync = (await vi.importActual<typeof import("node:child_process")>("node:child_process")).execFileSync;
-const execMock = vi.mocked(execFileSync);
+const realExecFile = (await vi.importActual<typeof import("node:child_process")>("node:child_process")).execFile;
+const execMock = vi.mocked(execFile);
+type GitCallback = (error: ExecFileException | null, stdout: Buffer, stderr: Buffer) => void;
 // Deliberately synthetic credentials, including URL/shell metacharacters.
 const username = "fixture user+name@example.invalid";
 const token = "fixture-only:p@ss /?#%+'\"$;雪";
@@ -45,7 +49,7 @@ let globalConfig: string;
 let globalContents: string;
 
 beforeEach(async () => {
-  execMock.mockReset().mockImplementation(realExecFileSync);
+  execMock.mockReset().mockImplementation(realExecFile);
   vi.mocked(fsPromises.writeFile).mockReset().mockImplementation(realWriteFile);
   root = mkdtempSync(path.join(tmpdir(), "cw-git-client-test-"));
   // Both shell quote forms, substitution and whitespace must stay literal.
@@ -92,12 +96,12 @@ function expectCredential(cwd: string, remoteUrl: string, prefix: string[] = [],
 function bridgeTransport(options: {
   remoteUrl?: string;
   password?: string;
-  beforeClone?: (args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => void;
+  beforeClone?: (args: string[], opts: ExecFileOptions) => void;
   fail?: (args: string[]) => boolean;
   failure?: Error;
 } = {}): { authenticatedClones: number; authenticatedPushes: number; authenticatedFetches: number } {
   const counts = { authenticatedClones: 0, authenticatedPushes: 0, authenticatedFetches: 0 };
-  execMock.mockImplementation(((file: string, args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => {
+  execMock.mockImplementation(((file: string, args: string[], opts: ExecFileOptions, callback: GitCallback) => {
     expect(file).toBe("git");
     expectNoSecrets(args);
     expect(opts.env?.GIT_CONFIG_NOSYSTEM).toBe("1");
@@ -114,16 +118,16 @@ function bridgeTransport(options: {
       expectCredential(repo, options.remoteUrl ?? config.remoteUrl, prefix, options.password);
       counts.authenticatedClones++;
       options.beforeClone?.(args, opts);
-      return realExecFileSync(file, [...prefix, "clone", "--quiet", bare, "."], opts);
+      return realExecFile(file, [...prefix, "clone", "--quiet", bare, "."], { ...opts, encoding: "buffer" }, callback);
     }
     if (args[0] === "push" || args[0] === "fetch") {
       expectCredential(repo, options.remoteUrl ?? config.remoteUrl, [], options.password);
       if (args[0] === "push") counts.authenticatedPushes++;
       else counts.authenticatedFetches++;
-      return realExecFileSync(file, args.map((arg) => arg === "origin" ? bare : arg), opts);
+      return realExecFile(file, args.map((arg) => arg === "origin" ? bare : arg), { ...opts, encoding: "buffer" }, callback);
     }
-    return realExecFileSync(file, args, opts);
-  }) as typeof execFileSync);
+    return realExecFile(file, args, { ...opts, encoding: "buffer" }, callback);
+  }) as typeof execFile);
   return counts;
 }
 
@@ -161,7 +165,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     let bootstrapFile = "";
     const counts = bridgeTransport({ remoteUrl, beforeClone(args, opts) {
       expect(args).toContain(remoteUrl);
-      expect(opts.stdio).toEqual(["ignore", "pipe", "pipe"]);
+      expect(opts.shell).toBe(false);
       expect(readdirSync(repo)).toEqual([]);
       const files = credentialFiles(root);
       expect(files).toHaveLength(1);
@@ -181,8 +185,8 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     expect(statSync(files[0]).mode & 0o777).toBe(0o600);
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expectNoSecrets(readFileSync(path.join(repo, ".git", "config"), "utf8"));
-    execFileSync("git", ["fetch", "origin"], {
-      cwd: repo, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    await executeGit(["fetch", "origin"], {
+      cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
     const saved = await commitAndPushSaved(repo, "git-fixture", "fixture", author);
@@ -219,8 +223,8 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       expect(helpers).toContain("store --file ");
     } });
     await cloneClawflows(repo, config);
-    execFileSync("git", ["fetch", "origin"], {
-      cwd: repo, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    await executeGit(["fetch", "origin"], {
+      cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "inherited-helper.txt"), "safe\n");
     await commitAndPushSaved(repo, "inherited-helper", "fixture", author);
@@ -256,7 +260,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     expect(String(caught)).toContain("128");
     expectAuthRemoved();
     for (const [, , opts] of execMock.mock.calls) {
-      expect((opts as ExecFileSyncOptionsWithStringEncoding).stdio).toEqual(["ignore", "pipe", "pipe"]);
+      expect((opts as ExecFileOptions).shell).toBe(false);
     }
   });
 
@@ -300,17 +304,136 @@ describe("ClawFlowsGitClient isolated credentials", () => {
   });
 
   it.each(["https://git.example.invalid/team/repo.git", "http://git.example.invalid/team/repo.git", "git@git.example.invalid:team/repo.git", "ssh://git@git.example.invalid/team/repo.git"])("preserves no-token/SSH transport %s", async (remoteUrl) => {
-    execMock.mockImplementation(((file: string, args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => {
+    execMock.mockImplementation(((file: string, args: string[], opts: ExecFileOptions, callback: GitCallback) => {
       expectNoSecrets(args);
       if (args[0] === "clone") {
         expect(args).toContain(remoteUrl);
         expect(credentialFiles(root)).toEqual([]);
-        return realExecFileSync(file, ["clone", "--quiet", bare, "."], opts);
+        return realExecFile(file, ["clone", "--quiet", bare, "."], { ...opts, encoding: "buffer" }, callback);
       }
-      return realExecFileSync(file, args, opts);
-    }) as typeof execFileSync);
+      return realExecFile(file, args, { ...opts, encoding: "buffer" }, callback);
+    }) as typeof execFile);
     await cloneClawflows(repo, { ...config, remoteUrl, token: remoteUrl.startsWith("http") ? undefined : token });
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expect(credentialFiles(root)).toEqual([]);
+  });
+});
+
+describe("ClawFlowsGitClient pack content inheritance", () => {
+  const packId = "pack-a";
+  const workflowId = "wf-a";
+  const spec: WorkflowSpec = {
+    id: workflowId,
+    title: "Updated Spec",
+    nodes: [
+      { id: "start", type: "start", title: "Start", config: {}, executor: { type: "start" }, dependsOn: [] },
+      { id: "end", type: "end", title: "End", config: {}, executor: { type: "end" }, dependsOn: ["start"] },
+    ],
+  };
+  const localConfig = (remoteUrl: string): ClawFlowsGitConfig => ({ remoteUrl, username: "", email: author.email });
+  const fullPackFiles: Record<string, string> = {
+    [`${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+    [`${packId}/scripts/run.sh`]: "echo pack-script\n",
+    [`${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows:\n  - id: ${workflowId}\n    file: workflows/${workflowId}.yaml\n`,
+  };
+
+  function seedBranch(branch: string, files: Record<string, string>): void {
+    const seed = path.join(root, `seed-${branch.replace(/\//g, "_")}`);
+    for (const [rel, content] of Object.entries(files)) {
+      const target = path.join(seed, rel);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, content);
+    }
+    runGit(seed, ["init"]);
+    runGit(seed, ["config", "user.name", "Seeder"]);
+    runGit(seed, ["config", "user.email", "seeder@example.invalid"]);
+    runGit(seed, ["add", "."]);
+    runGit(seed, ["commit", "-m", "seed"]);
+    runGit(seed, ["push", bare, `HEAD:refs/heads/${branch}`]);
+  }
+
+  async function withClonedWork(fn: (work: string) => Promise<void>): Promise<void> {
+    const work = await createTempRepo();
+    try {
+      await cloneClawflows(work, localConfig(bare));
+      await fn(work);
+    } finally {
+      await removeTempRepo(work);
+    }
+  }
+
+  it("inherits pack scripts when the previous deploy branch exists", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("branch");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).toContain(`${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`${packId}/workflow.pack.yaml`);
+      expect(tree).not.toContain(`packs/${packId}`);
+      // The spec is overwritten in place (engine root layout), not written to a second path.
+      const content = runGit(bare, ["show", `deploy/${workflowId}/#1:${packId}/workflows/${workflowId}.yaml`]);
+      expect(content).toContain(`id: ${workflowId}`);
+    });
+  });
+
+  it("bases the first snapshot on the latest deploy branch when no saved branch exists", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `saved/${workflowId}`, `wf/${workflowId}`)).toBe("fallback");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushSaved(work, workflowId, "save", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `saved/${workflowId}`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).not.toContain(`packs/${packId}`);
+    });
+  });
+
+  it("falls back to the default-branch base for a first-ever deploy", async () => {
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("default");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`packs/${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`packs/${packId}/workflow.pack.yaml`);
+    });
+  });
+
+  it("prunes a polluted base down to a single manifest on deploy", async () => {
+    seedBranch(`wf/${workflowId}`, {
+      ...fullPackFiles,
+      [`packs/${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+      [`packs/${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows: [${workflowId}]\n`,
+    });
+    await withClonedWork(async (work) => {
+      await prepareBranchBase(work, `wf/${workflowId}`);
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      expect(await pruneLegacyPackCopy(work, packId)).toBe(true);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).not.toContain(`packs/${packId}`);
+      expect(tree.split("\n").filter((line) => line.endsWith("workflow.pack.yaml"))).toEqual([
+        `${packId}/workflow.pack.yaml`,
+      ]);
+    });
+  });
+
+  it("prunes the legacy copy only when the root-level layout exists", async () => {
+    mkdirSync(path.join(repo, packId, "workflows"), { recursive: true });
+    mkdirSync(path.join(repo, "packs", packId), { recursive: true });
+    writeFileSync(path.join(repo, packId, "workflow.pack.yaml"), `id: ${packId}\n`);
+    writeFileSync(path.join(repo, "packs", packId, "workflow.pack.yaml"), `id: ${packId}\n`);
+    expect(await pruneLegacyPackCopy(repo, packId)).toBe(true);
+    expect(existsSync(path.join(repo, "packs", packId))).toBe(false);
+    expect(existsSync(path.join(repo, packId, "workflow.pack.yaml"))).toBe(true);
+    expect(await pruneLegacyPackCopy(repo, "pack-b")).toBe(false);
   });
 });

@@ -771,11 +771,16 @@ class LocalDeviceService(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
         ``device_uuid`` targets a specific instance for multi-instance BaaS bots;
         local devices are single-instance and ignore it.
+
+        ``caller_id`` is accepted to keep the provider signatures equal and
+        ignored: the local provider issues no a2a face, so the user-level
+        gray gate has nothing to withhold here.
 
         ``path`` is ignored here: this provider returns a bare routing target
         (and an HTTP base URL), never a finished WebSocket URL, so the caller

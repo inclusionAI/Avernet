@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bcs_test_support::LazySeedAuthorityHook;
 use bcs_message_flow::a2a_chat::{A2aChat, ChatRunStore, DrainOutcome, drain_chat_event, drain_chat_event_with_mode};
 use bcs_protocol::BcsFrame;
 use bcs_domain::{Organization, OrganizationMember};
@@ -22,6 +23,27 @@ use tokio::sync::{Mutex, Notify, RwLock, mpsc};
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 #[allow(dead_code)]
 mod support;
+
+
+/// Real authority chain for the Fixture
+/// builders (bot-authority plan Task 6.5):
+/// every `created_by: Some(owner)` fixture Bot gets a live
+/// owner edge; the legacy `created_by` check it mirrors is
+/// gone.
+fn staff_authority(pairs: &[(&str, &str)]) -> Arc<LazySeedAuthorityHook> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    for (bot_id, owner) in pairs {
+        chain.hook.seed_owner(bot_id, owner);
+    }
+    chain.hook
+}
+
+const STAFF_PAIRS: &[(&str, &str)] = &[("bot-source", "owner-1")];
+
+fn staff_authority_default() -> Arc<LazySeedAuthorityHook> {
+    assert!(STAFF_PAIRS.iter().any(|(id, _)| *id == "bot-source"));
+    staff_authority(STAFF_PAIRS)
+}
 
 fn chat_command(target_bot_id: &str) -> A2aChatCommand {
     A2aChatCommand {
@@ -61,11 +83,19 @@ async fn build_organization_service(
     let run_store = Arc::new(ChatRunStore::new());
     let registry = Arc::new(MemoryRegistry::default());
     let friend = Arc::new(StaticFriendCoreService::new(friendships));
+    let owned: Vec<(&str, &str)> = bots
+        .iter()
+        .filter_map(|(bot_id, _, created_by)| {
+            created_by.map(|owner| (*bot_id, owner))
+        })
+        .collect();
     for (bot_id, visibility, created_by) in bots {
         registry.insert(bot_id, visibility, created_by).await;
     }
     let organization = Arc::new(StaticOrganizationCoreService::new(members));
-    A2aChat::new(bot_delivery, run_store, 30_000, registry, friend).with_organization(organization)
+    A2aChat::new(bot_delivery, run_store, 30_000, registry, friend)
+        .with_organization(organization)
+        .with_bot_authority_hook(Some(staff_authority(&owned)))
 }
 
 async fn build_service(
@@ -76,6 +106,12 @@ async fn build_service(
     let run_store = Arc::new(ChatRunStore::new());
     let registry = Arc::new(MemoryRegistry::default());
     let friend = Arc::new(StaticFriendCoreService::new(friendships));
+    let owned: Vec<(&str, &str)> = bots
+        .iter()
+        .filter_map(|(bot_id, _, created_by)| {
+            created_by.map(|owner| (*bot_id, owner))
+        })
+        .collect();
     for (bot_id, visibility, created_by) in bots {
         registry.insert(bot_id, visibility, created_by).await;
     }
@@ -86,7 +122,8 @@ async fn build_service(
             30_000,
             registry.clone(),
             friend,
-        ),
+        )
+        .with_bot_authority_hook(Some(staff_authority(&owned))),
         bot_delivery,
         registry,
     )
@@ -104,15 +141,18 @@ async fn build_run_service(
         .await;
     registry.insert("bot-target", "public", None).await;
     let run_port = Arc::new(RecordingRunPort::new(events, keep_open_after_send));
-    let service = Arc::new(A2aChat::new_with_run_ports(
-        bot_delivery,
-        run_store.clone(),
-        30_000,
-        registry,
-        Arc::new(StaticFriendCoreService::default()),
-        run_port.clone(),
-        run_port.clone(),
-    ));
+    let service = Arc::new(
+        A2aChat::new_with_run_ports(
+            bot_delivery,
+            run_store.clone(),
+            30_000,
+            registry,
+            Arc::new(StaticFriendCoreService::default()),
+            run_port.clone(),
+            run_port.clone(),
+        )
+        .with_bot_authority_hook(Some(staff_authority_default())),
+    );
     (service, run_port, run_store)
 }
 
@@ -300,7 +340,8 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority_default()));
 
     let outcome = service
         .chat(A2aChatCommand {
@@ -389,7 +430,8 @@ async fn chat_records_original_request_as_wrapped_chat_send_frame() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority_default()));
 
     service
         .chat(A2aChatCommand {
@@ -1047,7 +1089,8 @@ async fn cancel_run_marks_running_run_cancelled() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority_default()));
     let caller = CallerContext::Bot(BotActor {
         bot_uuid: "bot-source".to_string(),
     });
@@ -1097,13 +1140,16 @@ async fn run_events_update_status_and_wake_waiters() {
         .insert("bot-source", "public", Some("owner-1"))
         .await;
     registry.insert("bot-target", "public", None).await;
-    let service = Arc::new(A2aChat::new(
-        bot_delivery,
-        run_store,
-        30_000,
-        registry,
-        Arc::new(StaticFriendCoreService::default()),
-    ));
+    let service = Arc::new(
+        A2aChat::new(
+            bot_delivery,
+            run_store,
+            30_000,
+            registry,
+            Arc::new(StaticFriendCoreService::default()),
+        )
+        .with_bot_authority_hook(Some(staff_authority_default())),
+    );
     let caller = CallerContext::Bot(BotActor {
         bot_uuid: "bot-source".to_string(),
     });
@@ -1307,7 +1353,8 @@ async fn disconnected_target_maps_to_service_not_connected_error() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority_default()));
 
     let err = service.chat(chat_command("bot-target")).await.unwrap_err();
 
@@ -1612,7 +1659,10 @@ async fn organization_scoped_a2a_rejects_disabled_organization_before_friendship
     let friend = Arc::new(StaticFriendCoreService::new(vec![("bot-source", "private-friend")]));
     let organization = Arc::new(StaticOrganizationCoreService::new(vec!["bot-source", "private-friend"]).disabled());
     let service = A2aChat::new(bot_delivery, run_store, 30_000, registry, friend)
-        .with_organization(organization);
+        .with_organization(organization)
+        .with_bot_authority_hook(Some(
+            staff_authority(&[("bot-source", "owner-1"), ("private-friend", "owner-1")]),
+        ));
 
     assert!(matches!(
         service.chat(scoped_chat_command("private-friend")).await.unwrap_err(),
@@ -1706,6 +1756,14 @@ impl BotRegistryCoreService for MemoryRegistry {
             .filter(|bot| bot.created_by.as_deref() == Some(created_by))
             .cloned()
             .collect()
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
     }
 
     async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {
@@ -2177,6 +2235,7 @@ async fn a2a_chat_blocking_interceptor_prevents_bot_delivery() {
         registry,
         Arc::new(StaticFriendCoreService::default()),
     )
+    .with_bot_authority_hook(Some(staff_authority_default()))
     .with_interceptors(Arc::new(chain));
 
     let result = service

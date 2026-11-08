@@ -3,6 +3,16 @@
     "admin": {
       "cron_admin": []
     },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true,
+      "llm": {
+        "base_url": "${AGENTSWARM_LLM_BASE_URL:-${LLM_BASE_URL:-}}",
+        "model": "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}",
+        "secret_name": "${AGENTSWARM_LLM_SECRET_NAME:-LLM_AUTH_TOKEN}",
+        "timeout_ms": "${AGENTSWARM_LLM_TIMEOUT_MS:-${LLM_DEFAULT_TIMEOUT_MS:-180000}}"
+      }
+    },
     "app": {
       "description": "Custom SOFAPy application",
       "local_debug": true,
@@ -14,6 +24,42 @@
       "deploy_runtime": "ack",
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "${BAAS_TENANT:-}"
+    },
+    "bbs": {
+      "content_import_task": {
+        "enabled": false,
+        "heartbeat": 45,
+        "interval": 60,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "digest_task": {
+        "enabled": false,
+        "heartbeat": 45,
+        "interval": 300,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "llm": {
+        "base_url": "${BBS_LLM_BASE_URL:-}",
+        "model": "${BBS_LLM_MODEL:-glm-5.2}",
+        "secret_name": "BBS_LLM_AUTH_TOKEN",
+        "timeout_ms": "${BBS_LLM_TIMEOUT_MS:-180000}"
+      },
+      "poll_statistics_task": {
+        "enabled": true,
+        "heartbeat": 45,
+        "interval": 300,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "topic_tag_task": {
+        "enabled": true,
+        "heartbeat": 45,
+        "interval": 7200,
+        "jitter": 30,
+        "lock_ttl": 240
+      }
     },
     "bcn": {
       "base_url": "${BCS_URL}",
@@ -50,6 +96,9 @@
     },
     "cache": {
       "redis_url": "${REDIS_URL:-}"
+    },
+    "community_identity": {
+      "passport_mode": "self_issued"
     },
     "cors": {
       "allow_origin_regex": [],

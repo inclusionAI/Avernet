@@ -10,9 +10,9 @@ from agentclaw.community.adapters.http.openapi_v1 import (
 )
 from tests.community.adapters.http.openapi_v1.conftest import public_document
 
-#: sessions 10 + session files 6 + engine 5 (default-config joined the reads)
+#: sessions 10 + session files 6 + engine 6 (default-config and default-model joined the reads)
 #: + models 2 + nodes 1 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 28
+_EXPECTED_ROUTE_COUNT = 29
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
@@ -34,10 +34,11 @@ def _all_engine_runtime_paths() -> set[str]:
     from agentclaw.community.adapters.http.openapi_v1.deprecated import (
         ENGINE_RUNTIME_GROUPS as LEGACY,
     )
+    from agentclaw.community.adapters.http.openapi_v1.dws_hosting.router import router as dws_management
 
     return {
         _schema_path(r.path)
-        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY]
+        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY, dws_management]
         for r in g.routes
         if isinstance(r, APIRoute)
     }
@@ -177,7 +178,7 @@ def test_enums_reach_the_generated_document_as_string_enums():
     components = _document()["components"]["schemas"]
 
     for name, expected in (
-        ("SocketKind", {"chat"}),
+        ("SocketKind", {"chat", "a2a"}),
         ("ApprovalMode", {"approve", "on-miss", "never"}),
         ("MessageRole", {"user", "assistant", "system", "tool_use", "tool_result"}),
     ):

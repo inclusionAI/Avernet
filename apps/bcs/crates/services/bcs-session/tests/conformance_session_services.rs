@@ -125,14 +125,6 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         unimplemented!("not used by membership error test")
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> u64 {
-        unimplemented!("not used by membership error test")
-    }
-
-    async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
-        unimplemented!("not used by membership error test")
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -172,14 +164,6 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         _bot_uuid: &str,
         _mode: ParticipantMode,
     ) -> ServiceResult<Session> {
-        unimplemented!("not used by membership error test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> ServiceResult<()> {
         unimplemented!("not used by membership error test")
     }
 
@@ -306,9 +290,6 @@ async fn impl_persists_and_publishes_chat_opening_message_once() {
     svc.complete_if_running(&session_id, None, None)
         .await
         .expect("complete session");
-    svc.update_callback_status(&session_id, "success")
-        .await
-        .expect("complete callback");
     svc.create_or_reactivate(CreateOrReactivateCommand {
         group_id: "g1".to_string(),
         session_id: Some(session_id.clone()),
@@ -428,7 +409,7 @@ async fn impl_fails_and_completes_new_session_when_opening_message_persistence_f
 }
 
 #[tokio::test]
-async fn impl_blocks_reactivate_when_callback_pending() {
+async fn impl_reactivates_completed_service_without_callback_state() {
     let repo = Arc::new(MemorySessionRepo::new());
     let group_repo = Arc::new(MemoryGroupRepo::new());
     let svc = SessionManagementServiceImpl::new(repo.clone(), group_repo);
@@ -448,11 +429,11 @@ async fn impl_blocks_reactivate_when_callback_pending() {
         .expect("create svc ok");
     let sid = outcome.session.id.clone();
 
-    // Complete it (callback_status remains "pending")
+    // Complete it.
     let completed = svc.complete_if_running(&sid, None, None).await.expect("complete");
     assert!(completed.is_some());
 
-    // Reactivate should fail with CallbackPending or Internal(SessionCallbackPending)
+    // Reactivate without a callback-state transition.
     let r = svc
         .create_or_reactivate(CreateOrReactivateCommand {
             group_id: "g".to_string(),
@@ -460,10 +441,8 @@ async fn impl_blocks_reactivate_when_callback_pending() {
             params: NewSessionParams::default(),
         })
         .await;
-    match r {
-        Err(SessionUseCaseError::CallbackPending(_) | SessionUseCaseError::Internal(_)) => {}
-        other => panic!("expected CallbackPending or Internal-ServiceCallbackPending, got {other:?}"),
-    }
+    let reactivated = r.expect("completed service can reactivate");
+    assert_eq!(reactivated.session.activation_count, 2);
 }
 
 #[tokio::test]

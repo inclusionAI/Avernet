@@ -40,7 +40,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 
 | 关注点 | 负责方 |
 | --- | --- |
-| 修订版、引用、引用上的比较并交换（CAS）、补丁、内容存储、谱系、基因组的 `policy` 部分（锁定基因、固定项、风险覆盖） | 基因组注册表（Genome Registry），[01-genome.zh-CN.md](01-genome.zh-CN.md)。晋升是唯一被允许在那里移动 `active`、`previous` 和 `canary` 的调用方 |
+| 修订版、引用、引用上的比较并交换（CAS）、补丁、内容存储、谱系、基因组的 `policy` 部分（可变基因、固定项、风险覆盖） | 基因组注册表（Genome Registry），[01-genome.zh-CN.md](01-genome.zh-CN.md)。晋升是唯一被允许在那里移动 `active`、`previous` 和 `canary` 的调用方 |
 | 候选如何被度量：套件、划分、评分器、执行器、配对统计、验证配置、判定、holdout 轮换、在线验证指标、反奖励投机规则以及验证器完整性 | 验证，[07-verification.zh-CN.md](07-verification.zh-CN.md) |
 | 绑定（哪个策略在 bot 上运行、触发器、允许的基因、验证配置、预算）、运行、沙箱、预算与紧急停止开关 | 进化运行，[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。晋升读取它需要的绑定字段并遵守紧急停止开关 |
 | 记录实验与审计轨迹 | 实验记录 H，[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)。晋升将其门禁决定、批准、拒绝和晋升写入其中 |
@@ -102,19 +102,24 @@ from enum import IntEnum, StrEnum
 
 class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
-    T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
-    T2 = 2   # persona edits, skill add/update, allowlisted engine_config, any rewrite-flagged edit
-    T3 = 3   # tools, script, memory replace mode, permissions, anything in policy: locked by default
+    T1 = 1   # memory item add/update/retire, memory mode seed/merge, skill description tweak, resource add/edit/remove
+    T2 = 2   # persona edits, skill add/update/remove, any rewrite-flagged edit
+    T3 = 3   # memory replace mode: always human review, never auto
 
 class PatchOpName(StrEnum):
-    """The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02)."""
+    """The Genome Patch op names (api-contracts/genome/v1/genome-patch.schema.json)."""
     FILE_EDIT = "file.edit"
+    PERSONA_ADD = "persona.add"
+    PERSONA_REMOVE = "persona.remove"
     SKILL_ADD = "skill.add"
     SKILL_UPDATE = "skill.update"
+    SKILL_REMOVE = "skill.remove"
+    RESOURCE_ADD = "resource.add"
+    RESOURCE_REMOVE = "resource.remove"
     MEMORY_ADD = "memory.add"
     MEMORY_UPDATE = "memory.update"
     MEMORY_RETIRE = "memory.retire"
-    ENGINE_CONFIG_SET = "engine_config.set"
+    MEMORY_SET_MODE = "memory.set_mode"
 
 class RaiseKind(StrEnum):           # why a tier was raised (§5.1)
     REWRITE = "rewrite"             # a file.edit changed more than the rewrite threshold of a file
@@ -229,7 +234,7 @@ class GateDecision:
   "risk": {"tier": "T2", "per_op": [], "raised_by": []},   // per_op elided here; see §2.1
   "auto_promote_ceiling": "T1",
   "checks": [
-    {"name": "static_floor", "result": "pass", "detail": "schema ok; no locked gene or pin touched; scan clean", "evidence": ["scan:sc_77"]},
+    {"name": "static_floor", "result": "pass", "detail": "schema ok; only mutable genes, no pin touched; scan clean", "evidence": ["scan:sc_77"]},
     {"name": "regression_floor", "result": "pass", "detail": "safety: 0 newly failing; regression: 0 newly failing", "evidence": ["eval:ev_302"]},
     {"name": "verification_verdict", "result": "pass", "detail": "accept on validation under default@1", "evidence": ["eval:ev_301"]},
     {"name": "holdout", "result": "pass", "detail": "final candidate of run scored on holdout; no drop", "evidence": ["eval:ev_305"]},
@@ -330,7 +335,6 @@ class Actor:
 @dataclass(frozen=True)
 class ApplyResult:
     kind: ApplyKind
-    reference: str | None           # apply report id or published version, once known
     detail: str                     # short human-readable progress or failure text
 
 @dataclass(frozen=True)
@@ -341,8 +345,6 @@ class Promotion:
     revision_id: str                # what the ref now points at
     revision_seq: int
     from_revision_id: str           # what the ref pointed at before
-    document_digest: str            # digest of the compiled Manifest document applied for `revision_id`; the
-                                    # apply report or publish record carries only this digest (01-genome.md §8)
     going_back: bool                # informational: target is an ancestor that was promoted before
     candidate_id: str | None        # set when the promotion came from a candidate
     gate_decision_id: str | None
@@ -362,14 +364,13 @@ class Promotion:
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "from_revision_id": "sha256:a90b…",
-  "document_digest": "sha256:f27a…",    // r42 compiles to this; the apply report records it
   "going_back": false,
   "candidate_id": "sha256:c41e…",
   "gate_decision_id": "gd_204",
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "Reviewed diff and verification report; escalation fix is correct.",
   "status": "applied",
-  "apply": {"kind": "manifest_apply", "reference": "apply_8812", "detail": "all categories converged"},
+  "apply": {"kind": "direct", "detail": "apply started"}   // 接缝的答复；apply 运行指明这次晋升,
   "created_at": "2026-10-08T09:12:00Z"
 }
 ```
@@ -441,7 +442,7 @@ class CandidateReport:
 | 修改验证器（套件、评分器、配置、协议、阈值） | **人**，通过经过评审的变更（[07-verification.zh-CN.md](07-verification.zh-CN.md)） | 任何自动化循环，包括第 3 层 |
 | 采用新机制（第 3 层） | 平台机制门禁 + 人工批准（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)） | 元策略 |
 | 决定晋升 | **平台门禁** + 按风险等级由所有者/评审者（本文） | 策略、bot |
-| 修改锁定基因 / policy | 所有者、租户管理员（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 策略、bot |
+| 修改 policy（可变基因、固定项、风险覆盖） | 所有者、租户管理员（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 策略、bot |
 
 每一行在实践中的含义：
 
@@ -465,7 +466,7 @@ class CandidateReport:
 - **决定晋升。** 只有本服务移动 `active`。自动晋升只在所有门禁检查通过且风险等级
   不高于所有者设定的自动晋升上限时发生；其他情况都等待人工
   处理。
-- **修改 policy。** 基因组的 `policy` 部分（锁定基因、可变基因、固定项、风险覆盖）
+- **修改 policy。** 基因组的 `policy` 部分（可变基因、固定项、风险覆盖）
   由平台原样向前复制，只能由所有者或租户管理员修改。底线拒绝任何
   触及它的补丁。
 
@@ -520,9 +521,9 @@ DR-2 中被否决的备选方案：
 
 只有当以下检查**全部**通过时，候选才可晋升：
 
-1. **静态底线**（§4.2，在提交时运行）—— schema 有效；基础修订版匹配；未触及任何锁定基因或
-   固定项；未引入密钥/PII；大小与重写阈值达标；
-   未引入新的出站 URL 或 MCP 服务器，除非对应基因已解锁；没有权限提升；未超出预算。
+1. **静态底线**（§4.2，在提交时运行）—— schema 有效；基础修订版匹配；只修改可变基因且未触及
+   任何固定项；未引入密钥/PII；大小与重写阈值达标；
+   未引入新的出站 URL；没有权限提升；未超出预算。
 2. **回归底线** —— 在 bot 的 `regression` 和 `safety` 套件上，候选相对于父修订版
    的退化不超过容差。默认：`safety` 上新失败用例为零（无容差），`regression` 上
    至多一个，且这一个会把候选送去评审，即使其等级本可以
@@ -569,12 +570,12 @@ DR-2 中被否决的备选方案：
 | --- | --- | --- |
 | Schema | 补丁及其产生的修订版均通过基因组和补丁 JSON Schema 校验 | 候选不被记录 |
 | 基础修订版 | `base` 等于父修订版；操作可干净地应用（v1 中不做模糊合并） | 候选不被记录 |
-| 锁定基因与固定项 | 没有操作触及 `policy.locked_genes` 中列出的基因或 `policy.pins` 中的条目；没有操作触及 `policy` | 候选不被记录 |
+| 可变基因与固定项 | 每个操作的基因路径都被 `policy.mutable_genes` 覆盖，且不与 `policy.pins` 中的任何条目重叠；没有操作能触及 `policy` | 候选不被记录 |
 | 允许的基因 | 每个操作都在绑定的 `allowed_genes` 范围内（其本身也在 `policy.mutable_genes` 范围内） | 候选不被记录 |
 | 密钥与 PII 扫描 | 未引入密钥或 PII，使用**与仓库 pre-push hook 相同的扫描规则**（私钥、可识别的提供商令牌、bearer/JWT 凭据、凭据类字段中的高熵值），外加租户的 PII 策略 | `not_promotable` |
-| 出站端点 | 不新增出站 URL，也不新增 MCP 服务器，除非对应基因已解锁 | `not_promotable` |
+| 出站端点 | 变更的内容中不新增出站 URL（MCP 服务器根本无法通过补丁变更） | `not_promotable` |
 | 权限提升 | 没有操作扩大工具、权限或 `policy` 中的任何内容 | `not_promotable` |
-| 大小与重写 | 补丁大小、文件数和文件大小在 Manifest 限制之内；修改超过文件可配置比例（默认 40%）的 `file.edit` 被标记为 `rewrite`（提升等级，§5.1） | 超出限制：`not_promotable`；重写：等级提升 |
+| 大小与重写 | 补丁大小、文件数和文件大小在 Manifest 限制之内；修改超过现有文本文件 2/5 行数的操作被标记为 `rewrite`（提升等级，§5.1） | 超出限制：`not_promotable`；重写：等级提升 |
 | 预算 | 本次运行在该候选上未超出预算 | `not_promotable` |
 
 **为什么要扫描补丁。** 经验（片段（episode）、反馈）是不可信的
@@ -591,7 +592,7 @@ DR-2 中被否决的备选方案：
 | --- | --- | --- |
 | `auto_promote` | 所有检查通过，等级不高于绑定的自动晋升上限，没有事件阻塞该 bot，该 bot 的进化未被冻结，且未达到每日晋升上限 | 晋升以参与者 `gate_policy` 移动 `active`（或 `canary`，§8） |
 | `needs_review` | 检查 1–5 通过，但等级高于上限，或某个软条件将其送去评审（一次被容忍的回归失败、该 bot 上的 holdout 事件、达到每日晋升上限、bot 被冻结） | 开启一个 `ReviewItem` |
-| `not_promotable` | 判定为 `reject` 或 `inconclusive`，或检查 1–5 中任一失败，或等级为 T3 且所涉基因未被所有者解锁 | 修订版状态变为 `rejected`；保留，永不删除 |
+| `not_promotable` | 判定为 `reject` 或 `inconclusive`，或检查 1–5 中任一失败 | 修订版状态变为 `rejected`；保留，永不删除 |
 
 拒绝是正常结果，而不是错误：大多数候选都应当失败，
 每个决定都会作为证据记录在实验记录 H 中。
@@ -615,8 +616,6 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
 
     if any(ch.result == "fail" for ch in checks) or c.verdict != "accept":
         return decision(checks, risk, "not_promotable")
-    if risk.tier == RiskTier.T3 and not c.policy.unlocks(risk):
-        return decision(checks, risk, "not_promotable")
 
     soft = soft_conditions(checks, bot)        # tolerated regression failure, incident, freeze, daily limit
     within = b.auto_promote_ceiling is not None and risk.tier <= b.auto_promote_ceiling
@@ -636,32 +635,47 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
 | 等级 | 示例 | 默认晋升方式 |
 | --- | --- | --- |
 | **T0** | 仅注释 | 自动 |
-| **T1** | 记忆条目新增/更新/退役；技能描述微调；资源内容更新 | 若门禁通过且所有者策略允许，则自动 |
-| **T2** | Persona 编辑（SOUL/AGENTS/RULES）；技能新增/更新；allowlist 范围内的 `engine_config`；任何被标记 `rewrite` 的编辑 | 人工评审（所有者或其委派人）；所有者可按策略将自动上限提高到 T2 |
-| **T3** | MCP/CLI 工具变更、script、记忆 `replace` 模式、权限、`policy` 中的任何内容 | 默认锁定；解锁后始终人工评审，永不自动 |
+| **T1** | 记忆条目新增/更新/退役；记忆模式 `seed`/`merge`；技能描述微调；资源新增、编辑与删除 | 若门禁通过且所有者策略允许，则自动 |
+| **T2** | Persona 文件的编辑、新增与删除；技能新增/更新/删除；任何被标记 `rewrite` 的编辑 | 人工评审（所有者或其委派人）；所有者可按策略将自动上限提高到 T2 |
+| **T3** | 记忆 `replace` 模式；被所有者覆盖提升到 T3 的任何操作 | 始终人工评审，永不自动 |
 
-从基因组补丁操作（[01-genome.zh-CN.md](01-genome.zh-CN.md)）
-到等级的提议默认映射。规范性映射以数据形式承载在补丁 schema 中
-（工作项 RSI-02：“每个补丁操作都有明确定义的风险等级”），并列于
-[01-genome.zh-CN.md](01-genome.zh-CN.md)；两张表必须保持一致。本文
-解释其背后的策略。
+工具（MCP 服务器）、启动脚本、`engine_config` 和 policy 没有等级，因为没有任何补丁
+操作能触及它们：它们只能在所有者记录一份完整的 Manifest 文档时变更
+（[01-genome.zh-CN.md](01-genome.zh-CN.md) §6.1）。
 
-| 操作 | 目标 | 等级 |
-| --- | --- | --- |
-| 修订版记录上的注释变更 | — | T0 |
-| `memory.add`、`memory.update`、`memory.retire`（模式 `seed`、`merge`） | `memory` | T1 |
-| 仅涉及技能描述的 `skill.update` | `skills/<name>` | T1 |
-| `file.edit` | `resources/...` | T1 |
-| `file.edit` | `persona/*`（SOUL、AGENTS、RULES） | T2 |
-| `skill.add`、`skill.update`（内容） | `skills/<name>` | T2 |
-| `engine_config.set`（allowlist 中的键） | `engine_config.<key>` | T2 |
-| 针对 `tools.mcp`、`tools.cli_tools`、`script` 的任何操作；记忆 `replace` 模式；权限变更 | 锁定基因 | T3 |
-| 针对 `policy` 的任何操作 | `policy` | 被底线拒绝（永不可晋升） |
+从基因组补丁操作（[01-genome.zh-CN.md](01-genome.zh-CN.md)）到等级的默认映射。
+规范性映射是 [`risk-tiers.json`](../../api-contracts/genome/v1/risk-tiers.json)：对每个
+操作，取第一条目标覆盖该操作基因路径且条件成立的规则。本表、
+[01-genome.zh-CN.md](01-genome.zh-CN.md) §6.3 中的表格与该文件必须完全一致；契约测试会
+检查这一点。本文解释其背后的策略。
+
+<!-- risk-tiers:begin -->
+| Op | Target | Condition | Tier |
+| --- | --- | --- | --- |
+| `file.edit` | `persona` | — | T2 |
+| `file.edit` | `skills` | `description_only` | T1 |
+| `file.edit` | `skills` | — | T2 |
+| `file.edit` | `resources` | — | T1 |
+| `persona.add` | `persona` | — | T2 |
+| `persona.remove` | `persona` | — | T2 |
+| `skill.add` | `skills` | — | T2 |
+| `skill.update` | `skills` | `description_only` | T1 |
+| `skill.update` | `skills` | — | T2 |
+| `skill.remove` | `skills` | — | T2 |
+| `resource.add` | `resources` | — | T1 |
+| `resource.remove` | `resources` | — | T1 |
+| `memory.add` | `memory` | — | T1 |
+| `memory.update` | `memory` | — | T1 |
+| `memory.retire` | `memory` | — | T1 |
+| `memory.set_mode` | `memory` | `mode=replace` | T3 |
+| `memory.set_mode` | `memory` | — | T1 |
+<!-- risk-tiers:end -->
 
 在按操作映射之后应用的提升：
 
-- **重写标记。** 被标记 `rewrite` 的 `file.edit`（修改超过文件
-  配置比例，默认 40%）至少为 T2。
+- **重写标记。** 被标记 `rewrite` 的操作（按行的精确最长公共子序列计算，修改超过
+  现有文本文件 2/5 的行）至少为 T2。补丁中先删除再以同一基因路径重新添加的条目按替换
+  判断，以同样方式标记（契约 README §6.3）。
   整文件重新生成会侵蚀上下文（“上下文坍塌”），因此大幅
   重写总要经人过目。
 - **Guardrail diff 审计。** 提及或编辑类 guardrail 文本的补丁
@@ -670,9 +684,8 @@ def decide(c: CandidateFacts, b: BindingView, bot: BotState) -> GateDecision:
   至少提升到 T2。检测规则属于 [07-verification.zh-CN.md](07-verification.zh-CN.md)
   中的验证器完整性规则；等级上的
   后果在这里应用。
-- **所有者覆盖。** 基因组中的 `policy.risk_overrides` 可以为该 bot 提高
-  特定基因或条目的等级。覆盖永远不会降低
-  底线规则，也永远不能使 T3 可自动晋升。
+- **所有者覆盖。** 基因组中的 `policy.risk_overrides` 可以提高所有基因路径与覆盖
+  路径重叠的操作的等级。覆盖永远不会降低等级或底线规则，也永远不能使 T3 可自动晋升。
 
 ### 5.2 为什么按操作分级并取最大值
 
@@ -776,7 +789,7 @@ open ──approve──▶ approved   (Promotion created; revision status → p
 
 所有者、租户管理员或所有者指定的委派人。流水线只能
 在所有者为其配置的自动晋升策略范围内批准
-（§3）。T3 条目（仅在所有者解锁该基因后才可能出现）始终需要
+（§3）。T3 条目始终需要
 人工。对于机制采用（第 3 层），比较报告是
 必需的（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)）。
 
@@ -808,17 +821,16 @@ open ──approve──▶ approved   (Promotion created; revision status → p
 4. **记录。** 一条 `Promotion` 记录和一条实验记录条目，包含参与者、原因、
    门禁决定、批准以及评测链接
    （[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)）。`Promotion`
-   记录在修订版 id 旁边保存所应用文档的摘要，基因组注册表也会记录该修订版编译出了
-   这个摘要，因此 apply 报告或发布记录上的摘要可以映射回该修订版
-   （[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+   记录保存移动的引用和投递接缝的答复，不保存它所投递状态的任何内容：Bot 持有
+   哪个修订版靠读取 Bot 来观察（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 5. **归因。** 从此以后，片段携带新的修订版 id
    （[02-experience.zh-CN.md](02-experience.zh-CN.md)），这使得
    在线比较 `r41` 和 `r42` 成为可能。
 
 **漂移。** 在第 1 步之前，晋升会询问基因组注册表该 bot 是否发生了漂移
-（`GenomeRegistry.applied_revision` 与 `active` 不同）：其最近一次应用的文档摘要
-与 `active` 编译出的摘要不同，通常发生在直接 `PUT /config-manifest` 之后
-（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。发生漂移时，由门禁
+（`GenomeRegistry.drift(bot)`）：注册表读取 bot 的当前状态，而该状态会记录成的
+修订版 id 与 `active` 不同，通常发生在直接 `PUT /config-manifest` 或设备上的手工
+编辑之后（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。发生漂移时，由门禁
 （`gate_policy`）、评审队列批准以及自动回滚规则（`rollout_policy`）发起的晋升
 都会以 `409 drifted` 被拒绝。所有者的晋升是允许的，因为这正是所有者进行调和的
 方式：晋升一个根据 bot 当前 Manifest 记录的修订版（保留直接编辑），或者再次晋升
@@ -991,7 +1003,7 @@ class PromotionService(Protocol):
 class FloorCheckName(StrEnum):      # one per row of §4.2
     SCHEMA = "schema"
     BASE = "base"
-    LOCKED_GENES_AND_PINS = "locked_genes_and_pins"
+    MUTABLE_GENES_AND_PINS = "mutable_genes_and_pins"
     ALLOWED_GENES = "allowed_genes"
     SECRET_PII_SCAN = "secret_pii_scan"
     OUTBOUND_ENDPOINTS = "outbound_endpoints"
@@ -1184,14 +1196,13 @@ Idempotency-Key: review-bot_123-sha256:c41e-approve
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
     "from_revision_id": "sha256:a90b…",
-    "document_digest": "sha256:f27a…",
     "going_back": false,
     "candidate_id": "sha256:c41e…",
     "gate_decision_id": "gd_204",
     "actor": {"kind": "user", "id": "user_owner_17"},
     "reason": "Reviewed diff and verification report; escalation fix is correct.",
     "status": "applying",
-    "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
+    "apply": {"kind": "direct", "detail": "apply started"},
     "created_at": "2026-10-08T09:12:00Z"
   }
 }
@@ -1279,22 +1290,20 @@ Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
   "from_revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:91d4…",  // what r41 compiles to
   "going_back": true,
   "candidate_id": null,
   "gate_decision_id": null,
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "r42 mis-routes VIP refunds",
   "status": "applying",
-  "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
+  "apply": {"kind": "direct", "detail": "apply started"},
   "created_at": "2026-10-09T08:02:00Z"
 }
 ```
 
-引用会立即移动；应用进度可通过晋升的
-`apply` 字段查看，其来源是现有的 Manifest apply 报告（个人 bot）或
-发布记录（服务 bot）。两者都只记录所应用文档的摘要；晋升的
-`document_digest` 把该摘要与修订版关联起来。
+引用会立即移动；应用进度可通过现有的 Manifest apply 报告（个人 bot）或
+发布记录（服务 bot）查看，其状态引用指明这次晋升。两者都不携带所应用内容的
+摘要：bot 是否持有 `active` 靠读取 bot 来观察。
 
 值得注意的错误：`404 not_found`（未知修订版或不属于该 bot）；
 `409 ref_conflict`（`expected_revision` 不匹配；未做任何改变）；
@@ -1404,8 +1413,8 @@ UI 后端发出同样的调用。
 
 | 其他部分 | 方向 | 流转内容 |
 | --- | --- | --- |
-| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 晋升 → 基因组 | 晋升前的漂移检查；对 `active`、`previous`、`canary` 的 CAS 移动；修订版状态变更（`promoted`、`rejected`）；记录已应用的修订版编译出了哪个文档摘要；读取补丁、diff 和 `policy` |
-| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 基因组 → 晋升 | 记录时的补丁级底线结果（基础修订版、锁定基因、固定项、rewrite 标记） |
+| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 晋升 → 基因组 | 自动晋升前的漂移检查（通过读取 bot）；对 `active`、`previous`、`canary` 的 CAS 移动；修订版状态变更（`promoted`、`rejected`）；编译修订版的期望状态；读取补丁、diff 和 `policy` |
+| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 基因组 → 晋升 | 记录时的补丁级底线结果（基础修订版、可变基因、固定项、rewrite 标记） |
 | 经验（[02-experience.zh-CN.md](02-experience.zh-CN.md)） | 晋升 → 经验（间接） | 晋升之后，片段携带新的修订版 id |
 | 进化策略（[03-strategy.zh-CN.md](03-strategy.zh-CN.md)） | 无直接交互 | 策略只提交候选并读取判定；永远看不到门禁决定或队列 |
 | 默认进化策略（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)） | — | ClawEvolve 的接受规则变为内部提交过滤器；其 `skill-decision` 审批变为本评审队列 |
@@ -1415,7 +1424,7 @@ UI 后端发出同样的调用。
 | 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)） | 晋升 → 验证 | 缺少 holdout 或基线结果时调用 `verify(candidate, profile)` |
 | 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | API → 晋升 | §10 的公开端点 |
 | 元进化（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)） | 元进化 → 晋升 | 通过独立的门禁配置进行机制采用（默认 T3，需要比较报告） |
-| 现有的 Manifest apply 与服务 bot 发布流程（Backend） | 晋升 → 现有服务 | 应用已晋升修订版编译出的文档；apply 报告和发布记录携带所应用文档的摘要，从不携带修订版 id |
+| 现有的 Manifest apply 与服务 bot 发布流程（Backend） | 晋升 → 现有服务 | 对已晋升修订版的期望状态执行一次 apply 运行（其状态引用指明这次晋升）；apply 报告和发布记录既不携带摘要也不携带修订版 id |
 
 ## 13. 待定决策
 

@@ -1,0 +1,134 @@
+import { communityErrorMessage } from '@/domain/community/errors';
+import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
+import type { CommunityTopic } from '@/domain/community/types';
+import { communityService } from '@/services/community';
+import { useCommunityStore } from '@/stores/communityStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+export function useCommunityTopicList({
+  currentUserId,
+  enrichTopicBotAuthor,
+  botNameById,
+}: {
+  currentUserId: string;
+  enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
+  botNameById: Record<string, string>;
+}) {
+  const {
+    appendTopics,
+    query,
+    scope,
+    setError,
+    setLoading,
+    setTopics,
+    topicType,
+    topics,
+    total,
+  } = useCommunityStore();
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const requestRef = useRef(0);
+
+  const load = useCallback(async () => {
+    const requestId = ++requestRef.current;
+    setLoading(true);
+    setError(null);
+    setLoadMoreError(null);
+    try {
+      const page = await communityService.listTopics({
+        search: query,
+        scope: scope,
+        topicType: topicType,
+        // "我的"走 openapi §2.4 author_id 真分页：下发本人工号，后端过滤、total 为过滤后行数。
+        ...(scope === 'mine' && currentUserId
+          ? { authorId: currentUserId }
+          : {}),
+        offset: 0,
+        limit: COMMUNITY_PAGE_SIZE,
+      });
+      if (requestId === requestRef.current) {
+        const items = page.items.map(enrichTopicBotAuthor);
+        setTopics(items, page.total);
+        setHasMore(items.length > 0 && items.length < page.total);
+      }
+    } catch (error) {
+      if (requestId === requestRef.current) {
+        setError(communityErrorMessage(error, '社区加载失败，请稍后重试'));
+      }
+    } finally {
+      if (requestId === requestRef.current) setLoading(false);
+    }
+  }, [
+    currentUserId,
+    enrichTopicBotAuthor,
+    query,
+    scope,
+    topicType,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 200);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  // BOT 作者名晚到补丁：本人 bot 列表通常在 topics 之后异步到达；到齐后回补已渲染主题的作者展示名。
+  useEffect(() => {
+    if (Object.keys(botNameById).length === 0 || topics.length === 0) return;
+    let changed = false;
+    const enriched = topics.map((topic) => {
+      if (topic.author.type !== 'bot') return topic;
+      const name = botNameById[topic.author.id];
+      if (name && name !== topic.author.displayName) {
+        changed = true;
+        return { ...topic, author: { ...topic.author, displayName: name } };
+      }
+      return topic;
+    });
+    if (changed) setTopics(enriched, total);
+  }, [botNameById, setTopics, topics, total]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const previousCount = topics.length;
+      const page = await communityService.listTopics({
+        search: query,
+        scope: scope,
+        topicType: topicType,
+        ...(scope === 'mine' && currentUserId
+          ? { authorId: currentUserId }
+          : {}),
+        offset: previousCount,
+        limit: COMMUNITY_PAGE_SIZE,
+      });
+      const appended = page.items.map(enrichTopicBotAuthor);
+      appendTopics(appended);
+      const loaded = previousCount + appended.length;
+      setHasMore(appended.length > 0 && loaded < page.total);
+    } catch (error) {
+      setLoadMoreError(communityErrorMessage(error, '加载更多失败，请稍后重试'));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [
+    currentUserId,
+    enrichTopicBotAuthor,
+    hasMore,
+    loadingMore,
+    query,
+    scope,
+    topicType,
+    topics,
+  ]);
+
+  return {
+    load,
+    loadMore,
+    hasMore,
+    loadingMore,
+    loadMoreError,
+  };
+}

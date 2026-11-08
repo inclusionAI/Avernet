@@ -308,7 +308,9 @@ async def _dispatch_chat_send_stream(
         from_ref=req.from_.to_domain(),
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
-        extensions=req.extensions,
+        extensions=req.extensions.model_dump(by_alias=True, exclude_none=True)
+        if req.extensions
+        else None,
         attachments=[a.to_domain() for a in req.attachments]
         if req.attachments
         else None,
@@ -363,7 +365,9 @@ async def _dispatch_chat_send(
         from_ref=req.from_.to_domain(),
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
-        extensions=req.extensions,
+        extensions=req.extensions.model_dump(by_alias=True, exclude_none=True)
+        if req.extensions
+        else None,
         attachments=[a.to_domain() for a in req.attachments]
         if req.attachments
         else None,

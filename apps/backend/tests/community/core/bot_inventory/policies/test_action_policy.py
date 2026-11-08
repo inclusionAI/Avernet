@@ -50,11 +50,8 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
         (
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.FAILED,
-            ("view", "delete"),
-            {
-                "restart": "bot provisioning failed",
-                "engine_restart": "bot provisioning failed",
-            },
+            ("view", "restart", "delete"),
+            {"engine_restart": "bot provisioning failed"},
         ),
         (
             BotInventoryKind.PERSONAL_CLOUD,

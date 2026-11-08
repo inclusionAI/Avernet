@@ -6,6 +6,26 @@
 
 下文 `community/` 指 `apps/backend/src/agentclaw/community/`；简称 `services/` 指本目录的 `services/`。仓库根 `AGENTS.md` 和 `docs/arch/` 仍规定通用架构约束。本目录 `README.md` 的 Context Boundary 继续承担机器可检验的依赖声明。
 
+## B4 Bot 资源寻址兼容（2026-10-22）
+
+Bot-bound Local Skill 查询、内容、参数、安全观察、上传和删除先通过
+`BotAddressResolver` 解析请求的兼容 locator。权限使用解析结果的当前 Owner 和真实
+actor；资源使用不可变 entity。上传/删除在编辑 guard 内复核原始 locator 的权限。
+`ac_skill.user_id` 对 Bot-local 资产表示稳定 entity；共享 Repo/Center/Space 资产的
+人员、空间和授权语义保持不变。旧 API 按 skill_id 查询时，从持久资产反查 Bot 后
+仍执行相同权限检查，不能用资源 locator 判定当前调用者是 Owner。
+
+B6 继续保持转交入口关闭。Legacy BFF Router 已按职责拆分，原 skills.py /
+skillsets.py 保留 Router 和历史导入接口；共享请求解析先解析 Bot，将稳定 entity
+用于资源路径，当前 Owner 仅用于元数据和权限。上传与基于持久 Skill 的删除也使用
+同一身份边界。SkillSetService 按职责拆分为行为模块，Default 模板查询使用 entity。
+Factory 的显式 entity 优先于历史 user_id 路由别名；Pool 路径不再使用当前 Owner。
+真实 actor 仍由每个命令显式传入，不能由上述路径参数获得人员授权。
+共享/离线/无 Bot 的历史目录流保留显式地址，不因此授予活跃 Bot 的访问权限。
+DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序及响应合同由 Legacy
+route snapshot 和 endpoint 测试固定。此变更不宣称真实转交事务、凭证及所有消费者
+已完成验收；后续 B7 单独实现和联合验证。
+
 ## 1. 从 OpenAPI 进入
 
 `community/adapters/http/openapi_v1/__init__.py` 是 Router 装配入口。所有下列路径均位于 `/openapi/v1/bots`；Space-owned 资源只是使用这个命名空间，不因此归属于某个 Bot。
@@ -66,7 +86,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | Set、成员和 Default exclusion | 组织/规则事实，由 UoW 物化到 Installation；不是第二套有效态读取算法 |
 | Runtime 文件、软链、MCP 配置 | 设备投影结果，不是 DB Desired State；存储内容存在也不等于 Skill 已激活 |
 
-Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env 过滤。`bot_id=default` 在不同 Owner 下可重复；actor/user_id 是调用者，不能替代 Owner。旧表仍使用 `bolt_id` 字段时按现有映射处理。
+Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env 过滤；旧 `owner_id` 可匹配 Bot 的稳定 entity 或当前 Owner。Bot 解析完成后，Installation、Set、MCP config 及 Skills Pool 等纯 Bot 资源统一用 `entity_id + bot_id` 读写，即使物理列仍命名为 `owner_id`。授权和协作审计仍使用当前 Owner 与 actor。`bot_id=default` 在不同 Owner 下可重复，不能退化为裸 id 查询；actor/user_id 是调用者，不能替代资源地址。旧表仍使用 `bolt_id` 字段时按现有映射处理。
 
 ## 3. Bot 有效态：统一 Reader / Writer
 
@@ -95,7 +115,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 ## 4. Local、Repo、Center 的内容身份
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。
-- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；仅 AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location，记录的 `git_path` 不改写。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
+- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location；OpenClaw Legacy 也接受固定的 `/home/admin/.openclaw/workspace/skills/skills-local/<skill_name>` 历史 Engine-view locator，并将其映射到已授权 Bot 的当前 canonical Local 包地址。两者均只兼容读取记录中的旧 locator，`git_path` 不改写；设备操作仍绑定当前 Bot。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
 - Local 上传或替换的四条成功路径统一在 `LocalSkillUploadService` 持有 edit guard 时，把本次校验的 canonical ZIP 交给 `LocalSkillSecurityUploadHook`。公共部署默认 Noop；仅显式启用的企业装配使用真实观察服务，先保存不可变快照，再绑定 `tc:<uuid>` 身份、冻结本次名称与描述、登记独立观察记录，并为扫描和资产同步分别入队。该后置链路故障需记录可定位证据和可补报状态，不能把已成功的同步上传改判为失败；后台任务不得从可变 Runtime 目录重建旧包。当前观察结果不拦截 Skill 使用。
 - 观察交接有期限；超时后释放 edit guard、记录上传 ID/摘要/精确快照 locator 和 handoff-failure 事实。晚返线程受取消栅栏约束，不能把旧包选为当前。补报必须先读回原快照并核对摘要；数据库不可用时至少输出含阶段与归属的结构化日志。完整原包不可得时不能冒称可补扫。
 - `HANDOFF_TIMEOUT` 中已有完整冻结元数据和持久上传顺序的记录也可恢复：慢写入的快照暂未出现时继续等待，出现后才读回核对摘要并补建观察；若观察记录已写入、只是超时清除了当前与同步目标指针，补报要在同一上传顺序栅栏下恢复这些指针和 handoff 阶段。旧上传仍不能覆盖更新包，不能仅凭超时后的短暂 `NOT_FOUND` 把它判为永久缺包。
@@ -274,6 +294,10 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 Local 保留现有显式 `retired_mappings` 卸载；真实目录、外部链接和结构目录保留。
 内容准备失败的 Center 声明仍保护其链接；只有成功解析的完整快照（包括合法空列表）
 允许自动清理。删除失败必须报告未收敛。发布 Service Bot 继续消费冻结 Artifact。
+
+普通文件系统投影直接将已解析计划下发 Engine，不再获取 Backend 缓存租约或二次重读快照。
+Engine 保留运行目录级进程内串行化；并发请求不保证按期望状态版本排序。设备失败仍返回
+实际 PENDING/DEGRADED，既有 Desktop 恢复语义继续适用。
 
 ## 11. 修改后的验证与文档维护
 

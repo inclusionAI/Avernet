@@ -13,7 +13,6 @@ E2E_TESTS_CLI=(
     "test_cli_connect"
     "test_cli_onboard"
     "test_cli_update_status"
-    "test_cli_request_group_help"
     "test_cli_chat"
     "test_cli_list_groups"
     "test_cli_friend"
@@ -192,47 +191,6 @@ test_cli_update_status() {
     TESTS_TOTAL=$((TESTS_TOTAL+1))
     # Restore to busy (demo default-ish).
     bcs_cli CEO update-status --status busy >/dev/null 2>&1 || true
-}
-
-# request-group-help -> confirm-group-help: end-to-end proposal flow via CLI.
-# (confirm-group-help has no separate array entry; it is driven inside this case
-#  using the proposal URL returned by request-group-help, per the one-case-per-command
-#  rule with cross-command data threading.)
-test_cli_request_group_help() {
-    info "CLI: bcs-cli request-group-help + confirm-group-help"
-    ensure_cli_token CEO || { skip_case "no token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
-    local gid=""
-    if ! bcs_cli CEO request-group-help --topic "cli e2e help"; then
-        fail "request-group-help exited $BCS_CLI_EXIT"
-        TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
-    fi
-    # The response contains a confirm URL (token-bearing). Extract it.
-    local confirm_url
-    confirm_url="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE 'https?://[^"[:space:]]+/groups/[^"[:space:]]+/confirm' | head -1)"
-    if [[ -z "$confirm_url" ]]; then
-        confirm_url="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE '/groups/[^"[:space:]]+/confirm' | head -1)"
-        [[ -n "$confirm_url" ]] && confirm_url="${BCS_API_BASE_URL}${confirm_url}"
-    fi
-    if [[ -z "$confirm_url" ]]; then
-        fail "request-group-help did not return a confirm URL"
-        TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
-    fi
-    if bcs_cli "" confirm-group-help --url "$confirm_url"; then
-        pass "bcs-cli confirm-group-help succeeded (group created via CLI proposal flow)"
-        TESTS_PASSED=$((TESTS_PASSED+1))
-        # Best-effort cleanup: confirm prints "Group created:\n  ID: <uuid>".
-        # DELETE /groups/{id}?bot_id=<driver> (api_delete can't add the query).
-        gid="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE 'ID: [a-f0-9-]+' | head -1 | sed 's/ID: //')"
-    else
-        fail "confirm-group-help exited $BCS_CLI_EXIT"
-        TESTS_FAILED=$((TESTS_FAILED+1))
-    fi
-    TESTS_TOTAL=$((TESTS_TOTAL+1))
-    if [[ -n "$gid" ]]; then
-        curl -s -o /dev/null -X DELETE "${BCS_API_BASE_URL}/groups/${gid}?bot_id=${BOT_CEO_UUID}" \
-            -H "X-Mock-User-Id: $BCS_MOCK_USER_ID" \
-            -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME" 2>/dev/null || true
-    fi
 }
 
 # chat: 1:1 message via CLI, detached so e2e does not block on bot response.

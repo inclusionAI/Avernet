@@ -17,6 +17,7 @@ pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
 
 #[derive(Clone)]
 pub enum ProviderBotEventCredential {
+    WithActor { credential: Box<ProviderBotEventCredential>, bot_uuid: String },
     StaticBearer(String),
     AgentPass {
         agent_code: String,
@@ -30,6 +31,7 @@ pub enum ProviderBotEventCredential {
 impl std::fmt::Debug for ProviderBotEventCredential {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::WithActor { credential, bot_uuid } => f.debug_struct("WithActor").field("credential", credential).field("bot_uuid", bot_uuid).finish(),
             Self::StaticBearer(_) => f.write_str("StaticBearer(***)"),
             Self::AgentPass { .. } => f.write_str("AgentPass(***)"),
             Self::ProviderAdmin {
@@ -54,6 +56,7 @@ pub struct RegisterProviderCommand {
     /// Downlink protocol version ("1.0" | "2.0"); None = "1.0".
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
+    pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +78,7 @@ pub struct UpdateProviderCommand {
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
     pub organization_management: Option<ProviderOrganizationManagementConfig>,
+    pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +100,8 @@ pub struct RegisterProviderBotCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotOutcome {
+    pub auth_mode: ProviderAuthMode,
+    pub identity: crate::types::provider_identity::ProviderBotIdentity,
     pub webhook_url: Option<String>,
     pub bot_uuid: String,
     pub provider_id: String,

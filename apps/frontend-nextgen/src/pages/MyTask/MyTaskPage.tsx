@@ -191,6 +191,7 @@ export default function MyTaskPage() {
       <MyTaskDrawers
         selectedTaskId={isUserIdentity ? selectedTaskId : null}
         onCloseTask={() => setSelectedTaskId(null)}
+        onSelectTask={setSelectedTaskId}
         taskRecords={taskRecords}
         ownerUserId={ownerUserId}
         selectedRoutine={isBotIdentity ? selectedRoutine : null}

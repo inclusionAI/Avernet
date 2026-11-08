@@ -832,14 +832,22 @@ describe('collaboration privacy runtime wiring', () => {
     const signal = new AbortController().signal;
     const config: FriendApprovalConfig = {
       mode: 'partial_exempt',
-      exemptOrganizationPaths: [['蚂蚁集团', '大安全', '协作平台']],
-      exemptDepartmentNos: [' A4195 ', 'A4195', 'A5000'],
+      exemptOrganizationPaths: [['示例集团', '技术事业部', '平台团队']],
+      exemptDepartmentNos: ['TECH-101', 'TECH-102'],
+      exemptOrganizationEntries: [
+        { deptNo: 'TECH-101', path: ['示例集团', '技术事业部', '平台团队'] },
+        { deptNo: 'TECH-102', path: ['示例集团', '技术事业部', '平台团队'] },
+      ],
     };
 
     await expect(adapter.updateFriendApproval({ botId: 'bot-real-1', config }, signal)).resolves.toEqual({
       mode: 'partial_exempt',
-      exemptOrganizationPaths: [['蚂蚁集团', '大安全', '协作平台']],
-      exemptDepartmentNos: ['A4195', 'A5000'],
+      exemptOrganizationPaths: [['示例集团', '技术事业部', '平台团队']],
+      exemptDepartmentNos: ['TECH-101', 'TECH-102'],
+      exemptOrganizationEntries: [
+        { deptNo: 'TECH-101', path: ['示例集团', '技术事业部', '平台团队'] },
+        { deptNo: 'TECH-102', path: ['示例集团', '技术事业部', '平台团队'] },
+      ],
     });
 
     expect(patchManagedBot).toHaveBeenCalledWith(
@@ -848,7 +856,10 @@ describe('collaboration privacy runtime wiring', () => {
         friend_ext: {
           public_user_approval: { puid: 'p-user', status: 'AGREE' },
           view_scope_agent_friend_deps: ['A1000'],
-          no_check_scope_friend_deps: ['A4195', 'A5000'],
+          no_check_scope_friend_deps: [
+            { deptNo: 'TECH-101', deptName: '示例集团 / 技术事业部 / 平台团队' },
+            { deptNo: 'TECH-102', deptName: '示例集团 / 技术事业部 / 平台团队' },
+          ],
         },
         friend_check_in_strategy: 'DEPT_FREE',
       },
@@ -860,7 +871,7 @@ describe('collaboration privacy runtime wiring', () => {
     const { dependencies, patchManagedBot } = createDependencies();
     patchManagedBot.mockResolvedValueOnce({
       ...createBotDto(),
-      friend_ext: { no_check_scope_friend_deps: ['D1'] },
+      friend_ext: { no_check_scope_friend_deps: [{ deptNo: 'D1', deptName: '研发一部' }] },
       friend_check_in_strategy: 'DEPT_FREE',
     });
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
@@ -872,6 +883,7 @@ describe('collaboration privacy runtime wiring', () => {
         mode: 'partial_exempt',
         exemptOrganizationPaths: [['研发一部']],
         exemptDepartmentNos: ['D1'],
+        exemptOrganizationEntries: [{ deptNo: 'D1', path: ['研发一部'] }],
       },
     });
     await adapter.updateFriendApproval({
@@ -936,6 +948,7 @@ describe('collaboration privacy runtime wiring', () => {
             mode: 'partial_exempt',
             exemptOrganizationPaths: [['研发一部']],
             exemptDepartmentNos: ['D1'],
+            exemptOrganizationEntries: [{ deptNo: 'D1', path: ['研发一部'] }],
           },
         }),
       ).rejects.toThrow('Bot 更新接口未返回已生效的好友审批策略');
@@ -973,6 +986,7 @@ describe('collaboration privacy runtime wiring', () => {
           mode: 'partial_exempt',
           exemptOrganizationPaths: [['研发一部']],
           exemptDepartmentNos: ['D1'],
+          exemptOrganizationEntries: [{ deptNo: 'D1', path: ['研发一部'] }],
         },
       }),
     ).rejects.toThrow('network failed');

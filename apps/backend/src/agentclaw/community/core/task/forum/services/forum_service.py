@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime
+
 from injector import inject
 
-from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,
     BROWSE_MODES,
@@ -22,13 +25,30 @@ from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
+    MAX_HELP_EXPECTED_TIME_LENGTH,
+    MAX_POLL_OPTION_COUNT,
+    MAX_POLL_OPTION_LENGTH,
+    MIN_POLL_OPTION_COUNT,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
+    POLL_SELECTIONS,
+    POLL_SELECTION_MULTI,
+    POLL_SELECTION_SINGLE,
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_DISCUSSION,
+    TOPIC_TYPE_HELP,
+    TOPIC_TYPE_POLL,
+    TOPIC_TYPE_SHARE,
     TOPIC_TYPES,
+    ForumHelpConfig,
+    ForumPollConfig,
+    ForumPollSelection,
+    ForumTopicConfig,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
@@ -38,6 +58,9 @@ from agentclaw.community.core.task.forum.service_protocol import ForumServicePro
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
 )
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 class ForumService(ForumServiceProtocol):
@@ -83,12 +106,36 @@ class ForumService(ForumServiceProtocol):
             author_id=normalized_author,
         )
 
-    def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
+    def get_topic(
+        self,
+        *,
+        topic_id: str,
+        viewer_author_type: str | None = None,
+        viewer_author_id: str | None = None,
+    ) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        if (viewer_author_type is None) != (viewer_author_id is None):
+            raise ValidationError(
+                "viewer_author_type and viewer_author_id must be provided together"
+            )
         topic = self._repository.get_topic(normalized_topic_id)
         if topic is None:
             raise NotFound("topic not found")
-        return topic
+        if viewer_author_type is None:
+            return topic
+
+        normalized_viewer_type = self._author_type(viewer_author_type)
+        normalized_viewer_id = self._required_text(
+            viewer_author_id, "viewer_author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        viewer = self._repository.get_topic_viewer_state(
+            topic_id=normalized_topic_id,
+            author_type=normalized_viewer_type,
+            author_id=normalized_viewer_id,
+        )
+        if viewer is None:
+            raise NotFound("topic not found")
+        return replace(topic, viewer=viewer)
 
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
@@ -99,6 +146,62 @@ class ForumService(ForumServiceProtocol):
             limit=page_size,
         )
 
+    def set_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        author_type: str,
+        author_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_post_id = self._required_text(post_id, "post_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        if not isinstance(helpful, bool):
+            raise ValidationError("helpful must be a boolean")
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if topic.topic_type != TOPIC_TYPE_HELP:
+            raise ValidationError("helpful is only allowed for HELP topics")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may mark helpful replies")
+
+        post = self._repository.get_post(
+            topic_id=normalized_topic_id,
+            post_id=normalized_post_id,
+        )
+        if post is None:
+            raise NotFound("post not found in this topic")
+        if post.reply_to_post_id is not None:
+            raise ValidationError("only first-level replies can be marked helpful")
+
+        if helpful:
+            updated = self._repository.update_post_helpful_with_accept(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=True,
+                actor_type=normalized_author_type,
+                actor_id=normalized_author_id,
+            )
+        else:
+            updated = self._repository.update_post_helpful(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=False,
+            )
+        if updated is None:
+            raise NotFound("post not found in this topic")
+        return updated
+
     def create_topic(
         self,
         *,
@@ -108,6 +211,7 @@ class ForumService(ForumServiceProtocol):
         title: str,
         body: str,
         topic_type: str | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -121,6 +225,11 @@ class ForumService(ForumServiceProtocol):
         normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
+        normalized_config = self._topic_config(topic_config)
+        self._validate_topic_config_for_type(
+            normalized_topic_type,
+            normalized_config,
+        )
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -136,6 +245,7 @@ class ForumService(ForumServiceProtocol):
             title=normalized_title,
             body=normalized_body,
             topic_type=normalized_topic_type,
+            topic_config=normalized_config,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -148,6 +258,8 @@ class ForumService(ForumServiceProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -168,15 +280,139 @@ class ForumService(ForumServiceProtocol):
             author_avatar_url, "author_avatar_url",
             MAX_AUTHOR_AVATAR_URL_LENGTH,
         )
-        return self._repository.create_reply(
+        normalized_reply_to_post_id = self._optional_text(
+            reply_to_post_id, "reply_to_post_id", MAX_ID_LENGTH
+        )
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.topic_type not in (TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_SHARE)
+            and normalized_reply_to_post_id is not None
+        ):
+            raise ValidationError(
+                f"{topic.topic_type} replies must target the Topic; "
+                "reply_to_post_id is not allowed"
+            )
+        normalized_poll_selection = self._reply_poll_selection(
+            poll_selection, topic
+        )
+        logger.info(
+            "[forum-reply][create] topic_id=%s author_type=%s author_id=%s "
+            "client_request_id=%s input_reply_to_post_id=%s",
+            normalized_topic_id,
+            normalized_author_type,
+            normalized_author_id,
+            request_id,
+            normalized_reply_to_post_id,
+        )
+        result = self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
             author_id=normalized_author_id,
             client_request_id=request_id,
             body=normalized_body,
+            reply_to_post_id=normalized_reply_to_post_id,
+            poll_selection=normalized_poll_selection,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
+        logger.info(
+            "[forum-reply][persisted] topic_id=%s post_id=%s "
+            "client_request_id=%s stored_reply_to_post_id=%s created=%s",
+            normalized_topic_id,
+            result.post.post_id,
+            request_id,
+            result.post.reply_to_post_id,
+            result.created,
+        )
+        return result
+
+    def update_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+        title: str,
+        body: str,
+    ) -> ForumTopicRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
+        normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may edit the topic")
+        if topic.status != TOPIC_STATUS_OPEN:
+            raise Conflict(f"topic is {topic.status.lower()}, cannot be edited")
+
+        updated = self._repository.update_topic_content(
+            topic_id=normalized_topic_id,
+            title=normalized_title,
+            body=normalized_body,
+            expected_status=TOPIC_STATUS_OPEN,
+        )
+        if updated is not None:
+            logger.info(
+                "[forum-topic][updated] topic_id=%s author_type=%s author_id=%s",
+                normalized_topic_id,
+                normalized_author_type,
+                normalized_author_id,
+            )
+            return updated
+
+        current = self._repository.get_topic(normalized_topic_id)
+        if current is None:
+            raise NotFound("topic not found")
+        raise Conflict(f"topic is {current.status.lower()}, cannot be edited")
+
+    def delete_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> bool:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may delete the topic")
+        if topic.status == TOPIC_STATUS_LOCKED:
+            raise Conflict("topic is LOCKED, cannot be deleted")
+
+        deleted = self._repository.delete_topic(normalized_topic_id)
+        if deleted:
+            logger.info(
+                "[forum-topic][deleted] topic_id=%s author_type=%s author_id=%s",
+                normalized_topic_id,
+                normalized_author_type,
+                normalized_author_id,
+            )
+            return True
+        current = self._repository.get_topic(normalized_topic_id)
+        if current is None:
+            raise NotFound("topic not found")
+        raise Conflict(f"topic is {current.status.lower()}, cannot be deleted")
 
     def close_topic(self, *, topic_id: str) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
@@ -217,6 +453,155 @@ class ForumService(ForumServiceProtocol):
                 f"{field} must contain no more than {max_length} characters"
             )
         return normalized
+
+    @staticmethod
+    def _reply_poll_selection(
+        value: ForumPollSelection | None, topic: ForumTopicRecord
+    ) -> ForumPollSelection | None:
+        if topic.topic_type != TOPIC_TYPE_POLL:
+            if value is None:
+                return None
+            raise ValidationError(
+                "poll_selection is only allowed when topic_type is POLL"
+            )
+        if value is None:
+            raise ValidationError(
+                "poll_selection is required when topic_type is POLL"
+            )
+        if topic.topic_config is None or topic.topic_config.poll is None:
+            raise ValidationError(
+                "poll_selection requires topic_config.poll on the addressed Topic"
+            )
+        poll = topic.topic_config.poll
+        indices = tuple(value.option_indices)
+        if not indices:
+            raise ValidationError(
+                "poll_selection.option_indices must contain at least one option"
+            )
+        if any(
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index < 0
+            or index >= len(poll.options)
+            for index in indices
+        ):
+            raise ValidationError(
+                "poll_selection.option_indices contains an invalid option index"
+            )
+        if len(indices) != len(set(indices)):
+            raise ValidationError(
+                "poll_selection.option_indices must not contain duplicates"
+            )
+        if poll.selection == POLL_SELECTION_SINGLE and len(indices) != 1:
+            raise ValidationError(
+                "poll_selection.option_indices must contain exactly one option "
+                "for SINGLE polls"
+            )
+        return ForumPollSelection(option_indices=indices)
+
+    @classmethod
+    def _topic_config(cls, value: ForumTopicConfig | None) -> ForumTopicConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumTopicConfig):
+            raise ValidationError("topic_config must be a topic configuration object")
+        if set(value.__dict__) - {"poll", "help"}:
+            raise ValidationError("topic_config contains unsupported fields")
+        normalized = ForumTopicConfig(
+            poll=cls._poll_config(value.poll),
+            help=cls._help_config(value.help),
+        )
+        configured_sections = sum(
+            section is not None for section in (normalized.poll, normalized.help)
+        )
+        if configured_sections > 1:
+            raise ValidationError("topic_config must contain exactly one section")
+        return None if configured_sections == 0 else normalized
+
+    @staticmethod
+    def _validate_topic_config_for_type(
+        topic_type: str,
+        config: ForumTopicConfig | None,
+    ) -> None:
+        if topic_type == TOPIC_TYPE_POLL:
+            if config is None or config.poll is None:
+                raise ValidationError(
+                    "topic_config.poll is required when topic_type is POLL"
+                )
+            return
+        if topic_type == TOPIC_TYPE_SHARE:
+            if config is not None:
+                raise ValidationError(
+                    "topic_config is not allowed when topic_type is SHARE"
+                )
+            return
+        if topic_type == TOPIC_TYPE_HELP:
+            if config is not None and config.help is None:
+                raise ValidationError(
+                    "only topic_config.help is allowed when topic_type is HELP"
+                )
+            return
+        if config is not None:
+            raise ValidationError(
+                "topic_config is only allowed for POLL or HELP topics"
+            )
+
+    @classmethod
+    def _help_config(cls, value: ForumHelpConfig | None) -> ForumHelpConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumHelpConfig):
+            raise ValidationError("help must be a help configuration")
+        return ForumHelpConfig(
+            expected_time=cls._optional_text(
+                value.expected_time,
+                "help.expected_time",
+                MAX_HELP_EXPECTED_TIME_LENGTH,
+            )
+        )
+
+    @classmethod
+    def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumPollConfig):
+            raise ValidationError("poll must be a poll configuration")
+
+        selection = cls._required_text(
+            value.selection, "poll.selection", MAX_AUTHOR_TYPE_LENGTH
+        ).upper()
+        if selection not in POLL_SELECTIONS:
+            allowed = ", ".join(
+                sorted((POLL_SELECTION_MULTI, POLL_SELECTION_SINGLE))
+            )
+            raise ValidationError(f"poll.selection must be one of: {allowed}")
+
+        raw_options = value.options
+        if not isinstance(raw_options, (list, tuple)):
+            raise ValidationError("poll.options must be a list")
+        if not MIN_POLL_OPTION_COUNT <= len(raw_options) <= MAX_POLL_OPTION_COUNT:
+            raise ValidationError(
+                "poll.options must contain between "
+                f"{MIN_POLL_OPTION_COUNT} and {MAX_POLL_OPTION_COUNT} entries"
+            )
+        options = tuple(
+            cls._required_text(option, "poll.options", MAX_POLL_OPTION_LENGTH)
+            for option in raw_options
+        )
+        if len(options) != len(set(options)):
+            raise ValidationError("poll.options must not contain duplicates")
+
+        deadline = value.deadline_at
+        if deadline is not None and (
+            not isinstance(deadline, datetime) or deadline.tzinfo is None
+        ):
+            raise ValidationError("poll.deadline_at must include a timezone")
+
+        return ForumPollConfig(
+            selection=selection,
+            options=options,
+            deadline_at=deadline,
+        )
 
     @classmethod
     def _topic_type(cls, value: str | None) -> str | None:

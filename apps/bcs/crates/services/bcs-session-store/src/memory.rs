@@ -15,9 +15,8 @@ use bcs_service_api::core::session::{
     can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
 };
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
-    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::MessageViewScope;
@@ -35,15 +34,6 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-/// ServiceInvocation sessions start with callback_status="pending"; others start with None.
-fn initial_callback_status(kind: SessionKind) -> Option<String> {
-    if matches!(kind, SessionKind::ServiceInvocation) {
-        Some("pending".to_string())
-    } else {
-        None
-    }
 }
 
 fn session_from_params(
@@ -66,7 +56,6 @@ fn session_from_params(
         input: params.input.clone(),
         output: None,
         error_message: None,
-        callback_status: initial_callback_status(params.session_kind),
         activation_count: 1,
         caller_principal: params.caller_principal.clone(),
         created_by: params.created_by.clone(),
@@ -102,34 +91,12 @@ fn validate_session_event_scope(
 #[derive(Default)]
 struct MemoryState {
     sessions: HashMap<String, Session>,
-    callback_leases: HashMap<String, CallbackLeaseState>,
     /// (session_id, bot_uuid) -> 收藏事件时间（epoch ms）。
     /// 仅在 collect 时插入（幂等：已存在则保留原时间，不刷新），uncollect 移除。
     collected: HashMap<(String, String), u64>,
 }
 
-#[derive(Default)]
-struct CallbackLeaseState {
-    token: Option<i64>,
-    owner: Option<String>,
-    until_ms: Option<u64>,
-}
-
-impl CallbackLeaseState {
-    fn for_session_kind(kind: SessionKind) -> Self {
-        Self {
-            token: matches!(kind, SessionKind::ServiceInvocation).then_some(0),
-            owner: None,
-            until_ms: None,
-        }
-    }
-}
-
 fn insert_session(state: &mut MemoryState, session: Session) {
-    state.callback_leases.insert(
-        session.id.clone(),
-        CallbackLeaseState::for_session_kind(session.session_kind),
-    );
     state.sessions.insert(session.id.clone(), session);
 }
 
@@ -246,6 +213,20 @@ impl SessionRepoPort for MemorySessionRepo {
         self.state.read().await.sessions.get(session_id).cloned()
     }
 
+    async fn read_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>> {
+        // Memory projects from the CURRENT state, so a second store
+        // instance always observes the just-committed value.
+        let state = self.state.read().await;
+        let env = bcs_config::resolve_env_str();
+        Ok(state
+            .sessions
+            .get(session_id)
+            .map(|session| super::authorization_snapshot::memory_snapshot(env, session)))
+    }
+
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {
         self.state
             .read()
@@ -271,18 +252,6 @@ impl SessionRepoPort for MemorySessionRepo {
             .await
             .into_iter()
             .next()
-    }
-
-    async fn count_running_service(&self, group_id: &str) -> u64 {
-        let st = self.state.read().await;
-        st.sessions
-            .values()
-            .filter(|s| {
-                s.group_id == group_id
-                    && matches!(s.session_kind, SessionKind::ServiceInvocation)
-                    && matches!(s.status, SessionStatus::Running)
-            })
-            .count() as u64
     }
 
     /// Mirrors [`SessionRepoPort::list_by_group`] filters exactly but returns
@@ -313,51 +282,6 @@ impl SessionRepoPort for MemorySessionRepo {
                 participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
             })
             .count() as u64)
-    }
-
-    async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
-        let st = self.state.read().await;
-        let mut v: Vec<_> = st
-            .sessions
-            .values()
-            .filter(|s| {
-                matches!(s.session_kind, SessionKind::ServiceInvocation)
-                    && matches!(s.status, SessionStatus::Running)
-            })
-            .cloned()
-            .collect();
-        v.sort_by_key(|s| s.created_at);
-        v.into_iter()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect()
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> ServiceResult<Vec<Session>> {
-        let st = self.state.read().await;
-        let mut sessions: Vec<_> = st
-            .sessions
-            .values()
-            .filter(|session| {
-                matches!(session.session_kind, SessionKind::ServiceInvocation)
-                    && matches!(session.status, SessionStatus::Completed)
-                    && session.callback_status.as_deref() == Some("pending")
-                    && after_session_id.map_or(true, |after| session.id.as_str() > after)
-                    && st.callback_leases.get(&session.id).is_some_and(|lease| {
-                        lease.token.is_some()
-                            && lease.until_ms.map_or(true, |until_ms| until_ms <= now_ms)
-                    })
-            })
-            .cloned()
-            .collect();
-        sessions.sort_by(|left, right| left.id.cmp(&right.id));
-        sessions.truncate(limit as usize);
-        Ok(sessions)
     }
 
     async fn list_running_service_after(
@@ -621,32 +545,6 @@ impl SessionRepoPort for MemorySessionRepo {
         command: UpdateSessionParticipantMessageViewScopeWithEvent,
     ) -> ServiceResult<Session> { self.repo_update_participant_message_view_scope_with_event(command).await }
 
-    async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {
-        let mut st = self.state.write().await;
-        {
-            let sess = st
-                .sessions
-                .get_mut(session_id)
-                .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-            sess.callback_status = Some(status.to_string());
-            sess.updated_at = now_ms();
-        }
-        if status != "pending"
-            && let Some(lease) = st.callback_leases.get_mut(session_id)
-        {
-            lease.owner = None;
-            lease.until_ms = None;
-        }
-        Ok(())
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> { self.repo_claim_callback(command).await }
-
-    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> { self.repo_complete_callback(command).await }
-
     async fn update_title(
         &self,
         session_id: &str,
@@ -673,11 +571,26 @@ impl SessionRepoPort for MemorySessionRepo {
         seen.into_iter().collect()
     }
 
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        if actor_ids.is_empty() {
+            return Ok(false);
+        }
+        let actor_ids = actor_ids.iter().map(String::as_str).collect::<std::collections::HashSet<_>>();
+        let state = self.state.read().await;
+        Ok(state.sessions.values().any(|session| {
+            session.group_id == group_id
+                && session.participants.iter().any(|p| actor_ids.contains(p.bot_uuid.as_str()))
+        }))
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let mut st = self.state.write().await;
         let existed = st.sessions.remove(session_id).is_some();
         if existed {
-            st.callback_leases.remove(session_id);
             st.collected.retain(|key, _| key.0 != session_id);
         }
         Ok(existed)

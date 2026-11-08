@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::body::{Body, to_bytes};
-use axum::http::{HeaderMap, Request};
+use axum::http::HeaderMap;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
@@ -17,9 +16,8 @@ use bcs_service_api::application::v1::{
     SessionParticipant, SessionService, SessionSummary, UpdateGroup, UpdateGroupParticipant,
     UpdateSession, UpdateSessionParticipant,
 };
-use serde_json::Value;
 
-struct HeaderVerifier {
+pub(crate) struct HeaderVerifier {
     caller: AuthenticatedCaller,
 }
 
@@ -56,39 +54,12 @@ pub(crate) fn caller() -> AuthenticatedCaller {
     }
 }
 
-pub(crate) fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .header("x-test-auth", "yes")
-        .header("x-request-id", "request-123")
-        .body(Body::from(body.to_string()))
-        .expect("request")
-}
-
-pub(crate) fn bare_request(method: &str, uri: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("x-request-id", "request-123")
-        .body(Body::empty())
-        .expect("request")
-}
-
-pub(crate) async fn response_json(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read response body");
-    serde_json::from_slice(&bytes).expect("JSON response")
-}
-
 // ---------------------------------------------------------------------------
 // Noop services for group / session / message / invitation / friendship
 // (register tests never hit those routes). Copied from invitation_routes.rs.
 // ---------------------------------------------------------------------------
 
-struct NoopGroupService;
+pub(crate) struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
@@ -137,7 +108,7 @@ impl GroupService for NoopGroupService {
     }
 }
 
-struct NoopSessionService;
+pub(crate) struct NoopSessionService;
 
 #[async_trait]
 impl SessionService for NoopSessionService {
@@ -207,7 +178,7 @@ impl SessionService for NoopSessionService {
     }
 }
 
-struct NoopSessionMessageService;
+pub(crate) struct NoopSessionMessageService;
 
 #[async_trait]
 impl SessionMessageService for NoopSessionMessageService {
@@ -221,7 +192,7 @@ impl SessionMessageService for NoopSessionMessageService {
     }
 }
 
-struct NoopInvitationService;
+pub(crate) struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
@@ -247,7 +218,7 @@ impl InvitationService for NoopInvitationService {
     }
 }
 
-struct NoopFriendshipService;
+pub(crate) struct NoopFriendshipService;
 
 #[async_trait]
 impl FriendshipService for NoopFriendshipService {

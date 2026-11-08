@@ -280,6 +280,14 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # Environment operations declare business operator/owner, not an acting user.
+    ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
+    ("get", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"),
+    ("post", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"),
+    # Expert discovery is tenant-wide, selected by the verified principal.
+    ("get", f"{PUBLIC_API_PREFIX}/experts"),
+    ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
+    ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
     # The minimal classification is tenant-wide, not owner-scoped.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
@@ -298,6 +306,22 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
     # BBS Topics and replies are tenant-wide content. The authenticated
     # principal may be a person, Bot, or application; no end-user axis exists.
+    # The BBS explicit-author contract names the action's author in the
+    # request body. The author is an explicit domain input, not the end user
+    # this seam confirms, and no bot is addressed on the wire.
+    (
+        "put",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts/{{post_id}}/helpful",
+    ),
+    # BBS interaction events and summaries likewise declare actor and target
+    # dimensions on the wire. They read and write tenant-wide BBS content and
+    # address no bot, so they expose no end-user scope.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/interactions"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/interactions/summary"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/interactions/summary/batch",
+    ),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
@@ -325,6 +349,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
     (
         "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/skills/install",
+    ),
+    (
+        "post",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
     ),
     (
@@ -345,6 +373,8 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/close"),
+    ("put", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
+    ("delete", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
     # BBS Browse-Loop runtime reporting: one bot reports a single Browse Run's
     # outcome; tenant-wide write, no user-id axis and no bot-id axis.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-reports"),
@@ -420,6 +450,13 @@ _AUTHENTICATED_SELF = {
     # README resolves the acting user from the verified principal; callers do
     # not get a second, steerable user_id query parameter.
     ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_id}}/readme"),
+    # Personal Center is a self read. It accepts owner_user_id, then binds it to
+    # the verified human principal; cross-owner reads are refused. It therefore
+    # has no delegable user_id parameter while still documenting its 403.
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/personal-center/activities",
+    ),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -570,7 +607,20 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # operations under /bots/{bot_id}/clis add four more: 181 -> 185. The acli
 # market search then moves to the tenant-wide /bots/market/clis, so one of
 # them leaves the path tier: path 185 -> 184, none 125 -> 126.
-_BOT_ID_PLACEMENT = {"path": 184, "query": 1, "none": 126}
+# DWS owner management adds eight Bot-path-addressed operations.
+# acli operations add four more (two cancels, the live list and one read):
+# path 192 -> 196.
+# DWS rollout eligibility adds one owner-scoped Bot-path operation.
+# BBS Bot skill-install repair adds one Bot-path operation: 197 -> 198.
+# The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
+# operations under /bots/{bot_id}/genome: path 198 -> 211.
+# The configured engine default-model read adds one Bot-path operation: 211 -> 212.
+# BBS interaction statistics adds five account-level routes with no Bot
+# dimension: helpful marking plus interaction write, summary, batch summary,
+# and Personal Center reads: 129 -> 134. Topic edit and delete add two more
+# explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
+# Service environments add one Bot-addressed and two workflow/environment operations.
+_BOT_ID_PLACEMENT = {"path": 213, "query": 1, "none": 138}
 
 
 def _schema() -> dict:
@@ -772,11 +822,16 @@ def test_the_pinned_number_of_operations_take_it():
     # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
     # The Local Skill security read adds one user-scoped path operation.
     # Engine release inspection adds one Bot-addressed read.
-# acli market CLIs: four path-addressed, user-scoped operations under
-# /bots/{bot_id}/clis take user_id like the identity switch beside them,
-# so ``taking`` grows 254 -> 258. The market search then moves to the
-# tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
-    assert len(taking) == 257
+    # acli market CLIs: four path-addressed, user-scoped operations under
+    # /bots/{bot_id}/clis take user_id like the identity switch beside them,
+    # so ``taking`` grows 254 -> 258. The market search then moves to the
+    # tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
+    # DWS management adds eight owner-scoped operations with explicit user_id.
+    # acli operations add four path-addressed, user-scoped ones: 265 -> 269.
+    # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
+    # The genome registry (RSI-03) adds thirteen: 270 -> 283.
+    # The default-model read adds one Bot-addressed user-scoped operation.
+    assert len(taking) == 284
 
 
 def test_the_exempt_operations_take_none():

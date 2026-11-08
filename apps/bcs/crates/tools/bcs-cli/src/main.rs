@@ -51,6 +51,7 @@
 // resolves it identically.
 mod collaboration_output;
 mod agentpass;
+mod collaboration_snapshot;
 // `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
 // resolved via `inventory`). Public builds link no provider and fall back to a
 // stub; internal builds link an Ant provider that performs the real flow.
@@ -379,6 +380,10 @@ fn resolve_bcs_url(cli: &Cli) -> Result<String> {
 ///
 /// Note: bcs-cli is stateless - it only READS session files, never writes.
 fn discover_token(explicit_token: Option<&str>) -> Result<String> {
+    let caller = bcs_cli::CallerContext::from_env_with_token(explicit_token)?;
+    if std::env::var("BCN_AUTH_MODE").ok().as_deref() == Some("agentpass-subbots") {
+        return Ok(caller.select_token(explicit_token, None, None).unwrap_or_default().to_string());
+    }
     // 1. Use explicit token if provided
     if let Some(token) = explicit_token {
         if !token.is_empty() {
@@ -421,20 +426,14 @@ fn get_token(token_arg: Option<&str>) -> Result<String> {
 ///
 /// This is used by friend/visibility commands that operate on "my" bot
 /// without requiring the user to specify their own bot_uuid.
-fn resolve_my_bot_uuid() -> Result<String> {
+async fn resolve_my_bot_uuid(client: &BcsClient) -> Result<String> {
+    if let Some(actor) = bcs_cli::CallerContext::from_env_with_token(client.token())?.actor_id() { return Ok(actor.into()); }
     if let Ok(Some(session)) = load_optional_session_info() {
-        if let Some(ref uuid) = session.bot_uuid {
-            if !uuid.is_empty() {
-                return Ok(uuid.clone());
-            }
+        if client.token().is_some_and(|token| !token.is_empty() && token == session.token) {
+            if let Some(uuid) = session.bot_uuid.filter(|uuid| !uuid.is_empty()) { return Ok(uuid); }
         }
     }
-
-    Err(anyhow!(
-        "Cannot resolve current bot UUID.\n\
-         Ensure $BOT_DATA_DIR/.bcs/session.json contains a valid bot_uuid field.\n\
-         This file is created after bot.connect succeeds."
-    ))
+    client.current_bot_uuid().await
 }
 
 /// Parse a `--input` / `--meta` style argument: a `@file.json` reference is
@@ -496,46 +495,6 @@ fn build_panel_opening_message(
     }
 
     Ok(Some(serde_json::Value::Object(opening_message)))
-}
-
-fn merge_baas_session_id_into_meta(
-    meta: Option<serde_json::Value>,
-    baas_session_id: Option<&str>,
-) -> Result<Option<serde_json::Value>> {
-    let Some(baas_session_id) = baas_session_id else {
-        return Ok(meta);
-    };
-
-    let mut meta_object = match meta {
-        Some(serde_json::Value::Object(map)) => map,
-        None => serde_json::Map::new(),
-        Some(_) => {
-            return Err(anyhow!(
-                "--meta must be a JSON object when --baas-session-id is set"
-            ));
-        }
-    };
-
-    let callback_target = meta_object.remove("callback_target");
-    let mut callback_target_object = match callback_target {
-        Some(serde_json::Value::Object(map)) => map,
-        None => serde_json::Map::new(),
-        Some(_) => {
-            return Err(anyhow!(
-                "meta.callback_target must be a JSON object when --baas-session-id is set"
-            ));
-        }
-    };
-    callback_target_object.insert(
-        "baas_session_id".to_string(),
-        serde_json::Value::String(baas_session_id.to_string()),
-    );
-    meta_object.insert(
-        "callback_target".to_string(),
-        serde_json::Value::Object(callback_target_object),
-    );
-
-    Ok(Some(serde_json::Value::Object(meta_object)))
 }
 
 /// Split a service session id at its canonical `{group_id}:<session_suffix>` boundary into its
@@ -658,11 +617,6 @@ fn service_session_summary_lines(session: &serde_json::Value, header: &str) -> V
     if let Some(err) = session.get("error_message").and_then(|v| v.as_str()) {
         if !err.is_empty() {
             lines.push(format!("  Error:    {}", err));
-        }
-    }
-    if let Some(cb) = session.get("callback_status").and_then(|v| v.as_str()) {
-        if !cb.is_empty() {
-            lines.push(format!("  Callback: {}", cb));
         }
     }
     lines
@@ -1060,31 +1014,6 @@ fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode
     }
 }
 
-/// Skill→BCS interactive debug
-macro_rules! skill_debug_request {
-    ($debug:expr, $method:expr, $endpoint:expr, $body:expr) => {
-        if $debug {
-            eprintln!("[Skill→BCS] {} {}", $method, $endpoint);
-            if !$body.is_null() {
-                eprintln!("    {}", serde_json::to_string(&$body).unwrap_or_default());
-            }
-        }
-    };
-}
-
-/// BCS→Skill response debug
-macro_rules! skill_debug_response {
-    ($debug:expr, $status:expr, $body:expr) => {
-        if $debug {
-            eprintln!("[BCS→Skill] Status: {}", $status);
-            eprintln!(
-                "    {}",
-                serde_json::to_string_pretty(&$body).unwrap_or_default()
-            );
-        }
-    };
-}
-
 #[derive(Subcommand)]
 enum Commands {
     /// Health check for BCS (no authentication required)
@@ -1208,32 +1137,6 @@ enum Commands {
         /// Load (0.0-1.0)
         #[arg(short, long)]
         load: Option<f32>,
-    },
-
-    /// Request group help - create a collaboration proposal
-    RequestGroupHelp {
-        /// Authentication token (auto-discovered if not provided)
-        #[arg(long)]
-        token: Option<String>,
-
-        /// Topic for the group collaboration
-        #[arg(short, long)]
-        topic: String,
-
-        /// Suggested participants (comma-separated)
-        #[arg(short, long)]
-        participants: Option<String>,
-
-        /// Suggested driver (currently ignored by server; driver is always the requesting bot)
-        #[arg(long)]
-        driver: Option<String>,
-    },
-
-    /// Confirm a group help proposal
-    ConfirmGroupHelp {
-        /// Confirm URL (full URL with token)
-        #[arg(short, long)]
-        url: String,
     },
 
     /// Create a group directly
@@ -1502,7 +1405,7 @@ enum Commands {
         command: SessionCommands,
     },
 
-    /// Drive a service-invocation flow on a group with `service_spec` set.
+    /// Drive a service-invocation flow on an existing group.
     ///
     /// Requires a bot token. The server records the caller as `bot:<bot_id>`.
     Service {
@@ -1534,7 +1437,7 @@ enum GroupContextCommands {
     /// Add a new active context.
     Add {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1548,7 +1451,7 @@ enum GroupContextCommands {
         #[arg(long, default_value = r#"{"userIds":[]}"#)]
         visible_to: String,
         #[arg(long)]
-        collect_from: String,
+        collect_from: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -1557,7 +1460,7 @@ enum GroupContextCommands {
     /// Supersede the active context version.
     Update {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1572,6 +1475,9 @@ enum GroupContextCommands {
         visible_to: Option<String>,
         #[arg(long)]
         collect_from: Option<String>,
+        /// Owner actor ids transferred to the new active version.
+        #[arg(long)]
+        owners: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -1582,7 +1488,7 @@ enum GroupContextCommands {
     /// List visible or writable active contexts.
     List {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1597,7 +1503,7 @@ enum GroupContextCommands {
     /// Get visible active contexts ordered round/session/group.
     Get {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1617,6 +1523,33 @@ enum GroupContextCommands {
 
 #[derive(Subcommand)]
 enum CollaborationCommands {
+    /// Store and share immutable collaboration-definition revisions
+    Draft {
+        #[command(subcommand)]
+        command: bcs_cli::collaboration_draft::DraftCommands,
+    },
+    /// Build a read-only collaboration-definition preview message without network access
+    Preview {
+        /// UTF-8 YAML file to include verbatim in the snapshot
+        file: PathBuf,
+
+        /// Optional display title (1..=120 Unicode code points)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Existing document UUID for a later snapshot, or an explicit first-version UUID
+        #[arg(long)]
+        document_id: Option<String>,
+
+        /// Direct parent snapshot UUID; requires --document-id
+        #[arg(long)]
+        parent_snapshot_id: Option<String>,
+
+        /// Explicit snapshot UUID for replaying the same constructed snapshot
+        #[arg(long)]
+        snapshot_id: Option<String>,
+    },
+
     /// Query whether the authenticated Bot may run a state machine in a session
     Permission {
         /// Current BCS session ID
@@ -1854,14 +1787,20 @@ fn build_channel_bind_payload(command: &ChannelCommands) -> Result<serde_json::V
         }
     };
 
+    // channel_type MUST be the registry spelling "dingtalk": bcs-http routes,
+    // the bcs-channel inbound join (find_active_by_account), and bcs-cli's own
+    // ConversationId by-session queries all key on that exact string.
+    // ChannelType is a plain String with no aliasing, so any other spelling
+    // stores a binding that inbound messages can never hit (BindingNotFound)
+    // and that our own channel conversation listing cannot see.
     let mut payload = json!({
-        "channel_type": "ding_talk",
+        "channel_type": "dingtalk",
         "account_ref": account,
         "target": target,
         "outbound_visibility": visibility,
         "env": env,
         "config": {
-            "channel_type": "ding_talk",
+            "channel_type": "dingtalk",
             "robot_code": robot_code,
             "client_id": client_id,
             "client_secret": client_secret,
@@ -2197,12 +2136,10 @@ enum SessionFileCommands {
 enum ServiceCommands {
     /// Kick off (or reactivate) a service-invocation session on a group.
     ///
-    /// The group must have a `service_spec` set (otherwise the server
-    /// returns 400). By default this command short-polls until the session
     /// reaches `status="completed"` or the timeout fires; pass `--detach`
     /// to return immediately after the 202 with the session id.
     Invoke {
-        /// Target group id (must have `service_spec` configured)
+        /// Target group id
         #[arg(short = 'g', long)]
         group: String,
 
@@ -2217,10 +2154,6 @@ enum ServiceCommands {
         /// Reactivate an existing session id instead of allocating a new one
         #[arg(long)]
         session_id: Option<String>,
-
-        /// BaaS conversation session id for callback delivery
-        #[arg(long)]
-        baas_session_id: Option<String>,
 
         /// Opaque caller-supplied id (recorded on the session row)
         #[arg(long)]
@@ -2273,12 +2206,39 @@ fn parse_group_context_policy(raw: &str, flag: &str) -> Result<serde_json::Value
     Ok(value)
 }
 
+fn parse_group_context_owners(raw: &str) -> Result<serde_json::Value> {
+    let value = parse_group_context_policy(raw, "owners")?;
+    let invalid_shape =
+        || anyhow!("--owners must be a JSON object containing a non-empty userIds array");
+    let user_ids = value
+        .get("userIds")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(invalid_shape)?;
+    if user_ids.is_empty() {
+        return Err(anyhow!("--owners.userIds must not be empty"));
+    }
+    if user_ids
+        .iter()
+        .any(|user_id| user_id.as_str().is_none_or(|value| value.trim().is_empty()))
+    {
+        return Err(anyhow!(
+            "--owners.userIds must contain non-empty string actor ids"
+        ));
+    }
+    Ok(value)
+}
+
 fn group_context_query(
-    group_id: &str,
+    group_id: Option<&str>,
     session_id: Option<&str>,
     round_id: Option<&str>,
 ) -> Vec<(String, String)> {
-    let mut query = vec![("groupId".to_string(), group_id.to_string())];
+    let mut query = Vec::new();
+    if let Some(value) = group_id {
+        if !value.is_empty() {
+            query.push(("groupId".to_string(), value.to_string()));
+        }
+    }
     if let Some(value) = session_id {
         query.push(("sessionId".to_string(), value.to_string()));
     }
@@ -2336,7 +2296,7 @@ fn group_context_add_body(
     scope_level: String,
     content: String,
     visible_to: String,
-    collect_from: String,
+    collect_from: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
 ) -> Result<serde_json::Value> {
@@ -2351,10 +2311,12 @@ fn group_context_add_body(
         "visible_to".to_string(),
         parse_group_context_policy(&visible_to, "visible-to")?,
     );
-    body.insert(
-        "collect_from".to_string(),
-        parse_group_context_policy(&collect_from, "collect-from")?,
-    );
+    if let Some(collect_from) = collect_from {
+        body.insert(
+            "collect_from".to_string(),
+            parse_group_context_policy(&collect_from, "collect-from")?,
+        );
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     Ok(serde_json::Value::Object(body))
@@ -2366,6 +2328,7 @@ fn group_context_update_body(
     content: Option<String>,
     visible_to: Option<String>,
     collect_from: Option<String>,
+    owners: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
     change_reason: Option<String>,
@@ -2389,12 +2352,14 @@ fn group_context_update_body(
             parse_group_context_policy(&collect_from, "collect-from")?,
         );
     }
+    if let Some(owners) = owners {
+        body.insert("owners".to_string(), parse_group_context_owners(&owners)?);
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     group_context_insert_optional_string(&mut body, "change_reason", change_reason);
     Ok(serde_json::Value::Object(body))
 }
-
 
 /// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
 /// module (`#[path]`) and call `run()` directly under its own runtime.
@@ -2413,6 +2378,40 @@ fn main() -> Result<()> {
 /// `#[tokio::main] async fn main`; only the entry is split out.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // The preview producer is intentionally dispatched before URL resolution,
+    // network probing, authentication, logging setup, or service discovery.
+    if let Commands::Collaboration {
+        command:
+            CollaborationCommands::Preview {
+                file,
+                title,
+                document_id,
+                parent_snapshot_id,
+                snapshot_id,
+            },
+        ..
+    } = &cli.command
+    {
+        let output = collaboration_snapshot::build_preview(
+            collaboration_snapshot::PreviewOptions {
+                file,
+                title: title.as_deref(),
+                document_id: document_id.as_deref(),
+                parent_snapshot_id: parent_snapshot_id.as_deref(),
+                snapshot_id: snapshot_id.as_deref(),
+            },
+        )?;
+        // Unlike network/query commands, preview's primary stdout artifact is
+        // the message itself. Structured output is therefore opt-in with
+        // --json so bots can forward the default output verbatim.
+        if cli.json && !cli.no_json {
+            println!("{}", serde_json::to_string(&output)?);
+        } else {
+            println!("{}", output.message);
+        }
+        return Ok(());
+    }
 
     // Setup logging
     let level = match cli.log_level.to_lowercase().as_str() {
@@ -2445,6 +2444,8 @@ pub async fn run() -> Result<()> {
         .with_writer(std::sync::Mutex::new(file))
         .compact()
         .init();
+
+    bcs_cli::CallerContext::new(None, std::env::var("BCN_ACTOR_BOT_ID").ok().as_deref())?;
 
     // Get current environment (defaults to "dev")
     let env = get_current_env();
@@ -2624,6 +2625,7 @@ pub async fn run() -> Result<()> {
         } else {
             BcsClient::with_token(bcs_url, token)
         };
+        client.set_actor_id(bcs_cli::CallerContext::from_env_with_token(Some(token)).expect("validated caller context").actor_id()).expect("validated Actor");
         client.set_client_identity(format!("bcs-cli/{}", env!("CARGO_PKG_VERSION")));
         if let Ok(traceparent) = std::env::var("TRACEPARENT") {
             if let Err(error) = client.set_traceparent(traceparent.trim()) {
@@ -2699,23 +2701,15 @@ pub async fn run() -> Result<()> {
                 client.set_oauth_headers(headers.clone());
             }
 
-            // Auto-discover existing session token to avoid duplicate registration.
-            // Priority: explicit --token > BCN_BOT_TOKEN env > session.json
-            let resolved_token =
-                token
-                    .or_else(|| {
-                        std::env::var("BCN_BOT_TOKEN")
-                            .ok()
-                            .filter(|t| !t.is_empty())
-                    })
-                    .or_else(|| {
-                        get_optional_session_file_path()
-                        .and_then(|p| load_session_info_from_path(&p).ok().flatten())
-                        .and_then(|s| if s.token.is_empty() { None } else {
-                            info!("Found existing session token from session file, will reconnect");
-                            Some(s.token)
-                        })
-                    });
+            let caller = bcs_cli::CallerContext::from_env_with_token(token.as_deref())?;
+            if caller.actor_id().is_some_and(|actor| bot_id.as_deref().is_some_and(|id| id != actor)) {
+                anyhow::bail!("--bot-id must match BCN_ACTOR_BOT_ID when connecting");
+            }
+            client.set_actor_id(caller.actor_id())?;
+            let selected = get_token(token.as_deref())?;
+            let resolved_token = (!selected.is_empty()).then_some(selected);
+            if let Some(token) = &resolved_token { client.set_token(token); }
+            let bot_id = bot_id.or_else(|| caller.actor_id().map(str::to_owned));
 
             // If we found a session token and no bot_id override, warn the user
             // that this bot is already registered (will reconnect instead of creating new).
@@ -2740,8 +2734,8 @@ pub async fn run() -> Result<()> {
 
             let result = client.connect(params).await?;
 
-            // Save session.json for subsequent commands
-            {
+            // Actor-scoped execution must not overwrite a shared session file.
+            if caller.actor_id().is_none() {
                 let session_bcs_url =
                     normalize_bcs_ws_url(&bcs_url).unwrap_or_else(|| bcs_url.clone());
                 let session = SessionInfo {
@@ -3170,104 +3164,6 @@ pub async fn run() -> Result<()> {
             }
         }
 
-        Commands::RequestGroupHelp {
-            token,
-            topic,
-            participants,
-            driver,
-        } => {
-            let token = get_token(token.as_deref())?;
-            let client = create_client(
-                &bcs_url,
-                &token,
-                bcs_cookie.as_deref(),
-                oauth_headers.as_ref(),
-            );
-
-            let suggested_participants: Option<Vec<String>> =
-                participants.map(|p| p.split(',').map(|s| s.trim().to_string()).collect());
-
-            skill_debug_request!(
-                debug,
-                "POST",
-                "/groups/request",
-                json!({
-                    "topic": &topic,
-                    "suggested_participants": &suggested_participants,
-                    "driver": &driver
-                })
-            );
-
-            let result = client
-                .propose_group_chat_with_token(&topic, suggested_participants, driver.as_deref())
-                .await?;
-
-            skill_debug_response!(
-                debug,
-                "200",
-                json!({
-                    "mode": &result.mode,
-                    "driver_bot": &result.driver_bot,
-                    "participants": &result.participants,
-                    "confirm_url": &result.confirm_url
-                })
-            );
-
-            if cli.json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                println!("Proposal created:");
-                println!("  Mode: {}", result.mode);
-                println!("  Driver: {}", result.driver_bot);
-                println!("  Participants: {}", result.participants.join(", "));
-                println!("  Confirm URL: {}", result.confirm_url);
-                println!("  Message: {}", result.message);
-            }
-        }
-
-        Commands::ConfirmGroupHelp { url } => {
-            // Confirm URL contains its own token, so we don't need the auth token
-            let mut client = BcsClient::new(&bcs_url);
-            if let Some(ref cookie) = bcs_cookie {
-                client.set_cookie(cookie);
-            }
-
-            skill_debug_request!(debug, "POST", &url, json!({}));
-
-            let result = client.confirm_proposal(&url).await?;
-
-            skill_debug_response!(
-                debug,
-                "200",
-                json!({
-                    "group_id": &result.group_id,
-                    "mode": &result.mode,
-                    "driver_bot": &result.driver_bot,
-                    "participants": &result.participants,
-                    "chat_url": &result.chat_url,
-                    "session_id": &result.session_id
-                })
-            );
-
-            if cli.json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                println!("Group created:");
-                println!("  ID: {}", result.group_id);
-                if let Some(mode) = &result.mode {
-                    println!("  Mode: {}", mode);
-                }
-                println!("  Driver: {}", result.driver_bot);
-                println!("  Participants: {}", result.participants.join(", "));
-                if let Some(ref chat_url) = result.chat_url {
-                    println!("  Chat URL: {}", chat_url);
-                }
-                if let Some(ref session_id) = result.session_id {
-                    println!("  Session: {}", session_id);
-                }
-            }
-        }
-
         Commands::CreateGroup {
             token,
             no_session,
@@ -3432,6 +3328,16 @@ pub async fn run() -> Result<()> {
         }
 
         Commands::Collaboration { token, command } => match command {
+            CollaborationCommands::Draft { command } => {
+                let authentication = get_token(token.as_deref())?;
+                let client = create_client(&bcs_url, &authentication, bcs_cookie.as_deref(), oauth_headers.as_ref());
+                let (output, success) = bcs_cli::collaboration_draft::execute(&client, command).await;
+                println!("{}", serde_json::to_string(&output)?);
+                if !success { anyhow::bail!("draft workflow did not produce a successful result"); }
+            }
+            CollaborationCommands::Preview { .. } => {
+                unreachable!("preview is dispatched before network setup")
+            }
             CollaborationCommands::Permission { session } => {
                 let token = get_token(token.as_deref())?;
                 let client = create_client(
@@ -4375,6 +4281,7 @@ pub async fn run() -> Result<()> {
                     content,
                     visible_to,
                     collect_from,
+                    owners,
                     valid_from,
                     valid_to,
                     change_reason,
@@ -4389,6 +4296,7 @@ pub async fn run() -> Result<()> {
                         content,
                         visible_to,
                         collect_from,
+                        owners,
                         valid_from,
                         valid_to,
                         Some(change_reason),
@@ -4431,7 +4339,11 @@ pub async fn run() -> Result<()> {
                     )
                 }
             };
-            let query = group_context_query(&group_id, session_id.as_deref(), round_id.as_deref());
+            let query = group_context_query(
+                group_id.as_deref(),
+                session_id.as_deref(),
+                round_id.as_deref(),
+            );
             let query_refs = query
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -4534,7 +4446,7 @@ pub async fn run() -> Result<()> {
                 FriendCommands::List { bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(
@@ -4765,7 +4677,7 @@ pub async fn run() -> Result<()> {
                 VisibilityCommands::Get { bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(
@@ -4799,7 +4711,7 @@ pub async fn run() -> Result<()> {
                 VisibilityCommands::Set { value, bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(
@@ -5463,7 +5375,7 @@ pub async fn run() -> Result<()> {
                     input,
                     meta,
                     session_id,
-                    baas_session_id,
+
                     caller_id,
                     title,
                     detach,
@@ -5479,9 +5391,6 @@ pub async fn run() -> Result<()> {
                         .map(parse_json_arg)
                         .transpose()
                         .map_err(|e| anyhow!("--meta: {}", e))?;
-                    let meta_json =
-                        merge_baas_session_id_into_meta(meta_json, baas_session_id.as_deref())
-                            .map_err(|e| anyhow!("--baas-session-id: {}", e))?;
 
                     debug_request!(
                         debug,
@@ -5719,6 +5628,102 @@ mod tests {
     }
 
     #[test]
+    fn group_context_query_omits_missing_and_empty_group_id() {
+        for group_id in [None, Some("")] {
+            let query = group_context_query(group_id, Some("sess-001"), None);
+            assert!(!query.iter().any(|(key, _)| key == "groupId"));
+        }
+    }
+
+    #[test]
+    fn group_context_query_includes_non_empty_group_id() {
+        let query = group_context_query(Some("game-room-7"), None, None);
+        assert_eq!(
+            query,
+            vec![("groupId".to_string(), "game-room-7".to_string())]
+        );
+    }
+
+    #[test]
+    fn group_context_commands_accept_non_group_scope_without_group_id() {
+        for (operation, args) in [
+            (
+                "add",
+                vec![
+                    "group-context",
+                    "add",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "game_rule",
+                    "--scope-level",
+                    "session",
+                    "--content",
+                    "rules",
+                    "--collect-from",
+                    r#"{"userIds":["judge_bot"]}"#,
+                ],
+            ),
+            (
+                "update",
+                vec![
+                    "group-context",
+                    "update",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                    "--change-reason",
+                    "metadata",
+                ],
+            ),
+            (
+                "list",
+                vec![
+                    "group-context",
+                    "list",
+                    "--session-id",
+                    "sess-001",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+            (
+                "get",
+                vec![
+                    "group-context",
+                    "get",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+        ] {
+            let mut input = vec!["bcs-cli"];
+            input.extend(args);
+            let cli = Cli::try_parse_from(input)
+                .unwrap_or_else(|error| panic!("failed to parse {operation}: {error}"));
+            let group_id = match cli.command {
+                Commands::GroupContext {
+                    command:
+                        GroupContextCommands::Add { group_id, .. }
+                        | GroupContextCommands::Update { group_id, .. }
+                        | GroupContextCommands::List { group_id, .. }
+                        | GroupContextCommands::Get { group_id, .. },
+                    ..
+                } => group_id,
+                _ => panic!("expected group-context {operation} command"),
+            };
+            assert_eq!(group_id, None, "unexpected group id for {operation}");
+        }
+    }
+
+    #[test]
     fn group_context_scope_level_flags_are_mutually_exclusive() {
         let err = resolve_group_context_scope_levels(
             vec!["group".to_string()],
@@ -5738,7 +5743,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             Some("2026-10-12T14:56:08+08:00".to_string()),
             Some("1791797768000".to_string()),
         )
@@ -5751,7 +5756,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             None,
             None,
         )
@@ -5759,6 +5764,47 @@ mod tests {
         let object = without_valid.as_object().unwrap();
         assert!(!object.contains_key("valid_from"));
         assert!(!object.contains_key("valid_to"));
+
+        let without_collect_from = group_context_add_body(
+            "game_rule".to_string(),
+            "group".to_string(),
+            "rules".to_string(),
+            r#"{"userIds":[]}"#.to_string(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let object = without_collect_from.as_object().unwrap();
+        assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("valid_from"));
+        assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_add_cli_accepts_missing_collect_from() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+        ])
+        .expect("collect_from is optional");
+
+        match cli.command {
+            Commands::GroupContext {
+                command: GroupContextCommands::Add { collect_from, .. },
+                ..
+            } => assert_eq!(collect_from, None),
+            _ => panic!("expected group-context add command"),
+        }
     }
 
     #[test]
@@ -5766,6 +5812,7 @@ mod tests {
         let body = group_context_update_body(
             "player_state".to_string(),
             "session".to_string(),
+            None,
             None,
             None,
             None,
@@ -5780,7 +5827,132 @@ mod tests {
         assert!(!object.contains_key("content"));
         assert!(!object.contains_key("visible_to"));
         assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("owners"));
         assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_update_body_includes_owners_when_provided() {
+        let body = group_context_update_body(
+            "player_state".to_string(),
+            "session".to_string(),
+            Some("v2".to_string()),
+            None,
+            None,
+            Some(r#"{"userIds":["bot-a","bot-b"]}"#.to_string()),
+            None,
+            None,
+            Some("transfer ownership".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            body["owners"],
+            serde_json::json!({"userIds": ["bot-a", "bot-b"]})
+        );
+    }
+
+    #[test]
+    fn group_context_add_rejects_owners_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--owners",
+            r#"{"userIds":["judge_bot"]}"#,
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_update_parses_owners_flag() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "update",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "player_state",
+            "--scope-level",
+            "session",
+            "--content",
+            "v2",
+            "--owners",
+            r#"{"userIds":["bot-a","bot-b"]}"#,
+            "--change-reason",
+            "transfer ownership",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::Update {
+                        owners,
+                        change_reason,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(owners.as_deref(), Some(r#"{"userIds":["bot-a","bot-b"]}"#));
+                assert_eq!(change_reason, "transfer ownership");
+            }
+            _ => panic!("expected group-context update command"),
+        }
+    }
+
+    #[test]
+    fn group_context_update_rejects_invalid_owners_shapes() {
+        for (raw, expected_error) in [
+            ("[]", "--owners must be a JSON object"),
+            (
+                r#"{"foo":"bar"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (
+                r#"{"userIds":"bot-a"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (r#"{"userIds":[]}"#, "--owners.userIds must not be empty"),
+            (
+                r#"{"userIds":["", " "]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+            (
+                r#"{"userIds":[1]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+        ] {
+            let error = group_context_update_body(
+                "player_state".to_string(),
+                "session".to_string(),
+                None,
+                None,
+                None,
+                Some(raw.to_string()),
+                None,
+                None,
+                Some("transfer ownership".to_string()),
+            )
+            .unwrap_err();
+            let error = error.to_string();
+            assert!(
+                error.contains(expected_error),
+                "owners={raw}, expected {expected_error}, got {error}"
+            );
+        }
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
@@ -6732,14 +6904,14 @@ mod tests {
         assert_eq!(
             payload,
             json!({
-                "channel_type": "ding_talk",
+                "channel_type": "dingtalk",
                 "account_ref": "robot_1",
                 "target": { "group": { "group_id": "group_1" } },
                 "group_chat_scope": "conversation_shared",
                 "outbound_visibility": "full_transcript",
                 "env": "pre",
                 "config": {
-                    "channel_type": "ding_talk",
+                    "channel_type": "dingtalk",
                     "robot_code": "robot_1",
                     "client_id": "client_id",
                     "client_secret": "secret",
@@ -7577,7 +7749,7 @@ mod tests {
                         input,
                         meta,
                         session_id,
-                        baas_session_id,
+
                         caller_id,
                         title,
                         detach,
@@ -7589,7 +7761,6 @@ mod tests {
                 assert!(input.is_none());
                 assert!(meta.is_none());
                 assert!(session_id.is_none());
-                assert!(baas_session_id.is_none());
                 assert!(caller_id.is_none());
                 assert!(title.is_none());
                 assert!(!detach);
@@ -7634,8 +7805,7 @@ mod tests {
             r#"{"trace":"abc"}"#,
             "--session-id",
             "g-1:00000001",
-            "--baas-session-id",
-            "agent:main:baas-session-1",
+
             "--caller-id",
             "client-a",
             "--title",
@@ -7654,7 +7824,7 @@ mod tests {
                         input,
                         meta,
                         session_id,
-                        baas_session_id,
+
                         caller_id,
                         title,
                         detach,
@@ -7666,10 +7836,6 @@ mod tests {
                 assert_eq!(input.as_deref(), Some(r#"{"q":"hi"}"#));
                 assert_eq!(meta.as_deref(), Some(r#"{"trace":"abc"}"#));
                 assert_eq!(session_id.as_deref(), Some("g-1:00000001"));
-                assert_eq!(
-                    baas_session_id.as_deref(),
-                    Some("agent:main:baas-session-1")
-                );
                 assert_eq!(caller_id.as_deref(), Some("client-a"));
                 assert_eq!(title.as_deref(), Some("demo"));
                 assert!(detach);
@@ -7698,39 +7864,6 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("--timeout-ms"));
         assert!(rendered.contains("86400000"));
-    }
-
-    #[test]
-    fn test_service_invoke_baas_session_id_merges_into_meta() {
-        let meta = Some(serde_json::json!({
-            "trace": "abc",
-            "callback_target": {
-                "source": "cli"
-            }
-        }));
-
-        let merged = merge_baas_session_id_into_meta(meta, Some("agent:main:baas-session-1"))
-            .unwrap()
-            .expect("meta should exist after merge");
-
-        assert_eq!(merged["trace"], "abc");
-        assert_eq!(merged["callback_target"]["source"], "cli");
-        assert_eq!(
-            merged["callback_target"]["baas_session_id"],
-            "agent:main:baas-session-1"
-        );
-    }
-
-    #[test]
-    fn test_service_invoke_baas_session_id_creates_meta_when_absent() {
-        let merged = merge_baas_session_id_into_meta(None, Some("agent:main:baas-session-1"))
-            .unwrap()
-            .expect("meta should be created");
-
-        assert_eq!(
-            merged["callback_target"]["baas_session_id"],
-            "agent:main:baas-session-1"
-        );
     }
 
     #[test]
@@ -7898,7 +8031,7 @@ mod tests {
             "session".into(),
             "content".into(),
             r#"{"userIds":["bot1"]}"#.into(),
-            r#"{"userIds":["bot2"]}"#.into(),
+            Some(r#"{"userIds":["bot2"]}"#.to_string()),
             Some("1791797768".into()),
             Some("2026-10-12T14:56:08+08:00".into()),
         )
@@ -7909,5 +8042,14 @@ mod tests {
             body["valid_to"],
             serde_json::json!("2026-10-12T14:56:08+08:00")
         );
+    }
+}
+
+#[cfg(test)]
+mod retired_service_policy_tests {
+    use super::*;
+    #[test]
+    fn service_invoke_rejects_retired_callback_flag() {
+        assert!(Cli::try_parse_from(["bcs-cli", "service", "invoke", "--group", "g", "--baas-session-id", "old-target"]).is_err());
     }
 }

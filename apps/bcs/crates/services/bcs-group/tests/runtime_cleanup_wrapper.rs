@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use bcs_service_api::{
-    GroupManagementService, GroupParticipantModeCommand, GroupPatchSettingsCommand,
-    GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatusCommand,
+    GroupManagementService, GroupParticipantModeCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatusCommand,
     GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand, ParticipantMode, Workspace,
+    ParticipantMode,
 };
 use bcs_group::GroupManagementWithRuntimeCleanup;
 use bcs_test_support::{NoopCollaborationRuntimeService, NoopGroupManagementService};
@@ -67,16 +66,6 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
     );
     assert!(
         service
-            .update_workspace(GroupUpdateWorkspaceCommand {
-                caller_actor_id: Some("driver".to_string()),
-                group_id: "group-1".to_string(),
-                workspace: Workspace::default(),
-            })
-            .await
-            .is_err()
-    );
-    assert!(
-        service
             .update_routing_policy(GroupRoutingPolicyCommand {
                 caller_actor_id: Some("driver".to_string()),
                 group_id: "group-1".to_string(),
@@ -95,15 +84,6 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
                 actor_id: "worker".to_string(),
                 mode: ParticipantMode::Muted,
                 message_view_scope: None,
-            })
-            .await
-            .is_err()
-    );
-    assert!(
-        service
-            .patch_group_settings(GroupPatchSettingsCommand {
-                group_id: "group-1".to_string(),
-                service_spec: None,
             })
             .await
             .is_err()

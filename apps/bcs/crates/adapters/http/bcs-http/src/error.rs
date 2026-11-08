@@ -64,12 +64,10 @@ impl HttpAdapterError {
             Self::Service(ServiceError::SessionInvalidParams(_)) => StatusCode::BAD_REQUEST,
             Self::Service(ServiceError::MessageLimitReached(_)) => StatusCode::TOO_MANY_REQUESTS,
             Self::Service(ServiceError::ProviderNotFound(_)) => StatusCode::NOT_FOUND,
-            Self::Service(ServiceError::ProposalNotFound(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::FriendRequestNotFound(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::BotNotRegistered(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::BotNotConnected(_)) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Service(ServiceError::SessionNotFound(_)) => StatusCode::NOT_FOUND,
-            Self::Service(ServiceError::SessionCallbackPending(_)) => StatusCode::CONFLICT,
             Self::Service(ServiceError::PendingRequestExists { .. }) => StatusCode::CONFLICT,
             Self::BadRequestStructured { .. } => StatusCode::BAD_REQUEST,
             Self::Service(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -129,4 +127,22 @@ impl IntoResponse for HttpAdapterError {
         });
         (status, Json(body)).into_response()
     }
+}
+
+impl From<bcs_auth_api::AuthError> for HttpAdapterError {
+    fn from(error: bcs_auth_api::AuthError) -> Self {
+        match error {
+            bcs_auth_api::AuthError::Forbidden(_) => Self::Forbidden("Bot identity forbidden".into()),
+            bcs_auth_api::AuthError::LookupFailed(_) | bcs_auth_api::AuthError::SdkError(_) => Self::Service(ServiceError::InternalError("Bot authentication unavailable".into())),
+            bcs_auth_api::AuthError::InvalidToken(message) if message.starts_with("ActorRequired") => Self::Unauthorized("ActorRequired: parent AgentPass requires a Bot Actor".into()),
+            _ => Self::Unauthorized("Bot authentication failed".into()),
+        }
+    }
+}
+
+impl From<HttpAdapterError> for Response {
+    fn from(error: HttpAdapterError) -> Self { error.into_response() }
+}
+impl From<HttpAdapterError> for StatusCode {
+    fn from(error: HttpAdapterError) -> Self { error.status() }
 }

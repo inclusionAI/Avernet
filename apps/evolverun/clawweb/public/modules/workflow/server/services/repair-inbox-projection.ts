@@ -37,7 +37,7 @@ function originalSummary(item: RepairInboxItem, force = false): RepairInboxItem 
     activeTaskId: item.activeTaskId, activeRevision: item.activeRevision, updatedAtMs: item.updatedAtMs,
     disposition: item.disposition ? { ...item.disposition, reason: inboxText(item.disposition.reason), evidenceFlowIds: [], evidenceEventIds: [] } : null,
     proposal: item.proposal ? { summary: inboxText(item.proposal.summary) } : null, instruction: inboxText(item.instruction), sources: [],
-    context: { nodeId: item.context?.nodeId ?? null, failureMode: item.context?.failureMode ?? null, signature: item.context?.signature ?? null },
+    context: { ...(item.context?.sourceSnapshot ? {sourceSnapshot:item.context.sourceSnapshot}:{}), nodeId: item.context?.nodeId ?? null, failureMode: item.context?.failureMode ?? null, signature: item.context?.signature ?? null },
     readSummary: { sourceCount: item.sources.length, runCount: repairEvidenceFlows(item).length,
       diagnosisCount: Array.isArray(item.context?.diagnoses) ? item.context.diagnoses.length : 0,
       originalBytes: bytes(original), operations: keys, conflictsComplete: keys.length === relevant.length } };

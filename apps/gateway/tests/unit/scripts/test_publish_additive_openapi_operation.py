@@ -125,15 +125,32 @@ def test_refuses_missing_operation_other_methods_and_version_mismatch() -> None:
     with pytest.raises(ValueError, match="no GET"):
         additive_document(_published(), _candidate(), "GET", "/absent")
 
+    # The other-methods refusal guards an ALREADY-PUBLISHED path: publishing
+    # a named method there must not silently change the unnamed sibling verbs.
+    published_with_path = _published()
+    published_with_path["paths"][_PATH] = _candidate()["paths"][_PATH]
+    for name, item in _candidate()["components"]["schemas"].items():
+        published_with_path["components"]["schemas"].setdefault(name, item)
     candidate = _candidate()
     candidate["paths"][_PATH]["post"] = {}
     with pytest.raises(ValueError, match="other methods"):
-        additive_document(_published(), candidate, "GET", _PATH)
+        additive_document(published_with_path, candidate, "GET", _PATH)
 
     candidate = _candidate()
     candidate["openapi"] = "3.0.3"
     with pytest.raises(ValueError, match="version differs"):
         additive_document(_published(), candidate, "GET", _PATH)
+
+
+def test_brand_new_multi_verb_path_publishes_jointly() -> None:
+    candidate = _candidate()
+    candidate["paths"][_PATH]["post"] = {
+        "operationId": "security_observations_post",
+        "responses": {"200": {"$ref": "#/components/schemas/ObservationEnvelope"}},
+    }
+    merged = additive_document(_published(), candidate, "GET", _PATH)
+    assert set(merged["paths"][_PATH]) == {"get", "post"}
+    assert merged["paths"][_PATH]["post"] == candidate["paths"][_PATH]["post"]
 
 
 def test_rejection_does_not_modify_published_artifact(tmp_path: Path) -> None:

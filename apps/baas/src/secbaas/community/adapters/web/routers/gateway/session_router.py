@@ -49,6 +49,7 @@ router = APIRouter(prefix="/openapi/v1/chat", tags=["Chat / Sessions"])
         401: {"description": "Authentication failed"},
         403: {"description": "Bot access denied"},
         404: {"description": "Session not found"},
+        503: {"description": "Authentication service unavailable"},
         500: {"description": "Internal server error"},
     },
 )
@@ -154,6 +155,7 @@ async def get_session(
         401: {"description": "Authentication failed"},
         403: {"description": "Bot access denied"},
         404: {"description": "Session not found"},
+        503: {"description": "Authentication service unavailable"},
         500: {"description": "Internal server error"},
     },
 )

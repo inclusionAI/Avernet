@@ -29,6 +29,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    default_publish_service,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
 
@@ -183,15 +186,15 @@ def apply_relay_report(
                 raise TaskStateError("relay report conflicts with an accepted event")
             return _result_from_record(previous), None, False
         has_successor = any(edge.src_id == command.node_id for edge in graph.relations)
-        if node.status != Status.RUNNING:
-            raise TaskStateError(
-                "relay report requires a RUNNING origin node "
-                f"(task_id={command.task_id} node_id={command.node_id} "
-                f"status={node.status.value} handed_off={has_successor})"
-            )
         if has_successor:
             raise TaskStateError("relay origin has already handed off a successor")
 
+        # Relay execution is Skill-driven and the Bot report is the latest
+        # authoritative execution fact. An infrastructure/Harness state may be
+        # stale while the Skill is still running or about to report, so it must
+        # not gate report acceptance. A terminal report below still decides the
+        # node's final state.
+        origin_status = node.status
         action_events: list[NodeActionEvent] = []
         # NB: 不再把 trace 注入 action_log payload——trace 的持久载体已改为
         # 上报时逐条独立落 task_trajectory_events 行(mixin._emit_trace_step_rows),
@@ -248,11 +251,20 @@ def apply_relay_report(
                 node.run_info.actual_goal = patch.actual_goal
                 node.run_info.acceptance_result = patch.local_acceptance_result
                 node.run_info.output.update(patch.output_patch or {})
+                # 产物发布点 ①(spec §5.1):ACCEPTED 写点 fold 之后 capture。
+                default_publish_service().capture_node(
+                    graph,
+                    node,
+                    artifact_patch=getattr(patch, "artifact_patch", None),
+                    now_ms=now,
+                )
             elif (
                 patch.actual_goal is not None
                 or patch.local_acceptance_result is not None
                 or patch.output_patch
+                or getattr(patch, "artifact_patch", None) is not None
             ):
+                # DECLINED 夹带 artifacts 属非法事件(§4):整体拒绝,不静默丢弃。
                 raise TaskStateError("declined execution cannot carry business facts")
             node.run_info.extend_props["execution_decision"] = decision
             node.run_info.progress_reason = command.progress_reason or None
@@ -305,12 +317,19 @@ def apply_relay_report(
                     raise TaskStateError("task completion requires passing acceptance")
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now
+                node.run_info.failure_reason = None
                 node.status = Status.SUCCESS
                 graph.status = Status.DONE
+                graph.extend_props.pop("hung_reason", None)
                 graph.output = _relay_graph_output(graph)
                 graph.extend_props["gaps"] = []
                 graph.extend_props["task_acceptance_result"] = _json_value(
                     asdict(acceptance)
+                )
+                # 产物发布点 ②(spec §5.1):completion 写点同闭包 capture,重复内容
+                # 由 select-first 查重吸收。
+                default_publish_service().capture_node(
+                    graph, node, artifact_patch=None, now_ms=now
                 )
                 record_action(
                     NodeAction.PLAN,
@@ -319,7 +338,7 @@ def apply_relay_report(
                         "task_acceptance_result": asdict(acceptance),
                         "progress_reason": command.progress_reason,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.SUCCESS,
                 )
                 record_action(
@@ -327,7 +346,7 @@ def apply_relay_report(
                     {
                         "reason": "task_completed",
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.SUCCESS,
                 )
                 result = TaskReportResult(TaskReportStatus.APPLIED, task_completed=True)
@@ -345,7 +364,7 @@ def apply_relay_report(
                         "failure_reason": failure,
                         "progress_reason": command.progress_reason,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.HUNG,
                 )
                 record_action(
@@ -354,7 +373,7 @@ def apply_relay_report(
                         "reason": "planning_failed",
                         "failure_reason": failure,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.HUNG,
                 )
                 result = TaskReportResult(TaskReportStatus.APPLIED, task_hung=True)
@@ -422,7 +441,7 @@ def apply_relay_report(
                             "failure_reason": node.run_info.failure_reason,
                             "progress_reason": command.progress_reason,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.HUNG,
                     )
                     record_action(
@@ -430,12 +449,14 @@ def apply_relay_report(
                         {
                             "reason": "relay_round_limit",
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.HUNG,
                     )
                     result = TaskReportResult(TaskReportStatus.APPLIED, task_hung=True)
                 else:
                     node.status = Status.DONE
+                    node.run_info.failure_reason = None
+                    graph.extend_props.pop("hung_reason", None)
                     graph.status = Status.RUNNING
                     target_id = f"relay-{uuid.uuid4().hex[:8]}"
                     child = TaskNode(
@@ -480,7 +501,7 @@ def apply_relay_report(
                             "pending_group_formation": planned_group_formation,
                             "progress_reason": command.progress_reason,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.DONE,
                     )
                     record_action(
@@ -489,7 +510,7 @@ def apply_relay_report(
                             "reason": "relay_handoff",
                             "target_node_id": target_id,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.DONE,
                     )
                     result = TaskReportResult(

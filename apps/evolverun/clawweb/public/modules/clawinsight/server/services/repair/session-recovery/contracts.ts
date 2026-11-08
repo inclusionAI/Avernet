@@ -1,11 +1,13 @@
+import type { BotRuntimeIdentity } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
 import type { RecoveryStoredTask, RecoveryJudgment, RecoveryPlan, RecoveryEvidence } from "./task-contracts.js";
 import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
 export type RecoveryRequest = {
   event_id: string;
   tc_fault_label: string | null;
-  target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE" };
+  target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE"; runtime_identity?: BotRuntimeIdentity };
   session_key: string;
+  session_id?: string;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;
@@ -15,24 +17,36 @@ export type RecoveryAcknowledgment = { event_id: string; delivery_key: string; s
 export type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/server/services/bot-runtime";
 export type RecoveryActor = { userId: string; isAdmin: boolean };
+/** Optional after-hook; implementations must isolate notification failures from business work. */
+export interface RecoveryActionNotifier {
+  after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" }): void;
+}
 /** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
-export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null };
-export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[] };
+export type RecoveryTermination = { status: "remote_stopped" | "remote_stop_failed" | "stop_pending"; aisJobId: string | null };
+export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
+export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
+  createSimulations(body: unknown, actor: RecoveryActor): Promise<{ batch_id: string; items: Array<RecoveryAcknowledgment & { task_id: string }> }>;
+  assessSimulation(taskId: string, version: number, input: import("./simulation.js").RecoverySimulationAssessment, finalSummary?: unknown): Promise<void>;
   create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }>;
-  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"] }>>;
+  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"]; completion_reason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required" }>>;
   detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView>;
   setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView>;
+  terminate(taskId: string, actor: RecoveryActor, reason?: unknown): Promise<RecoveryTaskView & { termination: RecoveryTermination }>;
   decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone?: boolean, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;
-  assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void>;
-  observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void>;
-  plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void>;
-  finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
-  executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean): Promise<void>;
+  assess(taskId: string, version: number, input: import("./task-contracts.js").RecoveryAssessment, finalSummary?: unknown): Promise<void>;
+  observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void>;
+  plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;
+  finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void>;
+  finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
+  finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void>;
+  finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
+  /** Only infrastructure callers supply failureCode; Agent business blocks are not technical alarms. */
+  executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown, failureCode?: string): Promise<void>;
   maintenance(): Promise<void>;
   reportResults(): Promise<void>;
 }

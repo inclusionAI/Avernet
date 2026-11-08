@@ -49,6 +49,7 @@ impl Api {
                     "bot_token": "test-bot-token",
                     "registration": {
                         "provider_id": "prv_test",
+        "auth_mode": "static_bearer",
                         "provider_bot_ref": query["provider_bot_ref"],
                         "mode": query["mode"],
                     },
@@ -69,6 +70,7 @@ fn token() -> String {
         "purpose": "provider_bot_registration",
         "id": "human_test",
         "provider_id": "prv_test",
+        "auth_mode": "static_bearer",
         "allowed_modes": ["plugin", "gateway"],
         "exp": 4102444800u64,
     })).unwrap();
@@ -91,7 +93,7 @@ async fn registration_permission_defaults_apply_only_to_the_selected_engine() {
             let provider_bot_ref = format!("{mode}-{engine}");
             let mut arguments = vec![
                 "register", "--token", &token, "--bot-name", "Test Bot",
-                "--provider-auth", "static-bearer", "--provider-bot-ref", &provider_bot_ref,
+                "--provider-bot-ref", &provider_bot_ref,
                 "--mode", mode, "--api-url", &api.base, "--engine", engine,
                 "--cwd", directory.path().to_str().unwrap(), "--engine-bin", engine_bin.to_str().unwrap(),
             ];

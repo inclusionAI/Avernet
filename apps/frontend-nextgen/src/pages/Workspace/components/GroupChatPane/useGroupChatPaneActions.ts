@@ -7,6 +7,8 @@ import { buildExplainPrompt, useMessageInteractions } from '@/pages/Workspace/ho
 import type { PanelAction } from '@tc-chat/core';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
 import { resolveSender } from './messageHelpers';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 interface UseGroupChatPaneActionsParams {
   group: GroupChatPaneProps['group'];
@@ -77,6 +79,7 @@ export function useGroupChatPaneActions({
   };
 
   const handleGroupSend = (content: string, mentions?: string[], attachments?: Parameters<GroupChatPaneProps['send']>[2]) => {
+    Tracert.click(Points.groupFocus.sendMessage, { group_id: group?.groupId });
     interactions.markRead();
     interactions.clearQuote();
     finishEdit();

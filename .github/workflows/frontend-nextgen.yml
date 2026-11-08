@@ -8,6 +8,7 @@ on:
       - 'REL*'
     paths:
       - 'apps/frontend-nextgen/**'
+      - 'packages/a2a-chat-client/**'
       - 'docker/services/frontend-nextgen.dockerfile'
       - 'docker/services/service-deployment.yaml'
       - 'docker/kube-deploy.sh'
@@ -18,6 +19,7 @@ on:
       - main
     paths:
       - 'apps/frontend-nextgen/**'
+      - 'packages/a2a-chat-client/**'
       - 'docker/services/frontend-nextgen.dockerfile'
       - 'docker/services/service-deployment.yaml'
       - 'docker/kube-deploy.sh'
@@ -58,3 +60,32 @@ jobs:
 
       - name: Run frontend CI
         run: npm run ci
+
+  a2a-chat-client:
+    name: Shared a2a-chat-client package checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/a2a-chat-client
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/a2a-chat-client/package-lock.json
+
+      - name: Install dev dependencies (oracle + test chain)
+        run: npm ci
+
+      - name: Typecheck package
+        run: npx tsc --noEmit
+
+      - name: Check Open Core boundary (package root)
+        run: node ../../apps/frontend-nextgen/scripts/check-open-core.cjs .
+
+      - name: Run package tests
+        run: npx jest --runInBand

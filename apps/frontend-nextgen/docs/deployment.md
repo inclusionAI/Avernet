@@ -27,7 +27,28 @@ Values must be absolute upstream origins understood by Nginx, for example an int
 
 The current frontend development proxy proves that space, work-order and work-order-notification paths use the separate admin upstream. The Nginx template therefore places those three specific locations before the broad `/openapi/` Gateway location.
 
+For local Task Engine diagnosis only, the development build accepts
+`TEAMCLAW_TASK_API_BASE=/api/v1/collaboration/tasks`. Pair it with
+`TASK_ENGINE_UPSTREAM=<task-engine-origin>` to send the complete task path directly to the
+Task Engine. Without this override, the public default remains
+`/openapi/v1/collaboration/tasks`. This is a development proxy option and does not add a
+production Nginx route for the internal `/api/v1` surface.
+
 ## Build
+
+Deployment overlays can disable the OpenClaw onboarding tab by overriding
+`getOpenClawRegistrationEnabled` with `{ status: 'available', value: false }`.
+It defaults to enabled. This controls external-bot onboarding only; existing bots
+and bot-engine creation options are unaffected. Re-enable the capability to restore
+the tab and its installer instructions.
+If no onboarding methods are enabled, the dialog displays an explicit unavailable
+state instead of an empty type selector or installer.
+
+`DSH_REGISTRATION_GUIDE_URL` optionally supplies the DeepSeek Harness guide through
+runtime configuration. Set it to an HTTP(S) guide for the plugin version deployed
+with this release, using an immutable revision when hosting documentation in Git.
+When absent, the optional guide link is hidden; all inline onboarding steps remain
+available. Internal overlays can override the guide capability independently.
 
 ```bash
 docker build -t <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION> .

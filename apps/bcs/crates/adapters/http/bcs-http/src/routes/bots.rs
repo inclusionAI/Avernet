@@ -134,7 +134,7 @@ pub async fn connect_bot(
     uri: Uri,
     Json(params): Json<BotConnectParams>,
 ) -> Result<Json<bcs_service_api::BotConnectResult>, HttpAdapterError> {
-    let caller_actor_id = extract_caller_actor_id(&state, &headers, &uri).await;
+    let caller_actor_id = extract_caller_actor_id(&state, &headers, &uri).await?;
     let result = state
         .services
         .bot_management
@@ -304,7 +304,10 @@ pub async fn set_visibility(
     uri: Uri,
     Json(req): Json<SetVisibilityRequest>,
 ) -> Response {
-    let caller_actor_id = extract_caller_actor_id(&state, &headers, &uri).await;
+    let caller_actor_id = match extract_caller_actor_id(&state, &headers, &uri).await {
+        Ok(caller) => caller,
+        Err(error) => return error.into_response(),
+    };
     match state
         .services
         .bot_management
@@ -418,6 +421,13 @@ fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
         obj.insert("skills".to_string(), serde_json::json!(skill_names));
     }
 
+    // Spec §8 mine row: the sampled per-item
+    // relation rides the legacy page additively
+    // (absent on pages without a sampled
+    // relation).
+    let access_relation =
+        bot.access_relation.map(Value::String);
+
     serde_json::json!({
         "bot_uuid": bot.bot_uuid,
         "capabilities": caps,
@@ -427,6 +437,7 @@ fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
         "env": bot.env,
         "status": actor_status_to_wire(bot.status),
         "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
+        "access_relation": access_relation,
     })
 }
 
@@ -498,7 +509,7 @@ pub async fn search_bots(
     };
     let friendship = parse_friendship_filter(q.friendship.as_deref(), q.is_friend)?;
 
-    let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await;
+    let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await?;
     let viewer_actor_id = match (&q.viewer_actor_type, &q.viewer_actor_id) {
         (None, None) => None,
         (Some(actor_type), Some(actor_id)) => {
@@ -723,7 +734,7 @@ async fn extract_caller_actor_id(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
-) -> Option<String> {
+) -> Result<Option<String>, HttpAdapterError> {
     caller_actor_id_from_headers(state, headers, uri).await
 }
 
@@ -747,7 +758,7 @@ async fn extract_visibility_caller_actor_id(
     uri: &Uri,
 ) -> Result<Option<String>, Response> {
     if bot_token_from_headers(headers).is_some() {
-        if let Some(bot_id) = state.bot_uuid_from_headers(headers).await {
+        if let Some(bot_id) = state.bot_uuid_from_headers(headers).await? {
             return Ok(Some(bot_id));
         }
 

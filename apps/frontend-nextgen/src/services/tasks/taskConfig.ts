@@ -13,6 +13,8 @@ import { getCapabilities } from '@/capabilities';
  */
 export const TASK_API_BASE = '';
 
+const DEFAULT_TASK_READ_API_BASE = '/openapi/v1/collaboration/tasks';
+
 /**
  * 解析 task API 路径前缀（不含 host）：由 capability getTaskApiBase 注入。
  * - Open Core → /openapi/v1/collaboration/tasks；内部 overlay → /api/v1/collaboration/tasks。
@@ -25,12 +27,14 @@ export function resolveTaskApiBase(): string {
 }
 
 /**
- * 任务「读公开面」路径前缀（dashboard / list / bbs-list）：所有环境统一走
- * /openapi/v1/collaboration/tasks 公开面（前端经 gateway spanner 鉴权），不随 internal
- * overlay 切到内面 /api/v1 —— 对齐后端安全收敛：后续将删除后端非 openapi 接口，仅保留
- * /openapi/v1 公开面，杜绝公网出口（如 avernet 阿里云部署）上内部 /api/v1 未经鉴权裸奔。
+ * 任务读接口路径前缀（dashboard / list / bbs-list）。默认走 /openapi/v1 公开面；仅本地
+ * 排障时可由 config.local.ts 注入 TEAMCLAW_TASK_API_BASE=/api/v1/collaboration/tasks，
+ * 让读写请求统一直连 TASK_ENGINE_UPSTREAM。生产构建未注入时仍保持公开面默认值。
  *
  * 仅用于前端发起的「读」接口（dashboard/list/bbs-list）；execute/grant/revoke 等写口
  * 仍由 resolveTaskApiBase() 按 capability 决定（Open Core /openapi、内部 overlay /api/v1）。
  */
-export const TASK_READ_API_BASE = '/openapi/v1/collaboration/tasks';
+export const TASK_READ_API_BASE =
+  typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
+    ? TEAMCLAW_TASK_API_BASE
+    : DEFAULT_TASK_READ_API_BASE;

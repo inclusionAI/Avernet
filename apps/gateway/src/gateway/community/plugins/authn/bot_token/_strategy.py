@@ -5,11 +5,10 @@ Token extraction:
 - an ``Authorization: Bearer <token>`` (or a bare token) is the default source,
   but **only when it is NOT JWT-shaped** — a JWT is left for a (future) JWT-based
   identity strategy, never mistaken for a bot session token;
-- otherwise the dedicated bot-token header (``x-avernet-bot-token``) is used,
-  taken as-is;
+- a dedicated Bot header selects the Bot credential independently of User OAuth;
 - absent/empty → not applicable (``None``).
 
-The strategy resolves the token itself in a **single** registry lookup:
+Ordinary requests resolve the token in a **single** registry lookup:
 ``find_bot_by_token(token) → RegisteredBot | None``. There is no separate
 validator abstraction — the lookup lives here. The registry record's
 ``bot_uuid`` / ``owner_id`` / ``app_id`` / ``agent_code`` / ``tenant`` flow
@@ -20,12 +19,14 @@ is mapped from the DB ``created_by`` column.
 from __future__ import annotations
 
 from gateway.community.logger import get_logger
+from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     Bot,
     BotPrincipal,
     CredentialBundle,
     Principal,
     PrincipalType,
+    expected_actor_id,
 )
 from gateway.community.spi.bot import BotRegistry
 
@@ -40,26 +41,22 @@ def is_jwt_format(token: str) -> bool:
 
 
 def extract_bot_token(creds: CredentialBundle, dedicated_header: str) -> str | None:
-    """Extract a bot session token: ``Authorization`` first (non-JWT), else the dedicated header.
+    """Extract a dedicated Bot token, otherwise non-JWT ``Authorization``.
 
-    ``Authorization`` (a Bearer or bare token) is the default source, but only
-    when it is NOT JWT-shaped — a JWT is left for a (future) JWT-based identity
-    strategy, never mistaken for a bot session token. If no usable Authorization
-    token is present, the dedicated bot-token header is used as a fallback
-    (taken as-is). Returns ``None`` when no usable bot token is present.
+    Only the configured dedicated header is recognized; no aliases are inferred.
+    It is independent of user OAuth, which may be opaque. The strategy resolves
+    a different Authorization credential before treating it as a second Bot token.
     """
+    dedicated: str = creds.headers.get(dedicated_header, "").strip()
     auth: str = creds.headers.get(_AUTH_HEADER, "")
     if auth.lower().startswith("bearer"):
         token: str = auth[len("bearer") :].strip()
     else:
         token = auth.strip()
+    if dedicated:
+        return dedicated
     if token and not is_jwt_format(token):
-        return token  # Authorization (Bearer or bare, non-JWT) wins
-    # No usable Authorization token → fall back to the dedicated header (as-is).
-    if dedicated_header:
-        dedicated: str = creds.headers.get(dedicated_header, "").strip()
-        if dedicated:
-            return dedicated
+        return token
     return None
 
 
@@ -79,7 +76,22 @@ class BotTokenStrategy:
         token = extract_bot_token(creds, self._token_header)
         if token is None:
             return None  # no bot token → not applicable
-        bot = await self._registry.find_bot_by_token(token)
+        auth = creds.headers.get(_AUTH_HEADER, "").strip()
+        if auth.lower().startswith("bearer "):
+            auth = auth[len("bearer ") :].strip()
+        # Opaque User OAuth is independent of a dedicated Bot credential.
+        # Reject only when the second credential is also a verified Bot token.
+        if auth and auth != token and not is_jwt_format(auth):
+            if await self._registry.find_bot_by_token(auth) is not None:
+                raise AuthError("Conflicting Bot credentials")
+        actor = expected_actor_id(creds.headers)
+        bot = (
+            await self._registry.find_bot_by_token(token, actor)
+            if actor is not None
+            else await self._registry.find_bot_by_token(token)
+        )
+        if actor is not None and (bot is None or bot.bot_uuid != actor):
+            raise AuthError("Actor does not match Bot token")
         if bot is None:
             logger.debug("bot token not found in registry")
             return None  # unknown / empty token → soft miss

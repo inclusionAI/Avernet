@@ -20,6 +20,10 @@ async fn deleting_unmigrated_gateway_also_disables_legacy_binding() {
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     bots.register_with_owner_and_token("legacy".into(), BotCapabilities::default(), "alice", "test-legacy-runtime").await.unwrap();
     let providers = Arc::new(MemoryProviderStore::new());
+    use bcs_service_api::{ProviderRecord, ProviderRepoPort};
+    providers.insert_provider(ProviderRecord { provider_id: "provider-a".into(), slug: None,
+        name: "Legacy".into(), config: "{}".into(), created_by: "alice".into(), owners: "[]".into(),
+        disabled: false, created_at: 1, updated_at: 1 }).await.unwrap();
     providers.insert_binding(ProviderBotBinding {
         bot_uuid: "legacy".into(), provider_id: "provider-a".into(), provider_bot_ref: "legacy-ref".into(),
         webhook_url: None, disabled: false, created_at: 1, updated_at: 1,
@@ -104,7 +108,13 @@ async fn admin_modes_and_gateway_mutations_keep_both_views_consistent() {
         assert_eq!(view.provider.unwrap().provider_id, provider.provider.provider_id);
         let management = ProviderManagement::new(Arc::new(admin.clone()), Arc::new(admin.clone()), registry.clone(),
             Arc::new(bcs_relation::RelationCore::memory()));
-        assert!(admin.delete_registered_provider_bot(&provider.provider.provider_id, "invalid-admin-token", "plugin").await.is_err());
+        // The token is verification-only: a wrong token never retires.
+        assert!(admin.retire_registered_bot(bcs_service_api::core::RetireProviderBotParams {
+            provider_id: provider.provider.provider_id.clone(),
+            provider_admin_token: "invalid-admin-token".into(),
+            provider_bot_ref: "plugin".into(),
+            allow_unbound_owner_suffixed_bot: false,
+        }).await.is_err());
         let deleted = management.delete_provider_bot(DeleteProviderBotCommand {
             provider_id: provider.provider.provider_id.clone(), provider_admin_token: provider.provider_admin_token.clone(),
             provider_bot_ref: "plugin".into(), allow_unbound_owner_suffixed_bot: false,

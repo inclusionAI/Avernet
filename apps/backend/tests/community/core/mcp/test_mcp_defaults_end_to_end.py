@@ -328,7 +328,7 @@ class TestClaudeCodeDefaultMcpNames:
 
         monkeypatch.setattr(_defaults, "get_default_mcp_servers", patched)
         # SkillSetService imported the name directly; patch its module reference too.
-        import agentclaw.community.core.skill_center.services.skill_set_service as svc_mod
+        import agentclaw.community.core.skill_center.services.skill_set_mcps as svc_mod
         monkeypatch.setattr(svc_mod, "get_default_mcp_servers", patched)
 
         service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)
@@ -361,7 +361,7 @@ class TestClaudeCodeDefaultMcpNames:
             return servers
 
         monkeypatch.setattr(_defaults, "get_default_mcp_servers", patched)
-        import agentclaw.community.core.skill_center.services.skill_set_service as svc_mod
+        import agentclaw.community.core.skill_center.services.skill_set_mcps as svc_mod
         monkeypatch.setattr(svc_mod, "get_default_mcp_servers", patched)
 
         service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)

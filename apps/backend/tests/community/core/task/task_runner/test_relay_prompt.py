@@ -3,6 +3,28 @@ from agentclaw.community.core.task.task_runner.client.relay_prompt import (
 )
 
 
+def test_relay_prompt_routes_relay_entry_through_task_loop() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口" in prompt
+    assert "必须由 task-loop Skill 承接" in prompt
+    assert "禁止任何业务 Skill 抢占入口或直接执行业务任务" in prompt
+    assert "task-loop 是编排 Skill" in prompt
+    assert "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用" in prompt
+    assert "S0 只做入口路由，不进入 trace.steps，也不新增 report event" in prompt
+    assert "完成路由锁定后进入 S1" in prompt
+    assert prompt.index("[task-execute]") < prompt.index("S0 路由锁")
+    assert "S0_CONTEXT" not in prompt
+
+
 def test_relay_prompt_uses_internal_network_without_bcs_credential() -> None:
     prompt = format_relay_execution_instruction(
         task_id="task-1",
@@ -62,6 +84,43 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "HTTP 422 表示契约非法" in prompt
     assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
     assert "禁止换 event_id 或 token" in prompt
+
+
+def test_relay_prompt_pins_s4a_execution_budget() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S4a 预算硬边界" in prompt
+    assert "wall_seconds=600" in prompt
+    assert "max_tool_calls=30" in prompt
+    assert "max_consecutive_failures=5" in prompt
+    assert "到达任一上限立即停止业务调用" in prompt
+    assert "并继续 S4b 上报" in prompt
+    assert "禁止卡住不切下一步" in prompt
+    assert "失败记录必须能还原关键问题现场" in prompt
+    assert "failure_type" in prompt
+    assert "actual_goal_digest" in prompt
+    assert "last_operation" in prompt
+    assert "raw_error_excerpt" in prompt
+    assert "evidence_refs" in prompt
+    assert "impacted_acceptances" in prompt
+    assert "impact_and_next_hint" in prompt
+    assert "只记录一个最相关的触发操作" in prompt
+    assert "单份失败 JSON 不超过 2000 字符" in prompt
+    assert "raw_error_excerpt 不超过 500 字符" in prompt
+    assert "evidence_refs 最多 5 个" in prompt
+    assert "发生裁剪时增加 truncation 并保留必需键" in prompt
+    assert "不得转储完整日志、会话、Prompt或全部产物" in prompt
+    assert "DECLINED 时 event.failure_reason 与 S4A_EXECUTION.error_msg 写同一份" in prompt
+    assert "ACCEPTED 但 verdict=FAILED 时顶层 failure_reason 仍为 null" in prompt
+    assert "不得包含 relay_token、密钥、会话凭证或完整原始日志" in prompt
 
 
 def test_relay_prompt_forbids_direct_web_tools() -> None:
@@ -165,6 +224,11 @@ def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
         relay_execution=True,
         relay_token="generation-1",
     )
+
+    assert "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口" in prompt
+    assert "必须由 task-loop Skill 承接" in prompt
+    assert "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用" in prompt
+    assert "S0 只做入口路由，不进入 trace.steps，也不新增 report event" in prompt
 
     assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
     assert "HTTP 契约允许省略 trace" in prompt

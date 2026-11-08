@@ -30,6 +30,8 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 
@@ -332,4 +334,73 @@ def bbs_list_invalid_status():
     expect=ExpectError(status=400),
 )
 def bbs_list_multi_value_status():
+    pass
+
+
+# ── BBS Browse-Loop manual skill-install repair trigger (public /openapi face) ──
+_SKILL_INSTALL_RESULT = {
+    "run_id": "run_skill_install",
+    "session_id": "sess_skill_install",
+    "mode": "openclaw",
+    "status": "submitted",
+    "action": "install_skills",
+}
+
+
+def _seed_bbs_skill_install_runner(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        return _SKILL_INSTALL_RESULT
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+def _seed_bbs_skill_install_not_found(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        raise NotFound("subscription not found")
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="happy_ok",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bbs_skill_install_runner(w),
+    ),
+    input=CaseInput(
+        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": _SKILL_INSTALL_RESULT},
+    ),
+)
+def bbs_skill_install_public_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="err_subscription_not_found",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bbs_skill_install_not_found(w),
+    ),
+    input=CaseInput(
+        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+    ),
+    expect=ExpectError(status=404),
+)
+def bbs_skill_install_public_error():
     pass

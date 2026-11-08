@@ -21,6 +21,14 @@ class BotLookupAmbiguousError(RuntimeError):
     """A caller-specific Bot lookup matched more than one live row."""
 
 
+class BotAddressNotFoundError(LookupError):
+    """No live Bot matched the supplied stable or compatibility address."""
+
+
+class BotAddressConflictError(ValueError):
+    """Explicit stable and compatibility locators identify different Bots."""
+
+
 class BotCreateError(Exception):
     """Base error for Bot creation policy failures."""
 

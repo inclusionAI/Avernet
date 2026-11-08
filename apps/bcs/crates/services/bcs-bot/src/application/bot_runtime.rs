@@ -7,12 +7,14 @@ impl BotRuntimeConnectionService for Bot {
         command: BotRuntimeConnectCommand,
     ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
         let BotRuntimeConnectCommand {
-            caller_actor_id: _,
+            caller_actor_id,
             token,
             bot_id,
             protocol_version,
             client_kind,
         } = command;
+
+        self.validate_connect_identity(caller_actor_id.as_deref(), token.as_deref(), bot_id.as_deref()).await?;
 
         if let Some(bot_id) = bot_id.as_deref() {
             self.validate_connect_bot_id(bot_id).await?;

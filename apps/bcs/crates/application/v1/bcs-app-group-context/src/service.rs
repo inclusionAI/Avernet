@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{GroupContextEntry, GroupContextPolicy, ScopeLevel};
+use bcs_domain::{GroupContextEntry, GroupContextOwners, GroupContextPolicy, ScopeLevel};
 use bcs_group_context_store::{GroupContextRepo, GroupContextStoreError, NewGroupContextEntry};
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
@@ -12,12 +12,13 @@ use bcs_service_api::application::v1::{
 use chrono::Utc;
 use ulid::Ulid;
 
-use crate::permissions::{actor_can_read, actor_can_write, permission_for};
+use crate::permissions::{actor_can_read, actor_can_write, actor_is_owner, permission_for};
 use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
 
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
 pub const MAX_NAME_CHARS: usize = 255;
 pub const MAX_POLICY_BYTES: usize = 4096;
+pub const MAX_OWNERS_BYTES: usize = 4096;
 pub const MAX_CREATOR_CHARS: usize = 255;
 
 const INVALID_PARAM: &str = "invalid_param";
@@ -44,14 +45,18 @@ impl GroupContextApplicationServiceImpl {
         content: String,
         creator: String,
         visible_to: GroupContextPolicy,
-        collect_from: GroupContextPolicy,
+        collect_from: Option<GroupContextPolicy>,
+        owners: GroupContextOwners,
         change_reason: Option<String>,
         valid_from: Option<bcs_domain::GroupContextTime>,
         valid_to: Option<bcs_domain::GroupContextTime>,
     ) -> Result<GroupContextEntry, ApplicationError> {
+        let collect_from = collect_from.unwrap_or_else(|| GroupContextPolicy::users(Vec::<String>::new()));
         validate_name(&name)?;
         validate_content(&content)?;
-        validate_policies(&visible_to, &collect_from)?;
+        validate_policy("visible_to", &visible_to)?;
+        validate_policy("collect_from", &collect_from)?;
+        validate_required_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
@@ -63,6 +68,7 @@ impl GroupContextApplicationServiceImpl {
                 creator,
                 visible_to,
                 collect_from,
+                owners,
                 supersedes: None,
                 change_reason,
                 valid_from: valid_from.unwrap_or(now),
@@ -83,13 +89,16 @@ impl GroupContextApplicationServiceImpl {
         creator: String,
         visible_to: GroupContextPolicy,
         collect_from: GroupContextPolicy,
+        owners: GroupContextOwners,
         change_reason: Option<String>,
         valid_from: bcs_domain::GroupContextTime,
         valid_to: Option<bcs_domain::GroupContextTime>,
     ) -> Result<GroupContextEntry, ApplicationError> {
         validate_name(&name)?;
         validate_content(&content)?;
-        validate_policies(&visible_to, &collect_from)?;
+        validate_policy("visible_to", &visible_to)?;
+        validate_policy("collect_from", &collect_from)?;
+        validate_persistable_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .supersede_active(
@@ -105,6 +114,7 @@ impl GroupContextApplicationServiceImpl {
                     creator,
                     visible_to,
                     collect_from,
+                    owners,
                     supersedes: Some(old.id),
                     change_reason,
                     valid_from,
@@ -124,12 +134,8 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         validate_actor(&command.actor_id)?;
         validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_policies(&command.visible_to, &command.collect_from)?;
-        if !command.collect_from.contains_user(&command.actor_id) {
-            return Err(permission_denied(format!(
-                "actor_id={} is not allowed to write {} in {}",
-                command.actor_id, command.name, scope.scope
-            )));
+        if let Some(collect_from) = command.collect_from.as_ref() {
+            validate_policy("collect_from", collect_from)?;
         }
         self.create(
             scope,
@@ -138,6 +144,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             command.actor_id.clone(),
             command.visible_to,
             command.collect_from,
+            GroupContextOwners::new([command.actor_id.clone()]),
             None,
             command.valid_from,
             command.valid_to,
@@ -168,12 +175,35 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| not_found(&command.name, &scope.scope))?;
-        if !actor_can_write(&old, &command.actor_id) {
-            return Err(permission_denied(format!(
-                "actor_id={} is not allowed to update {} in {}",
-                command.actor_id, command.name, scope.scope
-            )));
+        // Authorization uses only the active row read for this request. A new
+        // owners list is data, never evidence for the request that carries it.
+        let is_owner = actor_is_owner(&old, &command.actor_id);
+        if !is_owner {
+            if command.visible_to.is_some()
+                || command.collect_from.is_some()
+                || command.owners.is_some()
+            {
+                return Err(permission_denied(format!(
+                    "actor_id={} is not an owner and may only update content and validity for {} in {}",
+                    command.actor_id, command.name, scope.scope
+                )));
+            }
+            if !actor_can_write(&old, &command.actor_id) {
+                return Err(permission_denied(format!(
+                    "actor_id={} is not allowed to update {} in {}",
+                    command.actor_id, command.name, scope.scope
+                )));
+            }
         }
+        let owners = match command.owners {
+            Some(owners) => {
+                validate_required_owners(&owners)?;
+                owners
+            }
+            // Legacy rows can have no owners (SQL NULL, represented in Rust as
+            // an empty list). Preserve it when the request does not set owners.
+            None => old.owners.clone(),
+        };
         let content = command.content.unwrap_or_else(|| old.content.clone());
         let visible_to = command.visible_to.unwrap_or_else(|| old.visible_to.clone());
         let collect_from = command
@@ -192,6 +222,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             command.actor_id.clone(),
             visible_to,
             collect_from,
+            owners,
             command.change_reason,
             valid_from,
             valid_to,
@@ -246,7 +277,11 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .get_active_by_name_and_scopes(&query.name, &scopes)
             .await
             .map_err(map_store_error)?;
-        if !rows.is_empty() && !rows.iter().any(|entry| actor_can_read(entry, &query.actor_id)) {
+        if !rows.is_empty()
+            && !rows
+                .iter()
+                .any(|entry| actor_can_read(entry, &query.actor_id))
+        {
             return Err(permission_denied(format!(
                 "actor_id={} is not allowed to read {}",
                 query.actor_id, query.name
@@ -256,12 +291,21 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         rows.sort_by_key(|entry| specificity_rank(entry.scope_level));
         let items = rows
             .into_iter()
-            .map(|entry| GroupContextGetItem {
-                name: entry.name,
-                scope_level: entry.scope_level,
-                content: entry.content,
-                valid_from: entry.valid_from,
-                valid_to: entry.valid_to,
+            .map(|entry| {
+                let is_owner = actor_is_owner(&entry, &query.actor_id);
+                let visible_to = is_owner.then(|| entry.visible_to.clone());
+                let collect_from = is_owner.then(|| entry.collect_from.clone());
+                let owners = is_owner.then(|| entry.owners.clone());
+                GroupContextGetItem {
+                    name: entry.name,
+                    scope_level: entry.scope_level,
+                    content: entry.content,
+                    valid_from: entry.valid_from,
+                    valid_to: entry.valid_to,
+                    visible_to,
+                    collect_from,
+                    owners,
+                }
             })
             .collect();
         Ok(GroupContextGetResponse { items })
@@ -274,7 +318,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_policies(&command.visible_to, &command.collect_from)?;
+        validate_systemset_policies(&command.visible_to, &command.collect_from)?;
         let existing = self
             .repo
             .get_active(&command.name, &scope.scope)
@@ -292,6 +336,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     SYSTEM_CREATOR.to_string(),
                     command.visible_to,
                     command.collect_from,
+                    old.owners.clone(),
                     None,
                     command.valid_from.unwrap_or_else(Utc::now),
                     command.valid_to,
@@ -305,7 +350,8 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     command.content,
                     SYSTEM_CREATOR.to_string(),
                     command.visible_to,
-                    command.collect_from,
+                    Some(command.collect_from),
+                    GroupContextOwners::new([SYSTEM_CREATOR]),
                     None,
                     command.valid_from,
                     command.valid_to,
@@ -335,10 +381,7 @@ fn validate_actor(actor_id: &str) -> Result<(), ApplicationError> {
 
 fn validate_name(name: &str) -> Result<(), ApplicationError> {
     if name.trim().is_empty() {
-        return Err(ApplicationError::invalid(
-            INVALID_PARAM,
-            "name is required",
-        ));
+        return Err(ApplicationError::invalid(INVALID_PARAM, "name is required"));
     }
     if name.chars().count() > MAX_NAME_CHARS {
         return Err(ApplicationError::payload_too_large(
@@ -349,7 +392,7 @@ fn validate_name(name: &str) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn validate_policies(
+fn validate_systemset_policies(
     visible_to: &GroupContextPolicy,
     collect_from: &GroupContextPolicy,
 ) -> Result<(), ApplicationError> {
@@ -363,9 +406,7 @@ fn validate_policy(field: &str, policy: &GroupContextPolicy) -> Result<(), Appli
     if encoded.len() > MAX_POLICY_BYTES {
         return Err(ApplicationError::payload_too_large(
             PAYLOAD_TOO_LARGE,
-            format!(
-                "{field} serialized JSON exceeds {MAX_POLICY_BYTES} bytes"
-            ),
+            format!("{field} serialized JSON exceeds {MAX_POLICY_BYTES} bytes"),
         ));
     }
     Ok(())
@@ -380,6 +421,48 @@ fn validate_content(content: &str) -> Result<(), ApplicationError> {
     } else {
         Ok(())
     }
+}
+
+fn validate_required_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
+    if owners.is_empty() {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "owners.userIds must not be empty",
+        ));
+    }
+    validate_persistable_owners(owners)
+}
+
+fn validate_persistable_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
+    let encoded = serde_json::to_vec(owners)
+        .map_err(|error| ApplicationError::internal(error.to_string()))?;
+    if encoded.len() > MAX_OWNERS_BYTES {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("owners serialized JSON exceeds {MAX_OWNERS_BYTES} bytes"),
+        ));
+    }
+    if owners
+        .user_ids
+        .iter()
+        .any(|user_id| user_id.trim().is_empty())
+    {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "owners.userIds must not contain blank ids",
+        ));
+    }
+    if owners
+        .user_ids
+        .iter()
+        .any(|user_id| user_id.chars().count() > MAX_CREATOR_CHARS)
+    {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("owners.userIds contains an id exceeding {MAX_CREATOR_CHARS} characters"),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_collect_from(policy: &GroupContextPolicy) -> Result<(), ApplicationError> {

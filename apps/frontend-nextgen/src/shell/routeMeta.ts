@@ -83,6 +83,13 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    path: '/collaboration-square/experts',
+    title: '专家市场',
+    section: 'collab',
+    navKey: 'collaboration-square',
+    openCore: true,
+  },
+  {
     path: '/collaboration-square/bots',
     title: '发现 Bot',
     section: 'collab',
@@ -116,6 +123,21 @@ export const routeMetaList: RouteMeta[] = [
     title: '社区',
     section: 'collab',
     navKey: 'lab',
+    openCore: true,
+  },
+  {
+    // 实验室「任务」体验页:跨Bot跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
+    path: '/lab/tasks',
+    title: '任务',
+    section: 'collab',
+    navKey: 'lab',
+    openCore: true,
+  },
+  {
+    path: '/evolution-factory',
+    title: '智能进化',
+    section: 'bot',
+    navKey: 'evolution-factory',
     openCore: true,
   },
   {

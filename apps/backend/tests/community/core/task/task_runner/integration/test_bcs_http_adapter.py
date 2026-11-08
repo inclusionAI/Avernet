@@ -129,6 +129,25 @@ def test_get_session_messages_since_cursor():
     assert msgs[0]["content"] == "ans"
 
 
+def test_send_session_chat_continues_existing_session_with_bearer():
+    seen = {}
+
+    def h(req):
+        assert req.method == "POST"
+        assert req.url.path == "/sessions/s1/chat"
+        assert req.headers["authorization"] == "Bearer drv-session-token"
+        seen["body"] = json.loads(req.read())
+        assert req.headers.get("idempotency-key") == "resume-key"
+        return httpx.Response(200, json={"session_id": "s1", "delivered_count": 1})
+
+    result = _run(_adapter(h).send_session_chat(
+        "s1", message="continue", caller_bearer="drv-session-token",
+        idempotency_key="resume-key",
+    ))
+    assert result == {"session_id": "s1", "delivered_count": 1}
+    assert seen["body"] == {"message": "continue"}
+
+
 def test_server_error_raises():
     def h(req):
         return httpx.Response(500)

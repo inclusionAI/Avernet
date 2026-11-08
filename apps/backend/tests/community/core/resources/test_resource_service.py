@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.resources.models import ResourceType
 from agentclaw.community.core.resources.service import DuplicateResourceError, ResourceService
 from agentclaw.community.core.resources.services.file_service import FileService
@@ -546,3 +547,62 @@ class TestDeleteFileRecord:
 
         assert await _make_service(repo).delete_file_record(path="other.txt") is False
         repo.delete.assert_not_called()
+
+
+class TestReplaceManifestRows:
+    """``ResourceRowsPort``: the apply engine's one write to these rows (#2162).
+
+    After an apply has rewritten the workspace's resources, the bot's file rows
+    must say exactly what was written: every file row goes (the workspace root
+    is the resources root), one row per written file comes back with
+    ``source="manifest"``.
+    """
+
+    @staticmethod
+    def _repo_with_rows(*paths: str) -> MagicMock:
+        repo = _mock_repo()
+        repo.list_resources.return_value = [
+            {"id": index, "attributes": {"path": path}} for index, path in enumerate(paths, start=1)
+        ]
+        repo.delete_many.side_effect = lambda ids: len(ids)
+        repo.create_many.side_effect = lambda rows: [dict(row, id=index) for index, row in enumerate(rows, 1)]
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_every_file_row_is_replaced(self):
+        repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/elsewhere.txt")
+        svc = _make_service(repo, bot_id="bot7")
+
+        await svc.replace_rows(
+            files=[WrittenFile("data/kb/faq.md", 3), WrittenFile("data/new.txt", 1)], owner_id="owner", created_by="u2"
+        )
+
+        # Two statements: one batch delete of every file row, one batch insert of the written set.
+        repo.delete_many.assert_called_once_with(["1", "2", "3"])
+        repo.delete.assert_not_called()
+        repo.create.assert_not_called()
+        created = repo.create_many.call_args.args[0]
+        assert [(row["attributes"]["path"], row["attributes"]["size"]) for row in created] == [
+            ("data/kb/faq.md", 3),
+            ("data/new.txt", 1),
+        ]
+        assert {row["source"] for row in created} == {"manifest"}
+        assert {row["bolt_id"] for row in created} == {"bot7"}
+        assert {row["created_by"] for row in created} == {"u2"}
+        assert {row["user_id"] for row in created} == {"owner"}, "owned by the owner, stamped with the actor"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_written_set_clears_the_root_rows_and_the_roots_own_row(self):
+        repo = self._repo_with_rows("data", "data/old.csv")
+        await _make_service(repo).replace_rows(files=[], owner_id="owner", created_by=None)
+        repo.delete_many.assert_called_once_with(["1", "2"])
+        repo.create_many.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_row_write_that_fails_raises_rather_than_reporting_success(self):
+        repo = self._repo_with_rows()
+        repo.create_many.side_effect = RuntimeError("db down")
+        with pytest.raises(RuntimeError):
+            await _make_service(repo).replace_rows(
+                files=[WrittenFile("data/a.txt", 1)], owner_id="owner", created_by=None
+            )

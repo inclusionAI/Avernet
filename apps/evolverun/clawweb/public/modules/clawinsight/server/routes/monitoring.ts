@@ -8,6 +8,7 @@ const scoped = (req: Request) => /^\/(?:internal\/monitoring|monitoring)(?:\/|$)
 const statusCodes = { INVALID_EVENT: 400, INVALID_IDENTITY: 400, BOT_IDENTITY_UNAVAILABLE: 403, BOT_IDENTITY_AMBIGUOUS: 409, CHECK_CONFLICT: 409,
   TARGET_UNRESOLVED: 409, TARGET_AMBIGUOUS: 409, TARGET_BINDING_CONFLICT: 409,
   UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_ENROLLED: 409, ALREADY_ENROLLED: 409, ENROLLMENT_NOT_IMPLEMENTED: 501,
+  INVALID_RESULT: 422, RESULT_TARGET_NOT_FOUND: 404, RESULT_CONFLICT: 409,
   EVENT_CONFLICT: 409, PAYLOAD_TOO_LARGE: 413, NOT_READY: 503, BOT_NOT_FOUND: 404 } as const;
 export const monitoringErrorResponse: ErrorRequestHandler = (error, req, res, next) => {
   if (!scoped(req)) { next(error); return; }
@@ -59,6 +60,9 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.post("/internal/monitoring/diagnosis-events", async (req, res) => {
     const ack = await runtime.service!.reportDiagnosis(req.body, req.get("Idempotency-Key"));
     res.status(ack.duplicate ? 200 : 201).json(ack);
+  });
+  router.post("/internal/monitoring/session-recovery-results", async (req, res) => {
+    res.json(await runtime.service!.reportRecoveryResult(req.body));
   });
   router.post("/internal/monitoring/bot-checks", async (req, res) => {
     res.json(await runtime.service!.reportCheck(req.body));

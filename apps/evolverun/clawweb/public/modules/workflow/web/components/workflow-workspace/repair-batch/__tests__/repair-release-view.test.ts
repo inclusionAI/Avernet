@@ -14,6 +14,11 @@ it('uses durable deployment and approval status rather than the old review phase
   expect(candidateLabel(d, { revision: 1, phase: 'review' } as never)).toBe('已确认，待部署')
 })
 
+it('does not imply a separate missing review action for a publishable candidate', () => {
+  expect(candidateLabel({ release: { approval: null, deployments: [] } } as unknown as RepairTaskDetail,
+    { revision: 1, phase: 'review' } as never)).toBe('待确认发布')
+})
+
 it('creates Git links only from a safe server-provided repository URL', () => {
   const base = 'a'.repeat(40), candidate = 'b'.repeat(40)
   expect(repairGitLinks('https://example.com/workflows/packs.git', base, candidate)).toEqual({

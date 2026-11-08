@@ -93,4 +93,12 @@ class MCPConfigServiceProtocol(Protocol):
         engine_type: str | None = None,
         bot_override: dict[str, Any] | None = None,
         user_config_snapshot: dict[str, Any] | None = None,
-    ) -> tuple[str | None, dict[str, str], str, str | None]: ...
+        bot_id: str | None = None,
+    ) -> tuple[str | None, dict[str, str], str, str | None]:
+        """Resolve config; Bot delivery adds X-TC-Bot-Id for remote MCPs.
+
+        Only user-scoped catalog preflight omits bot_id. Bot context overrides
+        case-insensitive configured collisions, including on custom URLs;
+        LOCAL/stdio settings and existing credentials are unchanged.
+        """
+        ...

@@ -20,6 +20,13 @@ async fn exercise_registration_contract(auth_mode: ProviderAuthMode) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(MemoryProviderStore::new());
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    // The trusted registration needs the owner's live Human
+    // ACTOR row (spec §10.2/§3.1); the fixture presets it
+    // through the same production ensure path.
+    use bcs_service_api::port::repo::BotRepoPort;
+    bots.ensure_human_actor("owner", "owner")
+        .await
+        .expect("ensure fixture Human actor row");
     let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), store.clone()));
     let registry = Arc::new(BotCore::with_provider_repos(
         bots,

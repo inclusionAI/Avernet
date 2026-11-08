@@ -16,13 +16,69 @@ from agentclaw.community.core.task.forum.models import (
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_ID_LENGTH,
+    MAX_POLL_OPTION_COUNT,
     MAX_TITLE_LENGTH,
     TOPIC_TYPE_DISCUSSION,
     BrowseFeedTopicRecord,
+    ForumPollSelection,
+    ForumTopicAnalysisRecord,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
+
+from .topic_config_schemas import (
+    HelpConfig,
+    HelpConfigRequest,
+    PollConfig,
+    PollConfigRequest,
+    TopicConfig,
+    TopicConfigRequest,
+    domain_topic_config,
+)
+
+
+class PollSelectionRequest(BaseModel):
+    """Structured vote choices supplied with a reply to a POLL Topic.
+
+    The body remains presentation text. These indexes identify the selected
+    options and therefore never have to be parsed back out of prose.
+    """
+
+    option_indices: list[int] = Field(
+        min_length=1,
+        max_length=MAX_POLL_OPTION_COUNT,
+        description=(
+            "Selected indexes into the Topic's configured poll option list. "
+            "One entry is required for SINGLE polls; at least one is required "
+            "for MULTI polls."
+        ),
+    )
+
+
+def domain_poll_selection(
+    selection: PollSelectionRequest | None,
+) -> ForumPollSelection | None:
+    """Translate the HTTP vote body into the transport-agnostic domain record."""
+
+    if selection is None:
+        return None
+    return ForumPollSelection(option_indices=tuple(selection.option_indices))
+
+
+class PollSelection(BaseModel):
+    """Structured vote choices returned with a Poll Topic reply."""
+
+    option_indices: list[int] = Field(
+        description="Selected indexes into the Topic's configured poll option list."
+    )
+
+    @classmethod
+    def from_record(cls, selection: ForumPollSelection) -> "PollSelection":
+        return cls(option_indices=list(selection.option_indices))
 
 
 class CreateTopicRequest(BaseModel):
@@ -45,7 +101,13 @@ class CreateTopicRequest(BaseModel):
     )
     topic_type: str = Field(
         default=TOPIC_TYPE_DISCUSSION,
-        description="Topic type: DISCUSSION, POLL, or NOTICE.",
+        description="Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
+    )
+    topic_config: TopicConfigRequest | None = Field(
+        default=None,
+        description=(
+            "Type-specific Topic configuration for POLL or HELP Topics."
+        ),
     )
 
 
@@ -87,6 +149,25 @@ class CreateReplyRequest(BaseModel):
         min_length=1,
         max_length=MAX_BODY_LENGTH,
         description="Reply body. Leading and trailing whitespace is removed.",
+    )
+    reply_to_post_id: str | None = Field(
+        default=None,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Optional Post id of an existing reply in the addressed Topic. "
+            "Omit to reply directly to the Topic. DISCUSSION and SHARE "
+            "Topics accept floor replies; POLL, HELP, and NOTICE Topics "
+            "reject this field and require a direct Topic reply."
+        ),
+    )
+    poll_selection: PollSelectionRequest | None = Field(
+        default=None,
+        description=(
+            "Structured POLL vote choices. Required when the addressed Topic "
+            "is a POLL Topic and rejected for every other Topic type. A POLL "
+            "Topic accepts at most one reply per author and rejects new votes "
+            "after deadline_at."
+        ),
     )
 
 
@@ -145,9 +226,8 @@ class CreateTopicRequestUnified(AuthorRefRequest):
     """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics`: create a Topic as a declared author.
 
     The author is named explicitly (`author_type` + `author_id`); the
-    declared author may be a human or a Bot. The product surface does not
-    distinguish topic kinds; the Topic is persisted as `DISCUSSION` and
-    the write body carries no `topic_type` Flag.
+    declared author may be a human or a Bot. `topic_type` is explicit;
+    `topic_config` carries Topic-level configuration for POLL or HELP.
     """
 
     client_request_id: str = Field(
@@ -164,6 +244,16 @@ class CreateTopicRequestUnified(AuthorRefRequest):
         min_length=1,
         max_length=MAX_BODY_LENGTH,
         description="Topic description. Leading and trailing whitespace is removed.",
+    )
+    topic_type: str = Field(
+        default=TOPIC_TYPE_DISCUSSION,
+        description="Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
+    )
+    topic_config: TopicConfigRequest | None = Field(
+        default=None,
+        description=(
+            "Type-specific Topic configuration for POLL or HELP Topics."
+        ),
     )
 
 
@@ -185,6 +275,72 @@ class CreateReplyRequestUnified(AuthorRefRequest):
         max_length=MAX_BODY_LENGTH,
         description="Reply body. Leading and trailing whitespace is removed.",
     )
+    reply_to_post_id: str | None = Field(
+        default=None,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Optional Post id of an existing reply in the addressed Topic. "
+            "Omit to reply directly to the Topic. DISCUSSION and SHARE "
+            "Topics accept floor replies; POLL, HELP, and NOTICE Topics "
+            "reject this field and require a direct Topic reply."
+        ),
+    )
+    poll_selection: PollSelectionRequest | None = Field(
+        default=None,
+        description=(
+            "Structured POLL vote choices. Required when the addressed Topic "
+            "is a POLL Topic and rejected for every other Topic type. A POLL "
+            "Topic accepts at most one reply per author and rejects new votes "
+            "after deadline_at."
+        ),
+    )
+
+
+class SetPostHelpfulRequest(BaseModel):
+    """Mark or unmark one direct HELP reply as the Topic author."""
+
+    author_type: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Topic author kind: HUMAN or BOT.",
+    )
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Stable identifier of the Topic author performing the action.",
+    )
+    helpful: bool = Field(
+        description="True to mark the reply helpful; false to remove the marker."
+    )
+
+
+class UpdateTopicRequestUnified(AuthorRefRequest):
+    """Body for `PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`.
+
+    Only the declared author matching the stored Topic author may edit an OPEN
+    Topic. This operation updates the Topic itself; replies are not editable
+    in this release.
+    """
+
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Edited Topic title. Leading and trailing whitespace is removed.",
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=MAX_BODY_LENGTH,
+        description="Edited Topic description. Leading and trailing whitespace is removed.",
+    )
+
+
+class DeleteTopicRequestUnified(AuthorRefRequest):
+    """Body for `DELETE /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`.
+
+    The declared author must match the stored Topic author. LOCKED Topics are
+    not deletable. Deletion removes the Topic and all replies; reply edit and
+    delete APIs remain intentionally unsupported in this release.
+    """
 
 
 class CloseTopicRequestUnified(AuthorRefRequest):
@@ -211,6 +367,20 @@ class ReplyCreated(BaseModel):
     post_id: str = Field(
         description="Stable reply post id, returned unchanged on an idempotent replay."
     )
+
+
+class TopicDeleted(BaseModel):
+    """Outcome of deleting a Topic."""
+
+    topic_id: str = Field(description="Stable topic id that was deleted.")
+    deleted: bool = Field(default=True, description="Whether the Topic was deleted.")
+
+
+class PostHelpfulUpdated(BaseModel):
+    """Result of an idempotent HELP reply marker update."""
+
+    post_id: str = Field(description="Stable Post id that was updated.")
+    helpful: bool = Field(description="Resulting helpful marker state.")
 
 
 class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
@@ -288,15 +458,15 @@ class TopicListItem(BaseModel):
         description="Whether the Topic description continues past body_preview."
     )
     status: str = Field(description="Topic state: OPEN, CLOSED, or LOCKED.")
-    topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
+    topic_type: str = Field(description="Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.")
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
     reply_count: int = Field(
-        description="Total number of direct replies to this Topic."
+        description="Total number of replies to this Topic, including nested replies."
     )
     latest_activity_at: datetime = Field(
         description="Latest activity timestamp: the latest reply creation time, "
-        "or the Topic update timestamp when there are no replies."
+        "or the Topic creation time when there are no replies."
     )
     display_name: str | None = Field(
         default=None,
@@ -333,6 +503,108 @@ class TopicListItem(BaseModel):
         )
 
 
+class PollStatsOption(BaseModel):
+    """One indexed option's derived aggregate returned with Topic details."""
+
+    index: int = Field(description="Index into topic_config.poll.options.")
+    votes: int = Field(description="Derived votes for this option.")
+    percent: int = Field(description="Integer percentage of total votes, 0-100.")
+
+    @classmethod
+    def from_record(cls, option: ForumPollResultOptionRecord) -> "PollStatsOption":
+        return cls(index=option.index, votes=option.votes, percent=option.percent)
+
+
+class PollStats(BaseModel):
+    """Derived poll aggregate produced by a backend task."""
+
+    total_votes: int = Field(description="Total derived votes across all options.")
+    participant_count: int = Field(description="Number of unique authors who voted.")
+    by_option: list[PollStatsOption] = Field(
+        description="Aggregates in topic_config.poll.options order."
+    )
+    updated_at: datetime = Field(description="Aggregate update timestamp.")
+
+    @classmethod
+    def from_record(cls, result: ForumPollResultRecord) -> "PollStats":
+        return cls(
+            total_votes=result.total_votes,
+            participant_count=result.participant_count,
+            by_option=[
+                PollStatsOption.from_record(option) for option in result.options
+            ],
+            updated_at=result.updated_at,
+        )
+
+
+class TopicSummary(BaseModel):
+    """A natural-language summary generated by a background task."""
+
+    content: str = Field(description="Summary text.")
+
+
+class TopicAnalysis(BaseModel):
+    """Backend-derived Topic analysis result."""
+
+    summary: TopicSummary | None = Field(
+        default=None,
+        description="Generated topic summary; null before the task first runs.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Derived or manually assigned Topic labels, without a leading #.",
+    )
+    poll_stats: PollStats | None = Field(
+        default=None,
+        description=(
+            "Derived poll aggregate for a POLL Topic. A POLL Topic without a "
+            "persisted task result returns zero-vote options; null for other types."
+        ),
+    )
+
+    @classmethod
+    def from_record(cls, analysis: ForumTopicAnalysisRecord) -> "TopicAnalysis":
+        return cls(
+            summary=None
+            if analysis.summary is None
+            else TopicSummary(content=analysis.summary.content),
+            tags=list(analysis.tags),
+            poll_stats=(
+                None
+                if analysis.poll_result is None
+                else PollStats.from_record(analysis.poll_result)
+            ),
+        )
+
+
+class TopicViewer(BaseModel):
+    """Viewer-scoped Topic state explicitly requested by a read caller."""
+
+    has_voted: bool = Field(
+        description="Whether the declared viewer has already voted on a POLL Topic."
+    )
+    vote_post_id: str | None = Field(
+        default=None,
+        description="Post id of the viewer's vote, when one exists.",
+    )
+    poll_selection: PollSelection | None = Field(
+        default=None,
+        description="Structured indexes selected by the viewer's vote.",
+    )
+
+    @classmethod
+    def from_record(cls, viewer: ForumTopicViewerRecord) -> "TopicViewer":
+        return cls(
+            has_voted=viewer.has_voted,
+            vote_post_id=viewer.vote_post_id,
+            poll_selection=(
+                None
+                if viewer.poll_selection is None
+                else PollSelection.from_record(viewer.poll_selection)
+            ),
+        )
+
+
 class TopicDetail(BaseModel):
     """Full Topic description without replies."""
 
@@ -350,17 +622,50 @@ class TopicDetail(BaseModel):
     title: str = Field(description="Topic title.")
     body: str = Field(description="Full Topic description or reply body.")
     status: str = Field(description="Topic state: OPEN, CLOSED, or LOCKED.")
-    topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
+    topic_type: str = Field(description="Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.")
+    topic_config: TopicConfig | None = Field(
+        default=None,
+        description="Type-specific Topic configuration; null for Topics without one.",
+    )
+    analysis: TopicAnalysis = Field(
+        description="Backend-derived Topic summary, tags, and poll statistics.",
+    )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
+    viewer: TopicViewer | None = Field(
+        default=None,
+        description=(
+            "Personalized state for the explicitly declared viewer. Null when "
+            "the caller did not request viewer state."
+        ),
+    )
 
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicDetail":
-        return cls(**topic.__dict__)
+        return cls(
+            topic_config=None
+            if topic.topic_config is None
+            else TopicConfig.from_record(topic.topic_config),
+            analysis=TopicAnalysis.from_record(topic.analysis),
+            topic_id=topic.topic_id,
+            author_type=topic.author_type,
+            author_id=topic.author_id,
+            display_name=topic.display_name,
+            avatar_url=topic.avatar_url,
+            title=topic.title,
+            body=topic.body,
+            status=topic.status,
+            topic_type=topic.topic_type,
+            created_at=topic.created_at,
+            updated_at=topic.updated_at,
+            viewer=None
+            if topic.viewer is None
+            else TopicViewer.from_record(topic.viewer),
+        )
 
 
 class PostItem(BaseModel):
-    """One reply in a Topic's stable chronological stream."""
+    """One reply in a Topic's stable display stream."""
 
     post_id: str = Field(description="Stable server-generated reply identifier.")
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
@@ -375,12 +680,61 @@ class PostItem(BaseModel):
         description="Author avatar URL snapshot written at reply time, if supplied.",
     )
     body: str = Field(description="Full Topic description or reply body.")
+    poll_selection: PollSelection | None = Field(
+        default=None,
+        description=(
+            "Structured vote choices for a reply to a POLL Topic; null for "
+            "other replies."
+        ),
+    )
+    reply_to_post_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional Post id referenced by this reply, when the author "
+            "replied to an existing reply. Null for direct Topic replies."
+        ),
+    )
+    floor_no: int | None = Field(
+        default=None,
+        description=(
+            "Original chronological floor number for a first-level reply. "
+            "Helpful-first display ordering never changes this number."
+        ),
+    )
+    helpful: bool = Field(
+        default=False,
+        description="Whether the HELP Topic author marked this direct reply helpful.",
+    )
+    reply_to_floor_no: int | None = Field(
+        default=None,
+        description=(
+            "Read-only floor number when the referenced Post is a first-level "
+            "reply. Null when the target is a child reply and therefore has "
+            "no floor number. Not persisted; never a stable business identifier."
+        ),
+    )
+    children: list["PostItem"] = Field(
+        default_factory=list,
+        description=(
+            "All descendant replies shown inside this first-level floor's "
+            "two-level reply group. Empty on write results and on first-level "
+            "replies that have no child replies. Children never contain another "
+            "children array in the list view."
+        ),
+    )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
 
     @classmethod
     def from_record(cls, post: ForumPostRecord) -> "PostItem":
-        return cls(**post.__dict__)
+        payload = dict(post.__dict__)
+        payload["poll_selection"] = (
+            None
+            if post.poll_selection is None
+            else PollSelection.from_record(post.poll_selection)
+        )
+        payload["children"] = [cls.from_record(child) for child in post.children]
+        return cls(**payload)
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +817,7 @@ class BrowseFeedTopicItem(BaseModel):
     body_preview: str = Field(description="前 500 字符的主题描述。")
     body_truncated: bool = Field(description="主题描述是否被截断。")
     status: str = Field(description="Topic 状态 OPEN/CLOSED/LOCKED。")
-    topic_type: str = Field(description="Topic 类型 DISCUSSION/POLL/NOTICE。")
+    topic_type: str = Field(description="Topic 类型 DISCUSSION/SHARE/POLL/HELP/NOTICE。")
     created_at: datetime = Field(description="创建时间。")
     updated_at: datetime = Field(description="最近更新时间。")
     my_reply_count: int = Field(description="当前 actor（该 Bot）在该 Topic 上的回复数。")

@@ -11,20 +11,43 @@ from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.acli_clis.errors import (
     AcliBotNotRunningError,
-    AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
-    AcliCliNotGrantedError,
     AcliContainerError,
     AcliDefaultCliError,
+    AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketNotConfiguredError,
     AcliMarketUnavailableError,
+    AcliOperationCancelledError,
     AcliOperationFailedError,
+    AcliOperationInProgressError,
+    AcliOperationNotActiveError,
+    AcliOperationNotFoundError,
     AcliRequestRejectedError,
-    AcliRollbackFailedError,
+    AcliStageNotAllowedError,
+)
+from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    AcliOperation,
+    OperationKind,
+    OperationStatus,
+    OperationStep,
 )
 from agentclaw.community.core.acli_clis.port import AcliMarketPage, AcliTool
+
+
+@dataclass(frozen=True, slots=True)
+class AcliOutcome:
+    """What an add, remove or cancel request is answered with.
+
+    ``operation.running`` means the request stopped waiting (``async``, or the
+    30 s were up): answer ``202`` with it. Otherwise it has ended in success —
+    a failure is raised instead — and ``tool`` is what an add installed.
+    """
+
+    operation: AcliOperation
+    tool: AcliTool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,13 +73,27 @@ class BotCli:
 @runtime_checkable
 class AcliCliServiceProtocol(Protocol):
     @abstractmethod
-    def list_bot_clis(self, *, bot_id: str, entity_id: str) -> list[BotCli]: ...
+    async def list_bot_clis(
+        self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
+    ) -> list[BotCli]: ...
 
     @abstractmethod
     async def search_market(
         self, *, keyword: str, page_no: int, page_size: int
     ) -> AcliMarketPage:
         """One page of published acli market tools; not tied to any bot."""
+        ...
+
+    @abstractmethod
+    async def get_operation(
+        self, *, bot_id: str, entity_id: str, actor_id: str, operation_id: str
+    ) -> AcliOperation: ...
+
+    @abstractmethod
+    async def live_operation(
+        self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
+    ) -> AcliOperation | None:
+        """The runtime's running add or remove; ``None`` when nothing runs."""
         ...
 
     @abstractmethod
@@ -68,7 +105,9 @@ class AcliCliServiceProtocol(Protocol):
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
-    ) -> AcliTool: ...
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome: ...
 
     @abstractmethod
     async def remove(
@@ -79,25 +118,50 @@ class AcliCliServiceProtocol(Protocol):
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
-    ) -> None: ...
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome: ...
+
+    @abstractmethod
+    async def cancel(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        actor_id: str,
+        cli_code: str,
+        action: AcliAction,
+        lock_epoch: int | None,
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome: ...
 
 
 __all__ = [
     "AcliBotNotRunningError",
-    "AcliCliAlreadyGrantedError",
     "AcliCliNameMismatchError",
-    "AcliCliNotGrantedError",
     "AcliCliServiceProtocol",
     "AcliContainerError",
     "AcliDefaultCliError",
+    "AcliEngineOutdatedError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
     "AcliMarketNotConfiguredError",
-    "AcliMarketUnavailableError",
     "AcliMarketPage",
+    "AcliMarketUnavailableError",
+    "AcliAction",
+    "AcliOperation",
+    "AcliOperationCancelledError",
     "AcliOperationFailedError",
+    "AcliOperationInProgressError",
+    "AcliOperationNotActiveError",
+    "AcliOperationNotFoundError",
+    "AcliOutcome",
     "AcliRequestRejectedError",
-    "AcliRollbackFailedError",
+    "AcliStageNotAllowedError",
     "AcliTool",
     "BotCli",
+    "OperationKind",
+    "OperationStatus",
+    "OperationStep",
 ]

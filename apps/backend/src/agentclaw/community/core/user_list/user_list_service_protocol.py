@@ -24,8 +24,22 @@ class UserListServiceProtocol(Protocol):
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        subject_type: str = "user",
+        bot_type: str = "all",
         env: str | None = None,
-    ) -> bool: ...
+    ) -> bool:
+        """Correct membership after the caller has passed super-admin authorization.
+
+        HTTP adapters must reject non-operators before invoking this write.
+        """
+        ...
+
+
+    def matches_user(
+        self, *, entity_id: str, user_list_type: str, env: str, bot_type: str,
+    ) -> bool:
+        """Match user or department rules for an actual service/personal Bot."""
+        ...
 
 
 __all__ = ["UserListServiceProtocol"]

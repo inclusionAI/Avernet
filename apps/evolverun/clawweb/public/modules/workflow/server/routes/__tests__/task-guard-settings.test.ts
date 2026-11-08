@@ -6,12 +6,17 @@ import { AppConfigRepository } from "../../repositories/app-config-repository.js
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createTaskGuardSettingsRouter } from "../task-guard-settings.js";
 import { createAutoAnalysisSettings } from "../../services/task-guard/auto-analysis-settings.js";
+import { RepairAutomationDeniedError } from '../../contracts/workflow-automation.js';
 
+const records = vi.fn();
+const retry = vi.fn(), status = vi.fn();
 let db: SqliteDatabase;
 let server: ReturnType<express.Application["listen"]> | null;
 let baseUrl: string;
 
 beforeEach(async () => {
+  records.mockReset().mockResolvedValue({jobs: [], nextCursor: null});
+  retry.mockReset().mockResolvedValue(undefined); status.mockReset().mockResolvedValue({jobs:[],retryableJobs:[]});
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   const permissionRepo = new BotWorkflowPermissionRepository(db);
@@ -29,7 +34,7 @@ beforeEach(async () => {
   });
   const app = express();
   app.use(express.json());
-  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo }));
+  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo, automation: () => ({ records, retryFailures: retry, status }) as never }));
   server = await new Promise((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
   });
@@ -44,6 +49,35 @@ afterEach(async () => {
 });
 
 describe("Task Guard automatic analysis settings", () => {
+  it('persists notification recipients without enabling analysis or configuring a daily schedule', async () => {
+    const response = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', dailyConfigured: false, expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients: [' alice ', 'bob', 'alice'] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ enabled: false, version: 0, notificationVersion: 1, dailyConfigured: false, notificationRecipients: ['alice', 'bob'] });
+    const read = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, { headers: { 'X-User-Id': 'editor-1' } });
+    expect(await read.json()).toMatchObject({ notificationRecipients: ['alice', 'bob'], dailyConfigured: false });
+    const stale = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients: ['different-person'] }),
+    });
+    expect(stale.status).toBe(409);
+    const toggle = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' }, body: JSON.stringify({ enabled: true }),
+    });
+    expect(await toggle.json()).toMatchObject({ enabled: true, notificationRecipients: ['alice', 'bob'], dailyConfigured: false });
+  });
+
+  it.each([{ notificationRecipients: ['bad/id'] }, { notificationRecipients: Array.from({ length: 21 }, (_, i) => `person-${i}`) }, { notificationRecipients: 'not-an-array' }])("rejects malformed recipients without changing persisted policy: %j", async ({ notificationRecipients }) => {
+    const response = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients }),
+    });
+    expect(response.status).toBe(400);
+    const stored = await new AppConfigRepository(db).listAll();
+    expect(stored).toHaveLength(0);
+  });
   it("persists a per-workflow switch and returns the database value without a restart", async () => {
     const update = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
       method: "PUT",
@@ -92,4 +126,35 @@ it('saves one versioned daily policy and rejects stale or invalid writes', async
   expect((await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, dailyTime: '24:00', expectedVersion: 1 }) })).status).toBe(400);
   const off = await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, enabled: false, expectedVersion: 1 }) });
   expect(await off.json()).toMatchObject({ enabled: false, autoDraft: true, version: 2 });
+});
+
+it('authorizes history separately and validates bounded query parameters', async () => {
+  const url = `${baseUrl}/api/task-guard/workflows/wf-1/automation-records`;
+  expect((await fetch(url, { headers: { 'X-User-Id': 'viewer-1' } })).status).toBe(403);
+  expect(records).not.toHaveBeenCalled();
+  const headers = { 'X-User-Id': 'editor-1' };
+  for (const params of ['limit=100000', 'limit=0', 'limit=8&limit=20', 'status=invalid', 'period=invalid', 'kind=invalid']) {
+    expect((await fetch(`${url}?${params}`, { headers })).status).toBe(400);
+  }
+  expect(records).not.toHaveBeenCalled();
+  const response = await fetch(`${url}?period=7d&status=blocked&limit=20`, { headers });
+  expect(response.status).toBe(200);
+  expect(records).toHaveBeenCalledWith('wf-1', { period: '7d', status: 'blocked', limit: 20 });
+  expect(await response.json()).toEqual({ jobs: [], nextCursor: null });
+  expect((await fetch(`${url}?kind=notification&status=attention`, { headers })).status).toBe(200);
+  expect(records).toHaveBeenLastCalledWith('wf-1', { kind: 'notification', period: 'all', status: 'attention', limit: 8 });
+});
+
+it('authorizes targeted retries and never forwards a malformed target as a bulk retry', async () => {
+  const url = `${baseUrl}/api/task-guard/workflows/wf-1/automation-retry`;
+  const post = (body: object, user = 'editor-1') => fetch(url, {method:'POST',headers:{'Content-Type':'application/json','X-User-Id':user},body:JSON.stringify(body)});
+  expect((await post({jobId:'chosen'},'viewer-1')).status).toBe(403);
+  for (const jobId of [null, '', [], 123, 'x'.repeat(129)]) expect((await post({jobId})).status).toBe(400);
+  expect(retry).not.toHaveBeenCalled();
+  expect((await post({jobId:'chosen'})).status).toBe(200);
+  expect(retry).toHaveBeenLastCalledWith('wf-1','chosen');
+  retry.mockRejectedValueOnce(new RepairAutomationDeniedError('TASK_NOT_RETRYABLE'));
+  expect((await post({jobId:'stale'})).status).toBe(409);
+  expect((await post({})).status).toBe(200);
+  expect(retry).toHaveBeenLastCalledWith('wf-1',undefined);
 });

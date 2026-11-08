@@ -1,7 +1,6 @@
 """Tests for device_template_router.
 
 Tests all 8 REST API endpoints for device template management:
-- GET /api/v1/device-templates (list with tenant + status filter)
 - GET /api/v1/device-templates/online (list ONLINE templates)
 - GET /api/v1/device-templates/by-template-id/{template_id} (get by template_id)
 - GET /api/v1/device-templates/resolve (resolve default/explicit template)
@@ -26,7 +25,6 @@ from secbaas.community.adapters.web.routers.config_management.device_template_ro
     get_template,
     get_template_by_id,
     list_online_templates,
-    list_templates,
     resolve_template,
     transition_template_status,
     update_template,
@@ -129,90 +127,6 @@ class TestDeleteTemplateRequest:
         """Test DeleteTemplateRequest can be created."""
         request = DeleteTemplateRequest(operator="admin")
         assert request.operator == "admin"
-
-
-# ==================== GET list_templates ====================
-
-
-class TestListTemplates:
-    """Tests for list_templates endpoint."""
-
-    @pytest.mark.asyncio
-    async def test_list_templates_success(self) -> None:
-        """Test listing templates with optional status filter."""
-        mock_svc = MagicMock()
-        expected = TemplateListResponse(items=[], total=0, page=1, page_size=20)
-        mock_svc.list_templates.return_value = expected
-
-        result = await list_templates(tenant="test_tenant", service=mock_svc)
-
-        assert result.code == 0
-        assert result.data == expected
-        mock_svc.list_templates.assert_called_once_with(
-            tenant="test_tenant",
-            status=None,
-            page=1,
-            page_size=20,
-        )
-
-    @pytest.mark.asyncio
-    async def test_list_templates_with_status_filter(self) -> None:
-        """Test listing templates filtered by status."""
-        mock_svc = MagicMock()
-        expected = TemplateListResponse(items=[], total=0, page=1, page_size=20)
-        mock_svc.list_templates.return_value = expected
-
-        result = await list_templates(
-            tenant="test_tenant",
-            status=TemplateStatus.ONLINE,
-            service=mock_svc,
-        )
-
-        assert result.code == 0
-        mock_svc.list_templates.assert_called_once_with(
-            tenant="test_tenant",
-            status=TemplateStatus.ONLINE,
-            page=1,
-            page_size=20,
-        )
-
-    @pytest.mark.asyncio
-    async def test_list_templates_pagination(self) -> None:
-        """Test listing templates with custom pagination."""
-        mock_svc = MagicMock()
-        expected = TemplateListResponse(items=[], total=50, page=3, page_size=10)
-        mock_svc.list_templates.return_value = expected
-
-        result = await list_templates(
-            tenant="test_tenant",
-            page=3,
-            page_size=10,
-            service=mock_svc,
-        )
-
-        assert result.code == 0
-        mock_svc.list_templates.assert_called_once_with(
-            tenant="test_tenant",
-            status=None,
-            page=3,
-            page_size=10,
-        )
-
-    @pytest.mark.asyncio
-    async def test_list_templates_with_items(self) -> None:
-        """Test listing templates returns items in data."""
-        mock_svc = MagicMock()
-        tmpl = _make_template_response()
-        expected = TemplateListResponse(items=[tmpl], total=1, page=1, page_size=20)
-        mock_svc.list_templates.return_value = expected
-
-        result = await list_templates(tenant="test_tenant", service=mock_svc)
-
-        assert result.code == 0
-        assert result.data is not None
-        assert result.data.total == 1
-        assert len(result.data.items) == 1
-        assert result.data.items[0].template_uuid == "TEMPLATE-abc123"
 
 
 # ==================== GET list_online_templates ====================

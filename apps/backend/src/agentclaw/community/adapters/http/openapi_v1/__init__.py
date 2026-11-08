@@ -183,11 +183,13 @@ from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
+from .bots.acli_clis import operations_router as acli_cli_operations_router
 from .bots.acli_clis import router as acli_clis_router
 from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -221,6 +223,7 @@ from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .experts import router as experts_router
 from .market import router as market_router
 from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
@@ -243,6 +246,7 @@ from .skills import (
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_envs import router as service_envs_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -390,6 +394,9 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # grant rather than the own-bot one.
     config_manifest_router,
     config_manifest_apply_router,
+    # The genome registry is collaborator-scoped on the manifest's bars
+    # (MEMBER to read, ADMIN to record) and addresses a shared bot the same way.
+    genome_router,
     # The startup script, data-init state, identity persona files and the
     # workspace resources/routines are collaborator-scoped on the manifest's
     # bars (MEMBER to read, ADMIN behind the lock to write), so they take the
@@ -415,6 +422,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # acli market CLIs: MEMBER reads, owner-only writes behind the edit
     # lock — the bars of the identity switch above.
     acli_clis_router,
+    acli_cli_operations_router,
     skill_sets_router,
     skill_center_references_router,
     bot_mcp_router,
@@ -454,7 +462,10 @@ _GRANT_CHECKED_SUBGROUPS = [
 # their order relative to each other and to `_SUBGROUPS` is free. They are still
 # mounted before the bots router for the one rule stated above, not because any
 # of them needs it.
+from .engine_runtime.engine.default_model import router as engine_default_model_router
+
 _ENGINE_RUNTIME_GROUPS = [
+    engine_default_model_router,
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
@@ -503,6 +514,8 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter(route_class=PublicAPIRoute)
+    # Explicit business locators, no acting-user query dimension.
+    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
@@ -561,6 +574,7 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
+    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
@@ -650,6 +664,9 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
+
+    from .dws_hosting.router import router as dws_hosting_router
+    public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
 
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(

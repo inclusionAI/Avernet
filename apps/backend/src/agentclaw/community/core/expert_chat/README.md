@@ -17,6 +17,8 @@ consumes:
   - "SkillSync guard"
   - "CollaboratorService (chat 权限校验)"
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime.stage
+  - agentclaw.community.core.engine_runtime.errors
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
@@ -37,6 +39,29 @@ internal_dependencies:
 ### Change impact
 
 Schema changes require SQLite migration. Cross-domain dependencies make refactors risky — start with read-only impact analysis.
+
+### Owner inspection of friend sessions
+
+Friend service chat accepts explicit online addressing; legacy draft selectors
+also mean online, never the source workspace. The online binding is selected by
+the exact source Bot primary key/environment using Engine Runtime's canonical
+publication rule. Verify and services without an online publication are refused
+before device work. Caller instances remain subject-owned. Personal friends keep
+draft-only addressing. Read-only files and explicit friend IAM use the same
+stage/owned-session boundary. This does not add friend upload/delete privileges.
+
+The OpenAPI friend-session read routes (list/favorites/detail/messages and file
+reads) separate the session subject (`f_user_id`) from the authenticated actor
+(`user_id`). The subject continues to select the Backend-owned session index;
+it must never be replaced with the owner while filtering sessions. Reads pass
+the verified actor to ExpertChat as `actor_user_id`. Omission preserves the
+legacy subject-as-actor behavior. A different actor is accepted only for the
+Bot owner after explicit BCN friendship authorization. For shared runtimes the
+connection resolver uses that owner actor; ordinary friends retain their own
+identity and do not gain device-management permission. Caller-mode allocation
+and connection identity remain tied to the subject's independent instance.
+This does not grant owner-on-friend session mutation or broaden public Bot
+visibility. Existing clients need no new query parameter.
 
 ### Application Caller connection policy
 

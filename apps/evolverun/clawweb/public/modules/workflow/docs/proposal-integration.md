@@ -1,6 +1,37 @@
 # Service-owned proposal integration
 
-## Ownership and lifecycle
+## Current default: original goals with exact display folding
+
+The shared ClawWeb Host no longer creates or ticks the AI proposal coordinator.
+`proposalModel` remains a deprecated Host option for source compatibility, but is
+not used. Reads use an in-memory, deterministic projection: only available pending
+items with equal version, issue signature, node, failure mode, complete proposal
+and instruction fold together. Different values or targets stay separate. A card
+keeps every original ID and source; large duplicate sets use the existing maximum
+original-item count per card, so folding cannot create an unselectable choice.
+Cross-card conflicts still participate in automatic selection checks.
+
+Default candidate reads cover the last seven days. Explicit history, active work
+and awaiting-verification records remain available; no historical rows are deleted
+or rewritten. Lists and task selection do not wait for model classification.
+Manual and automatic generation use the existing selected-goal integration path:
+AIS receives the selected original goals, original evidence and frozen baseline,
+not a prerequisite AI classification result. Automatic selection continues to defer
+conflicting or unsupported originals rather than guessing a resolution.
+
+Evidence preparation is independent of the optional legacy coordinator. Frozen
+items retain diagnosis/run/event references and complete redacted evidence. Existing
+task inputs, material downloads, retry/report collection, review, trial, publication
+and observation keep their existing contracts and are not backfilled or regenerated.
+
+The coordinator implementation and journal records described below are retained
+for legacy integrations and historical compatibility. They are **not the default
+Host lifecycle**, and their old queued status does not block current selection.
+Explicit legacy Service callers may still supply a coordinator; new generation
+never calls its `prepare()` as a prerequisite. No new table, queue or configuration
+is introduced.
+
+## Legacy ownership and lifecycle
 
 Formal run → Bot single-case analysis → original diagnosis/proposal/evidence storage
 → ClawWeb durable background cause/goal grouping → one shared plan selection for
@@ -106,8 +137,8 @@ context. The Host dispatches `execution.action=integrate_candidate_v1`. The pair
 TaskGuard schema requires action/input agreement and rejects unknown versions,
 wrong baselines, omitted/duplicate original IDs. Older TaskGuard versions reject
 this new action clearly; they cannot silently ignore the plan and sequentially
-apply the old full Prompt replacements. Single original legacy inputs retain
-`generate_candidate`. Deploy paired producer/consumer revisions before enabling
+apply the old full Prompt replacements. Single original inputs without full-file
+patches retain `generate_candidate`. Deploy paired producer/consumer revisions before enabling
 integrated generation; this change does not build or activate a Snapshot.
 
 ### Compare deployment configuration and Git integrity separately
@@ -115,25 +146,27 @@ integrated generation; this change does not build or activate a Snapshot.
 `baseline.specDigest` remains SHA-256 of the exact tagged Git file bytes;
 `packCommit` and `packDigest` retain commit/tree integrity. The optional
 `baseline.proposalSpecDigest` is canonical JSON SHA-256 of the existing active
-deployment's stored spec. Before producing it, the Host verifies that stored
-configuration against the actual tagged YAML. Only scalar root `version` and
-`updatedAt` metadata follow the existing deployment-history serialization rule;
-unknown fields, nested metadata, business values and array order remain significant.
-The original stored JSON is hashed unchanged, matching analysis input identity.
+deployment's stored spec, hashed unchanged to match analysis input identity.
+These identities serve different purposes: analysis refers to the deployed
+configuration, while generation reads and edits the frozen Git files. A difference
+between those representations does not block drafting or background reconciliation.
 
 New Host adapters provide both identities. Legacy frozen inputs without the
 optional field preserve their prior digest interpretation. This additive metadata
-does not change TaskGuard actions, prompts, input schema or Git verification.
-Original `proposal.baseSpecDigest` is never rewritten. A matching fresh proposal
-uses the existing generation path, including a single original without integration.
+does not introduce TaskGuard actions, prompts, input schema or Git verification.
+Original `proposal.baseSpecDigest` and evidence are never rewritten. Full-file
+`proposal.patches`, even from a single selected original, use the existing integrated
+generation action: reconcile the selected goals against the frozen current files,
+not direct replacement with old file content. Ordinary single structured goals
+retain the existing single-original generation path. Regenerating a failed attempt
+applies the same routing without rewriting already-dispatched inputs.
 A genuinely different or unknown structured proposal baseline is rejected before
 task creation/dispatch with `PROPOSAL_BASELINE_CHANGED` or
 `BASELINE_IDENTITY_UNKNOWN`; classification/model output cannot override this.
 The earlier automatic historical-reevaluation fallback is removed.
 
-`BASELINE_CONTENT_MISMATCH` distinguishes a deployment-record/Git content mismatch.
-The UI retains the specific baseline error and reviewed selection/requirements.
-It also recognizes the exact legacy `SOURCE_CHANGED` baseline error from existing
+The UI still recognizes `BASELINE_CONTENT_MISMATCH` and the exact legacy
+`SOURCE_CHANGED` baseline error from existing
 servers without treating it as list mutation. A baseline changing during
 preparation still rejects before freezing a new task. Evidence, byte limits,
 candidate checks and publication binding retain their existing enforcement.
@@ -207,3 +240,22 @@ Publication receipts and new-version samples are local simulations only. These
 checks do not prove deployed Snapshot support, external provider quality,
 MySQL/OceanBase concurrency or real business effects. No real workflow, Bot, AIS,
 trial, production configuration, merge or deployment is exercised.
+
+### Version-scoped source goals
+
+The workbench requests `versionScope=current` for the active deployment and
+`versionScope=historical` for the folded archive. Omitting the issue API scope
+preserves legacy consumers. Selected-ID hydration includes the complete history.
+
+Historical selection declares `targetSnapshotKey` and the exact `historicalItemIds`.
+The server verifies source identity and freezes `context.sourceSnapshot`,
+`context.targetSnapshot`, and `context.referenceOnly`; it preserves the original
+proposal and its digest. Historical sources are goals in the existing v1 integrated
+writer, without source reservations or lifecycle updates. Feedback keeps the
+task's frozen target. New daily work accepts only the active deployment.
+
+The optional execution-port `integrationVersion` advertises local support for the
+existing v1 transport. A Host without this declaration rejects historical generation
+before task creation. This flag does not certify the configured AIS Snapshot:
+the existing paired-consumer deployment check above still applies. No consumer
+upgrade, Snapshot publication, or real model call is part of this implementation.

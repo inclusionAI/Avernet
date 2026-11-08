@@ -31,6 +31,12 @@ export interface SkillCenterSkillDto extends BackendUnknownRecord {
   description?: string;
   latestVersionNumber?: string | number;
   homepageUrl?: string;
+  /** 官方标记（additive，卡片徽标用；SkillCenter 接口已回传） */
+  isOfficial?: boolean | null;
+  /** 推荐标记（additive，卡片徽标用；SkillCenter 接口已回传） */
+  isRecommended?: boolean | null;
+  /** 标签字符串数组（SkillCenter tagList；缺省空数组） */
+  tagList?: string[];
 }
 export interface SkillCenterReferenceDto extends BackendUnknownRecord {
   reference_id: string;

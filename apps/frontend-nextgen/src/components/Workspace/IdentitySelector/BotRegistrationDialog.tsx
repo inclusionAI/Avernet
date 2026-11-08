@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import {
   Button,
   Empty,
+  Input,
   Modal,
   ModalContent,
   ModalDescription,
@@ -12,10 +13,14 @@ import {
   Segmented,
   Skeleton,
 } from '@/components/ui';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrationToken';
+import { quoteShellArg } from '@/services/workspace/botRegistrationCommand';
+import { resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import { Check, Copy, MessageSquare, RefreshCw, Terminal } from 'lucide-react';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
+import { DeepSeekHarnessRegistrationPanel } from './DeepSeekHarnessRegistrationPanel';
 import { PoolabRegistrationPanel } from './PoolabRegistrationPanel';
 import { QwenWorkRegistrationPanel } from './QwenWorkRegistrationPanel';
 
@@ -29,8 +34,8 @@ interface BotRegistrationDialogProps {
   onClose: () => void;
 }
 
-const SELF_SERVICE_COMMAND_TEMPLATE = String.raw`bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.sh || echo "exit 1")" install.sh --token {token} --bcs-endpoint {bcsEndpoint}`;
-const BOT_AUTO_COMMAND_TEMPLATE = String.raw`Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.md to join BCN (Bot Coordination Network), your TOKEN is {token} and BCS_ENDPOINT is {bcsEndpoint}.`;
+const OPENCLAW_INSTALL_BASE_URL =
+  'https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/apps/bcs/crates/plugins/openclaw-channel-bcn/install-instructions';
 
 function formatExpiresAt(expiresAt: number | null): string | null {
   if (expiresAt === null) return null;
@@ -40,15 +45,42 @@ function formatExpiresAt(expiresAt: number | null): string | null {
 export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogProps) {
   const panelCapability = getCapabilities().getAdditionalBotRegistrationPanels?.();
   const additionalPanels = panelCapability?.status === 'available' ? panelCapability.value : [];
+  const qwenWorkEnabled =
+    getCapabilities().getQwenWorkBotRegistrationConfig(resolveBcsEndpoint() ?? '').status === 'available';
+  const deepSeekHarnessEnabled = getCapabilities().getDeepSeekHarnessRegistrationEnabled().value;
+  const openClawCapability = getCapabilities().getOpenClawRegistrationEnabled();
+  const openClawEnabled = openClawCapability.status === 'available' && openClawCapability.value;
   const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
-  const [engine, setEngine] = useState<RegistrationEngine>('openclaw');
+  const engineOptions = [
+    ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
+    ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
+    ...(deepSeekHarnessEnabled ? [{ value: 'deepseek-harness', label: 'DeepSeek Harness' }] : []),
+    ...(qwenWorkEnabled ? [{ value: 'qwenwork', label: '千问办公' }] : []),
+    ...(openClawEnabled ? [{ value: 'openclaw', label: 'OpenClaw' }] : []),
+  ];
+  const defaultEngine = engineOptions[0]?.value ?? '';
+  const [selectedEngine, setEngine] = useState<RegistrationEngine>(defaultEngine);
+  const engine = engineOptions.some(({ value }) => value === selectedEngine) ? selectedEngine : defaultEngine;
   const AdditionalPanel = additionalPanels.find((panel) => panel.id === engine)?.Panel;
   const [mode, setMode] = useState<AccessMode>('self');
+  const { identity } = useHumanIdentity();
+  // null 表示尚未编辑，允许登录身份晚到时填充；主动清空后不再自动覆盖。
+  const [editedBotName, setBotName] = useState<string | null>(null);
+  const displayName = identity?.displayName.trim();
+  const botName = editedBotName ?? (displayName ? `${displayName}的 OpenClaw` : '');
   const [copied, setCopied] = useState(false);
   const copiedTimeoutRef = useRef<number | null>(null);
   const { token, expiresAt, isLoading, error, bcsEndpoint, retry } = useBotRegistrationToken(
     open && engine === 'openclaw',
   );
+
+  useEffect(() => {
+    if (open) {
+      setEngine(defaultEngine);
+      setCopied(false);
+      setBotName(null);
+    }
+  }, [open, defaultEngine]);
 
   useEffect(
     () => () => {
@@ -58,10 +90,13 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
   );
 
   const command = useMemo(() => {
-    if (!token) return '';
-    const template = mode === 'self' ? SELF_SERVICE_COMMAND_TEMPLATE : BOT_AUTO_COMMAND_TEMPLATE;
-    return template.replace('{token}', token).replace('{bcsEndpoint}', bcsEndpoint ?? '');
-  }, [mode, token, bcsEndpoint]);
+    const name = botName.trim();
+    if (!token || !name) return '';
+    if (mode === 'self') {
+      return `bash -c "$(curl -fsSL ${OPENCLAW_INSTALL_BASE_URL}/install.sh || echo "exit 1")" install.sh --token ${quoteShellArg(token)} --bcs-endpoint ${quoteShellArg(bcsEndpoint ?? '')} --bot-name ${quoteShellArg(name)}`;
+    }
+    return `Follow the instructions in ${OPENCLAW_INSTALL_BASE_URL}/install.md to join BCN (Bot Coordination Network), your NAME is '${name}', your TOKEN is ${token} and BCS_ENDPOINT is ${bcsEndpoint ?? ''}.`;
+  }, [mode, token, bcsEndpoint, botName]);
 
   const copyCommand = async () => {
     if (!command) return;
@@ -85,40 +120,65 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
-        <Segmented<RegistrationEngine>
-          aria-label="Bot 类型"
-          value={engine}
-          onChange={setEngine}
-          className="w-full"
-          options={[
-            { value: 'openclaw', label: 'OpenClaw' },
-            { value: 'qwenwork', label: '千问办公' },
-            ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
-            ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
-          ]}
-        />
+        {engineOptions.length > 0 ? (
+          <Segmented<RegistrationEngine>
+            aria-label="Bot 类型"
+            value={engine}
+            onChange={setEngine}
+            className="w-full overflow-x-auto"
+            options={engineOptions}
+          />
+        ) : (
+          <Empty compact title="暂无可用的接入方式" description="当前未启用 Bot 接入方式，请联系管理员。" />
+        )}
         {AdditionalPanel ? (
           <Suspense fallback={<p role="status">正在加载接入指南…</p>}>
             <AdditionalPanel open={open} />
           </Suspense>
+        ) : engine === 'deepseek-harness' ? (
+          <DeepSeekHarnessRegistrationPanel open={open} />
         ) : engine === 'qwenwork' ? (
           <QwenWorkRegistrationPanel open={open} />
         ) : engine === 'poolab' ? (
           <PoolabRegistrationPanel open={open} />
-        ) : (
+        ) : engine === 'openclaw' && openClawEnabled ? (
           <>
+            <label className="block space-y-2 text-xs font-medium">
+              <span>Bot 名称</span>
+              <Input
+                value={botName}
+                placeholder="请输入 Bot 名称"
+                onChange={(event) => {
+                  setBotName(event.target.value);
+                  setCopied(false);
+                }}
+              />
+            </label>
             <section className="space-y-2" aria-label="OpenClaw 接入方式">
-              <p className="text-xs font-medium text-muted-foreground">如何接入 OpenClaw？</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {([
-                  { value: 'self', label: '在终端执行', description: '复制安装命令，在 Bot 所在设备执行', icon: Terminal },
-                  { value: 'auto', label: '让 Bot 执行', description: '复制接入指引，发送给 OpenClaw Bot', icon: MessageSquare },
-                ] as const).map((option) => (
+                {(
+                  [
+                    {
+                      value: 'self',
+                      label: '在终端执行',
+                      description: '复制安装命令，在 Bot 所在设备执行',
+                      icon: Terminal,
+                    },
+                    {
+                      value: 'auto',
+                      label: '让 Bot 执行',
+                      description: '复制接入指引，发送给 OpenClaw Bot',
+                      icon: MessageSquare,
+                    },
+                  ] as const
+                ).map((option) => (
                   <Button
                     key={option.value}
                     variant="outline"
                     aria-pressed={mode === option.value}
-                    className={`h-auto min-w-0 justify-start gap-3 whitespace-normal p-3 text-left ${mode === option.value ? 'border-primary bg-primary/5' : ''}`}
+                    className={`h-auto min-w-0 justify-start gap-3 whitespace-normal p-3 text-left ${
+                      mode === option.value ? 'border-primary bg-primary/5' : ''
+                    }`}
                     onClick={() => {
                       setMode(option.value);
                       setCopied(false);
@@ -164,13 +224,19 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
                       {mode === 'self' ? '在 Bot 运行环境中执行以下命令。' : '将以下指引发送给目标 Bot 执行。'}
                     </p>
                   </div>
-                  <Button variant="secondary" size="sm" className="shrink-0 gap-1.5" onClick={copyCommand}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0 gap-1.5"
+                    disabled={!command}
+                    onClick={copyCommand}
+                  >
                     {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
                     {copied ? '已复制' : mode === 'self' ? '复制命令' : '复制指引'}
                   </Button>
                 </div>
                 <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
-                  {command}
+                  {botName.trim() ? command : '请输入 Bot 名称'}
                 </pre>
                 <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
                   Token 有效期至：{formatExpiresAt(expiresAt)}。
@@ -178,7 +244,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
               </div>
             )}
           </>
-        )}
+        ) : null}
       </ModalContent>
     </Modal>
   );

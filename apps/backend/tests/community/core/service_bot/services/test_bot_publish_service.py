@@ -99,9 +99,78 @@ def _make_service(
     if common_config_service is None:
         common_config.get_value.return_value = None
 
+    resolved_bot_repo = bot_repo or MagicMock()
+    if bot_repo is None:
+        resolved_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "entity_id": "user_001",
+            "owner_id": "user_001",
+            "env": "dev",
+        }
+    configured_bot = resolved_bot_repo.get_by_id_and_owner.return_value
+    if not isinstance(configured_bot, dict):
+        configured_bot = resolved_bot_repo.update_by_owner.return_value
+    if isinstance(configured_bot, dict):
+        configured_bot = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "entity_id": "user_001",
+            "owner_id": "user_001",
+            "env": "dev",
+            **configured_bot,
+        }
+        resolved_bot_repo.get_by_id_and_owner.return_value = configured_bot
+
+    def _legacy_matches(bot_id, owner_id):
+        bot = resolved_bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not isinstance(bot, dict) or not bot:
+            return []
+        return [{"id": 100, "bot_id": bot_id, "entity_id": owner_id,
+                 "owner_id": owner_id, "env": "dev", **bot}]
+
+    resolved_bot_repo.list_matches_by_legacy_locator.side_effect = _legacy_matches
+    def _by_pk(bot_pk):
+        current_bot = resolved_bot_repo.get_by_id_and_owner(
+            "bot_001", "user_001"
+        )
+        if isinstance(current_bot, dict):
+            return {
+                "bot_id": "bot_001",
+                "entity_id": "user_001",
+                "owner_id": "user_001",
+                "env": "dev",
+                **current_bot,
+                "id": bot_pk,
+            }
+        return {
+            "id": bot_pk,
+            "bot_id": "bot_001",
+            "entity_id": "user_001",
+            "owner_id": "user_001",
+            "env": "dev",
+        }
+
+    resolved_bot_repo.get_by_pk.side_effect = _by_pk
+    bot_publish_repo.get_by_source_bot_and_version.side_effect = (
+        lambda source_bot_pk, version, env: bot_publish_repo.get_by_publish_bot_id_and_version(
+            "bot_001_pub", "user_001", version, env
+        )
+    )
+    bot_publish_repo.get_latest_by_source_bot.side_effect = (
+        lambda source_bot_pk, env: bot_publish_repo.get_by_publish_bot_id(
+            "bot_001", "user_001", env
+        )
+    )
+    bot_publish_repo.get_latest_by_source_bot_and_status.side_effect = (
+        lambda source_bot_pk, status, env: bot_publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
+            "bot_001", "user_001", status, env
+        )
+    )
+
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
-        bot_repo=bot_repo or MagicMock(),
+        bot_repo=resolved_bot_repo,
         publish_flow_service_provider=(
             publish_flow_service_provider
             or (lambda flow=_flow_service_with_real_provider_seam(): flow)
@@ -189,6 +258,66 @@ class TestCreatePublishImagePolicy:
             "sbot_use_default_image": True,
         }
         common_config.get_value.assert_called_once()
+
+    def test_publish_owner_column_uses_entity_after_owner_handoff(self):
+        publish_repo = Mock()
+        publish_repo.get_by_publish_bot_id_and_version.return_value = None
+        publish_repo.insert.return_value = _create_mock_record(
+            record_id=10, status=PublishStatus.DRAFT
+        )
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 1,
+            "bot_id": "bot_001",
+            "entity_id": "stable-entity",
+            "owner_id": "new-owner",
+            "env": "dev",
+        }
+        service = _make_service(publish_repo, bot_repo=bot_repo)
+
+        service.create_publish(
+            source_bot_pk=1,
+            source_bot_id="bot_001",
+            publish_bot_id="bot_001",
+            name="bot",
+            owner_id="new-owner",
+            permission_owner="owner",
+        )
+
+        assert publish_repo.insert.call_args.args[0]["owner_id"] == "stable-entity"
+
+    def test_default_publish_recovers_from_orphan_source_bot_pk(self):
+        publish_repo = Mock()
+        publish_repo.get_by_publish_bot_id_and_version.return_value = None
+        publish_repo.insert.return_value = _create_mock_record(
+            record_id=10, status=PublishStatus.DRAFT
+        )
+        bot_repo = Mock()
+        bot_repo.get_by_pk.return_value = None
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 300,
+            "bot_id": "default",
+            "entity_id": "user-1",
+            "owner_id": "user-1",
+            "bot_type": "service",
+            "env": "prod",
+        }
+        service = _make_service(publish_repo, bot_repo=bot_repo)
+        bot_repo.get_by_pk.side_effect = None
+        bot_repo.get_by_pk.return_value = None
+
+        service.create_publish(
+            source_bot_pk=214445,
+            source_bot_id="default",
+            publish_bot_id="default",
+            name="legacy default",
+            owner_id="user-1",
+            permission_owner="owner",
+        )
+
+        inserted = publish_repo.insert.call_args.args[0]
+        assert inserted["source_bot_pk"] == 214445
+        assert inserted["owner_id"] == "user-1"
 
     @pytest.mark.parametrize(
         "config_value",
@@ -1650,6 +1779,9 @@ class TestDeleteServiceBot:
         """正常删除：草稿状态且无成功发布单，删除成功。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1694,6 +1826,9 @@ class TestDeleteServiceBot:
         """发布单不存在时抛出 PublishNotFoundError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         mock_repo.get_by_id.return_value = None
@@ -1715,6 +1850,9 @@ class TestDeleteServiceBot:
         """不满足删除条件时抛出 BotPublishServiceError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 成功状态的发布单，不满足删除条件
@@ -1741,6 +1879,9 @@ class TestDeleteServiceBot:
         """destroy_publish_history 失败时，抛出异常阻断删除流程。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1769,6 +1910,9 @@ class TestDeleteServiceBot:
         """存在其他成功发布单时，不能删除。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1800,6 +1944,9 @@ class TestDeleteServiceBot:
         """有 last_pub_id 时，销毁当前发布单和上一个发布单的发布历史。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 草稿记录有 last_pub_id=100
@@ -3385,7 +3532,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3407,7 +3554,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "TeClaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "TeClaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, _ = service.can_restore_draft(2)
@@ -3428,7 +3575,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3450,7 +3597,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3660,7 +3807,7 @@ class TestDraftRestore:
             }
         )
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "openclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "openclaw"}
         service = _make_service(
             repo,
             bot_service=bot_service,
@@ -3695,7 +3842,7 @@ class TestDraftRestore:
         operation_repo = self._stateful_operation_repo()
         task_queue = Mock()
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"
@@ -3750,7 +3897,7 @@ class TestDraftRestore:
         task_queue = Mock()
         task_queue.enqueue.side_effect = RuntimeError("queue unavailable")
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"

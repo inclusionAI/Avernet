@@ -16,6 +16,7 @@ Two responsibilities:
    so case files in this tree can request the fixtures by name and
    pytest discovers the runner in this collection scope.
 """
+
 from __future__ import annotations
 
 # ── Trigger endpoint case-module discovery ─────────────────────────────────

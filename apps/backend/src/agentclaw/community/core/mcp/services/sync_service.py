@@ -905,6 +905,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
             self.mcp_config_service.build_mcp_sync_payload,
             user_id=user_id,
+            bot_id=bot_id,
             mcp_data=mcp_data,
             api_key=api_key,
             custom_headers=custom_headers,
@@ -924,8 +925,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             )
         )
 
-        # 下发到设备；插件内部有 3 次指数退避重试。sync_single_mcp 是同步阻塞 HTTP，
-        # 放到线程池执行避免阻塞事件循环。
+        # 同步 HTTP 投递在线程池执行，避免阻塞事件循环；插件内部处理重试。
         return await asyncio.to_thread(
             plugin.sync_single_mcp,
             mcp_data,

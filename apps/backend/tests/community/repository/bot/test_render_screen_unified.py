@@ -43,6 +43,8 @@ def _create_schema(engine):
         ],
     )
     md.create_all(engine)
+    from agentclaw.community.plugin_api.models import BotModel
+    BotModel.__table__.create(engine, checkfirst=True)
 
 
 class _FileSqliteDB:

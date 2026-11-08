@@ -23,6 +23,7 @@ import {
   type CollaborationBotDto,
   type OrgDeptDto,
   type OrgUserDto,
+  type ViewDept,
 } from '@/services/backendApi';
 import { isEnvelopeFailure, type BackendApiEnvelope } from '@/services/backendApi/types';
 import { normalizeEmployeeNumber } from '@/utils/employeeNumber';
@@ -33,7 +34,11 @@ import {
   type PublicationCommand,
   type PublicationResult,
 } from './collaborationPrivacyGateway';
-import { buildFriendApprovalAttributesPatch, mapFriendApprovalAttributesToDomain } from './friendApprovalAttributes';
+import {
+  buildFriendApprovalAttributesPatch,
+  mapFriendApprovalAttributesToDomain,
+  readFriendApprovalAttributes,
+} from './friendApprovalAttributes';
 import {
   mapBotDtoToDomain,
   mapOrgDeptToEntry,
@@ -347,10 +352,14 @@ function assertFriendApprovalPatchResponse(
     friend_ext: friendExt,
     friend_check_in_strategy: bot.friend_check_in_strategy,
   });
-  const expectedDepartmentNos = expectedPatch.friend_ext.no_check_scope_friend_deps as string[];
+  const expectedEntries = expectedPatch.friend_ext.no_check_scope_friend_deps as ViewDept[];
+  const confirmedEntries = readFriendApprovalAttributes({
+    friend_ext: friendExt,
+    friend_check_in_strategy: bot.friend_check_in_strategy,
+  }).noCheckScopeDepartmentEntries;
   if (
     bot.friend_check_in_strategy !== expectedPatch.friend_check_in_strategy ||
-    JSON.stringify(confirmed.exemptDepartmentNos) !== JSON.stringify(expectedDepartmentNos)
+    JSON.stringify(confirmedEntries) !== JSON.stringify(expectedEntries)
   ) {
     throw new Error('Bot 更新接口未返回已生效的好友审批策略');
   }

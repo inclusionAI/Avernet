@@ -74,6 +74,7 @@ pub struct ManagedMessageDelivery {
     retry_backoff_ms: i64,
     policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
     instrumentation: Option<Arc<dyn bcs_service_api::application::message_delivery::DeliveryInstrumentation>>,
+    output_cleanup: std::sync::OnceLock<Weak<crate::BcsMessageFlow>>,
 }
 
 impl ManagedMessageDelivery {
@@ -87,6 +88,7 @@ impl ManagedMessageDelivery {
             retry_backoff_ms: 1000,
             policy: None,
             instrumentation: None,
+            output_cleanup: std::sync::OnceLock::new(),
         }
     }
 
@@ -101,6 +103,13 @@ impl ManagedMessageDelivery {
     }
     pub fn with_instrumentation(mut self, hook: Arc<dyn bcs_service_api::application::message_delivery::DeliveryInstrumentation>) -> Self {
         self.instrumentation = Some(hook); self
+    }
+
+    /// Composition-bound local lifecycle cleanup, independent of the lossy
+    /// status notification channel. The weak reference avoids a service cycle.
+    pub fn bind_output_cleanup(&self, flow: Weak<crate::BcsMessageFlow>) -> bcs_service_api::ServiceResult<()> {
+        self.output_cleanup.set(flow).map_err(|_| bcs_service_api::ServiceError::InternalError(
+            "delivery output cleanup already bound".into()))
     }
 
     pub fn set_admission_available(&self, available: bool) {
@@ -254,6 +263,9 @@ impl ManagedMessageDelivery {
             )
             && original.submitted_at_ms.is_none();
         if !outcome.changed && !start_abort && !submitted {
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                flow.release_unsent_output(original).await;
+            }
             return Ok(original.clone());
         }
         if command.reply.is_none() && outcome.changed {
@@ -456,7 +468,18 @@ impl ManagedMessageDelivery {
         let (committed_reply, _guards) = {
             let _timing = crate::reply_timing::Timer::new("delivery.commit_repository");
             let repo = self.repo.clone();
-            persist_with_guards(_guards, async move { repo.commit_transition(updates, command.reply).await }).await?
+            let cleanup = self.output_cleanup.get().cloned();
+            let terminal = primary.clone();
+            persist_with_guards(_guards, async move {
+                let result = repo.commit_transition(updates, command.reply).await?;
+                // Persistence has committed and its transaction is closed. Do
+                // local cleanup inside the cancellation-retained task, so an
+                // aborted caller or a lagged notification receiver cannot leak.
+                if let Some(flow) = cleanup.and_then(|weak| weak.upgrade()) {
+                    flow.release_unsent_output(&terminal).await;
+                }
+                Ok(result)
+            }).await?
         };
         if let Some(reply) = committed_reply {
             if !reply.duplicate {

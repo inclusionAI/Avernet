@@ -43,3 +43,31 @@ it.each(["network", "empty", "rejected"])("BaaS %s cannot cause retries or conta
   expect(fetch).toHaveBeenCalledTimes(1);expect(execute).not.toHaveBeenCalled();
   expect(JSON.stringify(result)).not.toContain("secret-token");
 });
+
+it("routes a diagnosed instance message through the existing Adapter worker on that exact device", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 0, data: { exit_code: 0,
+    stdout: JSON.stringify({ status: "accepted", sessionId: "original", locationStatus: "unconfirmed" }) } })));
+  vi.stubGlobal("fetch", fetch);
+  const target = { ...input.target, activeEngine: "openclaw", deviceUuid: "DEVICE-" + "a".repeat(32),
+    providerDeviceId: "ARCA-SANDBOX-exact@0", runtimeIdentity: { stage: "online" as const, version: "V16" } };
+  const prepare = vi.fn(command => command);
+  expect(await new BaasRuntimeProvider(config, { prepareMessageCommand: prepare }).sendMessage({ ...input, target })).toMatchObject({ status: "accepted", sessionId: "original" });
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(String(fetch.mock.calls[0][0])).toBe("https://pre.example.test/api/v1/paas/devices/ARCA-SANDBOX-exact%400/commands");
+  expect(prepare).toHaveBeenCalledOnce();
+  const command = JSON.parse(fetch.mock.calls[0][1].body).cmd;
+  const encoded = /'([^']+)'$/.exec(command)![1];
+  const worker = JSON.parse(Buffer.from(encoded, "base64").toString());
+  expect(worker).toMatchObject({ sessionKey: input.sessionKey, deliveryKey: input.deliveryKey,
+    message: input.message, engineUrl: "ws://127.0.0.1:20003/ws", engineAuthToken: "OPEN_API:app:test-pre" });
+  expect(worker.createSession).toBe(false);
+});
+it("keeps TE on BaaS messages and forwards its service stage without Shell", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 0, data: { message_id: "message" } })));
+  vi.stubGlobal("fetch", fetch);
+  await new BaasRuntimeProvider(config).sendMessage({ ...input, target: { ...input.target, activeEngine: "teclaw",
+    runtimeIdentity: { stage: "verify" } } });
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toBe("https://pre.example.test/openapi/v1/messages");
+  expect(JSON.parse(fetch.mock.calls[0][1].body).metadata).toMatchObject({ session_id: input.sessionKey, bot_options: { lifecycle_stage: "verify" } });
+});

@@ -18,6 +18,17 @@ stored intent unless the user explicitly changes this compatibility contract.
 Authorize using the matching cached start and retain run, toolCallId, Bot and
 Session identity checks.
 
+## Scoped Authority-Plan File-Size Exception
+
+Only for the files and period defined in
+[`BCS-AUTHORITY-SIZE-2026-10-10`](../../docs/arch/waivers/2026-10-10-bcs-authority-file-size.md),
+the named Bot Authority implementation plan uses a 2,500-physical-line ceiling
+instead of the root File Size rule's 1,000-line ceiling. The record names the
+requester's approval, implementation-PR confirmation, ownership handoff,
+expiry, and removal conditions. All other work retains the root rule. Do not
+extend the exception or weaken an automated gate; resolve any unmet condition
+before implementation.
+
 ## No Global Formatting
 
 Do not run `cargo fmt`, `cargo fmt --all`, or any global formatter in BCS.

@@ -21,6 +21,7 @@ export interface ChatHeaderActionsProps {
   /** 会话无 <AixUI type="panel"> 副屏内容时禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
   sidePaneDisabled?: boolean;
   onToggleSidePane: () => void;
+  notice?: ReactNode;
   className?: string;
 }
 
@@ -61,10 +62,12 @@ export function ChatHeaderActions({
   sidePaneOpen,
   sidePaneDisabled,
   onToggleSidePane,
+  notice,
   className,
 }: ChatHeaderActionsProps) {
   return (
     <div className={cn('flex items-center gap-1', className)}>
+      {notice}
       <HeaderIcon
         label={favorites.favorite ? '取消收藏当前会话' : '收藏当前会话'}
         icon={<Star className={cn('size-4', favorites.favorite && 'fill-star text-star')} />}

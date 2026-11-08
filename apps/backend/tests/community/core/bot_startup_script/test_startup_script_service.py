@@ -1,4 +1,5 @@
 """Unit tests for BotStartupScriptService — the rules the repository doesn't own."""
+
 import inspect
 import json
 
@@ -27,8 +28,13 @@ class FakeRepo:
         )
 
         rec = BotStartupScriptRecord(
-            id=1, env=env, entity_id=entity_id, bot_id=bot_id,
-            script=script, size_bytes=size_bytes, modifier=modifier,
+            id=1,
+            env=env,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            script=script,
+            size_bytes=size_bytes,
+            modifier=modifier,
         )
         self.rows[(env, entity_id, bot_id)] = rec
         return rec
@@ -174,9 +180,7 @@ class TestResolveSupport:
     def test_a_desktop_bot_is_unsupported(self, svc):
         """DesktopBotService calls ``_get_start_cmd`` directly, bypassing the
         payload builder where the script is resolved — so it would never run."""
-        supported, reason = svc.resolve_support(
-            {**self._bot(), "bot_type": "desktop"}
-        )
+        supported, reason = svc.resolve_support({**self._bot(), "bot_type": "desktop"})
         assert supported == "unsupported"
         assert "desktop" in reason
 
@@ -242,9 +246,7 @@ class TestTheKeyNamesOneBotForever:
             for c_ in BotModel.__table__.constraints
             if isinstance(c_, UniqueConstraint)
         ]
-        assert any(
-            {"bot_id", "entity_id", "env"} <= cols for cols in keys
-        ), (
+        assert any({"bot_id", "entity_id", "env"} <= cols for cols in keys), (
             "ac_bots must constrain (bot_id, entity_id, env) — the startup "
             "script store keys on that tuple and assumes it names one bot for "
             "the life of the data. Extra columns are fine (the declared key is "
@@ -272,7 +274,9 @@ class TestTheKeyNamesOneBotForever:
             for c in c_.columns
         }
 
-        source = inspect.getsource(BotRepository)
+        source = inspect.getsource(BotRepository) + inspect.getsource(
+            BotRepository.soft_delete_by_owner
+        )
         assert "soft_delete" in source
         assert ".delete(" not in source, (
             "BotRepository grew a hard delete; a removed ac_bots row frees its "
@@ -419,9 +423,7 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
     assert unique, "the table must keep a uniqueness constraint"
 
     for constraint in unique:
-        chars = sum(
-            getattr(col.type, "length", 0) or 0 for col in constraint.columns
-        )
+        chars = sum(getattr(col.type, "length", 0) or 0 for col in constraint.columns)
         assert chars * 4 <= 3072, (
             f"{constraint.name} is {chars} chars = {chars * 4} utf8mb4 bytes, "
             f"over InnoDB's 3072-byte index-key limit"
@@ -464,6 +466,4 @@ def test_a_lone_surrogate_is_refused_rather_than_crashing(svc):
     lone_surrogate = json.loads('{"s": "\\ud800"}')["s"]
 
     with pytest.raises(StartupScriptNotEncodableError):
-        svc.put(
-            entity_id="ent", bot_id="bot", script=lone_surrogate, modifier="alice"
-        )
+        svc.put(entity_id="ent", bot_id="bot", script=lone_surrogate, modifier="alice")

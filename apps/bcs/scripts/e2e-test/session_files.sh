@@ -32,9 +32,9 @@ story_session_file_workspace() {
     fi
 
     local SF_GID="" SF_TMP SF_DL SF_SHARE
-    SF_TMP="$(mktemp -t bcs_sf_src.XXXXXX)"
-    SF_DL="$(mktemp -t bcs_sf_dl.XXXXXX)"
-    SF_SHARE="$(mktemp -t bcs_sf_share.XXXXXX)"
+    SF_TMP="$(bcs_cli_mktemp bcs_sf_src.XXXXXX)"
+    SF_DL="$(bcs_cli_mktemp bcs_sf_dl.XXXXXX)"
+    SF_SHARE="$(bcs_cli_mktemp bcs_sf_share.XXXXXX)"
     printf 'bcs-e2e-session-file-payload\n' > "$SF_TMP"
 
     _sf_cleanup() {

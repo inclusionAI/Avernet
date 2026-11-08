@@ -70,3 +70,67 @@ test('SkillCenter 详情操作不改变已选集合', () => {
   expect(onViewSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc-code', version: '1.0' }));
   expect(screen.getByRole('button', { name: '添加' })).toBeDisabled();
 });
+
+test('SkillCenter 卡片按 isOfficial/isRecommended/tagList 渲染官方/推荐/标签（与 /market/skill MarketItemCard 一致）', () => {
+  jest.mocked(useSkillCenterPicker).mockReturnValue({
+    items: [
+      {
+        id: 'sc-tagger',
+        name: '官方推荐 Skill',
+        active: false,
+        source: 'skillcenter-market',
+        isOfficial: true,
+        isRecommended: true,
+        tags: ['数据分析', '内部共创'],
+      },
+    ],
+    loading: false,
+    error: '',
+    hasMore: false,
+    loadMore: jest.fn(),
+    retry: jest.fn(),
+  });
+  render(
+    <CapabilityPickerModal
+      kind="skill"
+      open
+      marketItems={[]}
+      skillCenterItems={[]}
+      workshopItems={[]}
+      myItems={[]}
+      existingIds={[]}
+      onOpenChange={jest.fn()}
+      onConfirm={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('官方')).toBeInTheDocument();
+  expect(screen.getByText('推荐')).toBeInTheDocument();
+  // tagList 拼成单 chip："数据分析 / 内部共创"
+  expect(screen.getByText('数据分析 / 内部共创')).toBeInTheDocument();
+});
+
+test('无 isOfficial/isRecommended/tagList 的 Skill 不渲染对应徽标', () => {
+  jest.mocked(useSkillCenterPicker).mockReturnValue({
+    items: [{ id: 'sc-plain', name: '普通 Skill', active: false, source: 'skillcenter-market' }],
+    loading: false,
+    error: '',
+    hasMore: false,
+    loadMore: jest.fn(),
+    retry: jest.fn(),
+  });
+  render(
+    <CapabilityPickerModal
+      kind="skill"
+      open
+      marketItems={[]}
+      skillCenterItems={[]}
+      workshopItems={[]}
+      myItems={[]}
+      existingIds={[]}
+      onOpenChange={jest.fn()}
+      onConfirm={jest.fn()}
+    />,
+  );
+  expect(screen.queryByText('官方')).not.toBeInTheDocument();
+  expect(screen.queryByText('推荐')).not.toBeInTheDocument();
+});

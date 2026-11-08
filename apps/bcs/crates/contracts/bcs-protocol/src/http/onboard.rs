@@ -89,6 +89,14 @@ pub struct EnsureBotRequest {
     /// Bot visibility (`public` / `protected`). Empty preserves existing.
     #[serde(default)]
     pub visibility: String,
+    /// Human-facing visibility (`public` / `protected` / `private`) — the
+    /// edge-permission attribute deciding whether humans may befriend or act
+    /// on this bot. Distinct from `visibility`, which is the bot-network
+    /// attribute. `None` preserves the existing attribute. Applied after the
+    /// ensure upsert via the internal bot-attributes patch, so a re-ensure
+    /// that only binds owner edges can stay a pure no-op.
+    #[serde(default)]
+    pub user_visibility: Option<String>,
 }
 
 /// Response from the Phase 0 ensure endpoint.

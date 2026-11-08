@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
+
 from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.core.user_list import (
     UserListRepositoryProtocol,
@@ -28,8 +30,9 @@ class UserListModule(Module):
     def user_list_service(
         self,
         repository: UserListRepositoryProtocol,
+        staff_dept: StaffDeptPlugin,
     ) -> UserListService:
-        return UserListService(repository=repository)
+        return UserListService(repository=repository, staff_dept=staff_dept)
 
     @singleton
     @provider

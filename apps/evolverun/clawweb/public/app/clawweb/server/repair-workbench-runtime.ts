@@ -1,6 +1,7 @@
-import { resolveAnalysisConfig } from '@avernet/clawweb-shared/server/db';
-import { createProposalModel } from './repair-proposal-model.js';
-import { createProposalCoordinator, type ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import { logWorkflowBackground, withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
+import { repairSourceSnapshot } from '@avernet/workflow/server/services/repair-source-snapshot';
+import type { ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
 import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
 import type { RepairTrialPort } from '@avernet/workflow/server/contracts/repair-trial';
 /** Shared composition root for the public and internal ClawWeb Hosts.
@@ -14,6 +15,8 @@ import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositor
 import { WorkflowEvolutionRepository } from '@avernet/clawevolve/server/repositories/workflow-evolution-repository';
 import { createRepairSourcePort, type RepairSuggestionSource } from '@avernet/workflow/server/repositories/repair-source-adapter';
 import { createRepairWorkbenchService } from '@avernet/workflow/server/services/repair-batch-service';
+import { queueRepairCompletion } from '@avernet/workflow/server/services/repair-completion-notification';
+import { createWorkflowNotificationDrain } from '@avernet/workflow/server/services/workflow-notification-delivery';
 import { createRepairBatchesRouter } from '@avernet/workflow/server/routes/repair-batches';
 import { createRepairAuthorizer, type RepairPrincipalResolver } from '@avernet/workflow/server/routes/repair-authorization';
 import { RepairBatchError } from '@avernet/workflow/server/contracts/repair-batch';
@@ -28,13 +31,18 @@ import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/tas
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
   environment?: string;
+  /** @deprecated Retained for host compatibility; suggestion reads no longer run an AI coordinator. */
   proposalModel?: ProposalModelPort;
   execution?: RepairExecutionPort;
   publication?: RepairPublicationPort;
   trial?: RepairTrialPort;
   automation?: { settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; now?: () => number };
+  /** Notification-only Hosts do not need to enable automatic analysis or draft scheduling. */
+  notifications?: Omit<Parameters<typeof createWorkflowNotificationDrain>[0], 'db' | 'workbench'>;
 }): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; trials: ReturnType<typeof createRepairTrialService>; router: Router; automation: WorkflowAutomationService | undefined; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
+    snapshot: repairSourceSnapshot,
+    snapshotRuns: (tx, flowIds) => new WorkflowSnapshotRepository(tx).forRuns(flowIds),
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
       const rows: RepairSuggestionSource[] = [];
@@ -56,6 +64,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     },
     evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),
   });
+  sources.activeSnapshot = (tx, workflowId) => new WorkflowSnapshotRepository(tx).active(workflowId);
   sources.readVersion = async (tx, workflowId) => {
     // No JSON bodies: independently committed analysis, legacy sources and human
     // dispositions all invalidate the bounded read projection on every instance.
@@ -64,6 +73,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
       ['workflow_healing_diagnoses', 'id', 'gmt_modified'],
       ['workflow_healing_suggestions', 'id', 'gmt_modified'],
       ['workflow_repair_items', 'state_version', 'updated_at_ms'],
+      ['workflow_deploy_history', 'is_active', 'deploy_number'],
     ];
     const versions = [];
     for (const [table, version, updated] of tables) {
@@ -81,45 +91,33 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     return options.execution!.dispatch(request);
   } } : undefined;
-  const proposals = execution && options.environment ? createProposalCoordinator({ db, scopeKey: options.environment, hydrate: async (workflowId, items) => {
-    const hydrated = sources.hydrate ? await sources.hydrate(db, workflowId, items) : items;
-    for (const item of hydrated) for (const diagnosis of (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>) {
-      const row = (await db.query<{workflow_deploy_number:number}>('SELECT workflow_deploy_number FROM flow_runs WHERE workflow_id = ? AND flow_id = ?', [workflowId,diagnosis.flowId]))[0];
-      diagnosis.observedDeployNumber = row?.workflow_deploy_number ?? null;
-    }
-    return hydrated as import('@avernet/workflow/server/contracts/repair-workbench').RepairInboxItem[];
-  }, read: workflowId => service.proposalSnapshot(workflowId),
-    model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
-  const service = createRepairWorkbenchService(db, sources, execution, proposals);
-  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
+  const service = createRepairWorkbenchService(db, sources, execution, undefined, queueRepairCompletion);
+  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation, environment: options.environment });
+  const notificationOptions = options.notifications ?? options.automation;
+  const drainNotifications = notificationOptions
+    ? createWorkflowNotificationDrain({ db, workbench: service, ...notificationOptions, environment: options.environment }) : undefined;
+  console.info('[workflow-notification] ' + JSON.stringify({ event: 'consumer_configured', environment: options.environment ?? 'prod',
+    consumer: drainNotifications ? 'notification_only' : 'none', completionObserverConfigured: true }));
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
-  const monitor = { async reconcile() {
-    // Aggregation is an independent durable worker, never part of single-case dispatch.
-    void proposals?.tick().catch(() => console.warn('[workflow-repair] proposal aggregation worker will retry'));
-    const count = await service.reconcile();
-    let after = '';
-    const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
-      : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
-    for (;;) {
-      const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
-        WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
-        AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
-      if (!pending.length) break;
-      for (const row of pending) {
-        const deployment = JSON.parse(row.body_json);
-        if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
-          try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
-          catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
-        }
+  logWorkflowBackground('workflow_repair_runtime', 'configured', { enabled: true, environment: options.environment });
+  let lastSummaryAt = -Infinity;
+  const monitor = { async reconcile() { return withWorkflowBackgroundContext({ environment: options.environment }, async () => {
+    try {
+      // Fast recovery owns unfinished AIS executions only. Publication/effect
+      // checks and new automatic work remain explicit, separate operations.
+      const count = await service.reconcile();
+      if (count || Date.now() - lastSummaryAt >= 60_000) {
+        logWorkflowBackground('workflow_repair_runtime', 'summary', { count });
+        lastSummaryAt = Date.now();
       }
-      after = pending.at(-1)!.record_id;
+      return count;
+    } finally {
+      // A failed generation must not prevent independent completion notices.
+      await drainNotifications?.();
     }
-    await verification.automatic.reconcile();
-    await automation?.tick();
-    return count;
-  } };
+  }); } };
   return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };
 }

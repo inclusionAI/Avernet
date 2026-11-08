@@ -7,7 +7,10 @@ use tower::ServiceExt;
 
 #[allow(dead_code)]
 mod register_support;
-use register_support::{bare_request, response_json, test_router, test_state};
+use register_support::{test_router, test_state};
+#[path = "register_support/requests.rs"]
+mod requests;
+use requests::{bare_request, response_json};
 
 struct UnusedRegisterService;
 
@@ -39,6 +42,13 @@ struct SelfService;
 
 #[async_trait]
 impl BotSelfService for SelfService {
+    async fn get_agent_me(&self, token: &str, provider: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<AgentSelfView, ApplicationError> {
+        assert_eq!(token, "parent");
+        assert_eq!(provider, Some("p"));
+        assert_eq!(cursor, Some("bot-a"));
+        assert_eq!(limit, 2);
+        Ok(AgentSelfView { agent_code:"parent".into(),bots:vec![],next_cursor:None })
+    }
     async fn get_me(&self, token: &str) -> Result<BotSelfView, ApplicationError> {
         match token {
             "invalid" | "expired" => return Err(ApplicationError::Unauthenticated),
@@ -128,4 +138,16 @@ async fn self_is_not_mounted_in_public_openapi() {
     request.headers_mut().insert("authorization", "Bearer registered".parse().unwrap());
     let response = app().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn parent_endpoint_uses_bearer_and_bounded_query_without_actor_or_principal() {
+    let mut request=bare_request("GET","/api/v1/collaboration/agents/me?provider_id=p&cursor=bot-a&limit=2");
+    request.headers_mut().insert("authorization","Bearer parent".parse().unwrap());
+    let response=app().oneshot(request).await.unwrap();
+    assert_eq!(response.status(),StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"],"no-store");
+    let body=response_json(response).await;
+    assert_eq!(body["data"]["agent_code"],"parent");
+    assert_eq!(body["data"]["bots"],serde_json::json!([]));
 }

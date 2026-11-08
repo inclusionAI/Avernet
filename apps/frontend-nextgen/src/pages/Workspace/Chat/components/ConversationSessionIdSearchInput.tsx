@@ -42,7 +42,9 @@ export function ConversationSessionIdSearchInput({
     onSearch('');
   };
   return (
-    <div className="px-4 py-1.5">
+    // conversation-area-in(2026-10-22 体验精修二轮):🔍 开关展开时的 2px 下落淡入,
+    // 与 Bot 展开区同一动效语言(global.css 局部 keyframe,reduced-motion 静止)。
+    <div className="conversation-area-in px-4 py-1.5">
       <div className="relative">
         <Search
           aria-hidden="true"

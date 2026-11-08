@@ -1,5 +1,7 @@
 """Real joined services and file SQLite; only external boundaries are mocked."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import create_autospec
@@ -96,7 +98,7 @@ def world(tmp_path, monkeypatch):
         bot_pk = bot.id
     repo = _work_orders(db)
     skills = _skill_editor_requests(db)
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     staff = create_autospec(StaffDeptPlugin, instance=True)
     staff.get_profile_by_work_no.return_value = StaffProfileInfo(
         work_no="applicant-1", nick_name="Applicant"

@@ -335,7 +335,7 @@ impl BotOnboardingService for BotOnboarding {
             ),
             binding_channels,
             visibility: effective_visibility,
-            agent_code: command.agent_code,
+            agent_code: command.agent_code.or_else(|| existing_caps.as_ref().and_then(|caps| caps.agent_code.clone())),
             agent_token: command.agent_token,
             ..Default::default()
         };
@@ -625,6 +625,14 @@ mod tests {
 
         async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {
             Vec::new()
+        }
+
+        async fn list_uninitialized_bots_by_creator(
+            &self,
+            _created_by: &str,
+            _limit: usize,
+        ) -> ServiceResult<Vec<RegisteredBot>> {
+            Ok(Vec::new())
         }
 
         async fn find_by_skills(&self, _skills: &[&str]) -> Vec<RegisteredBot> {

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { useGroupManagement } from '@/pages/Workspace/hooks/useGroupManagement';
 import { channelBindingService } from '@/services/workspace/channelBindingService';
+import { groupService } from '@/services/workspace/groupService';
 import { groupMemberService } from '@/services/workspace/groupMemberService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { expect, it, jest } from '@jest/globals';
@@ -13,6 +14,7 @@ jest.mock('@/services/workspace/invitationService');
 jest.mock('sonner', () => ({ toast: { error: () => undefined, success: () => undefined } }));
 
 const channelBinding = channelBindingService as unknown as Record<string, jest.Mock>;
+const groupSvc = groupService as unknown as Record<string, jest.Mock>;
 
 it('does not load dingtalk binding when advanced config is disabled', () => {
   renderHook(() => useGroupManagement('group-1', jest.fn(), false));
@@ -62,4 +64,38 @@ it('退出失败不清选中', async () => {
 
   expect(ok).toBe(false);
   expect(useWorkspaceStore.getState().selectedGroupId).toBe('group-1');
+});
+
+// ===== @Human 通知来源：updateGroup 写路径透传 =====
+
+it('updateGroup 透传 humanMentionNotifyMode：成功后 await onMutated 且返回 DomainResult', async () => {
+  groupSvc.updateGroup.mockResolvedValue({ ok: true, data: { groupId: 'group-1' } });
+  const onMutated = jest.fn(async () => undefined);
+
+  const { result } = renderHook(() => useGroupManagement('group-1', onMutated, false));
+  let res: unknown;
+  await act(async () => {
+    res = await result.current.updateGroup({ humanMentionNotifyMode: 'none' });
+  });
+
+  expect(groupSvc.updateGroup).toHaveBeenCalledWith('group-1', { humanMentionNotifyMode: 'none' });
+  expect(onMutated).toHaveBeenCalledTimes(1);
+  expect(res).toEqual({ ok: true, data: { groupId: 'group-1' } });
+});
+
+it('updateGroup 失败：toast 报错、不触发 onMutated、返回 null（面板受控值回滚，仅重试可复写）', async () => {
+  groupSvc.updateGroup.mockResolvedValue({
+    ok: false,
+    error: { code: 'GROUP_UPDATE_FAILED', friendlyMessage: '更新协作群失败，请稍后重试。', canRetry: false },
+  });
+  const onMutated = jest.fn(async () => undefined);
+
+  const { result } = renderHook(() => useGroupManagement('group-1', onMutated, false));
+  let res: unknown = 'unset';
+  await act(async () => {
+    res = await result.current.updateGroup({ humanMentionNotifyMode: 'driver_bot_only' });
+  });
+
+  expect(res).toBeNull();
+  expect(onMutated).not.toHaveBeenCalled();
 });

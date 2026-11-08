@@ -35,7 +35,8 @@ _OPENCLAW_RSYNC_EXCLUDES = [
     "canvas/",
     "update-check.json",
     "session_user_map.json",
-    "cron/runs/",
+    # Cron tasks belong to runtime instances, not published artifacts.
+    "/cron/",
     "identity/device.json",
 ]
 

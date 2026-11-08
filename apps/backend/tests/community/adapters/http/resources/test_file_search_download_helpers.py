@@ -374,6 +374,15 @@ def _mock_device_fs_dispatcher(fs):
     return dispatcher
 
 
+
+def _addressed_bot_repository():
+    repo = MagicMock()
+    repo.list_matches_by_legacy_locator.return_value = [{
+        "id": 1, "bot_id": "b1", "owner_id": "u1", "entity_id": "u1",
+        "active_engine": "openclaw",
+    }]
+    return repo
+
 class TestDownloadDirectoryDeviceFsDoubleJoin:
     """Regression for the subdir ``download-dir`` empty-zip bug.
 
@@ -412,7 +421,7 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
             resp = await download_directory.__wrapped__(
                 path="memory", bot_id="b1", engine_type="openclaw", owner_id="u1",
                 publish_id=None, ctx=SimpleNamespace(user_id="u1", bot_id="b1"),
-                bot_repo=MagicMock(), path_factory=MagicMock(),
+                bot_repo=_addressed_bot_repository(), path_factory=MagicMock(),
                 publish_repo=MagicMock(), baas_service=MagicMock(),
                 resolver=resolver, device_fs_dispatcher=_mock_device_fs_dispatcher(fs),
             )
@@ -454,7 +463,7 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
             resp = await download_directory.__wrapped__(
                 path="", bot_id="b1", engine_type="openclaw", owner_id="u1",
                 publish_id=None, ctx=SimpleNamespace(user_id="u1", bot_id="b1"),
-                bot_repo=MagicMock(), path_factory=MagicMock(),
+                bot_repo=_addressed_bot_repository(), path_factory=MagicMock(),
                 publish_repo=MagicMock(), baas_service=MagicMock(),
                 resolver=resolver, device_fs_dispatcher=_mock_device_fs_dispatcher(fs),
             )
@@ -522,7 +531,7 @@ class TestDownloadDirectoryZipMetadata:
             resp = await download_directory.__wrapped__(
                 path="memory", bot_id="b1", engine_type="openclaw", owner_id="u1",
                 publish_id=None, ctx=SimpleNamespace(user_id="u1", bot_id="b1"),
-                bot_repo=MagicMock(), path_factory=MagicMock(),
+                bot_repo=_addressed_bot_repository(), path_factory=MagicMock(),
                 publish_repo=MagicMock(), baas_service=MagicMock(),
                 resolver=resolver, device_fs_dispatcher=_mock_device_fs_dispatcher(fs),
             )

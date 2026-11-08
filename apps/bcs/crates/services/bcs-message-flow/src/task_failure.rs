@@ -116,7 +116,8 @@ pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::messag
             created_at:now as u64, run_id:row.run_id.clone().unwrap_or_default() },
         flow_kind:bcs_domain::message_delivery::DeliveryFlowKind::Task,
         targets:vec![DeliveryAdmissionTarget { rejection:None, target_bot_id:task.manager, kind:bcs_domain::DeliveryType::Send,
-            max_queued:100, semantic_projection_json:serde_json::to_value(projection)? }],
+            max_queued:100, semantic_projection_json:serde_json::to_value(projection)?, run_id: None,
+}],
         now_ms:now, expire_at_ms:None,
     }))
 }
@@ -146,7 +147,8 @@ fn timeout_unknown_notice(row: &PersistedMessageDelivery, now: i64) -> ServiceRe
         flow_kind:bcs_domain::message_delivery::DeliveryFlowKind::System,
         targets:vec![DeliveryAdmissionTarget { rejection:None, target_bot_id:task.manager,
             kind:bcs_domain::DeliveryType::Send, max_queued:100,
-            semantic_projection_json:serde_json::to_value(projection)? }],
+            semantic_projection_json:serde_json::to_value(projection)?, run_id: None,
+}],
         now_ms:now, expire_at_ms:None,
     })
 }

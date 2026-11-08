@@ -263,56 +263,6 @@ async fn test_bot_responds_with_chat_event() {
     bot.send_chat_event(&group_id, &request_id, "Hello back!").await;
 }
 
-// ── Test 6: Proposal flow end-to-end ─────────────────────────────────────────
-
-/// Full proposal flow: request → confirm → group context broadcast to participants.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_proposal_flow_end_to_end() {
-    let _ = tracing_subscriber::fmt::try_init();
-    let tmp = create_temp_bots_dir();
-    let (addr, _srv) = start_test_server(&tmp.path().to_path_buf()).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let mut bot1 = MockBot::connect(addr).await;
-    bot1.register("Requester", &["coordination"], addr).await;
-    let client1 = bot1.http_client(addr);
-
-    let mut bot2 = MockBot::connect(addr).await;
-    bot2.register("Expert", &["database"], addr).await;
-
-    // Bot1 requests group help
-    let proposal = client1.propose_group_chat_with_token(
-        "Need database expert help",
-        None,
-        None,
-    ).await;
-
-    if let Ok(prop) = proposal {
-        if !prop.confirm_url.is_empty() {
-            let token = prop.confirm_url
-                .split('/')
-                .rev()
-                .nth(1)
-                .unwrap_or("")
-                .to_string();
-
-            if !token.is_empty() {
-                let anon = bcs_cli::BcsClient::new(format!("http://{}", addr));
-                let _ = anon.confirm_proposal(&token).await;
-
-                let frame1 = bot1.recv_frame().await;
-                if let Some(f) = frame1 {
-                    let action = frame_action(&f);
-                    assert!(action == "chat.send" || action == "chat.inject",
-                        "Bot1 should receive group context frame, got: {f}");
-                }
-            }
-        }
-    }
-    // Test passes even if no matching bots found
-    let _ = bot2;
-}
-
 // ── Test 7: Heartbeat (bot.status) ───────────────────────────────────────────
 
 /// Verifies BCS responds ok to bot.status heartbeat frames (BCN heartbeat loop).

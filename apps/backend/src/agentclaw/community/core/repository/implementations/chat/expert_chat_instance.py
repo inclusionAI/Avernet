@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -77,6 +78,7 @@ class ExpertChatInstanceRepository(
     ) -> Optional[Dict[str, Any]]:
         env = get_current_env()
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             row = (
                 db.query(self.Model)
                 .filter(
@@ -107,6 +109,7 @@ class ExpertChatInstanceRepository(
         env = get_current_env()
         ext_json = json.dumps(ext) if ext is not None else None
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             dialect = db.get_bind().dialect.name
             table = self.Model.__table__
             values = {
@@ -193,6 +196,7 @@ class ExpertChatInstanceRepository(
         if ext is not None:
             updates[self.Model.ext] = json.dumps(ext)
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             rowcount = (
                 db.query(self.Model)
                 .filter(

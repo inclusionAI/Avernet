@@ -13,6 +13,10 @@
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
+import {
+  markTaskNavigationRouteHydrated,
+  shouldPreserveTaskPanelForSession,
+} from '@/services/tasks/taskConversationNavigation';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import type {
   SessionMessageSearchQuery,
@@ -20,7 +24,8 @@ import type {
 } from '@/services/workspace/conversationSearchService';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 // 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
@@ -38,6 +43,8 @@ export interface ChatHeaderFavoritesModel {
 
 export interface UseChatHeaderPanelsOptions {
   session: BotChatSessionView | null;
+  /** 当前登录用户任务列表查询口径。 */
+  userId: string | null;
   messages: ChatMessage[];
   /** 副屏 handle（与 ChatPanel panelRef 同源）。 */
   panelRef: React.RefObject<PanelHandle | null>;
@@ -117,6 +124,9 @@ const HIGHLIGHT_TIMEOUT_MS = 3000;
 
 export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseChatHeaderPanelsResult {
   const { session, messages, panelRef } = options;
+  const sessionId = session?.sessionId ?? null;
+
+  useSessionTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
 
   const [openPanel, setOpenPanel] = useState<ChatHeaderPanelKind | null>(null);
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
@@ -144,7 +154,6 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   }, [options]);
 
   // 会话切换即复位开合态（面板内容按当前会话呈现）。
-  const sessionId = session?.sessionId ?? null;
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const [sessionEpoch, setSessionEpoch] = useState(0);
   if (lastSessionIdRef.current !== sessionId) {
@@ -154,9 +163,12 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     // 副屏同步复位（兜底）：useBotChat 在同边界 closePanelForce 强关面板并清空 tabs，
     // closePanelForce 经 onIsOpenChange(false) 已同步真实态；此复位防面板随舞台切换卸载
     // 而无事件发出的脱钩场景（与群侧孪生 useGroupChatHeaderPanels 一致）。
-    setSidePaneOpen(false);
+    if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/chat')) setSidePaneOpen(false);
     setSessionEpoch((epoch) => epoch + 1);
   }
+  useEffect(() => {
+    markTaskNavigationRouteHydrated(sessionId, '/workspace/chat');
+  }, [sessionId]);
 
   // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
   const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);
@@ -193,6 +205,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   const historySearch = useSessionHistorySearchModel(messages, sessionEpoch);
 
   const locateMessage = useCallback((messageId: string) => {
+    setOpenPanel(null);
     setHighlightMessageId(messageId);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightMessageId(null), HIGHLIGHT_TIMEOUT_MS);

@@ -109,6 +109,7 @@ pub async fn register_provider(
         .services
         .provider_management
         .register_provider(RegisterProviderCommand {
+            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             name: req.name,
             slug: req.slug,
             webhook_url: req.webhook_url,
@@ -144,6 +145,7 @@ pub async fn get_provider_by_slug(
         auth_mode: match info.auth_mode {
             ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
             ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
+            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
             ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
         },
         enabled: info.enabled,
@@ -183,6 +185,7 @@ pub async fn patch_provider(
         .services
         .provider_management
         .update_provider(UpdateProviderCommand {
+            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             provider_id,
             provider_admin_token,
             authenticated_staff_id,
@@ -270,6 +273,14 @@ pub async fn register_provider_bot(
     }
 
     Ok(Json(RegisterProviderBotResponse {
+        auth_mode: match outcome.auth_mode {
+            ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
+            ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
+            ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
+            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
+        },
+        agent_code: outcome.identity.agent_code,
+        bot_slug: outcome.identity.bot_slug,
         webhook_url: outcome.webhook_url,
         bot_uuid: outcome.bot_uuid,
         provider_id: outcome.provider_id,
@@ -624,6 +635,7 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
     match mode {
         ProviderAuthModeDto::StaticBearer => ProviderAuthMode::StaticBearer,
         ProviderAuthModeDto::AgentPass => ProviderAuthMode::AgentPass,
+        ProviderAuthModeDto::AgentPassSubbots => ProviderAuthMode::AgentPassSubbots,
         ProviderAuthModeDto::ProviderAdmin => ProviderAuthMode::ProviderAdmin,
     }
 }
@@ -631,6 +643,7 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
 fn auth_mode_to_wire(mode: &str) -> ProviderAuthModeDto {
     match mode {
         "agentpass" => ProviderAuthModeDto::AgentPass,
+        "agentpass-subbots" => ProviderAuthModeDto::AgentPassSubbots,
         "provider_admin" => ProviderAuthModeDto::ProviderAdmin,
         _ => ProviderAuthModeDto::StaticBearer,
     }
@@ -841,6 +854,15 @@ fn provider_error(error: ServiceError) -> ProviderRouteError {
     }
 }
 
+fn parse_collaboration_scope(value: Option<&str>) -> Result<Option<bcs_service_api::ProviderCollaborationScope>, ProviderRouteError> {
+    match value {
+        None => Ok(None),
+        Some("standard") => Ok(Some(bcs_service_api::ProviderCollaborationScope::Standard)),
+        Some("same_owner") => Ok(Some(bcs_service_api::ProviderCollaborationScope::SameOwner)),
+        _ => Err(ProviderRouteError::bad_request("invalid collaboration_scope")),
+    }
+}
+
 fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse, ServiceError> {
     let config: Value = serde_json::from_str(&provider.config)?;
     let downlink = config.get("downlink").unwrap_or(&Value::Null);
@@ -866,7 +888,9 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
         })
         .transpose()?;
 
+    let scope = bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)?;
     Ok(ProviderInfoResponse {
+        collaboration_scope: Some(match scope { bcs_service_api::ProviderCollaborationScope::Standard => "standard", bcs_service_api::ProviderCollaborationScope::SameOwner => "same_owner" }.into()),
         provider_id: provider.provider_id,
         slug: provider.slug,
         name: provider.name,
@@ -1147,3 +1171,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/provider_scope.rs"]
+mod collaboration_scope_tests;

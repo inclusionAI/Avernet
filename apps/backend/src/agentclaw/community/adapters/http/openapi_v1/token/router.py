@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
@@ -34,6 +36,13 @@ from agentclaw.community.api.caller_credential import (
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import FriendUserIdQuery
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
+from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 
 token_router = APIRouter(
@@ -76,6 +85,9 @@ async def get_bot_iam_token(
     bot_id: BotIdPath,
     request: Request,
     user_id: UserIdDep,
+    owner_id: str | None = Query(default=None, min_length=1, description="Exact Bot owner for an explicit friend IAM request; defaults to the acting user."),
+    f_user_id: FriendUserIdQuery = None,
+    session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
     stage: RuntimeStage = Query(
         default=RuntimeStage.DRAFT,
         description="Bot runtime stage whose Caller identity may be prepared.",
@@ -85,9 +97,35 @@ async def get_bot_iam_token(
         description="Entity identifier used to resolve the Bot unambiguously.",
     ),
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
 ) -> Envelope[IamToken]:
     """Return the IAM token and prepare Caller identity when the Bot requires it."""
     normalized_entity_id = (entity_id or "").strip() or None
+    friend_kwargs = {}
+    if f_user_id is not None:
+        owner_id = owner_id or user_id
+        # Reading someone else's sessions does not authorize installing the
+        # owner's IAM token in that other person's Caller instance.
+        if f_user_id != user_id or not session_id:
+            raise EngineResourceNotFoundError("friend IAM requires the caller's own session")
+        resolved_stage = await authorize_file_list(
+            request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+            owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+            relay=relay, friendships=friendships, expert=expert,
+        )
+        stage = RuntimeStage(resolved_stage)
+        # The exact owner address was already verified; do not let a second
+        # client-supplied entity selector switch the token installation target.
+        bot = await asyncio.to_thread(bot_repo.get_by_id_and_owner, bot_id, owner_id)
+        if not bot or not bot.get("entity_id"):
+            raise EngineResourceNotFoundError("friend Bot identity is unavailable")
+        normalized_entity_id = str(bot["entity_id"])
+        friend_kwargs = {"friend_user_id": f_user_id, "session_key": session_id}
+    elif session_id is not None:
+        friend_kwargs = {"session_key": session_id}
     # Every user owns a Bot named ``default``.  When the browser has no explicit
     # chat target yet, scope that otherwise-ambiguous identifier to the verified
     # user instead of attempting a tenant-wide unique lookup.
@@ -103,6 +141,7 @@ async def get_bot_iam_token(
         publish_id=None,
         entity_id=normalized_entity_id,
         is_test_exchange=False,
+        **friend_kwargs,
     )
     _raise_for_error(result.error)
     return envelope(IamToken(iam_token=result.iam_token), request)

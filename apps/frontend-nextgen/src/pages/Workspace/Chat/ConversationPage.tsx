@@ -1,68 +1,43 @@
 // ConversationPage —— 对话页(/workspace/chat,Task 8 组合页)。
 // 组合:useHumanIdentity(Task 4 定式:固定登录 Human 身份,经页边界注入)+
 // Task 4 会话 Hook(目录/会话/他人只读/URL 同步)+ Task 6 对话侧栏 +
-// Task 7 交互舞台 + 只读面板。不调 useWorkspace 数据源,也不按 activeIdentity.kind 分支
-// (Bot 身份只读好友分支由 /workspace/chat 单一 Human 语义整体取代,旧分支 Task 10 退休)。
-// 登录用户变化(非首次出现)时重置会话 Store:缓存按 botId 记忆、无用户来源,
-// 防止上一用户的缓存/选中串号(控制器裁定,不在每次挂载时重置)。
-import type { IdentityView } from '@/domain/collaboration/types';
+// 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
-import { buildSingleChatBridgeRequest } from '@/hooks/singleChatBridgeRequest';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { useMinWidth } from '@/hooks/useMediaQuery';
-import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
-import { buildAgentCodingChatPath } from '@/services/workspace';
-import type { ChatBotView } from '@/services/workspace/botSessionService';
-import { chatBridge } from '@/services/workspace/chatBridge';
-import { useConversationStore } from '@/stores/conversationStore';
-import { useChatBridge } from '@tc-chat/adapters';
-import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
-import type { SenderRef } from '@tc-chat/ui/es/Sender';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { history } from '@umijs/max';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { getCapabilities } from '@/capabilities';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { useSpaceContextStore } from '@/stores/spaceContextStore';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
-import { useBotChat } from '../hooks/useBotChat';
-import { ChatHeaderActions } from './components/ChatHeaderActions';
-import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
+import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import { ConversationSidebar, type ConversationSidebarProps } from './components/ConversationSidebar';
-import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
-import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
-import { ConversationInteractiveStage } from './ConversationInteractiveStage';
-import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
-import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
-import { useConversationDirectory } from './hooks/useConversationDirectory';
+import { CodingBotStageBoundary } from './CodingBotStageBoundary';
+import { StandardConversationStageContainer } from './StandardConversationStageContainer';
 import { useConversationHistory } from './hooks/useConversationHistory';
-import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
+import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
+import { useConversationMobileSidebar } from './hooks/useConversationMobileSidebar';
 import { useConversationSelection } from './hooks/useConversationSelection';
-import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
+import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
+import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
   const userId = human?.userId ?? null;
-  const panelRef = useRef<PanelHandle | null>(null);
-  const inputRef = useRef<SenderRef | null>(null);
 
-  // 登录用户变化才整仓重置(不随挂载/重渲染触发);首次出现不算切换。
-  const previousUserIdRef = useRef<string | null>(null);
-  const identityChanged = previousUserIdRef.current !== null && previousUserIdRef.current !== userId;
-  useEffect(() => {
-    const previousUserId = previousUserIdRef.current;
-    previousUserIdRef.current = userId;
-    if (previousUserId !== null && previousUserId !== userId) {
-      useConversationStore.getState().reset();
-    }
-  }, [userId]);
+  // 登录用户变化才整仓重置;identityChanged 供切换瞬间停用旧用户会话装配(详见 hook)。
+  const { identityChanged } = useConversationIdentityReset(userId);
 
   const directory = useConversationDirectory(userId);
   // 团队 Bot 独立目录(section=team)与会话模型合并消费:
-  // 会话加载/选中/URL 同步等按「管理域全集」(managed + team)装配
-  // (sprint spec 2026-10-10-conversation-team-bots,取代 B2/B3 Batch 1 临时的空间拆桶分层)。
+  // 会话加载/选中/URL 同步等按「管理域全集」(managed + team)装配。
   const managedAndTeamBots = useMemo(
     () => [...directory.managedBots, ...directory.teamBots],
     [directory.managedBots, directory.teamBots],
@@ -98,59 +73,35 @@ export default function ConversationPage(): JSX.Element {
     hydrated,
   });
 
-  // 交互式(mine)装配:target/viewer/认证信息/请求身份全部来自登录 Human(Task 7 约定)。
-  // 登录用户切换瞬间不再装载旧用户会话(identityChanged 防串话,expand-selection 竞态保护)。
+  // 交互式(mine)装配:身份与选择态全部来自登录 Human。登录用户切换瞬间
+  // 停用旧用户会话,防止上一用户的缓存/选中串号。
   const interactiveBot = identityChanged || !userId ? null : interactive.bot;
   const selectedSession = interactive.session;
-  const target = useMemo(
-    () => (interactiveBot ? buildBotChatTarget(interactiveBot, selectedSession) : null),
-    [interactiveBot, selectedSession],
-  );
-  const botChat = useBotChat(interactiveBot, selectedSession, panelRef, undefined, userId);
-  const sessionEdits = useConversationSessionEdits(userId);
-  // viewer:登录 Human 的身份视图(kind 恒 user,是「查看者」而非可选身份)。
-  const viewer = useMemo<IdentityView | null>(
+  const isCodingBot = interactiveBot?.isAgentCodingBot === true;
+  const codingBotPreload = getCapabilities().getCodingBotConversationHost().value?.preload;
+
+  // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
+  // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就开始预载 qiankun 入口资产。
+  const selectedCodingBot = useMemo(
     () =>
-      human
-        ? {
-            id: human.userId,
-            kind: 'user',
-            displayName: human.displayName,
-            avatarUrl: human.avatarUrl,
-            online: human.online,
-          }
-        : null,
-    [human],
+      managedAndTeamBots.find(
+        (view) => view.section === store.selectedSection && view.bot.botId === store.selectedBotId,
+      )?.bot ?? null,
+    [managedAndTeamBots, store.selectedBotId, store.selectedSection],
   );
+  const shouldPreloadCodingBot = selectedCodingBot?.isAgentCodingBot === true;
+
+  useEffect(() => {
+    if (shouldPreloadCodingBot) codingBotPreload?.();
+  }, [codingBotPreload, shouldPreloadCodingBot]);
+
+  // URL 已指定 Bot 但目录仍在解析时不能挂载普通 Runtime;否则 Coding Bot 会在
+  // 目录返回前短暂初始化 useBotChat(null)。这个轻量 Stage 只等待目录结论。
+  const selectedBotPending = store.selectedBotId !== null && interactiveBot === null;
   const chatBots = useMemo(
     () => [...managedAndTeamBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
     [managedAndTeamBots, directory.friendBots],
   );
-
-  const interactiveModel = useConversationInteractiveChat({
-    target,
-    viewer,
-    authenticatedUserId: userId,
-    authenticatedUserName: human?.displayName,
-    authenticatedUserAvatarUrl: human?.avatarUrl,
-    requesterIdentityId: userId,
-    chatBots,
-    selectedSession,
-    botChat,
-    panelRef,
-    inputRef,
-    // AgentCoding Bot 行点击直达 /coding/coding-chat(专属形态),不进 ChatPanel 装配。
-    selectedAgentCodingBot: null,
-    sessions: sessionEdits,
-  });
-  // 副屏桥注册:对齐旧 useWorkspace(bridge.submit → bot 单聊 chat.onRequest)。
-  useChatBridge({
-    bridge: chatBridge,
-    chat: botChat.chat,
-    panelRef,
-    inputRef: inputRef as RefObject<BridgeInputRef | null>,
-    buildRequestParams: (content) => buildSingleChatBridgeRequest(target?.id ?? null, content),
-  });
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
@@ -161,11 +112,7 @@ export default function ConversationPage(): JSX.Element {
   });
 
   // <lg 二级会话列表抽屉开关(桌面收起,对齐旧页行为)。
-  const [mobileListOpen, setMobileListOpen] = useState(false);
-  const isDesktop = useMinWidth(1024);
-  useEffect(() => {
-    if (isDesktop) setMobileListOpen(false);
-  }, [isDesktop]);
+  const { open: mobileListOpen, setOpen: setMobileListOpen } = useConversationMobileSidebar();
 
   const handleOpenSession = (
     botId: string,
@@ -173,16 +120,28 @@ export default function ConversationPage(): JSX.Element {
     sessionId: string,
     friendUserId?: string,
   ) => {
-    if (isManagedConversationSection(section) && friendUserId) {
-      selectReadonlySession(botId, sessionId, friendUserId);
-      return;
-    }
-    if (section === 'friend') sessions.selectFriendBotSession(botId, sessionId);
-    else sessions.selectMineSession(botId, sessionId);
+    if (isManagedConversationSection(section) && friendUserId)
+      return selectReadonlySession(botId, sessionId, friendUserId);
+    if (section === 'friend') return sessions.selectFriendBotSession(botId, sessionId);
+    sessions.selectMineSession(botId, sessionId);
   };
-  // AgentCoding Bot 行点击直达专用 coding 对话页(与 Bot 工坊「去使用」一致;spec 2026-10-09 G2)。
-  const openAgentCodingBot = (bot: ChatBotView) =>
-    history.push(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
+  // #2990 新增「Bot 管理」入口保留：带该 Bot 所属空间上下文跳转 Bot 管理页；Coding Bot
+  // 本期不再跳 coding-chat 专用页，而是进入普通会话列表并挂载 embedded Stage。
+  const openBotManagement = useCallback((bot: ChatBotView) => {
+    const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
+    if (spaceId !== undefined && Number.isFinite(spaceId)) {
+      useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
+    }
+    history.push('/bot-workshop');
+  }, []);
+  // #2990 新增“当前会话回复中”状态保留。普通 Runtime 已拆到
+  // StandardConversationStageContainer，通过状态回传供侧边栏会话行展示；Coding Bot
+  // 子应用暂不透出同构状态，保持 null。
+  const [standardChatRequesting, setStandardChatRequesting] = useState(false);
+  const handleStandardChatRequestingChange = useCallback((isRequesting: boolean) => {
+    setStandardChatRequesting(isRequesting);
+  }, []);
+  const replyingSessionId = standardChatRequesting ? (selectedSession?.sessionId ?? null) : null;
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
     teamBots: directory.teamBots,
@@ -196,52 +155,9 @@ export default function ConversationPage(): JSX.Element {
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
-    onOpenAgentCodingBot: openAgentCodingBot,
+    onOpenBotManagement: openBotManagement,
+    replyingSessionId,
   };
-
-  // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
-  // 资源管理 = 既有会话文件副屏承接；与右缘面板互斥由 togglePanel 一并处理。
-  const headerPanels = useChatHeaderPanels({
-    session: interactiveModel.selectedSession,
-    messages: botChat.chat.messages,
-    panelRef,
-    section: store.selectedSection ?? 'managed',
-    botId: interactiveBot?.botId ?? null,
-    toggleFavorite: sessions.favorites.toggleFavorite,
-    favoritePending: sessions.favorites.isPending,
-    openFileDrawer: interactiveModel.fileFeature.openFileDrawer,
-    closeFileDrawer: interactiveModel.fileFeature.closeFileDrawer,
-    fileDrawerOpen: interactiveModel.fileFeature.fileDrawerOpen,
-  });
-  const toggleFileDrawer = () => {
-    if (interactiveModel.fileFeature.fileDrawerOpen) interactiveModel.fileFeature.closeFileDrawer();
-    else {
-      headerPanels.closePanel();
-      interactiveModel.fileFeature.openFileDrawer();
-    }
-  };
-  const headerActions = (
-    <ChatHeaderActions
-      favorites={headerPanels.favorites}
-      openPanel={headerPanels.openPanel}
-      onTogglePanel={headerPanels.togglePanel}
-      fileDrawerOpen={interactiveModel.fileFeature.fileDrawerOpen}
-      onToggleFileDrawer={toggleFileDrawer}
-      sidePaneOpen={headerPanels.sidePaneOpen}
-      sidePaneDisabled={headerPanels.sidePaneDisabled}
-      onToggleSidePane={headerPanels.toggleSidePane}
-    />
-  );
-  const headerRightPanels =
-    headerPanels.openPanel === 'detail' ? (
-      <ChatHeaderRightPanel title="会话详情" onClose={headerPanels.closePanel}>
-        <SessionDetailPanel session={interactiveModel.selectedSession} />
-      </ChatHeaderRightPanel>
-    ) : headerPanels.openPanel === 'history' ? (
-      <ChatHeaderRightPanel title="历史消息" onClose={headerPanels.closePanel}>
-        <SessionHistorySearchPanel search={headerPanels.historySearch} onLocate={headerPanels.locateMessage} />
-      </ChatHeaderRightPanel>
-    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -257,38 +173,47 @@ export default function ConversationPage(): JSX.Element {
             setMobileListOpen(false);
           }}
         />
-        {selectionIsReadonly ? (
-          <ReadOnlyConversationPanel
-            bot={readonly.bot}
-            friend={readonly.friend}
-            session={readonly.session}
-            messages={readonlyHistory.messages}
-            loading={readonlyHistory.loading}
-            error={readonlyHistory.error}
-            hasMore={readonlyHistory.hasMore}
-            isLoadingMore={readonlyHistory.isLoadingMore}
-            loadMoreError={readonlyHistory.loadMoreError}
-            onRetry={readonlyHistory.retry}
-            onLoadMore={() => void readonlyHistory.loadMore()}
-            onOpenSessionList={() => setMobileListOpen(true)}
-          />
-        ) : placeholder ? (
-          // 展开 Bot 后目标尚无选中会话:占位(加载/失败/空态/无效指定,expand-selection spec),
-          // 不挂载旧对话。
-          <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
-        ) : (
-          <ConversationInteractiveStage
-            model={interactiveModel}
-            onOpenSessionList={() => setMobileListOpen(true)}
-            onOpenAgentCodingBot={openAgentCodingBot}
-            headerActions={headerActions}
-            headerRightPanels={headerRightPanels}
-            highlightMessageId={headerPanels.highlightMessageId}
-            sidePaneOpen={headerPanels.sidePaneOpen}
-            onToggleSidePane={headerPanels.toggleSidePane}
-            onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
-          />
-        )}
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1">
+          {selectionIsReadonly ? (
+            <ReadOnlyConversationPanel
+              bot={readonly.bot}
+              friend={readonly.friend}
+              session={readonly.session}
+              messages={readonlyHistory.messages}
+              loading={readonlyHistory.loading}
+              error={readonlyHistory.error}
+              hasMore={readonlyHistory.hasMore}
+              isLoadingMore={readonlyHistory.isLoadingMore}
+              loadMoreError={readonlyHistory.loadMoreError}
+              onRetry={readonlyHistory.retry}
+              onLoadMore={() => void readonlyHistory.loadMore()}
+              onOpenSessionList={() => setMobileListOpen(true)}
+            />
+          ) : placeholder ? (
+            // 展开 Bot 后目标尚无选中会话:占位(加载/失败/空态/无效指定),
+            // 不挂载任何消息 Runtime。
+            <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
+          ) : isCodingBot ? (
+            selectedSession && (
+              <CodingBotStageBoundary bot={interactiveBot} session={selectedSession} human={human} />
+            )
+          ) : selectedBotPending ? (
+            <section aria-label="加载 Bot 会话" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+              <ChatMessageSkeleton ariaLabel="加载 Bot 会话" />
+            </section>
+          ) : (
+            <StandardConversationStageContainer
+              bot={interactiveBot}
+              session={selectedSession}
+              human={human}
+              section={store.selectedSection ?? 'managed'}
+              chatBots={chatBots}
+              sessions={sessions}
+              onOpenSessionList={() => setMobileListOpen(true)}
+              onChatRequestingChange={handleStandardChatRequestingChange}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

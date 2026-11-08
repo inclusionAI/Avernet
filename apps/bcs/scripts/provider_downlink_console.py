@@ -1018,7 +1018,7 @@ class Console:
             parser.add_argument(
                 "--auth",
                 default="static_bearer",
-                choices=["static_bearer", "agentpass", "provider_admin"],
+                choices=["static_bearer", "agentpass", "agentpass-subbots", "provider_admin"],
             )
             parser.add_argument("--webhook-url", default=self.webhook_url)
             ns = parser.parse_args(args[1:])

@@ -1,8 +1,8 @@
 import express from "express";
+import { withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import compression from "compression";
 import cookieParser from "cookie-parser";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClawevolveModule } from "@avernet/clawevolve";
 import { createInsightRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
@@ -26,6 +26,9 @@ import { MetricsRepository } from "@avernet/workflow/server/repositories/metrics
 import { AlertRepository } from "@avernet/workflow/server/repositories/alert-repository";
 import { FlowControlRepository } from "@avernet/workflow/server/repositories/flow-control-repository";
 import { ExecutionStepLogRepository } from "@avernet/workflow/server/repositories/execution-step-log-repository";
+import { FacadeBindingRepository } from "@avernet/workflow/server/repositories/facade-binding-repository";
+import { AppConfigRepository } from "@avernet/workflow/server/repositories/app-config-repository";
+import { createAutoAnalysisSettings } from "@avernet/workflow/server/services/task-guard/auto-analysis-settings";
 import {
   closeDatabase,
   initDatabase,
@@ -36,7 +39,10 @@ import {
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import type { ClawWebBootstrap } from "./bootstrap.js";
+import { closeHttpServer } from "./shutdown.js";
+import { mountStaticFrontend } from "./static-frontend.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
@@ -85,8 +91,14 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       });
       app.use("/api/evolve", clawevolve.publicRouter);
       const repairExecution = repairConfig
-        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
+        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId, getClawWebPublicBaseUrl())
         : undefined;
+      const botPermRepo = new BotWorkflowPermissionRepository(db);
+      const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
+      const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
+      const publicBaseUrl = getClawWebPublicBaseUrl();
+      console.info('[workflow-notification] ' + JSON.stringify({ event: 'provider_configured', environment: context.environment,
+        senderConfigured: !!insight.notificationSender, publicBaseUrlConfigured: !!publicBaseUrl }));
       const repairRuntime = createWorkflowRepairRuntime(db, {
         environment: context.environment,
         principal: async request => {
@@ -96,16 +108,48 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
             || await adminUserRepo.hasRole([identity.userId, identity.userName], "admin") };
         },
         execution: repairExecution,
+        notifications: {
+          settings: createAutoAnalysisSettings({ repo: new AppConfigRepository(db) }),
+          ports: {
+            owner: async workflowId => {
+              const row = await workflowSpecRepo.findSummaryByWorkflowId(workflowId);
+              return row?.resolved_owner_id?.trim() || row?.owner_id?.trim() || null;
+            },
+            canEdit: (workflowId, actorId) => botPermRepo.hasEditPermission(workflowId, actorId),
+            async notify(notice) {
+              if (!insight.notificationSender || !publicBaseUrl) {
+                console.warn('[workflow-notification] ' + JSON.stringify({ event: 'provider_unavailable', noticeId: notice.key,
+                  workflowId: notice.workflowId, reason: !insight.notificationSender ? 'NOTIFICATION_SENDER_MISSING' : 'NOTIFICATION_PUBLIC_URL_MISSING' }));
+                return { status: 'retryable' };
+              }
+              try {
+                const link = new URL(notice.path, publicBaseUrl).toString();
+                const sent = await insight.notificationSender.sendNotification({ recipientUserId: notice.recipientId,
+                  title: notice.title, text: `${notice.text}\n\n[查看工作流并处理](${link})` });
+                return { status: 'sent', ...(sent.processQueryKey ? { receipt: sent.processQueryKey } : {}) };
+              } catch (error) {
+                const message = error instanceof Error ? error.message : '';
+                const httpStatus = message.match(/HTTP (400|401|403|404|422|429)\b/)?.[1];
+                const missingConfiguration = message.includes('not configured');
+                console.warn('[workflow-notification] ' + JSON.stringify({ event: 'provider_failed', noticeId: notice.key,
+                  workflowId: notice.workflowId, httpStatus: httpStatus ?? null,
+                  reason: missingConfiguration ? 'NOTIFICATION_PROVIDER_NOT_CONFIGURED' : httpStatus ? 'NOTIFICATION_HTTP_REJECTED' : 'NOTIFICATION_TRANSPORT_UNKNOWN' }));
+                // Preserve unknown transport outcomes; the legacy sender has no idempotency key.
+                return { status: missingConfiguration || httpStatus ? 'retryable' : 'uncertain' };
+              }
+            },
+          },
+        },
       });
       app.use("/api/workflow-repairs", repairRuntime.router);
       let repairPollBusy = false;
-      const repairPoll = repairExecution ? setInterval(() => {
+      const repairPoll = setInterval(() => {
         if (repairPollBusy) return;
         repairPollBusy = true;
-        void repairRuntime.service.reconcile().catch(() => {
+        void withWorkflowBackgroundContext({ trigger: 'timer', environment: context.environment }, () => repairRuntime.monitor.reconcile()).catch(() => {
           console.warn('[clawweb] Workflow Repair reconciliation failed; will retry');
         }).finally(() => { repairPollBusy = false; });
-      }, 15_000) : null;
+      }, 15_000);
       repairPoll?.unref();
       app.use("/api/bench", clawevolve.benchRouter);
       app.use("/api/insight/v1", createSessionRecoveryRouter(options.sessionRecovery));
@@ -134,9 +178,6 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         name: autoHealConfig.gitAuthorName,
         email: autoHealConfig.gitAuthorEmail,
       };
-      const botPermRepo = new BotWorkflowPermissionRepository(db);
-      const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
-      const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
       const flowRunRepo = new FlowRunRepository(db);
       const nodeExecRepo = new NodeExecutionRepository(db);
       const eventRepo = new FlowEventRepository(db);
@@ -144,6 +185,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const alertRepo = new AlertRepository(db);
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
+      const facadeRepo = new FacadeBindingRepository(db);
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
@@ -166,32 +208,29 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         botPermRepo,
         workflowSpecRepo,
         execStepLogRepo,
+        facadeRepo,
       ));
       app.use("/api/auto-heal", createAutoHealRouter({
         db,
+        flowRunRepo,
         workflowSpecRepo,
         deployHistoryRepo,
         botPermRepo,
         gitConfig: autoHealGitConfig,
         gitAuthor: autoHealAuthor,
-        triggerRun: createAutoHealTriggerRun(),
+        triggerRun: createAutoHealTriggerRun(flowRunRepo),
+        facadeRepo,
       }));
 
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");
-      if (existsSync(staticDir)) {
-        app.use(express.static(staticDir));
-        app.get("{*path}", (request, response) => {
-          if (request.path.startsWith("/api/")) return response.status(404).json({ error: "Not Found" });
-          return response.sendFile(join(staticDir, "index.html"));
-        });
-      }
+      mountStaticFrontend(app, staticDir);
       const server = app.listen(port, "127.0.0.1", () => {
         console.info(`[clawweb] Public runner listening on http://127.0.0.1:${port}`);
       });
       return {
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
-          await new Promise<void>((done) => server.close(() => done()));
+          await closeHttpServer(server);
           await clawevolve.stop();
           await closeDatabase();
         },

@@ -9,7 +9,7 @@ from secbaas.community.logger import get_logger
 
 from ._orm_model import BotRunQueueModel
 from ._protocol import BotRunQueueRepository
-from ._record import BotRunQueueRecord
+from ._record import ActiveBot, BotRunQueueRecord, _parse_meta_json
 
 log = get_logger("orm")
 
@@ -58,21 +58,46 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         return row.to_record() if row else None
 
     @with_orm_session
-    def discover_active_bots(self, limit: int = 50) -> list[str]:
-        """发现有 PENDING 工作项的 bot_id 列表（确定性顺序，避免活锁）。"""
+    def discover_active_bots(self, limit: int = 50) -> list[ActiveBot]:
+        """发现有 PENDING 工作项的 bot 摘要（确定性顺序，避免活锁）。
+
+        拆成两条简单查询（有意避免 join/子查询/开窗等单条复杂 SQL）：
+        1. GROUP BY bot_id 取每个 bot 最新一条 PENDING 的 id（MAX(id)），
+           按 bot_id 排序 + LIMIT；
+        2. 按主键 IN 批量取这几行的 meta，解析 engine_type。
+        业务上保证同一 bot_id 的 engine_type 一致，取最新一条即可；
+        旧行缺 meta 字段时 engine_type 为 None，仍走既有通配回退。
+        """
         env = get_current_env()
-        rows = (
-            self._session.query(BotRunQueueModel.bot_id)
+        latest_ids = [
+            row[0]
+            for row in self._session.query(func.max(BotRunQueueModel.id))
             .filter(
                 BotRunQueueModel.status == "PENDING",
                 BotRunQueueModel.env == env,
             )
-            .distinct()
+            .group_by(BotRunQueueModel.bot_id)
             .order_by(BotRunQueueModel.bot_id.asc())
             .limit(limit)
             .all()
+        ]
+        if not latest_ids:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel.bot_id, BotRunQueueModel.meta)
+            .filter(BotRunQueueModel.id.in_(latest_ids))
+            .order_by(BotRunQueueModel.bot_id.asc())
+            .all()
         )
-        return [r[0] for r in rows]
+        return [self._to_active_bot(row) for row in rows]
+
+    @staticmethod
+    def _to_active_bot(row) -> ActiveBot:
+        bot_id, raw_meta = row
+        engine_type = _parse_meta_json(raw_meta).get("engine_type")
+        if not isinstance(engine_type, str) or not engine_type:
+            engine_type = None
+        return ActiveBot(bot_id=bot_id, engine_type=engine_type)
 
     def _count_running(self, bot_id: str, env: str | None) -> int:
         """统计某 bot 当前 RUNNING（在途）工作项数（供全局并发上限判断）。"""

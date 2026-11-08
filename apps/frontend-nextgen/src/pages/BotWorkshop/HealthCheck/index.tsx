@@ -1,8 +1,8 @@
 import { history, useLocation } from '@umijs/max';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import React, { useEffect } from 'react';
 
-import BotAvatar from '@/components/BotWorkshop/BotAvatar';
+import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { HealthCheckView } from '@/components/BotWorkshop/BotHealthCheckDrawer/HealthCheckView';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -75,40 +75,31 @@ const BotHealthCheckPage: React.FC = () => {
     );
 
   return (
-    <main className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="返回 Bot 管理"
-          onClick={() => history.push('/bot-workshop')}
-          leftIcon={<ArrowLeft className="size-4" />}
-        />
-        <BotAvatar name={bot.name} />
-        <div className="min-w-0 flex-1">
-          <h1 className="m-0 truncate text-base font-semibold">{bot.name}</h1>
-          <p className="m-0 mt-0.5 text-xs text-muted-foreground">
-            {bot.runtime.engine} · {bot.deployment === 'local' ? '本地' : '云端'}
-          </p>
+    <BotSubpageShell
+      onBack={() => history.push('/bot-workshop')}
+      botName={bot.name}
+      title={bot.name}
+      subtitle={`${bot.runtime.engine} · ${bot.deployment === 'local' ? '本地' : '云端'}`}
+      actions={
+        <>
+          {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
+          <Button
+            variant="secondary"
+            leftIcon={<RefreshCw className="size-4" />}
+            disabled={healthCheck.loading || healthCheck.checking}
+            onClick={() => void healthCheck.refresh()}
+          >
+            刷新结果
+          </Button>
+        </>
+      }
+    >
+      {healthCheck.loading && !healthCheck.summary ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Spin tip="正在加载健康检查结果" />
         </div>
-        {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
-        <Button
-          variant="secondary"
-          leftIcon={<RefreshCw className="size-4" />}
-          disabled={healthCheck.loading || healthCheck.checking}
-          onClick={() => void healthCheck.refresh()}
-        >
-          刷新结果
-        </Button>
-      </header>
-      <section className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        {healthCheck.loading && !healthCheck.summary ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Spin tip="正在加载健康检查结果" />
-          </div>
-        ) : null}
-
-        {!healthCheck.loading && healthCheck.error ? (
+      ) : healthCheck.error ? (
+        <section className="rounded-xl border border-border/60 bg-card">
           <Empty
             title="健康检查结果加载失败"
             description={healthCheck.error}
@@ -118,17 +109,18 @@ const BotHealthCheckPage: React.FC = () => {
               </Button>
             }
           />
-        ) : null}
-
-        {!healthCheck.loading && !healthCheck.error && !healthCheck.summary ? (
+        </section>
+      ) : !healthCheck.summary ? (
+        <section className="rounded-xl border border-border/60 bg-card">
           <Empty
             title="暂无健康检查结果"
             description="可以点击重新检测，结果生成后刷新查看。"
             action={<Button onClick={() => void healthCheck.runDiagnose()}>重新检测</Button>}
           />
-        ) : null}
-
-        {healthCheck.summary ? (
+        </section>
+      ) : (
+        // 体检报告宽度收窄居中（设计延展 §4）：HealthCheckView 自带 Card，不做双层白卡。
+        <div className="mx-auto w-full max-w-[1200px]">
           <HealthCheckView
             summary={healthCheck.summary}
             capability={healthCheck.capability}
@@ -137,9 +129,9 @@ const BotHealthCheckPage: React.FC = () => {
             checking={healthCheck.checking}
             onReDiagnose={healthCheck.runDiagnose}
           />
-        ) : null}
-      </section>
-    </main>
+        </div>
+      )}
+    </BotSubpageShell>
   );
 };
 

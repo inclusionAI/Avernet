@@ -61,6 +61,7 @@ pub async fn handle_group_callback(
     let mut delivery_results = Vec::new();
     let sender_display_name = "system".to_string();
     let callback_send = WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Public,
         group_id: cmd.group_id.clone(),
         session_id: None,

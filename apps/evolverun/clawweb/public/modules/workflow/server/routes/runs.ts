@@ -12,6 +12,8 @@ import { FlowControlRepository } from "../repositories/flow-control-repository.j
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
 import { buildInterventionMessage, type InterventionAction } from "../services/intervention-message-builder.js";
+import { resolveRerunCommand } from "../services/rerun-command.js";
+import type { FacadeBindingRepository } from "../repositories/facade-binding-repository.js";
 import type { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { ExecutionStepLogRepository } from "../repositories/execution-step-log-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
@@ -113,6 +115,7 @@ export function createRunsRouter(
   botPermRepo: BotWorkflowPermissionRepository | null = null,
   workflowSpecRepo: WorkflowSpecRepository | null = null,
   executionStepLogRepo: ExecutionStepLogRepository | null = null,
+  facadeRepo: FacadeBindingRepository | null = null,
 ): Router {
   const router = Router();
 
@@ -654,29 +657,23 @@ export function createRunsRouter(
         return;
       }
 
-      // Parse input_json to extract the command + message
-      // input_json shape: { command: "/kf-direct", message: "什么是任务", ... }
-      // The bot expects: "/kf-direct 什么是任务" (command + space + message)
-      let command: string | null = null;
-      if (run.input_json) {
-        try {
-          const parsed = JSON.parse(run.input_json) as Record<string, unknown>;
-          const cmd = (parsed.command as string | undefined)?.trim() ?? null;
-          const msg = (parsed.message as string | undefined)?.trim() ?? null;
-          if (cmd && msg) {
-            command = `${cmd} ${msg}`;
-          } else if (cmd) {
-            command = cmd;
-          }
-        } catch {
-          // input_json is not valid JSON — fall through
-        }
-      }
+      // Rebuild the original trigger. A facade-triggered run records the command it
+      // received in input_json; a cron-, dashboard- or gateway-triggered run records
+      // only params, so the workflow's facade binding supplies the command instead.
+      // Without that lookup every scheduled workflow was unrerunnable.
+      const command = await resolveRerunCommand({
+        inputJson: run.input_json,
+        workflowId: run.workflow_id,
+        lookupBoundCommand: async () => {
+          const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(run.workflow_id) : [];
+          return bindings[0]?.command ?? null;
+        },
+      });
 
       if (!command) {
         res.status(422).json({
           error: "Unprocessable Entity",
-          message: "该流程实例缺少可执行命令 (input_json.command)，无法重跑。",
+          message: `该流程实例缺少可执行命令：input_json 无 command，且工作流 "${run.workflow_id}" 未在 facade_bindings 中绑定命令，无法重跑。`,
         });
         return;
       }

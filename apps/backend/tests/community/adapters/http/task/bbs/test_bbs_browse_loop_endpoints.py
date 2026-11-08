@@ -24,6 +24,7 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     trigger_cron_remove_internal,
     trigger_framework_browse_internal,
     trigger_self_browse_internal,
+    trigger_skills_install_internal,
     upsert_subscription_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
@@ -33,12 +34,14 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BrowseSubscriptionProvisionResult,
+)
 from agentclaw.community.core.task.forum.models import (
     BrowseFeedPage,
     BrowseFeedTopicRecord,
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
-    BrowseSubscriptionUpsertResult,
 )
 
 
@@ -78,67 +81,55 @@ def _feed_item(*, topic_id: str, my_reply_count: int, topic_type: str = "DISCUSS
 
 
 @pytest.mark.asyncio
-async def test_upsert_subscription_openclaw_ensures_cron():
-    class Service:
-        def get_subscription(self, **kwargs):
-            return None  # brand-new join (created path)
-
-        def upsert_subscription(self, **kwargs):
-            assert kwargs["mode"] == "openclaw"
-            return BrowseSubscriptionUpsertResult(
-                subscription=_record(mode="openclaw", note="self cron"),
-                created=True,
-            )
-
+async def test_upsert_subscription_new_request_is_accepted_async():
+    provisioner = _FakeProvisioner(
+        BrowseSubscriptionProvisionResult(
+            subscription=_record(mode="openclaw", note="self cron"),
+            created=True,
+            persisted=False,
+        )
+    )
     response = Response()
-    cron_manager = _FakeCronManager()
-    scheduler = _FakeScheduler()
     payload = await upsert_subscription_internal(
         body=BrowsSubscriptionJoinRequest(note="self cron"),
         bot_id="bot-a",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
         owner_user_id="111111",
-        service=Service(),
-        cron_manager=cron_manager,
-        scheduler=scheduler,
+        provisioner=provisioner,
     )
-    assert response.status_code == 201
+    assert response.status_code == 202
+    assert payload.code == 202000
     assert isinstance(payload.data, SubscriptionItem)
     assert payload.data.mode == "openclaw" and payload.data.note == "self cron"
-    # openclaw create -> backend upserts the fixed-name cron; no scheduler job
-    assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
-    assert scheduler.registered == [] and scheduler.unregistered == []
+    assert provisioner.joins == [
+        {"bot_id": "bot-a", "owner_user_id": "111111", "note": "self cron"}
+    ]
 
 
 @pytest.mark.asyncio
-async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_scheduler():
-    class Service:
-        def get_subscription(self, **kwargs):
-            return _record(mode="framework")  # old framework sub
-
-        def upsert_subscription(self, **kwargs):
-            return BrowseSubscriptionUpsertResult(
-                subscription=_record(mode="openclaw"),
-                created=False,
-            )
-
-    cron_manager = _FakeCronManager()
-    scheduler = _FakeScheduler()
+async def test_upsert_subscription_existing_openclaw_updates_persisted_record():
+    provisioner = _FakeProvisioner(
+        BrowseSubscriptionProvisionResult(
+            subscription=_record(mode="openclaw", note="updated"),
+            created=False,
+            persisted=True,
+        )
+    )
     response = Response()
-    await upsert_subscription_internal(
-        body=BrowsSubscriptionJoinRequest(),
+    payload = await upsert_subscription_internal(
+        body=BrowsSubscriptionJoinRequest(note="updated"),
         bot_id="bot-a",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
         owner_user_id="111111",
-        service=Service(),
-        cron_manager=cron_manager,
-        scheduler=scheduler,
+        provisioner=provisioner,
     )
     assert response.status_code == 200
-    assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
-    assert scheduler.unregistered == ["bot-a"]
+    assert payload.code == 200000
+    assert provisioner.joins == [
+        {"bot_id": "bot-a", "owner_user_id": "111111", "note": "updated"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -181,16 +172,28 @@ async def test_delete_subscription_openclaw_removes_cron():
             return True
 
     cron_manager = _FakeCronManager()
+    digest_cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
+        digest_cron_manager=digest_cron_manager,
         scheduler=scheduler,
+        provisioner=_FakeProvisioner(
+            BrowseSubscriptionProvisionResult(
+                subscription=_record(mode="openclaw"),
+                created=False,
+                persisted=False,
+            )
+        ),
     )
     assert payload.data is not None and payload.data.deleted is True
     assert cron_manager.removes == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
+    assert digest_cron_manager.removes == [
+        {"bot_id": "bot-a", "owner_user_id": "111111"}
+    ]
     assert scheduler.unregistered == []
 
 
@@ -204,13 +207,22 @@ async def test_delete_subscription_framework_unregisters_scheduler():
             return True
 
     cron_manager = _FakeCronManager()
+    digest_cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
+        digest_cron_manager=digest_cron_manager,
         scheduler=scheduler,
+        provisioner=_FakeProvisioner(
+            BrowseSubscriptionProvisionResult(
+                subscription=_record(mode="framework"),
+                created=False,
+                persisted=False,
+            )
+        ),
     )
     assert payload.data is not None and payload.data.deleted is True
     assert scheduler.unregistered == ["bot-a"]
@@ -227,13 +239,22 @@ async def test_delete_subscription_missing_subscription_still_idempotent():
             return False
 
     cron_manager = _FakeCronManager()
+    digest_cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
         cron_manager=cron_manager,
+        digest_cron_manager=digest_cron_manager,
         scheduler=scheduler,
+        provisioner=_FakeProvisioner(
+            BrowseSubscriptionProvisionResult(
+                subscription=_record(mode="openclaw"),
+                created=False,
+                persisted=False,
+            )
+        ),
     )
     assert payload.data is not None and payload.data.deleted is False
     assert cron_manager.removes == [] and scheduler.unregistered == []
@@ -250,7 +271,15 @@ async def test_list_browse_feed_delegates_pagination_and_filters():
                 "page": 1,
                 "page_size": 20,
             }
-            return BrowseFeedPage(total=2, items=(_feed_item(topic_id="topic_1", my_reply_count=0), _feed_item(topic_id="topic_2", my_reply_count=3, topic_type="DISCUSSION")))
+            return BrowseFeedPage(
+                total=2,
+                items=(
+                    _feed_item(topic_id="topic_1", my_reply_count=0),
+                    _feed_item(
+                        topic_id="topic_2", my_reply_count=3, topic_type="DISCUSSION"
+                    ),
+                ),
+            )
 
     payload = await list_browse_feed_internal(
         bot_id="bot-a",
@@ -268,6 +297,7 @@ async def test_list_browse_feed_delegates_pagination_and_filters():
 @pytest.mark.asyncio
 async def test_list_subscriptions_routes_to_owner_user_id_listing():
     """Mirror public /openapi/v1/collaboration/tasks/bbs/browse-subscriptions: required owner_user_id."""
+
     class Service:
         def list_subscriptions(self, **kwargs):
             assert kwargs == {
@@ -284,6 +314,71 @@ async def test_list_subscriptions_routes_to_owner_user_id_listing():
         service=Service(),
     )
     assert payload.data is not None and payload.data.total == 1
+
+
+class _FakeSkillInstallRunner:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def trigger_install_bbs_skills(self, *, bot_id: str):
+        self.calls.append(bot_id)
+        return {
+            "run_id": "run_x",
+            "session_id": "sess_x",
+            "mode": "openclaw",
+            "status": "submitted",
+            "action": "install_skills",
+        }
+
+
+@pytest.mark.asyncio
+async def test_trigger_skills_install_internal_delegates_to_runner():
+    runner = _FakeSkillInstallRunner()
+    payload = await trigger_skills_install_internal(
+        bot_id="bot-a",
+        request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
+        runner=runner,
+    )
+    assert runner.calls == ["bot-a"]
+    assert payload.data == {
+        "run_id": "run_x",
+        "session_id": "sess_x",
+        "mode": "openclaw",
+        "status": "submitted",
+        "action": "install_skills",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_skills_install_internal_propagates_not_found():
+    class Runner:
+        async def trigger_install_bbs_skills(self, *, bot_id):
+            raise NotFound("subscription not found")
+
+    with pytest.raises(NotFound):
+        await trigger_skills_install_internal(
+            bot_id="bot-a",
+            request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
+            runner=Runner(),
+        )
+
+
+class _FakeProvisioner:
+    """Records the route's delegation to the asynchronous provisioning service."""
+
+    def __init__(self, result: BrowseSubscriptionProvisionResult) -> None:
+        self._result = result
+        self.joins: list[dict[str, str | None]] = []
+        self.cancels: list[str] = []
+
+    def join_or_refresh(self, *, bot_id: str, owner_user_id: str, note: str | None):
+        self.joins.append(
+            {"bot_id": bot_id, "owner_user_id": owner_user_id, "note": note}
+        )
+        return self._result
+
+    async def cancel_pending(self, *, bot_id: str) -> None:
+        self.cancels.append(bot_id)
 
 
 class _FakeCronManager:
@@ -331,9 +426,12 @@ class _FakeRunner:
         self._fail = fail
 
     async def push_browse_once(self, *, bot_id, expected_mode, timeout=60.0):
-        self.calls.append({"op": "browse", "bot_id": bot_id, "expected_mode": expected_mode})
+        self.calls.append(
+            {"op": "browse", "bot_id": bot_id, "expected_mode": expected_mode}
+        )
         if self._fail == "validation":
             from agentclaw.community.core.errors import ValidationError
+
             raise ValidationError("mode mismatch (test)")
         return {"run_id": "run_b_x", "session_id": "sess_b_x"}
 
@@ -341,16 +439,24 @@ class _FakeRunner:
         self.calls.append({"op": "cron", "bot_id": bot_id, "action": action})
         return {"run_id": "run_cron", "session_id": None}
 
+    async def push_install_bbs_skills(self, *, bot_id):
+        self.calls.append({"op": "install", "bot_id": bot_id})
+        return {"action": "install_skills", "bot_id": bot_id}
+
 
 @pytest.mark.asyncio
 async def test_trigger_framework_pushes_with_framework_mode():
     runner = _FakeRunner()
     payload = await trigger_framework_browse_internal(
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"),
+        request=_request(
+            "POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"
+        ),
         bot_id="bot-a",
         runner=runner,
     )
-    assert runner.calls == [{"op": "browse", "bot_id": "bot-a", "expected_mode": "framework"}]
+    assert runner.calls == [
+        {"op": "browse", "bot_id": "bot-a", "expected_mode": "framework"}
+    ]
     assert payload.data == {"run_id": "run_b_x", "session_id": "sess_b_x"}
 
 
@@ -362,7 +468,9 @@ async def test_trigger_self_pushes_with_openclaw_mode():
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-self"),
         runner=runner,
     )
-    assert runner.calls == [{"op": "browse", "bot_id": "bot-a", "expected_mode": "openclaw"}]
+    assert runner.calls == [
+        {"op": "browse", "bot_id": "bot-a", "expected_mode": "openclaw"}
+    ]
     assert payload.data is not None and payload.data["run_id"] == "run_b_x"
 
 
@@ -398,10 +506,13 @@ async def test_trigger_framework_propagates_runner_validation_error():
     the runner's ValidationError bubbles up unchanged.
     """
     from agentclaw.community.core.errors import ValidationError
+
     runner = _FakeRunner(fail="validation")
     with pytest.raises(ValidationError):
         await trigger_framework_browse_internal(
-            request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"),
+            request=_request(
+                "POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"
+            ),
             bot_id="bot-a",
             runner=runner,
         )

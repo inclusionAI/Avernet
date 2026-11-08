@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getCurrentEnv } from "./env.js";
 import { migrations, sqliteTriggers, type DbType } from "./schema.js";
+import { workflowSnapshotMigrations } from "./schema-workflow-snapshot.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
   type ResolvedDbConfig, type YamlAntLogsConfig } from "./db/config.js";
@@ -196,14 +197,20 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
 async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
   const canDdl = await ensureSchemaVersionTable(db);
   if (!canDdl) {
-    console.warn("[clawweb] DDL denied — skipping migrations, assuming schema exists in managed DB");
-    return;
+    // Managed runtime accounts may deny CREATE regardless of whether the
+    // migration ledger exists or contains rows. Do not read or write the
+    // ledger or replay ordinary migrations here; only explicitly marked,
+    // idempotent self-healing repairs are attempted.
+    console.warn("[clawweb] DDL denied — assuming schema exists in managed DB");
   }
 
-  const current = await getSchemaVersion(db);
+  const current = canDdl ? await getSchemaVersion(db) : 0;
 
-  for (const migration of migrations) {
-    if (migration.version <= current) continue;
+  // v146 automation-history DDL is retired; reserve that version and keep existing schemas untouched.
+  for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
+    if (!canDdl && !migration.selfHealing) continue;
+    // Self-healing repairs also run when the ledger reports them as applied.
+    if (!migration.selfHealing && migration.version <= current) continue;
     if (migration.sqliteOnly && dbType !== "sqlite") continue;
     if (migration.mysqlOnly && dbType !== "mysql" && dbType !== "zdas") continue;
     if (migration.migrate) await migration.migrate(db);
@@ -218,9 +225,10 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         // Also tolerate the occasional "already exists" / "key column ... does not exist".
         // MySQL error 1091: "Can't DROP column" — column doesn't exist (fresh install).
         // MySQL rendering strips CREATE INDEX IF NOT EXISTS; retain its idempotency.
+        // ALTER TABLE ADD INDEX reports the same ER_DUP_KEYNAME ("Duplicate key
+        // name") when the index already exists — also an idempotent no-op.
         if (
-          (/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s/i.test(ddl) &&
-            lower.includes("duplicate key name")) ||
+          lower.includes("duplicate key name") ||
           lower.includes("duplicate column name") ||
           lower.includes("no such column") ||
           lower.includes("already exists") ||
@@ -233,10 +241,12 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         }
       }
     }
-    await db.exec(
-      "INSERT INTO schema_version (version, description) VALUES (?, ?)",
-      [migration.version, migration.description]
-    );
+    if (canDdl) {
+      await db.exec(
+        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+        [migration.version, migration.description]
+      );
+    }
     console.log(`[clawweb] Migration v${migration.version}: ${migration.description}`);
   }
 
@@ -260,9 +270,25 @@ export type Repositories = {
 };
 
 let repos: Repositories | null = null;
+let initializedSchema: "migrate" | "external" | null = null;
 
-export async function initDatabase(configPath?: string): Promise<Repositories> {
-  if (repos) return repos;
+/** External schemas are provisioned by the caller; connection failures remain fatal. */
+export type DatabaseInitOptions = { schema?: "migrate" | "external" };
+
+export async function initDatabase(
+  configPath?: string,
+  options: DatabaseInitOptions = {},
+): Promise<Repositories> {
+  const schema = options.schema ?? "migrate";
+  if (schema !== "migrate" && schema !== "external") {
+    throw new Error(`Unsupported database schema initialization: ${schema}`);
+  }
+  if (repos) {
+    if (initializedSchema !== schema) {
+      throw new Error("Database already initialized with a different schema strategy");
+    }
+    return repos;
+  }
 
   const config = resolveDbConfig(configPath);
 
@@ -280,8 +306,9 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
       db = initSqlite(config.sqlitePath);
     }
 
-    await runMigrations(db, db.dbType as DbType);
+    if (schema === "migrate") await runMigrations(db, db.dbType as DbType);
   } catch (err) {
+    if (schema === "external") throw err;
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[clawweb] Database init failed (mode=${config.mode}): ${msg}`);
     console.warn("[clawweb] Falling back to NoOp database — API will return 503");
@@ -289,6 +316,7 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
   }
 
   repos = { db };
+  initializedSchema = schema;
   console.log(`[clawweb] Database ready (type=${db.dbType})`);
   return repos;
 }
@@ -919,6 +947,7 @@ export async function closeDatabase(): Promise<void> {
   if (repos) {
     await repos.db.close();
     repos = null;
+    initializedSchema = null;
   }
 }
 

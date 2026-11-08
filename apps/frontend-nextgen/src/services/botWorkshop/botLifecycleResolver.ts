@@ -1,3 +1,4 @@
+import { hasServiceDraftEvidence } from '@/domain/botEngineVersion';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import type { BotLifecycle } from './types';
 
@@ -67,4 +68,13 @@ function serviceLifecycle(dto: BackendUnknownRecord, warnings: string[]): BotLif
 
 export function resolveBotLifecycle(dto: BackendUnknownRecord, isService: boolean, warnings: string[]): BotLifecycle {
   return isService ? serviceLifecycle(dto, warnings) : legacyLifecycle(dto, warnings);
+}
+
+
+/** Version checks require explicit draft evidence; legacy ACTIVE is insufficient. */
+export function resolveServiceEngineLifecycle(dto: BackendUnknownRecord): BotLifecycle {
+  const state = resolveBotLifecycle(dto, true, []);
+  return state === 'draft' && !hasServiceDraftEvidence(state, publishStatusOf(dto), asString(dto.display_state))
+    ? 'unknown'
+    : state;
 }

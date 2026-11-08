@@ -1,17 +1,25 @@
 /** @jest-environment jsdom */
 import type { ConversationBotView } from '@/domain/conversation/types';
-import type { ConversationSidebarProps } from '@/pages/Workspace/Chat/components/ConversationSidebar';
 import { ConversationSidebar } from '@/pages/Workspace/Chat/components/ConversationSidebar';
 import { WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
-import type { ConversationDirectoryModel } from '@/pages/Workspace/Chat/hooks/useConversationDirectory';
-import type { ConversationSessionsModel } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
-import type { ManagedBotOthersModel } from '@/pages/Workspace/Chat/hooks/useManagedBotOthers';
 import { useConversationStore } from '@/stores/conversationStore';
-import type { ConversationState } from '@/stores/conversationStoreState';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  botOf,
+  managedBotA,
+  managedBotB,
+  friendBot,
+  teamBot,
+  sessionOf,
+  emptyList,
+  directoryModel,
+  sessionsModel,
+  seedStore,
+  sidebarProps,
+} from './ConversationSidebar.testUtils';
 
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({
@@ -33,107 +41,6 @@ beforeEach(() => {
   window.localStorage.removeItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY);
   useConversationStore.getState().reset();
 });
-
-const botOf = (botId: string, displayName: string, isFriendBot = false): ConversationBotView => {
-  const idx = botId.indexOf(':');
-  return {
-    bot: {
-      botId,
-      realBotId: idx < 0 ? botId : botId.slice(0, idx),
-      ownerId: idx < 0 ? undefined : botId.slice(idx + 1),
-      displayName,
-      online: true,
-      chatable: true,
-      isFriendBot,
-    },
-    section: isFriendBot ? 'friend' : 'managed',
-  };
-};
-
-const managedBotA = botOf('bot-a:2088', '管理 Bot A');
-const managedBotB = botOf('bot-b:2088', '管理 Bot B');
-const friendBot = botOf('fb-1:327325', '朋友 Bot', true);
-const teamBot = botOf('bot-team:2088', '团队空间 Bot');
-
-const sessionOf = (sessionId: string, botId = 'bot-a:2088') => ({
-  sessionId,
-  botId,
-  title: `会话 ${sessionId}`,
-  messageCount: 1,
-  gmtCreate: '',
-  gmtModified: '',
-});
-
-const emptyList = () => ({
-  items: [],
-  page: 1,
-  total: 0,
-  hasMore: false,
-  loading: false,
-  error: null,
-  isLoadingMore: false,
-  loadMoreError: null,
-});
-
-const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): ConversationDirectoryModel => ({
-  teamBots: [],
-  teamLoading: false,
-  teamError: null,
-  retryTeam: jest.fn(),
-  managedBots: [managedBotA],
-  friendBots: [friendBot],
-  managedLoading: false,
-  friendLoading: false,
-  managedError: null,
-  friendError: null,
-  retryManaged: jest.fn(),
-  retryFriend: jest.fn(),
-  ...over,
-});
-
-const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): ConversationSessionsModel => ({
-  actions: { run: jest.fn(async () => true), isPending: jest.fn(() => false) },
-  favorites: { toggleFavorite: jest.fn(async () => true), isPending: jest.fn(() => false) },
-  openBotIds: {},
-  toggleBot: jest.fn(),
-  selectMineSession: jest.fn(),
-  selectFriendBotSession: jest.fn(),
-  createSession: jest.fn(),
-  retrySessions: jest.fn(),
-  loadMoreSessions: jest.fn(),
-  ...over,
-});
-
-const othersModel = (over: Partial<ManagedBotOthersModel> = {}): ManagedBotOthersModel => ({
-  toggleFriend: jest.fn(),
-  retryDirectory: jest.fn(),
-  retryFriendSessions: jest.fn(),
-  loadMoreFriendSessions: jest.fn(),
-  ...over,
-});
-
-function seedStore(apply: (store: ConversationState) => void): ConversationState {
-  useConversationStore.getState().reset();
-  apply(useConversationStore.getState());
-  return useConversationStore.getState();
-}
-
-function sidebarProps(over: Partial<ConversationSidebarProps> = {}): ConversationSidebarProps {
-  return {
-    teamBots: [],
-    managedBots: [managedBotA],
-    friendBots: [friendBot],
-    store: seedStore(() => {}),
-    directory: directoryModel(),
-    sessions: sessionsModel(),
-    others: othersModel(),
-    onOpenSession: jest.fn(),
-    onOpenPublicBots: jest.fn(),
-    onOpenBotWorkshop: jest.fn(),
-    onOpenAgentCodingBot: jest.fn(),
-    ...over,
-  };
-}
 
 const modelWithManagedAndFriendBots = sidebarProps();
 
@@ -166,11 +73,35 @@ describe('ConversationSidebar', () => {
     expect(screen.getByText('团队空间 Bot')).toBeInTheDocument();
   });
 
-  it('hides the empty 团队 Bot group when the bucket has no members (无死分组)', () => {
+  it('分组标题右缘展示成员计数（aria-hidden 纯视觉，切换按钮可访问名保持纯标题）', () => {
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          teamBots: [teamBot],
+          managedBots: [managedBotA, managedBotB],
+          directory: directoryModel({ managedBots: [managedBotA, managedBotB], teamBots: [teamBot] }),
+        })}
+      />,
+    );
+    // 各分组计数 = 本组可见成员数(2026-10-22 体验精修)。
+    const managedGroup = screen.getByRole('group', { name: '我的 Bot' });
+    expect(within(managedGroup).getByText('2')).toBeInTheDocument();
+    const teamGroup = screen.getByRole('group', { name: '团队 Bot' });
+    expect(within(teamGroup).getByText('1')).toBeInTheDocument();
+    // 计数置于切换按钮之外 → 按钮可访问名不带数字,既有 getByRole(name:'我的 Bot') 契约不破。
+    expect(screen.getByRole('button', { name: '我的 Bot' })).toBeInTheDocument();
+    // 搜索过滤时计数随可见行数联动。
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索 Bot' }), { target: { value: '管理 Bot A' } });
+    const filteredGroup = screen.getByRole('group', { name: '我的 Bot' });
+    expect(within(filteredGroup).getByText('1')).toBeInTheDocument();
+  });
+
+  it('keeps the empty 团队 Bot group visible with its empty state', () => {
     render(<ConversationSidebar {...modelWithManagedAndFriendBots} />);
     expect(screen.getByText('我的 Bot')).toBeInTheDocument();
     expect(screen.getByText('好友 Bot')).toBeInTheDocument();
-    expect(screen.queryByText('团队 Bot')).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+    expect(screen.getByText('暂无运行中的团队 Bot')).toBeInTheDocument();
   });
 
   it('covers the team Bot group in keyword search', () => {
@@ -545,9 +476,8 @@ describe('ConversationSidebar', () => {
     expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
   });
 
-  it('shows AgentCoding Bots in the managed list and opens the coding chat directly', () => {
+  it('shows AgentCoding Bots in the managed list and uses the normal session toggle', () => {
     const sessions = sessionsModel();
-    const onOpenAgentCodingBot = jest.fn();
     const agentCodingBot: ConversationBotView = {
       bot: {
         botId: 'coding-bot:2088',
@@ -572,18 +502,16 @@ describe('ConversationSidebar', () => {
           sessions,
           friendBots: [],
           directory: directoryModel({ managedBots: [agentCodingBot, managedBotA], friendBots: [] }),
-          onOpenAgentCodingBot,
         })}
       />,
     );
     expect(screen.getByText('AgentCoding Bot')).toBeInTheDocument();
     expect(screen.getByText('应用 Bot')).toBeInTheDocument();
     expect(screen.queryByText('AgentCoding Bot 请前往')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
-    expect(onOpenAgentCodingBot).toHaveBeenCalledWith(agentCodingBot.bot);
-    expect(sessions.toggleBot).not.toHaveBeenCalled();
     const agentCodingRow = screen.getByRole('button', { name: 'AgentCoding Bot' }).closest('div');
-    expect(within(agentCodingRow as HTMLElement).queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(within(agentCodingRow as HTMLElement).getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
+    expect(sessions.toggleBot).toHaveBeenCalledWith('coding-bot:2088', 'managed');
   });
   it.each(['mine', 'others'] as const)('ends the %s session list before pagination and errors', (origin) => {
     const list = {
@@ -679,65 +607,26 @@ describe('ConversationSidebar', () => {
       expect(screen.queryByText('朋友 Bot')).toBeNull();
     });
 
-    it('收起后渲染「Bot 泊位」预览:压缩态不残留全名,直达头像进可访问树,选中 Bot 带当前态', () => {
+    it('收起分组只留标题行（2026-10-22 需求变更）:不渲染泊位头像/直达按钮,成员量由标题计数承载', () => {
       const base = sidebarProps({ managedBots: [managedBotA, managedBotB] });
-      useConversationStore.getState().selectConversation({
-        botId: 'bot-a:2088',
-        section: 'managed',
-        origin: 'mine',
-        scope: 'all',
-        friendUserId: null,
-        sessionId: 's1',
-      });
-      const { rerender } = render(<ConversationSidebar {...base} store={useConversationStore.getState()} />);
-      fireEvent.click(screen.getByRole('button', { name: '我的 Bot' }));
-      rerender(<ConversationSidebar {...base} store={useConversationStore.getState()} />);
-      // 收起仍是压缩态:行级全名不出现,信息由头像直达按钮承载。
-      expect(screen.queryByText('管理 Bot A')).toBeNull();
-      const selected = screen.getByRole('button', { name: '打开 管理 Bot A' });
-      expect(selected).toBeInTheDocument();
-      expect(selected).toHaveAttribute('aria-current', 'true');
-      expect(screen.getByRole('button', { name: '打开 管理 Bot B' })).not.toHaveAttribute('aria-current');
-    });
-
-    it('泊位头像直达:一次点击展开分组并补 toggleBot 懒加载;已展开的 Bot 不回弹;+N 溢出仅展开分组', () => {
-      const manyBots = Array.from({ length: 8 }, (_, i) => botOf(`bot-dock-${i}:2088`, `泊位 Bot ${i}`));
-      const base = sidebarProps({ managedBots: manyBots });
-      const toggleBot = base.sessions.toggleBot as jest.Mock;
       const { rerender } = render(<ConversationSidebar {...base} />);
       const syncStore = () => rerender(<ConversationSidebar {...base} store={useConversationStore.getState()} />);
       fireEvent.click(screen.getByRole('button', { name: '我的 Bot' }));
       syncStore();
-      // 8 个成员:6 个直达头像 + 「+2」溢出收口;溢出点击只展开分组,不触发懒加载。
-      expect(screen.getByRole('button', { name: '打开 泊位 Bot 0' })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: '展开更多 Bot（还有 2 个）' }));
-      expect(useConversationStore.getState().collapsedBotGroups.managed).toBeUndefined();
-      syncStore();
-      expect(screen.getByText('泊位 Bot 0')).toBeInTheDocument();
-      expect(toggleBot).not.toHaveBeenCalled();
-
-      // 再收起后从头像直达:分组展开 + 未展开过的 Bot 补一次 toggleBot。
+      // 收起即净:行级全名与泊位直达入口都不出现。
+      expect(screen.queryByText('管理 Bot A')).toBeNull();
+      expect(screen.queryByRole('button', { name: '打开 管理 Bot A' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '打开 管理 Bot B' })).toBeNull();
+      // 可感知的剩余信息 = 标题 + 成员计数;展开恢复由标题行一键触达。
+      expect(screen.getByRole('button', { name: '我的 Bot' })).toHaveAttribute('aria-expanded', 'false');
+      const managedGroup = screen.getByRole('group', { name: '我的 Bot' });
+      expect(within(managedGroup).getByText('2')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '我的 Bot' }));
       syncStore();
-      fireEvent.click(screen.getByRole('button', { name: '打开 泊位 Bot 3' }));
-      expect(useConversationStore.getState().collapsedBotGroups.managed).toBeUndefined();
-      expect(toggleBot).toHaveBeenCalledWith('bot-dock-3:2088', 'managed');
-      syncStore();
-      expect(screen.getByText('泊位 Bot 3')).toBeInTheDocument();
+      expect(screen.getByText('管理 Bot A')).toBeInTheDocument();
     });
 
-    it('不可聊 Bot 在泊位为降权占位,不提供直达按钮', () => {
-      const nonChatable = botOf('bot-nc:2088', '禁聊 Bot');
-      nonChatable.bot.chatable = false;
-      const base = sidebarProps({ managedBots: [managedBotA, nonChatable] });
-      const { rerender } = render(<ConversationSidebar {...base} />);
-      fireEvent.click(screen.getByRole('button', { name: '我的 Bot' }));
-      rerender(<ConversationSidebar {...base} store={useConversationStore.getState()} />);
-      expect(screen.queryByRole('button', { name: '打开 禁聊 Bot' })).toBeNull();
-      expect(screen.getByRole('button', { name: '打开 管理 Bot A' })).toBeInTheDocument();
-    });
-
-    it('整栏收起渲染「Bot 泊位」竖轨:选中带当前态,头像直达走分组泊位同契约,+N 请求反展开整栏', () => {
+    it('整栏收起渲染「Bot 泊位」竖轨:选中带当前态,头像直达恢复分组可见并补懒加载,+N 请求反展开整栏', () => {
       window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, 'true');
       const sessions = sessionsModel();
       const manyBots = Array.from({ length: 7 }, (_, i) => botOf(`rail-${i}:2088`, `轨道 Bot ${i}`));
@@ -765,7 +654,7 @@ describe('ConversationSidebar', () => {
       // 选中 Bot 在竖轨上留当前态;7 个成员只显 5 个 + 「+2」溢出。
       expect(screen.getByRole('button', { name: '打开 轨道 Bot 0' })).toHaveAttribute('aria-current', 'true');
       expect(screen.queryByRole('button', { name: '打开 轨道 Bot 5' })).not.toBeInTheDocument();
-      // 头像直达:与分组泊位同契约(恢复分组可见 + 未展开过的 Bot 补懒加载),侧栏保持收起。
+      // 头像直达:恢复分组可见 + 未展开过的 Bot 补懒加载(与展开态行为一致),侧栏保持收起。
       fireEvent.click(screen.getByRole('button', { name: '打开 轨道 Bot 2' }));
       expect(sessions.toggleBot).toHaveBeenCalledWith('rail-2:2088', 'managed');
       expect(useConversationStore.getState().collapsedBotGroups.managed).toBeUndefined();
@@ -775,19 +664,35 @@ describe('ConversationSidebar', () => {
       expect(aside).toHaveAttribute('data-collapsed', 'false');
     });
 
-    it('团队 Bot 分组标题不参与收起(未要求,保持静态标题)', () => {
-      render(
-        <ConversationSidebar
-          {...sidebarProps({
-            teamBots: [teamBot],
-            directory: directoryModel({ teamBots: [teamBot] }),
-            managedBots: [managedBotA],
-            friendBots: [friendBot],
-          })}
-        />,
-      );
-      expect(screen.queryByRole('button', { name: '团队 Bot' })).toBeNull();
-      expect(screen.getByText('团队 Bot')).toBeInTheDocument();
+    it('团队 Bot 分组接入收起(2026-10-22 需求变更):标题即开关,收起只留标题行+计数,记忆写入 Store', () => {
+      const base = sidebarProps({
+        teamBots: [teamBot],
+        directory: directoryModel({ teamBots: [teamBot] }),
+        managedBots: [managedBotA],
+        friendBots: [friendBot],
+      });
+      const { rerender } = render(<ConversationSidebar {...base} />);
+      const syncStore = () => rerender(<ConversationSidebar {...base} store={useConversationStore.getState()} />);
+      // 标题成为开关按钮,与我的/好友 Bot 同契约。
+      const teamToggles = screen.getByRole('button', { name: '团队 Bot' });
+      expect(teamToggles).toHaveAttribute('aria-expanded', 'true');
+
+      fireEvent.click(teamToggles);
+      expect(useConversationStore.getState().collapsedBotGroups).toEqual({ team: true });
+      syncStore();
+      // 收起即净:团队 Bot 行不渲染,标题计数仍在;搜索时强制展开可检索。
+      expect(screen.queryByText('团队空间 Bot')).toBeNull();
+      expect(within(screen.getByRole('group', { name: '团队 Bot' })).getByText('1')).toBeInTheDocument();
+      expect(teamToggles).toHaveAttribute('aria-expanded', 'false');
+
+      fireEvent.change(screen.getByLabelText('搜索 Bot'), { target: { value: '团队空间' } });
+      expect(screen.getByText('团队空间 Bot')).toBeInTheDocument();
+      // 清空关键词后收起记忆恢复生效。
+      fireEvent.change(screen.getByLabelText('搜索 Bot'), { target: { value: '' } });
+      expect(screen.queryByText('团队空间 Bot')).toBeNull();
+      fireEvent.click(teamToggles);
+      syncStore();
+      expect(screen.getByText('团队空间 Bot')).toBeInTheDocument();
     });
   });
 });
@@ -920,11 +825,16 @@ it('团队位于管理与好友之间，搜索可命中，展开回调携带 tea
   expect(screen.queryByText('未找到匹配的 Bot')).not.toBeInTheDocument();
 });
 
-it('团队 settle 后空桶不渲染死分组;独立加载失败展示并可单独重试', () => {
+it('团队加载结束后空列表保留分组，加载失败仍可单独重试', () => {
   const retry = jest.fn();
-  // settle 空目录:不渲染「团队 Bot」死分组,更不会有误导的「前往公开 Bot」入口。
-  const view = render(<ConversationSidebar {...sidebarProps({ teamBots: [] })} />);
-  expect(screen.queryByRole('group', { name: '团队 Bot' })).not.toBeInTheDocument();
+  const view = render(
+    <ConversationSidebar {...sidebarProps({ directory: directoryModel({ teamLoading: true }) })} />,
+  );
+  expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+  expect(screen.queryByText('暂无运行中的团队 Bot')).not.toBeInTheDocument();
+  view.rerender(<ConversationSidebar {...sidebarProps({ teamBots: [] })} />);
+  expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+  expect(screen.getByText('暂无运行中的团队 Bot')).toBeInTheDocument();
   // 团队目录独立失败:分组出现并给错误态+重试,不阻塞管理/好友分组。
   view.rerender(
     <ConversationSidebar
@@ -937,16 +847,17 @@ it('团队 settle 后空桶不渲染死分组;独立加载失败展示并可单�
   expect(retry).toHaveBeenCalledTimes(1);
 });
 
-it('搜索中团队组无匹配时同样隐藏空分组', () => {
+it('搜索中团队组无匹配时保留分类标题，不展示目录空态', () => {
   render(
     <ConversationSidebar
       {...sidebarProps({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) })}
     />,
   );
   expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
-  // 关键字只命中我的 Bot,团队组过滤为空:空分组连同标题一并隐藏(2026-10-14 体验修复)。
+  // 关键字只命中我的 Bot，团队组仍保留标题，与其他分类保持一致。
   fireEvent.change(screen.getByRole('textbox', { name: '搜索 Bot' }), { target: { value: '管理' } });
-  expect(screen.queryByRole('group', { name: '团队 Bot' })).not.toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+  expect(screen.queryByText('暂无运行中的团队 Bot')).not.toBeInTheDocument();
 });
 
 it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () => {
@@ -965,4 +876,78 @@ it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () =>
   expect(useConversationStore.getState().originByManagedBotId['team:entity']).toBeUndefined();
   fireEvent.click(othersOptions.find((node) => !node.disabled)!);
   expect(useConversationStore.getState().originByManagedBotId['bot-a:2088']).toBe('others');
+});
+
+describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指示 / infoHint）', () => {
+  it('onOpenBotManagement 仅经管理/团队行传导:两行出「更多操作」,好友行不出(好友无空间上下文)', () => {
+    const onOpenBotManagement = jest.fn();
+    const spaceManaged = { ...managedBotA, bot: { ...managedBotA.bot, spaceId: '101' } };
+    const spaceTeam = { ...teamBot, bot: { ...teamBot.bot, spaceId: '202' } };
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          managedBots: [spaceManaged],
+          teamBots: [spaceTeam],
+          friendBots: [friendBot],
+          directory: directoryModel({
+            managedBots: [spaceManaged],
+            teamBots: [spaceTeam],
+            friendBots: [friendBot],
+          }),
+          onOpenBotManagement,
+        })}
+      />,
+    );
+    // 「更多操作」入口仅出现在管理行与团队行;好友行不渲染。
+    const entries = screen.getAllByRole('button', { name: '更多操作' });
+    expect(entries).toHaveLength(2);
+    // 管理行打开菜单点击「Bot 管理」,回调携带所属空间信息。
+    fireEvent.click(entries[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Bot 管理/ }));
+    expect(onOpenBotManagement).toHaveBeenCalledTimes(1);
+    expect(onOpenBotManagement).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: 'bot-a:2088', spaceId: '101' }),
+    );
+  });
+
+  it('replyingSessionId 传导至会话行:命中行渲染「Bot 正在回复」,未命中行不渲染', () => {
+    const store = seedStore((s) => {
+      s.setExpandedBot('bot-a:2088', true);
+      s.setManagedBotCache('bot-a:2088', {
+        botId: 'bot-a:2088',
+        origin: 'mine',
+        scope: 'all',
+        sessions: { ...emptyList(), items: [sessionOf('s-a')] },
+        friendDirectory: { items: [], loading: false, error: null },
+        friendGroups: {},
+      });
+    });
+    render(<ConversationSidebar {...sidebarProps({ store, replyingSessionId: 's-a' })} />);
+    expect(screen.getAllByRole('status', { name: 'Bot 正在回复' })).toHaveLength(1);
+  });
+
+  it('团队 Bot 分组标题携带来源提示 infoHint(#2990 还原),切换按钮可访问名保持纯标题', async () => {
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          teamBots: [teamBot],
+          directory: directoryModel({ teamBots: [teamBot] }),
+        })}
+      />,
+    );
+    // 既有契约不回归:标题即开关、可访问名纯「团队 Bot」,计数徽标仍在。
+    expect(screen.getByRole('button', { name: '团队 Bot' })).toBeInTheDocument();
+    const info = screen.getByLabelText('通过团队成员身份获取的 Bot');
+    fireEvent.pointerMove(info, { pointerType: 'mouse' });
+    fireEvent.focusIn(info);
+    await waitFor(() => expect(screen.getByText('通过团队成员身份获取的 Bot')).toBeInTheDocument());
+  });
+});
+
+it('空团队目录在整栏收起后仍保留分类入口，点击可展开并查看空态', () => {
+  window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, 'true');
+  render(<ConversationSidebar {...sidebarProps({ teamBots: [] })} />);
+  fireEvent.click(screen.getByRole('button', { name: '展开侧栏，添加团队 Bot' }));
+  expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+  expect(screen.getByText('暂无运行中的团队 Bot')).toBeInTheDocument();
 });

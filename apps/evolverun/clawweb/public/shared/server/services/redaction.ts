@@ -1,5 +1,7 @@
 const SENSITIVE_FIELD_PATTERN = /(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?key|password|credential)/i;
-const INLINE_SECRET = /(["']?(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)["']?)\s*[:=]\s*([^\s,;]+)/gi;
+// Start once per identifier, not at every character of a long diagnostic token.
+// Keep arbitrary prefixes so labels such as prefixSecret remain fully protected.
+const INLINE_SECRET_PATTERN = /(?<![A-Za-z0-9_-])(["']?[A-Za-z0-9_-]*(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)["']?)\s*[:=]\s*([^\s,;]+)/gi;
 const CLI_CREDENTIAL_PATTERN = /--(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)(?:\s+|=)[^\s,;]+/gi;
 const SPACE_SECRET_VALUE = /(?<![A-Za-z0-9_-])(?:(?:[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_)?(?:AUTHORIZATION|COOKIE|TOKEN|SECRET|API_KEY|ACCESS_KEY|ACCESS_TOKEN|PASSWORD|CREDENTIAL)|apiKey|accessKey|accessToken)\s+(?:sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9._~+/=-]{16,})\b/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
@@ -12,7 +14,7 @@ const RAW_SECRET_LITERAL = /\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{2
 const RAW_SECRET_LITERAL_GLOBAL = /\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{20,})\b/gu;
 const SIGNED_QUERY_CREDENTIAL_PATTERN = /[?&](?:x[-_]?amz[-_]?(?:credential|signature)|x[-_]?oss[-_]?signature|x[-_]?goog[-_]?signature|ossaccesskeyid|signature|sig)=(?:[^&#\s]+)/iu;
 const SIGNED_QUERY_SECRET_GLOBAL = /([?&](?:x[-_]?amz[-_]?(?:credential|signature)|x[-_]?oss[-_]?signature|x[-_]?goog[-_]?signature|ossaccesskeyid|signature|sig)=)(?:[^&#\s]+)/giu;
-const APPROVAL_SECRET_TEXT = /(?:\bBearer\s+\S+|--(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)(?:\s+|=)\S+|["']?(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|token|secret|auth[_-]?code|authorization[_-]?code|api[_-]?key|access[_-]?(?:key|token)|model[_-]?key|password|credential|(?:raw|execution|step|workload)[_-]?ticket)["']?\s*[:=]\s*["']?\S+|\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{20,})\b)/iu;
+const APPROVAL_SECRET_TEXT = /(?:\bBearer\s+\S+|--(?:authorization|cookie|token|secret|api[_-]?key|access[_-]?(?:key|token)|password|credential)(?:\s+|=)\S+|(?<![A-Za-z0-9_-])["']?[A-Za-z0-9_-]*(?:authorization|cookie|token|secret|auth[_-]?code|authorization[_-]?code|api[_-]?key|access[_-]?(?:key|token)|model[_-]?key|password|credential|(?:raw|execution|step|workload)[_-]?ticket)["']?\s*[:=]\s*["']?\S+|\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{20,})\b)/iu;
 const APPROVAL_SECRET_KEYS = new Set([
   "apikey",
   "accesskey",
@@ -47,7 +49,7 @@ export function redactText(value: unknown, maxBytes = 32 * 1024, options: Redact
     .replace(BEARER, "Bearer [REDACTED]")
     .replace(CLI_CREDENTIAL_PATTERN, "[REDACTED]")
     .replace(SPACE_SECRET_VALUE, "[REDACTED]")
-    .replace(INLINE_SECRET, (_match, key: string) => `${key}=[REDACTED]`)
+    .replace(INLINE_SECRET_PATTERN, (_match, key: string) => `${key}=[REDACTED]`)
     .replace(RAW_SECRET_LITERAL_GLOBAL, "[REDACTED]")
     .replace(SIGNED_QUERY_SECRET_GLOBAL, "$1[REDACTED]")
     .replace(EMAIL, "[REDACTED_EMAIL]")
@@ -65,7 +67,7 @@ export function redactPersistableText(value: unknown, maxBytes = 32 * 1024, opti
     // their value has been removed. Replace only that assignment, preserving
     // the surrounding diagnostic text instead of discarding the whole entry.
     .replace(
-      /["']?(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|token|secret|auth[_-]?code|authorization[_-]?code|api[_-]?key|access[_-]?(?:key|token)|model[_-]?key|password|credential|(?:raw|execution|step|workload)[_-]?ticket)["']?\s*[:=]\s*["']?\[REDACTED\]["']?/giu,
+      /(?<![A-Za-z0-9_-])["']?[A-Za-z0-9_-]*(?:authorization|cookie|token|secret|auth[_-]?code|authorization[_-]?code|api[_-]?key|access[_-]?(?:key|token)|model[_-]?key|password|credential|(?:raw|execution|step|workload)[_-]?ticket)["']?\s*[:=]\s*["']?\[REDACTED\]["']?/giu,
       REDACTED_SECRET_TEXT,
     )
     .replace(/\bBearer\s+\[REDACTED\]/giu, REDACTED_SECRET_TEXT)

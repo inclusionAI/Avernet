@@ -487,8 +487,8 @@ def put_config_manifest_as_member_is_refused():
 from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import (  # noqa: E402
     SCRIPT_DELIVERY_NOTE,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (  # noqa: E402
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (  # noqa: E402
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (  # noqa: E402
     BotConfigManifestApplyLockRepositoryProtocol,
@@ -603,7 +603,7 @@ def put_config_manifest_on_a_pending_arca_bot():
 
 def _seed_pending_teclaw_platform_managed(world) -> None:
     """A PENDING teclaw bot, with the apply service's strategy switched on."""
-    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    from agentclaw.community.core.apply_engine.delivery import (
         DeliveryStrategyFactory,
         EngineFamily,
         PlatformPorts,
@@ -611,14 +611,14 @@ def _seed_pending_teclaw_platform_managed(world) -> None:
         TeclawPlatformDelivery,
         family_from_engine_test,
     )
-    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-        BotConfigManifestApplyService,
+    from agentclaw.community.core.apply_engine.run.service import (
+        ApplyRunService,
     )
 
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw", status="PENDING")
     applies = bind_overrides(
-        world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
+        world, ApplyRunServiceProtocol, {}, also_bind=(ApplyRunService,)
     )
     # The deployment's mode is read at boot and this container's is DEVICE, so
     # standing in for a platform-managed deployment means rebuilding the seam

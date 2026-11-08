@@ -803,8 +803,11 @@ SessionParticipantPath:
       "403":
         description: >-
           A Human may update its own mode and message view scope. A Session
-          manager may set another Human participant's scope; Bot participant
-          modes require Session management authority.
+          manager may set another Human participant's scope. An existing Bot
+          participant's auto/muted mode requires Session management authority or
+          ownership of that target Bot by the Human caller. Bot ownership alone
+          grants no message view scope or other Session management rights and
+          does not add missing participants.
         x-error-codes:
           - forbidden
           - message_view_scope_forbidden

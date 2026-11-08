@@ -108,30 +108,21 @@ impl ProviderBotEvents {
         provider_id: &str,
         credential: &ProviderBotEventCredential,
     ) -> Result<RuntimeBotIdentity, ProviderBotEventError> {
-        match credential {
-            ProviderBotEventCredential::StaticBearer(token) => self
-                .provider_bot_core
-                .authenticate_static_bearer_event(provider_id, token)
-                .await
-                .map_err(map_auth_error),
-            ProviderBotEventCredential::AgentPass { agent_code } => self
-                .provider_bot_core
-                .authenticate_agentpass_event(provider_id, agent_code)
-                .await
-                .map_err(map_auth_error),
-            ProviderBotEventCredential::ProviderAdmin {
-                provider_admin_token,
-                provider_bot_ref,
-            } => self
-                .provider_bot_core
-                .authenticate_provider_admin_event(
-                    provider_id,
-                    provider_admin_token,
-                    provider_bot_ref,
-                )
-                .await
-                .map_err(map_auth_error),
-        }
+        let (credential, actor) = match credential {
+            ProviderBotEventCredential::WithActor { credential, bot_uuid } => (credential.as_ref(), Some(bot_uuid.as_str())),
+            credential => (credential, None),
+        };
+        let identity = match credential {
+            ProviderBotEventCredential::StaticBearer(token) => self.provider_bot_core.authenticate_static_bearer_event(provider_id, token).await.map_err(map_auth_error)?,
+            ProviderBotEventCredential::AgentPass { agent_code } => match actor {
+                Some(actor) => self.provider_bot_core.authenticate_agentpass_actor_event(provider_id, agent_code, actor).await.map_err(map_auth_error)?,
+                None => self.provider_bot_core.authenticate_agentpass_event(provider_id, agent_code).await.map_err(map_auth_error)?,
+            },
+            ProviderBotEventCredential::ProviderAdmin { provider_admin_token, provider_bot_ref } => self.provider_bot_core.authenticate_provider_admin_event(provider_id, provider_admin_token, provider_bot_ref).await.map_err(map_auth_error)?,
+            ProviderBotEventCredential::WithActor { .. } => return Err(ProviderBotEventError::Unauthorized("invalid nested Actor credential".into())),
+        };
+        if actor.is_some_and(|actor| actor != identity.bot_uuid) { return Err(ProviderBotEventError::Unauthorized("Actor does not match event Bot".into())); }
+        Ok(identity)
     }
 
     async fn authenticate_event(

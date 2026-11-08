@@ -6,6 +6,9 @@ import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-r
 import { createRepairTrialService } from '../repair-trial-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import { redactTrial, redactTrialInput, trialSensitiveValues } from '../repair-trial-input.js';
+import { RepairReleaseRepository } from '../../repositories/repair-release-repository.js';
+import express from 'express';
+import { createRunRequestsReadRouter } from '../../routes/internal/run-requests.js';
 
 it('redacts schema-marked sensitive business fields and nested echoed values, independently of their names', () => {
   const schema = { properties: { customer: { type: 'string', sensitive: true }, settings: { properties: { note: { writeOnly: true } } },
@@ -66,6 +69,25 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     const snapshot = await service.resolveRunRequest(trial.id, { botId: 'bot', ownerId: 'owner' });
     expect(snapshot).toMatchObject({ requestId: trial.id, purpose: 'trial', input: { password: 'very-secret' }, candidateCommit: draft.candidateCommit });
     expect(await service.resolveRunRequest(trial.id, { botId: 'bot', ownerId: 'owner' })).toEqual(snapshot);
+    const failureTrial = { ...JSON.parse((f.raw.prepare('SELECT body_json FROM workflow_repair_release_records WHERE record_id = ?').get(trial.id) as { body_json: string }).body_json),
+      id: '00000000-0000-4000-8000-000000000001', requestId: 'failed-before-run', status: 'awaiting_run' };
+    await new RepairReleaseRepository(f.db).insert('trial', { requestId: failureTrial.requestId }, failureTrial);
+    const feedback = { requestId: failureTrial.id, botId: 'bot', ownerId: 'owner', code: 'REQUEST_READ_FAILED', httpStatus: 401 };
+    await expect(service.reportStartFailure({ ...feedback, botId: 'other' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    const app = express(); app.use(express.json()); app.use('/api/internal', createRunRequestsReadRouter(service));
+    const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/internal/run-requests/failures`;
+      const post = (body: unknown) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      expect((await post({ ...feedback, requestId: 'invalid' })).status).toBe(400);
+      expect((await post({ ...feedback, botId: 'other' })).status).toBe(409);
+      expect((await post({ ...feedback, code: '__proto__' })).status).toBe(400);
+      expect(await (await post(feedback)).json()).toEqual({ requestId: failureTrial.id, flowId: null, status: 'failed' });
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+    expect((await service.list(rev.taskId)).find(row => row.id === failureTrial.id)).toMatchObject({ status: 'failed', flowId: null, error: expect.stringContaining('HTTP 401') });
+    await service.reportStartFailure(feedback);
+    expect((await service.list(rev.taskId)).find(row => row.id === failureTrial.id)).toMatchObject({ status: 'failed', stateVersion: 3 });
+    await expect(service.reportStartFailure({ ...feedback, code: '__proto__', error: 'private-value' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     const registered = { flow_id: 'actual-native-flow', workflow_id: 'wf-1', workflow_version: -1, workflow_deploy_number: null,
       origin_bot_id: 'bot:owner', run_request_id: trial.id, run_request_bot_id: 'bot', run_request_owner_id: 'owner',
       candidate_commit: trial.candidateCommit, pack_digest: trial.packDigest, input_digest: trial.inputDigest };
@@ -77,6 +99,8 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     await expect(registerRunRequest(f.db, registered, async () => { throw Error('insert failed'); })).rejects.toThrow('insert failed');
     expect(f.raw.prepare("SELECT COUNT(*) AS n FROM workflow_repair_release_records WHERE record_kind='trial_run'").get()).toEqual({ n: 0 });
     expect(await registerRunRequest(f.db, registered, insert)).toBe('created');
+    await service.reportStartFailure({ ...feedback, requestId: trial.id });
+    expect((await service.list(rev.taskId)).find(row => row.id === trial.id)).toMatchObject({ flowId: 'actual-native-flow', status: 'waiting', error: null });
     expect(await registerRunRequest(f.db, registered, async () => { throw Error('must not insert twice'); })).toBe('existing');
     await expect(registerRunRequest(f.db, { ...registered, flow_id: 'another-root' }, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     await expect(registerRunRequest(f.db, { ...registered, run_request_id: undefined }, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });

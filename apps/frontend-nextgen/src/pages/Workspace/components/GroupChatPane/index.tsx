@@ -1,15 +1,16 @@
-import { Empty } from '@/components/ui';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
-import { Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
 import { ComposerStatusBar } from './ComposerStatusBar';
@@ -18,6 +19,8 @@ import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
 import { GroupChatMessageArea } from './GroupChatMessageArea';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
+import { GroupChatPlaceholder } from './GroupChatPlaceholder';
+import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
@@ -36,8 +39,10 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     chat,
     questions,
+    execApprovals,
     supportState,
     connectionStatus,
+    historyOnly = false,
     groupBootstrapProcessing = false,
     send,
     abortBot,
@@ -71,6 +76,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
   } = props;
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
+  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
 
   const collabPanel = useCollabPanel(
     session,
@@ -85,7 +93,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
   // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
-  const isLoadingHistory = useMessageAreaSkeleton({ messages, status: connectionStatus });
+  const isLoadingHistory = useMessageAreaSkeleton({
+    messages, status: connectionStatus, historyOnlyReady: historyOnly && supportState.phase === 'ready',
+  });
   const messageInteractions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
@@ -142,22 +152,14 @@ export function GroupChatPane(props: GroupChatPaneProps) {
       userIdentityName,
     });
   if (!group) {
-    return (
-      <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
-        <Empty
-          title="欢迎进入协作群对话现场"
-          description="在左侧选择一个协作群，开始与多个 Bot 和用户协同。"
-          icon={<Sparkles className="h-5 w-5" />}
-        />
-      </section>
-    );
+    return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
   }
 
   const showError = supportState.phase === 'error';
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
 
   // 输入框可见性（与下方 GroupChatComposer 渲染条件同源）：空态行动区仅在可发送视角提供。
-  const composerVisible = !!session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
+  const composerVisible = !!session && !historyOnly && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
   // 帽条可见性与 composer 分离：「退出会话」仅在 human 视角已加入（present）时有意义（同原 LeaveBar）。
   const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
@@ -165,10 +167,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
+        {linkedSession ? (
+          <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
+        ) : (
+          <>
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
           connectionStatus={connectionStatus}
+          historyOnly={historyOnly}
           onOpenSessionList={onOpenSessionList}
           canManageGroup={canManageGroup}
           activePanel={activePanel}
@@ -185,7 +192,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         <GroupChatMessageArea
           session={session}
           group={group}
-          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing}
+          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing && !(historyOnly && showError)}
           groupBootstrapProcessing={groupBootstrapProcessing}
           showError={showError}
           supportError={supportState.error}
@@ -221,6 +228,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         {/* ask_user 问答面板：仅 Human 视角挂载（Bot 不代答）。不参与 composerVisible 的
             humanAbsentOnly 条件——Human 未加入但其拥有的 Bot 仍在会话内时仍可作答，授权由 BCS 校验。
             Spec：面板位于输入区域上方，不替代、也不随问答待处理禁用普通聊天输入框。 */}
+        {session && activeIdentity?.kind === 'user' && execApprovals ? (
+          <GroupExecApprovalPanel model={execApprovals} participants={session.participants} />
+        ) : null}
         {session && activeIdentity?.kind === 'user' && questions ? (
           <GroupQuestionPanel model={questions} participants={session.participants} />
         ) : null}
@@ -260,15 +270,21 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             />
           </div>
         ) : null}
+          </>
+        )}
+        {/* 协作群副屏加宽至 480，且仅由顶栏或悬浮按钮关闭。 */}
         <ChatLayoutPanelSlot
           ref={panelRef}
           onAction={handlePanelAction}
           bridge={chatBridge}
+          panelWidth={480}
+          dismissOnOutside={false}
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>
-      {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
       {session && (
         <FuseSlot
           group={group}

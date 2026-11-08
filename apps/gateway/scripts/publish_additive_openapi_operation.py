@@ -55,8 +55,14 @@ def additive_document(
     source = (candidate.get("paths") or {}).get(path)
     if not isinstance(source, dict) or method not in source:
         raise ValueError(f"upstream dump has no {method.upper()} {path}")
+    already_published = (published.get("paths") or {}).get(path) is not None
     other_methods = _METHODS.intersection(source) - {method}
-    if other_methods:
+    # The overwrite hazard this guard closes — silently changing methods the
+    # caller did not name — only exists when the path is already published.
+    # A brand-new path publishes all its verbs jointly (there is nothing to
+    # overwrite), which is what makes new multi-verb surfaces publishable
+    # at all (e.g. GET+POST /openapi/v1/agentswarm/runs).
+    if already_published and other_methods:
         raise ValueError(
             f"upstream path contains other methods: {sorted(other_methods)}"
         )

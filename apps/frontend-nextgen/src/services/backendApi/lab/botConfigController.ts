@@ -1,4 +1,5 @@
 import type { BrowseSubscriptionDto, UpsertSubscriptionInput } from '@/domain/lab/types';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';
 
@@ -16,9 +17,9 @@ export type BotConfigEnvelope<T> = BackendApiEnvelope<T>;
  * bot_id 取 mine 列表拆分后的真实 bot_id（realBotId，详见 useOwnedBots/splitBotId）。
  */
 const BROWSE_SUBSCRIPTION_ENDPOINTS = {
-  list: '/openapi/v1/collaboration/tasks/bbs/browse-subscriptions',
+  list: `${TASK_READ_API_BASE}/bbs/browse-subscriptions`,
   subscription: (botId: string) =>
-    `/openapi/v1/collaboration/tasks/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
+    `${TASK_READ_API_BASE}/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
 };
 
 /**
@@ -36,7 +37,7 @@ export function listBrowseSubscriptions(ownerUserId: string, signal?: AbortSigna
 
 /**
  * 加入/更新逛论坛订阅（§4.3）。owner_user_id(query, 必填, 声明订阅 owner，不取自登录人)
- * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅 201，更新 200。
+ * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅返回 202，表示后端异步装配；装配合流成功后才写入订阅记录。
  */
 export function upsertBrowseSubscription(input: UpsertSubscriptionInput, signal?: AbortSignal) {
   return backendRequest<BotConfigEnvelope<BrowseSubscriptionDto>>(

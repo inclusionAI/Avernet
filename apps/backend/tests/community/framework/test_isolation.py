@@ -107,3 +107,78 @@ def test_next_case_has_different_engine_identity(app_with_testing_modules, world
             "Per-test injector must produce a fresh engine; got the same "
             "engine object as the previous test."
         )
+
+
+def test_fixture_disposal_waits_for_in_flight_session(request, monkeypatch) -> None:
+    """Teardown must not close StaticPool's connection during a background query."""
+    import threading
+
+    from agentclaw.community.plugins.local import database as db_mod
+    from tests.community.framework.fixtures import app_with_testing_modules
+
+    fixture = app_with_testing_modules.__wrapped__(request)
+    app = next(fixture)
+    plugin = app.state.injector.get(DatabasePlugin)
+    engine = db_mod._engine
+    session_started = threading.Event()
+    release_session = threading.Event()
+    query_finished = threading.Event()
+    teardown_started = threading.Event()
+    disposal_started = threading.Event()
+    errors: list[Exception] = []
+    dispose = engine.dispose
+
+    def observed_dispose():
+        disposal_started.set()
+        # Even on the unfixed fixture, never actually close an executing SQLite
+        # connection: observe the unsafe attempt without crashing the interpreter.
+        if not query_finished.wait(timeout=5):
+            raise TimeoutError("query did not finish before disposal")
+        dispose()
+
+    monkeypatch.setattr(engine, "dispose", observed_dispose)
+
+    def query():
+        try:
+            with plugin.orm_session() as session:
+                assert session.execute(text("SELECT 1")).scalar_one() == 1
+                session_started.set()
+                if not release_session.wait(timeout=5):
+                    raise TimeoutError("test did not release the active session")
+                assert session.execute(text("SELECT 2")).scalar_one() == 2
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            query_finished.set()
+
+    def teardown():
+        teardown_started.set()
+        try:
+            next(fixture)
+        except StopIteration:
+            pass
+        except Exception as exc:
+            errors.append(exc)
+
+    reader = threading.Thread(target=query)
+    closer = threading.Thread(target=teardown)
+    reader.start()
+    try:
+        assert session_started.wait(timeout=5)
+        closer.start()
+        assert teardown_started.wait(timeout=5)
+        assert not disposal_started.wait(timeout=0.2), (
+            "fixture attempted to close SQLite while a background session was active"
+        )
+    finally:
+        release_session.set()
+        reader.join(timeout=5)
+        if closer.ident is not None:
+            closer.join(timeout=5)
+        else:
+            fixture.close()
+
+    assert not reader.is_alive()
+    assert not closer.is_alive()
+    assert not errors
+    assert disposal_started.is_set()

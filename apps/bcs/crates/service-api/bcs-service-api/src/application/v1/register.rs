@@ -50,6 +50,9 @@ pub struct BotRegistration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotRegistrationScope {
+    pub auth_mode: bcs_domain::ProviderAuthMode,
+    pub agent_code: Option<String>,
+    pub bot_slug: Option<String>,
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: ProviderRegistrationMode,

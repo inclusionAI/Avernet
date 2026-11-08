@@ -3,20 +3,48 @@ use std::collections::BTreeSet;
 use async_trait::async_trait;
 
 use super::{
-    ApplicationError, AuthenticatedCaller, AuthenticatedUser, AuthenticatedUserIdentity, Principal,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUser, AuthenticatedUserIdentity,
+    Principal,
 };
+use crate::port::bot_authority::BotAuthorityPort;
 
 /// Selects which authenticated identity may become the effective Actor for an
 /// OpenAPI V1 use case. Resource authorization remains the responsibility of
 /// the application service after this selection.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityPolicy {
     /// Existing V1 routes fail closed as Human-only unless they opt in to a
     /// different policy.
-    #[default]
     HumanOnly,
     BotOnly,
     HumanOrOwnedBot,
+    /// Human-Or-AuthorizedBot (bot-authority plan Task 6, spec §3.3):
+    /// the authenticated Human acts AS the current manager of
+    /// `bot_id`, and the Bot becomes the business principal when
+    /// (and only when) the Human's management edge passes
+    /// live `can_manage`. A pure Bot credential keeps its own
+    /// authentication and never consults the authority hook.
+    HumanOrAuthorizedBot {
+        /// The Bot (byte-exact Bot id) this resolution is for.
+        bot_id: String,
+    },
+}
+
+impl IdentityPolicy {
+    /// The Bot id a [`IdentityPolicy::HumanOrAuthorizedBot`]
+    /// resolution is for; `None` for every other policy.
+    pub fn authorized_bot_id(&self) -> Option<&str> {
+        match self {
+            IdentityPolicy::HumanOrAuthorizedBot { bot_id } => Some(bot_id.as_str()),
+            _ => None,
+        }
+    }
+}
+
+impl Default for IdentityPolicy {
+    fn default() -> Self {
+        IdentityPolicy::HumanOnly
+    }
 }
 
 /// Require the User identity admitted by the current Human-facing V1 APIs.
@@ -75,6 +103,15 @@ pub fn select_principal(
     match policy {
         IdentityPolicy::HumanOnly => require_human(caller),
         IdentityPolicy::BotOnly => require_bot(caller),
+        // This claim-local selector cannot verify the live
+        // management edge `HumanOrAuthorizedBot` requires;
+        // use `resolve_authorized_principal` for that policy.
+        IdentityPolicy::HumanOrAuthorizedBot { .. } => Err(
+            ApplicationError::forbidden(
+                "this route does not implement the \
+                 HumanOrAuthorizedBot identity policy",
+            ),
+        ),
         IdentityPolicy::HumanOrOwnedBot => match (&caller.user, &caller.bot) {
             (Some(user), Some(bot)) => {
                 if bot.owner_id != user.id {
@@ -90,6 +127,74 @@ pub fn select_principal(
                 "This operation requires a Human or Bot caller",
             )),
         },
+    }
+}
+
+/// Resolve the effective business principal for the caller under
+/// `policy`, consulting the authority hook ONLY where the policy
+/// needs live management facts (bot-authority plan Task 6.3,
+/// spec §3.3 授权来源与撤权边界).
+///
+/// - `HumanOrAuthorizedBot` with hybrid User+Bot credentials: the
+///   Human must pass a live `can_manage(bot_id)` FIRST, and only
+///   then does the (credential-matching) Bot become the business
+///   principal. A revoked or denied edge is a 403 here.
+/// - A pure Bot credential keeps its pure-Bot contract unchanged:
+///   the authority hook is NOT consulted for that path.
+/// - Human-only credentials keep the existing Human self/view
+///   rules (`require_human`); the resolver only selects the
+///   principal — it never fabricates resource roles.
+///
+/// Authority read failures are errors, never denials-as-`Ok(false)`
+/// masquerade, and never a silent `Ok`.
+pub async fn resolve_authorized_principal(
+    caller: &AuthenticatedCaller,
+    policy: IdentityPolicy,
+    authority: &dyn BotAuthorityPort,
+) -> Result<Principal, ApplicationError> {
+    match policy {
+        // Policies that carry no authority fact consult nobody: the
+        // hook cannot be reached and cannot turn identity selection
+        // into a deny (or an unexpected success).
+        policy @ (IdentityPolicy::HumanOnly
+        | IdentityPolicy::BotOnly
+        | IdentityPolicy::HumanOrOwnedBot) => select_principal(caller, policy),
+        IdentityPolicy::HumanOrAuthorizedBot { bot_id } => {
+            match (&caller.user, &caller.bot) {
+                // Hybrid credential: the Human's live management edge
+                // authorizes the BOT to act.
+                (Some(user), Some(bot)) => {
+                    if bot.bot_uuid != bot_id {
+                        return Err(ApplicationError::forbidden(format!(
+                            "the authenticated bot '{}' does not match the \
+                             requested bot '{bot_id}'",
+                            bot.bot_uuid
+                        )));
+                    }
+                    match authority.can_manage(&user.id, &bot_id).await {
+                        Ok(true) => require_bot(caller),
+                        Ok(false) => Err(ApplicationError::forbidden(format!(
+                            "the caller is not the owner or a manager of \
+                             bot '{bot_id}'"
+                        ))),
+                        // A failing authority read must never be treated
+                        // as "unauthorized" or as "authorized" (spec §8:
+                        // authorization reads return `Result`).
+                        Err(error) => Err(ApplicationError::internal(format!(
+                            "bot authority lookup failed: {error}"
+                        ))),
+                    }
+                }
+                // Pure Bot: its own authentication decides; the
+                // authority hook is not consulted (spec §3.3).
+                (None, Some(_)) => require_bot(caller),
+                // Human-only keeps the existing Human self rules.
+                (Some(_), None) => require_human(caller),
+                (None, None) => Err(ApplicationError::forbidden(
+                    "This operation requires a Human or Bot caller",
+                )),
+            }
+        }
     }
 }
 

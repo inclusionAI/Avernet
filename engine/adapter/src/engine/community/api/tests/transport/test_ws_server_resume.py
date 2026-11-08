@@ -40,7 +40,8 @@ async def test_replay_buffer_redacts_materialized_paths() -> None:
 
 
 @pytest.mark.asyncio
-async def test_browser_disconnect_does_not_stop_resumable_openclaw_stream() -> None:
+@pytest.mark.parametrize("explicit_enable", [False, True])
+async def test_browser_disconnect_does_not_stop_resumable_openclaw_stream(explicit_enable) -> None:
     EngineManager.reset_instance()
     manager = EngineManager("openclaw")
     started = asyncio.Event()
@@ -76,8 +77,9 @@ async def test_browser_disconnect_does_not_stop_resumable_openclaw_stream() -> N
         "sessionKey": "session:one",
         "message": "write a story",
         "idempotencyKey": "run-1",
-        "resumeEnabled": True,
     }
+    if explicit_enable:
+        params["resumeEnabled"] = True
 
     try:
         accepted = await server._handle_chat_send(

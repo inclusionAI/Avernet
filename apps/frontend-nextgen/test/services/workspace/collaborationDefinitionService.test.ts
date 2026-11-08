@@ -6,6 +6,8 @@ import {
   formatValidationErrors,
 } from '@/services/workspace/collaborationDefinitionService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 jest.mock('@/services/backendApi/collaboration/collaborationDefinitionController');
 
@@ -16,6 +18,15 @@ beforeEach(() => {
 });
 
 describe('collaborationDefinitionService', () => {
+  it('preserves the BCS loop projection and validation-only diagnostics through the envelope', async () => {
+    const data = JSON.parse(readFileSync(resolve(__dirname, '../../../../bcs/tests/fixtures/fixed_loop_preview.json'), 'utf8'));
+    dc.validateDefinition.mockResolvedValue({ code: 20000, data });
+    const result = await collaborationDefinitionService.validate('loop yaml');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.graph).toEqual(data.graph);
+    expect(result.data.warnings).toEqual(data.warnings);
+  });
   it('validate unwraps envelope data and returns domain model', async () => {
     dc.validateDefinition.mockResolvedValue({
       code: 20000,
@@ -73,7 +84,7 @@ describe('formatValidationErrors', () => {
       { code: 'E1', path: '$.participants', message: 'missing' },
       { code: 'E2', path: '$', message: 'root error' },
     ]);
-    expect(msg).toBe('$.participants: missing；root error');
+    expect(msg).toBe('[E1] $.participants: missing；[E2] root error');
   });
 
   it('returns default text for empty errors', () => {

@@ -82,10 +82,27 @@ source "$SCRIPT_DIR/cli.sh"
 source "$SCRIPT_DIR/actor.sh"
 source "$SCRIPT_DIR/register.sh"
 source "$SCRIPT_DIR/stories.sh"
+source "$SCRIPT_DIR/authority.sh"
+source "$SCRIPT_DIR/provider_scope_story.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
+source "$SCRIPT_DIR/collaboration_draft_story.sh"
 source "$SCRIPT_DIR/fixed_loop_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
+source "$SCRIPT_DIR/session_owner_story.sh"
+source "$SCRIPT_DIR/service_policy_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
+
+# Both registration paths share parent identity while each child keeps its own
+# credential and lifecycle. Run through the live server used by Singlebox.
+story_provider_operator_manages_subbots() {
+    info "Story: provider operator registers, authenticates, and retires sibling Bots"
+    local result=0
+    python3 "$SCRIPT_DIR/agentpass_subbots_story.py" \
+        --base-url "$BCS_API_BASE_URL" --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "subbots registration and runtime identity journey" "$result" "0"
+}
+
+E2E_TESTS_STORIES+=("story_provider_operator_manages_subbots")
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)

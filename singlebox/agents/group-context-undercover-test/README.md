@@ -137,6 +137,5 @@ group-context-undercover-test/
 
 ## 参考
 
-- [Group Context API Spec](../../apps/bcs/specs/2026-09-09-group-context-api/spec-v1-publish.md)
-- [Tasks](../../apps/bcs/specs/2026-09-09-group-context-api/tasks.md)
+- [Group Context API Spec](../../apps/bcs/specs/2026-09-09-group-context-api/spec-01-v1-publish.md)
 - [原版谁是卧底 Profile](../6bots_undercover_game_profile/README.md)

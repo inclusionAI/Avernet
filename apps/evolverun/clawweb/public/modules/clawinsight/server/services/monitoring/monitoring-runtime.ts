@@ -60,6 +60,7 @@ export function createMonitoringRuntime(
   return {
     service: {
       bots: async () => services().service.bots(),
+      reportRecoveryResult: async (...args) => services().service.reportRecoveryResult(...args),
       reportCheck: async (...args) => services().service.reportCheck(...args),
       reportDiagnosis: async (...args) => services().service.reportDiagnosis(...args),
       status: async (...args) => services().service.status(...args),

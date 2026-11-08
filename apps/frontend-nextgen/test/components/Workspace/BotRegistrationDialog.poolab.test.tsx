@@ -35,6 +35,11 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
   beforeEach(() => {
     extendCapabilities({
       getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+      getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: true }),
+      getQwenWorkBotRegistrationConfig: (bcsEndpoint) => ({
+        status: 'available',
+        value: { providerSlug: 'qwenwork', apiUrl: bcsEndpoint },
+      }),
     });
     getRegistrationTokenMock.mockReset();
     resolveBcsEndpointMock.mockReset();
@@ -68,8 +73,11 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     render(<BotRegistrationDialog open onClose={() => {}} />);
 
     expect(screen.getByRole('button', { name: 'Poolab' })).toBeInTheDocument();
-    // 默认仍是 OpenClaw Tab
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Poolab' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('region', { name: 'OpenClaw 接入方式' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Poolab' }));
     // PoolabRegistrationPanel 标记文本
@@ -95,12 +103,35 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     expect(screen.getByText('1. 安装 bcs-bridge')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
     expect(screen.queryByText('1. 安装 bcs-bridge')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '千问办公' }));
     // QwenWorkRegistrationPanel 存在：渲染「接入千问 Bot」分组标题
     expect(screen.getByText(/接入千问 Bot/)).toBeInTheDocument();
+  });
+
+  it('hides disabled onboarding engines while preserving OpenClaw and Poolab', () => {
+    extendCapabilities({
+      getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: false }),
+      getQwenWorkBotRegistrationConfig: () => ({
+        status: 'unsupported',
+        value: { providerSlug: '', apiUrl: '' },
+      }),
+      getPoolabBridgeInstallation: () => ({
+        status: 'available',
+        value: { oneClickScriptUrl: 'https://example.com/poolab-onboard.sh', guideUrl: 'https://example.com/poolab' },
+      }),
+    });
+    render(<BotRegistrationDialog open onClose={() => {}} />);
+
+    expect(screen.queryByRole('button', { name: '千问办公' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'DeepSeek Harness' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Poolab' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('1. 安装 bcs-bridge')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
+    expect(screen.queryByText('1. 安装 bcs-bridge')).not.toBeInTheDocument();
   });
 
   it('deployment panels mount only when selected and leave default tabs available', () => {
@@ -119,6 +150,6 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     expect(screen.getByText('Example onboarding: true')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
     expect(screen.queryByText('Example onboarding: true')).not.toBeInTheDocument();
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
   });
 });

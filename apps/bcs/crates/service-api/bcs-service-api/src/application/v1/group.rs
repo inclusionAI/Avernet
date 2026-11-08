@@ -307,6 +307,8 @@ pub struct CreateParticipant {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCollaborationGroup {
+    /// External Human-mention notification policy selected at creation.
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub name: Option<String>,
     pub context: Option<String>,
     pub opening_message: Option<OpeningMessage>,
@@ -564,6 +566,9 @@ pub trait GroupService: Send + Sync {
         self.create_with_outcome(command).await
     }
 
+    /// Detail reads accept the selected Actor's Session membership in this
+    /// Group, including a Human's owned Bot in such a Session. This read-only
+    /// relation does not grant Group editing or participant management.
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError>;
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError>;

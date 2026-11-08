@@ -100,12 +100,6 @@ MOCK_GROUP = {
     "updated_at": 1713763200,
     "message_count": 5,
     "latest_running_session_id": "sess_001",
-    "workspace": {
-        "audit_log": [],
-        "decisions": [],
-        "notes": [],
-        "tasks": [],
-    },
     "service_group_uuid": "",
     "service_mode": "",
     "service_spec": None,
@@ -202,9 +196,10 @@ class TestGetGroup:
         assert_has_fields(
             data,
             {"id": str, "label": str, "driver_bot": str, "participants": list, "group_kind": str,
-             "status": str, "created_at": int, "updated_at": int, "workspace": dict},
+             "status": str, "created_at": int, "updated_at": int},
             label="GET /groups/{id} response",
         )
+        assert "workspace" not in data
 
 
 class TestGetGroupMessages:

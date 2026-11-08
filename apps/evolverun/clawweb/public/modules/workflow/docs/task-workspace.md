@@ -10,8 +10,11 @@ generation, trial, publication or reconciliation requests.
 
 One version selector controls all three views. The header names that candidate,
 its source (manual or daily automatic), exact publication receipt and, once read,
-its observation status. Latest-attempt failures and execution records are separate;
-viewing published v1 while v2 failed or needed no change retains v1's identity.
+its observation status. Generation execution state, IDs and errors follow the
+selected revision too; missing historical records explicitly show “暂无执行记录”,
+never another revision's execution. A separate one-line latest-generation summary
+remains visible when viewing an older revision. Viewing published v1 while v2
+failed or needed no change retains v1's identity.
 An incomplete automatic batch needing no change does not imply the whole round is
 publishable. The existing `automaticProgress.publishable` gate remains authoritative.
 
@@ -21,6 +24,27 @@ Per-task session storage retains inspection view/version on back/reopen and when
 returning from the scope editor. Storage failures do not block inspection. Task
 records and version digests remain unchanged. Paged historical records are folded;
 there is no second sidebar version picker.
+
+The task detail adds optional `executions`, keyed by revision, from the existing
+`ce_steps` records. The history response includes only its page plus the latest
+attempt/successful revisions, within the existing response budget. The browser
+retains execution metadata with previously loaded revision pages. Legacy
+`execution` remains latest-only for existing clients and task recovery; it is never
+used as a fallback for a selected historical revision. No schema or execution-state
+transition changes are required.
+
+Task HTTP reads reuse the already-read successful revision for release details,
+rather than loading the complete frozen history twice. Transport byte limits use
+the actual JSON body, not the write-identity canonicalizer. Write digests and the
+existing response limit are unchanged. Existing request diagnostics separate
+`task_detail` and `release_detail` timing.
+
+Scope adjustment requests only the current candidate page, not all metadata pages
+used by the issue browser. Complete frozen choices and requirement/feedback fields
+are editable while pending suggestions load; generation still waits for the fresh
+read. Response arrival never resets edits or silently selects new suggestions.
+Automatic scopes spanning multiple history pages still finish loading their full
+original scope before enabling its choices. No persistent cache is introduced.
 
 ## Starting another optimization task
 
@@ -86,6 +110,38 @@ an older selected revision cannot attach its error to a different candidate.
 The browser no longer posts reconciliation on a view timer: background Host
 reconciliation remains server-owned, and explicit recovery buttons retain the
 original request/deployment identity. Read-only task/observation polling remains.
+
+## Suggestion reads and revision submission
+
+The adjustment editor requests `metadataPage=1&includeTasks=false`: its candidate
+page does not need task summaries or their frozen revision bodies. Default callers
+retain task metadata. The history/version scope, selection digest, pagination and
+original evidence contract do not change; a history-enabled read still constructs
+the requested historical source summary, rather than pretending to be a SQL-limited
+twenty-row lookup.
+
+Identical concurrent candidate reads share only their pending request for a known
+browser principal and query scope; every subscriber gets a separate response object.
+Completed/failed requests are removed, so an explicit later refresh stays fresh.
+Unknown principals and different users/pages/scopes do not share requests. The
+editor depends on its effective history scope, so changing an overridden parent
+history flag cannot start the same historical read again.
+
+New revision submission reads selected source evidence once under the existing
+workflow transaction/lock and reuses the task snapshot already read for recovery;
+it rereads authoritative task state inside the transaction. Automatic chain,
+auto-to-manual feedback, source/version/claim checks and request idempotency remain.
+Plain manual tasks skip only the automatic-chain history scan whose validator was
+already a no-op for a manual predecessor. The response reads the exact submitted
+revision, not the complete task history. AIS dispatch still waits for a job receipt;
+no new background queue or response-before-dispatch behavior is introduced.
+
+The existing `[workflow-repair] request diagnostic` record now separates
+`task_state`, `revision_write`, `evidence_freeze`, `dispatch_materials`, `ais_submit`
+and `revision_response` in `stagesMs`. `revision_write` includes nested source and
+evidence stages: do not sum nested timings. Logs contain stage timings, not evidence,
+credentials or AIS request bodies. Local query-count regression is not proof of
+production latency after deployment.
 
 ## Validation boundary
 

@@ -13,6 +13,14 @@ use tower::ServiceExt;
 mod register_support;
 use register_support::*;
 
+#[path = "register_support/requests.rs"]
+mod requests;
+use requests::*;
+
+#[path = "register_support/authenticated_requests.rs"]
+mod authenticated_requests;
+use authenticated_requests::authenticated_request;
+
 // ---------------------------------------------------------------------------
 // Fake register service.
 // ---------------------------------------------------------------------------
@@ -210,5 +218,21 @@ async fn unknown_and_empty_modes_are_bad_requests_without_echoing_capabilities()
         assert_eq!(body["code"], 40_000);
         assert!(!body.to_string().contains("secret"));
         assert!(service.registered.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn actual_registration_preserves_complete_ref() {
+    // Removed query fields are ignored, including values outside the old enum.
+    for extra in ["", "&expected_auth_mode=not-a-mode&bot_slug=ignored"] {
+        let service = fake_service(false);
+        let request = bare_request("POST", &format!(
+            "/openapi/v1/collaboration/register?token=registration-token&bot_name=Test&provider_bot_ref=parent%3Aa&mode=plugin{extra}"
+        ));
+        let response = test_router(service.clone()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let commands = service.registered.lock().unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].provider_bot_ref.as_deref(), Some("parent:a"));
     }
 }

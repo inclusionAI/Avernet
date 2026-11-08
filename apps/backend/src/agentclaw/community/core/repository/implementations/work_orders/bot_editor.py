@@ -86,6 +86,11 @@ class _BotEditorWorkOrderRepository:
         )
         if bot is None:
             raise WorkOrderNotFoundError("Bot not found")
+        from agentclaw.community.core.bot_management.owner_handoff.guard import (
+            assert_bot_mutable,
+        )
+
+        assert_bot_mutable({"ext": bot.ext})
         space = (
             db.query(SpaceModel.id)
             .filter(
@@ -166,6 +171,11 @@ class _BotEditorWorkOrderRepository:
             if bot is None:
                 raise WorkOrderNotFoundError("Bot not found during request creation")
 
+            from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                assert_bot_mutable,
+            )
+
+            assert_bot_mutable({"ext": bot.ext})
             member = (
                 db.query(self._Member.id)
                 .filter(
@@ -229,7 +239,7 @@ class _BotEditorWorkOrderRepository:
                         "owner_id": owner_id,
                         "space_id": space_id,
                         "applicant_name": applicant_name,
-                        "requested_role": CollaboratorRole.MEMBER.value,
+                        "requested_role": CollaboratorRole.ADMIN.value,
                         "display_title": {
                             WorkOrderStatus.PENDING.value: title,
                             WorkOrderStatus.APPROVED.value: WorkOrderMessageTitle.BOT_COLLABORATOR_APPROVED.value,
@@ -307,7 +317,7 @@ class _BotEditorWorkOrderRepository:
                 owner_id=bot.owner_id,
                 user_id=applicant_user_id,
                 user_name=applicant_user_id,
-                role=CollaboratorRole.MEMBER.value,
+                role=CollaboratorRole.ADMIN.value,
                 operator_id=bot.owner_id,
                 env=env,
             )
@@ -448,7 +458,7 @@ class _BotEditorWorkOrderRepository:
                             owner_id=owner_id,
                             user_id=work_order.applicant_user_id,
                             user_name=work_order.applicant_user_id,
-                            role=CollaboratorRole.MEMBER.value,
+                            role=CollaboratorRole.ADMIN.value,
                             operator_id=reviewer_user_id,
                             env=env,
                         )
@@ -598,7 +608,7 @@ class _BotEditorWorkOrderRepository:
                     owner_id=owner_id,
                     user_id=order.applicant_user_id,
                     user_name=order.applicant_user_id,
-                    role=CollaboratorRole.MEMBER.value,
+                    role=CollaboratorRole.ADMIN.value,
                     operator_id=SYSTEM_REVIEWER_USER_ID,
                     env=env,
                 )

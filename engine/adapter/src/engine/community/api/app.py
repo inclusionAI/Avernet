@@ -74,6 +74,8 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from engine.community.api.cron.router import router as cron  # noqa: E402
 from engine.community.api.session.router import router as session_router  # noqa: E402
 from engine.community.api.session_favorites import router as session_favorites_router  # noqa: E402
+from engine.community.api.dws_hosting.router import router as dws_hosting_router  # noqa: E402
+from engine.community.di.dws_lifecycle import hosting_lifecycle  # noqa: E402
 from engine.community.manager import EngineManager  # noqa: E402
 from engine.community.di import Injected  # noqa: E402
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService  # noqa: E402
@@ -227,7 +229,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    yield
+    async with hosting_lifecycle(app, manager.engine):
+        yield
 
     # ── shutdown ──
     manager = EngineManager.get_instance()
@@ -262,9 +265,13 @@ _RUNTIME_CONFIG = RuntimeConfig.detect()
 _INJECTOR = build_injector(config=_RUNTIME_CONFIG)
 attach_injector(app, _INJECTOR)
 
+from engine.community.api.engine.default_model import router as default_model_router
+
 app.include_router(engine_router)
+app.include_router(default_model_router)
 app.include_router(session_router)
 app.include_router(session_favorites_router)
+app.include_router(dws_hosting_router)
 app.include_router(models)
 app.include_router(resource_materialization_router)
 app.include_router(session_files_router)

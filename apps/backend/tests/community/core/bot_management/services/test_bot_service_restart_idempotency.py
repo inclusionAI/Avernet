@@ -24,6 +24,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.default import (
     DefaultProvisioningStrategy,
 )
@@ -178,6 +180,9 @@ def _make_service(
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
     svc = BotService.__new__(BotService)
+    svc._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: svc._baas_service_provider(),
+    )
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = bot_repository if bot_repository is not None else MagicMock()
     svc._restart_lock_repo = lock_repo

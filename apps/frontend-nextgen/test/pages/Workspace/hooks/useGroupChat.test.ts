@@ -1,8 +1,10 @@
 /** @jest-environment jsdom */
 import type { SessionView } from '@/domain/collaboration';
+import type { GroupExecApproval } from '@/domain/collaboration/groupExecApprovals';
 import type { GroupQuestionInteraction, GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
 import { useGroupChat } from '@/pages/Workspace/hooks/useGroupChat';
 import { createGroupChatProvider } from '@/services/workspace/groupChatProvider';
+import type { GroupExecApprovalSnapshot } from '@/services/workspace/groupExecApprovalService';
 import type { GroupQuestionSnapshot } from '@/services/workspace/groupQuestionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -15,7 +17,7 @@ const session: SessionView = {
   title: 't',
   kind: 'chat',
   status: 'running',
-  participants: [],
+  participants: [{ actorId: 'me', kind: 'human', name: 'Me', role: 'member', mode: 'present' }],
   lastMessageAt: 0,
   createdAt: 0,
   favorite: false,
@@ -118,11 +120,13 @@ beforeEach(() => {
   // aixBridge 由 @/services/workspace/chatBridge mock 的 getter 在 useGroupChat 渲染时 ensure 指回单例,
   // 不在此 delete(单例跨 test 缓存,delete 后下一测试构造副作用不重跑);保留 resetWorkspace。
   useWorkspaceStore.getState().resetWorkspace();
-  useWorkspaceStore.setState({ activeIdentityId: 'me' });
+  useWorkspaceStore.setState({ activeIdentityId: 'me', identities: [{ id: 'me', kind: 'user', displayName: 'Me', online: true }] });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fn = () => jest.fn<any>();
   mockProvider = {
+    liveEnabled: true,
+    setLiveEnabled: fn().mockImplementation((enabled: boolean) => { mockProvider.liveEnabled = enabled; }),
     loadHistory: fn().mockResolvedValue([]),
     loadMoreHistory: fn().mockResolvedValue([]),
     connect: fn().mockResolvedValue(undefined),
@@ -142,6 +146,8 @@ beforeEach(() => {
     isConnected: false,
     subscribeToQuestions: jest.fn<any>(() => jest.fn<any>()),
     resolveQuestion: jest.fn<any>(() => Promise.resolve(undefined)),
+    subscribeToExecApprovals: jest.fn<any>(() => jest.fn<any>()),
+    resolveExecApproval: jest.fn<any>(() => Promise.resolve(undefined)),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 
@@ -172,11 +178,38 @@ it('mount connects to the provider with conversationKey=sessionId, unmount disco
     // 不再使用 SDK defaultMessages；改为显式 loadHistory + setMessages
     expect(opts.defaultMessages).toBeUndefined();
   });
-  expect(mockedProviderFactory).toHaveBeenCalledWith({ sessionId: 's1', groupId: 'g1', identityId: 'me' });
+  expect(mockedProviderFactory).toHaveBeenCalledWith({ sessionId: 's1', groupId: 'g1', identityId: 'me', liveEnabled: true });
   expect(mockProvider.connect).toHaveBeenCalled();
 
   unmount();
   expect(mockProvider.disconnect).toHaveBeenCalled();
+});
+
+it('absent mode keeps history refresh and pagination but blocks every send/reconnect entry', async () => {
+  const history = [{ id: 'm1', role: 'user', content: 'history', status: 'history' }];
+  mockProvider.loadHistory.mockResolvedValue(history);
+  mockProvider.hasMoreHistory = true;
+  const absent: SessionView = { ...session, participants: [{ ...session.participants[0], actorId: 'human_1', mode: 'absent' }] };
+  const { result } = renderHook(() => useGroupChat(absent, '1'));
+  await waitFor(() => expect(mockChat.setMessages).toHaveBeenCalledWith(history));
+  expect(result.current.historyOnly).toBe(true);
+  expect(result.current.connectionStatus).toBe('disconnected');
+  await act(async () => {
+    await result.current.reloadHistory();
+    await result.current.loadMoreHistory();
+    result.current.send('message');
+    result.current.submitPanelMessage('panel');
+    result.current.submitTaskExecutionMessage('task', 'bot_1');
+    await result.current.reconnect();
+    useWorkspaceStore.getState().bumpWsReconnect();
+  });
+  expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2);
+  expect(mockProvider.loadMoreHistory).toHaveBeenCalledTimes(1);
+  expect(mockProvider.connect).not.toHaveBeenCalled();
+  expect(mockProvider.reconnect).not.toHaveBeenCalled();
+  expect(mockChat.onRequest).not.toHaveBeenCalled();
+  const bridge = mockUseChatBridgeCalls[mockUseChatBridgeCalls.length - 1];
+  expect(() => bridge.buildRequestParams('card', {})).toThrow('未加入');
 });
 
 it('mount calls provider.loadHistory and sets messages into chat', async () => {
@@ -555,4 +588,39 @@ it('isConnected=false 时 questions.connected 初始为 false（真实连接状�
   expect(result.current.questions).toBeDefined();
   expect(result.current.questions.connected).toBe(false);
   expect(result.current.questions.interactions).toEqual([]);
+});
+
+it('wires execution approval snapshots and decisions through the main chat hook and cleans up on unmount', async () => {
+  let publish: (snapshot: GroupExecApprovalSnapshot) => void = () => {};
+  const unsubscribe = jest.fn();
+  mockProvider.subscribeToExecApprovals.mockImplementation((listener: typeof publish) => {
+    publish = listener;
+    return unsubscribe;
+  });
+  mockProvider.isConnected = true;
+  const approval: GroupExecApproval = {
+    key: JSON.stringify(['run-1', 'approval-1']),
+    runId: 'run-1',
+    interactionId: 'approval-1',
+    botId: 'bot-a',
+    toolName: 'bash',
+    command: 'pwd',
+    options: [{ decision: 'allow_once', label: 'Allow once' }],
+  };
+  const { result, unmount } = renderHook(() => useGroupChat(session));
+  expect(mockProvider.subscribeToExecApprovals).toHaveBeenCalledTimes(1);
+  act(() => publish({ reason: 'update', interactions: [approval] }));
+  expect(result.current.execApprovals.interactions).toEqual([approval]);
+  expect(result.current.execApprovals.connected).toBe(true);
+  expect(result.current.questions.interactions).toEqual([]);
+  let accepted: boolean | undefined;
+  await act(async () => {
+    accepted = await result.current.execApprovals.resolve(approval.key, 'allow_once');
+  });
+  expect(accepted).toBe(true);
+  expect(mockProvider.resolveExecApproval).toHaveBeenCalledWith(approval.key, { decision: 'allow_once' });
+  act(() => publish({ reason: 'update', interactions: [] }));
+  expect(result.current.execApprovals.interactions).toEqual([]);
+  unmount();
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
 });

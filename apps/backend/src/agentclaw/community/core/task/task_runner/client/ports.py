@@ -43,6 +43,7 @@ class OpenApiBotPort(Protocol):
         *,
         limit: int = 50,
         bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
     ) -> list[Any]:
         """读引擎侧会话(OpenClaw 等)的消息列表。
 
@@ -107,6 +108,21 @@ class BcsClientPort(Protocol):
     ) -> str: ...
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
+    async def send_session_chat(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one continuation message into an existing BCS session.
+
+        The session id and membership stay authoritative; this port never creates
+        a group or session and never rewrites the task node identity.
+        """
+        ...
+
     async def send_message_a2a(
         self,
         *,
@@ -136,6 +152,23 @@ class BcsClientPort(Protocol):
     def task_callback_url(self) -> str:
         """Return the callback origin used by task event subscriptions."""
         ...
+
+
+@runtime_checkable
+class BcsSessionFilesPort(Protocol):
+    """Read ready file metadata from a BCS session workspace."""
+
+    async def list_files(
+        self,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        caller_bearer: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

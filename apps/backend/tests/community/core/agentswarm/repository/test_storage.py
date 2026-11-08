@@ -1,0 +1,1006 @@
+"""Storage integration tests: every repository exercised against a real
+SqliteDB DatabasePlugin (D19, D31, D32, tenant stamping, logical delete)."""
+from __future__ import annotations
+
+import time
+import uuid
+from datetime import datetime
+
+import pytest
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.agentswarm.domain import models as dm
+from agentclaw.community.core.agentswarm.repository import registry as om
+from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
+from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
+from agentclaw.community.core.agentswarm.repository.message import MessageRepository
+from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
+from agentclaw.community.core.agentswarm.repository.round import RoundRepository
+from agentclaw.community.core.agentswarm.repository.run import RunRepository
+from agentclaw.community.utils.env_utils import get_current_env
+
+
+class _TestDB:
+    def __init__(self, engine):
+        self._factory = sessionmaker(
+            bind=engine, autocommit=False, autoflush=False
+        )
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    session = orm_session
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[
+        om.AcAgentSwarmRunModel.__table__,
+        om.AcAgentSwarmAgentModel.__table__,
+        om.AcAgentSwarmMessageModel.__table__,
+        om.AcAgentSwarmAgentResultModel.__table__,
+        om.AcAgentSwarmRoundModel.__table__,
+        om.AcAgentSwarmGuardEventModel.__table__,
+        om.AcAgentSwarmRunDispatchModel.__table__,
+    ])
+    yield _TestDB(engine)
+    engine.dispose()
+
+
+@pytest.fixture()
+def run_repo(db):
+    return RunRepository(db)
+
+
+@pytest.fixture()
+def agent_repo(db):
+    return AgentRepository(db)
+
+
+@pytest.fixture()
+def msg_repo(db):
+    return MessageRepository(db)
+
+
+@pytest.fixture()
+def result_repo(db):
+    return AgentResultRepository(db)
+
+
+@pytest.fixture()
+def round_repo(db):
+    return RoundRepository(db)
+
+
+@pytest.fixture()
+def guard_repo(db):
+    return GuardEventRepository(db)
+
+
+@pytest.fixture()
+def dispatch_repo(db):
+    return RunDispatchRepository(db)
+
+
+TENANT_A = dm.TenantId("tenant-a")
+TENANT_B = dm.TenantId("tenant-b")
+
+
+def _now_ms():
+    return int(time.time() * 1000)
+
+
+def _mk_run(run_id=None, tenant=TENANT_A) -> dm.Run:
+    return dm.Run(
+        run_id=dm.RunId(run_id or uuid.uuid4().hex),
+        tenant=tenant,
+        goal="test goal",
+        agent_catalog=(
+            dm.AgentSpec(name="r1", role="research"),
+        ),
+        provider=dm.ProviderKind("stub"),
+        request_metadata=dm.RequestMetadata(),
+        status=dm.RunStatus.RUNNING,
+        started_at=dm.EpochMillis(_now_ms()),
+    )
+
+
+def _mk_agent(run: dm.Run, name="a1") -> dm.Agent:
+    env = dm.TaskEnvelope(
+        name=name, objective="do", output_schema={},
+        boundaries="", parent_goal=run.goal,
+    )
+    return dm.Agent(
+        agent_id=dm.AgentId(uuid.uuid4().hex),
+        run_id=run.run_id,
+        tenant=TENANT_A,
+        parent_agent_id=None,
+        depth=0,
+        name=name,
+        role="role",
+        kind=dm.AgentKind.LLM,
+        task_spec=env,
+        spawn_round=0,
+        status=dm.AgentStatus.QUEUED,
+        attempts=0,
+        idempotency_key=dm.IdempotencyKey(uuid.uuid4().hex),
+        output={},
+    )
+
+
+def _mk_result(run: dm.Run, agent: dm.Agent) -> dm.AgentResult:
+    return dm.AgentResult(
+        id=dm.ResultId(uuid.uuid4().hex),
+        run_id=run.run_id,
+        tenant=TENANT_A,
+        source_agent_id=agent.agent_id,
+        payload={"result": "done"},
+        artifact_key=None,
+        routed_at=dm.EpochMillis(_now_ms()),
+    )
+
+
+def _insert_foreign_env_dispatch(dispatch_repo, status="READY", lease_expires_at=None):
+    """Raw dispatch row in a foreign env — enqueue's ORM default stamps the current
+    env, so only a direct insert can make a row claim_batch must never see."""
+    with db_session(dispatch_repo) as session:
+        session.add(om.AcAgentSwarmRunDispatchModel(
+            dispatch_id=uuid.uuid4().hex,
+            run_id=uuid.uuid4().hex,
+            status=status,
+            ready_at=datetime(2020, 1, 1),
+            deadline_at=datetime(2030, 1, 1),
+            lease_expires_at=lease_expires_at,
+            tenant=str(TENANT_A),
+            env="another-env",
+        ))
+
+
+class TestRunRepository:
+    def test_create_and_get(self, run_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.run_id == run.run_id
+        assert fetched.tenant == TENANT_A
+        assert fetched.goal == "test goal"
+
+    def test_create_stamps_deployment_env_not_provider_label(self, run_repo, monkeypatch):
+        # `env` is the deployment env (dev/pre/prod) — the same convention
+        # every other swarm table stamps via `_AgentSwarmBase.env`'s
+        # default — never the run's provider label ("stub"), which belongs
+        # to the `provider` column alone (D25 env/tenant dedup scope).
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()  # provider == "stub"
+        run_repo.create(run)
+        with db_session(run_repo) as session:
+            row = session.execute(
+                select(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.run_id == run.run_id,
+                )
+            ).scalar_one()
+            assert row.env == get_current_env()
+            assert row.env == "pre"
+            assert row.env != run.provider.value
+
+    def test_catalog_kind_round_trips_as_enum(self, run_repo):
+        run = _mk_run()
+        run.agent_catalog = (
+            dm.AgentSpec(name="r1", role="research"),
+            dm.AgentSpec(name="r2", role="bot", kind=dm.AgentKind.BOT),
+        )
+        run_repo.create(run)
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        kinds = [spec.kind for spec in fetched.agent_catalog]
+        assert all(isinstance(kind, dm.AgentKind) for kind in kinds)
+        assert [kind.value for kind in kinds] == ["llm", "bot"]
+
+    def test_tenant_isolation(self, run_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        assert run_repo.get(run.run_id, TENANT_B) is None
+        assert run_repo.get(run.run_id, TENANT_A) is not None
+
+    def test_update_status(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        ok = run_repo.update_status(
+            run.run_id, TENANT_A,
+            dm.RunStatus.COMPLETED,
+            termination_reason=dm.TerminationReason.FINISH,
+            final_answer="answer",
+            claim_epoch=claimed["claim_epoch"],
+        )
+        assert ok
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.status == dm.RunStatus.COMPLETED
+        assert fetched.ended_at is not None
+
+    def test_get_by_idempotency_running_only(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run.active_idempotency_key = dm.IdempotencyKey("idem-key-1")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is not None
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        assert run_repo.update_status(
+            run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+            claim_epoch=claimed["claim_epoch"],
+        )
+        assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is None
+
+    def test_idempotency_tenant_isolated(self, run_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run.active_idempotency_key = dm.IdempotencyKey("idem-2")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-2", TENANT_B) is None
+
+    def test_get_by_idempotency_scopes_to_current_env(self, run_repo, monkeypatch):
+        # uk_run_idem is (env, tenant, active_idempotency_key): in a
+        # multi-env single-DB deployment the lookup must never return
+        # another env's run — the create() convergence path (and the
+        # submit-plane dedupe join) relies on it staying None for
+        # foreign-env rows instead of converging across envs.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run.active_idempotency_key = dm.IdempotencyKey("idem-env-1")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-env-1", TENANT_A) is not None
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.get_by_idempotency("idem-env-1", TENANT_A) is None
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        fetched = run_repo.get_by_idempotency("idem-env-1", TENANT_A)
+        assert fetched is not None and fetched.run_id == run.run_id
+
+    def test_idempotency_double_create_converges_to_survivor(self, run_repo):
+        # uk_run_idem is the duplicate-submit join invariant; a racing
+        # submit that loses the double-INSERT inside the
+        # get_by_idempotency → create TOCTOU window must converge to
+        # the surviving row, not surface the IntegrityError as a 500.
+        first = _mk_run()
+        first.active_idempotency_key = dm.IdempotencyKey("idem-race-1")
+        assert run_repo.create(first).run_id == first.run_id
+        racer = _mk_run()
+        racer.active_idempotency_key = dm.IdempotencyKey("idem-race-1")
+        converged = run_repo.create(racer)  # no raise — join the winner
+        assert converged.run_id == first.run_id
+        assert converged.active_idempotency_key == dm.IdempotencyKey("idem-race-1")
+        # Exactly one row: the loser's run_id never landed.
+        assert run_repo.get(racer.run_id, TENANT_A) is None
+        assert run_repo.count_active_runs(TENANT_A) == 1
+
+    def test_idempotency_convergence_is_tenant_scoped(self, run_repo):
+        # uk_run_idem includes tenant, so the same key in two tenants
+        # is two independent slots; neither create may converge onto
+        # the other tenant's run.
+        run_a = _mk_run(tenant=TENANT_A)
+        run_a.active_idempotency_key = dm.IdempotencyKey("idem-shared")
+        run_b = _mk_run(tenant=TENANT_B)
+        run_b.active_idempotency_key = dm.IdempotencyKey("idem-shared")
+        run_repo.create(run_a)
+        created_b = run_repo.create(run_b)
+        assert created_b.run_id == run_b.run_id
+        assert run_repo.count_active_runs(TENANT_A) == 1
+        assert run_repo.count_active_runs(TENANT_B) == 1
+
+    def test_pk_collision_without_idempotency_key_still_raises(self, run_repo):
+        # uk_run_id (env, tenant, run_id): a genuine duplicate run_id is
+        # caller corruption, not a race to converge — with no active
+        # idempotency key the IntegrityError must surface, never get
+        # swallowed into a false converge.
+        first = _mk_run()
+        first.run_id = dm.RunId("dup-run-id")
+        run_repo.create(first)
+        twin = _mk_run()
+        twin.run_id = dm.RunId("dup-run-id")
+        with pytest.raises(IntegrityError):
+            run_repo.create(twin)
+
+    def test_pk_collision_with_active_key_resolving_to_no_run_still_raises(self, run_repo):
+        # create()'s convergence handler has a second, final raise-leg:
+        # the colliding run DOES carry an active idempotency key, but that
+        # key resolves to no RUNNING row (here: a genuine uk_run_id PK
+        # collision — the key itself is fresh). Nothing sound to join, so
+        # the IntegrityError must surface, never get swallowed into a
+        # fabricated or half-converged run.
+        first = _mk_run()
+        first.run_id = dm.RunId("dup-run-id-keyed")
+        run_repo.create(first)
+
+        twin = _mk_run()
+        twin.run_id = dm.RunId("dup-run-id-keyed")  # uk_run_id PK collision
+        twin.active_idempotency_key = dm.IdempotencyKey("idem-resolves-to-nothing")
+        with pytest.raises(IntegrityError):
+            run_repo.create(twin)
+
+        # The twin never landed and the ghost key still resolves to nothing.
+        assert run_repo.get_by_idempotency("idem-resolves-to-nothing", TENANT_A) is None
+        stored = run_repo.get(dm.RunId("dup-run-id-keyed"), TENANT_A)
+        assert stored.run_id == first.run_id
+        assert run_repo.count_active_runs(TENANT_A) == 1
+
+    def test_get_nonexistent(self, run_repo):
+        assert run_repo.get("nope", TENANT_A) is None
+
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        epoch = claimed["claim_epoch"]
+        assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=epoch + 100) is False
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.status == dm.RunStatus.RUNNING
+        assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=epoch) is True
+
+    def test_terminal_update_sets_ended_at(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                              termination_reason=dm.TerminationReason.FINISH,
+                              final_answer="done",
+                              claim_epoch=claimed["claim_epoch"])
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.ended_at is not None
+        assert fetched.final_answer == "done"
+
+    def test_list_page_pagination_and_status_filter(self, run_repo, dispatch_repo):
+        for _ in range(5):
+            run = _mk_run()
+            run_repo.create(run)
+            dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        page1 = run_repo.list_page(TENANT_A, page=1, page_size=2)
+        assert page1.total == 5
+        assert len(page1.items) == 2
+        page3 = run_repo.list_page(TENANT_A, page=3, page_size=2)
+        assert len(page3.items) == 1
+        claims = {c["run_id"]: c for c in dispatch_repo.claim_batch("w1", None, 10, 60)}
+        for r in page1.items:
+            c = claims[r.run_id]
+            assert run_repo.update_status(r.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                          claim_epoch=c["claim_epoch"])
+        active_page = run_repo.list_page(TENANT_A, status=dm.RunStatus.RUNNING, page=1, page_size=10)
+        assert active_page.total == 3
+        assert all(r.status == dm.RunStatus.RUNNING for r in active_page.items)
+
+    def test_list_page_tenant_isolated(self, run_repo):
+        run_repo.create(_mk_run(tenant=TENANT_A))
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        for_tenant_a = run_repo.list_page(TENANT_A, page=1, page_size=10)
+        assert for_tenant_a.total == 1
+        assert all(r.tenant == TENANT_A for r in for_tenant_a.items)
+
+    def test_count_active_runs(self, run_repo, dispatch_repo):
+        run_a1 = _mk_run(tenant=TENANT_A)
+        run_a2 = _mk_run(tenant=TENANT_A)
+        run_a3 = _mk_run(tenant=TENANT_A)
+        run_repo.create(run_a1)
+        run_repo.create(run_a2)
+        run_repo.create(run_a3)
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        assert run_repo.count_active_runs(TENANT_A) == 3
+        dispatch_repo.enqueue(run_id=run_a1.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        assert run_repo.update_status(run_a1.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=claimed["claim_epoch"])
+        assert run_repo.count_active_runs(TENANT_A) == 2
+        assert run_repo.count_active_runs(TENANT_B) == 1
+
+    def test_count_active_runs_global(self, run_repo):
+        run_repo.create(_mk_run(tenant=TENANT_A))
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        completed = _mk_run(tenant=TENANT_A)
+        completed.status = dm.RunStatus.COMPLETED
+        run_repo.create(completed)
+        assert run_repo.count_active_runs_global() == 2
+
+    def test_count_pending_dispatches(self, run_repo, dispatch_repo):
+        run_one = _mk_run()
+        run_two = _mk_run(tenant=TENANT_B)
+        run_repo.create(run_one)
+        run_repo.create(run_two)
+        assert run_repo.count_active_runs_global() == 2
+        assert dispatch_repo.count_pending_dispatches() == 0
+        dispatch_repo.enqueue(run_id=run_one.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        dispatch_repo.enqueue(run_id=run_two.run_id, tenant=TENANT_B, deadline_seconds=3600)
+        assert dispatch_repo.count_pending_dispatches() == 2
+        dispatch_repo.claim_batch("w1", None, 1, 60)
+        assert dispatch_repo.count_pending_dispatches() == 1
+
+
+class TestAgentRepository:
+    def test_create_and_get(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.name == "a1"
+        assert fetched.status == dm.AgentStatus.QUEUED
+        assert fetched.kind == dm.AgentKind.LLM
+
+    def test_list_by_run(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent_repo.create(_mk_agent(run, "a1"))
+        agent_repo.create(_mk_agent(run, "a2"))
+        agents = agent_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(agents) == 2
+
+    def _claimed_run(self, run_repo, dispatch_repo):
+        # The agent fence is the run fence (D28): an update must carry the
+        # dispatch row's CURRENT claim epoch to land, so every writing test first
+        # enqueues + claims its run the way a worker would.
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)[0]
+        return run, claimed["claim_epoch"]
+
+    def test_update_status_running(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        ok = agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.RUNNING.value, claim_epoch=epoch,
+        )
+        assert ok
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched.status == dm.AgentStatus.RUNNING
+
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value, claim_epoch=epoch + 100,
+        ) is False
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_A).status             == dm.AgentStatus.QUEUED
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value, claim_epoch=epoch,
+        ) is True
+
+    def test_update_status_without_a_job_row_is_fenced(self, run_repo, agent_repo):
+        # A run someone never enqueued belongs to no slice: a status write
+        # with a stale-or-absent epoch has no current-owner to match and is
+        # refused, exactly like the run row's own fence.
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value,
+        ) is False
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_A).status \
+            == dm.AgentStatus.QUEUED
+
+    def test_update_output_and_error(self, run_repo, agent_repo, dispatch_repo):
+        run, epoch = self._claimed_run(run_repo, dispatch_repo)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.FAILED.value,
+            error="something went wrong", claim_epoch=epoch,
+        )
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched.status == dm.AgentStatus.FAILED
+        assert fetched.error == "something went wrong"
+
+    def test_tenant_isolation(self, run_repo, agent_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_B) is None
+        assert agent_repo.list_by_run(run.run_id, TENANT_B) == []
+
+
+class TestAgentResultXOR:
+
+    def test_result_double_insert_converges_to_the_survivor(
+            self, run_repo, agent_repo, result_repo):
+        # The unique pair (uk_result_agent) is the exactly-once invariant; a
+        # racing pod that loses the double-insert must converge to the
+        # surviving row rather than surface an IntegrityError.
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        first = _mk_result(run, agent)
+        created = result_repo.create(first)
+        again = result_repo.create(_mk_result(run, agent))
+        results = result_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(results) == 1
+        assert created.source_agent_id == again.source_agent_id
+
+    def test_result_with_payload(self, run_repo, agent_repo, result_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        result = _mk_result(run, agent)
+        result_repo.create(result)
+        fetched = result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.payload == {"result": "done"}
+
+    def test_result_with_artifact_key(self, run_repo, agent_repo, result_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        result = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload=None,
+            artifact_key=dm.ArtifactKey("run/agent/result"),
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        result_repo.create(result)
+        fetched = result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.artifact_key == dm.ArtifactKey("run/agent/result")
+
+    def test_result_both_rejected(self, run_repo, agent_repo, result_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        bad = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload={"result": "x"},
+            artifact_key=dm.ArtifactKey("key"),
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        with pytest.raises(ValueError):
+            result_repo.create(bad)
+
+    def test_result_neither_rejected(self, run_repo, agent_repo, result_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        bad = dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload=None,
+            artifact_key=None,
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        with pytest.raises(ValueError):
+            result_repo.create(bad)
+
+    def test_result_tenant_isolation(self, run_repo, agent_repo, result_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        result = _mk_result(run, agent)
+        result_repo.create(result)
+        assert result_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_B) is None
+
+    def test_list_by_run_orders_oldest_to_newest(
+            self, run_repo, agent_repo, result_repo):
+        # list_by_run must pin ascending-insertion order: the orchestrator
+        # prompt keeps the tail as "most recent" — reordering would embed
+        # stale results and drop fresh ones.
+        run = _mk_run()
+        run_repo.create(run)
+        other_run = _mk_run()
+        run_repo.create(other_run)
+        agents = [_mk_agent(run, f"a{i}") for i in range(4)]
+        for agent in agents:
+            agent_repo.create(agent)
+        # Persist out of agent-creation order, interleaved with a foreign
+        # run's result: land order is a2, a0, <foreign>, a1, a3.
+        inserted = [agents[2], agents[0], agents[1], agents[3]]
+        result_repo.create(_mk_result(run, inserted[0]))
+        result_repo.create(_mk_result(run, inserted[1]))
+        result_repo.create(_mk_result(other_run, _mk_agent(other_run, "x")))
+        result_repo.create(_mk_result(run, inserted[2]))
+        result_repo.create(_mk_result(run, inserted[3]))
+
+        results = result_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(results) == 4  # foreign-run interleave excluded
+        assert [s.source_agent_id for s in results] == [
+            a.agent_id for a in inserted
+        ]
+
+
+class TestMessageRepository:
+    def test_list_by_agent(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        for i in range(5):
+            msg = dm.Message(
+                id=dm.MessageId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                agent_id=agent.agent_id,
+                seq=i,
+                role=dm.MessageRole.ASSISTANT,
+                content={"turn": i},
+            )
+            msg_repo.create(msg)
+        msgs = msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert len(msgs) == 5
+        assert msgs[0].seq == 0
+        assert msgs[4].seq == 4
+
+    def test_message_tenant_isolation(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        msg = dm.Message(
+            id=dm.MessageId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=agent.agent_id,
+            seq=0,
+            role=dm.MessageRole.USER,
+            content="hello",
+        )
+        msg_repo.create(msg)
+
+    def test_apply_retention_keeps_tail(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        for i in range(6):
+            msg_repo.create(dm.Message(
+                id=dm.MessageId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                agent_id=agent.agent_id,
+                seq=i,
+                role=dm.MessageRole.ASSISTANT,
+                content={"turn": i},
+            ))
+        deleted = msg_repo.apply_retention(run.run_id, agent.agent_id, TENANT_A, tail=2)
+        assert deleted == 4
+        kept = msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert [m.seq for m in kept] == [4, 5]
+
+    def test_apply_retention_noop_when_under_tail(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        msg_repo.create(dm.Message(
+            id=dm.MessageId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=agent.agent_id,
+            seq=0,
+            role=dm.MessageRole.USER,
+            content="only",
+        ))
+        assert msg_repo.apply_retention(run.run_id, agent.agent_id, TENANT_A, tail=50) == 0
+        assert len(msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)) == 1
+        assert msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_B) == []
+
+
+class TestRoundRepository:
+    def test_create_and_list(self, run_repo, round_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        for i in range(3):
+            r = dm.Round(
+                id=dm.RoundId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                stage_index=i,
+                orchestrator_steps=1,
+                slowest_attempt_steps=2,
+                cohort_agent_ids=(dm.AgentId("a"),),
+                started_at=dm.EpochMillis(_now_ms()),
+            )
+            round_repo.create(r)
+        rounds = round_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(rounds) == 3
+
+
+class TestGuardEventRepository:
+    def test_create_and_list(self, run_repo, guard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        ge = dm.GuardEvent(
+            id=dm.EventId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=None,
+            kind=dm.GuardKind.SERIAL_COLLAPSE,
+            details={"turns": 10},
+            created_at=dm.EpochMillis(_now_ms()),
+        )
+        guard_repo.create(ge)
+        events = guard_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(events) == 1
+        assert events[0].kind == dm.GuardKind.SERIAL_COLLAPSE
+
+
+class TestRunDispatchRepository:
+    def test_enqueue_returns_none(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        assert dispatch_repo.enqueue(
+            run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600,
+        ) is None
+        (claim,) = dispatch_repo.claim_batch("w1", None, 10, 60)
+        assert claim["run_id"] == run.run_id
+
+    def test_claim_batch_and_count_scope_to_current_env(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        _insert_foreign_env_dispatch(dispatch_repo, status="READY")
+        assert dispatch_repo.count_pending_dispatches() == 1
+        claimed = dispatch_repo.claim_batch("w1", None, 10, 60)
+        assert [c["run_id"] for c in claimed] == [run.run_id]
+        assert dispatch_repo.count_pending_dispatches() == 0
+
+    def test_reclaim_batch_scopes_to_current_env(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = dispatch_repo.claim_batch("w1", None, 1, 60)
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claim["claim_epoch"])
+        _insert_foreign_env_dispatch(
+            dispatch_repo, status="LEASED", lease_expires_at=datetime(2020, 1, 1),
+        )
+        reclaimed = dispatch_repo.reclaim_batch("w2", 10, 60)
+        assert [c["run_id"] for c in reclaimed] == [run.run_id]
+
+    def test_enqueue_and_claim(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            deadline_seconds=3600,
+        )
+        claimed = dispatch_repo.claim_batch("worker-1", None, 1, 60)
+        assert len(claimed) == 1
+        assert claimed[0]["run_id"] == run.run_id
+        assert claimed[0]["claim_epoch"] == 1
+        assert claimed[0]["claims"] == 1
+
+    def test_claim_increments_epoch(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        c1 = dispatch_repo.claim_batch("w1", None, 1, 60)
+        assert c1[0]["claim_epoch"] == 1
+        dispatch_repo.reschedule(run.run_id, TENANT_A, "w1", 0.1, None, 1)
+        import time as t
+        t.sleep(0.2)
+        c2 = dispatch_repo.claim_batch("w2", None, 1, 60)
+        assert c2[0]["claim_epoch"] == 2
+
+    def test_renew_lease_by_valid_holder(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        epoch = claimed[0]["claim_epoch"]
+        ok = dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, epoch)
+        assert ok
+
+    def test_renew_lease_rejected_by_stale_epoch(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        real_epoch = claimed[0]["claim_epoch"]
+        stale_epoch = real_epoch + 100
+        assert not dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, stale_epoch)
+
+    def test_complete(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        ok = dispatch_repo.complete(run.run_id, TENANT_A, "w1", claimed[0]["claim_epoch"])
+        assert ok
+
+    def test_fail(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        ok = dispatch_repo.fail(run.run_id, TENANT_A, "error", "w1", claimed[0]["claim_epoch"])
+        assert ok
+
+    def test_cancel_flow(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        assert not dispatch_repo.is_cancel_requested(run.run_id, TENANT_A)
+        dispatch_repo.request_cancel(run.run_id, TENANT_A)
+        assert dispatch_repo.is_cancel_requested(run.run_id, TENANT_A)
+
+    def test_claim_dict_reflects_the_committed_row(self, run_repo, dispatch_repo):
+        # The CAS claim advances epoch/attempts IN the UPDATE, so the dict a
+        # worker receives must equal what the row now says — never the stale
+        # read the racer-API once returned (both pods minting epoch N+1).
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = dispatch_repo.claim_batch("w1", None, 5, 60)
+        with db_session(dispatch_repo) as session:  # fresh raw read, same engine
+            from agentclaw.community.core.agentswarm.repository.run_dispatch import (
+                model as om_dispatch,
+            )
+            row = session.execute(
+                select(om_dispatch.AcAgentSwarmRunDispatchModel).where(
+                    om_dispatch.AcAgentSwarmRunDispatchModel.run_id == run.run_id)
+            ).scalar_one()
+            assert row.status == "LEASED"
+            assert row.claim_epoch == claim["claim_epoch"]
+            assert row.claims == claim["claims"]
+        assert dispatch_repo.claim_batch("w2", None, 5, 60) == []  # the race answer
+
+    def test_claim_visible_in_batch(self, run_repo, dispatch_repo):
+        run_repo.create(_mk_run())
+        run_repo.create(_mk_run())
+        dispatch_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        dispatch_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 10, 60)
+        assert len(claimed) >= 1
+
+    def test_reclaim_batch_picks_up_expired_leases(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        assert claimed[0]["claim_epoch"] == 1
+        assert dispatch_repo.reclaim_batch("w2", 10, 60) == []
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claimed[0]["claim_epoch"])
+        reclaimed = dispatch_repo.reclaim_batch("w2", 10, 60)
+        assert len(reclaimed) == 1
+        assert reclaimed[0]["claim_epoch"] == 2
+        assert reclaimed[0]["reclaims"] == 1
+        again = dispatch_repo.claim_batch("w3", None, 10, 60)
+        assert again == []
+
+    def test_reclaim_increments_reclaims_per_recovery(self, run_repo, dispatch_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = dispatch_repo.claim_batch("w1", None, 1, 60)
+        epoch = claimed[0]["claim_epoch"]
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, epoch)
+        r1 = dispatch_repo.reclaim_batch("w2", 10, 60)
+        assert r1[0]["reclaims"] == 1
+        dispatch_repo.renew_lease(run.run_id, TENANT_A, "w2", -1, r1[0]["claim_epoch"])
+        r2 = dispatch_repo.reclaim_batch("w3", 10, 60)
+        assert r2[0]["reclaims"] == 2
+        assert r2[0]["claim_epoch"] == r1[0]["claim_epoch"] + 1
+
+
+class TestMandatoryColumns:
+    def test_all_tables_have_mandatory_columns(self):
+        import sqlalchemy as sa
+        engine = sa.create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine, tables=[
+            om.AcAgentSwarmRunModel.__table__,
+            om.AcAgentSwarmAgentModel.__table__,
+            om.AcAgentSwarmMessageModel.__table__,
+            om.AcAgentSwarmAgentResultModel.__table__,
+            om.AcAgentSwarmRoundModel.__table__,
+            om.AcAgentSwarmGuardEventModel.__table__,
+            om.AcAgentSwarmRunDispatchModel.__table__,
+            om.AcAgentSwarmAuditModel.__table__,
+        ])
+        insp = sa.inspect(engine)
+        for table_name in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns(table_name)}
+            for required in ("id", "gmt_create", "gmt_modified", "env", "tenant", "is_deleted"):
+                assert required in cols, f"{table_name} missing {required}"
+
+    def test_unique_indexes_scoped_by_tenant(self):
+        for model in om.ALL_MODELS:
+            for idx in model.__table__.indexes:
+                if idx.unique:
+                    names = {c.name for c in idx.columns}
+                    assert "env" in names, f"{model.__tablename__}.{idx.name} not env-scoped"
+                    assert "tenant" in names, f"{model.__tablename__}.{idx.name} not tenant-scoped"
+
+    def test_orm_tables_not_pydantic(self):
+        import pydantic
+        for model in om.ALL_MODELS:
+            assert not issubclass(model, pydantic.BaseModel), \
+                f"{model.__name__} inherits pydantic.BaseModel"
+
+    def test_repository_impl_no_await_in_session(self):
+        # D19: every per-table impl.py must keep its session block sync.
+        import ast, pathlib
+        impl_dir = pathlib.Path(
+            "src/agentclaw/community/core/agentswarm/repository"
+        )
+        impl_files = sorted(impl_dir.glob("*/impl.py"))
+        assert impl_files, "no per-table impl.py found under repository/"
+        for impl_path in impl_files:
+            tree = ast.parse(impl_path.read_text())
+            for node in ast.walk(tree):
+                assert not isinstance(node, (ast.Await, ast.AsyncFor)), \
+                    f"async construct at {impl_path.name}:{getattr(node, 'lineno', '?')}"
+
+    def test_ddl_orm_column_parity(self):
+        import pathlib, re
+        # AgentSwarm DDL ships as dated forward files (migration policy 12.3);
+        # parity must hold across every file in sql/, not a single name.
+        ddl_dir = pathlib.Path("src/agentclaw/community/core/agentswarm/sql")
+        ddl_text = "\n".join(p.read_text() for p in sorted(ddl_dir.glob("*.sql")))
+        ddl_tables: dict[str, set[str]] = {}
+        for match in re.finditer(
+            r"CREATE TABLE IF NOT EXISTS `(\w+)`\s*\((.*?)\n\) ", ddl_text, re.DOTALL
+        ):
+            table_name, body = match.group(1), match.group(2)
+            cols = set(re.findall(r"^\s+`(\w+)`", body, re.MULTILINE))
+            ddl_tables[table_name] = cols
+        # Later dated files evolve a table additively (`ALTER ... ADD COLUMN`)
+        # instead of rewriting its v1 CREATE TABLE — the added columns are
+        # part of the DDL shape too, or every migrated column reads as drift.
+        for match in re.finditer(r"ALTER TABLE `(\w+)`[^;]*", ddl_text):
+            ddl_tables.setdefault(match.group(1), set()).update(
+                re.findall(r"ADD COLUMN `(\w+)`", match.group(0))
+            )
+        assert len(ddl_tables) == len(om.ALL_MODELS)
+        assert len(ddl_tables) >= 8  # 7 swarm tables + append-only audit
+        for model in om.ALL_MODELS:
+            orm_cols = {c.name for c in model.__table__.columns}
+            ddl_cols = ddl_tables[model.__tablename__]
+            missing = orm_cols - (ddl_cols | {"id", "gmt_create", "gmt_modified"})
+            assert not missing, (
+                f"{model.__tablename__}: ORM columns absent from OceanBase DDL: {missing}"
+            )
+        for table_name, cols in ddl_tables.items():
+            for required in ("env", "tenant", "is_deleted"):
+                assert required in cols, f"{table_name}: {required} missing in DDL"
+
+def db_session(dispatch_repo):
+    """The fixture DB's orm_session — for raw reads independent of the repo."""
+    return dispatch_repo._db.orm_session()

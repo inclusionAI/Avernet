@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, bail};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
-use crate::{app::BridgeApp, config, registration};
+use crate::{app::BridgeApp, registration};
 
 #[derive(Parser)]
 #[command(name = "bcs-bridge", version)]
@@ -29,9 +29,16 @@ enum Commands {
     /// Run the bridge in the foreground, or detach with --daemon
     Start(StartArgs),
     /// Show this user's bridge instance without loading configuration
-    Status,
+    Status(StatusArgs),
     /// Gracefully stop this user's bridge instance without loading configuration
     Stop,
+}
+
+#[derive(Args)]
+struct StatusArgs {
+    /// Print credential-free process and per-Bot observations as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -60,8 +67,7 @@ pub fn parse(app: &BridgeApp) -> Cli {
     let defaults = app.defaults();
     let mut command = Cli::command().about(defaults.about).mut_subcommand("register", |register| {
         let register = register
-            .mut_arg("engine", |arg| arg.required(false).default_value(defaults.engine))
-            .mut_arg("provider_auth", |arg| arg.required(false).default_value(defaults.provider_auth));
+            .mut_arg("engine", |arg| arg.required(false).default_value(defaults.engine));
         match defaults.model {
             Some(model) => register.mut_arg("model", |arg| arg.default_value(model)),
             None => register,
@@ -104,11 +110,11 @@ pub fn prepare_process(cli: &Cli) -> anyhow::Result<()> {
 pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
     match &cli.command {
         #[cfg(unix)]
-        Commands::Status => return crate::instance::status(&runtime_dir()?).await,
+        Commands::Status(args) => return crate::instance::status(&runtime_dir()?, args.json).await,
         #[cfg(unix)]
         Commands::Stop => return crate::instance::stop(&runtime_dir()?).await,
         #[cfg(not(unix))]
-        Commands::Status | Commands::Stop => bail!("Instance management requires Unix"),
+        Commands::Status(_) | Commands::Stop => bail!("Instance management requires Unix"),
         _ => {}
     }
     let named_profile = cli.profile.is_some();
@@ -122,10 +128,15 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
     };
     match cli.command {
         Commands::Register(args) => {
-            if named_profile && args.reuse_profile(&config_path, app)? { return Ok(()); }
+            if (named_profile || args.bot_id.is_some() || crate::multi_config::Document::load(&config_path).is_ok_and(|doc| doc.v2))
+                && args.reuse_profile(&config_path, app)? { return Ok(()); }
             registration::register(*args, &config_path, app).await
         }
         command @ (Commands::Init(_) | Commands::Deinit(_)) => {
+            #[cfg(unix)]
+            let _runtime_guard = crate::instance::reserve_registration(&runtime_dir()?)?;
+            let original = crate::config::read_existing(&config_path)?;
+            let _config_guard = crate::config::PreparedConfig::new(&config_path, original)?;
             let cleanup = matches!(command, Commands::Deinit(_));
             let args = match command { Commands::Init(args) | Commands::Deinit(args) => args, _ => unreachable!() };
             let mut options = toml::Table::new();
@@ -144,36 +155,10 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
             if !config_path.try_exists().context("Cannot inspect bridge configuration")? {
                 bail!("Configuration not found at {}. Provide bridge.toml or pass --config.", config_path.display());
             }
-            let (settings, mut config) = config::load_runtime_with_settings(&config_path, app.credentials())
-                // load_runtime sanitizes parser/credential errors. Retain its useful
-                // message without exposing the underlying error chain or config text.
-                .map_err(|error| anyhow::anyhow!("Cannot load bridge configuration at {}: {error}", config_path.display()))?;
-            if let Some(cwd) = &args.cwd {
-                if config.bots.len() != 1 || !matches!(config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
-                    bail!("--cwd requires a configuration containing one native Codex Bot");
-                }
-                let cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
-                if !cwd.is_dir() { bail!("Working directory must be a directory"); }
-                if settings.provider_auth.is_none() {
-                    bail!("This legacy configuration has no recorded identity policy; set registration.provider_auth to this Bot's registered identity policy before using --cwd");
-                }
-                config.bots[0].cwd = cwd;
-            }
-            for bot in &config.bots {
-                app.engines().build(bot).map_err(anyhow::Error::msg)?.preflight().await?;
-            }
-            if let Some(policy) = &settings.provider_auth {
-                let identity = app.identity(policy)?;
-                for bot in &config.bots {
-                    if matches!(bot.engine.as_str(), "codex" | "codex-desktop") {
-                        identity.validate_workspace(bot, settings.api_url.as_deref()).await?;
-                    }
-                }
-            }
             #[cfg(unix)] {
                 let config_path = config_path.canonicalize().context("Cannot resolve bridge configuration path")?;
-                if args.daemon { return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
-                crate::instance::run(config, app.engines(), &config_path, &runtime_dir()?).await
+                if args.daemon { load_start(&config_path, app, args.cwd.as_deref()).await?; return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
+                crate::instance::run(app, &config_path, &runtime_dir()?, args.cwd.as_deref()).await
             }
             #[cfg(not(unix))] {
                 if args.daemon || args.daemon_child { bail!("Background mode requires Unix"); }
@@ -181,16 +166,47 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
                     .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
                         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
                     .init();
-                bcs_bridge_core::service::serve(config, app.engines()).await
+                let config = load_start(&config_path, app, args.cwd.as_deref()).await?;
+                bcs_bridge_core::service::serve_bridge_managed(config, app.engines(),
+                    tokio_util::sync::CancellationToken::new(), None, bcs_bridge_core::status::BridgeStatus::default()).await
             }
         }
-        Commands::Status | Commands::Stop => unreachable!("handled before configuration resolution"),
+        Commands::Status(_) | Commands::Stop => unreachable!("handled before configuration resolution"),
     }
+}
+
+pub(crate) async fn load_start(config_path: &std::path::Path, app: &BridgeApp, cwd_override: Option<&std::path::Path>) -> anyhow::Result<bcs_bridge_core::config::BridgeConfig> {
+    let document = crate::multi_config::Document::load(config_path)?;
+    let mut providers = crate::multi_config::load_document(&document, config_path, app.credentials())
+        .map_err(|error| anyhow::anyhow!("Cannot load bridge configuration at {}: {error}", config_path.display()))?;
+    if let Some(cwd) = cwd_override {
+        if providers.len() != 1 || providers[0].config.bots.len() != 1
+            || !matches!(providers[0].config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
+            bail!("--cwd requires a configuration containing one native Codex Bot");
+        }
+        let cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
+        if !cwd.is_dir() { bail!("Working directory must be a directory"); }
+        if providers[0].registrations[0].provider_auth.is_none() {
+            bail!("This legacy configuration has no recorded identity policy; set registration.provider_auth to this Bot's registered identity policy before using --cwd");
+        }
+        providers[0].config.bots[0].cwd = cwd;
+    }
+    for provider in &providers {
+        for (bot, settings) in provider.config.bots.iter().zip(&provider.registrations) {
+            app.engines().build(bot).map_err(anyhow::Error::msg)?.preflight().await?;
+            if matches!(bot.engine.as_str(), "codex" | "codex-desktop") {
+                if let Some(policy) = &settings.provider_auth {
+                    app.identity(policy)?.validate_workspace(bot, settings.api_url.as_deref()).await?;
+                }
+            }
+        }
+    }
+    bcs_bridge_core::config::BridgeConfig::new(providers.into_iter().map(|p| p.config).collect())
 }
 
 /// Instance runtime directory (lock, control socket, PID record, daemon log).
 #[cfg(unix)]
-fn runtime_dir() -> anyhow::Result<PathBuf> {
+pub(crate) fn runtime_dir() -> anyhow::Result<PathBuf> {
     Ok(dirs::home_dir().context("Cannot locate home directory for bridge instance management")?.join(".bcn-bridge"))
 }
 
@@ -211,12 +227,45 @@ mod tests {
                 register.mut_arg("model", |arg| arg.default_value("deployment-model"))
             });
             let mut args = vec!["bcs-bridge", "register", "--token", "test-token", "--bot-name", "Test",
-                "--engine", engine, "--provider-auth", "static-bearer"];
+                "--engine", engine];
             if let Some(model) = explicit { args.extend(["--model", model]); }
             let matches = command.clone().try_get_matches_from(args).unwrap();
             let cli = from_matches(&app, &mut command, &matches);
             let Commands::Register(args) = cli.command else { panic!("expected registration"); };
             assert_eq!(args.model.as_deref(), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn startup_preserves_custom_endpoints_without_deployment_classification() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bridge.toml");
+        let group = |id: &str, upstream: &str| -> toml::Table {
+            toml::from_str(&format!("provider_id='{id}'\nmode='plugin'\nstate_path='{id}.db'\napi_url='https://api.example/register'\n[plugin]\nurl='{upstream}'\n[[bot]]\nprovider_bot_ref='worker'\nbot_id='bot-{id}'\nengine='codex'\nengine_bin='/bin/true'\ncwd='{}'\n", dir.path().display())).unwrap()
+        };
+        let first_url = "ws://127.0.0.1:21000/ws/bot";
+        let second_url = "ws://localhost:21001/ws/bot";
+        let first = group("first", first_url);
+        let second = group("second", second_url);
+        let legacy = toml::Value::Table(first.clone());
+        let v2 = toml::Value::Table(toml::Table::from_iter([
+            ("schema_version".into(), 2.into()),
+            ("provider".into(), toml::Value::Array(vec![first.into(), second.into()])),
+        ]));
+        let app = BridgeApp::builder().build();
+        for (document, count) in [(legacy, 1), (v2, 2)] {
+            let text = format!("# Keep custom endpoints unchanged\n{}", toml::to_string(&document).unwrap());
+            std::fs::write(&path, &text).unwrap();
+            let config = load_start(&path, &app, None).await.unwrap();
+            assert_eq!(config.providers.len(), count);
+            assert_eq!(config.providers[0].plugin.as_ref().unwrap().url, first_url);
+            if count == 2 { assert_eq!(config.providers[1].plugin.as_ref().unwrap().url, second_url); }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+            let invalid = text.replace(first_url, "not-a-websocket-url");
+            std::fs::write(&path, &invalid).unwrap();
+            assert!(load_start(&path, &app, None).await.is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
         }
     }
 

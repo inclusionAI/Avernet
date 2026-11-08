@@ -1,3 +1,4 @@
+import type { GroupChatExecApprovalsModel } from '@/pages/Workspace/hooks/useGroupChatExecApprovals';
 import type { DeliveryStatusView, GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
@@ -28,10 +29,12 @@ export interface GroupChatPaneProps {
    * 仅传入即视为当前会话存在问答编排；面板是否渲染由 Human 视角与会话共同决定。
    */
   questions?: GroupChatQuestionsModel;
+  execApprovals?: GroupChatExecApprovalsModel;
   /** 建群后 Driver/Manager 尚未产生第一条消息时的瞬态处理状态。 */
   groupBootstrapProcessing?: boolean;
   supportState: GroupChatState;
   connectionStatus: ProviderConnectionStatus;
+  historyOnly?: boolean;
   send: (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => void;
   /** 按当前群会话直发副屏 <AixUI> 消息（绕开全局桥 last-wins）。由 useGroupChat 提供。 */
   submitPanelMessage: (content: string) => void;

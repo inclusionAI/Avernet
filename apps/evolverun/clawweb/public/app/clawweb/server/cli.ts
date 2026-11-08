@@ -4,9 +4,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { configureClawWebRuntimeConfig } from "@avernet/clawweb-shared/server/db";
-import type { ClawWebBootstrapModule, ClawWebLifecycle } from "./bootstrap.js";
+import type { ClawWebBootstrapModule } from "./bootstrap.js";
 import { loadClawWebConfigFiles, mergeClawWebConfig } from "./config-loader.js";
 import { resolveMachineEnvironment } from "./environment.js";
+import { registerShutdown } from "./shutdown.js";
 
 type CliOptions = { bootstrap?: string; env?: string; config?: string };
 
@@ -61,19 +62,11 @@ async function main(): Promise<void> {
     configOverride,
     configSources: [...existingSources, ...(options.config ? [resolve(options.config)] : [])],
   });
-  registerShutdown(lifecycle);
-}
-
-function registerShutdown(lifecycle: ClawWebLifecycle | void): void {
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) return;
-    stopping = true;
-    await lifecycle?.stop?.();
-    process.exit(0);
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  registerShutdown(lifecycle, {
+    signals: process,
+    exit: (code) => process.exit(code),
+    logError: (error) => console.error("[clawweb] Failed to stop server:", error),
+  });
 }
 
 main().catch((error) => {

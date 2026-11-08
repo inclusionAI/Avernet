@@ -66,29 +66,6 @@ pub struct CompleteSessionWithEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct ClaimSessionCallback {
-    pub session_id: String,
-    pub expected_activation_count: i32,
-    pub lease_owner: String,
-    pub now_ms: u64,
-    pub lease_until_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SessionCallbackClaim {
-    pub lease_token: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct CompleteSessionCallback {
-    pub session_id: String,
-    pub expected_activation_count: i32,
-    pub lease_owner: String,
-    pub lease_token: i64,
-    pub terminal_status: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct AddSessionParticipantWithEvent {
     pub session_id: String,
     pub expected_participants: Vec<Participant>,
@@ -189,8 +166,6 @@ pub trait SessionRepoPort: Send + Sync {
             .await)
     }
     async fn latest_running(&self, group_id: &str) -> Option<Session>;
-    async fn count_running_service(&self, group_id: &str) -> u64;
-    async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session>;
 
     /// Bounded, ascending Session-id page of Running ServiceInvocation Sessions.
     /// The exclusive cursor and environment/status filters apply before LIMIT.
@@ -204,18 +179,6 @@ pub trait SessionRepoPort: Send + Sync {
             message: "Session recovery pagination is not configured".into(),
             request_id: None,
         })
-    }
-
-    /// List completed service Sessions whose current activation still has a
-    /// recoverable callback. Legacy rows are excluded by requiring a
-    /// non-null callback lease token in the concrete store.
-    async fn list_recoverable_callbacks(
-        &self,
-        _now_ms: u64,
-        _after_session_id: Option<&str>,
-        _limit: u64,
-    ) -> ServiceResult<Vec<Session>> {
-        Ok(Vec::new())
     }
 
     /// Count sessions in a group matching the SAME filters as [`SessionRepoPort::list_by_group`]
@@ -373,22 +336,6 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
-    async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()>;
-    async fn claim_callback(
-        &self,
-        _command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> {
-        Err(ServiceError::InvalidOperation {
-            message: "Session callback claim is not configured".to_string(),
-            request_id: None,
-        })
-    }
-    async fn complete_callback(&self, _command: CompleteSessionCallback) -> ServiceResult<bool> {
-        Err(ServiceError::InvalidOperation {
-            message: "Session callback completion is not configured".to_string(),
-            request_id: None,
-        })
-    }
     async fn update_title(&self, session_id: &str, title: Option<String>)
     -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
@@ -397,6 +344,21 @@ pub trait SessionRepoPort: Send + Sync {
         bot_uuid: &str,
     ) -> ServiceResult<Vec<String>> {
         Ok(self.list_group_ids_by_session_participant(bot_uuid).await)
+    }
+
+    /// Fallible existence check for current Session participation within one
+    /// Group. Empty input returns false; Session status does not affect the
+    /// relation. SQL stores must scope by environment and batch Actor IDs,
+    /// without loading full Sessions or issuing one query per Actor.
+    async fn has_group_session_participant(
+        &self,
+        _group_id: &str,
+        _actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InvalidOperation {
+            message: "Batch Session membership lookup is not configured".into(),
+            request_id: None,
+        })
     }
     async fn delete(&self, session_id: &str) -> ServiceResult<bool>;
 
@@ -423,6 +385,24 @@ pub trait SessionRepoPort: Send + Sync {
         _limit: u64,
     ) -> Vec<Session> {
         Vec::new()
+    }
+
+    /// Read the Session's authorization-fact snapshot (spec §8.3).
+    ///
+    /// `Ok(None)` means Session not found. This is a strict read
+    /// against the MASTER data source: implementations must NOT
+    /// consult an ordinary `try_get` display cache and must NOT
+    /// fall back to that cache on a read failure. A storage or
+    /// decoding failure is always `Err`. The default keeps
+    /// unconfigured repository implementations fail-closed.
+    async fn read_authorization_snapshot(
+        &self,
+        _session_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::SessionAuthorizationSnapshot>>
+    {
+        Err(ServiceError::InternalError(
+            "Session authorization snapshot reads are not implemented".to_string(),
+        ))
     }
 
     /// Batch lookup of collect-event timestamps. For each session_id in

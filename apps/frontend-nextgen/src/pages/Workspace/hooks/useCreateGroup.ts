@@ -1,5 +1,5 @@
 import type { GroupView } from '@/domain/collaboration';
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { HumanMentionNotifyMode, MessageViewScope } from '@/domain/collaboration/types';
 import { resolveUserId } from '@/services/workspace/botSessionService';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { groupService } from '@/services/workspace/groupService';
@@ -11,6 +11,7 @@ export interface CreateGroupInput {
   name: string;
   strategy: 'chat' | 'manager_worker' | 'state_machine';
   deliveryPolicy?: 'send_to_driver' | 'inject_observers';
+  humanMentionNotifyMode?: HumanMentionNotifyMode;
   definitionYaml?: string;
   driverBotUuid: string;
   originator: string;

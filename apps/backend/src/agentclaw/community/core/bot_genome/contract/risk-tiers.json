@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "description": "Default risk tier of every Genome Patch op (README §6.3). For each op, the first rule in this list whose op matches, whose target covers the op's gene path, and whose condition holds gives the default tier; raises and policy.risk_overrides then apply, and a patch takes the highest tier over its ops. The tier tables in 01-genome.md §6.3 and 08-promotion.md §5.1 must equal these rules (checked by the contract test).",
+  "rewrite_threshold": {
+    "numerator": 2,
+    "denominator": 5,
+    "description": "Flag rewrite when 5 * (len(a) + len(b) - 2 * LCS(a, b)) > 2 * (len(a) + len(b)) over the file's lines (README §6.3).",
+    "lcs_cell_limit": 16777216,
+    "lcs_cell_limit_description": "After removing the lines a and b share at the start and at the end, if the remaining len(a) * len(b) exceeds this, the file is flagged rewrite without computing the LCS (README §6.3)."
+  },
+  "rules": [
+    {"op": "file.edit", "target": "persona", "tier": "T2", "reason": "persona edit"},
+    {"op": "file.edit", "target": "skills", "when": {"description_only": true}, "tier": "T1", "reason": "skill description tweak"},
+    {"op": "file.edit", "target": "skills", "tier": "T2", "reason": "skill content edit"},
+    {"op": "file.edit", "target": "resources", "tier": "T1", "reason": "resource content edit"},
+    {"op": "persona.add", "target": "persona", "tier": "T2", "reason": "persona file added"},
+    {"op": "persona.remove", "target": "persona", "tier": "T2", "reason": "persona file removed"},
+    {"op": "skill.add", "target": "skills", "tier": "T2", "reason": "skill added"},
+    {"op": "skill.update", "target": "skills", "when": {"description_only": true}, "tier": "T1", "reason": "skill description tweak"},
+    {"op": "skill.update", "target": "skills", "tier": "T2", "reason": "skill content update"},
+    {"op": "skill.remove", "target": "skills", "tier": "T2", "reason": "skill removed"},
+    {"op": "resource.add", "target": "resources", "tier": "T1", "reason": "resource added"},
+    {"op": "resource.remove", "target": "resources", "tier": "T1", "reason": "resource removed"},
+    {"op": "memory.add", "target": "memory", "tier": "T1", "reason": "memory item added"},
+    {"op": "memory.update", "target": "memory", "tier": "T1", "reason": "memory item updated"},
+    {"op": "memory.retire", "target": "memory", "tier": "T1", "reason": "memory item retired"},
+    {"op": "memory.set_mode", "target": "memory", "when": {"mode": "replace"}, "tier": "T3", "reason": "memory replace mode drops runtime memory"},
+    {"op": "memory.set_mode", "target": "memory", "tier": "T1", "reason": "memory mode seed or merge"}
+  ],
+  "raises": [
+    {"kind": "rewrite", "min_tier": "T2", "reason": "a patch changed more than the rewrite threshold of a file, measured from the base to the patch result, or a patch replaced an entry by removing and re-adding its key (README §6.3)"},
+    {"kind": "guardrail_touch", "min_tier": "T2", "reason": "the patch mentions or edits guardrail-like text (07-verification.md)"}
+  ]
+}

@@ -116,7 +116,16 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub caller: SessionCaller,
+    /// The raw authenticated caller. The application
+    /// resolves the effective `SessionCaller` with the
+    /// LIVE Human→Bot hybrid rule
+    /// (`resolve_authorized_principal`): a hybrid
+    /// User+Bot credential becomes the Bot caller only
+    /// through the CURRENT management edge, so a
+    /// revoked historical owner cannot launch behind a
+    /// Bot and a current manager is not rejected
+    /// (bot-authority plan Task 6.3).
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub title: Option<String>,
     pub kind: Option<SessionKind>,
@@ -246,6 +255,9 @@ pub trait SessionService: Send + Sync {
         command: AddSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError>;
 
+    /// Human-only mutation. In addition to Session managers, a Human owner may
+    /// change an existing owned Bot's auto/muted mode. Ownership alone grants
+    /// neither message-view-scope changes nor general Session management.
     async fn update_participant(
         &self,
         command: UpdateSessionParticipant,

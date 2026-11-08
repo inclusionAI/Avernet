@@ -11,7 +11,7 @@
 # What this does NOT test:
 # - Real bot WS protocol (use scripts/test-structured-routing/ for that)
 # - Callback dispatch to AntDing (needs AntDing webhook)
-# - Timeout scanner firing (needs to wait 10s + service_spec.timeout_seconds)
+# - Service Session timeout scanning has been retired
 #
 # Usage:
 #   1. Start BCS server:
@@ -142,18 +142,17 @@ MSG=$(curl_json GET "/sessions/$SID/messages" '' "$TOKEN")
 assert_contains "messages route returns 501 with delegated message" "$MSG" 'delegated to bot chat.history'
 echo
 
-# Step 10: GET /groups/{id} returns service_spec + latest_running_session_id + group_strategy
+# Step 10: GET /groups/{id} returns latest_running_session_id + group_strategy
 cyan "Step 10: GET /groups/{id}"
 DETAIL=$(curl_json GET "/groups/$GID" '' "$TOKEN")
 assert_contains "GET /groups/{id} contains group_strategy" "$DETAIL" '"group_strategy":"chat"'
-assert_contains "GET /groups/{id} contains service_spec field" "$DETAIL" '"service_spec":'
 assert_contains "GET /groups/{id} contains latest_running_session_id field" "$DETAIL" '"latest_running_session_id":'
 echo
 
 # Step 11: PATCH /groups/{id}/settings (validation + 501 apply)
 cyan "Step 11: PATCH /groups/{id}/settings"
 SETTINGS=$(curl_json PATCH "/groups/$GID/settings" '{"service_spec":{"timeout_seconds":60,"max_concurrency":8}}' "$TOKEN")
-assert_contains "settings PATCH validation passes (501)" "$SETTINGS" 'apply deferred'
+assert_contains "settings PATCH reports retirement" "$SETTINGS" 'service_policy_retired'
 echo
 
 # Step 12: POST /services/{group_id}/sessions (svc invocation; svc-key not yet enforced via middleware layer)

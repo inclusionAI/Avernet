@@ -574,3 +574,27 @@ def test_the_resolver_shares_one_pooled_client_across_desktop_transports():
     second = resolver(ctx, lambda path: path)
 
     assert first._transport._client is second._transport._client
+
+
+@pytest.mark.parametrize("cls_name", ["BaasInvokeTransport", "DesktopBaasInvokeTransport"])
+def test_transports_explicitly_extend_the_baas_transport_contract(cls_name):
+    """Nominal, not just structural: both strategies name ``BaasTransport`` as a base,
+    so dropping one of its methods fails at instantiation rather than at first call."""
+    from agentclaw.community.core.devices.services import baas_invoke_transport as mod
+
+    assert mod.BaasTransport in getattr(mod, cls_name).__mro__
+
+
+def test_baas_transport_methods_are_abstract():
+    from agentclaw.community.core.devices.services.baas_invoke_transport import (
+        BaasTransport,
+    )
+
+    assert BaasTransport.__abstractmethods__ == frozenset({"post", "post_multipart"})
+
+    class _PostOnly(BaasTransport):
+        def post(self, path, *, json=None):
+            return _ok_response()
+
+    with pytest.raises(TypeError, match="post_multipart"):
+        _PostOnly()

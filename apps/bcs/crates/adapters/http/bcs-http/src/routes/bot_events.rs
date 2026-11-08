@@ -434,6 +434,7 @@ async fn credential_from_headers(
     headers: &HeaderMap,
     provider_id: &str,
 ) -> Result<ProviderBotEventCredential, BotEventRouteError> {
+    let actor = bcs_auth_api::expected_actor_id(headers).map_err(|_| BotEventRouteError::bad_request("invalid Actor header"))?;
     let token = bearer_token(headers)?;
     if is_jwt_format(&token) {
         let agent_code = state
@@ -441,7 +442,7 @@ async fn credential_from_headers(
             .resolve_agentpass_agent_code(&token)
             .await
             .ok_or_else(|| BotEventRouteError::unauthorized("unauthorized"))?;
-        return Ok(ProviderBotEventCredential::AgentPass { agent_code });
+        return Ok(with_actor(ProviderBotEventCredential::AgentPass { agent_code }, actor));
     }
 
     if let Some(resolved_provider_id) = state
@@ -453,13 +454,20 @@ async fn credential_from_headers(
             return Err(BotEventRouteError::provider_id_mismatch());
         }
         let provider_bot_ref = header_required(headers, BCN_PROVIDER_BOT_REF_HEADER)?;
-        return Ok(ProviderBotEventCredential::ProviderAdmin {
+        return Ok(with_actor(ProviderBotEventCredential::ProviderAdmin {
             provider_admin_token: token,
             provider_bot_ref,
-        });
+        }, actor));
     }
 
-    Ok(ProviderBotEventCredential::StaticBearer(token))
+    Ok(with_actor(ProviderBotEventCredential::StaticBearer(token), actor))
+}
+
+fn with_actor(credential: ProviderBotEventCredential, actor: Option<&str>) -> ProviderBotEventCredential {
+    match actor {
+        Some(actor) => ProviderBotEventCredential::WithActor { credential: Box::new(credential), bot_uuid: actor.into() },
+        None => credential,
+    }
 }
 
 fn bot_event_error(error: ProviderBotEventError) -> BotEventRouteError {
