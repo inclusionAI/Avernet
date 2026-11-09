@@ -32,7 +32,7 @@ it('未打开文件面板时,/file 唤起经 onSearch 动态拉取服务端已�
     ok: true,
     data: {
       items: [
-        { resourceId: 'uploaded-1', displayName: '已上传文件.txt', status: 'ready', sizeBytes: 10, errorCode: null },
+        { resourceId: 'uploaded-1', displayName: '已上传文件.txt', status: 'ready', sizeBytes: 10, errorCode: null, creatorType: null, creatorName: null, createdAt: null },
       ],
       total: 1,
     },

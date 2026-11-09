@@ -11,3 +11,13 @@
 .workspace-chat-panel-layout > div:nth-child(2) > div {
   display: none;
 }
+
+/*
+ * 对话区(ChatArea,LayoutRoot 第一个子 div)默认为「左上/左下直角、右上/右下圆角」
+ * (SDK ChatLayout styles.js)。/workspace/chat 需求:右上角与左下角不用圆角——左下
+ * 本就是直角,这里把右上角的圆角一并取直,对话区四角全直角;选择器以单聊舞台的
+ * data-workspace-conversation 限定作用域,协作群 GroupChatPane 保持 SDK 默认形态。
+ */
+[data-workspace-conversation='true'] .workspace-chat-panel-layout > div:first-child {
+  border-radius: 0;
+}

@@ -2,6 +2,7 @@
 
 import BotTable from '@/components/BotWorkshop/BotCard';
 import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
+import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
@@ -733,7 +734,8 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('服务 Bot 从状态下拉进入发布管理，更多菜单不再重复入口', () => {
+  test('服务 Bot 从状态下拉直接获取操作，更多菜单不再重复入口', async () => {
+    const load = jest.spyOn(botEditorService, 'listLifecycle').mockResolvedValue([]);
     const bot = mapBotDto({
       bot_id: 'general-service-draft',
       bot_name: 'GeneralCC 服务 Bot',
@@ -745,21 +747,23 @@ describe('Agent Coding Bot row actions', () => {
       actions: ['chat', 'restart', 'delete'],
     }).item;
 
-    const onManagePublication = jest.fn();
+    const onPublicationChanged = jest.fn();
     renderTable(bot, {
       onConversation: noop,
       onAction: jest.fn().mockResolvedValue(undefined),
-      onManagePublication,
+      onPublicationChanged,
       getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
     });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
     expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
-    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'GeneralCC 服务 Bot 发布状态' }));
-    expect(onManagePublication).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '发布与阶段推进' }));
-    expect(onManagePublication).toHaveBeenCalledWith(bot);
+    expect(await screen.findByText('当前暂无可执行操作')).toBeInTheDocument();
+    expect(onPublicationChanged).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledWith(bot.id, bot.ownerId);
+    load.mockRestore();
   });
 
   test('Bot 成员点击 Coding Bot 去使用时进入 Coding Chat', () => {
@@ -1034,7 +1038,7 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
       <BotTable
         bots={[bot]}
         onView={onView}
-        onManagePublication={jest.fn()}
+        onPublicationChanged={jest.fn()}
         onAction={jest.fn().mockResolvedValue(undefined)}
       />,
     );
