@@ -232,7 +232,7 @@ ARCA uses the captured old binding's sandbox/tenant through the existing
 backup-only transport; BaaS uses the physical devices returned by its inventory.
 No normal exec permission, provider transport or non-coding lifecycle is changed.
 
-Before backup, Backend sends the embedded read-only publication detector to the
+Before backup, Backend sends the embedded self-contained read-only restart detector to the
 old container (`engines/aicoding/fastdisk_probe.py`). It does not require an
 installed detector. The gate checks both workspace and sessions against actual
 mountpoints and source/target inode identity, and preserves the scripts' valid
@@ -249,11 +249,11 @@ value and log WARN `status=partial_success reason=partial_receipt_valid
  action=continue_restart data_loss_risk=true`; they do not write frontend failure
 fields or emit the restart-failed marker. Full success retains INFO logs. Actual
 failure, missing helper, missing mounts, malformed output, transport error and
-unconfirmed timeout block replacement when enabled. Strict backup has a shared **300-second wait budget**
-across replicas; command durations count against that budget and receipts are
-checked again before mutation. Non-fastdisk/unknown detection retains the
-existing best-effort backup behavior and its original budget. Binding checks,
-restart locks and mutation fences remain mandatory in either case.
+unconfirmed timeout block replacement when enabled. Strict backup has a shared **1500-second wait budget**
+across replicas; command durations count against that budget. A successful terminal
+receipt is validated once, without another helper query before mutation.
+Non-fastdisk/unknown detection skips the backup helper. Binding checks, restart
+locks and mutation fences remain mandatory in either case.
 
 The existing `ac_common_config` key `aicoding / fastdisk_fail_block`
 controls only fastdisk backup vetoes. Blocking defaults to `false`; only an enabled
@@ -262,7 +262,7 @@ invalid or unreadable configuration remains non-blocking. The strategy lazily re
 configuration only for confirmed fastdisk and snapshots the value across its
 backup/receipt precondition. The composition root supplies the config-service
 factory without doing I/O at import time. No per-engine logic is added to the
-shared restart flow. Both settings still run backup and retain the 300-second
+shared restart flow. For confirmed fastdisk, both settings still run backup and retain the 1500-second
 fastdisk budget; binding checks and mutation fences remain blocking. The previous
 `fastdisk_fail_open` key is no longer read and is not interpreted in reverse.
 See `engines/aicoding/restart-backup.md` for the operator curl and data-loss warning.
@@ -276,6 +276,10 @@ finish the task without issuing a provider workflow. All veto classification,
 operation failure, guard ownership, replay checks and failure persistence live in
 `engines/aicoding/restart_backup.py`; there is no shared backup exception or
 separate published-restart mixin. Failure-log formatting also lives in this file.
+Backup logs retain their existing event names and include `operation_type=restart`
+or `operation_type=recycle`. Backup failures use WARNING even when the configured
+guard blocks the operation, preserving the current restart diagnostic severity.
+Wrapped failure summaries retain the originating operation type after context cleanup.
 The common publish flow keeps its original orchestration inside `execute_restart`
 and enters the strategy's `published_restart_scope`; it does not extract a second
 common execution function. The scope yields an empty result to proceed, or a

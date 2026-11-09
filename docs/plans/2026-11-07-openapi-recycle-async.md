@@ -1,6 +1,6 @@
 # AICoding 个人 Bot 异步回收与备份
 
-状态：已实现，2026-11-08 按重启备份策略收敛职责；本轮调整未提交、未推送。未部署，未完成真实容器恢复验收。
+状态：已实现；2026-11-16 rebase 到 dev 并对齐当前重启备份策略。本文不代表部署或真实容器恢复验收通过。
 
 ## 1. 范围与分层
 
@@ -34,7 +34,8 @@ POST recycle
 
 `prepare_recycle` 保存在 AICoding mixin，直接复用 `prepare_restart`，不是复制一套备份规则。
 `fastdisk_fail_block` 仍由原 `_fastdisk_backup_blocking` 读取；每个 operation 保存首次读取结果。
-复用既有 `FASTDISK_TIMEOUT=300`、普通备份 1500 秒预算及 partial-success 语义。
+复用当前 dev 的 `FASTDISK_TIMEOUT=1500`、普通备份 1500 秒预算及 partial-success 语义。
+非快盘或初次探测失败跳过 helper；最终成功凭据只校验一次，不在释放前重复查询 helper。目标/绑定检查保持不变。
 保存稳定 operation ID、首次开始时间、已确认快盘和 warning，重投不会重置预算或丢弃证据。
 
 备份上下文只携带备份证据，不设置 `current_restart`，因此不会触发重启 mutation fence 或更新重启状态。
