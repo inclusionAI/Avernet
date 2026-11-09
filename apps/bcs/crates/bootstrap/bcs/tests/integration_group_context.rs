@@ -653,6 +653,8 @@ async fn session_create_inherits_only_the_selected_readable_contexts() {
         }
     };
     let create = format!("/groups/{group_id}/sessions");
+    let (status, body) = post(create.clone(), json!({"context_names":["timeline"]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     let (status, source) = post(create.clone(), json!({})).await;
     assert_eq!(status, StatusCode::CREATED, "{source}");
     let source_id = source["id"].as_str().unwrap();
@@ -691,4 +693,93 @@ async fn session_create_inherits_only_the_selected_readable_contexts() {
     copied_names.sort();
     assert_eq!(copied_names, ["skipped", "timeline"]);
     server.abort();
+}
+
+struct SlotTestIdentity;
+
+#[async_trait::async_trait]
+impl bcs_http::state::UserIdentityPort for SlotTestIdentity {
+    async fn extract(
+        &self,
+        _: &axum::http::HeaderMap,
+        _: &axum::http::Uri,
+    ) -> Option<bcs_http::state::HttpUserIdentity> {
+        Some(bcs_http::state::HttpUserIdentity {
+            staff_no: Some("slot-owner".into()),
+            nick_name: None,
+        })
+    }
+
+    async fn ensure_identity(
+        &self, _: &str, _: &str, _: Option<&str>, _: Option<&str>, _: &str,
+    ) -> Result<String, bcs_auth_api::AuthError> {
+        panic!("slot management must not create an identity")
+    }
+
+    async fn get_identity_by_token(
+        &self, _: &str,
+    ) -> Result<Option<bcs_auth_api::UserIdentityInfo>, bcs_auth_api::AuthError> {
+        Ok(None)
+    }
+
+    async fn get_identity_by_user_id(
+        &self, _: &str,
+    ) -> Result<Option<bcs_auth_api::UserIdentityInfo>, bcs_auth_api::AuthError> {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn human_slot_management_routes_persist_changes_and_report_validation_errors() {
+    use bcs_service_api::{Group, GroupCoreService, Participant, ParticipantRole};
+
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let authority = bcs_test_support::authority_edge_fixture();
+    bcs_test_support::grant_owner_edge(&authority.repo, "slot-driver", "slot-owner").await;
+    let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
+    groups.upsert(Group::new(
+        "slot-group", "slot-driver", vec![Participant::bot("slot-driver", ParticipantRole::Driver)],
+    )).await.unwrap();
+    let service = bcs_app_session::GroupContextAddAccessGuard::new(
+        Arc::new(GroupContextApplicationServiceImpl::new(repo.clone())),
+        groups,
+        Arc::new(bcs_session_store::MemorySessionRepo::new()),
+        authority.hook,
+    );
+    let services = Services::builder().group_context(Arc::new(service)).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(SlotTestIdentity)));
+    let post = |uri: &str, body: Value| {
+        let request = Request::post(uri).header("content-type", "application/json")
+            .body(Body::from(body.to_string())).unwrap();
+        app.clone().oneshot(request)
+    };
+
+    let endpoint = "/groupcontext/change-slot?groupId=slot-group";
+    let add = json!({"operation":"add","name":"timeline"});
+    for (uri, body) in [
+        ("/groupcontext/change-slot", add.clone()),
+        (endpoint, json!({"operation":"unknown"})),
+    ] {
+        assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    }
+
+    for body in [
+        add,
+        json!({"operation":"edit","name":"timeline","new_name":"events","description":"Key events"}),
+    ] {
+        let response = post(endpoint, body).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["status"], "ok");
+    }
+    let slots = repo.list_slots("slot-group").await.unwrap();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].name, "events");
+    assert_eq!(slots[0].description, "Key events");
+    assert_eq!(slots[0].creator, "human_slot-owner");
+    assert_eq!(slots[0].modifier, "human_slot-owner");
+
+    let delete = json!({"operation":"delete","name":"events"});
+    assert_eq!(post(endpoint, delete.clone()).await.unwrap().status(), StatusCode::OK);
+    assert!(repo.list_slots("slot-group").await.unwrap().is_empty());
+    assert_eq!(post(endpoint, delete).await.unwrap().status(), StatusCode::NOT_FOUND);
 }
