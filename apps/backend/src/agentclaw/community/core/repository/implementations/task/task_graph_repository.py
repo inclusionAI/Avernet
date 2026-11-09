@@ -41,6 +41,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 _GRAPH_STATUS_KEY = "__graph_status"
+_RUNTIME_REASONS_KEY = "__runtime_reasons"
 # Hard cap for one durable handoff's retry storm. This is a safety net for
 # unknown graph/status reconciliation bugs; legitimate retryable failures
 # also mark the intent EXHAUSTED after this many delivery attempts.
@@ -191,6 +192,12 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             nodes = []
             for row in node_rows:
                 runtime_row = latest_runs.get(row.node_id)
+                runtime_props = (
+                    json.loads(runtime_row.extend_props)
+                    if runtime_row and runtime_row.extend_props else {}
+                )
+                # Storage metadata must not become domain / HTTP extend_props.
+                reasons = runtime_props.pop(_RUNTIME_REASONS_KEY, {})
                 runtime = runtime_from_dict({
                     "run_mode": runtime_row.run_mode if runtime_row else None,
                     "assignee": runtime_row.assignee if runtime_row else None,
@@ -205,10 +212,9 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                         json.loads(runtime_row.actual_goal)
                         if runtime_row and runtime_row.actual_goal else None
                     ),
-                    "extend_props": self._hydrated_extend_props(
-                        json.loads(runtime_row.extend_props)
-                        if runtime_row and runtime_row.extend_props else {}
-                    ),
+                    "progress_reason": reasons.get("progress_reason"),
+                    "failure_reason": reasons.get("failure_reason"),
+                    "extend_props": self._hydrated_extend_props(runtime_props),
                 })
                 nodes.append((row.node_id, Status(row.status), json.loads(row.task_spec), runtime))
             relations = [
@@ -729,7 +735,15 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 else None
             )
             run_row.session_id = node.run_info.extend_props.get("session_id")
-            run_row.extend_props = self._json(self._persistable_extend_props(node.run_info.extend_props))
+            # Persist first-class runtime reasons in the existing JSON column;
+            # copy rather than modify the live domain object's extension bag.
+            run_row.extend_props = self._json({
+                **self._persistable_extend_props(node.run_info.extend_props),
+                _RUNTIME_REASONS_KEY: {
+                    "progress_reason": node.run_info.progress_reason,
+                    "failure_reason": node.run_info.failure_reason,
+                },
+            })
             run_row.start_time = node.run_info.start_time
             run_row.end_time = node.run_info.end_time
             run_row.update_time = int(time.time() * 1000)

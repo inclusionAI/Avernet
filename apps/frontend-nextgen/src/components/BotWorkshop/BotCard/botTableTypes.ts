@@ -25,7 +25,8 @@ export interface BotTableProps {
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
-  onManagePublication?: (bot: BotDomain) => void;
+  onPublicationChanged?: () => Promise<void>;
+  onPublicationGateBlocked?: (bot: BotDomain) => void;
   onAction?: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
   onReleaseLock?: (bot: BotDomain) => Promise<void>;
@@ -60,7 +61,8 @@ export type BotTableColumnOptions = Pick<
   | 'onHealthCheck'
   | 'onChangeSpace'
   | 'onAuthorize'
-  | 'onManagePublication'
+  | 'onPublicationChanged'
+  | 'onPublicationGateBlocked'
   | 'onAction'
   | 'onClaimLock'
   | 'onReleaseLock'

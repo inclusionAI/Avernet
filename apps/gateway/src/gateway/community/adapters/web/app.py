@@ -18,6 +18,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 
 from gateway.community import __version__
 from gateway.community.adapters.web._cors import install_cors
+from gateway.community.adapters.web._envelope import install_error_envelope
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web._log_redaction import install_credential_redaction
 from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
@@ -83,6 +84,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         swagger_ui_parameters={"supportedSubmitMethods": []},
     )
+
+    # The gateway's own failures (routing 404/405, request validation, a refused
+    # credential raised from a dependency) answer in the response envelope, not
+    # FastAPI's ``{"detail": ...}`` body. Upstream responses are relayed as-is.
+    # Installed before the tracer so its request-id middleware sits inside the
+    # span and every envelope carries the trace id, the 500 included.
+    install_error_envelope(app)
 
     tracer = get_tracer_plugin()
     tracer.setup(config.app_name)

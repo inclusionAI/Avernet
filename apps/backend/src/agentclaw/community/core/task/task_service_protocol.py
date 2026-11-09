@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportResult,
     TaskSpec,
 )
+from agentclaw.community.core.task.domain.search_viewer import SearchViewerType
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.intake import (
     TaskIntakeCommand,
@@ -106,6 +107,8 @@ class TaskServiceProtocol(Protocol):
 
     async def search_bots(
         self, *, query: str, task_id: str, node_id: str,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]: ...
 
     def attach_bbs_node(

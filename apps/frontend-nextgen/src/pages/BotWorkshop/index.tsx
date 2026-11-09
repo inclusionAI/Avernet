@@ -10,7 +10,6 @@ import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
 import { ServiceBotEvalGateBlockedModal } from '@/components/BotWorkshop/ServiceBotEvaluation/ServiceBotEvalGateBlockedModal';
-import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -19,7 +18,6 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { useServiceBotEvalMenuVisibility } from '@/hooks/useServiceBotEvalMenuVisibility';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
-import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { history } from '@umijs/max';
@@ -39,7 +37,6 @@ const BotWorkshopPage: React.FC = () => {
     if (keyword || createCloud) history.replace('/bot-workshop');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次性消费,workshop 方法每渲染重建不进依赖。
   }, []);
-  const [publicationBot, setPublicationBot] = useState<BotDomain>();
   const [evalGateModalBot, setEvalGateModalBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
@@ -75,25 +72,6 @@ const BotWorkshopPage: React.FC = () => {
     );
   };
   const openEvaluationHistory = (bot: BotDomain) => openEvaluation(bot, 'eval_history');
-  const handleManagePublication = async (bot: BotDomain) => {
-    if (bot.lifecycle !== 'draft') {
-      setPublicationBot(bot);
-      return;
-    }
-    try {
-      const version = String(bot.publicationVersion ?? bot.liveVersion ?? '');
-      if (!version) throw new Error('评测版本不存在，无法推进发布');
-      const gate = await serviceBotEvalService.precheck(bot.id, version, bot.ownerId);
-      if (gate.allowed) {
-        setPublicationBot(bot);
-        return;
-      }
-      setEvalGateModalBot(bot);
-    } catch (error) {
-      if (error instanceof Error && error.message === '评测版本不存在，无法推进发布') setEvalGateModalBot(bot);
-      else setEvalGateModalBot(bot);
-    }
-  };
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full p-5 sm:p-6">
@@ -193,7 +171,8 @@ const BotWorkshopPage: React.FC = () => {
                         getGeneralConfigAvailability(bot, workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
-                      onManagePublication={(bot) => void handleManagePublication(bot)}
+                      onPublicationChanged={() => workshop.retry({ silent: true })}
+                      onPublicationGateBlocked={setEvalGateModalBot}
                       onOpenEvaluation={openEvaluation}
                       onOpenEvalHistory={openEvaluationHistory}
                       onAction={workshop.runAction}
@@ -268,14 +247,6 @@ const BotWorkshopPage: React.FC = () => {
             if (evalGateModalBot) openEvaluation(evalGateModalBot);
             setEvalGateModalBot(undefined);
           }}
-        />
-        <ServicePublicationDrawer
-          bot={publicationBot}
-          onClose={() => {
-            setPublicationBot(undefined);
-            void workshop.retry({ silent: true });
-          }}
-          onChanged={workshop.retry}
         />
         {generalConfigBot ? (
           <BotGeneralConfigDialog bot={generalConfigBot} onClose={() => setGeneralConfigBot(undefined)} />

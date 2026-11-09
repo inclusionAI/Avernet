@@ -115,6 +115,7 @@ class ManualConsentPassportPlugin:
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         tenant = get_current_avernet_tenant()
         status, body = self._request(
@@ -156,6 +157,7 @@ class ManualConsentPassportPlugin:
         cli_items: list[CliItem] | None = None,
         *,
         target_env: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         tenant = get_current_avernet_tenant()

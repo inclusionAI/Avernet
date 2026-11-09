@@ -434,7 +434,7 @@ def test_report_dto_rejects_empty_action_type() -> None:
     ), excinfo.value.errors()
 
 
-def test_relay_search_request_rejects_unknown_or_empty_fields() -> None:
+def test_relay_search_request_ignores_unknown_but_rejects_empty_fields() -> None:
     valid = {
         "query": "q",
         "task_id": "t1",
@@ -443,15 +443,16 @@ def test_relay_search_request_rejects_unknown_or_empty_fields() -> None:
     }
     assert TaskSearchRequestDTO.model_validate(valid).task_id == "t1"
 
-    with pytest.raises(ValidationError):
-        TaskSearchRequestDTO.model_validate({**valid, "extra": "x"})
+    assert TaskSearchRequestDTO.model_validate({**valid, "extra": "x"}).model_dump() == (
+        TaskSearchRequestDTO.model_validate(valid).model_dump()
+    )
     with pytest.raises(ValidationError):
         TaskSearchRequestDTO.model_validate({**valid, "task_id": ""})
     with pytest.raises(ValidationError):
         TaskSearchRequestDTO.model_validate({**valid, "task_id": " "})
 
 
-def test_relay_dispatch_request_rejects_unknown_or_empty_fields() -> None:
+def test_relay_dispatch_request_ignores_unknown_but_rejects_empty_fields() -> None:
     valid = {
         "task_id": "t1",
         "target_node_id": "target",
@@ -460,8 +461,9 @@ def test_relay_dispatch_request_rejects_unknown_or_empty_fields() -> None:
     }
     assert TaskDispatchRequestDTO.model_validate(valid).target_node_id == "target"
 
-    with pytest.raises(ValidationError):
-        TaskDispatchRequestDTO.model_validate({**valid, "extra": "x"})
+    assert TaskDispatchRequestDTO.model_validate({**valid, "extra": "x"}).model_dump() == (
+        TaskDispatchRequestDTO.model_validate(valid).model_dump()
+    )
     with pytest.raises(ValidationError):
         TaskDispatchRequestDTO.model_validate({**valid, "target_node_id": ""})
     with pytest.raises(ValidationError):
@@ -726,3 +728,67 @@ def test_runtime_info_dto_output_accepts_scalar_string():
 
     empty_dto = RuntimeInfoDTO()
     assert empty_dto.output == {}
+
+
+@pytest.mark.parametrize(
+    "viewer_type,viewer_id", [("bot", "candidate:owner"), ("human", "146836")]
+)
+def test_relay_search_accepts_paired_viewer_scope(viewer_type, viewer_id):
+    parsed = TaskSearchRequestDTO.model_validate(
+        {
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "n1",
+            "relay_token": "generation-1",
+            "viewer_actor_type": viewer_type,
+            "viewer_actor_id": f"  {viewer_id}  ",
+        }
+    )
+    assert parsed.viewer_actor_type == viewer_type
+    assert parsed.viewer_actor_id == viewer_id
+
+
+@pytest.mark.parametrize(
+    "viewer",
+    [
+        {},
+        {"viewer_actor_type": None, "viewer_actor_id": None},
+    ],
+)
+def test_relay_search_absent_viewer_keeps_default_scope(viewer):
+    parsed = TaskSearchRequestDTO.model_validate(
+        {
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "n1",
+            "relay_token": "generation-1",
+            **viewer,
+        }
+    )
+    assert parsed.viewer_actor_type is None
+    assert parsed.viewer_actor_id is None
+
+
+@pytest.mark.parametrize(
+    "viewer",
+    [
+        {"viewer_actor_type": "bot"},
+        {"viewer_actor_id": "b:1"},
+        {"viewer_actor_type": "bot", "viewer_actor_id": None},
+        {"viewer_actor_type": None, "viewer_actor_id": "b:1"},
+        {"viewer_actor_type": "admin", "viewer_actor_id": "b:1"},
+        {"viewer_actor_type": "human", "viewer_actor_id": "  "},
+        {"viewer_actor_type": "bot", "viewer_actor_id": 146836},
+    ],
+)
+def test_relay_search_rejects_invalid_viewer_scope(viewer):
+    with pytest.raises(ValidationError):
+        TaskSearchRequestDTO.model_validate(
+            {
+                "query": "q",
+                "task_id": "t1",
+                "node_id": "n1",
+                "relay_token": "generation-1",
+                **viewer,
+            }
+        )

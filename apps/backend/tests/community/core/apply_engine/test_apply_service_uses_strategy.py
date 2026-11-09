@@ -162,6 +162,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             resource_rows=resource_rows_for()[0],
             cli_tool_service=EmptyCliTools(),
             shared_skills=object(),
+            file_sync=None,
         )
 
     device_ports = device_port_bundle(activation_service=device_activation, cli_tool_service=EmptyCliTools())
