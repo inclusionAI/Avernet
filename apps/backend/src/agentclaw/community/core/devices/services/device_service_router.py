@@ -277,18 +277,6 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
             device_props_extra=device_props_extra,
         )
 
-    def submit_recycle_release(self, *, target, request_id, owner_id):
-        service = self._providers.get(target["provider"])
-        if service is None:
-            raise DeviceServiceError("Recycle provider unavailable")
-        return service.submit_recycle_release(target=target, request_id=request_id, owner_id=owner_id)
-
-    def observe_recycle_release(self, *, target, release):
-        service = self._providers.get(target["provider"])
-        if service is None:
-            raise DeviceServiceError("Recycle provider unavailable")
-        return service.observe_recycle_release(target=target, release=release)
-
     @override
     def release_device(
         self,

@@ -238,7 +238,6 @@ from agentclaw.community.core.task.forum.interaction.personal_center_activity_se
 )
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
-from agentclaw.community.core.bot_dormant.recycle_operation import RecycleOperationService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
@@ -417,7 +416,7 @@ _PAIRS = [
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),
     (BotDormantRecycleServiceProtocol, RecycleBotService),
-    (BotDormantRecycleOperationProtocol, RecycleOperationService),
+    (BotDormantRecycleOperationProtocol, RecycleBotService),
     (BotDormantAuditServiceProtocol, DormantAuditService),
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),

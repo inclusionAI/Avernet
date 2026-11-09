@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-from agentclaw.community.core.bot_dormant.recycle_state import BLOCKING, journal as recycle_journal
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import BLOCKING, journal as recycle_journal
 
 KEY = "coding_restart"
 TASK_TYPE = "aicoding.bot.restart"

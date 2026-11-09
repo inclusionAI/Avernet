@@ -34,7 +34,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
-from agentclaw.community.core.bot_dormant.recycle_state import RecycleUnavailable
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -368,3 +368,40 @@ def test_query_owner_alias_conflict_is_422(client, recycle_service):
     response = client.get("/openapi/v1/bots/b1/recycle-operations/op1", params={"entity_id": "u1", "owner_id": "u2"})
     assert response.status_code == 422
     recycle_service.get_operation.assert_not_called()
+
+
+@pytest.mark.parametrize("engine,http_status", [("openclaw", 200), ("claude_code", 202)])
+def test_real_recycle_facade_selects_engine_execution_policy(engine, http_status):
+    from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
+    from agentclaw.community.core.bot_management.engines.recycle_contract import RecycleServices
+
+    bots, passport, audit, operations = (MagicMock() for _ in range(4))
+    bots.get_bot.return_value = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal",
+                                 "active_engine": engine, "status": "ACTIVE", "ext": {}}
+    bots.is_teclaw_bot.return_value = False
+    operations.submit.return_value = {"bot_id": "b1", "owner_id": "u1", "status": "ACTIVE",
+                                       "changed": True, "operation_id": "op1", "phase": "QUEUED"}
+    factory = MagicMock(return_value=operations)
+    service = RecycleBotService(bots, passport, recycle_services=RecycleServices(factory), audit_service=audit)
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(BotDormantRecycleOperationProtocol, to=service)
+            binder.bind(BotRepository, to=SeamBots())
+            binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
+    attach_injector(app, Injector([Bindings()]))
+    mount_public_error_handlers(app)
+    response = user_scoped_client(app, "u1").post("/openapi/v1/bots/b1/recycle")
+    assert response.status_code == http_status
+    if http_status == 200:
+        assert response.json()["data"]["status"] == "RECYCLED"
+        factory.assert_not_called()
+        audit.record_openapi_recycle.assert_called_once()
+    else:
+        assert response.json()["data"]["operation_id"] == "op1"
+        bots.stop_bot.assert_not_called()
+        audit.record_openapi_recycle.assert_not_called()

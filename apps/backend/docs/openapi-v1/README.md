@@ -1353,7 +1353,7 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
-| POST | `/openapi/v1/bots/{bot_id}/recycle` | Durably submit backup and resource release for an ACTIVE personal managed-cloud Bot | `202 Envelope[BotRecycleResult]`; already RECYCLED: `200`, `changed=false` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot using its engine strategy | AICoding: `202 Envelope[BotRecycleResult]`; default engines/RECYCLED: `200` |
 | GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
@@ -1379,7 +1379,10 @@ are hidden as 404. Teclaw, desktop and service Bots are outside this lifecycle.
 
 #### Asynchronous recycle and reactivation
 
-`POST .../recycle` has no body. It persists a `bot.recycle` task and returns
+`POST .../recycle` has no body and selects the engine strategy, as restart does.
+Default engines (for example OpenClaw) retain synchronous recycling and HTTP 200;
+they do not construct a coding queue, probe fastdisk, or return an operation handle.
+The AICoding strategy (`aicoding` / `claude_code`) persists a `bot.recycle` task and returns
 202 with `bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id`
 and `phase`. It does not wait for backup or call container destruction in the
 HTTP request. `changed=true` means a new operation was admitted, **not that the
@@ -1389,7 +1392,8 @@ operation still returns 200 / `status=RECYCLED` / `changed=false`, with no new
 backup, release or audit. Incompatible state or a busy lifecycle returns 409;
 a disabled worker or unconfirmed durable admission returns 503.
 
-Poll the dedicated `GET .../recycle-operations/{operation_id}`. Its data contains
+For AICoding operations, poll the dedicated `GET .../recycle-operations/{operation_id}`.
+Default engines have no operation record and answer 404 without constructing a coding runtime. Its data contains
 `bot_id`, `owner_id`, `operation_id`, `bot_status`, `phase`, nullable
 `error_code`, `message`, and `warning` (safe code/message only). HTTP 200 means
 the operation was read successfully, including when its phase is FAILED. GET
@@ -1404,13 +1408,13 @@ QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
               FAILED    NEEDS_CONFIRMATION
 ```
 
-Backup reuses the engine's restart strategy and `fastdisk_fail_block` policy,
+AICoding backup reuses its restart strategy and `fastdisk_fail_block` policy,
 read once per operation. With blocking enabled, a failed/expired required
 backup ends the **operation** as FAILED: Bot remains ACTIVE, with its old
 binding and Passport unchanged. It does not set Bot.status or startup markers
 to FAILED. With blocking disabled, existing best-effort behavior remains and a
-confirmed degraded backup is surfaced as a warning. Unsupported backup engines
-retain their existing no-op policy. Redelivery preserves the backup operation
+confirmed degraded backup is surfaced as a warning. Other engines remain on their original synchronous lifecycle rather than
+entering this state machine. Redelivery preserves the backup operation
 ID, first-start budget and already-confirmed fastdisk targets.
 
 Resource release is submitted only after the durable RELEASING fence, followed
