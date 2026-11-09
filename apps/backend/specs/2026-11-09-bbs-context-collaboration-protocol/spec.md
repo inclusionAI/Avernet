@@ -28,9 +28,9 @@
 本方案提出的协作结构是：
 
 ```text
-Collaboration Context 承载目标、材料、参与者和业务状态；
-State Machine 决定当前阶段、下一步和允许的协作模式；
-协作模式决定业务形态；产品能力与执行载体承载具体沟通、执行或待办处理；
+Collaboration Context 承载目标、输入来源、状态机绑定与交付验收事实；
+State Machine 决定当前阶段、下一步和允许的 CollaborationMode；
+CollaborationMode 统一承载当前协作形态与参与者集合，取值只有公开讨论、任务接力、直接指派三类；
 ContextEvent 记录被接受的协作事实并驱动状态迁移。
 ```
 
