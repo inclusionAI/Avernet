@@ -383,9 +383,9 @@ describe('GroupChatComposer — Open 装配真实任务槽位（能力菜单 + �
 
     fireEvent.click(screen.getByTestId('sender-submit'));
 
-    // 真实槽位 payload（registerOpenGroupTaskSlots）既有「/task-intent-recognition」指令形态。
+    // 真实槽位 payload（registerOpenGroupTaskSlots）现行「/skill/task-intake」指令形态（taskMapper 真源）。
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith('/task-intent-recognition 追问内容', [], undefined);
+    expect(onSend).toHaveBeenCalledWith('/skill/task-intake 追问内容', [], undefined);
     expect(execution.clearSelection).toHaveBeenCalledTimes(1);
     expect(onDraftChange).toHaveBeenCalledWith('');
   });
