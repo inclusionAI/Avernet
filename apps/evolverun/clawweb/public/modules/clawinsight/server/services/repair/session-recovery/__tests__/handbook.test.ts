@@ -8,19 +8,25 @@ function history(kind: RecoveryTimelineEvent["kind"], handbook: unknown): Recove
 const task = (timeline: RecoveryTimelineEvent[]) => ({ timeline } as RecoveryStoredTask);
 
 describe("recovery handbook references", () => {
+  it.each(["MCP", "TOOL", "SKILL", "MODEL"])("offers network guidance for coarse %s faults without prescribing a recovery action", category => {
+    expect(recoveryHandbook(`TC.${category}.EXAMPLE`).chapters).toContain("common/network/handbook.md");
+  });
   it("routes one category to multiple candidate topics without embedding advice", () => {
     expect(recoveryHandbook("TC.MCP.PERMISSION")).toEqual({
       skillName: "clawevolve-recovery-handbook", handbookVersion: "clawevolve-recovery-handbook/v3", category: "TC.MCP", teamKey: null,
-      chapters: ["common/mcp/handbook.md", "common/file-download/handbook.md"],
+      chapters: ["common/mcp/handbook.md", "common/file-download/handbook.md", "common/network/handbook.md"],
       verificationReference: expect.any(String),
     });
   });
-  it.each(["TC.MODEL.DATA", "TC.TOOL.PERMISSION", "TC.SESSION_CONTEXT.DATA"])(
+  it.each(["TC.MODEL.DATA", "TC.TOOL.PERMISSION"])(
     "shares the file topic with %s", code => {
-      expect(recoveryHandbook(code).chapters).toEqual(["common/file-download/handbook.md"]);
+      expect(recoveryHandbook(code).chapters).toEqual(["common/file-download/handbook.md", "common/network/handbook.md"]);
     });
+  it("keeps session context on its existing file candidate", () => {
+    expect(recoveryHandbook("TC.SESSION_CONTEXT.DATA").chapters).toEqual(["common/file-download/handbook.md"]);
+  });
   it("routes Skill faults to the general Skill handbook alongside shared file guidance", () => {
-    expect(recoveryHandbook("TC.SKILL.INSTRUCTION").chapters).toEqual(["common/skill/handbook.md", "common/file-download/handbook.md"]);
+    expect(recoveryHandbook("TC.SKILL.INSTRUCTION").chapters).toEqual(["common/skill/handbook.md", "common/file-download/handbook.md", "common/network/handbook.md"]);
   });
   it.each([null, "TC.NEW.CATEGORY", "TC.MCPX.DATA", "TC.MCP-PERMISSION", "other"])(
     "does not select a fallback topic for %s", code => {
@@ -28,7 +34,7 @@ describe("recovery handbook references", () => {
     });
   it("does not let one task modify the next task's candidate list", () => {
     recoveryHandbook("TC.MCP.DATA").chapters.pop();
-    expect(recoveryHandbook("TC.MCP.DATA").chapters).toEqual(["common/mcp/handbook.md", "common/file-download/handbook.md"]);
+    expect(recoveryHandbook("TC.MCP.DATA").chapters).toEqual(["common/mcp/handbook.md", "common/file-download/handbook.md", "common/network/handbook.md"]);
   });
   it("restores the saved list instead of rebuilding it from the current catalog", () => {
     const saved = { ...recoveryHandbook("TC.MCP.DATA"), chapters: ["mcp/handbook.md"] };

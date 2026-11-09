@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 import { workflowVersionSourceLabel } from '../utils/workflow-version-source'
 import { useWorkflowAccess } from '../api/hooks'
 import WorkflowVersionDiff from './WorkflowVersionDiff'
+import YamlCodeViewer from './YamlCodeViewer'
 
 interface WorkflowHistoryPanelProps {
   workflowId: string
@@ -29,18 +29,6 @@ function formatTime(epochSec: number): string {
   return new Date(epochSec * 1000).toLocaleString()
 }
 
-/** Best-effort: render spec_json as text. Handles the {"content":"yaml"} wrapper. */
-function specJsonToText(specJson: string): string {
-  try {
-    const parsed = JSON.parse(specJson)
-    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
-      return parsed.content
-    }
-    return stringifyYaml(parsed, { lineWidth: 0 })
-  } catch {
-    return specJson
-  }
-}
 
 export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange, onClose }: WorkflowHistoryPanelProps) {
   const [history, setHistory] = useState<(DeployHistoryItem & { source?: import('../../server/contracts/workflow-version-source').WorkflowVersionSource | null })[]>([])
@@ -172,7 +160,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
         <div className="p-8 text-center text-sm text-gray-400">暂无已发布版本</div>
       ) : (
         <div className="flex flex-1 overflow-hidden bg-slate-100">
-          <aside className="flex w-[340px] shrink-0 flex-col border-r border-slate-200 bg-white">
+          <aside className="flex w-[272px] shrink-0 flex-col border-r border-slate-200 bg-white">
             <div className="border-b border-slate-100 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">已发布版本 · 选择两项进行比较</div>
             <div className="flex-1 overflow-y-auto px-2 py-2">
               {history.map((h) => {
@@ -238,16 +226,14 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                 {snapshotLoading ? (
                   <div className="p-4 text-sm text-gray-500">加载中…</div>
                 ) : snapshot ? (
-                  <pre className="flex-1 overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-200">
-                    {specJsonToText(snapshot.specJson)}
-                  </pre>
+                  <YamlCodeViewer value={snapshot.specJson} />
                 ) : (
                   <div className="p-4 text-sm text-gray-400">无内容</div>
                 )}
               </div>
             ) : (
               <div className="flex h-full items-center justify-center p-8 text-center">
-                <div><div className="text-sm font-medium text-slate-600">选择一个版本查看内容</div><div className="mt-1 text-xs text-slate-400">勾选两个版本后，可在这里阅读精简差异</div></div>
+                <div><div className="text-sm font-medium text-slate-600">选择一个版本查看内容</div><div className="mt-1 text-xs text-slate-400">勾选两个版本后，可在这里并排对比内容</div></div>
               </div>
             )}
           </main>

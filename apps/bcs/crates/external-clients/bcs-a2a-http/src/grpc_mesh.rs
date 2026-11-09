@@ -60,13 +60,19 @@ impl GrpcMeshConfig {
     }
 
     pub fn client(&self, interface: &A2aInterface, bearer: &str, extensions: &str) -> ServiceResult<GrpcClient> {
+        self.client_with_optional_bearer(interface,Some(bearer),extensions)
+    }
+
+    pub fn client_with_optional_bearer(&self,interface:&A2aInterface,bearer:Option<&str>,extensions:&str)->ServiceResult<GrpcClient> {
         self.validate().map_err(|_| invalid("invalid deployment configuration"))?;
         let route = self.routes.iter().find(|route| route.interface_url == interface.url)
             .ok_or_else(|| invalid("no configured route for selected interface"))?;
         let mut headers = MetadataMap::new();
-        let mut credential = MetadataValue::try_from(format!("Bearer {bearer}"))
-            .map_err(|_| invalid("invalid credential"))?;
-        credential.set_sensitive(true); headers.insert("authorization", credential);
+        if let Some(bearer)=bearer {
+            if bearer.trim().is_empty() {return Err(invalid("empty credential"));}
+            let mut credential=MetadataValue::try_from(format!("Bearer {bearer}")).map_err(|_|invalid("invalid credential"))?;
+            credential.set_sensitive(true);headers.insert("authorization",credential);
+        }
         headers.insert("tri-type", MetadataValue::from_static("rpc"));
         headers.insert("mesh_vip_only", MetadataValue::from_static("false"));
         headers.insert("mesh_vip_enforce", MetadataValue::from_static("false"));

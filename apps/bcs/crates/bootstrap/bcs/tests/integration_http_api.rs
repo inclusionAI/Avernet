@@ -8,6 +8,7 @@
 //! cargo test --package bcs --test integration_bcs_http_test -- --test-threads=1
 //! ```
 
+#[path = "support/e2e_helpers.rs"]
 mod e2e_helpers;
 
 use std::time::Duration;

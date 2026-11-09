@@ -316,8 +316,10 @@ impl BcsConfig {
             "toml" => parse_and_expand("toml")?,
             // Unknown extension: try JSON first, then TOML. Only fall through to
             // TOML when the content fails to *parse* as JSON — a valid JSON
-            // document must surface its own expansion/deserialize errors instead
-            // of being retried (and mis-reported) as a TOML parse error.
+            // document must surface its own expansion/deserialize/value-domain
+            // errors instead of being retried (and mis-reported) as a TOML
+            // parse error. In particular, api.auth value-guard failures return
+            // directly and must not be swallowed by a blanket Err(_) arm.
             _ => match crate::config_loader::parse_config_content(
                 "json",
                 &content,
@@ -327,7 +329,8 @@ impl BcsConfig {
                     crate::config_loader::expand_env_vars(&mut value)?;
                     serde_json::from_value(value)?
                 }
-                Err(_) => parse_and_expand("toml")?,
+                Err(crate::config_loader::ConfigLoadError::Parse(..)) => parse_and_expand("toml")?,
+                Err(other) => return Err(other.into()),
             },
         };
 

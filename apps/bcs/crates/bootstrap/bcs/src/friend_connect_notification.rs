@@ -1,6 +1,7 @@
 //! Friend-connect notification adapter that forwards BCS friend requests to
 //! the backend work-order API.
 
+use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_service_api::port::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
@@ -322,7 +323,7 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         let request_payload = friend_work_order_payload_for_log(&payload);
         let response = self
             .build_request_with_payload(&command, url.clone(), &payload)
-            .send()
+            .send_traced()
             .await
             .map_err(|error| {
                 warn!(

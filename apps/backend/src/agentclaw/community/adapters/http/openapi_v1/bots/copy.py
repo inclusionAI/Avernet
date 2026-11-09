@@ -44,8 +44,15 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     OwnerNameDep,
     UserIdDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.core.bot_config_manifest.creation import ManifestCreationSeam
+from agentclaw.community.core.bot_management.create_flow import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
+    BotCreateSpec,
+    BotCreateTemplateValidationMode,
+    creation_spec_to_payload,
+)
 from agentclaw.community.core.bot_copy.repository.protocol import (
     BotCopyRepositoryProtocol,
 )
@@ -259,14 +266,31 @@ def submit_copy(
         )
     )
 
+    # Route B reuses the manifest-creation flow, whose deserializer
+    # (`creation_spec_from_payload`) requires a complete creation payload — not
+    # just the bot fields, but the context block too (deployment_mode/space_kind/
+    # space_quota). Build it via the canonical `creation_spec_to_payload(spec,
+    # context)` so every strict key is present and compliant: copy is a public
+    # OpenAPI surface, so PUBLIC validation mode + CLOUD deployment, mirroring
+    # `submit_manifest_creation`. Copy-specific extras (request_detail /
+    # source_bot_id) ride along — the deserializer ignores unknown keys.
     payload_spec: dict[str, Any] = {
-        "entity_id": owner_id,
-        "entity_type": source.get("entity_type") or "staff",
-        "engine_type": engine,
-        "bot_type": source.get("bot_type") or "personal",
-        "bot_name": body.bot_name,
-        "bot_desc": body.bot_desc,
-        "space_id": space_id,
+        **creation_spec_to_payload(
+            BotCreateSpec(
+                entity_id=owner_id,
+                engine_type=engine,
+                bot_type=source.get("bot_type") or "personal",
+                bot_name=body.bot_name,
+                bot_desc=body.bot_desc,
+                space_id=space_id,
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+            ),
+            BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=current_space.kind,
+                space_quota=True,
+            ),
+        ),
         "request_detail": body.request_detail,
         "source_bot_id": source["bot_id"],
     }
@@ -340,6 +364,7 @@ def retry_copy(
     apply_repo: BotConfigManifestApplyRepositoryProtocol,
     bot_repo: BotRepository,
     manifest_seam: ManifestCreationSeam,
+    space_context: BusinessSpaceContextProtocol,
     now: datetime,
 ) -> RetryResult:
     """Operator-triggered retry of the copy operation whose dst is ``bot_id``.
@@ -382,14 +407,34 @@ def retry_copy(
     # No hardcoded literals; if the dst record is partial (first submit failed
     # before persist), the missing fields stay None until a later stage fills them.
     dst = bot or {}
+    # Same canonical `creation_spec_to_payload(spec, context)` path as
+    # submit_copy: re-resolve the creation context from the dst owner's space so
+    # the durable payload carries every strict key the deserializer reads
+    # (entity_id/engine_type/bot_type/template_validation_mode +
+    # deployment_mode/space_kind/space_quota). The dst's own record supplies the
+    # bot fields; PUBLIC + CLOUD mirror the public OpenAPI surface. Copy is
+    # openclaw-only, so a missing engine on a still-partial dst falls back to
+    # openclaw rather than a None BotCreateSpec.engine_type would reject.
+    retry_space = space_context.resolve_current(
+        owner_id=row.dst_owner_id, header_space_id=None
+    )
     payload_spec: dict[str, Any] = {
-        "entity_id": row.dst_owner_id,
-        "entity_type": dst.get("entity_type") or "staff",
-        "engine_type": dst.get("active_engine") or dst.get("engine_type"),
-        "bot_type": dst.get("bot_type") or "personal",
-        "bot_name": dst.get("bot_name"),
-        "bot_desc": dst.get("bot_desc"),
-        "space_id": dst.get("space_id"),
+        **creation_spec_to_payload(
+            BotCreateSpec(
+                entity_id=row.dst_owner_id,
+                engine_type=dst.get("active_engine") or dst.get("engine_type") or "openclaw",
+                bot_type=dst.get("bot_type") or "personal",
+                bot_name=dst.get("bot_name"),
+                bot_desc=dst.get("bot_desc"),
+                space_id=dst.get("space_id"),
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+            ),
+            BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=retry_space.kind,
+                space_quota=True,
+            ),
+        ),
         "request_detail": row.request_detail,
         "source_bot_id": row.source_bot_id,
     }
@@ -431,7 +476,7 @@ async def copy_bot(
     space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
-    del request, caller
+    del caller
     result = submit_copy(
         body=body,
         owner_id=owner_id,
@@ -443,7 +488,7 @@ async def copy_bot(
         passport_plugin=passport_plugin,
         space_context=space_context,
     )
-    return Envelope(data=result)
+    return envelope(result, request)
 
 
 @router.post(
@@ -467,13 +512,14 @@ async def retry_copy_bot(
     ),
     bot_repo: BotRepository = Injected(BotRepository),
     manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
+    space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
 ) -> Envelope[RetryResponse]:
     """Re-hand-off a copy operation to create_job (operator-triggered retry).
 
     The path's bot_id is the dst bot (the one FE is polling copy_state on); the
     backend resolves it to the operation ledger row.
     """
-    del request, caller
+    del caller
     result = retry_copy(
         bot_id=bot_id,
         operator_id=owner_id,
@@ -481,15 +527,17 @@ async def retry_copy_bot(
         apply_repo=apply_repo,
         bot_repo=bot_repo,
         manifest_seam=manifest_seam,
+        space_context=space_context,
         now=datetime.now(),
     )
     # Re-fetch the row to surface the operation_id in the response (retry_copy
     # returned the result enum only, not the row).
     row = bot_copy_repo.get_by_dst_bot_id(env=get_current_env(), dst_bot_id=bot_id)
-    return Envelope(
-        data=RetryResponse(
+    return envelope(
+        RetryResponse(
             operation_id=row.operation_id if row else "", result=result
-        )
+        ),
+        request,
     )
 
 

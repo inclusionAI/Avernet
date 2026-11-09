@@ -53,7 +53,7 @@ impl PersistentBotRepo {
     ) -> ServiceResult<ProfileWrite> {
         let columns = project_profile_columns(bot_id, &update.capabilities)?;
         let mut sql = format!(
-            "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, \
+            "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, \
              visibility = ?",
             bot_info_assignment = columns.bot_info_assignment
         );

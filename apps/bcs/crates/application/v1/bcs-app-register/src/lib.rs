@@ -143,14 +143,13 @@ impl RegisterServiceImpl {
                 A2aCardSource::Url(url)=>{let fetched=cards.fetch(&url,true).await.map_err(provider_registration_error)?;(Some(url),fetched)},
                 A2aCardSource::Inline(raw)=>(None,cards.validate(raw,true).await.map_err(provider_registration_error)?),
             };
-            if registration.bot_name.is_empty() {registration.bot_name=fetched.raw.get("name").and_then(|value|value.as_str()).unwrap_or("").into();}
-            if !(2..=64).contains(&registration.bot_name.chars().count()) || registration.bot_name!=registration.bot_name.trim() {
-                return Err(ApplicationError::invalid("invalid_request","Card name requires a 2..64 character BCS display alias"));
-            }
+            registration.bot_name=bcs_service_api::types::a2a_names::card_bot_name(&fetched.raw)
+                .map_err(|message|ApplicationError::invalid("invalid_request",message))?.into();
             let now_ms = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)
                 .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
                 .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
             let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                visibility: Default::default(),
                 agent_card_url:url,
                 agent_card:fetched.raw,interface:fetched.interface,
                 registered_at_ms:now_ms,};
@@ -197,6 +196,15 @@ fn core_registration_error(error: ServiceError) -> ApplicationError {
 
 fn provider_registration_error(error: ServiceError) -> ApplicationError {
     match error {
+        ServiceError::A2aManagement(error) => {
+            use bcs_service_api::types::a2a_bot::a2a_management::ManagementCode as Code;
+            match error.code {
+                Code::BotNameConflict|Code::SourceAgentConflict|Code::SourceAgentChangeNotAllowed =>
+                    ApplicationError::conflict("registration_conflict", "A2A registration conflicts with an existing registration"),
+                Code::InternalError|Code::ServiceUnavailable => ApplicationError::internal("A2A registration unavailable"),
+                _ => ApplicationError::invalid("invalid_request", "A2A Card or source is not supported"),
+            }
+        },
         ServiceError::Forbidden(_) => ApplicationError::forbidden("provider registration is forbidden"),
         ServiceError::ProviderNotFound(_) => ApplicationError::not_found(
             "provider_not_found", "provider not found",

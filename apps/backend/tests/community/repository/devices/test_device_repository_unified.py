@@ -2565,3 +2565,53 @@ def test_update_bot_status_on_device_active_env_isolation(repo, db):
             s.query(BotModel).filter_by(bot_id="bot-prod").one().status
             == "ACTIVE"
         )
+
+
+def test_list_active_caller_refresh_bindings_isolates_scope(repo):
+    values = dict(
+        entity_id="stable-entity", entity_type="staff", device_id="arca-1",
+        device_provider="arca", env="prod", status="ACTIVE",
+        apply_reason="caller_instance:service-1", applied_by="001234",
+        device_props={"sandbox_id": "sandbox-1"},
+    )
+    older = repo.insert_binding(**_binding(**values))
+    latest = repo.insert_binding(**_binding(**values))
+    second = repo.insert_binding(**_binding(**{**values, "device_id": "arca-2", "applied_by": "005678"}))
+    for index, override in enumerate([
+        {"entity_id": "other"}, {"env": "pre"}, {"status": "RELEASED"},
+        {"device_provider": "teclaw"}, {"entity_type": "team"},
+        {"apply_reason": "caller_instance:service-1-extra"},
+    ]):
+        repo.insert_binding(**_binding(**{**values, "device_id": f"excluded-{index}", **override}))
+    bindings = repo.list_active_caller_refresh_bindings(
+        bot_id="service-1", entity_id="stable-entity", env="prod"
+    )
+    assert [binding.id for binding in bindings] == [second, latest]
+    assert older not in [binding.id for binding in bindings]
+    assert [binding.applied_by for binding in bindings] == ["005678", "001234"]
+    assert bindings[1].device_props["sandbox_id"] == "sandbox-1"
+
+
+def test_list_active_caller_refresh_bindings_propagates_database_failure(repo, caplog):
+    caplog.set_level("INFO")
+    with patch.object(repo._db, "orm_session", side_effect=RuntimeError("database unavailable")):
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            repo.list_active_caller_refresh_bindings(bot_id="b", entity_id="e", env="prod")
+    assert "caller_refresh_bindings_requested" in caplog.text
+    assert "caller_refresh_bindings_failed" in caplog.text
+    assert "database unavailable" not in caplog.text
+
+
+def test_refresh_query_includes_product_baas_callers_with_arca_underlay(repo):
+    binding_id = repo.insert_binding(**_binding(
+        entity_id="stable-entity", entity_type="staff", device_id="baas-caller-bot",
+        device_provider="baas", env="prod", status="ACTIVE",
+        apply_reason="caller_instance:service-1", applied_by="001234",
+        device_props={"bolt_id": "service-1"},
+    ))
+    bindings = repo.list_active_caller_refresh_bindings(
+        bot_id="service-1", entity_id="stable-entity", env="prod"
+    )
+    assert [item.id for item in bindings] == [binding_id]
+    assert bindings[0].device_provider == "baas"
+    assert bindings[0].applied_by == "001234"

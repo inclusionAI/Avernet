@@ -44,6 +44,7 @@ pub mod persistent_repo;
 pub mod provider;
 pub mod a2a;
 mod a2a_search;
+mod a2a_source;
 pub mod provider_cache;
 mod caller_config_cache;
 

@@ -25,7 +25,10 @@ use axum::{
     body::{Body, to_bytes},
     http::Request,
 };
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{
+    ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+    VerifiedRequestIdentity, router,
+};
 use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
@@ -118,13 +121,17 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &axum::http::HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity::pin(
+                self.caller.clone(),
+                "test-double",
+                CredentialKind::GatewayPrincipalHeader,
+            ))
         } else {
             Err(PrincipalVerificationError::Missing)
         }

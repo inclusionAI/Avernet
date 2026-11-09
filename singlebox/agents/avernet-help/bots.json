@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "Avernet 使用帮助",
+  "port_start": 30951,
+  "port_step": 10,
+  "scopes": "local,avernet-help",
+  "bots": [
+    {
+      "source": "collaboration",
+      "profile": "avernet-help-collaboration",
+      "name": "协作助手",
+      "summary": "解答自定义协作问题，编写、校验 YAML 并提供副屏预览。",
+      "domains": "avernet-help,custom-collaboration,state-machine",
+      "skills": "collaboration-authoring,yaml-validation,collaboration-preview"
+    }
+  ]
+}

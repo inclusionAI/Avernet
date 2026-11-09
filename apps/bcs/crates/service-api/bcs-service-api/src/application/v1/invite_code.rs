@@ -3,9 +3,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{ApplicationError, AuthenticatedCaller};
 
-/// Command for batch-initializing invite codes from an internal caller.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Command for batch-initializing invite codes. The application must authorize
+/// the verified user against the deployment issuer allowlist before any write.
+/// Being authenticated, invite-bound, or using an internal route is insufficient.
+#[derive(Debug, Clone)]
 pub struct InitInviteCodes {
+    pub caller: AuthenticatedCaller,
     pub count: u64,
 }
 

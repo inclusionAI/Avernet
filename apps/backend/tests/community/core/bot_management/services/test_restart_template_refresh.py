@@ -184,6 +184,9 @@ class _TemplateRepository:
     def exists_by_bot_id(self, bot_id):
         return self.record is not None
 
+    def get_by_bot_id(self, bot_id):
+        return deepcopy(self.record)
+
     def insert(self, data):
         assert self.record is None
         self.inserts += 1

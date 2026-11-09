@@ -35,8 +35,8 @@ export function useGroupSidebarProps({
   const sessionTabsByGroup = useWorkspaceStore((s) => s.sessionTabsByGroup);
   const setSessionTabForGroup = useWorkspaceStore((s) => s.setSessionTabForGroup);
 
-  const handleCreateSession: GroupSidebarProps['onCreateSession'] = (groupId, scope) =>
-    void sessions.createSessionIn(groupId, undefined, undefined, scope);
+  const handleCreateSession: GroupSidebarProps['onCreateSession'] = (groupId, scope, contextDelivery) =>
+    void sessions.createSessionIn(groupId, undefined, undefined, scope, contextDelivery);
   const handleCreateGroup = () => createGroupDialog.openModal();
   // 侧栏「…」菜单：群管理（选中该群并打开管理面板；详情由主组件 effect 按需补拉）。
   const handleManageGroup = (groupId: string) => {

@@ -101,3 +101,42 @@ async def test_content_returns_materializing_when_manifest_file_is_missing(tmp_p
 
     assert exc.value.status_code == 409
     assert exc.value.detail == "resource_not_materialized"
+
+
+@pytest.mark.parametrize("source_kind", ["baas_session_file", "temporary_url", "workspace_file"])
+def test_legacy_http_refuses_live_ids_and_still_serves_controlled_copies(tmp_path, source_kind):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fastapi_injector import attach_injector
+    from injector import Injector, InstanceProvider, Module
+    from engine.community.api.resource_materialization.router import router
+    from engine.community.core.resource_materialization.service import ManifestStore, ResourceMaterializationService
+    from engine.community.core.resource_materialization.tests.test_service import _PullClient, _CallbackClient
+    from engine.community.core.session_files.service import SessionFileService
+    from engine.community.core.session_files.tests.test_export_service import _write_file
+
+    _, _, legacy_path = _write_file(tmp_path)
+    store = ManifestStore(tmp_path)
+    store.upsert(store.get("sr_001").model_copy(update={"source_kind": source_kind}))
+    (tmp_path / "live.txt").write_bytes(b"live bytes")
+    view = SessionFileService(workspace_root_provider=lambda: tmp_path).register_file(
+        session_key="a", workspace_relative_path="live.txt"
+    )
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"), callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(ResourceMaterializationService, to=InstanceProvider(service))
+    app = FastAPI()
+    attach_injector(app, Injector([Bindings()]))
+    app.include_router(router)
+    with TestClient(app) as http:
+        live = http.get(f"/api/resource-materializations/{view.resource_id}/content")
+        assert live.status_code == 409
+        assert live.json() == {"detail": "resource_not_materialized"}
+        legacy = http.get("/api/resource-materializations/sr_001/content")
+        assert legacy.status_code == 200
+        assert legacy.content == legacy_path.read_bytes()
+        assert int(legacy.headers["content-length"]) == len(legacy.content)

@@ -67,42 +67,23 @@ impl BotCore {
         let credentials = self.provider_credentials.as_ref().ok_or_else(|| {
             ServiceError::InternalError("provider credential repo not configured".to_string())
         })?;
-        let credential = credentials
-            .get_credential_by_kind(&provider.provider_id, credential_kind)
-            .await?
-            .ok_or_else(|| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential not found");
-                ServiceError::InvalidOperation {
-                    message: format!(
-                        "provider '{}' downlink credential not found",
-                        provider.provider_id
-                    ),
-                    request_id: None,
-                }
-            })?;
-        if credential.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!(
-                    "provider '{}' downlink credential is disabled",
-                    provider.provider_id
-                ),
-                request_id: None,
-            });
+        let credential=credentials.get_credential_by_kind(&provider.provider_id,credential_kind).await?;
+        if let Some(card)=card {
+            let ready=credential.as_ref().is_some_and(|value|!value.disabled && !value.secret_value.trim().is_empty());
+            let auth=bcs_service_api::types::a2a_auth::select_authentication(&card.agent_card,true,ready)
+                .map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
+            let bearer=match auth {
+                bcs_service_api::types::a2a_auth::A2aAuthentication::Anonymous=>String::new(),
+                bcs_service_api::types::a2a_auth::A2aAuthentication::ProviderBearer=>credential.ok_or_else(||ServiceError::InternalError("validated credential disappeared".into()))?.secret_value,
+            };
+            let extensions=if for_abort {vec![]} else {card.agent_card.pointer("/capabilities/extensions").and_then(serde_json::Value::as_array)
+                .into_iter().flatten().map(|value|serde_json::from_value(value.clone())).collect::<Result<Vec<_>,_>>()?};
+            return Ok(BotDeliveryTarget::A2a {bot_id:bot.bot_uuid,provider_id:provider.provider_id,
+                provider_bot_ref:binding.provider_bot_ref,interface:self.select_a2a_route(&card.agent_card)?,
+                credential_kind:auth.credential_kind().into(),bearer:RedactedToken::new(bearer),card_revision:card.revision,extensions});
         }
-
-        if let Some(card) = card {
-            if credential.secret_value.trim().is_empty() {
-                return Err(ServiceError::InvalidOperation { message: "A2A credential unavailable".into(), request_id: None });
-            }
-            let extensions = if for_abort {vec![]} else {card.agent_card.pointer("/capabilities/extensions").and_then(serde_json::Value::as_array)
-                .into_iter().flatten().map(|value| serde_json::from_value(value.clone()))
-                .collect::<Result<Vec<_>,_>>()?};
-            return Ok(BotDeliveryTarget::A2a { bot_id: bot.bot_uuid, provider_id: provider.provider_id,
-                provider_bot_ref: binding.provider_bot_ref, interface: self.select_a2a_route(&card.agent_card)?,
-                credential_kind: credential_kind.into(), bearer: RedactedToken::new(credential.secret_value),
-                card_revision: card.revision, extensions });
-        }
+        let credential=credential.filter(|value|!value.disabled).ok_or_else(||ServiceError::InvalidOperation {
+            message:"Provider downlink credential unavailable".into(),request_id:None})?;
         let webhook_url = binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref())
             .ok_or_else(|| ServiceError::InvalidOperation {
                 message: "missing_delivery_endpoint: configure a Bot or Provider webhook_url".to_string(),
@@ -228,12 +209,11 @@ impl BotCore {
             {
                 continue;
             }
-            let Some(credential) = credentials.get(&binding.provider_id) else {
-                continue;
-            };
-            if credential.disabled {
-                continue;
-            }
+            let credential=credentials.get(&binding.provider_id);
+            if let Some(card)=card {
+                let ready=credential.is_some_and(|value|!value.disabled && !value.secret_value.trim().is_empty());
+                if bcs_service_api::types::a2a_auth::select_authentication(&card.authentication,true,ready).is_err() {continue;}
+            } else if !credential.is_some_and(|value|!value.disabled) {continue;}
             active.insert(binding.bot_uuid);
         }
         Ok(self.activity_snapshot(observed_at_ms, bot_ids, active))
@@ -342,12 +322,11 @@ impl BotCore {
             {
                 continue;
             }
-            let Some(credential) = credentials.get(&binding.provider_id) else {
-                continue;
-            };
-            if credential.disabled {
-                continue;
-            }
+            let credential=credentials.get(&binding.provider_id);
+            if let Some(card)=card {
+                let ready=credential.is_some_and(|value|!value.disabled && !value.secret_value.trim().is_empty());
+                if bcs_service_api::types::a2a_auth::select_authentication(&card.authentication,true,ready).is_err() {continue;}
+            } else if !credential.is_some_and(|value|!value.disabled) {continue;}
             active.insert(binding.bot_uuid);
         }
 
@@ -355,8 +334,12 @@ impl BotCore {
     }
     fn select_a2a_route(&self, card:&serde_json::Value)->ServiceResult<bcs_service_api::types::a2a_bot::A2aInterface> {
         use bcs_service_api::types::a2a_bot::{select_a2a_interface,A2aBinding};
-        select_a2a_interface(card,|binding,url|match binding {
-            A2aBinding::HttpJson=>self.a2a_url_guard.validate_configured_http_url(url).is_ok(),
+        let projected = bcs_a2a_binding_api::registry().project(card).map_err(|_|ServiceError::InvalidOperation {
+            message:"A2A custom interface is unavailable".into(),request_id:None})?;
+        select_a2a_interface(&projected,|binding,url|match binding {
+            A2aBinding::Custom=>bcs_a2a_binding_api::registry().fingerprint(url).is_ok(),
+            A2aBinding::HttpJson|A2aBinding::JsonRpc=>bcs_service_api::types::a2a_bot::http_interface_address_allowed(url)
+                && self.a2a_url_guard.validate_configured_http_url(url).is_ok(),
             A2aBinding::Grpc=>self.a2a_grpc_urls.iter().any(|allowed|allowed==url),
         }).map_err(|_|ServiceError::InvalidOperation {message:"A2A Card has no interface allowed by current deployment policy".into(),request_id:None})
     }

@@ -19,10 +19,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut bearer = HeaderValue::from_str(&format!("Bearer {token}"))?;
     bearer.set_sensitive(true);
     headers.insert(AUTHORIZATION, bearer);
-    let http = reqwest::Client::builder().default_headers(headers)
+    let http = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none()).no_proxy()
         .connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(180)).build()?;
-    let raw = http.get(format!("{}/agent-card.json", base.trim_end_matches('/')))
+    let http = bcs_network_tracing::ClientWithDefaults::new(http, headers);
+    let raw = http.request(|http| http.get(format!("{}/agent-card.json", base.trim_end_matches('/'))))
         .send().await?.error_for_status()?.json().await?;
     let selected = select_card(raw, &[], true, |selected| selected == base)
         .map_err(|error| format!("Card incompatible: {error:?}"))?;

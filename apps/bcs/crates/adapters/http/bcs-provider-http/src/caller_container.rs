@@ -1,3 +1,4 @@
+use bcs_network_tracing::RequestBuilderExt;
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -129,15 +130,18 @@ impl bcs_service_api::port::CallerContainerGatewayPort for HttpProviderTransport
             Ok(client) => client,
             Err(_) => return Err(Error::ProviderUnavailable { retryable: false }),
         };
-        let request_fut = request_client
+        let http_request = request_client
             .post(guarded_url.as_str())
             .bearer_auth(service_credential.expose_secret())
             .header("Accept", "application/json")
-            .header("Content-Type", "application/json; charset=utf-8")
-            .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
-            .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
-            .json(&body)
-            .send();
+            .header("Content-Type", "application/json; charset=utf-8");
+        let request_fut = with_bcn_headers(
+            http_request,
+            protocol_version,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .json(&body)
+        .send_traced();
         let response_result = tokio::time::timeout(
             Duration::from_millis(CALLER_ENSURE_TOTAL_TIMEOUT_MS),
             request_fut,

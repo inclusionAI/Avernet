@@ -6,12 +6,13 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { cronJobId } from "./session-identity.js";
-import { parseRequest } from "./validation.js";
+import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
+import { confirmOwnerRequest, requestOwnerCooperation } from "./owner-cooperation.js";
 import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore, RecoveryOwnerHandoffContent } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 const CRON_WAIT_MS = 5 * 60 * 1000;
@@ -23,9 +24,11 @@ export interface RecoveryAgentExecutor {
   listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
 }
 export interface RecoveryTaskNotifier {
+  /** Same card instance across request revisions; false means disabled/unconfigured. */
+  notifyOwnerRequest?(input: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean>;
   /** False means notification is disabled; do not record a delivery attempt. */
   notify(input: { ownerId: string; botId: string; targetEnvironment: RecoveryRequest["target"]["env"];
-    taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
+    taskId: string; sessionKey: string; kind: "plan" | "result"; summary: string; handoff?: RecoveryOwnerHandoffContent; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -138,9 +141,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
+      if (value.ownerRequest?.status === "confirmed" && value.requiresFreshObservation) this.fail(409, "Owner 反馈后需先读取原会话最新现场，再判断处理条件与恢复效果");
       if (!["message", "environment", "observe", "wait_cron"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
         || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "初始判断需要决策、理由及已保存的证据");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      if (input.decision === "environment" && value.plan) this.fail(409, "本任务已有完整方案；Owner 反馈不允许重建方案，请核验原方案效果或按实际事项转交");
       if (input.decision === "wait_cron") {
         if (value.level === "debug" || value.request.target.engine !== "OC" || !cronJobId(value.request.session_key) || value.delivery) {
           this.fail(422, "wait_cron 只用于尚未发送指引的真实 OpenClaw Cron；已投递消息仍按原流程回收效果");
@@ -150,10 +155,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           cronWait: value.cronWait ?? { startedAt: this.now(), deadlineAt: this.now() + CRON_WAIT_MS },
           timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
       }
-      if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
+      const ownerMessage = value.ownerRequest?.status === "confirmed" && value.timeline.some(event => event.kind === "operation"
+        && (event.payload.result as Record<string, unknown>)?.owner_request_id === value.ownerRequest!.requestId);
+      if (input.decision === "message" && !value.delivery && !ownerMessage && !(value.level === "debug" && value.timeline.some(event =>
         event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(422, "message 决策需要已留存的初始消息或拟发送内容。若 retry_message 在投递前失败且无法继续，请保留受阻结论并返回 blocked；不要改写为已发送，也不要盲目重发结果未知的消息。");
       const debugFinished = value.level === "debug" && input.decision !== "environment";
-      return { ...value, version: value.version + 1, cronWait: undefined, phase: input.decision === "environment" ? "plan" : "observe",
+      const observationPhase = value.ownerRequest?.status === "confirmed" && value.ownerRequest.resumePhase === "verify" ? "verify" as const : "observe" as const;
+      return { ...value, version: value.version + 1, cronWait: undefined, phase: input.decision === "environment" ? "plan" : observationPhase,
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
         observationDeadlineAt: input.decision === "environment" ? null : value.observationDeadlineAt ?? this.now() + this.deps.observationMs,
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
@@ -193,7 +201,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (existing && JSON.stringify(existing) !== JSON.stringify(item)) this.fail(409, "同一证据标识的内容不能改变");
         if (!existing) stored.push(item);
       }
-      return { ...value, ...observeRecovery({ ...value, evidence: stored }, judgment, this.now()),
+      let observing = { ...value, evidence: stored };
+      if (value.phase === "plan" && judgment.effect === "recovered") {
+        // Planning can discover recovery; keep the last message's original observation deadline.
+        const message = value.timeline.findLast(event => event.kind === "operation"
+          && typeof (event.payload.result as Record<string, unknown>)?.initial_message === "boolean");
+        const finishedAt = message ? (message.payload.result as Record<string, unknown>).finished_at_ms : value.delivery?.delivery.finished_at_ms;
+        observing = { ...observing, phase: "observe", observationDeadlineAt: value.observationDeadlineAt
+          ?? (typeof finishedAt === "number" ? finishedAt + this.deps.observationMs : null) };
+      }
+      return { ...value, ...observeRecovery(observing, judgment, this.now()),
         timeline: [...value.timeline, this.event("observation", "agent", judgment.summary, { judgment, evidence })] };
     }, finalSummary);
     if (["completed", "failed", "waiting_effect"].includes(task.status)) await this.deps.agent.release(task);
@@ -231,6 +248,35 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.mutate(taskId, previous.version, value => ({ ...value, ...resumeRecoveryObservation(value),
       timeline: [...value.timeline, this.event("resumed", "service", "恢复原观察阶段", {})] }));
     await this.deps.agent.start(task);
+  }
+
+  async requestOwner(taskId: string, version: number, input: import("./task-contracts.js").RecoveryOwnerRequestInput & { executionId: string; reportSummary?: string }): Promise<void> {
+    if (input.reportSummary !== undefined && (typeof input.reportSummary !== "string" || !input.reportSummary.trim()
+      || input.reportSummary.length > 8000 || containsSecret(input.reportSummary))) this.fail(422, "Owner 转交的完整调查报告无效");
+    const requestId = randomUUID();
+    await this.mutate(taskId, version, value => {
+      if (value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "旧执行不能提交 Owner 处理事项");
+      if (value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，请按正常效果流程回报；优化建议写入完成总结，不再请求 Owner 处理");
+      const { executionId: _execution, reportSummary, ...request } = input;
+      return { ...value, ...requestOwnerCooperation(value, request, requestId, this.now()),
+        timeline: [...value.timeline, this.event("waiting", "agent", reportSummary ?? request.summary, { owner_request_id: requestId, phase: value.phase })] };
+    });
+  }
+
+  async confirmOwner(taskId: string, requestId: string, actor: RecoveryActor, feedback = ""): Promise<void> {
+    const previous = await this.required(taskId); this.owner(previous, actor);
+    if (!this.ownsTask(previous)) this.fail(409, "处理事项属于另一控制面环境");
+    if (confirmOwnerRequest(previous, requestId, actor.userId, feedback, this.now()) === previous) return;
+    let accepted = false;
+    await this.mutate(taskId, previous.version, value => {
+      const confirmed = confirmOwnerRequest(value, requestId, actor.userId, feedback, this.now());
+      accepted = confirmed !== value;
+      return accepted ? { ...value, ...confirmed, timeline: [...value.timeline,
+        this.event("owner_decision", "owner", "Owner 已反馈处理完成，等待自愈核验", { owner_request_id: requestId, feedback, phase: "assess" })] }
+        : { ...value, version: value.version + 1 }; // A concurrent duplicate still respects the store CAS contract.
+    });
+    // The durable state is the queue. Maintenance recovers a crash before this dispatch.
+    if (accepted) setImmediate(() => { void this.start(previous).catch(error => logRepairEvent("session-recovery", "session_recovery_owner_resume", "dispatch_failed", { taskId, ...repairLogError(error) })); });
   }
 
   async list(eventId: string, actor: RecoveryActor) {
@@ -308,6 +354,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
+      if (value.ownerRequest?.status === "confirmed" && value.requiresFreshObservation) this.fail(409, "Owner 反馈后需先读取最新原会话，再判断用户续聊");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
         .map(event => event.payload.raw_tool_call_id ?? event.payload.tool_call_id));
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
@@ -327,13 +374,18 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
-  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void> {
+  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; handoff?: RecoveryOwnerHandoffContent; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void> {
+    const handoff = input.handoff === undefined ? undefined : parseOwnerHandoffContent(input.handoff);
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
         || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理");
+      if (value.ownerRequest?.status === "confirmed" && value.requiresFreshObservation) this.fail(409, "Owner 反馈后需先读取最新现场，再决定转交及恢复效果");
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
         || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "Owner 转交需要已核实原因、Owner 处理指引及现场证据");
       if (input.effect !== undefined && !["recovered", "not_recovered", "unknown"].includes(input.effect)) this.fail(422, "Owner 转交效果仅接受 recovered / not_recovered / unknown，按原任务实际执行证据判断");
+      const effect = input.effect ?? value.judgment?.effect ?? "unknown";
+      if (effect === "recovered" || value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，不能以 owner_handoff 结束；assess 回报 decision=observe，plan 回报 observation，其他阶段按正常效果流程回报，优化建议写入完成总结");
+      if (value.phase === "assess" && value.delivery && value.delivery.delivery.status !== "failed") this.fail(422, "已有初始消息投递记录，不能转交结束并跳过效果回收；请回报 assessment、decision=message 进入 observe，不重复发送");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
         && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
@@ -341,12 +393,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
         judgment: { delivery: input.delivery ?? value.judgment?.delivery ?? "unconfirmed", response: input.response ?? value.judgment?.response ?? "unknown",
-          effect: input.effect ?? value.judgment?.effect ?? "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
+          effect, summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
-          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase })] };
+          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase, ...(handoff ? { handoff } : {}) })] };
     }, finalSummary);
     // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
-    try { await this.notify(task, "result", input.summary); }
+    try { await this.notify(task, "result", input.summary, handoff); }
     finally { await this.deps.agent.release(task); }
     this.notifyGroup(await this.required(taskId), "result");
   }
@@ -407,7 +459,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   private failureJudgment(task: RecoveryStoredTask, summary: string): RecoveryJudgment {
     return { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
-      effect: "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
+      effect: task.judgment?.effect === "recovered" ? "recovered" : "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
   }
 
   async maintenance(): Promise<void> {
@@ -425,6 +477,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       cursor = task.taskId;
       try {
         if (!this.ownsTask(task)) continue;
+        if (task.ownerRequest) this.scheduleOwnerCard(task);
         // Persisted retry scheduling also survives a process restart between state save and release.
         if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") {
           // A retained retry marker must never retire a successor launched by another worker.
@@ -434,7 +487,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
-            effect: "unknown", summary: "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
+            effect: task.judgment?.effect === "recovered" ? "recovered" : "unknown",
+            summary: task.judgment?.effect === "recovered" ? `${task.judgment.summary}\n\n原任务已恢复；观察期限已到，触达按现有证据记录。${task.request.target.engine === "TE" ? "TE 的 AIVision 轨迹可能延迟，未确认触达不能认定消息未到达。" : ""}`
+              : "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
           continue;
         }
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
@@ -447,13 +502,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
   }
 
-  private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string): Promise<void> {
+  private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string, handoff?: RecoveryOwnerHandoffContent): Promise<void> {
     if (task.simulation) return;
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
       const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, botId: task.request.target.bot_id,
-        targetEnvironment: task.request.target.env, taskId: task.taskId, kind, summary,
+        targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind, summary, ...(handoff ? { handoff } : {}),
         ...(kind === "result" ? { effect: task.judgment?.effect ?? "unknown" } : {}) });
       if (result === false) return;
       sent = true;
@@ -465,6 +520,55 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("notification", "service", sent ? "钉钉通知已发送" : "钉钉通知未确认，请在任务页面处理", { kind, sent })] }));
+  }
+  private scheduleOwnerCard(task: RecoveryStoredTask): void {
+    setImmediate(() => { void this.syncOwnerCard(task).catch(error => logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_unavailable", { taskId: task.taskId, ...repairLogError(error) })); });
+  }
+  private ownerCardStateKey(task: RecoveryStoredTask): string {
+    return `owner-card-${task.ownerRequest!.requestId}-${task.ownerRequest!.status}-${task.status}-${task.phase}`;
+  }
+  private async settleOwnerCard(taskId: string, stateKey: string): Promise<void> {
+    const task = await this.required(taskId);
+    if (!task.ownerCardSyncPending || !task.ownerRequest || this.ownerCardStateKey(task) !== stateKey) return;
+    await this.mutate(taskId, task.version, value => {
+      if (!value.ownerRequest || this.ownerCardStateKey(value) !== stateKey) this.fail(409, "待同步卡片状态已更新");
+      return { ...value, ownerCardSyncPending: false, version: value.version + 1 };
+    });
+  }
+  private async syncOwnerCard(input: RecoveryStoredTask, refreshSource = "", depth = 0): Promise<void> {
+    const task = await this.required(input.taskId), request = task.ownerRequest;
+    if (!request || task.simulation || !this.ownsTask(task)) return;
+    const stateKey = this.ownerCardStateKey(task);
+    const key = refreshSource ? `${stateKey}-sync-${createHash("sha256").update(refreshSource).digest("hex").slice(0, 16)}` : stateKey;
+    const attempts = task.timeline.filter(event => event.payload.notification_key === key && event.payload.state === "sending");
+    const last = attempts.at(-1), result = last && task.timeline.find(event => event.event_id === `${last.event_id}-result`);
+    if (result && ["sent", "disabled"].includes(String(result.payload.state))) { await this.settleOwnerCard(task.taskId, stateKey); return; }
+    if (last && this.now() - last.at_ms < (result ? 60000 : 30000)) return;
+    if (attempts.length >= 3) {
+      if (last && !result) await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", "卡片同步回执缺失，请在任务页处理", { ...last.payload, state: "unconfirmed", sent: false }), event_id: `${last.event_id}-result` });
+      await this.settleOwnerCard(task.taskId, stateKey);
+      return;
+    }
+    const id = `${key}-${attempts.length}`;
+    const updateOnly = task.timeline.some(event => event.kind === "notification" && event.payload.channel === "owner_card" && event.payload.state === "sending");
+    const payload = { channel: "owner_card", owner_request_id: request.requestId, notification_key: key, kind: "owner_request", phase: task.phase, operation: updateOnly ? "update" : "create" };
+    if (!await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", "正在同步 Owner 待办卡片", { ...payload, state: "sending" }), event_id: id })) return;
+    let state = "unconfirmed", synced = false;
+    try {
+      synced = !!await this.deps.notifier.notifyOwnerRequest?.({ task, updateOnly });
+      // Updating an instance cannot prove a previous uncertain create/delivery succeeded.
+      const delivered = !updateOnly || task.timeline.some(event => event.payload.channel === "owner_card" && event.payload.operation === "create" && event.payload.state === "sent");
+      state = synced ? delivered ? "sent" : "unconfirmed" : "disabled";
+    }
+    catch (error) { logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_unconfirmed", { taskId: task.taskId, ...repairLogError(error) }); }
+    await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", state === "sent" ? "Owner 待办卡片已同步" : state === "disabled" ? "卡片通知未启用，请在任务页处理" : "卡片发送结果未确认，请在任务页处理", { ...payload, state, sent: state === "sent", synced }), event_id: `${id}-result` });
+    if (["sent", "disabled"].includes(state) || attempts.length === 2) await this.settleOwnerCard(task.taskId, stateKey);
+    // A slow old send must not leave a newer revision/terminal state overwritten.
+    const latest = await this.required(task.taskId);
+    if (latest.ownerRequest && this.ownerCardStateKey(latest) !== stateKey) {
+      if (depth < 3) await this.syncOwnerCard(latest, id, depth + 1);
+      else logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_state_changed", { taskId: task.taskId });
+    }
   }
   private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
     if (task.simulation) return;
@@ -485,6 +589,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       const updated = await this.deps.tasks.update(taskId, version, value => {
         previous = { status: value.status, phase: value.phase };
         const changed = change(value);
+        if (changed.ownerRequest && (!value.ownerRequest || this.ownerCardStateKey(changed) !== this.ownerCardStateKey(value))) changed.ownerCardSyncPending = true;
         // Optional presentation metadata must never invalidate a valid business result.
         if (changed.status !== value.status && ["completed", "failed", "waiting_effect"].includes(changed.status)) {
           const text = typeof finalSummary === "string" ? finalSummary.trim() : "";
@@ -497,6 +602,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
             ? [...changed.timeline].reverse().find(event => event.kind === "termination")?.summary : undefined)] : value.pending_results };
       });
       if (updated) {
+        if (updated.ownerRequest) this.scheduleOwnerCard(updated);
         if (previous && (previous.status !== updated.status || previous.phase !== updated.phase)) {
           logRepairEvent("session-recovery", "session_recovery_task", "state_changed", { environment: this.deps.controlPlaneEnvironment,
             taskId, eventId: updated.request.event_id, phase: updated.phase, status: updated.status,

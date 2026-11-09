@@ -247,24 +247,43 @@ async fn auth_user_returns_oauth_name_and_avatar_from_cookie() {
         .await
         .expect("ensure_identity");
 
-    // Sign a session JWT and bind its hash (as the callback would).
-    let jwt_svc = bcs_jwt::JwtService::new(TEST_JWT_SECRET);
+    // Seed a STRICT session through the safe install path (the same
+    // lifecycle the shared login entrys use; the old unconditional
+    // `update_token` backdoor is gone).
+    let env = state
+        .auth_config
+        .oauth
+        .as_ref()
+        .expect("oauth config")
+        .env
+        .clone();
+    let identities = state
+        .auth_session_identity
+        .clone()
+        .expect("strict session identity port wired");
+    let engine = bcs_auth_oauth::OAuthSessionEngine::new(
+        bcs_jwt::OAuthSessionJwt::new(TEST_JWT_SECRET),
+        identities,
+        env.clone(),
+        1800,
+    );
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let claims = bcs_jwt::Claims {
-        sub: user_id.clone(),
-        src: "google".to_string(),
-        iat: now,
-        exp: now + 1800,
-        name: None,
-    };
-    let jwt = jwt_svc.sign(&claims).expect("sign jwt");
-    user_port
-        .update_token(&user_id, &bcs_jwt::token_hash(&jwt), claims.exp)
+    let jwt = engine
+        .install(
+            bcs_auth_api::session::SessionScope {
+                user_id: user_id.clone(),
+                provider: "google".to_string(),
+                env,
+            },
+            Some("Alice OAuth".to_string()),
+            now,
+        )
         .await
-        .expect("bind token");
+        .expect("strict session install")
+        .token;
 
     let resp = reqwest::Client::new()
         .get(format!("http://{addr}/auth/user"))

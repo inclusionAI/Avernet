@@ -139,3 +139,27 @@ async fn admin_modes_and_gateway_mutations_keep_both_views_consistent() {
         assert!(registry.try_get(&gateway.bot_uuid).await.unwrap().is_none());
     }
 }
+
+#[tokio::test]
+async fn legacy_admin_name_conflict_precedes_registry_write() {
+    let dir=tempfile::tempdir().unwrap();
+    let bots=Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    let providers=Arc::new(MemoryProviderStore::new());
+    let metadata=Arc::new(MemoryBotProviderStore::new(bots.clone(),providers.clone()));
+    let projection=Arc::new(ProviderBindingProjection::new(providers.clone(),metadata.clone(),DownlinkDetectionSource::Binding));
+    let registry=Arc::new(BotCore::with_provider_repos(bots,providers.clone(),providers.clone(),projection.clone()).with_bot_provider_repo(metadata.clone()));
+    let admin=ProviderCore::new(providers.clone(),providers.clone(),projection,registry.clone()).with_bot_provider_repo(metadata);
+    let provider=admin.register_provider("Name preflight".into(),Some("https://example.org/hook".into()),ProviderAuthMode::StaticBearer,"alice".into(),None,None).await.unwrap();
+    let params=|id:&str| RegisterProviderBotParams {
+        bot_uuid:Some(id.into()),bot_name:"Shared name".into(),provider_bot_ref:id.into(),owners:vec!["alice".into()],
+        connection_mode:ProviderBotConnectionMode::Gateway,..Default::default()
+    };
+    admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id,&provider.provider_admin_token,params("first-name")).await.unwrap();
+    let error=admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id,&provider.provider_admin_token,params("second-name")).await.unwrap_err();
+    assert!(matches!(error,bcs_service_api::ServiceError::Conflict(_)));
+    assert!(registry.try_get("second-name").await.unwrap().is_none());
+    assert!(providers.get_binding_by_bot_uuid("second-name").await.unwrap().is_none());
+    // Existing reference replay is unchanged and must not replace the registered identity.
+    let (replayed,token)=admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id,&provider.provider_admin_token,params("first-name")).await.unwrap();
+    assert_eq!(replayed.bot_uuid,"first-name");assert!(token.is_none());
+}

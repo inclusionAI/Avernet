@@ -71,6 +71,7 @@ import { CronScheduler, type WorkflowLauncher } from "./scheduler/scheduler.js";
 import { loadBotId, loadOwnerId } from "./credentials.js";
 import { initFlowControl, stopFlowControl, getFlowControlService } from "./flow-control/index.js";
 import { configureLlmSemaphore } from "./executors/llm-semaphore.js";
+import { configureFanoutApiHost } from "./platform/fanout-host.js";
 import { enqueueInject } from "./inject-queue.js";
 import { shouldInjectForFlow } from "./inject-gating.js";
 import { parseScheduleArgs, handleScheduleCommand, type ScheduleCommandDeps } from "./scheduler/schedule-command.js";
@@ -190,7 +191,7 @@ import { executeApprovalCardWeb, type ApprovalCardWebApi } from "./executors/app
 import { buildApprovalCardData, renderAixUICard } from "./approval-card-data.js";
 import { validateApprover, extractSenderIdFromMessage } from "./approver-validator.js";
 import { executeBaasCall } from "./executors/baas-call.js";
-import type { EmbeddedAgentToolContext } from "./executors/embedded-context.js";
+import { scopeToolContextForSession, type EmbeddedAgentToolContext } from "./executors/embedded-context.js";
 import { decorateApprovalCallbackResult } from "./approval-actors.js";
 import { createActionRegistry } from "./actions/registry.js";
 import type { ActionExecutionContext, ActionRegistry } from "./actions/types.js";
@@ -1092,6 +1093,12 @@ export function createExecutorDispatch(
   subworkflowDepsGetter?: () => SubworkflowDeps | undefined,
   packRoot?: string,
 ): (node: WorkflowNode, templateCtx: TemplateContext, flowState: FlowState, flowId: string) => Promise<ExecutorResult> {
+  // A fanout child has a distinct session identity. Never let a parent
+  // tool context override that identity (sessionId/sessionFile/workspace) when
+  // embedded-agent resolves its execution context. Keep the context only when
+  // it belongs to this dispatch session; direct callers without a sessionKey
+  // can still provide the legacy context fields.
+  const scopedToolCtx = scopeToolContextForSession(toolCtx, sessionKey);
   const compressionDefaults = loadConfig().app.contextCompression;
   const sessionCompressionConfig = loadConfig().app.sessionCompression;
   const llmConfig = loadConfig().app.llm;
@@ -1114,7 +1121,7 @@ export function createExecutorDispatch(
 
     return {
       sessionKey,
-      toolCtx,
+      toolCtx: scopedToolCtx,
       runId: `clawmind:${flowState.workflowId}:${flowId}:${node.id}:${Date.now()}`,
       flowId,
       attempt: flowState.nodeStates[node.id]?.attempts ?? 1,
@@ -2055,6 +2062,16 @@ function buildDeps(
       return undefined;
     })(),
   });
+  if (deps.clawWebBaseUrl) {
+    const fanoutApiConfig = loadDatabaseConfig();
+    const fanoutApi = createApiClient(fanoutApiConfig.type === "api" && fanoutApiConfig.api
+      ? fanoutApiConfig.api : { baseUrl: deps.clawWebBaseUrl, privateKeyB64: deps.signatureKey });
+    configureFanoutApiHost(deps, fanoutApi, child => createExecutorDispatch(
+      api, child.sessionKey, actionRegistry, user, undefined, child.signal, child.workflow,
+      child.getSubworkflowDeps,
+      typeof child.workflow.defaults?.packRoot === "string" ? child.workflow.defaults.packRoot : resolvedPackRoot,
+    ));
+  }
   // Set global bot/owner/session IDs for JSONL log entries (used by embedded agent event logging)
   _activeBotId = deps.botId ?? null;
   _activeOwnerId = deps.ownerId ?? null;

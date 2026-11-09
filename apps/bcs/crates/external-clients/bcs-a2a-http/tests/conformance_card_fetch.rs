@@ -38,12 +38,10 @@ async fn public_card_is_fetched_without_credentials_and_preserved() {
 }
 
 #[tokio::test]
-async fn rejects_redirects_media_type_cache_and_oversized_body() {
+async fn rejects_redirects_media_type_and_oversized_body() {
     for (status, headers, body) in [
         ("302 Found", "Location: http://127.0.0.1:1/secret\r\n", String::new()),
         ("200 OK", "Content-Type: text/html\r\n", card()),
-        ("200 OK", "Content-Type: application/json\r\nCache-Control: max-age=300\r\nCache-Control: No-Cache=\"field\"\r\n", card()),
-        ("200 OK", "Content-Type: application/json\r\nCache-Control: no-store\r\n", card()),
         ("200 OK", "Content-Type: application/json\r\n", " ".repeat(1_048_577)),
     ] {
         let (url, request) = server(status, headers, body).await;
@@ -89,4 +87,17 @@ async fn inline_card_uses_the_same_validation_without_fetching_or_executing() {
     raw["capabilities"]["extensions"]=json!([{"uri":"https://example.org/unknown","required":true}]);
     assert!(fetcher.validate(raw,true).await.is_err());
     assert!(fetcher.validate(json!(["not a Card"]),true).await.is_err());
+}
+
+#[tokio::test]
+async fn explicit_registration_accepts_cache_control_and_jsonrpc_interfaces() {
+    let mut raw:serde_json::Value=serde_json::from_str(&card()).unwrap();
+    raw["supportedInterfaces"][0]["protocolBinding"]=json!("JSONRPC");
+    for directive in ["no-store","no-cache"] {
+        let (url,request)=server("200 OK",&format!("Content-Type: application/json\r\nCache-Control: {directive}\r\n"),raw.to_string()).await;
+        let fetcher=HttpA2aCardFetcher::new(OutboundUrlGuard::new(true,true),vec![]);
+        let selected=fetcher.fetch(&url,false).await.unwrap();
+        assert_eq!(selected.interface.binding,bcs_service_api::types::a2a_bot::A2aBinding::JsonRpc);
+        assert_eq!(selected.raw,raw);request.await.unwrap();
+    }
 }

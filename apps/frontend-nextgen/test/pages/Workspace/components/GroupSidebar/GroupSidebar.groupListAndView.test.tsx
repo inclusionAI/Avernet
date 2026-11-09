@@ -163,8 +163,12 @@ describe('GroupSidebar', () => {
     expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
-    fireEvent.click(screen.getByText('参与者视角'));
-    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant');
+    fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+    fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+    fireEvent.click(screen.getByRole('button', { name: '消息视角' }));
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant', 'inject');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
   });
 

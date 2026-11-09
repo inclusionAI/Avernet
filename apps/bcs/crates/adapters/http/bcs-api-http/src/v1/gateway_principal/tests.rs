@@ -11,7 +11,7 @@ use super::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust, GatewayPrincipalVerificationError,
     GatewayPrincipalVerifierBuildError,
 };
-use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
+use crate::v1::common::{CredentialKind, PrincipalVerificationError, PrincipalVerifier};
 
 const NOW: u64 = 1_785_657_600;
 const TEST_KEY_TEXT: &str = "TEST-ONLY-bcs-principal-contract-key-32-bytes";
@@ -329,15 +329,23 @@ async fn header_verifier_extracts_one_signed_gateway_principal_token() {
         HeaderValue::from_str(&current_token()).expect("valid header value"),
     );
 
-    let caller = PrincipalVerifier::verify(&verifier(), &headers)
+    let identity = PrincipalVerifier::verify(&verifier(), &headers)
         .await
         .expect("valid signed Gateway caller");
+    let caller = identity.caller;
 
     assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(caller.user.as_ref().map(|user| user.id.as_str()), Some("user-1"));
     assert_eq!(caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()), Some("bot-1"));
     assert!(caller.app.is_some());
     assert!(caller.access_key.is_some());
+    // The wrapper pins provenance: constants of the trusted verifier, never
+    // supplied by request content (V1 API auth plan, spec §7.4).
+    assert_eq!(identity.authentication_context.source, "gateway");
+    assert_eq!(
+        identity.authentication_context.credential_kind,
+        CredentialKind::GatewayPrincipalHeader
+    );
 }
 
 #[tokio::test]

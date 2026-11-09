@@ -1,9 +1,17 @@
-import { assertDeploymentAvailable, clearConfirmedDeployment, clearReconciledDeployment, markDeploymentPending } from '../editor/deploymentGuard'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { autoHealSaveIsCurrent, autoHealSavedBaselineChangedMessage, autoHealUnifiedSaveIdentity, bindAutoHealDeployToSave, isAutoHealWriteNotSent, isDeployPrePushConflict, PostSaveLockError, postSaveLockMessage } from '../api/autoHealWrites'
+import { readAutoHealUnifiedBaseline, readAutoHealUnifiedCapability, AutoHealScopedCapabilityError, confirmAutoHealUnifiedReview, type AutoHealUnifiedBaseline } from '../api/autoHealUnifiedBaseline'
+import { serializeUnifiedSpec } from '../api/workflowUnifiedSave'
+import AutoHealSaveReview from './AutoHealSaveReview'
+import AutoHealDeployConfirm from './AutoHealDeployConfirm'
+import type { AutoHealDeploySnapshot } from '../api/autoHealDeploySnapshot'
+import { editorWorkflowWriteSnapshot, editorWorkflowWriteState, subscribeEditorWorkflowWrites } from '../editor/workflowWriteGuard'
+import { hasPostSaveVerificationError, packVersionsRevision, subscribePackVersions } from '../editor/packVersionSession'
+import { assertDeploymentAvailable, clearAttemptConfirmedDeployment, clearEditorReconciledDeployment, clearRejectedDeployment, createDeploymentId, markWorkflowDeploymentPending, finishWorkflowDeployment, isWorkflowDeploymentPending, readEditorDeploymentMarker, subscribeWorkflowDeploymentPending, workflowDeploymentPendingRevision } from '../editor/deploymentGuard'
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
 import { useAutoHealSourceRun } from '../api/useAutoHealSourceRun'
 import StatusBadge from './StatusBadge'
-import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion } from '@avernet/clawweb-shared/web/types'
+import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion, AutoHealSaveResult } from '@avernet/clawweb-shared/web/types'
 import { formatDuration } from '../utils/time'
 import DeploymentRecoveryDialog from './DeploymentRecoveryDialog'
 import { PanelHeader, PhaseIndicator, type AutoHealPhase } from './AutoHealPanelHeader'
@@ -27,9 +35,18 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   // verified actor. Never read or render it. Remove it and leave a non-sensitive
   // marker so an unknown in-flight write cannot silently be replaced on reload.
   const [legacyBlocked, setLegacyBlocked] = useState(true)
-  const [deploymentRecovery, setDeploymentRecovery] = useState<{ workflowId: string; message: string; storageAvailable: boolean } | null>(null)
+  const [deploymentRecovery, setDeploymentRecovery] = useState<{ workflowId: string; message: string; storageAvailable: boolean; attemptToken?: string } | null>(null)
   const [deploymentRecoveryError, setDeploymentRecoveryError] = useState<string | null>(null)
   const [deploymentRecoveryOpen, setDeploymentRecoveryOpen] = useState(false)
+  const recoveryTarget = useRef<{ workflowId: string; token: string } | null>(null)
+  useSyncExternalStore(subscribeWorkflowDeploymentPending, workflowDeploymentPendingRevision, workflowDeploymentPendingRevision)
+  const workflowPending = isWorkflowDeploymentPending(run.workflow_id)
+  useSyncExternalStore(subscribePackVersions, packVersionsRevision, packVersionsRevision)
+  const postSaveLocked = hasPostSaveVerificationError(run.workflow_id)
+  useSyncExternalStore(subscribeEditorWorkflowWrites, () => editorWorkflowWriteSnapshot(run.workflow_id), () => editorWorkflowWriteSnapshot(run.workflow_id))
+  const databaseWritePhase = editorWorkflowWriteState(run.workflow_id).phase
+  const mounted = useRef(false)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     const prefix = 'clawweb.autoheal.operation.v1.'
     const marker = 'clawweb.autoheal.review-blocked.v1.'
@@ -42,16 +59,17 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
         try { localStorage.setItem(marker + suffix, '1') } catch { failed = true }
         try { localStorage.removeItem(key) } catch { failed = true }
       }
-      const blockedMarker = localStorage.getItem(marker + encodeURIComponent(run.workflow_id)) !== null
-      setDeploymentRecovery(blockedMarker
-        ? { workflowId: run.workflow_id, message: '存在未确认的浏览器核对标记。请人工核对 Git 和数据库后，仅清除当前工作流标记。', storageAvailable: !failed }
+      let blockedMarker = localStorage.getItem(marker + encodeURIComponent(run.workflow_id)) !== null
+      try { assertDeploymentAvailable(run.workflow_id) } catch { blockedMarker = true }
+      setDeploymentRecovery(current => blockedMarker
+        ? current?.workflowId === run.workflow_id && current.attemptToken ? current : { workflowId: run.workflow_id, message: '存在未确认的浏览器核对标记。请人工核对 Git 和数据库后，仅清除当前工作流标记。', storageAvailable: !failed }
         : null)
       setLegacyBlocked(failed || blockedMarker)
     } catch {
       setDeploymentRecovery({ workflowId: run.workflow_id, message: '无法访问浏览器核对标记，无法安全恢复。', storageAvailable: false })
       setLegacyBlocked(true)
     }
-  }, [run.workflow_id])
+  }, [run.workflow_id, workflowPending])
   const [customPrompt, setCustomPrompt] = useState('')
   const [diagnosisResult, setDiagnosisResult] = useState<AutoHealDiagnosisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -60,7 +78,23 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   const [errorChainExpanded, setErrorChainExpanded] = useState(true)
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(true)
   const [autoRun, setAutoRun] = useState(true)
-  const [saveResult, setSaveResult] = useState<{ workflowId: string; packId: string } | null>(null)
+  const [deployConfirmation, setDeployConfirmation] = useState<AutoHealSaveResult | null>(null)
+  const [saveMode, setSaveMode] = useState<'checking' | 'unified' | 'compatible' | 'failed' | 'unavailable'>('checking')
+  const [capabilityError, setCapabilityError] = useState('')
+  const [review, setReview] = useState<{ baseline: AutoHealUnifiedBaseline; candidateJson: string } | null>(null)
+  const saveInFlight = useRef(false)
+  useEffect(() => {
+    if (!diagnosisResult) return
+    let current = true
+    setSaveMode('checking'); setCapabilityError(''); setReview(null)
+    void readAutoHealUnifiedCapability(diagnosisResult.workflowId).then(enabled => {
+      if (current) setSaveMode(enabled ? 'unified' : 'compatible')
+    }).catch(error => {
+      if (current) { setCapabilityError(extractErrorMessage(error, '无法确认宿主保存能力。')); setSaveMode(error instanceof AutoHealScopedCapabilityError ? 'unavailable' : 'failed') }
+    })
+    return () => { current = false }
+  }, [diagnosisResult])
+  const [saveResult, setSaveResult] = useState<{ workflowId: string; packId: string; receipt: AutoHealSaveResult } | null>(null)
 
   const diagnoseMutation = useAutoHealDiagnose()
   const saveMutation = useAutoHealSave()
@@ -86,6 +120,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
       return
     }
 
+    setSaveMode('checking'); setReview(null)
     setPhase('diagnosing')
     setErrorMessage(null)
     setDiagnosisResult(null)
@@ -123,55 +158,83 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
     return () => clearInterval(timer)
   }, [phase])
 
-  const handleSave = useCallback(() => {
-    if (!diagnosisResult?.fixedSpec || legacyBlocked) return
+  const submitSave = useCallback((spec: NonNullable<AutoHealDiagnosisResult['fixedSpec']>, baseline?: AutoHealUnifiedBaseline) => {
+    if (!diagnosisResult) return
+    let requestId: string | undefined
+    try { if (baseline) requestId = createDeploymentId() }
+    catch (err) { saveInFlight.current = false; setPhase('error'); setErrorMessage(extractErrorMessage(err, '无法创建请求标识；未发送保存。')); return }
+    setReview(null); setPhase('saving'); setErrorMessage(null); setSaveResult(null)
+    saveMutation.mutate({ workflowId: diagnosisResult.workflowId, spec, diagnosisId: diagnosisResult.diagnosisId,
+      note: 'auto-heal save', ...(baseline ? { unifiedBaseline: baseline, requestId } : {}) }, {
+      onSuccess: (result) => {
+        saveInFlight.current = false
+        if (!result || result.ok !== true || result.saved !== true || result.workflowId !== diagnosisResult.workflowId || typeof result.packId !== 'string' || !result.packId.trim()) {
+          setPhase('error'); setErrorMessage('保存结果无效或工作流不匹配，无法部署。请先核对草稿。'); return
+        }
+        setSaveResult({ workflowId: result.workflowId, packId: result.packId, receipt: result }); setPhase('saved')
+      },
+      onError: (err) => {
+        saveInFlight.current = false; setPhase('error')
+        setErrorMessage(err instanceof PostSaveLockError ? postSaveLockMessage : extractErrorMessage(err, '保存修复失败'))
+      },
+    })
+  }, [diagnosisResult, saveMutation])
+
+  const handleSave = useCallback(async () => {
+    if (!diagnosisResult?.fixedSpec || legacyBlocked || saveInFlight.current || review || saveMode === 'checking' || saveMode === 'failed' || saveMode === 'unavailable') return
     if (diagnosisResult.workflowId !== run.workflow_id) { setPhase('error'); setErrorMessage('诊断工作流不匹配，无法保存。'); return }
+    if (hasPostSaveVerificationError(diagnosisResult.workflowId)) { setPhase('error'); setErrorMessage(postSaveLockMessage); return }
     try { assertDeploymentAvailable(diagnosisResult.workflowId) } catch (err) {
       setLegacyBlocked(true); setPhase('error'); setErrorMessage(extractErrorMessage(err, '无法访问浏览器核对标记。')); return
     }
+    saveInFlight.current = true
+    if (saveMode === 'compatible') { submitSave(diagnosisResult.fixedSpec); return }
+    setPhase('saving'); setErrorMessage(null)
+    try {
+      const candidateJson = serializeUnifiedSpec(diagnosisResult.fixedSpec)
+      const baseline = await readAutoHealUnifiedBaseline(diagnosisResult.workflowId)
+      if (mounted.current) { setReview({ baseline, candidateJson }); setPhase('diagnosed') }
+    } catch (err) {
+      if (mounted.current) { setPhase('error'); setErrorMessage(extractErrorMessage(err, '读取保存基线失败；请求未发送。')) }
+    } finally { saveInFlight.current = false }
+  }, [diagnosisResult, legacyBlocked, review, saveMode, run.workflow_id, submitSave])
 
-    setPhase('saving')
-    setErrorMessage(null)
-    setSaveResult(null)
+  const handleReviewConfirm = useCallback(() => {
+    if (!review || !diagnosisResult?.fixedSpec || saveInFlight.current || legacyBlocked || saveMode !== 'unified') return
+    try {
+      if (serializeUnifiedSpec(diagnosisResult.fixedSpec) !== review.candidateJson) throw new Error('修复内容已变化，请重新核对。')
+      assertDeploymentAvailable(diagnosisResult.workflowId)
+      if (hasPostSaveVerificationError(diagnosisResult.workflowId)) throw new Error(postSaveLockMessage)
+      const spec = JSON.parse(review.candidateJson) as NonNullable<AutoHealDiagnosisResult['fixedSpec']>
+      confirmAutoHealUnifiedReview(review.baseline, spec)
+      saveInFlight.current = true
+      submitSave(spec, review.baseline)
+    } catch (err) { setReview(null); setPhase('error'); setErrorMessage(extractErrorMessage(err, '无法确认基线；请求未发送。')) }
+  }, [review, diagnosisResult, legacyBlocked, saveMode, submitSave])
 
-    saveMutation.mutate(
-      {
-        workflowId: diagnosisResult.workflowId,
-        spec: diagnosisResult.fixedSpec,
-        diagnosisId: diagnosisResult.diagnosisId,
-        note: 'auto-heal save',
-      },
-      {
-        onSuccess: (result) => {
-          if (!result || result.ok !== true || result.saved !== true || result.workflowId !== diagnosisResult.workflowId || typeof result.packId !== 'string' || !result.packId.trim()) {
-            setPhase('error')
-            setErrorMessage('保存结果无效或工作流不匹配，无法部署。请先核对草稿。')
-            return
-          }
-          setSaveResult({ workflowId: result.workflowId, packId: result.packId })
-          setPhase('saved')
-        },
-        onError: (err) => {
-          setPhase('error')
-          setErrorMessage(extractErrorMessage(err, '保存修复失败'))
-        },
-      },
-    )
-  }, [diagnosisResult, saveMutation, legacyBlocked, run.workflow_id])
+  const openDeploymentRecovery = useCallback(() => {
+    if (!deploymentRecovery?.storageAvailable || isWorkflowDeploymentPending(run.workflow_id)) return
+    try {
+      const marker = readEditorDeploymentMarker(run.workflow_id)
+      if (!marker || deploymentRecovery.attemptToken && marker !== deploymentRecovery.attemptToken) throw new Error('部署请求与核对标记不匹配，请重新核对。')
+      recoveryTarget.current = { workflowId: run.workflow_id, token: marker }
+      setDeploymentRecoveryError(null); setDeploymentRecoveryOpen(true)
+    } catch (error) { setErrorMessage(extractErrorMessage(error, '无法读取核对标记。')); setPhase('error') }
+  }, [deploymentRecovery, run.workflow_id])
 
   const handleDeploymentRecoveryConfirm = useCallback(() => {
-    if (!deploymentRecovery || !deploymentRecovery.storageAvailable) return
+    const target = recoveryTarget.current
+    if (!deploymentRecovery?.storageAvailable || !target || target.workflowId !== run.workflow_id) return
     setDeploymentRecoveryError(null)
     try {
-      clearReconciledDeployment(run.workflow_id, { gitAndDatabaseConfirmed: true })
+      if (deploymentRecovery.attemptToken && target.token !== deploymentRecovery.attemptToken) throw new Error('部署请求与核对标记不匹配。')
+      clearEditorReconciledDeployment(target.workflowId, target.token)
     } catch (error) {
       setDeploymentRecoveryError(extractErrorMessage(error, '已确认人工核对，但无法清除浏览器核对标记；当前工作流仍保持 blocked。'))
       return
     }
-    setDeploymentRecovery(null)
-    setDeploymentRecoveryOpen(false)
-    setLegacyBlocked(false)
-    setErrorMessage(null)
+    recoveryTarget.current = null
+    setDeploymentRecovery(null); setDeploymentRecoveryOpen(false); setLegacyBlocked(false); setErrorMessage(null)
     setPhase(saveResult && diagnosisResult ? 'saved' : 'idle')
   }, [deploymentRecovery, run.workflow_id, saveResult, diagnosisResult])
 
@@ -206,12 +269,17 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
     )
   }, [diagnosisResult, run.flow_id, runMutation, onRerunComplete])
 
-  const handleDeploy = useCallback(() => {
+  const handleDeploy = useCallback(async (snapshot?: AutoHealDeploySnapshot) => {
     if (!diagnosisResult || !saveResult || deployInFlight.current || legacyBlocked) return
+    const unified = autoHealUnifiedSaveIdentity(saveResult.receipt)
+    if (unified && (!snapshot || snapshot.commit !== unified.commit || snapshot.draftToken !== unified.draftToken)) { setErrorMessage('部署审阅与保存回执不匹配；请求未发送。'); return }
+    if (!autoHealSaveIsCurrent(saveResult.receipt)) { setErrorMessage(autoHealSavedBaselineChangedMessage); return }
+    if (hasPostSaveVerificationError(saveResult.workflowId)) { setErrorMessage(postSaveLockMessage); return }
 
     // Persist only a non-sensitive uncertainty marker before sending. Without a
     // server journal, a reload after lost acknowledgement must not silently retry.
-    try { markDeploymentPending(saveResult.workflowId) } catch (err) {
+    let pendingToken: string, requestId: string
+    try { requestId = createDeploymentId(); pendingToken = markWorkflowDeploymentPending(saveResult.workflowId) } catch (err) {
       setLegacyBlocked(true)
       setPhase('error')
       setErrorMessage(extractErrorMessage(err, '无法记录待核对标记，部署未发送；请检查浏览器存储。'))
@@ -221,78 +289,99 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
     setPhase('deploying')
     setErrorMessage(null)
 
-    deployMutation.mutate(
-      {
-        workflowId: saveResult.workflowId,
-        packId: saveResult.packId,
-        diagnosisId: diagnosisResult.diagnosisId,
-        note: 'auto-heal deploy',
-        // The legacy server callback cannot resolve the original run's bot/lifecycle.
-        autoRun: false,
-      },
-      {
-        onSuccess: (result) => {
+    const input = { workflowId: saveResult.workflowId, packId: saveResult.packId, requestId,
+      diagnosisId: diagnosisResult.diagnosisId, note: 'auto-heal deploy', autoRun: false,
+      ...(snapshot && unified ? { candidateCommit: snapshot.commit, expectedDraftToken: snapshot.draftToken, expectedActiveCommit: snapshot.expectedActiveCommit, snapshotProtocol: 'saved-tree-v2' as const, confirmedFileDiff: true as const } : {}) }
+    try {
+      bindAutoHealDeployToSave(input, saveResult.receipt)
+      const result = await deployMutation.mutateAsync(input)
           deployInFlight.current = false
           if (!result || result.ok !== true || result.deployed !== true || result.workflowId !== saveResult.workflowId || result.packId !== saveResult.packId
             || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
-            || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()) {
+            || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()
+            || (snapshot && unified && (result.requestId !== requestId || !('snapshotProtocol' in result) || result.snapshotProtocol !== 'saved-tree-v2' || !('candidateCommit' in result) || result.candidateCommit !== snapshot.commit || !('expectedActiveCommit' in result) || result.expectedActiveCommit !== snapshot.expectedActiveCommit))) {
             setLegacyBlocked(true)
-            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署结果无法确认，当前工作流需要人工核对。', storageAvailable: true })
+            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署结果无法确认，当前工作流需要人工核对。', storageAvailable: true, attemptToken: pendingToken })
             setPhase('error')
             setErrorMessage('部署结果无法确认；请先人工核对 Git 和数据库，勿重试。')
             return
           }
-          try { clearConfirmedDeployment(saveResult.workflowId) } catch (err) {
+          try { clearAttemptConfirmedDeployment(saveResult.workflowId, pendingToken) } catch (err) {
             setLegacyBlocked(true)
-            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '浏览器核对标记清除失败，当前工作流仍保持 blocked。', storageAvailable: true })
+            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '浏览器核对标记清除失败，当前工作流仍保持 blocked。', storageAvailable: true, attemptToken: pendingToken })
             setPhase('error')
             setErrorMessage(extractErrorMessage(err, '无法清除浏览器核对标记。'))
             return
           }
           setPhase('deployed')
-          if (autoRun) handleRerun()
-        },
-        onError: (err) => {
+          if (autoRun && mounted.current) handleRerun()
+    } catch (err) {
           deployInFlight.current = false
+          if (err instanceof PostSaveLockError || isAutoHealWriteNotSent(err, input)) {
+            try { clearRejectedDeployment(saveResult.workflowId, pendingToken); setPhase('saved'); setErrorMessage(err instanceof PostSaveLockError ? postSaveLockMessage : extractErrorMessage(err, '部署未发送。')) }
+            catch (clearError) {
+              setLegacyBlocked(true); setDeploymentRecovery({ workflowId: saveResult.workflowId, message: extractErrorMessage(clearError, '无法清除浏览器核对标记。'), storageAvailable: true, attemptToken: pendingToken })
+              setPhase('error'); setErrorMessage(extractErrorMessage(clearError, '无法清除浏览器核对标记。'))
+            }
+            return
+          }
+          if (isDeployPrePushConflict(err, { workflowId: saveResult.workflowId, requestId })) {
+            try {
+              clearRejectedDeployment(saveResult.workflowId, pendingToken)
+              setDeploymentRecovery(null)
+              setLegacyBlocked(false)
+              setDiagnosisResult(null)
+              setSaveResult(null)
+              setPhase('error')
+              setErrorMessage('当前生效 tag 缺失或候选快照存在文件缺失、模式或受保护文件内容冲突，部署已阻止。请联系有权限的维护人员核对并修复，然后重新诊断并保存。')
+              return
+            } catch (clearError) {
+              setLegacyBlocked(true)
+              setDeploymentRecovery({ workflowId: saveResult.workflowId, message: extractErrorMessage(clearError, '无法清除浏览器核对标记。'), storageAvailable: true, attemptToken: pendingToken })
+              setPhase('error')
+              setErrorMessage(extractErrorMessage(clearError, '无法清除浏览器核对标记。'))
+              return
+            }
+          }
           setLegacyBlocked(true)
-          setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署失败或结果未知，当前工作流需要人工核对。', storageAvailable: true })
+          setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署失败或结果未知，当前工作流需要人工核对。', storageAvailable: true, attemptToken: pendingToken })
           setPhase('error')
           setErrorMessage(`${extractErrorMessage(err, '部署修复失败')}；结果可能未知，请先人工核对 Git 和数据库，勿重试。`)
-        },
-      },
-    )
+    } finally {
+      finishWorkflowDeployment(saveResult.workflowId, pendingToken)
+    }
   }, [diagnosisResult, saveResult, deployMutation, autoRun, handleRerun, legacyBlocked])
 
   const handleReset = useCallback(() => {
     setPhase('idle')
-    setDiagnosisResult(null)
+    setDiagnosisResult(null); setReview(null); setDeployConfirmation(null)
     setErrorMessage(null)
     setCustomPrompt('')
   }, [])
 
+  const savedBaselineStale = phase === 'saved' && !!saveResult && !autoHealSaveIsCurrent(saveResult.receipt)
   const isFailed = ['failed', 'blocked', 'waiting'].includes(run.status)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl"
+        className={`flex h-full w-full ${review ? 'max-w-6xl' : 'max-w-2xl'} flex-col bg-white shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <PanelHeader run={run} onClose={onClose} />
 
-        {/* Phase Indicator */}
         <PhaseIndicator phase={phase} />
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {legacyBlocked && (
+          {(legacyBlocked || workflowPending) && (
             <div role="alert" className="rounded border border-amber-300 p-3 text-sm">
-              <p>存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请先人工核对 Git 和数据库；核对完成前，暂不能保存或部署。</p>
-              {deploymentRecovery?.storageAvailable && (
+              <p>{workflowPending ? '部署操作正在进行，不能清除核对标记或重复部署。' : '存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请先人工核对 Git 和数据库；核对完成前，暂不能保存或部署。'}</p>
+              {deploymentRecovery?.storageAvailable && !workflowPending && (
                 <button
                   type="button"
-                  onClick={() => { setDeploymentRecoveryError(null); setDeploymentRecoveryOpen(true) }}
+                  onClick={openDeploymentRecovery}
                   className="mt-2 rounded border border-input bg-card px-3 py-1.5 text-xs text-foreground"
                 >
                   我已人工核对，清除当前工作流标记…
@@ -300,8 +389,10 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
               )}
             </div>
           )}
-          {/* Error */}
-          {(phase === 'error' || phase === 'run-error') && errorMessage && (
+          {databaseWritePhase !== 'clear' && <div role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{databaseWritePhase === 'pending' ? '数据库写入正在进行；请等待结果。' : '数据库写入结果未知；请人工核对，勿重试或将读取结果作为已确认基线。'}</div>}
+          {savedBaselineStale && <div role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{autoHealSavedBaselineChangedMessage}</div>}
+          {postSaveLocked && <div role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{postSaveLockMessage}</div>}
+          {(phase === 'error' || phase === 'run-error' || phase === 'saved') && errorMessage && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
               <div className="flex items-center gap-2 mb-1">
                 <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
@@ -326,7 +417,6 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             />
           )}
 
-          {/* Diagnosing */}
           {phase === 'diagnosing' && <DiagnosingContent elapsed={diagnosingElapsed} />}
 
           {/* Diagnosed: Results */}
@@ -342,12 +432,22 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             />
           )}
 
+          {(phase === 'diagnosed' || phase === 'error') && diagnosisResult?.fixedSpec && <div className="rounded border border-input bg-card p-3 text-sm">
+            {saveMode === 'checking' && <p>正在确认宿主保存能力；完成前不能保存。</p>}
+            {saveMode === 'unavailable' && <p role="alert">{capabilityError}</p>}
+            {saveMode === 'failed' && <p role="alert">{capabilityError} 无法确认宿主是否支持统一保存；未发送保存。请重试或联系维护人员检查宿主能力接口。</p>}
+            {saveMode === 'compatible' && <p>兼容保存的数据库和 Git 写入范围及并发保护由宿主决定，可能覆盖诊断后的更改；保存不等于部署。</p>}
+            {saveMode === 'unified' && <p>保存前需要核对当前草稿和修复内容。诊断未提供可验证的源草稿身份。</p>}
+          </div>}
+          {review && <AutoHealSaveReview baseline={review.baseline} candidateJson={review.candidateJson}
+            onConfirm={handleReviewConfirm} onCancel={() => setReview(null)} />}
+
           {/* Saving state */}
           {phase === 'saving' && (
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在保存修复…</p>
-              <p className="text-xs">正在将工作流保存到数据库，保存不会部署</p>
+              <p className="text-xs">{saveMode === 'unified' ? '正在读取基线或保存数据库与 Git，保存不会部署' : '正在通过宿主兼容接口保存；保存范围由宿主决定'}</p>
             </div>
           )}
 
@@ -357,7 +457,9 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
               <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
                 <h3 className="font-semibold text-blue-800">修复已保存</h3>
                 <p className="mt-1 text-blue-700 text-sm">
-                  修复后的工作流已保存到数据库，尚未部署。部署时将发布当前保存的工作流。
+                  {(saveResult?.receipt as (AutoHealSaveResult & { unified?: boolean }) | undefined)?.unified
+                    ? '数据库和 Git 已确认保存，尚未部署；部署前将重新核对保存回执和文件差异。'
+                    : '宿主已确认保存，尚未部署；数据库和 Git 的实际保存范围由宿主决定。'}
                 </p>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
@@ -371,7 +473,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
                   />
                 </label>
                 <p className="mt-1 text-xs text-gray-500">
-                  开启后，部署成功会自动触发一次新的 flow run 来验证修复。
+                  {(saveResult?.receipt as (AutoHealSaveResult & { unified?: boolean }) | undefined)?.unified ? '开启后将重新运行已确认部署的快照。' : '开启后将重新运行服务端实际部署的草稿；其内容可能与本次修复不同。'}
                 </p>
               </div>
             </div>
@@ -382,7 +484,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在部署修复…</p>
-              <p className="text-xs">正在发布已保存的工作流</p>
+              <p className="text-xs">正在发布服务端读取的草稿</p>
             </div>
           )}
 
@@ -392,8 +494,8 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
               <svg className="mx-auto mb-2 h-10 w-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <h3 className="font-semibold text-green-800">修复已部署</h3>
-              <p className="mt-1 text-green-700 text-sm">工作流已保存并部署到生产。你可以重新运行工作流来验证修复效果。</p>
+              <h3 className="font-semibold text-green-800">部署已完成</h3>
+              <p className="mt-1 text-green-700 text-sm">服务端读取的草稿已部署；这不保证内容与本次修复相同。</p>
             </div>
           )}
 
@@ -407,7 +509,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
           )}
         </div>
 
-        {deploymentRecovery && deploymentRecoveryOpen && (
+        {deploymentRecovery && deploymentRecoveryOpen && !workflowPending && (
           <DeploymentRecoveryDialog
             workflowId={deploymentRecovery.workflowId}
             errorMessage={deploymentRecoveryError}
@@ -416,18 +518,19 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
           />
         )}
 
-        {/* Footer Actions */}
+        {deployConfirmation && phase === 'saved' && <AutoHealDeployConfirm receipt={deployConfirmation} onCancel={() => setDeployConfirmation(null)} onConfirm={snapshot => { const confirmed = deployConfirmation; setDeployConfirmation(null); if (confirmed === saveResult?.receipt) void handleDeploy(snapshot) }} />}
         <PanelFooter
           phase={phase}
           isFailed={isFailed}
           hasFixedSpec={!!diagnosisResult?.fixedSpec}
           onDiagnose={handleDiagnose}
           onSave={handleSave}
-          onDeploy={handleDeploy}
+          onDeploy={() => { if (saveResult) setDeployConfirmation(saveResult.receipt) }}
           onRerun={handleRerun}
           onReset={handleReset}
           isDiagnosing={diagnoseMutation.isPending}
-          isWriteBlocked={legacyBlocked}
+          isWriteBlocked={legacyBlocked || postSaveLocked || databaseWritePhase !== 'clear' || savedBaselineStale || (phase !== 'saved' && (saveMode === 'checking' || saveMode === 'failed' || saveMode === 'unavailable' || !!review))}
+          savedBaselineStale={savedBaselineStale}
           isSaving={saveMutation.isPending}
           isDeploying={deployMutation.isPending}
           isRunning={runMutation.isPending}
@@ -792,17 +895,18 @@ interface PanelFooterProps {
   onReset: () => void
   isDiagnosing: boolean
   isWriteBlocked: boolean
+  savedBaselineStale: boolean
   isSaving: boolean
   isDeploying: boolean
   isRunning: boolean
 }
 
-function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDeploy, onRerun, onReset, isDiagnosing, isWriteBlocked, isSaving, isDeploying, isRunning }: PanelFooterProps) {
+function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDeploy, onRerun, onReset, isDiagnosing, isWriteBlocked, savedBaselineStale, isSaving, isDeploying, isRunning }: PanelFooterProps) {
   return (
     <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          {(phase === 'diagnosed' || phase === 'deployed' || phase === 'run-error' || phase === 'error') && (
+          {(phase === 'diagnosed' || phase === 'deployed' || phase === 'run-error' || phase === 'error' || phase === 'saved' && savedBaselineStale) && (
             <button
               onClick={onReset}
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"

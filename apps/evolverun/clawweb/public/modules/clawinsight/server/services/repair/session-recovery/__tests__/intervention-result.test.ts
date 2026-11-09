@@ -148,3 +148,122 @@ it("does not treat a pre-upgrade v2 artifact without audit coverage as no interv
   await service.executionFailure(task.taskId, "历史任务结束"); await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "unknown" });
 });
+
+
+it("holds recovered results until delayed delivery evidence arrives, including after audit rehydration", async () => {
+  let task = await create();
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status: "accepted", platformMessageId: "accepted-without-trace" });
+  await agent.retryMessage(task, { clientRequestId: "delayed-send", purpose: "原任务继续指引", message: "继续原失败步骤" });
+  const read = await inspect(await current(task.taskId), "before-ingestion");
+  expect(read.result.delivery_confirmed).toBe(false);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "进入观察", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId); const deadline = task.observationDeadlineAt;
+  const judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "原业务产物已恢复，触达证据尚未入库", evidence_ids: [read.evidenceId] };
+  await agent.report(task, { kind: "observation", phase: "observe", judgment, final_summary: "应继续观察，不能提前收尾" });
+  await service.reportResults();
+  expect(callbacks).toEqual([]);
+  expect(await current(task.taskId)).toMatchObject({ status: "running", judgment, observationDeadlineAt: deadline });
+  await expect(agent.report(await current(task.taskId), { kind: "observation", phase: "observe",
+    judgment: { ...judgment, delivery: "confirmed" } })).rejects.toMatchObject({ status: 422 });
+  tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
+  let saved = await current(task.taskId);
+  await tasks.update(saved.taskId, saved.version, value => ({ ...value, version: value.version + 1, timeline: [...value.timeline,
+    ...Array.from({ length: 70 }, (_, i) => ({ event_id: `poll-${i}`, at_ms: now + i, kind: "operation" as const, actor: "agent" as const,
+      summary: "观察", payload: { status: "succeeded", tool_call_id: `poll-${i}` } }))] }));
+  const bootstrap = await agent.bootstrap(await current(task.taskId));
+  expect(bootstrap.task.timeline.length).toBeLessThanOrEqual(60);
+  expect(bootstrap.task.timeline.some(event => (event.payload.result as Record<string, unknown> | undefined)?.initial_message === true)).toBe(true);
+  const sent = vi.mocked(runtime.sendMessage).mock.calls[0][0];
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "delayed-message", message: { role: "user", content: sent.message } }) + "\n");
+  const after = await inspect(await current(task.taskId), "after-ingestion");
+  expect(after.result.delivery_confirmed).toBe(true);
+  saved = await current(task.taskId);
+  await agent.report(saved, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "confirmed", response: "acted", evidence_ids: [read.evidenceId, after.evidenceId] } });
+  await service.reportResults();
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
+  expect(callbacks.at(-1)).toMatchObject({ status: "completed", effect: "recovered", intervention_status: "performed" });
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])("waits for delayed TE AIVision evidence after recovery: initial=%s", async initial => {
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
+  let task = await create("automatic", { target: { ...request.target, engine: "TE" } });
+  const read = vi.fn().mockResolvedValue({ delivery_confirmed: false, traces: [] });
+  (agent as any).deps.trajectory = { read };
+  const basis = await agent.trajectoryRead(task, { clientRequestId: "te-before-send", purpose: "核实原业务阻塞" });
+  if (!initial) {
+    await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "核实原任务", evidence_ids: [basis.evidenceId] });
+    await agent.report(await current(task.taskId), { kind: "plan", phase: "plan", plan: { ...plan, actions: [], owner_cooperation: [] } });
+  }
+  await agent.retryMessage(await current(task.taskId), { clientRequestId: "te-delayed-send", purpose: "继续原任务", message: "请继续原失败步骤" });
+  if (initial) await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "等待指引效果", evidence_ids: [basis.evidenceId] });
+  else await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: true, success: true, summary: "发送方案内继续指引" });
+  const phase = initial ? "observe" : "verify";
+  const before = await agent.trajectoryRead(await current(task.taskId), { clientRequestId: "te-delayed-check", purpose: "核实消息和恢复效果" });
+  const judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务产物已恢复，AIVision暂未见本次消息", evidence_ids: [before.evidenceId] };
+  await agent.report(await current(task.taskId), { kind: "observation", phase, judgment });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "running", phase, judgment });
+  expect(task.pending_results).toEqual([]);
+  const deadline = task.observationDeadlineAt;
+  read.mockResolvedValue({ delivery_confirmed: true, traces: [] });
+  const after = await agent.trajectoryRead(task, { clientRequestId: "te-late-ingestion", purpose: "补读迟到轨迹确认触达" });
+  await agent.report(await current(task.taskId), { kind: "observation", phase, judgment: { ...judgment, delivery: "confirmed", evidence_ids: [after.evidenceId] } });
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", intervention_status: "performed" });
+  expect((await current(task.taskId)).observationDeadlineAt).toBe(deadline);
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+  expect(runtime.request).not.toHaveBeenCalled();
+  expect(runtime.executeShell).not.toHaveBeenCalled();
+});
+
+it("counts durable Owner feedback once while keeping recovery unknown and preserving it across later requests", async () => {
+  let task = await create();
+  const read = await inspect(task);
+  notifier.notifyOwnerRequest = vi.fn().mockResolvedValue(true);
+  vi.spyOn(agent, "start").mockResolvedValue();
+  const ask = async () => {
+    task = await current(task.taskId);
+    await service.requestOwner(task.taskId, task.version, { reason: "permission", summary: "原资料访问权限不足", instructions: "请申请原资料读取权限",
+      evidence_ids: [read.evidenceId], executionId: task.execution!.executionId });
+    task = await current(task.taskId);
+    return task.ownerRequest!.requestId;
+  };
+  const first = await ask();
+  await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.kind === "notification"
+    && event.payload.channel === "owner_card" && event.payload.state === "sent")).toBe(true));
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "none", pending_results: [] });
+  await expect(service.confirmOwner(task.taskId, first, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  await expect(service.confirmOwner(task.taskId, "stale-request", actor)).rejects.toMatchObject({ status: 409 });
+  const save = vi.spyOn(tasks, "update").mockRejectedValueOnce(new Error("storage unavailable"));
+  await expect(service.confirmOwner(task.taskId, first, actor)).rejects.toThrow("storage unavailable"); save.mockRestore();
+  expect(await current(task.taskId)).toMatchObject({ interventionStatus: "none", ownerRequest: { status: "pending" } });
+
+  await service.confirmOwner(task.taskId, first, actor, "已处理权限");
+  await service.confirmOwner(task.taskId, first, actor, "重复回执");
+  tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
+  expect(await current(task.taskId)).toMatchObject({ status: "running", interventionStatus: "performed", judgment: null, pending_results: [] });
+  expect((await current(task.taskId)).timeline.filter(event => event.kind === "owner_decision")).toHaveLength(1);
+  await inspect(await current(task.taskId), "after-owner-feedback");
+  const second = await ask();
+  expect(second).not.toBe(first);
+  await expect(service.confirmOwner(task.taskId, first, actor)).rejects.toMatchObject({ status: 409 });
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "performed", ownerRequest: { requestId: second, status: "pending" } });
+  await service.confirmOwner(task.taskId, second, actor, "已处理剩余权限");
+  await service.executionFailure(task.taskId, "回执已保存，后续执行未完成核验");
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ effect: "unknown", intervention_status: "performed" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("does not count environment-plan approval as a confirmed permission-handling receipt", async () => {
+  let task = await create();
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要获批环境动作", evidence_ids: [read.evidenceId] });
+  await agent.report(await current(task.taskId), { kind: "plan", phase: "plan", plan });
+  task = await current(task.taskId);
+  vi.spyOn(agent, "start").mockResolvedValue();
+  await service.decide(task.taskId, task.plan!.digest!, true, actor);
+  expect((await current(task.taskId)).timeline.some(event => event.kind === "owner_decision")).toBe(true);
+  expect((await current(task.taskId)).interventionStatus).toBe("none");
+});

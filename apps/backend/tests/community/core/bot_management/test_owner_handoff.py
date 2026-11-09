@@ -736,6 +736,7 @@ def test_real_runtime_arca_receipt_completes_handoff_and_releases_lock(
         else [{"device_uuid": "DEVICE-online"}]
     )
     runtime = BotService.__new__(BotService)
+    runtime._scheduled_caller_refresh = None
     runtime._repository = world.bots
     runtime._passport_plugin = world.passport
     runtime._device_service_provider = lambda: devices

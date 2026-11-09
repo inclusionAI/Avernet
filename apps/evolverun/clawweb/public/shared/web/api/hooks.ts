@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@avernet/clawweb-shared/web/api/client'
+import { api } from './client'
 import type { BenchDomain } from '@avernet/clawweb-shared/web/types'
 import type { WorkflowSpec, KnowledgeBaseCreateInput, KnowledgeBaseUpdateInput, ValidationTemplateCreateInput, ValidationTemplateUpdateInput, ThetaTraceQueryParams, InterveneRequest, InterveneResult, SessionInfoUpdate, NodeStepTraceData, HallucinationCheckData, AutoHealDiagnosisResult, SmartOnboardingGenerateRequest, SmartOnboardingGenerationStatus, SmartOnboardingTestRunRequest, SmartOnboardingValidateRequest, SmartOnboardingValidateResult, TCLogQueryParams, TCLogTaskListParams, TCLogTaskSearchParams, YuQueBookInfo, AppConfigCreateInput, AppConfigUpdateInput, AdminUsersListResponse, AdminUserCreateInput } from '@avernet/clawweb-shared/web/types'
 
@@ -265,11 +265,28 @@ export function useAbortFlowRun() {
   })
 }
 
+const RUN_DETAIL_REFRESH_MS = 5_000
+const ACTIVE_FLOW_RUN_STATUSES = new Set<string>([
+  'pending',
+  'queued',
+  'running',
+  'postActionsRunning',
+  'waiting',
+  'blocked',
+])
+
 export function useFlowRun(flowId: string) {
   return useQuery({
     queryKey: ['run', flowId],
     queryFn: () => api.runs.get(flowId),
     enabled: !!flowId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.run?.status
+      return status !== undefined && ACTIVE_FLOW_RUN_STATUSES.has(String(status))
+        ? RUN_DETAIL_REFRESH_MS
+        : false
+    },
+    refetchIntervalInBackground: false,
   })
 }
 

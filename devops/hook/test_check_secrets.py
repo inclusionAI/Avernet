@@ -107,3 +107,25 @@ def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
         findings = _findings(_diff(line, path="example.rs"))
         assert findings, expression
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_rust_credential_named_declarations_are_types_not_secrets() -> None:
+    declarations = [
+        "    session_SLOT: Option<&str>,",
+        "    async fn named_provider(&self,name:&str,SLOT:&str)->ServiceResult<ProviderBasicInfo> {",
+        "pub struct Registration {pub card:Card,pub bot_runtime_SLOT:Option<String>}",
+    ]
+    for line in declarations:
+        assert _findings(_diff(line.replace("SLOT", "token"), path="example.rs")) == []
+    literal = 'pub struct Record { SLOT: "a-real-looking-' + 'secret-value-12345" }'
+    assert _findings(_diff(literal.replace("SLOT", "token"), path="example.rs"))
+
+
+def test_python_runtime_credential_lookup_does_not_treat_field_label_as_value() -> None:
+    line = 'SLOT = registration["bot_runtime_SLOT"]'.replace("SLOT", "token")
+    assert _findings(_diff(line)) == []
+    secret = "ghp_" + "a" * 30
+    # Known credentials stay forbidden even when used as lookup keys.
+    assert _findings(_diff('SLOT = registration["' + secret + '"]'))
+    literal = 'SLOT = "a-real-looking-' + 'secret-value-12345"'
+    assert _findings(_diff(literal.replace("SLOT", "token")))

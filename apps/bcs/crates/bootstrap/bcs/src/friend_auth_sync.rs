@@ -3,6 +3,7 @@
 //! (same as HttpFriendConnectNotificationPort); does NOT send the openapi
 //! Authorization/Cookie identity.
 
+use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_api_http::v1::gateway_principal::GatewayPrincipalReSigner;
 use bcs_service_api::port::{
@@ -172,7 +173,7 @@ impl FriendAuthSyncPort for HttpFriendAuthSyncPort {
             Ok(rb) => rb,
             Err(e) => return Err(e),
         };
-        let response = request.send().await.map_err(|error| {
+        let response = request.send_traced().await.map_err(|error| {
             warn!(action = command.action.as_str(), %error, "friend-auth-sync request failed");
             ServiceError::InternalError(format!("friend-auth-sync request failed: {error}"))
         })?;

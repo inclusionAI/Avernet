@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
 from agentclaw.community.core.bot_management.capabilities import (
@@ -117,6 +118,8 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     resolve_current_arca_image,
 )
 from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    avernet_tenant_scope,
     bind_current_avernet_tenant,
 )
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
@@ -140,6 +143,9 @@ from agentclaw.community.core.devices.services.device_service import (
     ARCA_DEVICE_PROVIDER,
     BAAS_DEVICE_PROVIDER,
     DeviceService,
+)
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
 )
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.passport import PassportError
@@ -388,8 +394,10 @@ class BotService(BotServiceProtocol):
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
         restart_backup_dependencies: "RestartBackupDependencies | None" = None,
+        scheduled_caller_refresh: ScheduledCallerRefreshProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._scheduled_caller_refresh = scheduled_caller_refresh
         self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
         self._skill_layout_repository = skill_layout_repository
         self._bot_storage_policy = bot_storage_policy
@@ -570,6 +578,7 @@ class BotService(BotServiceProtocol):
         template_type: "str | None",
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
+        bot_name: str | None = None,
     ) -> "Optional[Dict[str, Any]]":
         """Build engine-specific extra_envs via the provisioning strategy.
 
@@ -594,6 +603,8 @@ class BotService(BotServiceProtocol):
                 template_config=template_config,
             )
             extra_envs = strategy.build_extra_envs(ctx)
+            if isinstance(bot_name, str) and bot_name.strip():
+                extra_envs = {**(extra_envs or {}), "TEAMCLAW_BOT_NAME": bot_name.strip()}
             if extra_envs:
                 logger.info(
                     "[%s] Setting engine extra_envs for bot %s: %s",
@@ -1790,6 +1801,8 @@ class BotService(BotServiceProtocol):
             raise BotServiceError(
                 "applicationCoding workspace creation returned no id"
             ) from exc
+        except TemplateWriteInvalidInput:
+            raise
         except Exception as exc:
             raise BotServiceError(
                 "applicationCoding workspace creation failed"
@@ -1807,6 +1820,8 @@ class BotService(BotServiceProtocol):
                 template_type=template_type,
                 active_engine=active_engine,
             )
+        except TemplateWriteInvalidInput:
+            raise
         except Exception as exc:
             logger.error(
                 "[bot_service.create_bot] Failed to create template for bot %s: %s",
@@ -2029,6 +2044,7 @@ class BotService(BotServiceProtocol):
                     template_type=template_type,
                     template_config=template_config,
                     log_context="bot_service.create_bot",
+                    bot_name=resolved_bot_name,
                 )
                 if resolved_active_engine == "openclaw":
                     extra_envs = {
@@ -2301,6 +2317,7 @@ class BotService(BotServiceProtocol):
                     template_type=bot_template_type,
                     template_config=resolved_template_config,
                     log_context="bot_service._allocate_device_async",
+                    bot_name=bot_record.get("bot_name") if bot_record else None,
                 )
                 if active_engine == "openclaw":
                     extra_envs = {
@@ -3255,6 +3272,14 @@ class BotService(BotServiceProtocol):
                         old_template_config=old_template_config,
                         new_template_config=template_config,
                     )
+            except TemplateWriteInvalidInput:
+                # The corp/template-write overlay owns candidate validation.
+                # Preserve the existing best-effort behavior for unrelated
+                # template failures, but never swallow an intentional domain
+                # rejection: the HTTP layer must return the documented 400 and
+                # the bot update must not report success with a missing template
+                # write.
+                raise
             except Exception as e:
                 logger.error(f"[bot_service.update_bot] Failed to update template for bot {bot_id}: {e}")
                 # Don't fail bot update if template update fails
@@ -4884,6 +4909,9 @@ class BotService(BotServiceProtocol):
             # confirmed_template_update 的 MCP/软链刷新由 engine 自己在
             # refresh_restart_authorization 里判断并执行；replacement restart
             # 等新设备 apply 成功后再 resolve 并调用，避免写到旧设备上。
+        except TemplateWriteInvalidInput:
+            # An intentional write rejection must not become a successful restart.
+            raise
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.
             logger.warning(
@@ -5247,6 +5275,7 @@ class BotService(BotServiceProtocol):
             template_type=bot_template_type,
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
+            bot_name=bot.get("bot_name"),
         )
         if active_engine == "openclaw":
             extra_envs = {
@@ -6010,6 +6039,28 @@ class BotService(BotServiceProtocol):
                     "skipped": True,
                     "reason": f"unsupported bot_type: {bot_type}",
                 }
+            if bot_type == "service" and self._scheduled_caller_refresh is not None:
+                refresh_fields = {
+                    "bot_id": bot_id, "owner_user_id": user_id,
+                    "entity_id": stable_resource_owner_id(bot), "env": get_current_env(),
+                }
+                started = time.monotonic()
+                logger.info("scheduled_caller_refresh_requested fields=%s", refresh_fields)
+                try:
+                    # COSEC: use the resolved Bot's tenant, never a callback-supplied tenant.
+                    with avernet_tenant_scope(bot.get("avernet_tenant") or DEFAULT_AVERNET_TENANT):
+                        self._scheduled_caller_refresh.refresh(**refresh_fields)
+                except Exception as exc:
+                    logger.warning(
+                        "scheduled_caller_refresh_failed fields=%s error_type=%s duration_ms=%.1f",
+                        refresh_fields, type(exc).__name__, (time.monotonic() - started) * 1000,
+                    )
+                    # COSEC: provider exceptions may contain credentials; expose only a stable failure.
+                    raise BotServiceError("Caller credential refresh failed") from None
+                logger.info(
+                    "scheduled_caller_refresh_succeeded fields=%s duration_ms=%.1f",
+                    refresh_fields, (time.monotonic() - started) * 1000,
+                )
             logger.info(
                 f"[bot_service.refresh_passport_token] Device hot-update succeeded: "
                 f"bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, bindings={bindings}"

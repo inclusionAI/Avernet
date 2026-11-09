@@ -109,6 +109,17 @@ impl ProviderRepoPort for MemoryProviderStore {
         Ok(())
     }
 
+    async fn pin_a2a_slug(&self, provider_id: &str, slug: &str) -> ServiceResult<()> {
+        let mut providers = self.providers.write().await;
+        let provider = providers.get_mut(provider_id)
+            .filter(|provider| provider.slug.as_deref() == Some(slug))
+            .ok_or_else(|| ServiceError::Conflict("Provider name changed".into()))?;
+        let mut config: serde_json::Value = serde_json::from_str(&provider.config)?;
+        config["a2a_name_pinned"] = serde_json::json!(true);
+        provider.config = serde_json::to_string(&config)?;
+        Ok(())
+    }
+
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>> {
         Ok(self.providers.read().await.get(provider_id).cloned())
     }
@@ -157,6 +168,11 @@ impl ProviderRepoPort for MemoryProviderStore {
         let Some(provider) = providers.get_mut(provider_id) else {
             return Ok(None);
         };
+        let pinned = serde_json::from_str::<serde_json::Value>(&provider.config)?
+            .get("a2a_name_pinned").and_then(serde_json::Value::as_bool) == Some(true);
+        if pinned && slug.is_some_and(|slug| provider.slug.as_deref() != Some(slug)) {
+            return Err(ServiceError::Conflict("A2A Provider name is immutable".into()));
+        }
         if let Some(config) = config {
             reject_policy_relaxation(&provider.config, config)?;
             if bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)? == bcs_service_api::ProviderCollaborationScope::Standard
@@ -176,7 +192,11 @@ impl ProviderRepoPort for MemoryProviderStore {
             provider.name = name.to_string();
         }
         if let Some(config) = config {
-            provider.config = config.to_string();
+            provider.config = if pinned {
+                let mut value: serde_json::Value = serde_json::from_str(config)?;
+                value["a2a_name_pinned"] = serde_json::json!(true);
+                serde_json::to_string(&value)?
+            } else { config.to_string() };
         }
         if let Some(slug) = slug {
             provider.slug = Some(slug.to_string());

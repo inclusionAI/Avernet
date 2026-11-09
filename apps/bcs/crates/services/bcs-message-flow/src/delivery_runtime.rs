@@ -58,7 +58,7 @@ pub struct DeliveryRuntime {
 }
 
 enum WorkResult {
-    CallerFinished(String, bool),
+    CallerFinished(String),
     Prepared(
         PersistedMessageDelivery,
         ServiceResult<PreparedManagedDelivery>,
@@ -502,12 +502,18 @@ impl DeliveryRuntime {
                                     last_send.insert(bot.clone(), epoch.elapsed().as_millis() as u64);
                                     let runtime = self.clone();
                                     work.spawn(async move {
-                                        let result = futures::future::Abortable::new(
-                                            tokio::time::timeout(runtime.config.io_timeout,
-                                                runtime.attempt_caller_protected_dispatch(&row)),
+                                        // No outer window (spec 2026-11-03): every
+                                        // stage inside the attempt carries its own
+                                        // liveness bound and converges with
+                                        // stage-accurate evidence; liveness of the
+                                        // whole task stays with the cancel handle
+                                        // (run-deadline arbiter / AbortUnconfirmed),
+                                        // the same model the ordinary path uses.
+                                        let _result = futures::future::Abortable::new(
+                                            runtime.attempt_caller_protected_dispatch(&row),
                                             registration,
                                         ).await;
-                                        WorkResult::CallerFinished(delivery_id, matches!(result, Ok(Err(_))))
+                                        WorkResult::CallerFinished(delivery_id)
                                     });
                                     continue;
                                 }
@@ -528,24 +534,9 @@ impl DeliveryRuntime {
                 Some(result) = work.join_next(), if !work.is_empty() => {
                     let result = result.map_err(|_| ManagedDeliveryError::Conflict)?;
                     match result {
-                        WorkResult::CallerFinished(id, timed_out) => {
+                        WorkResult::CallerFinished(id) => {
                             preparing.remove(&id);
                             caller_tasks.remove(&id);
-                            if timed_out {
-                                tracing::warn!(delivery_id = %id, "caller protected dispatch timed out; no automatic resend");
-                                if let Some(row) = storage!(self.get(&id)) {
-                                    let next = match row.state.status {
-                                        Status::Queued => Some(Event::PreparationFailed),
-                                        Status::Dispatching | Status::Running => Some(Event::TransportUnknown),
-                                        // Preserve cancellation and terminal evidence; abort work
-                                        // independently establishes stopped vs uncertain.
-                                        _ => None,
-                                    };
-                                    if let Some(next) = next {
-                                        storage!(self.transition(event(&row, next)));
-                                    }
-                                }
-                            }
                         }
                         WorkResult::Prepared(prepared_row, result) => {
                             preparing.remove(&prepared_row.delivery_id);
@@ -608,7 +599,7 @@ impl DeliveryRuntime {
                             command.transport_context_json = Some(prepared.transport_context_json);
                             command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
                                 row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
-                            } else { now_ms().saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
+                            } else { command.now_ms.saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
                             let Some(started) = storage!(self.transition(command.clone())) else { continue; };
                             // §7.2.1 delegation-only lineage (review batch-3
                             // §3.1): an ORDINARY Started row carrying the
