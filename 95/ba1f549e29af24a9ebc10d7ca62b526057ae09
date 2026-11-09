@@ -1,0 +1,1406 @@
+.aci/bcsfuse/bcsfuse-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 94
+.aci/metadata/bcn.aci-metadata.yml
+  h_5b2ec9c12c4d18 1-4
+.agents/skills/teamclaw-defect-handoff
+  h_5b2ec9c12c4d18 1
+.agents/skills/teamclaw-dima-difficulty
+  h_5b2ec9c12c4d18 1
+.agents/skills/teamclaw-dima-scan
+  h_5b2ec9c12c4d18 1
+.agents/skills/teamclaw-explore
+  h_5b2ec9c12c4d18 1
+.claude/skills/teamclaw-defect-handoff
+  h_5b2ec9c12c4d18 1
+.claude/skills/teamclaw-dima-difficulty
+  h_5b2ec9c12c4d18 1
+.claude/skills/teamclaw-dima-scan
+  h_5b2ec9c12c4d18 1
+.claude/skills/teamclaw-explore
+  h_5b2ec9c12c4d18 1
+.githooks/pre-push
+  h_5b2ec9c12c4d18 32-39,41-45,63
+.gitignore
+  h_5b2ec9c12c4d18 194-197,208-211
+AGENTS.md
+  h_5b2ec9c12c4d18 377-440
+apps/agentclawscs/README.md
+  h_5b2ec9c12c4d18 26-27,30-47
+apps/agentclawscs/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/agentclawscs/docker/bcn/Dockerfile
+  h_5b2ec9c12c4d18 1-41
+apps/agentclawscs/docker/bcn/README.md
+  h_5b2ec9c12c4d18 1-3
+apps/agentclawscs/docker/bcn/logrotate.conf
+  h_5b2ec9c12c4d18 1-23
+apps/agentclawscs/docker/bcn/nginx.conf
+  h_5b2ec9c12c4d18 1-231
+apps/agentclawscs/docker/bcn/scripts/admin/bin/health.sh
+  h_5b2ec9c12c4d18 1-55
+apps/agentclawscs/docker/bcn/scripts/admin/bin/init-mosn.sh
+  h_5b2ec9c12c4d18 1-30
+apps/agentclawscs/docker/bcn/scripts/admin/bin/preStop.sh
+  h_5b2ec9c12c4d18 1-10
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start-logrotate.sh
+  h_5b2ec9c12c4d18 1-54
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  h_5b2ec9c12c4d18 1-28
+apps/agentclawscs/docker/bcn/scripts/admin/bin/verify-bcs-lua.sh
+  h_5b2ec9c12c4d18 1-45
+apps/agentclawscs/docker/bcn/tests/master-resolver-test.lua
+  h_5b2ec9c12c4d18 1-80
+apps/agentclawscs/docker/bcn/validate-bcs-artifact.sh
+  h_5b2ec9c12c4d18 1-46
+apps/agentclawscs/docker/bcs/Dockerfile
+  h_5b2ec9c12c4d18 1,36-37
+apps/agentclawscs/docker/bcs/README.md
+  h_5b2ec9c12c4d18 2-3
+apps/agentclawscs/docker/ocbcn/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/agentclawscs/docker/utils/README.md
+  h_5b2ec9c12c4d18 1
+apps/agentclawscs/docs/contract.json
+  h_5b2ec9c12c4d18 8-9,28-50
+apps/agentclawscs/docs/coordination-contract.md
+  h_5b2ec9c12c4d18 1,3,7-28
+apps/agentclawscs/docs/coordination-reference-v2.md
+  h_5b2ec9c12c4d18 17,34-36,106-123
+apps/agentclawscs/sofapyapp/configs/application.yaml
+  h_5b2ec9c12c4d18 60
+apps/agentclawscs/sofapyapp/servers/mcp/bcs_coordination.py
+  h_5b2ec9c12c4d18 47-48,54-55,57-58,73,103,105,110-113,119,121-142
+apps/agentclawscs/sofapyapp/servers/mcp/coordination_store.py
+  h_5b2ec9c12c4d18 52,60,62-64
+apps/agentclawscs/sofapyapp/servers/mcp/task_handles.py
+  h_5b2ec9c12c4d18 1-54
+apps/agentclawscs/tests/test_contract_alignment.py
+  h_5b2ec9c12c4d18 1,5-28
+apps/agentclawscs/tests/test_coordination_store.py
+  h_5b2ec9c12c4d18 67,70,74,82,85,88,115-126
+apps/agentclawscs/tests/test_echo_tools.py
+  h_5b2ec9c12c4d18 41-43
+apps/agentclawscs/tests/test_task_handles.py
+  h_5b2ec9c12c4d18 1-51
+apps/baas/.aci/baas-dev-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/baas/.aci/baas-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/baas/.aci/baas-prod-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/baas/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/baas/docs/DEPLOYMENT.md
+  h_5b2ec9c12c4d18 59
+apps/baas/docs/teClawHttpAPI.md
+  h_5b2ec9c12c4d18 12-14
+apps/baas/src/secbaas/enterprise/plugins/sandbox/teclaw/_real.py
+  h_5b2ec9c12c4d18 10,12-13,15-16,42-60,92-97,99,103-130,143,188-191,220,225-312,389-390,393-418,420-421,433,440-454,734
+apps/baas/tests/unit/plugins/sandbox/teclaw/test_real.py
+  h_5b2ec9c12c4d18 953,966,1673-1760
+apps/baas/tests/unit/plugins/sandbox/teclaw/test_real_retry.py
+  h_5b2ec9c12c4d18 1-308
+apps/backend/.aci/agentclawengine-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/backend/.aci/backend-dev-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/backend/.aci/backend-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/backend/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/backend/docker/Dockerfile.backend
+  h_5b2ec9c12c4d18 1
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  h_5b2ec9c12c4d18 12,15,95
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  h_5b2ec9c12c4d18 12,15,99,349-353
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/admin_bot_service.py
+  h_5b2ec9c12c4d18 1-56
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/admin_correction_scope.py
+  h_5b2ec9c12c4d18 1-49
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/capability.py
+  h_5b2ec9c12c4d18 1-24,32-34,36-37,40-42,44-48,51-52,54-57,64-66,68-74,78-79,81-86,91,94-121,123-134
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/context.py
+  h_5b2ec9c12c4d18 3-10,29,39,61,74-75,78
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/extension.py
+  h_5b2ec9c12c4d18 20-24,101-106,182,216,339-360,362,364-376,378-383
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/orchestrator.py
+  h_5b2ec9c12c4d18 1,4-11,13,24-27,81,86,91-94,97-99,127-131,137,142-146,164,166,172-187,314,322-324,327,346-349,474,484-489,496,516-523,525-526,528-532,542,551,571,581,583,585,589-597,600,605,734-737,745-747,749-760,762,766-767,813,818,823-825,835,843,854,907-909,925,931-933,980,1000-1002,1004,1007-1010,1034
+apps/backend/src/agentclaw/corp/core/aicoding/related_bot/template_write_extension.py
+  h_5b2ec9c12c4d18 1-221
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  h_5b2ec9c12c4d18 1-39
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  h_5b2ec9c12c4d18 1-95
+apps/backend/src/agentclaw/corp/core/default_env_bot/default_env_bot_service.py
+  h_5b2ec9c12c4d18 1668,1943-1948,1950-1957
+apps/backend/src/agentclaw/corp/core/devices/services/arca_device_service.py
+  h_5b2ec9c12c4d18 659,825-829,857-859,868,1304,1324,1469
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/admin_bot_service_module.py
+  h_5b2ec9c12c4d18 1-211
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/app_services.py
+  h_5b2ec9c12c4d18 5,7,16-18,24-29,63-71,75-78
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/column.py
+  h_5b2ec9c12c4d18 24-29,111-113,185-189,252,278-280
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  h_5b2ec9c12c4d18 5,16-17,26,31-34,75-77,83-84,88-105
+apps/backend/src/agentclaw/corp/plugins/prod/README.md
+  h_5b2ec9c12c4d18 10,20
+apps/backend/src/agentclaw/corp/plugins/prod/auth_relationship.py
+  h_5b2ec9c12c4d18 34
+apps/backend/src/agentclaw/corp/plugins/prod/database.py
+  h_5b2ec9c12c4d18 25,495,497,506,509,512,518
+apps/backend/src/agentclaw/corp/plugins/prod/device_adapter_transport.py
+  h_5b2ec9c12c4d18 31,477-478,493,495,567-568,578,580
+apps/backend/src/agentclaw/corp/plugins/prod/oss_storage.py
+  h_5b2ec9c12c4d18 232-236,243-259
+apps/backend/src/agentclaw/corp/plugins/prod/outbound_rules.py
+  h_5b2ec9c12c4d18 35-48,162-178,214,270,277,294,301-304,423-437,440-441
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  h_5b2ec9c12c4d18 105-111,355,364,407,415,460,474,557,572
+apps/backend/src/agentclaw/corp/plugins/prod/passport_dtos.py
+  h_5b2ec9c12c4d18 95,112,144-145,199,212,237-238
+apps/backend/src/agentclaw/corp/plugins/prod/passport_handoff.py
+  h_5b2ec9c12c4d18 3-4,7,51-87
+apps/backend/src/agentclaw/corp/plugins/prod/runtime_list_timing.py
+  h_5b2ec9c12c4d18 1-18
+apps/backend/src/agentclaw/corp/plugins/prod/sandbox_client.py
+  h_5b2ec9c12c4d18 13,170-179
+apps/backend/src/agentclaw/corp/plugins/prod/scheduled_caller.py
+  h_5b2ec9c12c4d18 1-188
+apps/backend/tests/corp/core/config/test_corp_overlay_merge.py
+  h_5b2ec9c12c4d18 142,146,151,154-156
+apps/backend/tests/corp/core/default_env_bot/test_default_env_bot_service.py
+  h_5b2ec9c12c4d18 2618-2619,2626-2627,2633,2637-2650
+apps/backend/tests/corp/core/default_env_bot/test_eval_draft_build.py
+  h_5b2ec9c12c4d18 1026-1071,1116-1119
+apps/backend/tests/corp/core/default_env_bot/test_eval_env_bot_service.py
+  h_5b2ec9c12c4d18 603-604,613-614,619,622-637,683-684,716-728
+apps/backend/tests/corp/core/devices/services/test_arca_device_service_nas.py
+  h_5b2ec9c12c4d18 439
+apps/backend/tests/corp/core/devices/services/test_arca_device_service_oss.py
+  h_5b2ec9c12c4d18 25,784-830
+apps/backend/tests/corp/core/devices/services/test_arca_device_service_outbound.py
+  h_5b2ec9c12c4d18 59,68,281-282,319-320,421
+apps/backend/tests/corp/core/service_bot/services/test_baas_service_create_teclaw.py
+  h_5b2ec9c12c4d18 151-158
+apps/backend/tests/corp/core/test_hook_source_binding.py
+  h_5b2ec9c12c4d18 1-105
+apps/backend/tests/corp/core/test_quality_bot_admin_correction_scope.py
+  h_5b2ec9c12c4d18 1-413
+apps/backend/tests/corp/core/test_quality_bot_create_flow_chain.py
+  h_5b2ec9c12c4d18 29-31,35,181,254-256,324-327,331,334,338-355,407-495
+apps/backend/tests/corp/core/test_quality_bot_delete_cascade.py
+  h_5b2ec9c12c4d18 98
+apps/backend/tests/corp/core/test_quality_bot_orchestrator.py
+  h_5b2ec9c12c4d18 1,3,5-9,11,118-119,125,129-131,308,326-384,386-390,392-395,397,400-412,424,429,436-437,439-441,446-447,449-456,459,464,468-513,515,525,531,569,589
+apps/backend/tests/corp/core/test_quality_bot_payload_item.py
+  h_5b2ec9c12c4d18 1,6-13,34-36,89-93,132-143,146,148,151-170,188,210-213,215,225,254
+apps/backend/tests/corp/core/test_quality_bot_template_write_hook.py
+  h_5b2ec9c12c4d18 1-361
+apps/backend/tests/corp/di/test_local_k8s_column.py
+  h_5b2ec9c12c4d18 4-5,9-10,16-17,21,23-24,29-32,40,47,49-52,87-88,95-117
+apps/backend/tests/corp/di/test_profile_and_modules_for.py
+  h_5b2ec9c12c4d18 61-63
+apps/backend/tests/corp/e2e/test_manifest_mcp_full_replace_flow.py
+  h_5b2ec9c12c4d18 1,28-30,34-39,50-52,66,81,176-183,192-194,233-242,244-245,248-255,271-311,334,340-343,348-353,356,363-364,368-403,411-414,423-425
+apps/backend/tests/corp/plugins/prod/test_device_adapter_transport.py
+  h_5b2ec9c12c4d18 60-73
+apps/backend/tests/corp/plugins/prod/test_oss_storage_edge_paths.py
+  h_5b2ec9c12c4d18 116,124-146
+apps/backend/tests/corp/plugins/prod/test_outbound_rules.py
+  h_5b2ec9c12c4d18 59-139
+apps/backend/tests/corp/plugins/prod/test_owner_handoff_credentials.py
+  h_5b2ec9c12c4d18 23,28-29
+apps/backend/tests/corp/plugins/prod/test_passport_agent_portal_metadata.py
+  h_5b2ec9c12c4d18 1-57
+apps/backend/tests/corp/plugins/prod/test_passport_dto_edges.py
+  h_5b2ec9c12c4d18 37,47-48,56-57,64
+apps/backend/tests/corp/plugins/prod/test_passport_handoff_rpc.py
+  h_5b2ec9c12c4d18 1-47
+apps/backend/tests/corp/plugins/prod/test_passport_handoff_snapshot.py
+  h_5b2ec9c12c4d18 1-106
+apps/backend/tests/corp/plugins/prod/test_runtime_list_timing.py
+  h_5b2ec9c12c4d18 1-37
+apps/backend/tests/corp/plugins/prod/test_sandbox_client.py
+  h_5b2ec9c12c4d18 12-13,20,133-156
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  h_5b2ec9c12c4d18 1-438
+apps/backend/tests/corp/plugins/prod/test_zdas_db.py
+  h_5b2ec9c12c4d18 29-43
+apps/backend/tests/corp/singlebox/test_mcp_adapter_contract.py
+  h_5b2ec9c12c4d18 10-12,16-17,23-24,26-27,51-52,54,58,60,62-64,66,71,73-85,123-125,157,201-215,256,305-311,313-315,318-320,342
+apps/bcs-internal/.aci.yml
+  h_5b2ec9c12c4d18 9
+apps/bcs-internal/.aci/bcs-merge-verify.aci.yml
+  h_5b2ec9c12c4d18 52,74-75,78
+apps/bcs-internal/.aci/bcs-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 28,90
+apps/bcs-internal/Cargo.lock
+  h_5b2ec9c12c4d18 5-63,373-383,390-412,533-538,549,554-555,557-558,582-583,625,651,675,699-760,788-808,815-816,901,917,973,979,983-985,987-990,992,994,996,1046,1048,1076,1096,1118-1119,1132,1191,1231,1282-1283,1286-1291,1293,1295,1301-1328,1356,1406,1409,1448,1469,1497,1607,1625,1632,1734,1762-1763,1792,1813,1817,1878,1904,1906-1908,1910-1911,1913,1917,1924-1925,1930-1935,1937,1939-1943,1989,1996,2005,2024,2101,2104,2106,2111,2114,2118-2119,2144-2153,2203,2302,2319,2353,2427,2436,2460,2518-2519,2521-2523,2525-2526,2528,2530-2531,2533,2535-2537,2549,2566-2572,2614-2615,2638,3240-3245,3535-3540,4056,4060,4314-4362,4412,4419,5067-5102,5104-5110,5148-5158,5359,5362-5383,5424-5496,5517-5536,5578,5861,5912,5917-5960,6112-6113,6153-6179,6196,6214-6222,6495-6504,6661-6671,6721-6732,6745-6754,7106,7109,7113-7115,7118,7120,7122,7136-7149,7165-7180,7209,7211,7214,7427-7432,7527-7536,7636-7648,7669-7677,7795-7805
+apps/bcs-internal/Cargo.toml
+  h_5b2ec9c12c4d18 3,10,37,40-42,70-79,86,89-90
+apps/bcs-internal/README.md
+  h_5b2ec9c12c4d18 31-39
+apps/bcs-internal/bcn-configs/README.md
+  h_5b2ec9c12c4d18 1-7
+apps/bcs-internal/bcn-configs/a2a-sofarpc.toml
+  h_5b2ec9c12c4d18 1-8
+apps/bcs-internal/bcn-configs/bcs-config-dev.toml
+  h_5b2ec9c12c4d18 1-207
+apps/bcs-internal/bcn-configs/bcs-config-gray.toml
+  h_5b2ec9c12c4d18 1-101
+apps/bcs-internal/bcn-configs/bcs-config-pre.toml
+  h_5b2ec9c12c4d18 1-112
+apps/bcs-internal/bcn-configs/bcs-config-prod.toml
+  h_5b2ec9c12c4d18 1-101
+apps/bcs-internal/bcn-configs/bcs-config.toml
+  h_5b2ec9c12c4d18 1-437
+apps/bcs-internal/configs/a2a-sofarpc.toml
+  h_5b2ec9c12c4d18 1-8
+apps/bcs-internal/configs/bcs-config-dev.toml
+  h_5b2ec9c12c4d18 23-35,125-137
+apps/bcs-internal/configs/bcs-config-local.toml
+  h_5b2ec9c12c4d18 35-54
+apps/bcs-internal/configs/bcs-config-pre.toml
+  h_5b2ec9c12c4d18 41-52,107-118
+apps/bcs-internal/configs/bcs-config-prod.toml
+  h_5b2ec9c12c4d18 72-83
+apps/bcs-internal/configs/bcs-config.toml
+  h_5b2ec9c12c4d18 62,90-129,451-456
+apps/bcs-internal/configs/examples/api-auth-cookie.toml
+  h_5b2ec9c12c4d18 1-74
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  h_5b2ec9c12c4d18 10-11,31-43,45-49,51-63
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/cookie_v1_tests.rs
+  h_5b2ec9c12c4d18 1-673
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_5b2ec9c12c4d18 6,39-41,47-49,58-70,80-101,112-136,331-338
+apps/bcs-internal/crates/bootstrap/bcs-internal/tests/v1_cookie_config.rs
+  h_5b2ec9c12c4d18 1-968
+apps/bcs-internal/crates/bootstrap/bcs-internal/tests/v1_cookie_http.rs
+  h_5b2ec9c12c4d18 1-841
+apps/bcs-internal/crates/bootstrap/bcs-internal/tests/v1_cookie_logs.rs
+  h_5b2ec9c12c4d18 1-283
+apps/bcs-internal/crates/bootstrap/bcs-internal/tests/v1_cookie_rollback.rs
+  h_5b2ec9c12c4d18 1-133
+apps/bcs-internal/crates/external-clients/bcs-layotto/tests/support/zdas_mysql.rs
+  h_5b2ec9c12c4d18 17,140-143,227-230,236-240,245-248,252
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/Cargo.toml
+  h_5b2ec9c12c4d18 1-31
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/README.md
+  h_5b2ec9c12c4d18 1-100
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/lib.rs
+  h_5b2ec9c12c4d18 1-126
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/triple.rs
+  h_5b2ec9c12c4d18 1-49
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/config_install.rs
+  h_5b2ec9c12c4d18 1-27
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  h_5b2ec9c12c4d18 1-151
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/triple_wire.rs
+  h_5b2ec9c12c4d18 1-82
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/CONTEXT.md
+  h_5b2ec9c12c4d18 1-84
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/Cargo.toml
+  h_5b2ec9c12c4d18 20-30,35-42
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/lib.rs
+  h_5b2ec9c12c4d18 253-280
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote.rs
+  h_5b2ec9c12c4d18 1-327
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote_http2_tests.rs
+  h_5b2ec9c12c4d18 1-116
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote_tests.rs
+  h_5b2ec9c12c4d18 1-826
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/strict.rs
+  h_5b2ec9c12c4d18 1-61
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1.rs
+  h_5b2ec9c12c4d18 1-284
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config.rs
+  h_5b2ec9c12c4d18 1-358
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config_tests.rs
+  h_5b2ec9c12c4d18 1-687
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_tests.rs
+  h_5b2ec9c12c4d18 1-606
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/tests/fixtures/http2/README.md
+  h_5b2ec9c12c4d18 1-13
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/tests/fixtures/http2/ca.pem
+  h_5b2ec9c12c4d18 1-11
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/CONTEXT.md
+  h_5b2ec9c12c4d18 1-109
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/Cargo.toml
+  h_5b2ec9c12c4d18 1-29
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/client.rs
+  h_5b2ec9c12c4d18 1-147
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/config.rs
+  h_5b2ec9c12c4d18 1-55
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/lib.rs
+  h_5b2ec9c12c4d18 1-90
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/subject.rs
+  h_5b2ec9c12c4d18 1-60
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/tests/agentpass_conformance.rs
+  h_5b2ec9c12c4d18 1-328
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/http_client.rs
+  h_5b2ec9c12c4d18 347-353,373,381-388
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/mention_notify.rs
+  h_5b2ec9c12c4d18 145-155,296,387,452-453,488-489,497,596-597,688-826
+apps/bcs-internal/crates/plugins/bcs-db-zdas/CONTEXT.md
+  h_5b2ec9c12c4d18 37-43,75-77
+apps/bcs-internal/crates/plugins/bcs-db-zdas/src/lib.rs
+  h_5b2ec9c12c4d18 30-31,363-368,421-422,426-427,432-463
+apps/bcs-internal/crates/plugins/bcs-db-zdas/tests/transaction_stop.rs
+  h_5b2ec9c12c4d18 184-221
+apps/bcs-internal/crates/tools/bcs-bridge/.aci/bridge-onboarding-release.aci.yml
+  h_5b2ec9c12c4d18 6
+apps/bcs-internal/crates/tools/bcs-bridge/README.md
+  h_5b2ec9c12c4d18 6
+apps/bcs-internal/docs/overlay/governance/baseline.md
+  h_5b2ec9c12c4d18 15
+apps/bcs-internal/docs/plans/2026-11-02-v1-cookie-auth-design.md
+  h_5b2ec9c12c4d18 1-221
+apps/bcs-internal/docs/plans/2026-11-02-v1-cookie-auth-validation.md
+  h_5b2ec9c12c4d18 1-526
+apps/bcs-internal/docs/plans/2026-11-02-v1-cookie-auth.md
+  h_5b2ec9c12c4d18 1-233
+apps/bcs-internal/docs/plans/2026-11-03-v1-cookie-auth-review-fixes.md
+  h_5b2ec9c12c4d18 1-52
+apps/bcs-internal/scripts/check-p4.sh
+  h_5b2ec9c12c4d18 19-20,88-96
+apps/bcs-internal/tests/support/http.rs
+  h_5b2ec9c12c4d18 1-8,20,22,25,30-225
+apps/bcs-internal/tests/support/v1_cookie.rs
+  h_5b2ec9c12c4d18 1-444
+apps/bcs-internal/tests/support/v1_cookie_fixture.rs
+  h_5b2ec9c12c4d18 1-653
+apps/bcsfuse/conf/docker/Dockerfile.unified
+  h_5b2ec9c12c4d18 1
+apps/ecb/.aci/ecb-dev-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/ecb/.aci/ecb-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/ecb/.aci/ecb-prod-deploy.aci.yml
+  h_5b2ec9c12c4d18 20
+apps/ecb/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/ecb/docker/Dockerfile.ecb
+  h_5b2ec9c12c4d18 1
+apps/evolverun/clawweb-ais-base/Dockerfile.aistudio
+  h_5b2ec9c12c4d18 3
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  h_5b2ec9c12c4d18 14,17,25-27
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/file-download/handbook.md
+  h_5b2ec9c12c4d18 24-31
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  h_5b2ec9c12c4d18 21,23,27,32,46-50,81,211,220
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/network/handbook.md
+  h_5b2ec9c12c4d18 1-23
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/skill/handbook.md
+  h_5b2ec9c12c4d18 11-12,20-22,29
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  h_5b2ec9c12c4d18 11,14-52
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/references/tool-contract.md
+  h_5b2ec9c12c4d18 7-12
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime/base_entry.py
+  h_5b2ec9c12c4d18 23,105
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery-simulation/SKILL.md
+  h_5b2ec9c12c4d18 18,27,38
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  h_5b2ec9c12c4d18 10,16,18,20,22,24,26,28,30,32,34,36,38-97,101,107-108,111-114,120,124-125,130,134-136,140-145,152-154,158,160,164-174,176,178,180-182,186-187,194-196,198-200,206-214,220-222,224,226,228,230,232,234,236,238,240,242,244,246,248,250,252,254,256,258-271,281-282,285,290,310,344
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/evals/recovery-behavior-cases.json
+  h_5b2ec9c12c4d18 1-230
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/final_summary.py
+  h_5b2ec9c12c4d18 14,21-35,38-40,53
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/mcp_server.py
+  h_5b2ec9c12c4d18 3,27,48,57,127-142
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  h_5b2ec9c12c4d18 38-40,47-48,50-56,89,126-130,133-134,136,140-147,149-156,159,165-169,179,183-203,207,228,245-247,269-271,297,301,316,331,367-371,394,410-411,420,459-460,463-468,471-476,479-480,553-555
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/simulation.py
+  h_5b2ec9c12c4d18 7,16,21-23,27,32,35
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/workspace.py
+  h_5b2ec9c12c4d18 39-41,44-46
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_delivery_observation.py
+  h_5b2ec9c12c4d18 1-92
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_handbook_scope.py
+  h_5b2ec9c12c4d18 153
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  h_5b2ec9c12c4d18 1-168
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_remediation.py
+  h_5b2ec9c12c4d18 2,50-74
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  h_5b2ec9c12c4d18 702-743,946,952-953,957,1145-1175
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_simulation.py
+  h_5b2ec9c12c4d18 4-5,13,47-48,51-52,60-61,78-79,81-84,86-91,93-153,159-160,205-236,258-275
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_trajectory_polling.py
+  h_5b2ec9c12c4d18 1-57
+apps/evolverun/clawweb-skills/tests/test_base_entry.py
+  h_5b2ec9c12c4d18 193-205
+apps/evolverun/clawweb/.aci/clawweb-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 44
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  h_5b2ec9c12c4d18 1-336
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  h_5b2ec9c12c4d18 1-84
+apps/evolverun/clawweb/docs/recovery-owner-feedback/owner-notifications.example.json
+  h_5b2ec9c12c4d18 1-13
+apps/evolverun/clawweb/docs/recovery-owner-feedback/team97-routes.patch.json
+  h_5b2ec9c12c4d18 1-37
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-search-signature.test.ts
+  h_5b2ec9c12c4d18 1-27
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-api.test.ts
+  h_5b2ec9c12c4d18 1-39
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-mount.test.ts
+  h_5b2ec9c12c4d18 1-74
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-runtime.test.ts
+  h_5b2ec9c12c4d18 1-24
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/auto-heal-unified-host.test.ts
+  h_5b2ec9c12c4d18 1-265
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/bot-workflow-permission-mount.test.ts
+  h_5b2ec9c12c4d18 1-85
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-cors-preflight.test.ts
+  h_5b2ec9c12c4d18 1-72
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-deploy-logging.test.ts
+  h_5b2ec9c12c4d18 1-30
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-deploy-router-host.test.ts
+  h_5b2ec9c12c4d18 1-45
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-deploy-transport.test.ts
+  h_5b2ec9c12c4d18 1-117
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-draft-host.test.ts
+  h_5b2ec9c12c4d18 1-119
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-first-draft-unified-host.test.ts
+  h_5b2ec9c12c4d18 1-164
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-host.test.ts
+  h_5b2ec9c12c4d18 1-102
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-logging.test.ts
+  h_5b2ec9c12c4d18 1-30
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-router-host.test.ts
+  h_5b2ec9c12c4d18 1-51
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/insight-management-mount.test.ts
+  h_5b2ec9c12c4d18 1-134
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-auto-heal-gzip-host.test.ts
+  h_5b2ec9c12c4d18 1-103
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-auto-heal-host.test.ts
+  h_5b2ec9c12c4d18 1-79
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-origin-bootstrap.test.ts
+  h_5b2ec9c12c4d18 1-58
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-origin-config.test.ts
+  h_5b2ec9c12c4d18 1-310
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-pre-cors-mount.test.ts
+  h_5b2ec9c12c4d18 1-70
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-browser-auth.test.ts
+  h_5b2ec9c12c4d18 1-49
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-full-path.test.ts
+  h_5b2ec9c12c4d18 1-109
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-git-config.test.ts
+  h_5b2ec9c12c4d18 1-126
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-origin.test.ts
+  h_5b2ec9c12c4d18 1-180
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-version-wiring.test.ts
+  h_5b2ec9c12c4d18 1-35
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts.test.ts
+  h_5b2ec9c12c4d18 1-232
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-browser-login.test.ts
+  h_5b2ec9c12c4d18 1-193
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-host.test.ts
+  h_5b2ec9c12c4d18 1-63
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-logging.test.ts
+  h_5b2ec9c12c4d18 1-132
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  h_5b2ec9c12c4d18 1-186
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-security.test.ts
+  h_5b2ec9c12c4d18 1-140
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback.test.ts
+  h_5b2ec9c12c4d18 1-172
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-execution.test.ts
+  h_5b2ec9c12c4d18 48-49
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-git-store.test.ts
+  h_5b2ec9c12c4d18 6-8,15-16,98,102-104,107-110,115,117-305
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-read-projection.test.ts
+  h_5b2ec9c12c4d18 1-38
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-guard.test.ts
+  h_5b2ec9c12c4d18 1-223
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-list-guard.test.ts
+  h_5b2ec9c12c4d18 1-482
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-permissions.test.ts
+  h_5b2ec9c12c4d18 1-43
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-routes.test.ts
+  h_5b2ec9c12c4d18 1-136
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/subworkflow-observability.test.ts
+  h_5b2ec9c12c4d18 1-115
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/unified-save-host.test.ts
+  h_5b2ec9c12c4d18 1-211
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/unified-save-timeout.test.ts
+  h_5b2ec9c12c4d18 1-39
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-search-signature.ts
+  h_5b2ec9c12c4d18 1-25
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-workbench-mount.ts
+  h_5b2ec9c12c4d18 1-31
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-workbench-runtime.ts
+  h_5b2ec9c12c4d18 1-15
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/body-parsers.ts
+  h_5b2ec9c12c4d18 2,7-8
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/bot-workflow-permission-mount.ts
+  h_5b2ec9c12c4d18 1-6
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5b2ec9c12c4d18 20,23,71-72,84,91,129,140,470-472,487-491,495,522-524,549-551,565-573,742,746,752,757,777,806-807,919-920,944
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/insight-management-mount.ts
+  h_5b2ec9c12c4d18 1-38
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  h_5b2ec9c12c4d18 1-302
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-security.ts
+  h_5b2ec9c12c4d18 1-254
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/private/__tests__/config-mist-runtime.test.ts
+  h_5b2ec9c12c4d18 15,124-125,135,149,164,176
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/private/config-mist-runtime.ts
+  h_5b2ec9c12c4d18 18,47
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback.ts
+  h_5b2ec9c12c4d18 1-79
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-execution.ts
+  h_5b2ec9c12c4d18 13,136
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-git-store.ts
+  h_5b2ec9c12c4d18 199-221,225-226,335,344,346-350,353-354
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-fanout-auth.test.ts
+  h_5b2ec9c12c4d18 1-123
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-flow-run-links.test.ts
+  h_5b2ec9c12c4d18 1-52
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/internal/index.ts
+  h_5b2ec9c12c4d18 73,117,132
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-read-projection.ts
+  h_5b2ec9c12c4d18 1-41
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-guard.ts
+  h_5b2ec9c12c4d18 1-61
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-list-guard.ts
+  h_5b2ec9c12c4d18 1-139
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-principal.ts
+  h_5b2ec9c12c4d18 1-20
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-scan.ts
+  h_5b2ec9c12c4d18 1-88
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-workflow-types.ts
+  h_5b2ec9c12c4d18 1-74
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/session-recovery-runtime.ts
+  h_5b2ec9c12c4d18 8-24
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/subworkflow-observability.ts
+  h_5b2ec9c12c4d18 1-24
+apps/evolverun/clawweb/internal/bootstrap/clawweb/vitest.config.ts
+  h_5b2ec9c12c4d18 1-23
+apps/evolverun/clawweb/internal/configs/application-default.yaml
+  h_5b2ec9c12c4d18 20-21
+apps/evolverun/clawweb/internal/configs/application-pre.yaml
+  h_5b2ec9c12c4d18 3-6
+apps/evolverun/clawweb/internal/configs/application-prod.yaml
+  h_5b2ec9c12c4d18 2-5
+apps/evolverun/clawweb/internal/docker/Dockerfile
+  h_5b2ec9c12c4d18 1,44
+apps/evolverun/clawweb/internal/docker/nginx.conf
+  h_5b2ec9c12c4d18 121-122
+apps/evolverun/clawweb/internal/modules/ais/package.json
+  h_5b2ec9c12c4d18 18-19
+apps/evolverun/clawweb/internal/modules/ais/server/__tests__/aistudio-service.test.ts
+  h_5b2ec9c12c4d18 70,75-77,82-103
+apps/evolverun/clawweb/internal/modules/ais/server/aistudio-service.ts
+  h_5b2ec9c12c4d18 1,77,79-85,88-89,92,94,96-106
+apps/evolverun/clawweb/internal/modules/archive/server/middleware/__tests__/pack-scripts-logging.test.ts
+  h_5b2ec9c12c4d18 1-113
+apps/evolverun/clawweb/internal/modules/archive/server/middleware/request-logger.ts
+  h_5b2ec9c12c4d18 78-92,115,118-127,148-150
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auth-pack-script.test.ts
+  h_5b2ec9c12c4d18 1-224
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-capability.test.ts
+  h_5b2ec9c12c4d18 1-58
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-editor-first-draft.test.ts
+  h_5b2ec9c12c4d18 1-173
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-git-config.test.ts
+  h_5b2ec9c12c4d18 4-5,11-12,89-90,94-95,97-114,116,161-175,185,244,258-259
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-snapshot-v2.test.ts
+  h_5b2ec9c12c4d18 1-168
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-write-security.test.ts
+  h_5b2ec9c12c4d18 1-262
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/run-archives-security.test.ts
+  h_5b2ec9c12c4d18 1-109
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auth.ts
+  h_5b2ec9c12c4d18 3,246-332
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auto-heal.ts
+  h_5b2ec9c12c4d18 6,12,64-66,100-112,128-129,133-184,249-290,292,298,300,305-306,309-325,327-339,343-347,351-352,363,367-370,375-389,391-417,419-422,426-429,433,435-446,469-470,483
+apps/evolverun/clawweb/internal/modules/archive/server/routes/run-archives.ts
+  h_5b2ec9c12c4d18 119-157,166,183-184,218,259,261,300,317-318
+apps/evolverun/clawweb/internal/modules/archive/server/services/__tests__/auto-heal-deploy-adapter.test.ts
+  h_5b2ec9c12c4d18 1-19
+apps/evolverun/clawweb/internal/modules/archive/server/services/__tests__/clawflows-git-client.test.ts
+  h_5b2ec9c12c4d18 11
+apps/evolverun/clawweb/internal/modules/archive/server/services/auto-heal-deploy-service.ts
+  h_5b2ec9c12c4d18 1-3,5-6,8-11
+apps/evolverun/clawweb/internal/modules/archive/server/services/auto-heal-save-service.ts
+  h_5b2ec9c12c4d18 1-3
+apps/evolverun/clawweb/internal/modules/archive/src/components/__tests__/Editor.test.tsx
+  h_5b2ec9c12c4d18 1-2,8,11-16,25-27,29-31,33-35,41-45,50,53,55-57,59-60,87-88,91-92,94-95,98,100-104,107,109-110,115-116,119-120,122-125,136,143-144,147-149,151-152,155-160,163-176,257,260-263
+apps/evolverun/clawweb/package-lock.json
+  h_5b2ec9c12c4d18 38,244,284,316-337,359-360,452-453,4717-4719,4725,4733-4736,6351-6366
+apps/evolverun/clawweb/scripts/ci/README.md
+  h_5b2ec9c12c4d18 58-102
+apps/evolverun/clawweb/scripts/ci/test_clawweb_ci.sh
+  h_5b2ec9c12c4d18 11,13,26-27
+apps/evolverun/clawweb/scripts/ci/test_rollout_nginx.mjs
+  h_5b2ec9c12c4d18 25-35,74,101-102,146-183
+apps/evolverun/clawweb/scripts/ci/tests/ci-ref-selection.test.mjs
+  h_5b2ec9c12c4d18 1-140
+apps/evolverun/clawweb/scripts/ci/tests/editor-draft-contract.test.mjs
+  h_5b2ec9c12c4d18 1-90
+apps/evolverun/clawweb/scripts/ci/tests/fixtures/ocb-77e1151b-pack-scripts.ts.txt
+  h_5b2ec9c12c4d18 1-133
+apps/evolverun/clawweb/scripts/ci/verify_clawweb_workspace.mjs
+  h_5b2ec9c12c4d18 5,7-9,100-171
+apps/evolverun/docs/clawinsight/README.md
+  h_5b2ec9c12c4d18 1-39
+apps/evolverun/docs/clawinsight/data-pipeline/catalog/source-map.md
+  h_5b2ec9c12c4d18 1-52
+apps/evolverun/docs/clawinsight/data-pipeline/session-analysis.md
+  h_5b2ec9c12c4d18 1-49
+apps/evolverun/docs/clawinsight/data-pipeline/session-sql-sources.md
+  h_5b2ec9c12c4d18 1-85
+apps/evolverun/docs/clawinsight/validation/offline-audit-status.yaml
+  h_5b2ec9c12c4d18 1-35
+apps/frontend-nextgen/config/config.local.ts
+  h_5b2ec9c12c4d18 167-168
+apps/frontend-nextgen/config/config.ts
+  h_5b2ec9c12c4d18 104-108
+apps/frontend-nextgen/config/internal/legacyAgentclawApiPrefixes.ts
+  h_5b2ec9c12c4d18 12-16,21-22,24-25
+apps/frontend-nextgen/config/internal/runtime/config.ts
+  h_5b2ec9c12c4d18 110-111,286-288
+apps/frontend-nextgen/config/plugins/boot-splash.ts
+  h_5b2ec9c12c4d18 1-114
+apps/frontend-nextgen/docs/design-migration/2026-10-29-coding-bot-first-session-runtime-readiness.md
+  h_5b2ec9c12c4d18 1-940
+apps/frontend-nextgen/docs/design-migration/2026-11-04-coding-bot-cross-bot-session-create.md
+  h_5b2ec9c12c4d18 1-941
+apps/frontend-nextgen/docs/local-integration/2026-11-02-teamclaw-aixcoding-local-qiankun.md
+  h_5b2ec9c12c4d18 1-382
+apps/frontend-nextgen/jest.config.cjs
+  h_5b2ec9c12c4d18 41-45,47,76-78
+apps/frontend-nextgen/mock/collaborationIdentity.ts
+  h_5b2ec9c12c4d18 33,35-36
+apps/frontend-nextgen/mock/market.ts
+  h_5b2ec9c12c4d18 321-323,325-337,340-342,346-368,881,885-898
+apps/frontend-nextgen/mock/openapiRoutines.ts
+  h_5b2ec9c12c4d18 119-120
+apps/frontend-nextgen/mock/zz-mock-catchall.ts
+  h_5b2ec9c12c4d18 1-40
+apps/frontend-nextgen/package.json
+  h_5b2ec9c12c4d18 53
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  h_5b2ec9c12c4d18 60-61,126-150,281
+apps/frontend-nextgen/scripts/public-tests.list
+  h_5b2ec9c12c4d18 20-23,38-39,43,56,61-62,65-110
+apps/frontend-nextgen/src/extensions/internal.ts
+  h_5b2ec9c12c4d18 11,45,47,410-415,464-466
+apps/frontend-nextgen/src/internal/agentCoding/CodingBotEmbeddedStage.tsx
+  h_5b2ec9c12c4d18 7-10,12,27-32,34-39,48-50,82,84-89,91,94-100,147-167
+apps/frontend-nextgen/src/internal/agentCoding/aixcodingSessionActionRegistry.ts
+  h_5b2ec9c12c4d18 4,7,12-42,44-45,48-118,121-131,135,139
+apps/frontend-nextgen/src/internal/agentCoding/codingBotBuildMode.ts
+  h_5b2ec9c12c4d18 1-2
+apps/frontend-nextgen/src/internal/bot-workshop/AvatarEditor.tsx
+  h_5b2ec9c12c4d18 3-6,8-10,30-50,53-70,72-82
+apps/frontend-nextgen/src/internal/help/contentReleaseService.ts
+  h_5b2ec9c12c4d18 1-47
+apps/frontend-nextgen/src/internal/help/helpLinks.ts
+  h_5b2ec9c12c4d18 6,26
+apps/frontend-nextgen/src/internal/knowledge/api/managementController.ts
+  h_5b2ec9c12c4d18 2-10,43-48,68,70,73,77
+apps/frontend-nextgen/src/internal/knowledge/components/KnowledgeConversationComposer.tsx
+  h_5b2ec9c12c4d18 3,17,21-26,41,78,123-124,127-144
+apps/frontend-nextgen/src/internal/knowledge/components/KnowledgePanel.tsx
+  h_5b2ec9c12c4d18 21-24,26-28,32-39,57,60-62,67-68,71,92-99
+apps/frontend-nextgen/src/internal/knowledge/domain.ts
+  h_5b2ec9c12c4d18 18,20-22,72-73
+apps/frontend-nextgen/src/internal/knowledge/hooks/useSourceOperation.ts
+  h_5b2ec9c12c4d18 39
+apps/frontend-nextgen/src/internal/knowledge/pages/KnowledgeDetailPage.tsx
+  h_5b2ec9c12c4d18 47-52
+apps/frontend-nextgen/src/internal/knowledge/pages/KnowledgeListPage.tsx
+  h_5b2ec9c12c4d18 24-29
+apps/frontend-nextgen/src/internal/knowledge/services/conversationKnowledge.ts
+  h_5b2ec9c12c4d18 10,14,17-22,24-30
+apps/frontend-nextgen/src/internal/modelBadge/modelBadgeConfig.ts
+  h_5b2ec9c12c4d18 1-19
+apps/frontend-nextgen/src/internal/notify/components/NotifyPage.tsx
+  h_5b2ec9c12c4d18 49,98-101,103
+apps/frontend-nextgen/src/internal/notify/hooks/useNotifications.ts
+  h_5b2ec9c12c4d18 4,15-35,184-189,205
+apps/frontend-nextgen/src/internal/productGuide/components/GuideAssistantPanel.tsx
+  h_5b2ec9c12c4d18 1-327
+apps/frontend-nextgen/src/internal/productGuide/components/GuideEntryButton.tsx
+  h_5b2ec9c12c4d18 1-24
+apps/frontend-nextgen/src/internal/productGuide/components/GuidedTour.tsx
+  h_5b2ec9c12c4d18 1-213
+apps/frontend-nextgen/src/internal/productGuide/components/ProductGuideOverlay.tsx
+  h_5b2ec9c12c4d18 1-16
+apps/frontend-nextgen/src/internal/productGuide/components/WelcomeGuideModal.tsx
+  h_5b2ec9c12c4d18 1-181
+apps/frontend-nextgen/src/internal/productGuide/components/guideEntryToast.ts
+  h_5b2ec9c12c4d18 1-13
+apps/frontend-nextgen/src/internal/productGuide/config/defaultGuideConfig.json
+  h_5b2ec9c12c4d18 1-575
+apps/frontend-nextgen/src/internal/productGuide/config/defaultGuideConfig.ts
+  h_5b2ec9c12c4d18 1-12
+apps/frontend-nextgen/src/internal/productGuide/config/guideConfigTypes.ts
+  h_5b2ec9c12c4d18 1-130
+apps/frontend-nextgen/src/internal/productGuide/config/resolveGuideConfig.ts
+  h_5b2ec9c12c4d18 1-177
+apps/frontend-nextgen/src/internal/productGuide/config/targetMap.ts
+  h_5b2ec9c12c4d18 1-31
+apps/frontend-nextgen/src/internal/productGuide/index.ts
+  h_5b2ec9c12c4d18 1-28
+apps/frontend-nextgen/src/internal/productGuide/productGuideService.ts
+  h_5b2ec9c12c4d18 1-46
+apps/frontend-nextgen/src/internal/productGuide/productGuideStore.ts
+  h_5b2ec9c12c4d18 1-78
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_5b2ec9c12c4d18 2,193-198,237,246
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  h_5b2ec9c12c4d18 149-152
+apps/frontend-nextgen/test/collaborationSquarePage.test.tsx
+  h_5b2ec9c12c4d18 9,11,13,146-172,177,193,216,222-223,225-226,235,239,257,264-267
+apps/frontend-nextgen/test/collaborationSquareService.test.ts
+  h_5b2ec9c12c4d18 31,273-313
+apps/frontend-nextgen/test/components/Admin/NotificationBell.test.tsx
+  h_5b2ec9c12c4d18 15-33,45-46,74-94
+apps/frontend-nextgen/test/components/Admin/NotificationItem.test.tsx
+  h_5b2ec9c12c4d18 15-16
+apps/frontend-nextgen/test/components/BotWorkshop/BotAccessModal.test.tsx
+  h_5b2ec9c12c4d18 9
+apps/frontend-nextgen/test/components/BotWorkshop/BotBasicInfoDialog.test.tsx
+  h_5b2ec9c12c4d18 3-4,9-21,23-30,33,35-50,53-54,56,58,60-85,100,103-104
+apps/frontend-nextgen/test/components/BotWorkshop/BotContainerInfo.test.tsx
+  h_5b2ec9c12c4d18 28-34
+apps/frontend-nextgen/test/components/BotWorkshop/BotDormantLifecycle.test.tsx
+  h_5b2ec9c12c4d18 1-193
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  h_5b2ec9c12c4d18 98,101,113,256,265,525,536,544,549,552,556,873
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.test.tsx
+  h_5b2ec9c12c4d18 194-228
+apps/frontend-nextgen/test/components/CollaborationPrivacy/PermissionCard.test.tsx
+  h_5b2ec9c12c4d18 71-73,75,116
+apps/frontend-nextgen/test/components/CollaborationSquare/BotCard.test.tsx
+  h_5b2ec9c12c4d18 33-34,89-90,93-96,118-119
+apps/frontend-nextgen/test/components/CollaborationSquare/FriendRequestConfirmation.test.tsx
+  h_5b2ec9c12c4d18 5,11,19-20,25-28,30-33,35-51,53-60,62-72,74-81,83-119,121-127
+apps/frontend-nextgen/test/components/CollaborationSquare/FriendRequestDialog.test.tsx
+  h_5b2ec9c12c4d18 1-228
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupIdentityDisplay.test.tsx
+  h_5b2ec9c12c4d18 1-25
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx
+  h_5b2ec9c12c4d18 81-82,84-85,95,101
+apps/frontend-nextgen/test/components/CollaborationSquare/PublicBotCatalogPanel.test.tsx
+  h_5b2ec9c12c4d18 22-32,35-36,55,62-63,66-67,71-73,75-80
+apps/frontend-nextgen/test/components/CollaborationSquare/ShareGroupDialog.test.tsx
+  h_5b2ec9c12c4d18 1-62
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareIdentityPicker.test.tsx
+  h_5b2ec9c12c4d18 57-62
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  h_5b2ec9c12c4d18 1-46
+apps/frontend-nextgen/test/components/CollaborationSquare/SquarePageShellDispatch.test.tsx
+  h_5b2ec9c12c4d18 22-33,107-142,150,152-155,175,177,188
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareSearchBar.test.tsx
+  h_5b2ec9c12c4d18 11,15,17-18,25,28,31,34,38-39,41,47-74,90,92-93,116
+apps/frontend-nextgen/test/components/Workspace/ChatPanel/BotModelSelector.test.tsx
+  h_5b2ec9c12c4d18 1-77
+apps/frontend-nextgen/test/components/Workspace/IdentitySelector.layout.test.tsx
+  h_5b2ec9c12c4d18 10,136,427,447,463,514-620
+apps/frontend-nextgen/test/components/Workspace/InlineIdentityList.test.tsx
+  h_5b2ec9c12c4d18 1-99
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  h_5b2ec9c12c4d18 25-26,35,82-83,88-125,132,145-146,160-164,184,186
+apps/frontend-nextgen/test/components/ui/DataTable.test.tsx
+  h_5b2ec9c12c4d18 7-17,231-305
+apps/frontend-nextgen/test/components/ui/sonner.test.tsx
+  h_5b2ec9c12c4d18 1-3,5-7,21,32-47
+apps/frontend-nextgen/test/domain/chatEngineVersionTarget.test.ts
+  h_5b2ec9c12c4d18 24
+apps/frontend-nextgen/test/domain/conversationTeam.test.ts
+  h_5b2ec9c12c4d18 33,35-42,45-53
+apps/frontend-nextgen/test/hooks/useBotWorkshop.test.tsx
+  h_5b2ec9c12c4d18 9,31-32,80-97,204-232,235-238,240-241,243-255,315,335,338,347-348,350-351,354-358,378,382-455,511-546
+apps/frontend-nextgen/test/hooks/useCollaborationSquare.test.tsx
+  h_5b2ec9c12c4d18 1255-1259,1261-1269,1271-1298,1316-1317
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_5b2ec9c12c4d18 14,17,50
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  h_5b2ec9c12c4d18 6,17-20,25-26,67-68,72-216,268,281,283,298,312
+apps/frontend-nextgen/test/internal/agentCoding/aixcodingSessionActionRegistry.test.ts
+  h_5b2ec9c12c4d18 2,7,9-16,19-44,47-77,79-80,84-88,90-91,93,95-97
+apps/frontend-nextgen/test/internal/botScheduledTasks/lockProxy.test.ts
+  h_5b2ec9c12c4d18 1-14
+apps/frontend-nextgen/test/internal/help/contentReleaseService.test.ts
+  h_5b2ec9c12c4d18 1-137
+apps/frontend-nextgen/test/internal/knowledge/botKnowledge.test.tsx
+  h_5b2ec9c12c4d18 27-32,40,45,53-94
+apps/frontend-nextgen/test/internal/knowledge/conversationComposer.test.tsx
+  h_5b2ec9c12c4d18 2,4,96-117,128-130
+apps/frontend-nextgen/test/internal/knowledge/conversationKnowledge.test.ts
+  h_5b2ec9c12c4d18 99-143
+apps/frontend-nextgen/test/internal/knowledge/knowledgeStageRequests.test.tsx
+  h_5b2ec9c12c4d18 1-70
+apps/frontend-nextgen/test/internal/knowledge/managementController.test.ts
+  h_5b2ec9c12c4d18 60-62,75-77,86-93
+apps/frontend-nextgen/test/internal/knowledge/pageScroll.test.tsx
+  h_5b2ec9c12c4d18 1-65
+apps/frontend-nextgen/test/internal/knowledge/sourceOperations.test.tsx
+  h_5b2ec9c12c4d18 50
+apps/frontend-nextgen/test/internal/notify/NotifyPage.test.tsx
+  h_5b2ec9c12c4d18 66,102,111
+apps/frontend-nextgen/test/internal/notify/notifyDomain.test.ts
+  h_5b2ec9c12c4d18 6-7,106-136
+apps/frontend-nextgen/test/internal/notify/proxyConfig.test.ts
+  h_5b2ec9c12c4d18 61-78
+apps/frontend-nextgen/test/internal/productGuide/GuideAssistantPanel.test.tsx
+  h_5b2ec9c12c4d18 1-149
+apps/frontend-nextgen/test/internal/productGuide/GuidedTour.test.tsx
+  h_5b2ec9c12c4d18 1-194
+apps/frontend-nextgen/test/internal/productGuide/WelcomeGuideModal.test.tsx
+  h_5b2ec9c12c4d18 1-143
+apps/frontend-nextgen/test/internal/productGuide/capabilityWiring.test.ts
+  h_5b2ec9c12c4d18 1-18
+apps/frontend-nextgen/test/internal/productGuide/productGuideService.test.ts
+  h_5b2ec9c12c4d18 1-61
+apps/frontend-nextgen/test/internal/productGuide/productGuideStore.test.ts
+  h_5b2ec9c12c4d18 1-131
+apps/frontend-nextgen/test/internal/productGuide/resolveGuideConfig.test.ts
+  h_5b2ec9c12c4d18 1-169
+apps/frontend-nextgen/test/mocks/resizeObserverMock.js
+  h_5b2ec9c12c4d18 1-13
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationInteractiveStage.test.tsx
+  h_5b2ec9c12c4d18 8,47-48,235,333-358
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationPage.test.tsx
+  h_5b2ec9c12c4d18 7,11,17-20,43-52,106-109,140-146,240-243,264-265,268-278,282-284,287,295-305,308-328,383-525,570,578-632,833-929,940,943-953
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  h_5b2ec9c12c4d18 2,4,30-41,48,58-70,77-78,87-105,111-125,143-144,215-218,221,229-301,309,314-317,320,326,330-332,339,351,360,371,504,509-510,515,517,541
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ChatHeaderActions.test.tsx
+  h_5b2ec9c12c4d18 1-30
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ChatHeaderPanels.test.tsx
+  h_5b2ec9c12c4d18 20-21,36,39-40,53,61-62
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/CodingBotEmbeddedStage.localDevelopment.test.tsx
+  h_5b2ec9c12c4d18 1-36
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  h_5b2ec9c12c4d18 2-3,23,27,35,49,88-90,115-120,139-141,144,149-163,172-173,183-184,187,192,200,204-205,207-210,214,216-217,221,242,244-253,360,365-370,444-445,447,450,452,455,458,461,466,468,471,477-479,483-484,488-489,493-500,504,526-527,533,567,569,572,574-576,579,583-626,632,634-656,670-704
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationCollapsedRail.test.tsx
+  h_5b2ec9c12c4d18 31,64,77,80,88,92
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  h_5b2ec9c12c4d18 38,42,53,69,73-74,192-205,357-390
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebar.test.tsx
+  h_5b2ec9c12c4d18 10-26,68,74-75,77-87,90,100-106,109-110,113,115,117-118,132-134,152,250-358,431,639-685,723,728,731,736,743,753,764,784,790-794,833,837,847,853-855,858-859,862,865,987-988,1003-1004,1006-1007,1014,1026-1027,1029-1030,1034,1036,1052,1071-1072,1074,1098,1107-1232,1235-1242
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebar.testUtils.ts
+  h_5b2ec9c12c4d18 1-112
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx
+  h_5b2ec9c12c4d18 94,120
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSelection.test.tsx
+  h_5b2ec9c12c4d18 580
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.expand.test.tsx
+  h_5b2ec9c12c4d18 2-4,80-82,85,88-90,92-101,105-109,111-112,115-121,123-124,128-129,131,135,137-140,142,144,152,154-155,157,162-163,165-181,199-220,244,253
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  h_5b2ec9c12c4d18 2,124,142-267,581,594,596-598,622,624,628-632,654-656,674-720
+apps/frontend-nextgen/test/pages/Workspace/GroupChatPane.test.tsx
+  h_5b2ec9c12c4d18 885
+apps/frontend-nextgen/test/pages/Workspace/GroupWorkspaceAreaManagePanel.test.tsx
+  h_5b2ec9c12c4d18 31-32,108-113,145-153,173-183,221-224
+apps/frontend-nextgen/test/pages/Workspace/WorkspaceIdentityWiring.test.tsx
+  h_5b2ec9c12c4d18 137,151
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  h_5b2ec9c12c4d18 183-214
+apps/frontend-nextgen/test/pages/Workspace/components/GroupHeader.test.tsx
+  h_5b2ec9c12c4d18 10-13,82-106,138-177,237,239,310-322
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupSidebar.groupListAndView.test.tsx
+  h_5b2ec9c12c4d18 125-126,128
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/SessionItem.test.tsx
+  h_5b2ec9c12c4d18 8,200-223
+apps/frontend-nextgen/test/pages/Workspace/components/ManagePanel/MemberList.test.tsx
+  h_5b2ec9c12c4d18 4,72-75,371-442
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.test.tsx
+  h_5b2ec9c12c4d18 104,178,181,190-191,327,362,391-394,396-397,399-402,405-413,415-420,441,625-628,635,666-670
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/GroupParticipantPicker.test.tsx
+  h_5b2ec9c12c4d18 161
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotModels.test.tsx
+  h_5b2ec9c12c4d18 2,5,10,37-41,48-77,109-135
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  h_5b2ec9c12c4d18 1-67
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  h_5b2ec9c12c4d18 5,9-10,16,40,62,72-153
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  h_5b2ec9c12c4d18 144-148
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupSessions.test.ts
+  h_5b2ec9c12c4d18 440-442,448-449
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSessionMemberSync.test.ts
+  h_5b2ec9c12c4d18 5,8,23-42,45-46,53,58-63,66,71-72,75,78,80-81,85,87-120,123-233,239,241-242,245,261,266-271,273,297,308-309,312
+apps/frontend-nextgen/test/pages/Workspace/hooks/useYamlValidation.test.ts
+  h_5b2ec9c12c4d18 29,73,96
+apps/frontend-nextgen/test/services/botWorkshop/botAdvancedConfigService.test.ts
+  h_5b2ec9c12c4d18 10-11,24,28-46
+apps/frontend-nextgen/test/services/botWorkshop/botManagementService.test.ts
+  h_5b2ec9c12c4d18 115,120
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  h_5b2ec9c12c4d18 1,4-6,12,16-29,108-216,238-252,254,257-258,260,265,271-297
+apps/frontend-nextgen/test/services/botWorkshop/botWorkshopService.test.ts
+  h_5b2ec9c12c4d18 480-482
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  h_5b2ec9c12c4d18 11,24,38,85,93-95,188,197-199,881,884-888,1189,1202-1307
+apps/frontend-nextgen/test/services/lab/botConfigApiGateway.test.ts
+  h_5b2ec9c12c4d18 63,68
+apps/frontend-nextgen/test/services/lab/botConfigController.test.ts
+  h_5b2ec9c12c4d18 61-67
+apps/frontend-nextgen/test/services/lab/botConfigService.test.ts
+  h_5b2ec9c12c4d18 4,59,62-63,67,70-71
+apps/frontend-nextgen/test/services/workspace/collaborationCandidateService.test.ts
+  h_5b2ec9c12c4d18 110,119-121,130-131
+apps/frontend-nextgen/test/services/workspace/collaborationDefinitionService.test.ts
+  h_5b2ec9c12c4d18 76
+apps/frontend-nextgen/test/services/workspace/mappers.test.ts
+  h_5b2ec9c12c4d18 1,28,75,96,100,117-118,123-266,314-316,321-391
+apps/frontend-nextgen/test/services/workspace/teamBotConversationService.test.ts
+  h_5b2ec9c12c4d18 231,247,313-323
+apps/frontend-nextgen/test/shell/AppSidebar.test.tsx
+  h_5b2ec9c12c4d18 99,106,110,113,117,121,137,188,202,206
+apps/frontend-nextgen/test/shell/navigation.test.tsx
+  h_5b2ec9c12c4d18 35,38
+apps/frontend-nextgen/test/shell/routeMeta.test.ts
+  h_5b2ec9c12c4d18 78,81
+apps/gateway/.aci/gateway-dev-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/gateway/.aci/gateway-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/gateway/.aci/gateway-prod-deploy.aci.yml
+  h_5b2ec9c12c4d18 19
+apps/gateway/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/gateway/configs/application-prod.yaml
+  h_5b2ec9c12c4d18 9-13
+apps/gateway/configs/application.yaml
+  h_5b2ec9c12c4d18 221-222
+apps/gateway/src/gateway/enterprise/plugins/authn/user_cookie/_buservice_client.py
+  h_5b2ec9c12c4d18 1,7-10,13-15,17,22-33,37,41,50,56-80,85-134,136,138-144,147-178,180-200,202-203,209,214-215,218
+apps/gateway/tests/test_gateway_config.py
+  h_5b2ec9c12c4d18 9,11,23-48,169-179
+apps/gateway/tests/unit/plugins/authn/user_cookie/test_buservice_client.py
+  h_5b2ec9c12c4d18 1,5-6,8,10,12-14,20-56,59-60,62-64,66-86,89-101,104-108,110-113,116-119,121-225,227-232,234,237-239,241-243,245-246,248-251,254-255,257-259,261-262,265-271,273-276,279-282,284-286,288-545
+apps/proxy/.aci/proxy-dev-deploy.aci.yml
+  h_5b2ec9c12c4d18 18
+apps/proxy/.aci/proxy-pre-deploy.aci.yml
+  h_5b2ec9c12c4d18 18
+apps/proxy/.aci/proxy-prod-deploy.aci.yml
+  h_5b2ec9c12c4d18 18
+apps/proxy/conf/docker/Dockerfile
+  h_5b2ec9c12c4d18 1
+apps/proxy/conf/docker/nginx/lua/teclaw_config.lua
+  h_5b2ec9c12c4d18 94-96
+apps/proxy/sofapyapp/configs/application-default.yaml
+  h_5b2ec9c12c4d18 6
+apps/proxy/sofapyapp/configs/application-prepub.yaml
+  h_5b2ec9c12c4d18 15
+apps/proxy/sofapyapp/configs/application-prod.yaml
+  h_5b2ec9c12c4d18 11
+apps/proxy/sofapyapp/configs/application.yaml
+  h_5b2ec9c12c4d18 96
+apps/proxy/sofapyapp/servers/web/resolvers/teclaw_resolver.py
+  h_5b2ec9c12c4d18 12,29,38,56,96
+apps/proxy/tests/lua/test_teclaw_angw2.lua
+  h_5b2ec9c12c4d18 1-50
+apps/proxy/tests/test_teclaw_config.py
+  h_5b2ec9c12c4d18 16-18,23,48,58,67,77,90,98,105,111,121,133,138,156,165,175,184,192,200,209,238,250,264,349,362,388-425
+apps/proxy/tests/test_teclaw_lua.py
+  h_5b2ec9c12c4d18 1-25
+autocoding/AGENTS.md
+  h_5b2ec9c12c4d18 10-11,13-14
+autocoding/README.md
+  h_5b2ec9c12c4d18 13,15-18,78-79,83,85,99
+autocoding/evals/clarify-investigation-disposition.md
+  h_5b2ec9c12c4d18 1-52
+autocoding/scripts/installer/manifest.json
+  h_5b2ec9c12c4d18 22-26
+autocoding/skills/teamclaw-cdo-patrol/SKILL.md
+  h_5b2ec9c12c4d18 14-15,56-57
+autocoding/skills/teamclaw-clarify/SKILL.md
+  h_5b2ec9c12c4d18 3,10,27,29,33,36-37,48,51,58,62,73
+autocoding/skills/teamclaw-clarify/references/applications/baas/index.md
+  h_5b2ec9c12c4d18 8
+autocoding/skills/teamclaw-clarify/references/applications/backend/agentclaw-diagnostics.md
+  h_5b2ec9c12c4d18 3,14,38,40,67,69,74-75,93,113,137,142-152,161
+autocoding/skills/teamclaw-clarify/references/applications/backend/cdo-investigation.md
+  h_5b2ec9c12c4d18 1-28
+autocoding/skills/teamclaw-clarify/references/applications/backend/index.md
+  h_5b2ec9c12c4d18 8-9
+autocoding/skills/teamclaw-clarify/references/applications/proxy/index.md
+  h_5b2ec9c12c4d18 7
+autocoding/skills/teamclaw-clarify/references/dima-operations.md
+  h_5b2ec9c12c4d18 59
+autocoding/skills/teamclaw-clarify/references/gate-a-delivery.md
+  h_5b2ec9c12c4d18 8-11,24,42,45-62,65-66,74,77-78,99
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  h_5b2ec9c12c4d18 49,68-78,82
+autocoding/skills/teamclaw-clarify/references/no-fix.md
+  h_5b2ec9c12c4d18 1-61
+autocoding/skills/teamclaw-clarify/references/runtime-evidence.md
+  h_5b2ec9c12c4d18 3-4,7-8,11,13,16,32,34-37,43,61,68-69,71-72
+autocoding/skills/teamclaw-clarify/references/show-me.md
+  h_5b2ec9c12c4d18 1-71
+autocoding/skills/teamclaw-clarify/references/stage-events.md
+  h_5b2ec9c12c4d18 3,26-27,32-34
+autocoding/skills/teamclaw-clarify/scripts/stage_events.py
+  h_5b2ec9c12c4d18 122-154,156,158-165,167-181,183,185,187,189-190,192-193,195-196,198-200,202-217,219,221,225-226,228,233,235-239,243-248,250,328,339-342,350-351,354,356-357,359-362
+autocoding/skills/teamclaw-defect-handoff/SKILL.md
+  h_5b2ec9c12c4d18 1-88
+autocoding/skills/teamclaw-defect-handoff/references/code-ownership.md
+  h_5b2ec9c12c4d18 1-10
+autocoding/skills/teamclaw-defect-handoff/references/daytime-detect.md
+  h_5b2ec9c12c4d18 1-21
+autocoding/skills/teamclaw-defect-handoff/references/group-messages.md
+  h_5b2ec9c12c4d18 1-119
+autocoding/skills/teamclaw-defect-handoff/references/owners.md
+  h_5b2ec9c12c4d18 1-20
+autocoding/skills/teamclaw-dima-difficulty/SKILL.md
+  h_5b2ec9c12c4d18 1-37
+autocoding/skills/teamclaw-dima-scan/SKILL.md
+  h_5b2ec9c12c4d18 1-35
+autocoding/skills/teamclaw-explore/SKILL.md
+  h_5b2ec9c12c4d18 1-54
+autocoding/skills/teamclaw-implement/SKILL.md
+  h_5b2ec9c12c4d18 24-27,37,39,49-50
+autocoding/skills/teamclaw-implement/references/delivery.md
+  h_5b2ec9c12c4d18 15-76,83,88-90
+autocoding/skills/teamclaw-implement/references/show-me.md
+  h_5b2ec9c12c4d18 1-71
+autocoding/skills/teamclaw-implement/references/stage-events.md
+  h_5b2ec9c12c4d18 3,26-27,32-34
+autocoding/skills/teamclaw-implement/scripts/impl/reporting.py
+  h_5b2ec9c12c4d18 177,184
+autocoding/skills/teamclaw-implement/scripts/implement.py
+  h_5b2ec9c12c4d18 128-129
+autocoding/skills/teamclaw-implement/scripts/stage_events.py
+  h_5b2ec9c12c4d18 122-154,156,158-165,167-181,183,185,187,189-190,192-193,195-196,198-200,202-217,219,221,225-226,228,233,235-239,243-248,250,328,339-342,350-351,354,356-357,359-362
+autocoding/skills/teamclaw-implement/tests/conftest.py
+  h_5b2ec9c12c4d18 40
+autocoding/skills/teamclaw-implement/tests/test_reporting.py
+  h_5b2ec9c12c4d18 100
+autocoding/skills/teamclaw-implement/tests/test_stage_events.py
+  h_5b2ec9c12c4d18 46,48-49,88,92-228
+autocoding/skills/teamclaw-implement/tests/test_workflow_handoff.py
+  h_5b2ec9c12c4d18 33,40-41,43,50,67
+autocoding/skills/teamclaw-plan/SKILL.md
+  h_5b2ec9c12c4d18 28-32,36,48-50,57
+autocoding/skills/teamclaw-plan/references/delivery.md
+  h_5b2ec9c12c4d18 13-15,17,44-45,58,95
+autocoding/skills/teamclaw-plan/references/no-fix.md
+  h_5b2ec9c12c4d18 1-61
+autocoding/skills/teamclaw-plan/references/project-context.md
+  h_5b2ec9c12c4d18 15-18,57,63,74,82,88-90
+autocoding/skills/teamclaw-plan/references/review.md
+  h_5b2ec9c12c4d18 1-24
+autocoding/skills/teamclaw-plan/references/show-me.md
+  h_5b2ec9c12c4d18 1-71
+autocoding/skills/teamclaw-plan/references/stage-events.md
+  h_5b2ec9c12c4d18 3,26-27,32-34
+autocoding/skills/teamclaw-plan/scripts/stage_events.py
+  h_5b2ec9c12c4d18 122-154,156,158-165,167-181,183,185,187,189-190,192-193,195-196,198-200,202-217,219,221,225-226,228,233,235-239,243-248,250,328,339-342,350-351,354,356-357,359-362
+autocoding/skills/teamclaw-pr-debate/SKILL.md
+  h_5b2ec9c12c4d18 3,6,8,12,14,16,18,20-30,34-36,38
+autocoding/skills/teamclaw-pr-debate/references/delivery.md
+  h_5b2ec9c12c4d18 4,10,13-15,18,22,29-32
+autocoding/skills/teamclaw-pr-debate/references/platforms.md
+  h_5b2ec9c12c4d18 1,3,7,14-15,18-22,26,30,36-50,52,54-57
+autocoding/skills/teamclaw-pr-debate/references/polling.md
+  h_5b2ec9c12c4d18 1,3,5,7,9,11-14,16,18,20,22,24,26
+autocoding/skills/teamclaw-pr-debate/references/show-me.md
+  h_5b2ec9c12c4d18 1-67
+autocoding/skills/teamclaw-pr-debate/scripts/debate.py
+  h_5b2ec9c12c4d18 2,50,60,63-65,68-71,73,75-80,90,97-117,120,130-143,147,176,192-196,221-222,240,302,313-341,344-348,390-391,402,404-405,407,412,417-418,424,428,430
+autocoding/skills/teamclaw-pr-debate/scripts/stage_events.py
+  h_5b2ec9c12c4d18 122-154,156,158-165,167-181,183,185,187,189-190,192-193,195-196,198-200,202-217,219,221,225-226,228,233,235-239,243-248,250,328,339-342,350-351,354,356-357,359-362
+autocoding/skills/teamclaw-pr-debate/tests/conftest.py
+  h_5b2ec9c12c4d18 12-13
+autocoding/skills/teamclaw-pr-debate/tests/test_debate.py
+  h_5b2ec9c12c4d18 11-22,65,74,76,78-79,84-86,91,107,109,120,122,127,144,150,154-156,161-163,169,172,177,185,187,202,218,235,242,248,253-582
+autocoding/skills/teamclaw-workflow/SKILL.md
+  h_5b2ec9c12c4d18 13,32,35-37,39,52-53,65
+autocoding/skills/teamclaw-workflow/references/access-preflight.md
+  h_5b2ec9c12c4d18 20
+autocoding/tests/test_clarify_routing.py
+  h_5b2ec9c12c4d18 73-88
+autocoding/tests/test_stage_skills_standalone.py
+  h_5b2ec9c12c4d18 16-20,23
+devops/pipeline/PRChecker.aci.yml
+  h_5b2ec9c12c4d18 7,437,467,656,746,807
+docs/aicoding/2026-11-03-quality-bot-v2-related-contract-spec.md
+  h_5b2ec9c12c4d18 1-230
+docs/bot-scheduled-tasks-integration-spec.md
+  h_5b2ec9c12c4d18 1-188
+docs/bot-scheduled-tasks-manual-checklist.md
+  h_5b2ec9c12c4d18 1-120
+docs/dockerfile-acr-to-hcr-migration.md
+  h_5b2ec9c12c4d18 1-189
+docs/plans/2026-10-29-manager-worker-implementation-progress.md
+  h_5b2ec9c12c4d18 1-47
+docs/plans/2026-10-29-manager-worker-task-handle-reliability.md
+  h_5b2ec9c12c4d18 1-369
+docs/plans/2026-11-02-mcp-config-lifecycle/verification.md
+  h_5b2ec9c12c4d18 1-150
+docs/sandbox/NETBOX.md
+  h_5b2ec9c12c4d18 77
+docs/singlebox-eval/tier-diff-S4.md
+  h_5b2ec9c12c4d18 13,15,56,58
+docs/verification/service-bot-knowledge-stages-20261102.md
+  h_5b2ec9c12c4d18 1-37
+docs/服务Bot协作者操作手册.md
+  h_5b2ec9c12c4d18 1-167
+engine/.aci/arca-image-build.aci.yml
+  h_5b2ec9c12c4d18 30,51
+engine/adapter/scripts/ci_test.sh
+  h_5b2ec9c12c4d18 124-132,150,153-161,168,174-177
+engine/bootloader/bootstrapping/install_mcporter.sh
+  h_5b2ec9c12c4d18 2-4,7-9
+engine/bootloader/bootstrapping/mcporter_artifact.py
+  h_5b2ec9c12c4d18 1-161
+engine/bootloader/bootstrapping/service_bot_transition.sh
+  h_5b2ec9c12c4d18 499-501
+engine/bootloader/bootstrapping/start_service.sh
+  h_5b2ec9c12c4d18 1935,1947,1969-1972,1974-1975,1981,1984-1996,1998-2001,2003,2008-2010
+engine/bootloader/installations/mcporter.properties
+  h_5b2ec9c12c4d18 1-4
+engine/bootloader/tests/test_adaptor_readiness.py
+  h_5b2ec9c12c4d18 1-176
+engine/bootloader/tests/test_service_bot_transition_permissions.py
+  h_5b2ec9c12c4d18 303-310,325-328
+engine/bootloader/tests/test_service_permission_snapshot.py
+  h_5b2ec9c12c4d18 127-129
+engine/docker/arca-base/Dockerfile
+  h_5b2ec9c12c4d18 5,7
+engine/docker/ci-singlebox/Dockerfile
+  h_5b2ec9c12c4d18 2
+engine/installer/README.md
+  h_5b2ec9c12c4d18 14,31-68
+engine/installer/install/01_install_mcporter.sh
+  h_5b2ec9c12c4d18 11
+engine/installer/install/09_install_agent_sec_manager.sh
+  h_5b2ec9c12c4d18 3-6,9,11-14
+engine/installer/install_deps.sh
+  h_5b2ec9c12c4d18 12-13,43-50
+engine/installer/start/start_agent_sec.sh
+  h_5b2ec9c12c4d18 4,9,12,14-32,34-36,38
+engine/installer/tests/test_mcporter_artifact.py
+  h_5b2ec9c12c4d18 1-321
+engine/netbox/.aci/netbox-build.aci.yml
+  h_5b2ec9c12c4d18 15
+engine/plugins/packages/openclaw-channel-bcn-internal/openclaw.plugin.json
+  h_5b2ec9c12c4d18 10-11
+engine/plugins/packages/openclaw-channel-bcn-internal/package.json
+  h_5b2ec9c12c4d18 3,10
+engine/plugins/packages/openclaw-channel-bcn-internal/test/index.test.ts
+  h_5b2ec9c12c4d18 40,43
+offline/clawinsight/README.md
+  h_5b2ec9c12c4d18 1-25
+offline/clawinsight/catalog/source-manifest.jsonl
+  h_5b2ec9c12c4d18 1-14
+offline/clawinsight/odps_scripts/execute_sql/sql_00_ddl_tables.sql
+  h_5b2ec9c12c4d18 1-153
+offline/clawinsight/odps_scripts/execute_sql/sql_01_aggregate_jsonl.sql
+  h_5b2ec9c12c4d18 1-88
+offline/clawinsight/odps_scripts/execute_sql/sql_02_parse_sessions_json.sql
+  h_5b2ec9c12c4d18 1-56
+offline/clawinsight/odps_scripts/execute_sql/sql_03_join_extract.sql
+  h_5b2ec9c12c4d18 1-159
+offline/clawinsight/odps_scripts/execute_sql/sql_13_session_mapping_create.sql
+  h_5b2ec9c12c4d18 1-19
+offline/clawinsight/odps_scripts/execute_sql/sql_13_session_mapping_insert.sql
+  h_5b2ec9c12c4d18 1-38
+offline/clawinsight/odps_scripts/sql_00_alter_session_full_di_add_skill_path.sql
+  h_5b2ec9c12c4d18 1-12
+offline/clawinsight/odps_scripts/sql_00_create_table_with_comments.sql
+  h_5b2ec9c12c4d18 1-91
+offline/clawinsight/odps_scripts/sql_04_register_udf.sql
+  h_5b2ec9c12c4d18 1-69
+offline/clawinsight/odps_scripts/sql_13_session_mapping_register_udf.sql
+  h_5b2ec9c12c4d18 1-26
+offline/clawinsight/odps_scripts/udf_extract_session_features.py
+  h_5b2ec9c12c4d18 1-484
+offline/clawinsight/odps_scripts/udf_extract_session_mapping.py
+  h_5b2ec9c12c4d18 1-52
+offline/clawinsight/odps_scripts/udf_session_features_metrics.py
+  h_5b2ec9c12c4d18 1-911
+offline/clawinsight/tests/test_session_udf_regression.py
+  h_5b2ec9c12c4d18 1-169
+simulator/.gitignore
+  h_5b2ec9c12c4d18 14-16
+simulator/.simulator.conf.example
+  h_5b2ec9c12c4d18 32-38,86-90
+simulator/AGENTS.md
+  h_5b2ec9c12c4d18 71,147-224,1066-1082,1199-1324,1605-1712,1802-1855
+simulator/docs-published-artifacts.md
+  h_5b2ec9c12c4d18 43-48,51-52,55-56,59-60
+simulator/docs/import-bot.md
+  h_5b2ec9c12c4d18 1-200
+simulator/justfile
+  h_5b2ec9c12c4d18 72,271-277
+simulator/modules/baas/config/application-dev.yaml
+  h_5b2ec9c12c4d18 84-98
+simulator/modules/baas/manifest/pod.yaml
+  h_5b2ec9c12c4d18 171-175
+simulator/modules/backend/kustomization.yaml
+  h_5b2ec9c12c4d18 11
+simulator/modules/backend/sql/seed.sql
+  h_5b2ec9c12c4d18 1,3-4,11-14,46-50,70-80
+simulator/modules/frontend-nextgen/docker/nginx.conf
+  h_5b2ec9c12c4d18 44-49,78-105,161,165,168,171,179,184,189
+simulator/modules/storage/sql/agentclawdb-structure.sql
+  h_5b2ec9c12c4d18 36,73,4389-4392,8666,11045,11099-11125,11214,11223-11540
+simulator/poolab/01-preflight.md
+  h_5b2ec9c12c4d18 1-114
+simulator/poolab/02-planb-architecture.md
+  h_5b2ec9c12c4d18 1-113
+simulator/poolab/03-deviations.md
+  h_5b2ec9c12c4d18 1-125
+simulator/poolab/04-build-pipeline.md
+  h_5b2ec9c12c4d18 1-117
+simulator/poolab/05-bringup.md
+  h_5b2ec9c12c4d18 1-159
+simulator/poolab/06-bot-sandbox.md
+  h_5b2ec9c12c4d18 1-374
+simulator/poolab/07-gotchas.md
+  h_5b2ec9c12c4d18 1-114
+simulator/poolab/08-domains-and-hosts.md
+  h_5b2ec9c12c4d18 1-125
+simulator/poolab/09-e2e-readiness.md
+  h_5b2ec9c12c4d18 1-207
+simulator/poolab/10-ob-deployment.md
+  h_5b2ec9c12c4d18 1-364
+simulator/poolab/README.md
+  h_5b2ec9c12c4d18 1-139
+simulator/poolab/scripts/hosts-setup.sh
+  h_5b2ec9c12c4d18 1-88
+simulator/poolab/scripts/preflight.sh
+  h_5b2ec9c12c4d18 1-165
+simulator/poolab/scripts/status.sh
+  h_5b2ec9c12c4d18 1-144
+simulator/poolab/tools/README.md
+  h_5b2ec9c12c4d18 1-212
+simulator/poolab/tools/bringup/apply-rendered.sh
+  h_5b2ec9c12c4d18 1-228
+simulator/poolab/tools/bringup/deviate.py
+  h_5b2ec9c12c4d18 1-1407
+simulator/poolab/tools/bringup/gen_mist_degrade.py
+  h_5b2ec9c12c4d18 1-209
+simulator/poolab/tools/bringup/meshboot-standalone.yaml
+  h_5b2ec9c12c4d18 1-83
+simulator/poolab/tools/bringup/mock-services-deploy.yaml
+  h_5b2ec9c12c4d18 1-105
+simulator/poolab/tools/bringup/pvs.yaml
+  h_5b2ec9c12c4d18 1-36
+simulator/poolab/tools/bringup/wire-principal-secret.sh
+  h_5b2ec9c12c4d18 1-238
+simulator/poolab/tools/build/build-bcs-rust-kaniko.sh
+  h_5b2ec9c12c4d18 1-250
+simulator/poolab/tools/build/w1-build-all.sh
+  h_5b2ec9c12c4d18 1-311
+simulator/poolab/tools/build/w1-waves.sh
+  h_5b2ec9c12c4d18 1-50
+simulator/poolab/tools/decisions/20261027-sandbox-privilege-probes-and-review-audit.md
+  h_5b2ec9c12c4d18 1-56
+simulator/poolab/tools/e2e/bcs-ws-e2e.py
+  h_5b2ec9c12c4d18 1-559
+simulator/poolab/tools/examples/deviate-report.example.txt
+  h_5b2ec9c12c4d18 1-49
+simulator/poolab/tools/k3s/crictl.yaml
+  h_5b2ec9c12c4d18 1-2
+simulator/poolab/tools/k3s/fetch-k3s.sh
+  h_5b2ec9c12c4d18 1-66
+simulator/poolab/tools/k3s/hosts-simulator.txt
+  h_5b2ec9c12c4d18 1-55
+simulator/poolab/tools/k3s/import-images.sh
+  h_5b2ec9c12c4d18 1-12
+simulator/poolab/tools/k3s/restore.sh
+  h_5b2ec9c12c4d18 1-36
+simulator/poolab/tools/k3s/start-k3s.sh
+  h_5b2ec9c12c4d18 1-154
+simulator/poolab/tools/ob-evidence/OB-SWITCH-REPORT.md
+  h_5b2ec9c12c4d18 1-36
+simulator/poolab/tools/ob-evidence/bcs-config-dev.ob.toml
+  h_5b2ec9c12c4d18 1-256
+simulator/poolab/tools/ob-evidence/ob-pilot.yaml
+  h_5b2ec9c12c4d18 1-30
+simulator/poolab/tools/ob-evidence/patch2-baas.json
+  h_5b2ec9c12c4d18 1
+simulator/poolab/tools/ob-evidence/patch2-backend.json
+  h_5b2ec9c12c4d18 1
+simulator/poolab/tools/ob-evidence/patch2-clawweb.json
+  h_5b2ec9c12c4d18 1
+simulator/poolab/tools/ob-evidence/patch2-gateway.json
+  h_5b2ec9c12c4d18 1
+simulator/poolab/tools/poc/poc-test.sh
+  h_5b2ec9c12c4d18 1-190
+simulator/scripts/base-images.txt
+  h_5b2ec9c12c4d18 17
+simulator/scripts/bcs_e2e_cohort.json
+  h_5b2ec9c12c4d18 1-27
+simulator/scripts/bcs_e2e_cohort.sh
+  h_5b2ec9c12c4d18 1-177
+simulator/scripts/bcs_e2e_env.sh
+  h_5b2ec9c12c4d18 144-179
+simulator/scripts/cluster-common.sh
+  h_5b2ec9c12c4d18 662,680,686-690,705-708,760-768,779,947-959,993,1001-1002,1048,1062,1092,1101-1105
+simulator/scripts/help.sh
+  h_5b2ec9c12c4d18 180-190
+simulator/scripts/import-bot.py
+  h_5b2ec9c12c4d18 1-1046
+simulator/scripts/install-apparmor-profile.sh
+  h_5b2ec9c12c4d18 4-6,26-31,44-74,119
+simulator/scripts/k3d-apparmor-init.sh
+  h_5b2ec9c12c4d18 1-31
+simulator/scripts/k3d-start.sh
+  h_5b2ec9c12c4d18 23-26,134-159,168,171
+simulator/scripts/probe-runtime-image.sh
+  h_5b2ec9c12c4d18 1-78
+simulator/scripts/start-service.sh
+  h_5b2ec9c12c4d18 36,38-40,58-61,64-75,86-87,106
+simulator/scripts/tests/test-clawweb-baseline.sh
+  h_5b2ec9c12c4d18 59-73
+simulator/scripts/tests/test-cluster-scripts.sh
+  h_5b2ec9c12c4d18 158-161,211,887-888,907-908,996-1001,1055-1056,1058-1059,1100-1159,1187,2516-2518,2812-2816,2872-2874,2905-2911,2916-2944,3754,3795-3796,3939-3942
+simulator/scripts/tests/test_apparmor.py
+  h_5b2ec9c12c4d18 1-230
+simulator/scripts/tests/test_published_artifacts.py
+  h_5b2ec9c12c4d18 50-54,63-77
+simulator/tests/test_default_skills_command.py
+  h_5b2ec9c12c4d18 82-84,107
+simulator/tests/test_import_bot.py
+  h_5b2ec9c12c4d18 1-1166
+simulator/tests/test_runtime_image_contract.py
+  h_5b2ec9c12c4d18 1-177
+simulator/tests/test_telemetry.py
+  h_5b2ec9c12c4d18 34-36
+skills/release-note-auto/SKILL.md
+  h_5b2ec9c12c4d18 1-172
+skills/release-note-auto/scripts/collect_changes.sh
+  h_5b2ec9c12c4d18 1-65
+skills/release-note-auto/scripts/open_pr.sh
+  h_5b2ec9c12c4d18 1-96
+skills/release-note-auto/scripts/state.sh
+  h_5b2ec9c12c4d18 1-50
+src/frontend/src/components/InstanceFilter/__tests__/filterInstances.test.ts
+  h_5b2ec9c12c4d18 1-55
+src/frontend/src/components/InstanceFilter/filterInstances.ts
+  h_5b2ec9c12c4d18 1-29
+src/frontend/src/components/InstanceFilter/index.tsx
+  h_5b2ec9c12c4d18 1-51
+src/frontend/src/components/InstanceFilter/types.ts
+  h_5b2ec9c12c4d18 1-12
+submodules/avernet
+  h_5b2ec9c12c4d18 1
+tests/ci/test_bcn_deployment.py
+  h_5b2ec9c12c4d18 1-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "95ba1f549e29af24a9ebc10d7ca62b526057ae09",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
