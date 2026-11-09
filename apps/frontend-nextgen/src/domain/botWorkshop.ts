@@ -57,6 +57,8 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
+  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
+  evalGateVisible?: boolean;
   /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
   needsEditLock?: boolean;
   /** Bot 级协作关系；运行态不要求编辑锁，但仍允许管理已有协作锁。 */
