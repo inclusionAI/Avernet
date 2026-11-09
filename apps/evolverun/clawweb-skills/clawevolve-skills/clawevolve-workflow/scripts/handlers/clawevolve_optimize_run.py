@@ -5062,7 +5062,8 @@ def action_load_baseline_opt(args):
     if not isinstance(state, dict):
         state = {}
     manifest = dict(manifest or {})
-    expected_round = 0 if args.round == 1 else manifest.get("last_accepted_round")
+    # Until a candidate is accepted, the baseline remains the task-start Round 0.
+    expected_round = 0 if args.round == 1 else (manifest.get("last_accepted_round") or 0)
     artifact_path = _baseline_artifact_path(args, paths, manifest, state)
     if artifact_path is None:
         raise SystemExit(f"baseline artifact is required before baseline evaluation for Round {args.round}")
