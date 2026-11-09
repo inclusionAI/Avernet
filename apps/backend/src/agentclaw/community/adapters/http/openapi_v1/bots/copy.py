@@ -64,6 +64,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.core.bot_management.render_screen_service_protocol import (
+    RenderScreenServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyRepositoryProtocol,
@@ -167,6 +170,7 @@ def _build_manifest_document(
     script_body: str,
     source_bot_id: str,
     excludes: tuple[str, ...] = (),
+    render_screen_rows: tuple[dict[str, str], ...] = (),
 ) -> str:
     """Serialize source's config into a manifest config document.
 
@@ -178,20 +182,32 @@ def _build_manifest_document(
     list the caller sent under ``request_detail`` — written into the manifest
     entry so the compiler and a future sync materialiser read one source of
     truth rather than reaching back across modules for the operation ledger.
-    ``identity`` / ``skills`` / ``mcp`` are still deferred (能力集 stage).
+
+    ``render_screen_rows`` carries the source bot's render-screen set as the
+    v1 ``bot_config.render_screen`` kind. Each row is the ``(name, cdn_url)``
+    pair the RenderScreenService writes, serialised verbatim — an empty tuple
+    omits the ``bot_config`` key, so a source with no screens produces a
+    document with no ``bot_config``, which the validator and compiler treat as
+    undeclared (untouched) rather than as an overwrite-to-empty. ``identity``
+    / ``skills`` / ``mcp`` are still deferred (能力集 stage).
     """
     resources_entry: dict[str, Any] = {"path": _FILE_SYNC_PATH, "from": "from_bot"}
     if excludes:
         resources_entry["excludes"] = list(excludes)
+    manifest: dict[str, Any] = {
+        "resources": [resources_entry],
+    }
+    if render_screen_rows:
+        manifest["bot_config"] = {
+            "render_screen": [dict(row) for row in render_screen_rows],
+        }
     document: dict[str, Any] = {
         "schema_version": 1,
         "script": {"body": script_body},
         "sources": {
             "from_bot": {"protocol": "bot", "bot_id": source_bot_id},
         },
-        "manifest": {
-            "resources": [resources_entry],
-        },
+        "manifest": manifest,
     }
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
@@ -207,6 +223,7 @@ def submit_copy(
     manifest_seam: ManifestCreationSeam,
     passport_plugin: PassportPlugin,
     space_context: BusinessSpaceContextProtocol,
+    render_screen_service: RenderScreenServiceProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
 
@@ -261,10 +278,24 @@ def submit_copy(
     # compiler reads one source of truth rather than reaching across modules
     # for the ledger row). They are the same value under two roles.
     request_excludes = tuple((body.request_detail or {}).get("excludes") or ())
+    # Source's render-screen set → the v1 ``bot_config.render_screen`` kind.
+    # ``None`` owner reads every non-deleted row under the source bot (scope
+    # ``bot`` strips the caller's owner filter; scope ``owner`` is keyed by the
+    # source's own row). Empty → the kind is omitted, so a screenless source
+    # produces a document the validator/compiler treats as undeclared bot_config.
+    source_render_screens = tuple(
+        {"name": r.name, "cdn_url": r.cdn_url}
+        for r in render_screen_service.list_render_screens(
+            bot_id=source["bot_id"],
+            owner_id=source_owner_id,
+            current_user_id=owner_id,
+        )
+    )
     manifest_document = _build_manifest_document(
         script_body=script_body,
         source_bot_id=source["bot_id"],
         excludes=request_excludes,
+        render_screen_rows=source_render_screens,
     )
 
     # Validate the document before anything is spent (manifest-creation's rule:
@@ -512,6 +543,9 @@ async def copy_bot(
     manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
+    render_screen_service: RenderScreenServiceProtocol = Injected(
+        RenderScreenServiceProtocol
+    ),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
     del caller
@@ -525,6 +559,7 @@ async def copy_bot(
         manifest_seam=manifest_seam,
         passport_plugin=passport_plugin,
         space_context=space_context,
+        render_screen_service=render_screen_service,
     )
     return envelope(result, request)
 
