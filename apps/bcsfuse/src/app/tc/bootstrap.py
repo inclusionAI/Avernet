@@ -15,6 +15,26 @@ from app.tc.search import CardProfileSource, TcSearch
 logger = logging.getLogger(__name__)
 
 
+def _create_profile_gateway():
+    from app.adapters.http.dependencies.fusion_dependencies import _create_llm_provider
+    from app.application.services.llm_gateway_service import LLMGatewayService
+    from app.infra.llm.config.llm_settings import LLMSettings
+
+    if not any(
+        os.getenv(key, "").lower() == "true"
+        for key in ("ENABLE_REAL_LLM", "LLM_ENABLED")
+    ):
+        return None
+    try:
+        # V1 sync waits for indexing, so use a short model timeout for TC profiles.
+        settings = LLMSettings(default_timeout_ms=4000)
+        if settings.base_url and settings.auth_token:
+            return LLMGatewayService(_create_llm_provider(settings), settings=settings)
+    except Exception:  # noqa: BLE001 -- the source Card can still be indexed
+        logger.warning("TC profile model configuration unavailable")
+    return None
+
+
 class CardRuntimeStateStore:
     def __init__(self, catalog):
         self.catalog = catalog
@@ -65,6 +85,7 @@ def create_tc_app(context, *, search_router=None):
                     context.config, registry.require("embedding_provider")
                 ),
                 instance_id=context.config.get("instance_id", "tc"),
+                profile_gateway=_create_profile_gateway(),
             )
             runtimes.append(card_runtime)
             registry.register("tc_card_catalog", card_catalog)

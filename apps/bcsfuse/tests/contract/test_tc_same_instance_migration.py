@@ -4,6 +4,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from threading import Event, Thread
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,6 +91,64 @@ def new_card(client, key, **fields):
 def rows(path, table):
     with sqlite3.connect(path) as db:
         return db.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+
+
+def test_card_preparation_indexes_generated_profile_and_reuses_current_input(
+    service, monkeypatch
+):
+    from app.tc import bootstrap
+
+    calls = []
+
+    def generate(request, **_kwargs):
+        calls.append(request)
+        if '"name": "模型超时"' in request.user_prompt:
+            raise TimeoutError
+        return SimpleNamespace(raw_text='{"topic":"扑克游戏"}', errors=[])
+
+    monkeypatch.setattr(
+        bootstrap,
+        "_create_profile_gateway",
+        lambda: SimpleNamespace(generate=generate),
+    )
+    start, _ = service
+    key = "poker:dealer"
+    name = "poker_发牌师傅"
+    summary = "扑克游戏"
+    with start("card") as (client, registry):
+        new_card(client, key, name=name, description=name, runtime_state="online")
+        catalog = registry.require("tc_catalog_repository")
+        docs = registry.require("tc_search").updates.documents
+        assert catalog.get(key).card.source_card["description"] == name
+        assert catalog.get(key).profile["content"]["summary"] == summary
+        assert summary in docs.load_by_id(key).point.payload["search_text"]
+        assert len(calls) == 1
+
+        response = client.post(
+            "/api/v1/recommend",
+            json={"question": "游戏", "topK": 1, "enable_rerank": False},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["recommendations"][0]["short_profile"] == summary
+
+        result = client.put(f"/api/v1/workers/{key}/offline")
+        assert result.status_code == 200, result.text
+        assert summary in docs.load_by_id(key).point.payload["search_text"]
+        assert len(calls) == 1
+
+        new_card(client, key, description="汇总供应商的发票明细。")
+        assert (
+            docs.load_by_id(key)
+            .point.payload["search_text"]
+            .endswith("汇总供应商的发票明细。")
+        )
+        assert "游戏" not in docs.load_by_id(key).point.payload["search_text"]
+        assert len(calls) == 1
+
+        old_sync(client, "模型超时", "模型超时")
+        assert catalog.get("模型超时").profile is None
+        assert "模型超时" in docs.load_by_id("模型超时").point.payload["search_text"]
+        assert len(calls) == 2
 
 
 def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(service):
