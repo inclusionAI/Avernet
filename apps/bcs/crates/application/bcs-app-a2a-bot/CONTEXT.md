@@ -60,9 +60,15 @@ metadata. The conditional pin still fences a concurrent Provider rename.
 `management` derives Provider identity from an authenticated Provider-admin token,
 validates the anonymous-only full Card and delegates commits to core contracts.
 Its five-field result contains the stable BCN bot_id but never runtime credentials.
-Legacy ID and named registration remain separate compatibility entrypoints. Public
-updates bind the original Bot ID and current name across the fetch, retry local
-CAS conflicts at most three times, and cannot retarget a renamed/deleted Bot.
+Provider-ID and Provider-name registration retain their admission policies and expose
+the stable Bot identity. Public get/update/refresh use only bot_id, never Card.name.
+Updates fence the original Bot ID and Provider binding across the fetch, retry local
+CAS conflicts at most three times without refetching, and cannot retarget a renamed/deleted Bot.
+Refresh retains single-CAS protection against newer explicit updates. Unmounted name
+management handlers and their Service API methods are removed; named chat resolution remains.
+Source-key recovery authenticates the Provider, queries the existing immutable source
+agentId exactly, rechecks binding and returns zero or one management result. It is
+not registration upsert or history storage.
 The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
 

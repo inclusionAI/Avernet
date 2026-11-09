@@ -308,7 +308,7 @@ async fn registration_missing_avatar_target_returns_bot_not_found_without_resurr
 }
 
 #[tokio::test]
-async fn named_registration_and_card_update_use_card_names_and_hide_internal_identity() {
+async fn named_registration_returns_stable_id_for_public_card_management() {
     use bcs_service_api::application::a2a_bot::RegisterNamedA2aBotCommand;
     let (chain,service,_,_)=fixture().await;
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
@@ -318,15 +318,16 @@ async fn named_registration_and_card_update_use_card_names_and_hide_internal_ide
         source:A2aCardSource::Inline(raw.clone()),now_ms:1000}).await.unwrap();
     assert_eq!(result.card.bot_name,"订单助手");assert_eq!(result.card.provider_name,"orders");
     assert_eq!(result.card.agent_card,raw);assert!(result.bot_runtime_token.is_some());
-    let fetched=service.get_named("orders","test-admin","订单助手").await.unwrap();
+    assert!(!result.card.bot_id.is_empty());
+    let id=result.card.bot_id;
+    let fetched=service.get_agent_by_id("test-admin",&id).await.unwrap();
     assert_eq!(fetched.agent_card,raw);
-    assert!(service.get_named("orders","wrong-token","订单助手").await.is_err());
+    assert!(service.get_agent_by_id("wrong-token",&id).await.is_err());
     raw["name"]=json!("订单查询助手");
-    let updated=service.configure_named("orders","test-admin","订单助手",
-        A2aCardSource::Inline(raw.clone()),2000).await.unwrap();
-    assert_eq!(updated.bot_name,"订单查询助手");
-    assert!(service.get_named("orders","test-admin","订单助手").await.is_err());
-    assert_eq!(service.get_named("orders","test-admin","订单查询助手").await.unwrap().agent_card,raw);
+    let updated=service.update_agent_by_id("test-admin",&id,A2aCardSource::Inline(raw.clone())).await.unwrap();
+    assert_eq!(updated.bot_id,id);
+    assert_eq!(updated.agent_name,"订单查询助手");
+    assert_eq!(service.get_agent_by_id("test-admin",&id).await.unwrap().agent_card,raw);
 }
 
 #[tokio::test]
