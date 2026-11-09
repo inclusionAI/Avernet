@@ -624,3 +624,49 @@ fn cancelled_join_does_not_schedule_successors_and_waits_for_remote_evidence() {
         NodePhase::PendingResult
     );
 }
+
+#[test]
+fn terminal_human_with_judge_keeps_saved_answer_after_empty_target_selection() {
+    let first = start(&spec(json!({
+        "h": {
+            "kind": "human_input", "display_name": "Input", "instruction": "answer",
+            "node_timeout_ms": 1000,
+            "judge": { "criteria": ["approve"], "outcomes": ["ok"] },
+            "transitions": { "ok": { "targets": [] } },
+        },
+    })));
+    let mut answer = message();
+    answer.parts = vec![MessagePart::Text { text: "answer".into() }];
+    let answered = StructuredGroupRunner.reduce(
+        &first.next_state,
+        &input(SessionInputKind::HumanReply {
+            task_id: TaskId::new(scope(), "t"),
+            interaction_id: first.next_state.current_task.as_ref().unwrap().nodes["h"]
+                .interaction_id.clone().unwrap(),
+            caller: CallerContext { scope: scope(), principal: "user".into(), trace_id: None },
+            message: answer.clone(),
+        }),
+    ).unwrap();
+    let judged = save(&answered.next_state, "h");
+    let EffectIntent::Judge { request } = &judged.effects[0] else { panic!() };
+    assert_eq!(request.inputs["h"].intent.output, answer.parts);
+    let chosen = StructuredGroupRunner.reduce(
+        &judged.next_state,
+        &input(SessionInputKind::JudgeDecided {
+            task_id: TaskId::new(scope(), "t"),
+            node_id: request.node_id.clone(),
+            branch: "ok".into(),
+        }),
+    ).unwrap();
+    assert!(chosen.next_state.current_task.as_ref().unwrap().nodes[&request.node_id]
+        .result_intent.as_ref().unwrap().output.is_empty());
+    let recovered: RunnerState = serde_json::from_slice(
+        &serde_json::to_vec(&chosen.next_state).unwrap(),
+    ).unwrap();
+    let saved_judge = save(&recovered, &request.node_id);
+    let EffectIntent::SaveResult { intent } = &saved_judge.effects[0] else { panic!() };
+    assert_eq!(intent.status, TaskStatus::Completed);
+    assert_eq!(intent.output, answer.parts);
+    assert!(saved_judge.next_state.current_task.as_ref().unwrap().nodes[&request.node_id]
+        .saved_result.as_ref().unwrap().intent.output.is_empty());
+}

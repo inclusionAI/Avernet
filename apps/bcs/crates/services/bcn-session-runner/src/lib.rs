@@ -384,12 +384,14 @@ fn reduce(
             let node = task
                 .nodes
                 .iter()
-                .find(|(node, n)| {
-                    matches!(
-                        n.phase,
-                        NodePhase::Running | NodePhase::WaitingInput | NodePhase::WaitingJudge
-                    ) && (timer(&task, node, false) == *timer_id
-                        || timer(&task, node, true) == *timer_id)
+                .find(|(node, n)| match n.phase {
+                    // Cancellation may race an already-enqueued timer. Only the
+                    // deadline for the current wait phase remains authoritative.
+                    NodePhase::WaitingInput => timer(&task, node, true) == *timer_id,
+                    NodePhase::Running | NodePhase::WaitingJudge => {
+                        timer(&task, node, false) == *timer_id
+                    }
+                    _ => false,
                 })
                 .map(|(id, _)| id.clone());
             if let Some(node) = node {
@@ -824,7 +826,13 @@ fn finish_task(t: &mut Transition, task: &mut TaskExecution, result_status: Task
                 .graph
                 .iter()
                 .filter(|(_, n)| n.successors.is_empty())
-                .filter_map(|(id, _)| task.nodes[id].saved_result.as_ref())
+                // Normalization inserts a Judge after its source business node.
+                // A terminal Judge keeps that source as the output identity.
+                .filter_map(|(id, n)| match n.kind {
+                    NormalizedNodeKind::Judge { .. } => n.predecessors.first(),
+                    _ => Some(id),
+                })
+                .filter_map(|id| task.nodes[id].saved_result.as_ref())
                 .flat_map(|r| r.intent.output.clone())
                 .collect()
         } else {

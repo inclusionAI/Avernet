@@ -643,3 +643,42 @@ fn unknown_execution_fails_already_queued_tasks_after_save_without_dispatch() {
         )));
     assert!(saved.effects.is_empty());
 }
+
+#[test]
+fn cancelled_execution_deadline_does_not_end_current_human_wait() {
+    let first = started();
+    let execution_timer = first.timer_changes.iter().find_map(|change| match change {
+        TimerChange::Upsert(deadline) => Some(deadline.timer_id.clone()),
+        _ => None,
+    }).unwrap();
+    let waiting = DirectA2aRunner.reduce(
+        &first.next_state,
+        &agent(&first.next_state, AgentEvent::InputRequired {
+            handle: handle(),
+            prompt: vec![],
+        }),
+    ).unwrap();
+    assert!(waiting.timer_changes.contains(&TimerChange::Cancel(execution_timer.clone())));
+    let human_timer = waiting.timer_changes.iter().find_map(|change| match change {
+        TimerChange::Upsert(deadline) => Some(deadline.timer_id.clone()),
+        _ => None,
+    }).unwrap();
+    // Cancellation cannot remove an execution timeout already in the inbox.
+    let recovered: RunnerState = serde_json::from_slice(
+        &serde_json::to_vec(&waiting.next_state).unwrap(),
+    ).unwrap();
+    let stale = DirectA2aRunner.reduce(
+        &recovered,
+        &input(SessionInputKind::TimerFired { timer_id: execution_timer }),
+    ).unwrap();
+    assert_eq!(stale.next_state, recovered);
+    assert!(stale.effects.is_empty());
+    assert!(stale.events.is_empty());
+    assert!(stale.timer_changes.is_empty());
+    let expired = DirectA2aRunner.reduce(
+        &stale.next_state,
+        &input(SessionInputKind::TimerFired { timer_id: human_timer }),
+    ).unwrap();
+    assert_eq!(expired.next_state.current_task.as_ref().unwrap().status, TaskStatus::PendingResult);
+    assert!(expired.effects.iter().any(|effect| matches!(effect, EffectIntent::SaveResult { .. })));
+}
