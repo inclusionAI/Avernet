@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
@@ -62,6 +63,25 @@ if TYPE_CHECKING:
     from agentclaw.community.di.profile import DeployProfile
 
 logger = get_logger()
+
+
+def install_openclaw_config_path() -> None:
+    """Set ``AGENTCLAW_CONFIG_PATH`` so early OpenClaw imports find config."""
+    try:
+        # A deployment's assembled runtime ``configs/`` directory (cwd) takes
+        # precedence; the community source tree provides the same file for
+        # development and test invocations.
+        possible_config_dirs = [
+            Path.cwd() / "configs",
+            Path(__file__).resolve().parents[2] / "configs",
+        ]
+        for config_dir in possible_config_dirs:
+            if config_dir.exists() and (config_dir / "application.yaml").exists():
+                os.environ["AGENTCLAW_CONFIG_PATH"] = str(config_dir)
+                logger.info("Set AGENTCLAW_CONFIG_PATH to %s", config_dir)
+                break
+    except Exception as exc:
+        logger.warning("Could not set AGENTCLAW_CONFIG_PATH: %s", exc)
 
 #: Selects the boot shape. Unset or empty means :attr:`BootMode.EAGER`.
 BOOT_MODE_ENV = "AGENTCLAW_HTTP_BOOT_MODE"

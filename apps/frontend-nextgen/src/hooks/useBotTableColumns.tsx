@@ -31,15 +31,12 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onOpenLogs,
     onOpenTaskInstances,
     canOpenTaskInstances,
-    onOpenContainers,
-    canViewContainers,
+    onOpenContainers, canViewContainers,
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onPublicationChanged,
-    onAction,
-    onClaimLock,
-    onReleaseLock,
+    onPublicationChanged, onPublicationGateBlocked, onOpenEvaluation, onOpenEvalHistory,
+    onAction, onClaimLock, onReleaseLock,
     getInventoryActions,
     getHealthCheckAvailability,
     getLogAction,
@@ -85,6 +82,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
             onPublicationChanged={onAction ? onPublicationChanged : undefined}
+            onPublicationGateBlocked={onPublicationGateBlocked}
           />
         ),
       },
@@ -193,6 +191,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                onOpenEvaluation={onOpenEvaluation}
+                onOpenEvalHistory={onOpenEvalHistory}
                 copyAvailability={copyAvailability}
                 onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
@@ -220,6 +220,9 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onChangeSpace,
       onAuthorize,
       onPublicationChanged,
+      onPublicationGateBlocked,
+      onOpenEvaluation,
+      onOpenEvalHistory,
       onAction,
       onClaimLock,
       onReleaseLock,
