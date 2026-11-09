@@ -11,6 +11,11 @@ import type { ChangeEvent } from 'react';
 import { useMemo, useRef, useState } from 'react';
 
 type EvalTab = 'simple_cert_submit' | 'restart_eval' | 'eval_history';
+
+const resolveEvalTab = (value: string | null): EvalTab => {
+  if (value === 'simple_cert_submit' || value === 'restart_eval' || value === 'eval_history') return value;
+  return 'simple_cert_submit';
+};
 type GoalType = 'json' | 'semantic';
 
 interface EvalFileInputProps {
@@ -63,7 +68,8 @@ const EvaluationPage: React.FC = () => {
   const detail = evaluation.detail as Record<string, any> | undefined;
   const tabs = detail?.tabs as Record<string, { enabled?: boolean; visible?: boolean; visible_reason?: string }> | undefined;
   const certState = detail?.cert_state as Record<string, unknown> | undefined;
-  const [activeTab, setActiveTab] = useState<EvalTab>('simple_cert_submit');
+  const initialTab = resolveEvalTab(searchParams.get('tab'));
+  const [activeTab, setActiveTab] = useState<EvalTab>(initialTab);
   const [sampleFile, setSampleFile] = useState<File>();
   const [reportFile, setReportFile] = useState<File>();
   const [datasetFile, setDatasetFile] = useState<File>();

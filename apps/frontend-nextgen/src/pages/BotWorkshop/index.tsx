@@ -50,13 +50,18 @@ const BotWorkshopPage: React.FC = () => {
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
     else setBasicInfoBot(bot);
   };
-  const openEvaluation = (bot: BotDomain) => {
+  const openEvaluation = (bot: BotDomain, tab?: 'simple_cert_submit' | 'eval_history') => {
     const version = bot.publicationVersion ?? bot.liveVersion ?? 'latest';
+    const params = new URLSearchParams();
+    if (bot.ownerId) params.set('owner_id', bot.ownerId);
+    if (tab) params.set('tab', tab);
+    const query = params.toString();
     history.push(
       `/bot-workshop/evaluation/${encodeURIComponent(bot.id)}/versions/${encodeURIComponent(String(version))}` +
-        (bot.ownerId ? `?owner_id=${encodeURIComponent(bot.ownerId)}` : ''),
+        (query ? `?${query}` : ''),
     );
   };
+  const openEvaluationHistory = (bot: BotDomain) => openEvaluation(bot, 'eval_history');
   const handleManagePublication = async (bot: BotDomain) => {
     if (bot.lifecycle !== 'draft') {
       setPublicationBot(bot);
@@ -177,6 +182,7 @@ const BotWorkshopPage: React.FC = () => {
                       onGeneralConfig={setGeneralConfigBot}
                       onManagePublication={(bot) => void handleManagePublication(bot)}
                       onOpenEvaluation={openEvaluation}
+                      onOpenEvalHistory={openEvaluationHistory}
                       onAction={workshop.runAction}
                       onCopy={workshop.openCopy}
                       getCopyAvailability={workshop.getCopyAvailability}

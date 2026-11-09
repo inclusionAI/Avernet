@@ -38,6 +38,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onAuthorize,
     onManagePublication,
     onOpenEvaluation,
+    onOpenEvalHistory,
     onAction,
     onClaimLock,
     onReleaseLock,
@@ -189,6 +190,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
                 onOpenEvaluation={onOpenEvaluation}
+                onOpenEvalHistory={onOpenEvalHistory}
                 onHealthCheck={onHealthCheck}
                 healthCheckAvailability={getHealthCheckAvailability?.(bot)}
                 onOpenTaskInstances={onOpenTaskInstances}
@@ -226,6 +228,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onAuthorize,
       onManagePublication,
       onOpenEvaluation,
+      onOpenEvalHistory,
       onAction,
       onClaimLock,
       onReleaseLock,
