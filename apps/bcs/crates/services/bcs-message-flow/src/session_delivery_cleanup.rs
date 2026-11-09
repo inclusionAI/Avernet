@@ -12,8 +12,7 @@ use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoError};
 use bcs_service_api::{
-    DeliveryTransitionCommand, ManagedDeliveryError, ManagedMessageDeliveryService, ServiceError,
-    ServiceResult,
+    DeliveryTransitionCommand, ManagedDeliveryError, ServiceError, ServiceResult,
 };
 
 /// Same cancel budget the per-message cancellation API grants.

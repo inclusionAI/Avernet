@@ -34,13 +34,31 @@ impl MessageFlowService for RecordingFlow {
     }
 }
 
+/// Accepts Session run cancellation (the Noop runtime refuses it); every
+/// other call keeps the Noop behaviour.
+struct CancellingRuntime;
+
+#[async_trait]
+impl CollaborationRuntimeService for CancellingRuntime {
+    async fn start_state_machine_run(&self, cmd: StartStateMachineRunCommand) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> { NoopCollaborationRuntimeService.start_state_machine_run(cmd).await }
+    async fn get_state_machine_run(&self, run_id: &str) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> { NoopCollaborationRuntimeService.get_state_machine_run(run_id).await }
+    async fn get_state_machine_session_history(&self, session_id: &str, limit: u64, before: Option<u64>) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> { NoopCollaborationRuntimeService.get_state_machine_session_history(session_id, limit, before).await }
+    async fn cancel_state_machine_run(&self, cmd: CancelStateMachineRunCommand) -> Result<StateMachineRunView, CollaborationRuntimeError> { NoopCollaborationRuntimeService.cancel_state_machine_run(cmd).await }
+    async fn lookup_delivery_correlation(&self, run_id: &str) -> Result<Option<StateMachineDeliveryCorrelation>, CollaborationRuntimeError> { NoopCollaborationRuntimeService.lookup_delivery_correlation(run_id).await }
+    async fn register_delivery_alias(&self, request_id: &str, run_id: String) -> Result<(), CollaborationRuntimeError> { NoopCollaborationRuntimeService.register_delivery_alias(request_id, run_id).await }
+    async fn handle_bot_terminal_event(&self, cmd: HandleBotTerminalEventCommand) -> Result<HandleBotTerminalEventOutcome, CollaborationRuntimeError> { NoopCollaborationRuntimeService.handle_bot_terminal_event(cmd).await }
+    async fn upsert_definition(&self, definition: CollaborationDefinition) -> Result<(), CollaborationRuntimeError> { NoopCollaborationRuntimeService.upsert_definition(definition).await }
+    async fn configure_group_runtime(&self, cmd: ConfigureGroupRuntimeCommand) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError> { NoopCollaborationRuntimeService.configure_group_runtime(cmd).await }
+    async fn cancel_session_runs(&self, _session_id: &str, _reason: &str) -> Result<(), CollaborationRuntimeError> { Ok(()) }
+}
+
 async fn session_service(flow: Arc<RecordingFlow>, repo: Arc<MemorySessionRepo>) -> (SessionManagementWithRuntimeCleanup, String) {
     let session = repo.create("group-1", NewSessionParams {
         participants: vec![Participant::bot("bot-a", ParticipantRole::Worker), Participant::bot("bot-b", ParticipantRole::Worker)],
         ..Default::default()
     }).await.unwrap();
     let inner = Arc::new(SessionManagementServiceImpl::new(repo, Arc::new(MemoryGroupRepo::new())));
-    let service = SessionManagementWithRuntimeCleanup::new(inner, Arc::new(NoopCollaborationRuntimeService))
+    let service = SessionManagementWithRuntimeCleanup::new(inner, Arc::new(CancellingRuntime))
         .with_message_flow(flow);
     (service, session.id)
 }

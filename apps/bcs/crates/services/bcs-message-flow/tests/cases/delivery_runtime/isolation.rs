@@ -9,6 +9,7 @@ struct PoisonedRow {
     inner: Arc<ManagedMessageDelivery>,
     poisoned: String,
     allow_quarantine: bool,
+    outage: bool,
 }
 
 #[async_trait]
@@ -31,20 +32,24 @@ impl ManagedMessageDeliveryService for PoisonedRow {
         let quarantine = command.transport_context_json.as_ref()
             .and_then(|v| v.get("scheduler_quarantined")).is_some();
         if command.delivery_id == self.poisoned && !(quarantine && self.allow_quarantine) {
-            return Err(MessageDeliveryRepoError::Invalid("injected deterministic row fault".into()).into());
+            return Err(if self.outage {
+                MessageDeliveryRepoError::Storage("injected persistent outage".into())
+            } else {
+                MessageDeliveryRepoError::Invalid("injected deterministic row fault".into())
+            }.into());
         }
         self.inner.transition(command).await
     }
 }
 
-async fn scenario(allow_quarantine: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn scenario(allow_quarantine: bool, outage: bool) -> Result<(), Box<dyn std::error::Error>> {
     let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
     let mut expired = command("poisoned", "poisoned-session");
     expired.expire_at_ms = Some(2);
     let poisoned = service.admit(expired).await?.deliveries.remove(0);
     let io = Arc::new(RecordingIo { service: service.clone(), sent: Default::default(), aborts: Default::default(), fail_send: false, fail_registration: false });
     let mut worker = runtime(service.clone(), io.clone());
-    worker.service = Arc::new(PoisonedRow { inner: service.clone(), poisoned: poisoned.delivery_id.clone(), allow_quarantine });
+    worker.service = Arc::new(PoisonedRow { inner: service.clone(), poisoned: poisoned.delivery_id.clone(), allow_quarantine, outage });
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(worker.run(shutdown));
     // The healthy row is admitted after the poisoned row has been seen.
@@ -53,11 +58,11 @@ async fn scenario(allow_quarantine: bool) -> Result<(), Box<dyn std::error::Erro
     wait_submitted(&service, "healthy").await?;
     assert!(!task.is_finished(), "a row fault must never stop the scheduler");
     let row = service.snapshot(Some("poisoned-session")).await?.remove(0);
-    if allow_quarantine {
+    if allow_quarantine && !outage {
         assert_eq!(row.state.status, Status::Failed, "never-sent row is settled");
         assert_eq!(row.last_error_code.as_deref(), Some("scheduler_quarantined"));
     } else {
-        assert_eq!(row.state.status, Status::Queued, "an unsettleable row is only skipped");
+        assert_eq!(row.state.status, Status::Queued, "an unsettleable row, or one behind an outage, is only skipped");
     }
     stop.send(true)?;
     task.await??;
@@ -66,10 +71,17 @@ async fn scenario(allow_quarantine: bool) -> Result<(), Box<dyn std::error::Erro
 
 #[tokio::test]
 async fn deterministic_row_fault_is_quarantined_and_the_queue_keeps_moving() -> Result<(), Box<dyn std::error::Error>> {
-    scenario(true).await
+    scenario(true, false).await
 }
 
 #[tokio::test]
 async fn unsettleable_row_is_skipped_and_the_queue_keeps_moving() -> Result<(), Box<dyn std::error::Error>> {
-    scenario(false).await
+    scenario(false, false).await
+}
+
+#[tokio::test]
+async fn persistent_storage_fault_never_settles_a_healthy_row() -> Result<(), Box<dyn std::error::Error>> {
+    // Quarantine is allowed, but an outage is not a row fault: the row is
+    // retried, then skipped, and keeps its Queued state.
+    scenario(true, true).await
 }

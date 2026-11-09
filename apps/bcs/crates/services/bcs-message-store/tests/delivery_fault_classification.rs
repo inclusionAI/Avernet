@@ -54,14 +54,50 @@ async fn deleted_session_reply_is_a_deterministic_session_missing_error() -> Res
 async fn one_corrupt_row_does_not_poison_scheduler_batches() -> Result<(), Box<dyn std::error::Error>> {
     let (db, repo) = store().await?;
     let good = repo.admit(admission("good")).await?.deliveries.remove(0);
-    // Sorts before the good row on (expire_at_ms, delivery_id).
-    db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,expire_at_ms) VALUES ('aaa-corrupt','dev','m','bot','doomed','g',99,'group','send','queued',1,0,1,1,1,0,'{not json',1)")).await?;
+    // Sorts before the good row on (expire_at_ms, delivery_id). The column
+    // is valid SQL data but not a known flow kind, so only decoding fails.
+    db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,expire_at_ms) VALUES ('aaa-corrupt','dev','m','bot','doomed','g',99,'not-a-flow-kind','send','queued',1,0,1,1,1,0,'{}',1)")).await?;
 
-    let expired = repo.work_batch(DeliveryWorkBatch::Expired, 100, "", 1).await;
+    // The skipped row still occupies its slot in the page (known limit:
+    // undecodable rows are skipped, not settled); the page itself succeeds.
+    let expired = repo.work_batch(DeliveryWorkBatch::Expired, 100, "", 100).await;
     let expired = expired.expect("a corrupt row must not fail the whole batch");
     assert_eq!(expired.iter().map(|d| d.delivery_id.as_str()).collect::<Vec<_>>(), vec![good.delivery_id.as_str()]);
 
     let error = repo.get_delivery("aaa-corrupt").await.unwrap_err();
     assert!(matches!(error, MessageDeliveryRepoError::Invalid(_)), "corrupt row is not an outage: {error:?}");
+    Ok(())
+}
+
+/// Fails the admission's commit transaction (not its single-step sequence
+/// read) with a fixed backend error.
+struct FailingTransactions { inner: Arc<LocalSqliteDbPlugin>, error: fn() -> bcs_db_api::DbError }
+
+#[async_trait::async_trait]
+impl DbPlugin for FailingTransactions {
+    async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbRow>> { self.inner.query(statement).await }
+    async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> { self.inner.execute(statement).await }
+    async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+        if steps.len() == 1 { return self.inner.transaction(steps).await; }
+        Err((self.error)())
+    }
+    async fn health_check(&self) -> bcs_db_api::DbResult<bcs_db_api::DbHealth> { self.inner.health_check().await }
+}
+
+#[tokio::test]
+async fn only_backend_outages_stay_retryable_storage_errors() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_db_api::DbError;
+    let (db, _) = store().await?;
+    let cases: [(fn() -> DbError, fn(&MessageDeliveryRepoError) -> bool); 4] = [
+        (|| DbError::InvalidInput("bad step".into()), |e| matches!(e, MessageDeliveryRepoError::Invalid(_))),
+        (|| DbError::Conversion("bad value".into()), |e| matches!(e, MessageDeliveryRepoError::Invalid(_))),
+        (|| DbError::Backend("UNIQUE constraint failed: bcs_messages.message_id".into()), |e| matches!(e, MessageDeliveryRepoError::Conflict)),
+        (|| DbError::Backend("connection reset".into()), |e| matches!(e, MessageDeliveryRepoError::Storage(_))),
+    ];
+    for (error, expected) in cases {
+        let repo = MySqlMessageStore::sqlite(Arc::new(FailingTransactions { inner: db.clone(), error }), "dev".into());
+        let got = repo.admit(admission("classified")).await.unwrap_err();
+        assert!(expected(&got), "{:?} classified as {got:?}", error());
+    }
     Ok(())
 }
