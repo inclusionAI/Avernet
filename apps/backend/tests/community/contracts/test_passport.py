@@ -75,6 +75,20 @@ def test_apply_agent_passport_returns_local_mock_envelope(world) -> None:
     assert result["token"] == "mock_token_nonfirst_bot_y"
 
 
+def test_passport_lifecycle_accepts_optional_bot_type(world) -> None:
+    plugin = world.get(PassportPlugin)
+    result = plugin.apply_first_agent_passport(
+        bot_id="bot_typed",
+        owner_workno="alice",
+        mcp_codes=[],
+        bot_type="service",
+    )
+    plugin.update_passport("bot_typed", "alice", bot_type="service")
+
+    assert result is not None
+    assert result["agent_code"] == "local_bot_typed"
+
+
 # ── community impl (B4) — self-issued, deterministic, consent-free ──
 
 
