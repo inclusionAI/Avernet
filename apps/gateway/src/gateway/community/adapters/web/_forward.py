@@ -26,6 +26,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
 from gateway.community.adapters.web._cors import CORS_RESPONSE_HEADERS
+from gateway.community.adapters.web._envelope import error_response, request_id
 from gateway.community.adapters.web._log_redaction import redact_credentials
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
@@ -40,31 +41,15 @@ from gateway.community.spi.authn import (
 )
 from gateway.community.spi.forwarder import ForwardRequest
 from gateway.community.spi.principal_signer import PrincipalSigner
-from gateway.community.tracer import get_tracer_plugin
 
 logger = get_logger("forward")
 
 _ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 
-def _request_id() -> str:
-    try:
-        return str(get_tracer_plugin().get_trace_id())
-    except Exception:
-        return ""
-
-
 def _error(status: int, subcode: int, message: str) -> JSONResponse:
     """A gateway-generated error in the standard envelope shape."""
-    return JSONResponse(
-        status_code=status,
-        content={
-            "code": status * 1000 + subcode,
-            "message": message,
-            "data": None,
-            "request_id": _request_id(),
-        },
-    )
+    return error_response(status, message, subcode=subcode)
 
 
 def _bundle(connection: HTTPConnection) -> CredentialBundle:
@@ -309,7 +294,7 @@ async def forward_request(request: Request) -> Response:
         caller,
         domain.name,
         server.name,
-        _request_id() or _ABSENT,
+        request_id() or _ABSENT,
     )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
     #

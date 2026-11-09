@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from gateway.community.adapters.web._envelope import error_response
 from gateway.community.api.app_registration import AppNameTakenError
 from gateway.community.logger import get_logger
 
@@ -115,10 +116,7 @@ _MIGRATION_ERROR_STATUS: dict[str, tuple[int, int]] = {
 def _error(
     status: int, subcode: int, message: str, data: Any | None = None
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status,
-        content={"code": status * 1000 + subcode, "message": message, "data": data},
-    )
+    return error_response(status, message, subcode=subcode, data=data)
 
 
 @router.post("/access-keys", status_code=201)

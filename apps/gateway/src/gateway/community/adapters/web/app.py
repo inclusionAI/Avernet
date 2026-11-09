@@ -18,6 +18,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 
 from gateway.community import __version__
 from gateway.community.adapters.web._cors import install_cors
+from gateway.community.adapters.web._envelope import install_error_envelope
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web._log_redaction import install_credential_redaction
 from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
@@ -87,6 +88,11 @@ def create_app() -> FastAPI:
     tracer = get_tracer_plugin()
     tracer.setup(config.app_name)
     tracer.install_middleware(app)
+
+    # The gateway's own failures (routing 404/405, request validation, a refused
+    # credential raised from a dependency) answer in the response envelope, not
+    # FastAPI's ``{"detail": ...}`` body. Upstream responses are relayed as-is.
+    install_error_envelope(app)
 
     @app.get(
         "/api/test",
