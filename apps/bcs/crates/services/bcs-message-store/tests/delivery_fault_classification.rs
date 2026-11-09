@@ -58,9 +58,9 @@ async fn one_corrupt_row_does_not_poison_scheduler_batches() -> Result<(), Box<d
     // is valid SQL data but not a known flow kind, so only decoding fails.
     db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,expire_at_ms) VALUES ('aaa-corrupt','dev','m','bot','doomed','g',99,'not-a-flow-kind','send','queued',1,0,1,1,1,0,'{}',1)")).await?;
 
-    // The skipped row still occupies its slot in the page (known limit:
-    // undecodable rows are skipped, not settled); the page itself succeeds.
-    let expired = repo.work_batch(DeliveryWorkBatch::Expired, 100, "", 100).await;
+    // A one-row page: the corrupt row is excluded and the page re-read, so
+    // it cannot keep hiding the healthy row behind it.
+    let expired = repo.work_batch(DeliveryWorkBatch::Expired, 100, "", 1).await;
     let expired = expired.expect("a corrupt row must not fail the whole batch");
     assert_eq!(expired.iter().map(|d| d.delivery_id.as_str()).collect::<Vec<_>>(), vec![good.delivery_id.as_str()]);
 
@@ -99,5 +99,23 @@ async fn only_backend_outages_stay_retryable_storage_errors() -> Result<(), Box<
         let got = repo.admit(admission("classified")).await.unwrap_err();
         assert!(expected(&got), "{:?} classified as {got:?}", error());
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn corrupt_overdue_rows_cannot_hide_healthy_control_work() -> Result<(), Box<dyn std::error::Error>> {
+    let (db, repo) = store().await?;
+    // Seven undecodable overdue Dispatching rows sort ahead of a healthy one
+    // and would fill the category's share of a 32-row control page.
+    for n in 0..7 {
+        db.execute(DbStatement::new(format!("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms) VALUES ('bad-{n}','dev','m{n}','bot','doomed','g',{n},'not-a-flow-kind','send','dispatching',1,1,1,1,1,1,'{{}}',{n})"))).await?;
+    }
+    db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms) VALUES ('healthy','dev','mh','bot','doomed','g',50,'group','send','dispatching',1,1,1,1,1,1,'{}',50)")).await?;
+    let page = repo.work_batch(DeliveryWorkBatch::Control, 1000, "", 32).await?;
+    assert!(page.iter().any(|d| d.delivery_id == "healthy"), "healthy overdue work must still be scanned");
+    assert!(page.iter().all(|d| !d.delivery_id.starts_with("bad-")));
+    // Recovery pagination also advances past an all-corrupt prefix.
+    let recovery = repo.work_batch(DeliveryWorkBatch::Recovery, 1000, "", 7).await?;
+    assert_eq!(recovery.iter().map(|d| d.delivery_id.as_str()).collect::<Vec<_>>(), vec!["healthy"]);
     Ok(())
 }
