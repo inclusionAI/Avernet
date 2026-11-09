@@ -83,8 +83,8 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
             .iter()
             .map(|migration| (migration.version, migration.name.as_str()))
             .collect::<Vec<_>>(),
-        vec![(42, "auth_session_version")],
-        "only version 42 is pending on the upgrade path"
+        vec![(42, "auth_session_version"), (43, "group_context_slot")],
+        "the upgrade path starts at version 42"
     );
 
     run_sqlite_migrations(&db).await?;

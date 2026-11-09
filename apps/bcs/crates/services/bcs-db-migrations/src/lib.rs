@@ -159,6 +159,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 40, name: "bot_avatar" },
     SqliteMigration { version: 41, name: "group_agent_cards" },
     SqliteMigration { version: 42, name: "auth_session_version" },
+    SqliteMigration { version: 43, name: "group_context_slot" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -550,6 +551,23 @@ async fn apply_sqlite_migration_body(
         // `session_id` / `session_revision` / `session_expires_at` columns plus
         // the one-time historical token/expiry clear.
         42 => add_sqlite_auth_session_version_schema(db).await,
+        43 => {
+            let columns = sqlite_table_columns(db, "bcs_group_contexts").await?;
+            for (index, sql) in include_str!(
+                "../../../../migrations/sqlite/043_group_context_slot.sql"
+            )
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+            .enumerate()
+            {
+                if index == 0 && columns.iter().any(|column| column == "is_slot") {
+                    continue;
+                }
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

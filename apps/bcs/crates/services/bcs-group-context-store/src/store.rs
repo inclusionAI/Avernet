@@ -1,3 +1,8 @@
+use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+
+#[path = "sql_slots.rs"]
+mod sql_slots;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,6 +36,7 @@ impl GroupContextStoreError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewGroupContextEntry {
+    pub is_slot: bool,
     pub context_id: String,
     pub name: String,
     pub scope_level: ScopeLevel,
@@ -49,6 +55,22 @@ pub struct NewGroupContextEntry {
 
 #[async_trait]
 pub trait GroupContextRepo: Send + Sync {
+    async fn inheritance_sources(&self, _scope: &str, _names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
+        Err(GroupContextStoreError::Backend("context inheritance unavailable".into()))
+    }
+
+    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        Ok(self.list_slots(group_id).await?.iter().any(|slot| slot.name == name))
+    }
+
+    async fn list_slots(&self, _group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+        Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
+    }
+
+    async fn change_slot(&self, _group_id: &str, _actor: &str, _change: GroupContextSlotChange) -> StoreResult<()> {
+        Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
+    }
+
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry>;
 
     /// Atomically supersede the currently active row (matched by `name`, `scope`,
@@ -134,7 +156,7 @@ impl SqlGroupContextStore {
 
     fn select_cols(&self) -> String {
         let base = "id, context_id, name, scope_level, scope, content, creator, visible_to_json, \
-                    collect_from_json, owners_json, supersedes, change_reason, valid_from, valid_to, \
+                    collect_from_json, owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, \
                     is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
             "{base}, {vfm}, {vtm}, {gsm}, {ttm}, {gcm}, {gmm}",
@@ -207,6 +229,7 @@ impl SqlGroupContextStore {
         let gmt_superseded_ms: Option<i64> =
             db_get_column_opt(row, "gmt_superseded_ms").map_err(GroupContextStoreError::backend)?;
         Ok(GroupContextEntry {
+            is_slot: db_get_column(row, "is_slot").map_err(GroupContextStoreError::backend)?,
             id: db_get_column(row, "id").map_err(GroupContextStoreError::backend)?,
             context_id: db_get_column(row, "context_id")
                 .map_err(GroupContextStoreError::backend)?,
@@ -262,6 +285,36 @@ impl SqlGroupContextStore {
 
 #[async_trait]
 impl GroupContextRepo for SqlGroupContextStore {
+    async fn inheritance_sources(&self, scope: &str, names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
+        let mut sql = format!(
+            "SELECT {} FROM bcs_group_contexts WHERE scope = ? AND scope_level = 'session' AND is_superseded = FALSE",
+            self.select_cols(),
+        );
+        let mut params = vec![scope.into()];
+        if let Some(names) = names {
+            if names.is_empty() {
+                return Ok(Vec::new());
+            }
+            let placeholders = vec!["?"; names.len()].join(", ");
+            sql.push_str(&format!(" AND name IN ({placeholders})"));
+            params.extend(names.iter().map(|name| DbValue::from(name.as_str())));
+        }
+        let rows = self.db.query(DbStatement::with_params(sql, params)).await.map_err(GroupContextStoreError::backend)?;
+        rows.iter().map(|row| self.row_to_entry(row)).collect()
+    }
+
+    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        self.has_slot(group_id, name).await
+    }
+
+    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+        self.load_slots(group_id).await
+    }
+
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> StoreResult<()> {
+        self.write_slot(group_id, actor, change).await
+    }
+
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry> {
         let visible =
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
@@ -276,8 +329,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
         let result = self
@@ -294,6 +347,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
+                    DbValue::from(params.is_slot),
                     params
                         .supersedes
                         .map(DbValue::from)
@@ -352,8 +406,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let insert_sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
 
@@ -396,6 +450,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
+                    DbValue::from(params.is_slot),
                     DbValue::from(expected_active_id),
                     DbValue::from(params.change_reason.as_deref()),
                     valid_from,
@@ -591,6 +646,7 @@ mod tests {
         for migration in [
             include_str!("../../../../migrations/sqlite/034_group_context.sql"),
             include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
+            include_str!("../../../../migrations/sqlite/043_group_context_slot.sql"),
         ] {
             for sql in migration
                 .split(';')
@@ -756,6 +812,7 @@ mod tests {
             .expect("timestamp");
         let created = store
             .create_active(NewGroupContextEntry {
+                is_slot: false,
                 context_id: "ctx-load-by-id".into(),
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
@@ -795,6 +852,7 @@ mod tests {
         ] {
             store
                 .create_active(NewGroupContextEntry {
+                    is_slot: false,
                     context_id: context_id.into(),
                     name: name.into(),
                     scope_level,

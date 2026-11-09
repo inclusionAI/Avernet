@@ -39,6 +39,8 @@ pub(super) async fn execute(
                     input,
                     meta,
                     group_context_delivery,
+                    context_from_session_id,
+                    context_names,
                 } => {
                     let input_json = input
                         .as_deref()
@@ -50,6 +52,12 @@ pub(super) async fn execute(
                         .map(serde_json::from_str::<serde_json::Value>)
                         .transpose()
                         .map_err(|e| anyhow!("Invalid --meta JSON: {}", e))?;
+
+                    let inherit_names = context_names.as_deref()
+                        .map(serde_json::from_str::<Vec<String>>)
+                        .transpose()
+                        .map_err(|e| anyhow!("Invalid --context-names JSON: {}", e))?;
+                    let inheritance = context_from_session_id.as_deref().map(|source| (source, inherit_names.as_deref()));
 
                     debug_request!(
                         debug,
@@ -65,13 +73,14 @@ pub(super) async fn execute(
                     );
 
                     let result = client
-                        .create_session(
+                        .create_session_with_inheritance(
                             &group,
                             title.as_deref(),
                             kind.as_deref(),
                             input_json.as_ref(),
                             meta_json.as_ref(),
                             group_context_delivery.as_deref(),
+                            inheritance,
                         )
                         .await?;
 

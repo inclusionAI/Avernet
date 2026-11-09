@@ -229,7 +229,10 @@ impl BcsServer {
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
-        let session_repo = Arc::new(MemorySessionRepo::new().with_event_store(event_repo.clone()));
+        let group_context_repo = bcs_group_context_store::MemoryGroupContextRepo::new();
+        let session_repo = Arc::new(MemorySessionRepo::new()
+            .with_group_contexts(group_context_repo.clone())
+            .with_event_store(event_repo.clone()));
         let message_repo: Arc<dyn MessageRepoPort> =
             Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()).with_session_registry(session_repo.session_registry()));
         let group_session_metrics_snapshot: Arc<dyn GroupSessionMetricsSnapshotPort> =
@@ -611,7 +614,7 @@ impl BcsServer {
         let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
             Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
                 Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                    Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+                    Arc::new(group_context_repo),
                 )),
                 sessions.clone(),
                 session_repo.clone(),

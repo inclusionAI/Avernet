@@ -1654,6 +1654,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "ulid",
 ]
 
 [[package]]
@@ -2336,9 +2337,11 @@ dependencies = [
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
+ "bcs-group-context-store",
  "bcs-group-store",
  "bcs-service-api",
  "bcs-test-support",
+ "chrono",
  "hex",
  "mysql_async",
  "serde_json",

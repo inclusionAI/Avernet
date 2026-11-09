@@ -161,6 +161,14 @@ pub trait SessionLaunchService: Send + Sync {
         command: CreateSessionLaunch,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError>;
 
+    async fn create_with_contexts(
+        &self,
+        _command: CreateSessionLaunch,
+        _contexts: Vec<bcs_domain::GroupContextEntry>,
+    ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
+        Err(SessionLaunchError::InvalidRequest("context inheritance unavailable".into()))
+    }
+
     async fn reactivate(
         &self,
         command: ReactivateSessionLaunch,

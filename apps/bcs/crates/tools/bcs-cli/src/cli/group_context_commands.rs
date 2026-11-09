@@ -189,7 +189,11 @@ pub(super) async fn execute(
                 oauth_headers.as_ref(),
             );
             let (operation, group_id, session_id, round_id, body) = match command {
+                GroupContextCommands::ListSlot { group_id } => (
+                    "list-slot", Some(group_id), None, None, json!({}),
+                ),
                 GroupContextCommands::Add {
+                    slot,
                     group_id,
                     session_id,
                     round_id,
@@ -200,12 +204,8 @@ pub(super) async fn execute(
                     collect_from,
                     valid_from,
                     valid_to,
-                } => (
-                    "add",
-                    group_id,
-                    session_id,
-                    round_id,
-                    group_context_add_body(
+                } => {
+                    let mut body = group_context_add_body(
                         name,
                         scope_level,
                         content,
@@ -213,8 +213,12 @@ pub(super) async fn execute(
                         collect_from,
                         valid_from,
                         valid_to,
-                    )?,
-                ),
+                    )?;
+                    if slot {
+                        body["slot"] = json!(true);
+                    }
+                    ("add", group_id, session_id, round_id, body)
+                }
                 GroupContextCommands::Update {
                     group_id,
                     session_id,

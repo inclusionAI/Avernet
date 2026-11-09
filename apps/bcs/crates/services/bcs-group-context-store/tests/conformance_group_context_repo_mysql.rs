@@ -78,6 +78,18 @@ async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
         )
         .await;
     }
+    let columns = db.query(DbStatement::new(
+        "SELECT COUNT(*) AS slot_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'is_slot'",
+    ))
+    .await
+    .expect("check for the MySQL group context slot column");
+    if db_get_column::<i64>(&columns[0], "slot_columns").expect("read slot column count") == 0 {
+        execute_group_context_migration(
+            db,
+            include_str!("../../../../migrations/mysql/043_group_context_slot.sql"),
+        )
+        .await;
+    }
 }
 
 async fn execute_group_context_migration(db: &dyn DbPlugin, migration: &'static str) {
@@ -123,6 +135,7 @@ async fn assert_group_context_roundtrip(plugin: Arc<MysqlDbPlugin>, suffix: &str
 
     let first = repo
         .create_active(NewGroupContextEntry {
+            is_slot: false,
             context_id: format!("ctx-{suffix}"),
             name: name.clone(),
             scope_level: ScopeLevel::Session,
@@ -162,6 +175,7 @@ async fn assert_group_context_roundtrip(plugin: Arc<MysqlDbPlugin>, suffix: &str
             &scope,
             first.id,
             NewGroupContextEntry {
+                is_slot: false,
                 context_id: first.context_id.clone(),
                 name: name.clone(),
                 scope_level: ScopeLevel::Session,

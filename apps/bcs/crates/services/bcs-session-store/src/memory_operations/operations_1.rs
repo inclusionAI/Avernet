@@ -21,8 +21,12 @@ impl MemorySessionRepo {
             }
             check_group_claim(&registry, &id)?;
             let sess = session_from_params(id.clone(), group_id, &params, now);
+            let copies = self.stage_contexts(&params, &id).await?;
             commit_group_claim(&mut registry, &id);
             insert_session(&mut st, sess.clone());
+            if let Some(commit) = copies {
+                commit();
+            }
             return Ok(sess);
         }
 
@@ -36,8 +40,12 @@ impl MemorySessionRepo {
             }
             check_group_claim(&registry, &id)?;
             let sess = session_from_params(id.clone(), group_id, &params, now);
+            let copies = self.stage_contexts(&params, &id).await?;
             commit_group_claim(&mut registry, &id);
             insert_session(&mut st, sess.clone());
+            if let Some(commit) = copies {
+                commit();
+            }
             return Ok(sess);
         }
 
@@ -81,10 +89,14 @@ impl MemorySessionRepo {
                 "session {session_id} already exists"
             )));
         }
+        let copies = self.stage_contexts(&command.params, &session_id).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 commit_group_claim(&mut registry, &session_id);
                 insert_session(&mut state, candidate.clone());
+                if let Some(commit) = copies {
+                    commit();
+                }
                 Ok(())
             })
             .await

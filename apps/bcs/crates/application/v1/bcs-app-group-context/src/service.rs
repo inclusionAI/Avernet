@@ -1,3 +1,5 @@
+use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,6 +16,8 @@ use ulid::Ulid;
 
 use crate::permissions::{actor_can_read, actor_can_write, actor_is_owner, permission_for};
 use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
+
+const MAX_INHERITED_CONTEXTS: usize = 500;
 
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
 pub const MAX_NAME_CHARS: usize = 255;
@@ -40,6 +44,7 @@ impl GroupContextApplicationServiceImpl {
 
     async fn create(
         &self,
+        is_slot: bool,
         scope: ResolvedScope,
         name: String,
         content: String,
@@ -60,6 +65,7 @@ impl GroupContextApplicationServiceImpl {
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
+                is_slot,
                 context_id: new_context_id(),
                 name,
                 scope_level: scope.scope_level,
@@ -106,6 +112,7 @@ impl GroupContextApplicationServiceImpl {
                 &old.scope,
                 expected_active_id,
                 NewGroupContextEntry {
+                    is_slot: old.is_slot,
                     context_id: old.context_id.clone(),
                     name,
                     scope_level: scope.scope_level,
@@ -130,6 +137,69 @@ impl GroupContextApplicationServiceImpl {
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
+        self.add_with_slot(command, false).await
+    }
+
+    async fn inheritance_sources(
+        &self,
+        _group_id: &str,
+        session_id: &str,
+        actor: &str,
+        names: Option<&[String]>,
+    ) -> Result<Vec<GroupContextEntry>, ApplicationError> {
+        validate_actor(actor)?;
+        let Some(names) = names else {
+            let mut entries = self.repo.inheritance_sources(session_id, None).await.map_err(map_store_error)?;
+            entries.retain(|entry| actor_can_read(entry, actor));
+            validate_inheritance_limit(entries.len())?;
+            return Ok(entries);
+        };
+        if names.is_empty() {
+            return Err(ApplicationError::invalid(INVALID_PARAM, "inheritance requires at least one context name"));
+        }
+        validate_inheritance_limit(names.len())?;
+        let mut distinct = std::collections::HashSet::new();
+        for name in names {
+            validate_name(name)?;
+            if !distinct.insert(name) {
+                return Err(ApplicationError::invalid(INVALID_PARAM, "inheritance names must be unique"));
+            }
+        }
+        let entries = self.repo.inheritance_sources(session_id, Some(names)).await.map_err(map_store_error)?;
+        if entries.len() != names.len() || entries.iter().any(|entry| !distinct.contains(&entry.name) || !actor_can_read(entry, actor)) {
+            return Err(permission_denied("one or more requested contexts are unavailable"));
+        }
+        Ok(entries)
+    }
+
+    async fn list_slots(&self, group_id: &str) -> Result<Vec<GroupContextSlot>, ApplicationError> {
+        validate_name(group_id)?;
+        self.repo.list_slots(group_id).await.map_err(map_store_error)
+    }
+
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> Result<(), ApplicationError> {
+        validate_name(group_id)?;
+        validate_actor(actor)?;
+        match &change {
+            GroupContextSlotChange::Add { name, description } => {
+                validate_name(name)?;
+                validate_content(description)?;
+            }
+            GroupContextSlotChange::Edit { name, new_name, description } => {
+                validate_name(name)?;
+                if let Some(name) = new_name {
+                    validate_name(name)?;
+                }
+                if let Some(description) = description {
+                    validate_content(description)?;
+                }
+            }
+            GroupContextSlotChange::Delete { name } => validate_name(name)?,
+        }
+        self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
+    }
+
+    async fn add_with_slot(&self, command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_actor(&command.actor_id)?;
         validate_name(&command.name)?;
@@ -137,7 +207,17 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         if let Some(collect_from) = command.collect_from.as_ref() {
             validate_policy("collect_from", collect_from)?;
         }
+        if slot && (command.scope_level != ScopeLevel::Session || command.request_context.group_id.is_none()) {
+            return Err(ApplicationError::invalid(INVALID_PARAM, "slot creation requires a session in a group"));
+        }
+        if let Some(group_id) = command.request_context.group_id.as_deref() {
+            let defined = self.repo.slot_exists(group_id, &command.name).await.map_err(map_store_error)?;
+            if defined != slot {
+                return Err(ApplicationError::invalid(INVALID_PARAM, "slot flag must match the group slot definition"));
+            }
+        }
         self.create(
+            slot,
             scope,
             command.name,
             command.content,
@@ -345,6 +425,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             }
             None => {
                 self.create(
+                    false,
                     scope,
                     command.name,
                     command.content,
@@ -528,4 +609,15 @@ mod tests {
         let internal = map_store_error(GroupContextStoreError::Backend("storage failed".into()));
         assert_eq!(internal.code(), "internal_error");
     }
+}
+
+
+fn validate_inheritance_limit(count: usize) -> Result<(), ApplicationError> {
+    if count > MAX_INHERITED_CONTEXTS {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("context inheritance exceeds the limit of {MAX_INHERITED_CONTEXTS} entries"),
+        ));
+    }
+    Ok(())
 }

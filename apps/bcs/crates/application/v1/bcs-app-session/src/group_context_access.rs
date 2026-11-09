@@ -1,9 +1,8 @@
-//! Add-only access guard for the public Group Context application service.
+//! Group and Session resource checks for public Group Context operations.
 //!
-//! The guard resolves the resource identity from the current Group/Session and
-//! returns before the Group Context service can create a write. All other
-//! operations are plain delegation; this is deliberately not a global
-//! interceptor or generic authorization framework.
+//! The guard resolves the canonical Group for adds and slot definitions, and
+//! checks source Session membership before resolving inheritance selections.
+//! Entry-level permissions remain in the Group Context application service.
 
 use std::sync::Arc;
 
@@ -153,6 +152,36 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
     async fn add(&self, mut command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         self.authorize_add(&mut command).await?;
         self.inner.add(command).await
+    }
+
+    async fn add_with_slot(&self, mut command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
+        self.authorize_add(&mut command).await?;
+        self.inner.add_with_slot(command, slot).await
+    }
+
+    async fn inheritance_sources(
+        &self,
+        group_id: &str,
+        session_id: &str,
+        actor: &str,
+        names: Option<&[String]>,
+    ) -> Result<Vec<bcs_domain::GroupContextEntry>, ApplicationError> {
+        let session = self.load_session(session_id).await?;
+        if session.group_id != group_id {
+            return Err(invalid_param("source session must belong to the target group"));
+        }
+        ensure_participant(&session.participants, actor, "the source Session")?;
+        self.inner.inheritance_sources(group_id, &session.id, actor, names).await
+    }
+
+    async fn list_slots(&self, group_id: &str) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        self.inner.list_slots(&group.id).await
+    }
+
+    async fn change_slot(&self, group_id: &str, actor: &str, change: bcs_service_api::application::v1::GroupContextSlotChange) -> Result<(), ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        self.inner.change_slot(&group.id, actor, change).await
     }
 
     async fn update(

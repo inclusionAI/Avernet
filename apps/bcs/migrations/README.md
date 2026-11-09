@@ -688,3 +688,11 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
 - **Re-login after restore.** Rolling forward or back invalidates
   pre-upgrade sid-less sessions in both directions; after restoring the
   fixed writers + `[api.auth]`, users re-login through the new chain.
+
+## Group Context slots and inheritance
+
+SQLite and MySQL `043_group_context_slot.sql` and OceanBase
+`033_group_context_slot.sql` add the Group slot definitions and the
+`is_slot` flag on context versions. Existing contexts read as `false`.
+Apply remote DDL before starting the new server. SQLite applies its migration
+during startup.

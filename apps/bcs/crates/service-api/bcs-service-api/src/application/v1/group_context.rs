@@ -195,6 +195,31 @@ pub struct GroupContextGetResponse {
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
 
+    async fn add_with_slot(&self, command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
+        if slot {
+            return Err(ApplicationError::invalid("invalid_param", "slots unavailable"));
+        }
+        self.add(command).await
+    }
+
+    async fn inheritance_sources(
+        &self,
+        _group_id: &str,
+        _session_id: &str,
+        _actor: &str,
+        _names: Option<&[String]>,
+    ) -> Result<Vec<GroupContextEntry>, ApplicationError> {
+        Err(ApplicationError::internal("context inheritance unavailable"))
+    }
+
+    async fn list_slots(&self, _group_id: &str) -> Result<Vec<GroupContextSlot>, ApplicationError> {
+        Err(ApplicationError::internal("slots unavailable"))
+    }
+
+    async fn change_slot(&self, _group_id: &str, _actor: &str, _change: GroupContextSlotChange) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("slots unavailable"))
+    }
+
     async fn update(
         &self,
         command: UpdateGroupContext,
@@ -215,3 +240,5 @@ pub trait GroupContextApplicationService: Send + Sync {
         command: SystemSetGroupContext,
     ) -> Result<GroupContextAck, ApplicationError>;
 }
+
+pub use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};

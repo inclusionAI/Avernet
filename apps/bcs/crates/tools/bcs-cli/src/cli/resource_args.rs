@@ -16,8 +16,15 @@ pub(super) enum ChatRunCommands {
 
 #[derive(Subcommand)]
 pub(super) enum GroupContextCommands {
+    /// List the predefined context names for a group.
+    ListSlot {
+        #[arg(long)]
+        group_id: String,
+    },
     /// Add a new active context.
     Add {
+        #[arg(long)]
+        slot: bool,
         #[arg(long)]
         group_id: Option<String>,
         #[arg(long)]
@@ -28,7 +35,7 @@ pub(super) enum GroupContextCommands {
         name: String,
         #[arg(long)]
         scope_level: String,
-        #[arg(long)]
+        #[arg(long, alias = "context")]
         content: String,
         #[arg(long, default_value = r#"{"userIds":[]}"#)]
         visible_to: String,

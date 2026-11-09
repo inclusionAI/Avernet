@@ -8,6 +8,7 @@ pub fn entry(context_id: &str, name: &str, scope: &str, content: &str) -> NewGro
         .single()
         .unwrap();
     NewGroupContextEntry {
+        is_slot: false,
         context_id: context_id.into(),
         name: name.into(),
         scope_level: ScopeLevel::Session,
@@ -41,7 +42,10 @@ pub async fn create_duplicate_active_conflicts(repo: &dyn GroupContextRepo) {
 
 pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
     let first = repo
-        .create_active(entry("ctx-1", "player_state", "sess-001", "张三存活"))
+        .create_active(NewGroupContextEntry {
+            is_slot: true,
+            ..entry("ctx-1", "player_state", "sess-001", "张三存活")
+        })
         .await
         .expect("create active");
     let second = repo
@@ -50,6 +54,7 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
             "sess-001",
             first.id, // CAS token: must match the active row's id
             NewGroupContextEntry {
+                is_slot: first.is_slot,
                 context_id: first.context_id.clone(), // preserve context_id across versions
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
@@ -75,6 +80,8 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
         .await
         .expect("supersede active");
 
+    assert!(first.is_slot);
+    assert!(second.is_slot);
     assert_eq!(second.context_id, first.context_id);
     assert_eq!(second.supersedes, Some(first.id));
     assert_eq!(second.change_reason.as_deref(), Some("第一轮投票"));
@@ -115,6 +122,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
             "sess-chain",
             first.id,
             NewGroupContextEntry {
+                is_slot: false,
                 context_id: first.context_id.clone(),
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
@@ -146,6 +154,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
             "sess-chain",
             second.id,
             NewGroupContextEntry {
+                is_slot: false,
                 context_id: first.context_id.clone(),
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
@@ -205,6 +214,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         .expect("create v1");
 
     let v2_entry = NewGroupContextEntry {
+        is_slot: false,
         context_id: first.context_id.clone(),
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,
@@ -236,6 +246,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
     // Now v2 is the active row. Writer B tries to supersede using stale first.id.
     // The CAS UPDATE WHERE id=first.id AND is_superseded=FALSE affects 0 rows -> Conflict.
     let stale_entry = NewGroupContextEntry {
+        is_slot: false,
         context_id: first.context_id.clone(),
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,

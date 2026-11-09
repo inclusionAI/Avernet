@@ -17,6 +17,22 @@ impl BcsClient {
         meta: Option<&serde_json::Value>,
         group_context_delivery: Option<&str>,
     ) -> Result<serde_json::Value> {
+        self.create_session_with_inheritance(
+            group_id, session_title, session_kind, input, meta, group_context_delivery, None,
+        ).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_session_with_inheritance(
+        &self,
+        group_id: &str,
+        session_title: Option<&str>,
+        session_kind: Option<&str>,
+        input: Option<&serde_json::Value>,
+        meta: Option<&serde_json::Value>,
+        group_context_delivery: Option<&str>,
+        inheritance: Option<(&str, Option<&[String]>)>,
+    ) -> Result<serde_json::Value> {
         let url = format!("{}/groups/{}/sessions", self.base_url, group_id);
         let mut payload = serde_json::Map::new();
         if let Some(title) = session_title {
@@ -36,6 +52,13 @@ impl BcsClient {
                 "group_context_delivery".to_string(),
                 serde_json::json!(delivery),
             );
+        }
+
+        if let Some((source, names)) = inheritance {
+            payload.insert("context_from_session_id".into(), serde_json::json!(source));
+            if let Some(names) = names {
+                payload.insert("context_names".into(), serde_json::json!(names));
+            }
         }
 
         let response = self

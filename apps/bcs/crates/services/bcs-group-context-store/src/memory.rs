@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,11 +16,52 @@ pub struct MemoryGroupContextRepo {
 
 #[derive(Default)]
 struct MemoryState {
+    slots: BTreeMap<String, BTreeMap<String, GroupContextSlot>>,
     next_id: i64,
     rows: Vec<GroupContextEntry>,
 }
 
 impl MemoryGroupContextRepo {
+    pub async fn stage_inheritance(
+        &self,
+        entries: &[GroupContextEntry],
+        destination: &str,
+        owner: &str,
+    ) -> StoreResult<impl FnOnce() + Send + use<>> {
+        let mut state = self.state.clone().write_owned().await;
+        let mut active_ids = entries.iter().map(|entry| entry.id).collect::<std::collections::HashSet<_>>();
+        let names = entries.iter().map(|entry| entry.name.as_str()).collect::<std::collections::HashSet<_>>();
+        for row in state.rows.iter().filter(|row| !row.is_superseded) {
+            active_ids.remove(&row.id);
+            if row.scope == destination && names.contains(row.name.as_str()) {
+                return Err(GroupContextStoreError::Conflict { name: row.name.clone(), scope: destination.into() });
+            }
+        }
+        if let Some(entry) = entries.iter().find(|entry| active_ids.contains(&entry.id)) {
+            return Err(GroupContextStoreError::Conflict { name: entry.name.clone(), scope: entry.scope.clone() });
+        }
+        let now = chrono::Utc::now();
+        let copies = entries.iter().cloned().map(|mut entry| {
+            entry.scope = destination.into();
+            entry.context_id = ulid::Ulid::new().to_string();
+            entry.creator = owner.into();
+            entry.owners = bcs_domain::GroupContextOwners::new([owner]);
+            entry.supersedes = None;
+            entry.change_reason = None;
+            entry.tx_time = now;
+            entry.gmt_create = now;
+            entry.gmt_modified = now;
+            entry
+        }).collect::<Vec<_>>();
+        Ok(move || {
+            for mut copy in copies {
+                state.next_id += 1;
+                copy.id = state.next_id;
+                state.rows.push(copy);
+            }
+        })
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -25,6 +69,56 @@ impl MemoryGroupContextRepo {
 
 #[async_trait]
 impl GroupContextRepo for MemoryGroupContextRepo {
+    async fn inheritance_sources(&self, scope: &str, names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
+        Ok(self.state.read().await.rows.iter().filter(|row| {
+            row.scope == scope && row.scope_level == bcs_domain::ScopeLevel::Session
+                && !row.is_superseded && names.is_none_or(|names| names.contains(&row.name))
+        }).cloned().collect())
+    }
+
+    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        Ok(self.state.read().await.slots.get(group_id).is_some_and(|slots| slots.contains_key(name)))
+    }
+
+    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+        Ok(self.state.read().await.slots.get(group_id)
+            .into_iter().flat_map(|slots| slots.values().cloned()).collect())
+    }
+
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> StoreResult<()> {
+        let mut state = self.state.write().await;
+        let slots = state.slots.entry(group_id.to_owned()).or_default();
+        let duplicate = |name| GroupContextStoreError::DuplicateActive { name, scope: group_id.into() };
+        let missing = |name| GroupContextStoreError::NotFound { name, scope: group_id.into() };
+        match change {
+            GroupContextSlotChange::Add { name, description } => {
+                if slots.contains_key(&name) {
+                    return Err(duplicate(name));
+                }
+                slots.insert(name.clone(), GroupContextSlot {
+                    name, description, creator: actor.into(), modifier: actor.into(),
+                });
+            }
+            GroupContextSlotChange::Edit { name, new_name, description } => {
+                let target = new_name.unwrap_or_else(|| name.clone());
+                if target != name && slots.contains_key(&target) {
+                    return Err(duplicate(target));
+                }
+                let mut slot = slots.remove(&name).ok_or_else(|| missing(name))?;
+                slot.name = target.clone();
+                slot.modifier = actor.into();
+                if let Some(description) = description {
+                    slot.description = description;
+                }
+                slots.insert(target, slot);
+            }
+            GroupContextSlotChange::Delete { name } => {
+                slots.remove(&name).ok_or_else(|| missing(name))?;
+            }
+        }
+        Ok(())
+    }
+
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry> {
         let mut state = self.state.write().await;
         if state
@@ -140,6 +234,7 @@ impl GroupContextRepo for MemoryGroupContextRepo {
 
 fn row_from_new(id: i64, params: NewGroupContextEntry) -> GroupContextEntry {
     GroupContextEntry {
+        is_slot: params.is_slot,
         id,
         context_id: params.context_id,
         name: params.name,

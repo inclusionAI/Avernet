@@ -584,3 +584,122 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
         vec!["admin"]
     );
 }
+
+#[tokio::test]
+async fn slot_management_audits_actor_and_keeps_existing_contexts() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = app_with_repo(repo.clone()).await;
+    let management = "/groupcontext/change-slot?groupId=slot-group";
+    let list = "/groupcontext/list-slot?groupId=slot-group";
+    let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
+    let (status, _) = post_json(
+        &app, management, token_for("admin"),
+        json!({"operation":"add","name":"timeline","creator":"spoofed"}),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["slots"][0]["creator"], "admin");
+    assert_eq!(body["slots"][0]["modifier"], "admin");
+
+    let mut context = json!({
+        "name":"timeline","scope_level":"session","content":"event",
+        "visible_to":{"userIds":[]}
+    });
+    assert_eq!(post_json(&app, add, token_for("judge_bot"), context.clone()).await.0,
+        StatusCode::BAD_REQUEST);
+    context["slot"] = json!(true);
+    assert_eq!(post_json(&app, add, token_for("judge_bot"), context).await.0, StatusCode::OK);
+
+    let (status, _) = post_json(
+        &app, management, token_for("judge_bot"),
+        json!({"operation":"edit","name":"timeline","new_name":"events","description":"Key events"}),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = post_json(&app, list, token_for("admin"), json!({})).await;
+    assert_eq!(body["slots"][0], json!({
+        "name":"events","description":"Key events","creator":"admin","modifier":"judge_bot"
+    }));
+
+    assert_eq!(post_json(&app, management, token_for("admin"),
+        json!({"operation":"delete","name":"events"})).await.0, StatusCode::OK);
+    let existing = repo.get_active("timeline", "slot-group:12345678").await.unwrap().unwrap();
+    assert!(existing.is_slot);
+    assert_eq!(existing.content, "event");
+}
+
+mod helpers;
+
+#[tokio::test]
+async fn session_create_inherits_only_the_selected_readable_contexts() {
+    use bcs_service_api::{Group, Participant, ParticipantRole};
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = helpers::create_test_config(&dir.path().to_path_buf());
+    let (addr, server, state) = bcs::BcsServer::new_allowing_private_outbound_for_tests(config)
+        .run_on_random_port_with_state().await.unwrap();
+    let group_id = "spec05-inherit";
+    let actor = "spec05-author";
+    let bearer = format!("{actor}-fixture");
+    state.services.registry.register_with_owner_and_token(
+        actor.into(), BotCapabilities::default(), "spec05-owner", &bearer,
+    ).await.unwrap();
+    state.services.group.upsert(Group::new(
+        group_id, actor, vec![Participant::bot(actor, ParticipantRole::Driver)],
+    )).await.unwrap();
+
+    let http = reqwest::Client::new();
+    let post = |path: String, payload: Value| {
+        let request = http.post(format!("http://{addr}{path}")).bearer_auth(&bearer).json(&payload);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status();
+            let body = response.json::<Value>().await.unwrap();
+            (status, body)
+        }
+    };
+    let create = format!("/groups/{group_id}/sessions");
+    let (status, source) = post(create.clone(), json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{source}");
+    let source_id = source["id"].as_str().unwrap();
+
+    let (status, body) = post(
+        format!("/groupcontext/change-slot?groupId={group_id}"),
+        json!({"operation":"add","name":"timeline"}),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for (name, slot) in [("timeline", true), ("skipped", false)] {
+        let (status, body) = post(
+            format!("/groupcontext/add?sessionId={source_id}"),
+            json!({"name":name,"scope_level":"session","content":"event","visible_to":{"userIds":[]},"slot":slot}),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let (status, body) = post(create.clone(), json!({
+        "context_from_session_id":source_id,"context_names":["timeline","missing"],
+    })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, destination) = post(create.clone(), json!({
+        "context_from_session_id":source_id,"context_names":["timeline"],
+    })).await;
+    assert_eq!(status, StatusCode::CREATED, "{destination}");
+    let destination_id = destination["id"].as_str().unwrap();
+    let (status, body) = post(
+        format!("/groupcontext/list?sessionId={destination_id}"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(names(&body, "contexts"), ["timeline"]);
+    assert!(body["contexts"][0].get("is_slot").is_none());
+    let (status, destination) = post(create, json!({"context_from_session_id":source_id})).await;
+    assert_eq!(status, StatusCode::CREATED, "{destination}");
+    let destination_id = destination["id"].as_str().unwrap();
+    let (status, body) = post(
+        format!("/groupcontext/list?sessionId={destination_id}"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut copied_names = names(&body, "contexts");
+    copied_names.sort();
+    assert_eq!(copied_names, ["skipped", "timeline"]);
+    server.abort();
+}

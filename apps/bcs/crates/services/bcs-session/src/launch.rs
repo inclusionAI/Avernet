@@ -578,8 +578,22 @@ impl SessionLaunchService for SessionLaunchApplication {
         &self,
         command: CreateSessionLaunch,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
+        self.create_with_contexts(command, Vec::new()).await
+    }
+
+    async fn create_with_contexts(
+        &self,
+        command: CreateSessionLaunch,
+        contexts: Vec<bcs_domain::GroupContextEntry>,
+    ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
         let group_id = command.request.group_id.clone();
-        let prepared = self.prepare(command.request).await?;
+        let mut prepared = self.prepare(command.request).await?;
+        if let Some(creator) = &prepared.params.created_by {
+            if contexts.iter().any(|entry| !entry.owners.contains(creator) && !entry.visible_to.is_visible_to(creator)) {
+                return Err(SessionLaunchError::Forbidden("session creator cannot read all requested contexts".into()));
+            }
+        }
+        prepared.params.inherited_contexts = contexts;
         let outcome = self
             .sessions
             .create_or_reactivate(CreateOrReactivateCommand {

@@ -15,6 +15,7 @@ use super::AppendEventRecord;
 /// Session 服务层入参（创建新 session）。
 #[derive(Debug, Clone)]
 pub struct NewSessionParams {
+    pub inherited_contexts: Vec<bcs_domain::GroupContextEntry>,
     pub session_kind: SessionKind,
     pub message_visibility_version: u8,
     pub participants: Vec<Participant>,
@@ -32,6 +33,7 @@ pub struct NewSessionParams {
 impl Default for NewSessionParams {
     fn default() -> Self {
         Self {
+            inherited_contexts: Vec::new(),
             session_kind: SessionKind::default(),
             // Existing persisted Sessions decode as version 0. New Session
             // creation uses the classified Domain/Audience writer contract.

@@ -6,6 +6,8 @@
 //! resolves the effective actor from trusted headers/server-side token lookup.
 //! The actor is never trusted from the JSON body or URL query.
 
+use bcs_service_api::application::v1::GroupContextSlotChange;
+
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Json, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
@@ -43,6 +45,8 @@ impl GroupContextQuery {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct AddRequest {
+    #[serde(default)]
+    slot: bool,
     name: String,
     scope_level: ScopeLevel,
     content: String,
@@ -109,7 +113,7 @@ pub(crate) async fn add(
     let result = state
         .services
         .group_context
-        .add(AddGroupContext {
+        .add_with_slot(AddGroupContext {
             actor_id,
             request_context: query.request_context(),
             name: body.name,
@@ -119,9 +123,50 @@ pub(crate) async fn add(
             collect_from: body.collect_from,
             valid_from: body.valid_from,
             valid_to: body.valid_to,
-        })
+        }, body.slot)
         .await?;
     Ok(json_ok(result))
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub(crate) enum SlotRequest {
+    Add { name: String, #[serde(default)] description: String },
+    Edit { name: String, new_name: Option<String>, description: Option<String> },
+    Delete { name: String },
+}
+
+pub(crate) async fn list_slot(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    actor_id(&state, &headers, &uri).await?;
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    let slots = state.services.group_context.list_slots(&group_id).await?;
+    Ok(json_ok(serde_json::json!({ "slots": slots })))
+}
+
+pub(crate) async fn change_slot(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<SlotRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let actor = actor_id(&state, &headers, &uri).await?;
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let Json(body) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    let change = match body {
+        SlotRequest::Add { name, description } => GroupContextSlotChange::Add { name, description },
+        SlotRequest::Edit { name, new_name, description } => GroupContextSlotChange::Edit { name, new_name, description },
+        SlotRequest::Delete { name } => GroupContextSlotChange::Delete { name },
+    };
+    state.services.group_context.change_slot(&group_id, &actor, change).await?;
+    Ok(json_ok(GroupContextAck::ok()))
 }
 
 pub(crate) async fn update(

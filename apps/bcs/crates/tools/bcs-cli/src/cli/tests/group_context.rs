@@ -31,6 +31,7 @@ fn group_context_add_parses_valid_range_flags() {
         Commands::GroupContext {
             command:
                 GroupContextCommands::Add {
+                    slot: _,
                     valid_from,
                     valid_to,
                     ..
@@ -485,4 +486,21 @@ fn group_context_add_body_sends_timestamps_as_numbers() {
         body["valid_to"],
         serde_json::json!("2026-10-12T14:56:08+08:00")
     );
+}
+
+#[test]
+fn test_group_context_slot_commands_parse() {
+    let list = Cli::try_parse_from([
+        "bcs-cli", "group-context", "list-slot", "--group-id", "g-1",
+    ]).unwrap();
+    assert!(matches!(list.command, Commands::GroupContext {
+        command: GroupContextCommands::ListSlot { group_id }, ..
+    } if group_id == "g-1"));
+    let add = Cli::try_parse_from([
+        "bcs-cli", "group-context", "add", "--slot", "--scope-level", "session",
+        "--session-id", "g-1:12345678", "--name", "timeline", "--context", "event",
+    ]).unwrap();
+    assert!(matches!(add.command, Commands::GroupContext {
+        command: GroupContextCommands::Add { slot: true, content, .. }, ..
+    } if content == "event"));
 }

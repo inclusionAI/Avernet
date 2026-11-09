@@ -265,6 +265,8 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
+        .route("/groupcontext/list-slot", post(routes::group_context::list_slot))
+        .route("/groupcontext/change-slot", post(routes::group_context::change_slot))
         .route("/groupcontext/add", post(routes::group_context::add))
         .route("/groupcontext/update", post(routes::group_context::update))
         .route("/groupcontext/list", post(routes::group_context::list))

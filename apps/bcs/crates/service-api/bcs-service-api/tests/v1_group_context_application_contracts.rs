@@ -253,6 +253,7 @@ fn entry_active_state_uses_superseded_marker_not_business_valid_to() {
     let now = time("2026-10-12T08:16:08Z");
     let past = time("2023-11-14T22:13:20Z");
     let mut entry = GroupContextEntry {
+        is_slot: false,
         id: 42,
         context_id: "ctx_42".into(),
         name: "player_state".into(),

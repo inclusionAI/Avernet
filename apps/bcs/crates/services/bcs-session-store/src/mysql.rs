@@ -226,6 +226,17 @@ impl MySqlSessionStore {
             )));
         }
 
+        if !params.inherited_contexts.is_empty() {
+            let owner = params.created_by.as_deref().ok_or_else(|| {
+                ServiceError::SessionInvalidParams("context inheritance requires a creator".into())
+            })?;
+            for batch in params.inherited_contexts.chunks(100) {
+                let copies = bcs_group_context_store::inheritance_step(batch, &session_id, owner)
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                steps.push(copies);
+            }
+        }
+
         if let Some(event) = event {
             validate_session_event_scope(&session_value, event)?;
             let event_plan = EventAppendTransactionPlan::build(event, self.flavor, steps.len())
