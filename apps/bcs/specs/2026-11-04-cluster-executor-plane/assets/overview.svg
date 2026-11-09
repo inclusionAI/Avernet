@@ -56,7 +56,7 @@
 
   <!-- pub/sub -->
   <rect x="560" y="326" width="356" height="44" rx="8" fill="#f7eed7" stroke="#9a6b0a" stroke-width="1.4"/>
-  <text x="738" y="345" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Message queue (non-durable, sharded)</text>
+  <text x="738" y="345" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Message queue (Redis, sharded)</text>
   <text x="738" y="361" font-size="10.5" text-anchor="middle" fill="#5c6a62">delta channel per bucket · Redis Stream per session</text>
   <line x1="600" y1="326" x2="430" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-start="url(#ao)" marker-end="url(#ao)"/>
   <line x1="820" y1="326" x2="800" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
