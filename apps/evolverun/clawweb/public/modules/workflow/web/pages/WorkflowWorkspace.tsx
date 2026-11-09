@@ -1,4 +1,5 @@
 import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
+import { assertEditorWorkflowReadable } from '../editor/workflowWriteGuard'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
@@ -310,6 +311,7 @@ export default function WorkflowWorkspace() {
 
   const handleCreate = useCallback(async (input: { workflowId: string; spec: WorkflowSpec; facade?: { command?: string; remark?: string } }) => {
     if (!user?.userId) throw new Error('无法获取用户信息，请重新登录')
+    assertEditorWorkflowReadable(input.workflowId)
     const request = ++transitionRequest.current
     const sourceLocation = locationRef.current
     const approval = beginWorkflowTransition()

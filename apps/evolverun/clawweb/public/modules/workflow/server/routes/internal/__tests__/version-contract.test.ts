@@ -63,6 +63,35 @@ describe("ClawMind workflow version wire contract", () => {
     expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'state-run'").get()).toEqual({ state_json: stateJson });
   });
 
+  it("rejects child dispatch claim fields on legacy and trial-shaped run creates without inserting", async () => {
+    const post = (body: unknown) => fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    for (const value of ["secret-claim", "", null, false, 0, {}, []]) {
+      const state_json = JSON.stringify({ subworkflowFanouts: { a: { children: [{}, { dispatchClaimToken: value }] } } });
+      for (const fields of [{}, { run_request_id: "trial" }]) {
+        const response = await post({ flow_id: "blocked-run", workflow_id: "demo", status: "running", state_json, ...fields });
+        expect(response.status).toBe(400);
+        expect(await response.text()).not.toContain("secret-claim");
+      }
+    }
+    expect(raw.prepare("SELECT flow_id FROM flow_runs WHERE flow_id = 'blocked-run'").get()).toBeUndefined();
+  });
+
+  it("retains unrelated token-named business data and token-free fanout groups", async () => {
+    const state_json = JSON.stringify({ dispatchClaimToken: "user", workflowData: { dispatchClaimToken: "user" },
+      subworkflowFanouts: { node: { dispatchClaimToken: "user", children: [{ item: { dispatchClaimToken: "user" }, params: { dispatchClaimToken: "user" } }] } } });
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "business-token", workflow_id: "demo", status: "running", state_json, input_json: JSON.stringify({ dispatchClaimToken: "user" }), run: { state_json: JSON.stringify({ subworkflowFanouts: { node: { children: [{ dispatchClaimToken: "ignored" }] } } }) } }) });
+    expect(response.status).toBe(201);
+    expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'business-token'").get()).toEqual({ state_json });
+  });
+
+  it("keeps existing runs with stored claims readable", async () => {
+    const state_json = JSON.stringify({ subworkflowFanouts: { node: { children: [{ dispatchClaimToken: "old-claim" }] } } });
+    raw.prepare("INSERT INTO flow_runs (flow_id, workflow_id, status, state_json) VALUES (?, ?, ?, ?)").run("old-claim-run", "demo", "running", state_json);
+    const response = await fetch(`${baseUrl}/runs/old-claim-run/state`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, data: { state_json } });
+  });
+
   it("rejects a double-encoded initial state", async () => {
     const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "invalid-state", workflow_id: "demo", status: "running", state_json: JSON.stringify('{"workflowId":"demo"}') }) });
     expect(response.status).toBe(400);

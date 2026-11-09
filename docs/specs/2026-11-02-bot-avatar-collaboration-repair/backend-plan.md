@@ -1,5 +1,12 @@
 # Backend Bot Avatar and Collaboration Repair Implementation Plan
 
+> Historical implementation plan. The 2026-11-05 scope update supersedes its
+> caller-repair and blank-summary-unconfirmed steps: repair now returns only
+> ownership/profile/managers, and acknowledged blank summaries succeed.
+> See [the current design](design.md) and
+> [the follow-up plan](repair-scope-update-plan.md).
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让现有 Bot 注册/名称描述更新链路同步头像，并提供 `POST /openapi/v1/bots/{bot_id}/collaboration/repair`，手动修复已存在 BCS Bot 的当前协作资料。
@@ -15,13 +22,33 @@
 - 精确路径：`POST /openapi/v1/bots/{bot_id}/collaboration/repair`，不使用 `/bcs/repair`。
 - “BCS 对应 Bot 不存在时返回明确错误，不自动注册、不创建、不恢复已删除 Bot。”
 - 只有 Backend 当前 Owner 可修复；沿用 App grant、admission、租户、地址解析和授权机制。
-- 稳定 BCS 身份使用解析得到的 `bot_id:entity_id`，不能用当前 Owner 当后缀。
+- BCS 身份复用既有 `bcn_bot_reference`；保留 personal/default 的注册规则和 service 转换引用，service Bot handoff 不以当前 Owner 重拼地址。
 - 修复范围为 `ownership`、`profile`（名称/描述/头像）、`managers`、适用的 `caller_config`；不盲目覆盖审批、visibility、friend_ext、运行时或凭证。
 - 手动修复每项至多一次写入，不调用仅入队的 request_bot，不调用带默认重试的 sync_once；不改变既有后台同步规则。
 - Core 不导入 HTTP 框架、具体 Plugin 或读取环境；装配只在 composition root。
 - Backend 自身数据库读写失败报错，不当作空事实或成功；下游分项失败必须明确报告。
-- 新增/修改源码 ≤1,000 行；不修改 BCS、前端或无关业务，不降低 CI/覆盖阈值。
+- 除 Task 1 经批准保留的 BotService 历史豁免外，新增/修改源码 ≤1,000 行；不修改 BCS、前端或无关业务，不降低 CI/覆盖阈值。
 - 本文所有步骤是未来执行指令；编写基线 `a9b62a1f2`，测试“预期”不是验证证据。
+
+## PR #3569 review fixes (2026-11-04)
+
+1. Add SQL-reader and consumer regressions for personal/default Bots and
+   converted service Bots. Resolve their established reference through
+   `bcn_bot_reference`, including the saved `bcn_provider_bot_ref`, and reject
+   invalid stored references before sending.
+2. Add production-adapter and consumer regressions for empty/blank summaries.
+   The existing BCS onboard contract preserves the old summary and does not
+   echo it; after a confirmed onboard, report `profile=unknown` with
+   `collaboration_summary_unconfirmed` for these inputs. Keep the avatar/name
+   write and subsequent independent items, without adding another write or
+   changing the BCS contract. Align the recording implementation and docs.
+3. Cover multiline credential constructors and field-like literal values in
+   the secret scanner. Exempt lookup keys only in their actual AST position;
+   inspect complete multiline calls before declaring them safe.
+4. Diagnose the failing Backend job from its logs/artifacts, reproduce its
+   failure, and fix the cause without reducing test/coverage thresholds.
+5. Run focused regressions, architecture and contract suites, the Backend CI
+   gate, source-size checks and the secret scanner over the final changes.
 
 ---
 
@@ -60,7 +87,7 @@ pt tests/community/core/bot_management/services \
 | `src/agentclaw/community/core/repository/implementations/bot/collaboration_repair.py` | 明确 tenant/env/PK 的事实读取 |
 | `src/agentclaw/community/core/bot_management/collaboration_repair/profile.py` | 头像来源、显式清空和资料投影 |
 | `src/agentclaw/community/core/bot_management/collaboration_repair/service.py` | 一次修复编排，不持有后台线程/队列 |
-| `src/agentclaw/community/di/bcs_collaboration_metadata_adapter.py` | 组合既有 BcnService transport 与新出站协议，保留类型化结果 |
+| `src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py` | 组合既有 BcnService transport 与新出站协议，保留类型化结果 |
 | `src/agentclaw/community/di/modules/collaboration_repair_module.py` | request-scoped 装配与资源关闭 |
 | `src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py` | recording local 实现 |
 | `src/agentclaw/community/adapters/http/openapi_v1/bots/collaboration_repair.py` | 新 HTTP 路由 |
@@ -69,60 +96,20 @@ pt tests/community/core/bot_management/services \
 
 各新 Python 包添加空 `__init__.py`，不启动资源。下列 tasks 列出修改点、测试与必要拆分；所有路径均相对仓库根，表格明确前缀时除外。
 
-## Task 1: 拆分 BotService，保留公共入口和行为
+## Task 1: 保留 BotService 结构，仅增加头像调用点
 
 **Files:**
 - Modify: `apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py`
-- Create: 同目录 `bot_service_parts/__init__.py`、`bot_service_parts/common.py` 及下表文件
-- Create: `apps/backend/tests/community/core/bot_management/services/test_bot_service_layout.py`
-- Modify: `apps/backend/tests/community/architecture/test_no_oversized_modules.py`（仅删除拆分后过期的 BotService allowlist 项）
-- Modify: 同测试目录内引用已迁移 lexical module 的 patch 目标，仅在原 patch 不再命中时调整
+- Create: `apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/profile.py`
 
-**Interfaces:** `BotService` 仍位于原 import path，仍实现 `BotServiceProtocol`，构造参数、方法签名、类常量及公共异常/函数兼容。Mixin 只组织同一对象的方法，不新增状态、条件分发或服务抽象。
+经维护者在 PR #3569 明确批准，BotService 沿用基线已有的超长文件豁免。
+本 PR 不整体搬迁旧方法，不新增尺寸豁免；完整生命周期拆分留给独立重构。
+新增头像投影留在独立 feature 模块，旧服务只增加必要的调用及参数传递。
+原公共入口、构造参数和测试 patch 路径保持不变。
 
-需要此 task 的原因：当前 `bot_service.py` 为 6,355 行，修改任何业务行都无法满足根规则。不得仅将新功能移出却留下已修改的超限文件。
-
-- [ ] **RED：** 新建尺寸和公共入口测试：
-
-```python
-from pathlib import Path
-from agentclaw.community.core.bot_management.services import bot_service
-
-def test_bot_service_source_is_bounded():
-    root = Path(bot_service.__file__).parent
-    paths = [Path(bot_service.__file__), *root.glob("bot_service_parts/*.py")]
-    assert all(len(p.read_text().splitlines()) <= 1000 for p in paths)
-
-def test_bot_service_public_surface_is_preserved():
-    for name in ("create_bot", "update_bot", "start_bot", "restart_bot",
-                 "delete_bot", "get_bot", "_sync_bot_to_bcn"):
-        assert callable(getattr(bot_service.BotService, name))
-    assert issubclass(bot_service.BotNotFoundError, bot_service.BotServiceError)
-```
-
-- [ ] 运行 `pt tests/community/core/bot_management/services/test_bot_service_layout.py -q`，预期尺寸断言失败。
-- [ ] 按方法边界原样移动；下面的首尾为**包含端点的连续方法范围**，不是漂移行号：
-
-| 新文件 / Mixin | 原方法范围 |
-| --- | --- |
-| `runtime_setup.py / BotRuntimeSetupMixin` | `_initialize_capability_installations` 至 `_try_acquire_restart_lock` |
-| `quota.py / BotQuotaMixin` | `get_bot_by_ip_and_user` 至 `_resolve_bot_name` |
-| `creation.py / BotCreationMixin` | `create_bot` 至 `_retry_creation_confirmation` |
-| `provisioning.py / BotProvisioningMixin` | `_release_provisioning_claim` 至 `_allocate_device_async` |
-| `queries.py / BotQueriesMixin` | `get_bot_by_address` 至 `resolve_desktop_live_status`，包含 display-status 类常量 |
-| `metadata.py / BotMetadataMixin` | `update_bot` 至 `admin_update_bot`，并移动末尾 `update_bot_ext` |
-| `collaboration.py / BotCollaborationMixin` | `_sync_bot_to_bcn` 至 `_is_new_bot_use_nas`，包含两项 DRM 类常量 |
-| `deletion.py / BotDeletionMixin` | `get_bot_config_path` 至 `check_bot_name_exists` |
-| `lifecycle.py / BotLifecycleMixin` | `stop_bot` 至 `restart_bot_async` |
-| `restart.py / BotRestartMixin` | `restart_bot` 至 `_restart_bot_baas` |
-| `publication.py / BotPublicationMixin` | `prepare_bot_backup` 至 `release_bot_for_others` |
-| `credentials.py / BotCredentialsMixin` | `hot_update_passport_token_to_device` 至 `_hot_update_by_publish_binding` |
-
-- [ ] 将模块级异常、常量、`_compose_operator_context`、`validate_bot_name`、`_copy_tree_fast`、`generate_bot_id` 移至 `common.py`，原模块显式 re-export。Facade 保留 `__init__`、workspace-hosting 两方法。每个 mixin 只导入它使用的符号，不导入 facade，不使用 star-import、动态 `exec` 或模块代理来兼容 monkeypatch。
-- [ ] `BotService` 声明 mixins 在 `BotServiceProtocol` 前。用 AST 方法签名/函数体对比确认只移动；调整测试 patch 的**定义模块**，不删除行为断言。依赖模块对象本身的 patch（如 threading.Thread）不应无故重写。
-- [ ] 删除 file-size gate 中已经不再超限的 BotService allowlist 项，不添加新豁免；运行 `pt tests/community/architecture/test_no_oversized_modules.py -q`。
-- [ ] **GREEN：** 运行 layout test、§0 service 全套，以及 `pt tests/community/core/bot_management -q`。尺寸不达标时按原方法责任继续拆，不改功能语义；完整基线差异单独记录。
-- [ ] Commit：`refactor(backend): split bot service by existing responsibilities`。提交范围仅机械拆分与对应测试。
+- [ ] 运行头像注册/编辑及 BotService 行为测试，保留显式清空、非法投影省略、
+  稳定 entity 身份和 best-effort 失败语义。
+- [ ] 确认未修改方法保持原样，现有文件尺寸门禁仍执行，新增源码不超过 1,000 行。
 
 ## Task 2: 现有 BCN transport 扩展头像和类型化结果
 
@@ -176,7 +163,7 @@ if avatar_url is not None:
 
 **Files:**
 - Create: `apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/profile.py`
-- Modify: Task 1 的 `bot_service_parts/collaboration.py`、`metadata.py` 及实际调用注册的 `creation.py`、`provisioning.py`、`lifecycle.py`、`restart.py`
+- Modify: `apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py` 的创建、编辑、同步、启动及重启调用点
 - Create: `apps/backend/tests/community/core/bot_management/services/test_bot_avatar_sync.py`
 - Modify: 现有 `test_bot_service_bcn_sync.py`、`test_bot_service_create_bcn_register.py` 的实际 payload/patch 目标
 
@@ -315,19 +302,19 @@ def test_unknown_is_not_success():
 ## Task 5: 单次 metadata 适配与 recording 实现
 
 **Files:**
-- Create: `apps/backend/src/agentclaw/community/di/bcs_collaboration_metadata_adapter.py`
+- Create: `apps/backend/src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py`
 - Create: `apps/backend/src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py`
-- Create: `apps/backend/tests/community/di/test_bcs_collaboration_metadata_adapter.py`
+- Create: `apps/backend/tests/community/plugins/community/test_bcs_collaboration_metadata.py`
 - Modify: Task 2 transport 方法，仅为保留 typed missing/unavailable/unknown 信息
 
-**Interfaces:** `BcnCollaborationMetadataAdapter(bcn_service, profile_headers: Mapping[str,str])` 实现 Task 4 Plugin，位于 composition glue；Core 不导入 BcnService。`RecordingBcsCollaborationMetadataPlugin` 记录 `calls: list[tuple[str, object]]`、`existing: set[str]`、可注入 `failures: dict[str, Exception]`；不存在返回 False，不自动创建。
+**Interfaces:** `BcnCollaborationMetadataAdapter(bcn_service, profile_headers: Mapping[str,str])` 实现 Task 4 Plugin，位于 production community plugin；Core 不导入 BcnService。`RecordingBcsCollaborationMetadataPlugin` 记录 `calls: list[tuple[str, object]]`、`existing: set[str]`、可注入 `failures: dict[str, Exception]`；不存在返回 False，不自动创建。
 
 - [ ] **RED：** 用 `Mock(spec=BcnService)` 配合真实 adapter 断言：
 
 ```python
 import pytest
 from unittest.mock import Mock
-from agentclaw.community.di.bcs_collaboration_metadata_adapter import BcnCollaborationMetadataAdapter
+from agentclaw.community.plugins.community.bcs_collaboration_metadata import BcnCollaborationMetadataAdapter
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.kernel.collaboration_repair import ProfileSnapshot
 
@@ -342,7 +329,7 @@ async def test_profile_uses_existing_onboard_only():
     bcn.register_provider_bot.assert_not_called()
 ```
 
-- [ ] 运行 `pt tests/community/di/test_bcs_collaboration_metadata_adapter.py -q`，预期缺 adapter。
+- [ ] 运行 `pt tests/community/plugins/community/test_bcs_collaboration_metadata.py -q`，预期缺 adapter。
 - [ ] adapter 通过 `asyncio.to_thread` 调用原同步 HttpClient 链路，并向每个 transport 传入 remaining timeout。profile 转调 onboard，exists 转调 provider-scoped get_attributes，caller 转调 sync_bot_caller_config 并传稳定 reference；不创建新 URL 或新重试。
 - [ ] typed mapping：真实 404→exists False；其他异常不能变 False。skipped→`RepairPreconditionError("collaboration_sync_unavailable")`；onboarded=false→`MetadataDeliveryError(REJECTED,"collaboration_bot_not_found")`；malformed/ID mismatch→UNKNOWN；caller stale/conflict→明确 failed，不加 revision。
 - [ ] 同步 thread 取消不能强停底层 HTTP：transport 自身必须设置 remaining timeout；取消后不启动其他项，不在未结束发送上关闭共享 client。BcnService/HttpClient 使用已有生命周期，adapter.aclose 不关闭借来的 singleton。
@@ -394,8 +381,8 @@ def remaining(deadline: float, clock) -> float:
     return seconds
 ```
 
-进入执行后 deadline 错误映射对应项 failed/unknown 和后续 skipped_dependency；未发送的项不标 unknown。每次调用都传当前 remaining，外层 await 也使用该预算。
-- [ ] Owner 异常或不匹配就停止其他写入；owner missing-no-op→collaboration_bot_not_found。profile 失败可继续 managers/caller，除非目标已消失或截止时间耗尽。manager facts read 错误必须抛明确事实错误，不能发送空名单。
+进入执行后 deadline 错误映射对应项 failed/unknown 和后续 skipped_dependency；未发送的项不标 unknown。每次调用都传当前 remaining，外层 await 也使用该预算，包括三个 to_thread 事实读取。超时后丢弃线程结果，不等待线程完成；读取自身的未分类 TimeoutError 不等同于请求截止时间耗尽。
+- [ ] Owner 异常或不匹配就停止其他写入；owner missing-no-op→collaboration_bot_not_found。profile 失败可继续 managers/caller，除非目标已消失或截止时间耗尽。manager facts read 已分类错误由编排层纳入 failed 分项，保留已执行结果并跳过 caller，不能发送空名单；managers missing 同样停止 caller。
 - [ ] 将已知 DeliveryFailure.NOT_SENT/REJECTED 映射 failed，UNKNOWN 映射 unknown；消息使用有限 code。不要捕获 BaseException；未分类异常和 Backend DB 错误仍抛出，不假装成功报告。
 - [ ] 增加测试：Owner first、fresh managers、owner exclusion/Space 规则、unknown、skipped、partial_failed、caller not_applicable/disabled、timeout、取消、每项一次、无队列调用、无凭证/运行时写入。`AsyncMock.attach_mock` 或事件列表断言实际顺序，不只断言最终状态。
 - [ ] **GREEN：** `pt tests/community/core/bot_management/collaboration_repair -q`；既有 owner/managers suite 再跑，确认重试和后台 behavior 未改。
@@ -486,7 +473,6 @@ pt tests/community/adapters/http/openapi_v1/test_collaboration_repair.py \
 
 **Files:**
 - Modify: 新模块 README、`apps/backend/docs/bot-ownership-sync-operations.md`（区分旧入队修复与新请求内修复）
-- Create: `docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-validation.md`
 - Create: `apps/backend/tests/community/acceptance/collaboration_repair/conftest.py`、`test_collaboration_repair_live.py`、`live_case.py`
 - Modify: `singlebox/ci/singlebox_coverage_modules.yaml`（Backend 修复模块验收 target、完整分母与实测阈值，不改 BCS 门槛）
 
@@ -513,7 +499,7 @@ python singlebox/ci/verify_singlebox_coverage_artifacts.py \
 必须在 registry 增加 `collaboration_repair` Backend module，`acceptance_targets` 为 `tests/community/acceptance/collaboration_repair`；Core 分母包含整个 `core/bot_management/collaboration_repair/`；Router 为本次唯一 POST；Plugin 分母包含 metadata 的 exists/update_profile/sync_caller/aclose 的实际实现。复用 Owner/managers 的生产代码保持现有分母，不改旧阈值。先运行 `bash singlebox/ci/singlebox_coverage.sh --module collaboration_repair` 测得完整分母覆盖率，按仓库规则建立该新模块阈值并保留报告，再跑上述默认全部模块命令。不能省略函数来抬高覆盖，不能写未实测的通过数字。共享 coverage registry 属于本计划的 Backend 验证配置，不是 BCS 实现变更。
 
 - [ ] 检查所有新增/修改源码行数、`git diff --check`、密钥扫描；没有数据库迁移、runtime state、私有 endpoint 或新增依赖。
-- [ ] `backend-validation.md` 写各命令退出码、当前 commit、live BCS版本、4项读回结果、缺失Bot零创建、无自动重试、超时/取消局限、未执行项。不要将仅记录 mock 调用当真实远端证据。
+- [ ] 在 PR 的 Validation 中记录最终命令退出码、实现 commit、live BCS 版本、4 项读回结果、缺失 Bot 零创建、无自动重试、超时/取消局限及未执行项；不另存过程性验证文档，不将仅记录 mock 调用当真实远端证据。
 - [ ] 交接发布顺序：BCS先上线含独立列和 existing-only 行为，Backend后上线；回滚Backend不删BCS列、不撤销既有已成功修复的Owner。前端后续依据 report.status 展示成功/部分失败，不在此 plan 实现按钮。
 - [ ] Commit：`test(backend): verify avatar sync and manual collaboration repair`。未经另行要求不 push、不创建 PR。
 

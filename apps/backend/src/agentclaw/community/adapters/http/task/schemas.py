@@ -155,7 +155,7 @@ class TaskInfoRequestDTO(BaseModel):
     source_type: Literal["bot", "coop_group", "api"] = Field(
         "bot", description="触发渠道类型"
     )
-    owner_user_id: str = Field(..., description="userId")
+    owner_user_id: str = Field(..., description="任务发起人/访问者 userId")
     owner_bot_id: str = Field(..., description="botId")
     execution_config: ExecutionConfigDTO = Field(
         default_factory=lambda: ExecutionConfigDTO(task_type="dynamic"),
@@ -346,7 +346,7 @@ class TaskInfoRecordDTO(BaseModel):
     id: int = Field(..., description="持久化记录自增主键")
     task_id: str = Field(..., description="任务ID")
     source_type: str = Field(..., description="触发渠道类型(bot/coop_group/api)")
-    owner_user_id: str = Field(..., description="归属 userId")
+    owner_user_id: str = Field(..., description="任务发起人/访问者 userId")
     owner_user_name: str | None = Field(None, description="归属用户名称")
     owner_bot_id: str = Field(..., description="归属 botId")
     owner_bot_name: str | None = Field(None, description="归属 Bot 名称")
@@ -969,7 +969,6 @@ class TaskRevokeResultDTO(BaseModel):
 
 
 TaskSettingType = Literal[
-    "claim_join_filter",
     "search_skill",
     "skill_report_enabled",
     "harness_poller",

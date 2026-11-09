@@ -14,11 +14,9 @@ What the service owns (moved out of ``adapters/http/resources/file_router.py``):
   ``workspace`` namespace;
 - directory-listing projection and read-only path classification; listings preserve
   the provider's real entries, while search/archive keep their own curated policies;
-- the ``absolute_path`` field: the device's own absolute path for the entry — the
-  engine returns it per listing entry (``path``: container path for arca/openclaw/
-  aicoding/claude_code, host path for local). teclaw doesn't expose an absolute path
-  yet, so it returns its logical (root-relative) path there for now; once teclaw
-  matches the other engines this works automatically and the fallback can be dropped.
+- the ``absolute_path`` field: prefer the provider's explicit ``absolute_path``,
+  then its legacy ``path`` field, then the workspace-relative logical fallback.
+  Physical container/host path ownership remains with the provider.
 
 Each engine entry also carries ``relative_path`` (relative to the *listed* dir), used
 to build the workspace-relative ``path`` so a future recursive listing stays correct;
@@ -413,9 +411,10 @@ class ResourceFileService(ResourceFilePort):
             items.append({
                 "name": name,
                 "path": rel,
-                # the device's absolute path (engine ``path``); logic-view fallback
-                # only when the engine doesn't expose one (legacy teclaw).
-                "absolute_path": e.get("path") or self._logical(rel),
+                # Prefer the explicit device path, preserving legacy fallbacks.
+                "absolute_path": (
+                    e.get("absolute_path") or e.get("path") or self._logical(rel)
+                ),
                 "is_dir": is_dir,
                 "readonly": is_readonly(rel),
                 "size": e.get("size") if not is_dir else None,
@@ -423,6 +422,10 @@ class ResourceFileService(ResourceFilePort):
                 "modified_at": e.get("modified_at"),
             })
 
+        logger.debug(
+            "[ResourceFileService.list_dir] bot_id=%s path=%s item_count=%d",
+            bot_id, path, len(items),
+        )
         return items
 
     async def read_file(

@@ -54,7 +54,13 @@ const reply: CommunityReply = {
   id: 'reply-1',
   topicId: topic.id,
   body: '回复',
-  author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
+  author: {
+    type: 'bot',
+    id: 'bot-1:900003',
+    botUuid: 'bot-1:900003',
+    botId: 'bot-1',
+    displayName: '协作助手',
+  },
   createdAt: '2026-10-06T06:20:00Z',
   helpful: false,
 };

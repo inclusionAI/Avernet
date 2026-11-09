@@ -13,9 +13,11 @@ import type {
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,
+  BotModelBadge,
   CapabilityResult,
   CodingBotConversationHost,
   ConversationInstanceScopeCapability,
+  GuideAssistantSpec,
   HumanIdentity,
   InviteCodeGatePolicy,
   LegacyVersionSwitchSpec,
@@ -154,6 +156,11 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // 产品引导（新版助手）：内源专属功能，Open Core 无此能力（入口不渲染、浮层不挂载）。
+  getGuideAssistant: (): CapabilityResult<GuideAssistantSpec | null> => ({
+    status: 'available',
+    value: null,
+  }),
   // Open Core 无员工目录数据源 → 员工搜索不支持（添加成员弹窗降级为手填工号）。
   getUserSearchCapability: (): CapabilityResult<UserSearchCapability | null> => ({
     status: 'available',
@@ -174,6 +181,8 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 无内源运营配置：模型列表不渲染徽标。
+  getModelBadge: (): CapabilityResult<BotModelBadge | null> => ({ status: 'available', value: null }),
   getAgentCodingInternalResources: (): CapabilityResult<AgentCodingInternalResources> => ({
     status: 'available',
     value: {

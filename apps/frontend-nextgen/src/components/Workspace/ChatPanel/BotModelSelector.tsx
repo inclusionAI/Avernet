@@ -12,10 +12,11 @@ interface BotModelSelectorProps {
   loading?: boolean;
   disabled?: boolean;
   onSelect: (modelId: string) => void;
+  onOpen?: () => void;
 }
 
 /** bot 单聊头部模型切换按钮，参考 open-claw 我的 Bot 会话模型选择器。 */
-export function BotModelSelector({ models, activeModelId, loading, disabled, onSelect }: BotModelSelectorProps) {
+export function BotModelSelector({ models, activeModelId, loading, disabled, onSelect, onOpen }: BotModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const activeModel = useMemo(
     () => models.find((model) => model.modelId === activeModelId) ?? null,
@@ -24,7 +25,7 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
   const label = activeModel?.name || activeModelId || '选择模型';
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) onOpen?.(); }}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -73,8 +74,34 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
                         </TooltipTrigger>
                         <TooltipContent>{model.name}</TooltipContent>
                       </Tooltip>
+                      {model.badge ? (
+                        <Badge tone="primary" className="flex-none">
+                          {model.badge.label}
+                        </Badge>
+                      ) : null}
                     </span>
                     <span className="flex items-center gap-1.5">
+                      {model.badge?.link ? (
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          className="flex-none cursor-pointer text-xs font-medium text-primary hover:underline"
+                          onClick={(event) => {
+                            // 「查看介绍」只跳转：不触发选模型、不收起下拉。
+                            event.stopPropagation();
+                            event.preventDefault();
+                            if (model.badge?.link) window.open(model.badge.link, '_blank', 'noopener,noreferrer');
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter') return;
+                            event.stopPropagation();
+                            event.preventDefault();
+                            if (model.badge?.link) window.open(model.badge.link, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          查看介绍
+                        </span>
+                      ) : null}
                       {model.provider ? <Badge tone="neutral">{model.provider}</Badge> : null}
                       {selected ? <Check className="h-4 w-4 text-primary" /> : null}
                     </span>
@@ -104,7 +131,7 @@ export function BotModelSelectorContainer({
   onSessionModelChange,
 }: BotModelSelectorContainerProps) {
   const bot = chatBots.find((item) => item.botId === session?.botId) ?? null;
-  const botModels = useBotModels(bot, session, activeIdentityId, onSessionModelChange);
+  const botModels = useBotModels(bot, session, activeIdentityId, onSessionModelChange, false);
 
   return (
     <BotModelSelector
@@ -112,6 +139,7 @@ export function BotModelSelectorContainer({
       activeModelId={botModels.activeModelId}
       loading={botModels.isLoadingModels}
       disabled={bot?.isFriendBot}
+      onOpen={botModels.loadModels}
       onSelect={(modelId) => void botModels.selectModel(modelId)}
     />
   );

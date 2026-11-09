@@ -8,7 +8,7 @@ import { render, screen } from '@testing-library/react';
 jest.mock('@tc-chat/ui/es/Bubble', () => ({ Bubble: () => <div>消息正文</div> }));
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({ aixUiPlugin: {}, fileRefPlugin: {} }));
 
-const props = { group: {} as never, participants: [] as never, isLastMessage: false, isRequesting: true };
+const props = { group: { participants: [] } as never, participants: [] as never, isLastMessage: false, isRequesting: true };
 
 describe('GroupChatBubble progress', () => {
   it('marks every streaming assistant reply independently of its position', () => {

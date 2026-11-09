@@ -34,7 +34,7 @@ test('renders successful zero results separately from loading and preserves publ
   render(<ExpertMarketPage />);
   expect(screen.getByRole('status')).toHaveTextContent('正在加载专家');
   expect(await screen.findByText('没有找到匹配的专家')).toBeVisible();
-  expect(screen.getByRole('link', { name: '公开Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
+  expect(screen.getByRole('link', { name: '公开 Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
   expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
 });
 

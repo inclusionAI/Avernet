@@ -21,6 +21,7 @@ bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-54}"
 bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-48}"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
+repair_provider_fixture=""
 requested_modules=()
 acceptance_targets=()
 explicit_acceptance_targets=()
@@ -123,6 +124,12 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# Service launchers embed this root into generated configs and then cd into
+# their own module directories. A relative --coverage-root would silently
+# point BCS at a nonexistent config dir, so absolutize before any use.
+coverage_root="$(mkdir -p "$coverage_root" && cd "$coverage_root" && pwd -P)"
+report_dir="$coverage_root/reports"
+
 if [[ ! -s "$module_manifest" ]]; then
   echo "missing singlebox coverage module manifest: $module_manifest" >&2
   exit 2
@@ -191,6 +198,9 @@ run_real_singlebox() {
   mkdir -p "$coverage_root/raw" "$report_dir"
   coverage_standalone_root="$coverage_root/standalone-openclaw"
   coverage_standalone_runtime="$coverage_root/standalone-runtime"
+  repair_provider_fixture="$coverage_root/collaboration-repair-provider.json"
+  # A new live Provider is registered below; never reuse a previous credential.
+  rm -f "$repair_provider_fixture"
   echo "singlebox coverage real mode"
   echo "coverage_root: $coverage_root"
   echo "standalone_openclaw_root: $coverage_standalone_root"
@@ -205,6 +215,9 @@ run_real_singlebox() {
       STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
       bash "$repo_root/singlebox/singlebox.sh" --standalone stop all || true
     bcs_e2e_mock_stop || true
+    # This file contains the ephemeral Provider admin credential, not evidence.
+    # Remove it on both normal completion and EXIT-trap failure cleanup.
+    rm -f "$repair_provider_fixture"
   }
   trap cleanup_real_singlebox EXIT
   bcs_e2e_mock_start "$coverage_root/mock-services"
@@ -218,20 +231,34 @@ run_real_singlebox() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/singlebox/singlebox.sh" --standalone setup all
-  # Gateway, BCS, and Backend use different env var names for the same HMAC
-  # principal contract. All three ends must receive the same coverage key.
-  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+  launch_coverage_stack() {
+    # Gateway, BCS, and Backend use different env var names for the same HMAC
+    # principal contract. All three ends must receive the same coverage key.
+    env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
+    BCS_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs" \
+    BCS_CLI_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-cli" \
+    LLVM_PROFILE_FILE="$bcs_coverage_dir/llvm-cov-target/bcs-%m-%p.profraw" \
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE="$repair_provider_fixture" \
     SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF="${SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF:-1}" \
     SINGLEBOX_ACCEPTANCE_KNOWLEDGE_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/bot_knowledge/fixture_catalog.json" \
     SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
-    bash "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start all
+    bash "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage "$@"
+  }
+  launch_coverage_stack start all
+  SINGLEBOX_COVERAGE=1 "${reporter_command[@]}" \
+    "$script_dir/collaboration_repair_provider.py" provision \
+    --bcs-url "http://127.0.0.1:${BCS_PORT:-21000}" \
+    --mock-url "$BCS_E2E_MOCK_BASE_URL" --fixture "$repair_provider_fixture"
+  # Attribute mutation is startup-allowlisted. Regenerate only the disposable
+  # BCS config; Backend and bot gateways keep their original live processes.
+  launch_coverage_stack restart bcs
   local acceptance_status=0
   local bcs_e2e_status=0
   local backend_coverage_status=0
@@ -308,6 +335,7 @@ run_acceptance_smoke() {
     RUN_ACCEPTANCE=1 \
       SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
       SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+      SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE="$repair_provider_fixture" \
       SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
       SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
       uv run pytest "${acceptance_targets[@]}" -q --junitxml "$junit_report"

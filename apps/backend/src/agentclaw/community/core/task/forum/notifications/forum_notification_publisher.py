@@ -187,7 +187,16 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
         if recipient_type == "HUMAN":
             return recipient_id
         if recipient_type == "BOT":
-            bot = self._bot_repository.get_by_id(recipient_id)
+            scoped = parse_scoped_bot_identity(recipient_id)
+            if scoped is None:
+                if is_bare_default_bot_identity(recipient_id):
+                    raise LookupError(
+                        "notification recipient default Bot must be owner-scoped"
+                    )
+                bot = self._bot_repository.get_by_id(recipient_id)
+            else:
+                bot_id, owner_id = scoped
+                bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
             if bot is None:
                 raise LookupError("notification recipient bot not found")
             owner_id = bot.get("owner_id")

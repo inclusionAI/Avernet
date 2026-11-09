@@ -1,6 +1,20 @@
 use bcs_network_tracing::ClientExt;
 use super::*;
 
+/// Common HTTP tracking headers for ordinary and protected downlinks. Keep
+/// this independent of body handling/logging so Caller material stays private.
+/// `message_id` is a fresh UUID per HTTP attempt, not the business frame ID.
+pub(super) fn with_bcn_headers(
+    request: reqwest::RequestBuilder,
+    protocol_version: &str,
+    message_id: &str,
+) -> reqwest::RequestBuilder {
+    request
+        .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
+        .header(BCN_MESSAGE_ID_HEADER, message_id)
+        .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
+}
+
 pub(super) async fn post_provider<T: DeserializeOwned>(
     client: &reqwest::Client,
     url_guard: &OutboundUrlGuard,
@@ -190,14 +204,12 @@ pub(super) async fn send_provider_request_with_policy(
         request_started_ms,
         "provider downlink: posting webhook"
     );
-    let mut request = request_client
+    let request = request_client
         .post(guarded_url.as_str())
         .bearer_auth(bcs_to_provider_token.expose_secret())
         .header("Accept", accept)
-        .header("Content-Type", "application/json; charset=utf-8")
-        .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
-        .header(BCN_MESSAGE_ID_HEADER, &message_id)
-        .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string());
+        .header("Content-Type", "application/json; charset=utf-8");
+    let mut request = with_bcn_headers(request, protocol_version, &message_id);
     for (name, value) in provider_bypass_headers {
         if is_safe_provider_bypass_header(name) {
             request = request.header(name.as_str(), value.as_str());

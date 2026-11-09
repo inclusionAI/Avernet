@@ -5,6 +5,7 @@ import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { DetailDebugChat } from '@/pages/BotWorkshop/Detail/DetailDebugChat';
 import { botSessionService } from '@/services/workspace/botSessionService';
+import { clearBotModelCache } from '@/services/workspace/botModelCache';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -36,6 +37,7 @@ const create = jest.mocked(botSessionService.createSession);
 const chat = jest.mocked(useBotChat);
 
 beforeEach(() => {
+  clearBotModelCache();
   jest.clearAllMocks();
   sessions.mockResolvedValue({ ok: true, data: [] });
   models.mockResolvedValue({ ok: true, data: [] });

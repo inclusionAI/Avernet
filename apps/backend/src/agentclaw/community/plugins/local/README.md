@@ -8,12 +8,14 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
   - RecordingBcsOwnershipPlugin
+  - RecordingBcsCollaborationMetadataPlugin
   - "Local* and Noop* implementations, including LocalSkillCenterGateway"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.plugin_api.bcs_collaboration_metadata   # recording fake for the one-shot collaboration repair
   - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.plugins.community.knowledge_catalog
   - agentclaw.community.core.economy.governance.orm    # repository contracts consumed by this module

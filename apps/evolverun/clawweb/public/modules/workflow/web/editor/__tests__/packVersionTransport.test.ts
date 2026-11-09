@@ -11,7 +11,7 @@ function readBlob(blob: Blob): Promise<string> {
   })
 }
 it('sends an uncompressed JSON Blob with the CSRF header through the real fetchJson, including above its gzip threshold', async () => {
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ branch: 'saved/workflow', commit: 'a'.repeat(40) }) })
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ branch: 'wf/workflow', commit: 'a'.repeat(40) }) })
   const compressor = vi.fn(() => { throw new Error('unexpected compression') })
   vi.stubGlobal('fetch', fetchMock); vi.stubGlobal('CompressionStream', compressor)
   const input = { sourceVersion: 'draft' as const, sourceCommit: 'b'.repeat(40), expectedSavedHead: 'b'.repeat(40), changes: [
@@ -39,7 +39,7 @@ it('is accepted by a loopback JSON parser with inflate disabled and an explicit 
   app.put('/api/workflows/workflow/pack-version', (req, res) => {
     if (req.get('X-Pack-Version-CSRF') !== '1' || req.get('Content-Encoding')) { res.status(403).end(); return }
     received = req.body
-    res.json({ branch: 'saved/workflow', commit: 'a'.repeat(40) })
+    res.json({ branch: 'wf/workflow', commit: 'a'.repeat(40) })
   })
   const server = await new Promise<import('node:http').Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   try {
@@ -59,7 +59,7 @@ it('is accepted by a loopback JSON parser with inflate disabled and an explicit 
       { operation: 'create' as const, path: 'scripts/large', contentBase64: 'YWJj'.repeat(7000), mode: '100644' as const },
     ] }
     const result = await putPackVersion('workflow', input)
-    expect(result.branch).toBe('saved/workflow')
+    expect(result.branch).toBe('wf/workflow')
     expect(received).toEqual(input)
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))

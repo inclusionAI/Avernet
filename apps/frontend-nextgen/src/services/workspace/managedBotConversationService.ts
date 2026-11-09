@@ -33,7 +33,7 @@ const INVALID_CONTEXT_ERROR: DomainError = {
   canRetry: false,
 };
 
-// 临时关闭团队 Bot 他人会话，避免历史 URL/缓存绕过禁用入口继续请求未就绪后端。
+// 临时关闭团队空间 Bot 他人会话，避免历史 URL/缓存绕过禁用入口继续请求未就绪后端。
 const TEAM_OTHERS_UNAVAILABLE: DomainError = {
   code: 'TEAM_OTHERS_UNAVAILABLE',
   friendlyMessage: '他人发起的会话功能开发中',

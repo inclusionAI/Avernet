@@ -60,6 +60,22 @@ beforeEach(() => {
 });
 
 describe('useTaskSwitcherTasks', () => {
+  it('后台标签页不轮询，回到前台恢复查询，卸载后移除监听', async () => {
+    jest.useFakeTimers();
+    const visibility = jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
+    try {
+      const { unmount } = renderHook(() => useTaskSwitcherTasks('u1', { currentTaskId: 't1' }));
+      await act(async () => { jest.advanceTimersByTime(120_000); });
+      expect(mockListMyTasks).not.toHaveBeenCalled();
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+      unmount();
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); jest.advanceTimersByTime(60_000); });
+      expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+    } finally { visibility.mockRestore(); jest.useRealTimers(); }
+  });
   it('listTasks 结果映射三桶状态与中文 label(执行中/待开始/已结束)', async () => {
     mockListMyTasks.mockResolvedValue({
       code: 0,
@@ -107,6 +123,31 @@ describe('useTaskSwitcherTasks', () => {
 
     expect(result.current.items.map((record) => record.taskId)).toEqual(['t1', 't2']);
     expect(result.current.records.map((record) => record.task_id)).toEqual(['t1', 't2']);
+  });
+
+  it('by_session 关联的任务即使 main_session_id 不同也能进入当前会话下拉', () => {
+    const records = [
+      item('t1', 'EXECUTING', '当前任务', { sessionId: 'session-first' }),
+      item('t2', 'EXECUTING', '第二棒关联任务', { sessionId: 'session-second' }),
+      item('t3', 'DONE', '其它任务', { sessionId: 'session-other' }),
+    ];
+
+    expect(
+      filterTasksForCurrentConversation(records, 't1', ['t2']).map((record) => record.task_id),
+    ).toEqual(['t1', 't2']);
+  });
+
+  it('同一任务重复返回时按 task_id 去重', () => {
+    const current = item('t1', 'EXECUTING', '当前任务');
+    const duplicate = { ...item('t1', 'DONE', '重复任务'), status: 'DONE' } as TaskListItem;
+    const records = [
+      current,
+      duplicate,
+      item('t2', 'EXECUTING', '同会话任务'),
+      item('t3', 'DONE', '其它会话任务', { sessionId: 'session-b' }),
+    ];
+
+    expect(filterTasksForCurrentConversation(records, 't1').map((record) => record.task_id)).toEqual(['t1', 't2']);
   });
 
   it('历史任务可回退使用 teamclaw_context.main_session_id', () => {

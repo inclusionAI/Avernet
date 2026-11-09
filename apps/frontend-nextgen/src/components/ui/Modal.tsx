@@ -32,6 +32,11 @@ interface ModalContentProps extends React.ComponentPropsWithoutRef<typeof Dialog
   size?: ModalSize;
   showClose?: boolean;
   closeLabel?: string;
+  /**
+   * Radix 实现层支持但公共类型未导出的焦点圈开关。
+   * 弹窗内宿主浮层（上传/AIGC）portal 出去后，Radix 的 focus trap 会抢回焦点，需临时放开。
+   */
+  trapFocus?: boolean;
 }
 
 const sizeClasses: Record<ModalSize, string> = {

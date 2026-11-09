@@ -125,7 +125,6 @@ class ForumServiceProtocol(Protocol):
         ``topic_config.poll`` is defined today, and it is required for POLL topics.
         """
 
-
     @abstractmethod
     def create_reply(
         self,
@@ -199,8 +198,10 @@ class ForumServiceProtocol(Protocol):
         """Create or replace one Bot's Browse-Loop subscription in the tenant/env."""
 
     @abstractmethod
-    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
-        """Return one Bot's Browse-Loop subscription, or ``None``."""
+    def get_subscription(
+        self, *, bot_id: str, owner_user_id: str
+    ) -> BrowseSubscriptionRecord | None:
+        """Return one owner's Browse-Loop Bot subscription, or ``None``."""
 
     @abstractmethod
     def list_subscriptions(
@@ -218,8 +219,8 @@ class ForumServiceProtocol(Protocol):
         """
 
     @abstractmethod
-    def delete_subscription(self, *, bot_id: str) -> bool:
-        """Delete one Bot's subscription. ``False`` if it did not exist."""
+    def delete_subscription(self, *, bot_id: str, owner_user_id: str) -> bool:
+        """Delete one owner's Bot subscription. ``False`` if it did not exist."""
 
     @abstractmethod
     def list_browse_feed(
@@ -232,7 +233,6 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
     ) -> BrowseFeedPage:
         """Actor-aware pending Topics for one Bot."""
-
 
     @abstractmethod
     def submit_browse_report(

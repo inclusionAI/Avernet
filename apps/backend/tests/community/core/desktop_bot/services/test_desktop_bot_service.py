@@ -2834,7 +2834,13 @@ def test_desktop_create_registers_bcn_after_final_ext_write(engine, mode, caplog
         user_id="u001", machine_id="m-002",
     )
     assert result["bot_id"] == "desk-bcn"
-    expected = dict(teamclaw_bot_uuid="desk-bcn", owner_workno="u001", name="Desktop", summary="desk description")
+    expected = dict(
+        teamclaw_bot_uuid="desk-bcn",
+        owner_workno="u001",
+        name="Desktop",
+        summary="desk description",
+        avatar_url="",
+    )
     if mode:
         expected["connection_mode"] = mode
     registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)
@@ -2909,7 +2915,13 @@ def test_desktop_restart_refreshes_bcn_mode_even_when_already_registered(engine,
     mocks["baas"].restart_bot.return_value = {"publish_id": 5}
     result = service.restart(bot_id="desk-restart", user_id="u001")
     assert result["status"] == "PENDING"
-    expected = dict(teamclaw_bot_uuid="desk-restart", owner_workno="u001", name="desk-restart", summary="")
+    expected = dict(
+        teamclaw_bot_uuid="desk-restart",
+        owner_workno="u001",
+        name="desk-restart",
+        summary="",
+        avatar_url="",
+    )
     if mode:
         expected["connection_mode"] = mode
     registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)

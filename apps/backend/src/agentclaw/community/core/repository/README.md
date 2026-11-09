@@ -140,6 +140,8 @@ purpose: "Every repository contract (protocols/) and implementation (implementat
 provides:
   - OwnershipSyncReadRepository
   - SqlOwnershipSyncReadRepository
+  - CollaborationRepairReadRepository
+  - SqlCollaborationRepairReadRepository
   - SpacePersistenceEffects
   - SpaceKnowledgeSyncRepository
   - SpaceKnowledgeSyncRepositoryProtocol
@@ -374,6 +376,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.space_membership
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.collaboration_repair   # RepairFacts/RepairFactsError typed in the collaboration repair fact reader
   - agentclaw.community.kernel.bot_manager_sync   # SyncKey / SyncFacts / SpaceChange typed in ManagerSyncReadRepositoryProtocol
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
@@ -419,6 +422,7 @@ internal_dependencies:
   - agentclaw.community.utils.app_utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.runtime_list_timing
 ```
 
 ### Change impact

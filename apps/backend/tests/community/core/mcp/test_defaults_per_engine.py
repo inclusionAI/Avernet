@@ -115,6 +115,24 @@ def test_ecb_knowledge_mcp_is_default_for_mcp_enabled_engines():
     assert ECB_KNOWLEDGE_MCP_SERVER_CODE not in get_default_mcp_server_codes("moltis")
 
 
+def test_ecb_knowledge_mcp_default_carries_display_name():
+    """Every engine's default entry must carry a real display name.
+
+    The Bot MCP list synthesises an entry for a default code that has no
+    ``ac_skill_set_mcp`` row and falls back to ``server_code.split(".")[-1]``
+    when the default config has no ``name`` — which surfaced
+    ``ecb-knowledge-mcp-service`` in the frontend instead of the Chinese label.
+    """
+    for engine in ("openclaw", "teclaw", "claude_code", "hermes", "aicoding"):
+        entry = next(
+            server
+            for server in get_default_mcp_servers(engine)
+            if server["server_code"] == ECB_KNOWLEDGE_MCP_SERVER_CODE
+        )
+        assert entry.get("name") == "TeamClaw知识库MCP", engine
+        assert entry.get("description"), engine
+
+
 def test_unknown_engine_returns_empty():
     assert get_default_mcp_servers("does-not-exist") == []
 

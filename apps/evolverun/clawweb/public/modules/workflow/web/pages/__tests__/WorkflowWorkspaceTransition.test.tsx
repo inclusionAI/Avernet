@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), fetchJson: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
 vi.mock('../../api/hooks', () => ({
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
@@ -12,7 +12,7 @@ vi.mock('../../api/hooks', () => ({
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'user', isAdmin: false }) }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: mocks.fetchJson }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
@@ -57,7 +57,17 @@ function unchanged(session: number) {
 }
 beforeEach(() => {
   useEditorStore.setState(useEditorStore.getInitialState(), true); state().loadSpec(A)
-  vi.clearAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  vi.resetAllMocks(); mocks.rows = [row('a', 'Original'), row('b', 'Target')]
+  // Source reads obtain the database document and token from the CAS row.
+  mocks.fetchJson.mockImplementation((url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (match && init?.method === 'GET') {
+      const id = decodeURIComponent(match[1])
+      const spec = id === 'a' ? A : id === 'b' ? B : { id, title: 'New', version: '1', nodes: [] }
+      return Promise.resolve({ workflowId: id, packId: null, specJson: JSON.stringify(spec), draftToken: 'a'.repeat(64) })
+    }
+    return new Promise(() => {})
+  })
   mocks.history.mockReturnValue(new Promise(() => {}))
   mocks.refetch.mockResolvedValue({ data: mocks.rows })
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -100,7 +110,7 @@ describe('real workspace and embedded editor transitions', () => {
   it('confirms canvas and Pack risk once and leaves the Pack draft in memory', async () => {
     const packId = 'workspace-combined-pack', pack = sessionFor(packId)
     const file = { path: 'workflows/a.yaml', contentBase64: 'b2xk', mode: '100644' as const }
-    const snapshot = { workflowId: packId, packId, baseRef: `origin/wf/${packId}`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
+    const snapshot = { workflowId: packId, packId, baseRef: `refs/tags/deploy/${packId}/#1`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
     updateVersion(pack, 'current', { snapshot, files: [{ ...file, contentBase64: 'bmV3' }] })
     makeDraft(); mocks.get.mockResolvedValueOnce(B); mount(); chooseB()
     await waitFor(() => expect(state().spec?.id).toBe('b'))
@@ -160,7 +170,7 @@ describe('real workspace and embedded editor transitions', () => {
   })
 
   it('commits an active-only target with a null DB baseline rather than inventing a draft', async () => {
-    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
     mount(); chooseB()

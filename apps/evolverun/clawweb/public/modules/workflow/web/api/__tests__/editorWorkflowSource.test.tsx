@@ -19,6 +19,7 @@ beforeEach(() => {
   useEditorStore.getState().reset({ force: true })
   request = vi.fn(async (url: string) => {
     if (url === '/api/workflows/flow') return missing()
+    if (url === '/api/workflows/flow/editor-draft') return new Response(JSON.stringify({ workflowId: 'flow', packId: null, specJson: JSON.stringify(draft), draftToken: 'a'.repeat(64) }))
     if (url === '/api/workflows/flow/history?limit=50&releaseOnly=true') return new Response(JSON.stringify({ workflowId: 'flow', history: [{ ...active, deployNumber: 100, version: 100, isActive: false }], active }))
     if (url === '/api/workflows/flow/history/by-deploy/3') return new Response(JSON.stringify(snapshot()))
     throw new Error(`Unexpected request: ${url}`)
@@ -32,20 +33,16 @@ describe('editor source uses DB draft before an explicitly active DB deployment'
     request.mockResolvedValueOnce(new Response(JSON.stringify(draft)))
     const source = await readEditorWorkflowSource('flow')
     expect(source).toEqual({ spec: draft, databaseSpec: draft, activeDeployNumber: null })
-    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledTimes(2)
     expect(source.spec).not.toBe(source.databaseSpec)
   })
-  it.each(['direct', 'export', 'projection'] as const)('preserves a null version from an existing draft via %s without fallback', async kind => {
+  it('preserves a null version from the CAS row without trusting the GET projection', async () => {
     const legacy = { ...draft, version: null }
-    const response = kind === 'direct' ? legacy : { ...legacy, version: 19, ...(kind === 'projection' ? { content: stringify(legacy) } : {}) }
-    request.mockResolvedValueOnce(new Response(JSON.stringify(response)))
-    if (kind !== 'direct') request.mockResolvedValueOnce(new Response(stringify(kind === 'projection' ? { ...legacy, version: '1', content: stringify(legacy) } : legacy)))
-    const result = await readEditorWorkflowSource('flow')
-    expect(result).toEqual({ spec: legacy, databaseSpec: legacy, activeDeployNumber: null })
-    expect(result.spec.version).toBeNull(); expect(result.databaseSpec!.version).toBeNull()
-    expect(request.mock.calls.map(([url]) => url)).toEqual(kind === 'direct' ? ['/api/workflows/flow'] : ['/api/workflows/flow', '/api/workflows/flow/export'])
+    request.mockResolvedValueOnce(new Response(JSON.stringify({ ...legacy, version: 19 })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workflowId: 'flow', packId: null, specJson: JSON.stringify(legacy), draftToken: 'a'.repeat(64) })))
+    expect(await readEditorWorkflowSource('flow')).toEqual({ spec: legacy, databaseSpec: legacy, activeDeployNumber: null })
   })
-  it.each(['json', 'wrapper', 'projection'] as const)('preserves null version in an active %s document only when the draft is absent', async kind => {
+  it.each(['json'] as const)('preserves null version in an active %s document only when the draft is absent', async kind => {
     const legacy = { ...deployed, version: null }, yaml = stringify(legacy)
     const specJson = JSON.stringify(kind === 'json' ? legacy : kind === 'wrapper' ? { content: yaml } : { ...legacy, version: '1', content: yaml })
     const transport = request.getMockImplementation()!
@@ -54,19 +51,39 @@ describe('editor source uses DB draft before an explicitly active DB deployment'
   })
   it('uses the top-level active record even when it is older than the history page', async () => {
     expect(await readEditorWorkflowSource('flow')).toEqual({ spec: deployed, databaseSpec: null, activeDeployNumber: 3 })
-    expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/workflows/flow', '/api/workflows/flow/history?limit=50&releaseOnly=true', '/api/workflows/flow/history/by-deploy/3'])
+    expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/workflows/flow', '/api/workflows/flow/history?limit=50&releaseOnly=true', '/api/workflows/flow/history/by-deploy/3', '/api/workflows/flow', '/api/workflows/flow/history?limit=50&releaseOnly=true', '/api/workflows/flow/history/by-deploy/3', '/api/workflows/flow'])
   })
-  it.each(['json', 'yaml', 'wrapper', 'projection', 'numeric', 'absent-version', 'custom-content'] as const)('preserves the source document from %s', async kind => {
+  it.each(['json', 'yaml'] as const)('preserves the source document from %s', async kind => {
     const original = structuredClone(deployed)
-    if (kind === 'numeric') original.version = 2.7 as unknown as string
-    if (kind === 'absent-version') delete original.version
-    if (kind === 'custom-content') original.content = stringify({ ...deployed, version: 'other-source' })
     const yaml = stringify(original)
-    const specJson = kind === 'yaml' ? yaml : JSON.stringify(kind === 'wrapper' ? { content: yaml }
-      : ['projection', 'numeric', 'absent-version'].includes(kind) ? { ...original, version: String(original.version ?? '1'), content: yaml } : original)
+    const specJson = kind === 'yaml' ? yaml : JSON.stringify(kind === 'wrapper' ? { content: yaml } : original)
     const transport = request.getMockImplementation()!
     request.mockImplementation((url: string) => url.endsWith('/by-deploy/3') ? Promise.resolve(new Response(JSON.stringify(snapshot(specJson)))) : transport(url))
     expect(await readEditorWorkflowSource('flow')).toEqual({ spec: original, databaseSpec: null, activeDeployNumber: 3 })
+  })
+  it.each([{ content: stringify(deployed) }, { id: 'flow', content: stringify(deployed) }])('refuses an ambiguous content-only envelope %j', async stored => {
+    const transport = request.getMockImplementation()!
+    request.mockImplementation((url: string) => url.endsWith('/by-deploy/3')
+      ? Promise.resolve(new Response(JSON.stringify(snapshot(JSON.stringify(stored))))) : transport(url))
+    await expect(readEditorWorkflowSource('flow')).rejects.toThrow('无法核验生效历史与 Git')
+  })
+  it.each(['authored', 'projection'] as const)('rejects active %s content without a Git-bound token or writes', async kind => {
+    const original = { ...deployed, content: 'user payload' }
+    const stored = kind === 'projection' ? { ...original, content: stringify(original) } : original
+    const transport = request.getMockImplementation()!
+    request.mockImplementation((url: string) => url.endsWith('/by-deploy/3')
+      ? Promise.resolve(new Response(JSON.stringify(snapshot(JSON.stringify(stored))))) : transport(url))
+    await expect(readEditorWorkflowSource('flow')).rejects.toThrow('无法核验生效历史与 Git')
+    expect(request.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
+  })
+  it.each(['string', 'wrapper'] as const)('rejects an active projection in a %s snapshot without a Git-bound token', async kind => {
+    const original = { ...deployed, content: 'user payload' }
+    const projection = { ...original, content: stringify(original) }
+    const specJson = kind === 'string' ? JSON.stringify(JSON.stringify(projection)) : JSON.stringify({ content: JSON.stringify(projection) })
+    const transport = request.getMockImplementation()!
+    request.mockImplementation((url: string) => url.endsWith('/by-deploy/3')
+      ? Promise.resolve(new Response(JSON.stringify(snapshot(specJson)))) : transport(url))
+    await expect(readEditorWorkflowSource('flow')).rejects.toThrow('无法核验生效历史与 Git')
   })
   it.each([
     [404, { error: 'Not Found' }], [404, { error: 'Not Found', message: 'Workflow "other" not found' }],
@@ -84,10 +101,10 @@ describe('editor source uses DB draft before an explicitly active DB deployment'
     request.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'WORKFLOW_NOT_FOUND', workflowId: 'flow' }), { status: 404 }))
     expect((await readEditorWorkflowSource('flow')).databaseSpec).toBeNull()
   })
-  it('does not fallback after a draft export failure, even for the exact missing response', async () => {
+  it('does not fallback after a CAS failure, even for the exact missing response', async () => {
     request.mockResolvedValueOnce(new Response(JSON.stringify({ ...draft, version: 19 }))).mockResolvedValueOnce(missing())
-    await expect(readEditorWorkflowSource('flow')).rejects.toThrow('原文')
-    expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/workflows/flow', '/api/workflows/flow/export'])
+    await expect(readEditorWorkflowSource('flow')).rejects.toThrow()
+    expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/workflows/flow', '/api/workflows/flow/editor-draft'])
   })
   it.each(['network', 'malformed-draft', 'history-failure', 'missing-active', 'history-identity', 'snapshot-identity', 'snapshot-number', 'snapshot-version', 'snapshot-structure', 'spec-identity'] as const)('fails closed without changing the current draft: %s', async kind => {
     useEditorStore.getState().loadSpec(draft)
@@ -95,7 +112,8 @@ describe('editor source uses DB draft before an explicitly active DB deployment'
     const before = useEditorStore.getState(), transport = request.getMockImplementation()!
     request.mockImplementation((url: string) => {
       if (kind === 'network') return Promise.reject(new Error('offline'))
-      if (kind === 'malformed-draft' && url === '/api/workflows/flow') return Promise.resolve(new Response(JSON.stringify({ ...draft, nodes: null })))
+      if (kind === 'malformed-draft' && url === '/api/workflows/flow') return Promise.resolve(new Response(JSON.stringify(draft)))
+      if (kind === 'malformed-draft' && url.endsWith('/editor-draft')) return Promise.resolve(new Response(JSON.stringify({ workflowId: 'flow', packId: null, specJson: JSON.stringify({ ...draft, nodes: null }), draftToken: 'a'.repeat(64) })))
       if (url.includes('/history?') && kind === 'history-failure') return Promise.resolve(new Response('unavailable', { status: 503 }))
       if (url.includes('/history?') && kind === 'missing-active') return Promise.resolve(new Response(JSON.stringify({ workflowId: 'flow', history: [active], active: null })))
       if (url.includes('/history?') && kind === 'history-identity') return Promise.resolve(new Response(JSON.stringify({ workflowId: 'other', history: [], active })))

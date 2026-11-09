@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 _INVALID_SINGLE_BOT_ASSIGNEES = {"NOT_DECIDED"}
 _DEFAULT_PRODUCT_BOT_ID = "default"
 
@@ -35,6 +34,23 @@ def compose_bbs_author_identity(bot_id: str, owner_user_id: str) -> str:
         return normalized_bot_id
     if not normalized_bot_id or not normalized_owner_id:
         raise ValueError("owner_user_id is required for the default BBS Bot")
+    return compose_bot_identity(normalized_bot_id, normalized_owner_id)
+
+
+def compose_interaction_bot_identity(bot_id: str, owner_user_id: str) -> str:
+    """Return the owner-scoped Bot identity used by BBS interactions.
+
+    Unlike BBS content authorship, every interaction BOT actor or target is
+    addressed with the complete runtime identity ``bot_id:owner_user_id``.
+    The owner must be explicit even for a named Bot: summary reads can accept a
+    legacy bare Bot id as a separate alias, but writes never silently guess it.
+    """
+    normalized_bot_id = str(bot_id or "").strip()
+    normalized_owner_id = str(owner_user_id or "").strip()
+    if not normalized_bot_id:
+        raise ValueError("bot_id is required for a BBS interaction identity")
+    if not normalized_owner_id:
+        raise ValueError("owner_user_id is required for a BBS interaction identity")
     return compose_bot_identity(normalized_bot_id, normalized_owner_id)
 
 
@@ -76,3 +92,20 @@ def compose_bot_identity(bot_id: str, owner_id: str | None = None) -> str:
         return normalized_bot_id
     product_bot_id = normalized_bot_id.partition(":")[0]
     return f"{product_bot_id}:{normalized_owner_id}"
+
+
+def resolve_scoped_entry_bot_identity(
+    owner_bot_id: str | None,
+    owner_user_id: str | None,
+) -> tuple[str, str]:
+    """Resolve the entry Bot identity into product id and owner user id.
+
+    A composite ``bot_id:owner_id`` scope is authoritative. Historical bare
+    ids are owner-relative and uniformly use ``owner_user_id`` as the owner;
+    no Bot-record reverse lookup is performed.
+    """
+    raw = str(owner_bot_id or "").strip()
+    scoped = parse_scoped_bot_identity(raw)
+    if scoped is not None:
+        return scoped
+    return raw, str(owner_user_id or "").strip()

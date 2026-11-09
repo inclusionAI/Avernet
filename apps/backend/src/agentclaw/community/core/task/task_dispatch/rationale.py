@@ -10,8 +10,8 @@ either a ``DispatchRationale`` or ``None`` (assembly is ``try/except``-safe — 
 Compatibility note:
     * ``join_dropped`` and its historical reason values remain in the trajectory
       schema for readers of old events. Current dispatch never removes candidates
-      through claim-join post-filtering; the filter-disabled visibility marker may
-      still be emitted for trajectory compatibility, but it never affects routing.
+      during rationale assembly; the compatibility marker may still be emitted
+      for trajectory readers, but it never affects routing.
 
 Invariants:
     * ``_build_search_rationale`` is wrapped in ``try/except``: any sub-field

@@ -10,6 +10,7 @@ import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import type { WorkflowSpec } from '../../workflow.js';
 import { AutoHealSaveService } from '../auto-heal-save-service.js';
+import { mockPreparedSpecSave, preparedSaveIdentity } from './auto-heal-prepared-save-fixture.js';
 import * as git from '../clawflows-git-client.js';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
 
@@ -19,8 +20,9 @@ const spec: WorkflowSpec = { id: 'flow', version: '1', title: 'Original', nodes:
 ] };
 const config = { remoteUrl: 'https://invalid.example/repo', username: 'test', email: 'test@example.invalid', token: '' };
 
-describe('AutoHeal database-only save contract', () => {
+describe('AutoHeal DB transaction and policy within prepared save', () => {
   let raw: Database.Database, db: SqliteDatabase, specs: WorkflowSpecRepository, permissions: BotWorkflowPermissionRepository;
+  let publication: ReturnType<typeof mockPreparedSpecSave>;
   const service = () => new AutoHealSaveService(db, specs, null, permissions, config, { name: 'Test', email: 'test@example.invalid' });
   const input = () => ({ workflowId: 'flow', actorId: 'owner', spec: { ...spec, title: 'Edited' } });
   const rows = () => raw.prepare('SELECT * FROM workflow_specs').all();
@@ -33,19 +35,24 @@ describe('AutoHeal database-only save contract', () => {
       gmt_create INTEGER NOT NULL, gmt_modified INTEGER NOT NULL);
       CREATE TABLE workflow_deploy_history (id INTEGER PRIMARY KEY, workflow_id TEXT, pack_id TEXT);`);
     db = new SqliteDatabase(raw); specs = new WorkflowSpecRepository(db); permissions = new BotWorkflowPermissionRepository(db);
+    publication = mockPreparedSpecSave(input => {
+      expect(raw.inTransaction).toBe(false);
+      expect(raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get(input.workflowId)).toEqual({ spec_json: JSON.stringify(input.spec) });
+    });
   });
   afterEach(async () => { vi.restoreAllMocks(); await db.close(); });
   async function seed() {
     await specs.upsert('flow', 'pack', JSON.stringify(spec), 'owner');
     await permissions.upsert({ bot_id: null, bot_owner_id: 'owner', workflow_id: 'flow', can_view: 1, can_execute: 1, can_edit: 1 });
   }
-  it('updates only the draft and returns no invented Git identity', async () => {
+  it('updates the DB draft before the prepared push and returns its exact identity', async () => {
     await seed();
     const clone = vi.spyOn(git, 'cloneClawflows');
     const runGit = vi.spyOn(gitExecution, 'executeGit');
     const operation = vi.spyOn(gitExecution, 'withGitOperation');
     const result = await service().save(input());
-    expect(result).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'pack' });
+    expect(result).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'pack', ...preparedSaveIdentity });
+    expect(publication.push).toHaveBeenCalledOnce();
     const row = await specs.findByWorkflowId('flow');
     expect(row).toMatchObject({ pack_id: 'pack', title: 'Edited', owner_id: 'owner', version: null });
     expect(JSON.parse(row!.spec_json).title).toBe('Edited');
@@ -79,6 +86,7 @@ describe('AutoHeal database-only save contract', () => {
     await expect(service().save(input())).rejects.toThrow('write failure'); expect(rows()).toEqual(before);
     raw.exec('DROP TRIGGER fail_update; CREATE TRIGGER ignore_update BEFORE UPDATE ON workflow_specs BEGIN SELECT RAISE(IGNORE); END');
     await expect(service().save(input())).rejects.toThrow('Workflow update failed'); expect(rows()).toEqual(before);
+    expect(publication.prepare).toHaveBeenCalledTimes(2); expect(publication.push).not.toHaveBeenCalled();
   });
   it.each(['wf', 'saved'])('rejects takeover of deleted DB workflow with real Git %s branch', async branch => {
     const dir = mkdtempSync(join(tmpdir(), 'auto-heal-ownership-'));
@@ -112,7 +120,7 @@ describe('AutoHeal database-only save contract', () => {
     const beforePermissions = raw.prepare('SELECT * FROM bot_workflow_permissions').all();
     await expect(noGit.save({ ...input(), createOnly: true }))
       .rejects.toMatchObject({ status: 503, code: 'CREATE_ONLY_UNAVAILABLE_GIT_OWNERSHIP_UNVERIFIED' });
-    vi.spyOn(git, 'cloneClawflows').mockRejectedValueOnce(new Error('Git unavailable'));
+    vi.spyOn(git, 'initClawflowsReadRepo').mockRejectedValueOnce(new Error('Git unavailable'));
     await expect(service().save({ ...input(), createOnly: true })).rejects.toThrow('Git unavailable');
     expect(rows()).toEqual(beforeSpecs);
     expect(raw.prepare('SELECT * FROM bot_workflow_permissions').all()).toEqual(beforePermissions);
@@ -127,7 +135,7 @@ describe('AutoHeal database-only save contract', () => {
       raw.prepare('INSERT INTO workflow_specs (id, workflow_id, spec_json, gmt_create, gmt_modified) VALUES (99, ?, ?, 0, 0)').run('flow', 'replacement');
       return allowed;
     });
-    await expect(service().save(input())).rejects.toThrow('Workflow update failed');
+    await expect(service().save(input())).rejects.toMatchObject({ status: 409, code: 'DRAFT_CONFLICT' });
     expect(raw.prepare('SELECT id, spec_json FROM workflow_specs').get()).toEqual({ id: 99, spec_json: 'replacement' });
   });
   it('preserves a user-authored content field without fabricating a projection', async () => {

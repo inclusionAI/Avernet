@@ -13,13 +13,18 @@ export function useHostingTabs(
   routines: boolean,
   additionalTabs: Array<{ key: MainTab; label: string; icon: ReactNode }> = [],
   contextKey = '',
+  initialTab?: string,
 ) {
-  const [tab, setTab] = useState<MainTab>('capability');
+  // 深链可指定初始 tab（如 ?tab=resource）；仅接受主 tab 白名单，未知值回落「能力集」。
+  const resolvedInitialTab = (
+    mainTabs.some((item) => item.key === initialTab) ? initialTab : 'capability'
+  ) as MainTab;
+  const [tab, setTab] = useState<MainTab>(resolvedInitialTab);
   const [more, setMore] = useState<MoreConfigTab>();
   useEffect(() => {
-    setTab('capability');
+    setTab(resolvedInitialTab);
     setMore(undefined);
-  }, [id, bot?.ownerId, contextKey]);
+  }, [id, bot?.ownerId, contextKey, resolvedInitialTab]);
   useEffect(() => {
     if (!isOwner && more === 'engine') setMore(undefined);
   }, [isOwner, more]);

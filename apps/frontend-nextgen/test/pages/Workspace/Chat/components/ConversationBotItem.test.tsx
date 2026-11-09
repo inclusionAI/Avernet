@@ -24,6 +24,7 @@ function renderBotItem(
     onToggle?: () => void;
     bot?: Partial<ChatBotView>;
     botSelected?: boolean;
+    createSessionPending?: boolean;
     onOpenBotManagement?: (bot: ChatBotView) => void;
   } = {},
 ) {
@@ -45,6 +46,7 @@ function renderBotItem(
       onSearchSession={noop}
       onCreateSession={noop}
       onSelectSession={noop}
+      createSessionPending={overrides.createSessionPending}
       onLoadMore={noop}
       onToggleFavorite={noop}
       isFavoritePending={() => false}
@@ -139,15 +141,26 @@ describe('ConversationBotItem 操作区', () => {
     expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开时文字为右侧 4 个操作按钮预留 112px，图标不被文字压底', () => {
+  it('展开态收起按钮随操作组显隐,静默态不再常驻让位(2026-11-05 回归修正)', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[112px]');
+    // 收起按钮只在 hover/键盘聚焦/触屏/菜单打开时出现;静默态不预留右侧按钮空间。
+    const column = title?.parentElement as HTMLElement;
+    expect(column).not.toHaveClass('pr-9');
+    expect(column.className).toContain('group-hover:pr-[112px]');
+    const collapse = screen.getByRole('button', { name: '收起会话列表' });
+    const create = screen.getByRole('button', { name: '新建会话' });
+    expect(collapse.parentElement).toBe(create.parentElement);
+    expect(collapse.className).toContain('opacity-0');
+    expect(collapse.className).toContain('group-hover:opacity-100');
+    expect(collapse.className).toContain('group-focus-within:opacity-100');
+    expect(collapse.className).toContain('group-has-[[data-state=open]]:opacity-100');
+    expect(collapse.className).toContain('[@media(hover:none)]:opacity-100');
   });
 
-  it('展开且有「更多操作」入口时让位扩至 pr-[138px]（5 按钮紧凑几何）', () => {
+  it('展开且有「Bot 管理」入口时 hover 让位 5 按钮 138px（紧凑几何）', () => {
     const { container } = renderBotItem({
       expanded: true,
       bot: { spaceId: '101' },
@@ -156,8 +169,8 @@ describe('ConversationBotItem 操作区', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[138px]');
-    // 非钉住态(收起且无筛选/检索)走临时让位变体,菜单打开期间(data-state=open)同样让位,
+    expect((title?.parentElement as HTMLElement).className).toContain('group-hover:pr-[138px]');
+    // 非钉住态(收起且无筛选/检索)走临时让位变体,筛选菜单打开期间(data-state=open)同样让位,
     // 鼠标移出行、菜单仍开时不塌缩。
     const { container: collapsed } = renderBotItem({
       bot: { spaceId: '101' },
@@ -229,6 +242,15 @@ describe('ConversationBotItem 右侧操作组收起按钮', () => {
     // 整行只剩主按钮，无会话操作组。
     expect(container.querySelectorAll('button').length).toBe(1);
     expect(screen.queryByRole('button', { name: '收起会话列表' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationBotItem 新建会话 pending', () => {
+  it('新建会话在途时按钮禁用并切换为 loading 图标', () => {
+    renderBotItem({ bot: { isAgentCodingBot: true }, createSessionPending: true });
+    const createButton = screen.getByRole('button', { name: '新建会话' });
+    expect(createButton).toBeDisabled();
+    expect(createButton.querySelector('.animate-spin')).not.toBeNull();
   });
 });
 
@@ -335,19 +357,17 @@ describe('ConversationBotItem 会话ID检索入口', () => {
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
   });
 
-  it('生效中的检索在收起时仍可见:操作区常驻并给行名称让位', () => {
+  it('生效中的检索在收起时仍可见:🔍 常显并给行名称让位', () => {
     const { container } = renderRow({ sessionKey: 'agent:main:live', expanded: false });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    // 生效中的检索钉住操作区,行名称让位 pr-[86px]。
-    expect(title?.parentElement).toHaveClass('pr-[86px]');
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    expect(actions.className).toContain('opacity-100');
-    // 🔍 按钮激活态主色,标记生效条件。
-    expect(screen.getByRole('button', { name: '会话ID检索' })).toHaveClass('text-primary');
+    // 生效中的检索:🔍 icon 级常显(2026-11-04 显隐重构),行名称仅按激活 icon 让位 pr-9。
+    expect(title?.parentElement).toHaveClass('pr-9');
+    // 🔍 按钮激活态常显 + 品牌蓝标记生效条件。
+    const searchButton = screen.getByRole('button', { name: '会话ID检索' });
+    expect(searchButton).toHaveClass('opacity-100');
+    expect(searchButton).toHaveClass('text-primary');
   });
 
   it('提交检索透传 onSearchSession(已 trim),清空提交传播空串', () => {
@@ -421,48 +441,42 @@ describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', ()
   });
 });
 
-describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () => {
-  it('提供回调且 Bot 有 spaceId:渲染「更多操作」入口', () => {
+describe('ConversationBotItem 「Bot 管理」前置直达（#2990 还原,2026-11-05 收拢一层）', () => {
+  it('提供回调且 Bot 有 spaceId:渲染「跳转至 Bot 管理」入口', () => {
     renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
-    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '跳转至 Bot 管理' })).toBeInTheDocument();
   });
 
-  it('未传回调或缺 spaceId 不渲染入口(有菜单项才显示,#2990 收紧口径)', () => {
+  it('未传回调或缺 spaceId 不渲染入口(有落点才显示,#2990 收紧口径)', () => {
     const { unmount } = renderBotItem({ bot: { spaceId: '101' } });
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '跳转至 Bot 管理' })).not.toBeInTheDocument();
     unmount();
     renderBotItem({ onOpenBotManagement: noop });
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '跳转至 Bot 管理' })).not.toBeInTheDocument();
   });
 
-  it('点击「Bot 管理」触发 onOpenBotManagement(bot) 并关闭菜单', async () => {
+  it('点击「跳转至 Bot 管理」直接触发 onOpenBotManagement(bot)(前置直达,无菜单两层)', async () => {
     const onOpenBotManagement = jest.fn();
     renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement });
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
-    fireEvent.click(screen.getByRole('button', { name: /Bot 管理/ }));
+    fireEvent.click(screen.getByRole('button', { name: '跳转至 Bot 管理' }));
     await waitFor(() => expect(onOpenBotManagement).toHaveBeenCalledTimes(1));
     expect(onOpenBotManagement.mock.calls[0][0]).toMatchObject({ botId: 'bot-1', spaceId: '101' });
-    // 菜单项点击后关闭。
-    expect(screen.queryByRole('button', { name: /Bot 管理/ })).not.toBeInTheDocument();
   });
 
-  it('FAILED 行无回调不渲染「…」(不可用行不出现空菜单)', () => {
+  it('FAILED 行无回调不渲染「跳转至 Bot 管理」(不可用行不出现空入口)', () => {
     renderBotItem({ bot: { status: 'FAILED', spaceId: '101' } });
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '跳转至 Bot 管理' })).not.toBeInTheDocument();
   });
 
-  it('不可用 Bot「…」常驻可见且菜单仅「Bot 管理」(运维直达,会话类入口不渲染)', async () => {
+  it('不可用 Bot「跳转至 Bot 管理」常驻可见(运维直达,会话类入口不渲染)', async () => {
     const onOpenBotManagement = jest.fn();
     const { container } = renderBotItem({
       bot: { status: 'FAILED', spaceId: '101' },
       onOpenBotManagement,
     });
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    // 常驻可见;不随 hover 变化。
-    expect(actions.className).toContain('opacity-100');
-    // 不可用行让位收敛到单按钮几何:10 渐隐区+「…」+右内边距(2026-11-03 紧凑化),不从 hover 变化。
+    // 常驻可见(2026-11-04 显隐重构:常驻下移至 icon 级,容器不整体控制);不随 hover 变化。
+    expect(screen.getByRole('button', { name: '跳转至 Bot 管理' })).toHaveClass('opacity-100');
+    // 不可用行让位收敛到单按钮几何:10 渐隐区+Bot 管理入口+右内边距(2026-11-03 紧凑化),不从 hover 变化。
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
@@ -471,22 +485,23 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
     // 会话类入口不渲染。
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
-    // 菜单内容仅「Bot 管理」一项。
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
-    expect(screen.getByRole('button', { name: /Bot 管理/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Bot 管理/ }));
+    // 前置直达:入口常驻可点,直接点击触发回调(无菜单两层)。
+    fireEvent.click(screen.getByRole('button', { name: '跳转至 Bot 管理' }));
     await waitFor(() => expect(onOpenBotManagement).toHaveBeenCalledTimes(1));
   });
 
-  it('菜单打开期间操作区钉住:strip 含 data-state=open 钉住类(静态类断言,jsdom 不算选择器)', () => {
-    const { container } = renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    expect(actions.className).toContain('group-has-[[data-state=open]]:opacity-100');
+  it('筛选菜单打开期间操作区钉住:icon 级含 data-state=open 钉住类(静态类断言,jsdom 不算选择器)', () => {
+    renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
+    // 显隐下沉 icon 级(2026-11-04):钉住类在每个按钮上,筛选菜单打开期间整组可见、鼠标移出不塌缩。
+    expect(screen.getByRole('button', { name: '跳转至 Bot 管理' }).className).toContain(
+      'group-has-[[data-state=open]]:opacity-100',
+    );
+    expect(screen.getByRole('button', { name: '新建会话' }).className).toContain(
+      'group-has-[[data-state=open]]:opacity-100',
+    );
   });
 
-  it('origin=others 只读视角不渲染「更多操作」入口', () => {
+  it('origin=others 只读视角不渲染「跳转至 Bot 管理」入口', () => {
     render(
       <ConversationBotItem
         bot={{ ...bot, spaceId: '101' }}
@@ -508,8 +523,8 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
         onOpenBotManagement={noop}
       />,
     );
-    // 只读视角检索/筛选保留,「更多操作」不渲染。
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    // 只读视角检索/筛选保留,「跳转至 Bot 管理」不渲染。
+    expect(screen.queryByRole('button', { name: '跳转至 Bot 管理' })).not.toBeInTheDocument();
   });
 });
 
@@ -565,12 +580,17 @@ describe('ConversationBotItem 行徽标', () => {
     expect(label.parentElement).not.toHaveClass('flex-col');
   });
 
-  it('引擎徽章让位优先于名称(2026-11-03 紧凑化):展开钉住时整徽章隐藏', () => {
+  it('展开态徽章静默常显:收起按钮 hover 显隐时不强制隐藏徽章(2026-11-05 回归修正)', () => {
     const { container } = renderBotItem({ expanded: true, bot: { engine: 'openclaw' } });
     const badge = Array.from(container.querySelectorAll('span')).find((el) =>
       el.textContent === 'OpenClaw',
     ) as HTMLElement;
-    expect(badge).toHaveClass('hidden');
+    // 收起按钮不再常驻,徽章静默态保留,仅在 hover/聚焦/菜单打开/触屏时让位。
+    expect(badge).not.toHaveClass('hidden');
+    expect(badge.className).toContain('group-hover:hidden');
+    expect(badge.className).toContain('group-focus-within:hidden');
+    expect(badge.className).toContain('group-has-[[data-state=open]]:hidden');
+    expect(badge.className).toContain('[@media(hover:none)]:hidden');
   });
 
   it('收起态徽章静默常显:仅悬停/聚焦/菜单开/触屏类让位,不强制 hidden', () => {
@@ -586,7 +606,7 @@ describe('ConversationBotItem 行徽标', () => {
   });
 
   it('不可用 Bot 的常驻操作区同样令徽章恒定让位,无操作区行徽章不注入显隐类', () => {
-    // 不可用 + 有「更多操作」(操作区常驻)→ 徽章恒定 hidden。
+    // 不可用 + 有「Bot 管理」入口(操作区常驻)→ 徽章恒定 hidden。
     const { container: unavailable } = renderBotItem({
       bot: { status: 'FAILED', spaceId: '101', engine: 'openclaw' },
       onOpenBotManagement: noop,

@@ -72,6 +72,11 @@ def _profile() -> dict[str, Any]:
             {"capability_id": "", "display_name": "  "},
             "not-a-mapping",
         ],
+        "skills": [
+            {"skill_id": "weekly-report", "display_name": "风太周报"},
+            {"skill_id": "", "display_name": "   "},
+            "not-a-mapping",
+        ],
     }
 
 
@@ -724,6 +729,7 @@ def test_profile_projects_only_public_fields_and_drops_invalid_capabilities(
             {"capability_id": "antv", "display_name": "AntV 可视化图表"},
             {"capability_id": "dima", "display_name": "Dima MCP"},
         ],
+        "skills": [{"skill_id": "weekly-report", "display_name": "风太周报"}],
     }
     assert services[0].profile_calls == [
         {

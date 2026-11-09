@@ -83,16 +83,19 @@ export function useCollaborationSquare(resource: SquareResource) {
         // 画像走 bot-catalog profile 真实端点（CollaborationSquareApiAdapter）；
         // 原 mock fixture 链路已废弃——公开能力列表只有后端画像端点能给出。
         store.setBotProfile(await collaborationSquareBotService.getBotProfile(bot.id));
-      } catch {
-        // 画像/已公开能力详情拉取失败（bot_uuid 不在公开目录、网络异常等）不做目标失效：
+      } catch (error) {
+        // 画像/已公开能力详情拉取失败（bot_uuid 不在公开目录 404、网络异常等）不做目标失效：
         // 卡片保留、申请弹窗保持打开，按「无已公开能力」版式（dmore artboard-003）展示摘要并发起申请。
-        // 失败不弹 toast——404 被映射为 target_invalid，对列表中可见的卡片误报“已取消公开”更糟。
+        // 失败改为在弹窗内提示（mapProfileError 已 cancel httpClient 默认 sonner 投递），不再 toast。
         store.setBotProfile(null);
+        store.setBotProfileError(
+          error instanceof CollaborationSquareError ? error.message : 'Bot 画像加载失败，请稍后重试',
+        );
       } finally {
         store.setDetailLoading(false);
       }
     },
-    [store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
+    [store.setBotProfile, store.setBotProfileError, store.setDetailLoading, store.setSelectedBotId],
   );
 
   const openGroupMembers = useSquareGroupMembers(

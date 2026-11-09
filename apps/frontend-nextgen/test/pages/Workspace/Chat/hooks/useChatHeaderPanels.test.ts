@@ -2,11 +2,23 @@
  * @jest-environment jsdom
  */
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { beforeEach, expect, it, jest } from '@jest/globals';
+
+const mockGetTaskBySession = jest.fn();
+const mockListMyTasks = jest.fn();
+
+jest.mock('@/services/myTask', () => ({
+  getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
+  isEnvelopeFailure: (result?: { code?: number }) => result?.code !== 0,
+  listMyTasks: (...args: unknown[]) => mockListMyTasks(...args),
+  normalizeMyTaskPage: (data: unknown) => ({ items: Array.isArray(data) ? data : [], total: 0, page: 1, pageSize: 10 }),
+}));
 import { sessionHasSidePaneContent, useChatHeaderPanels } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import { beforeEach, expect, it, jest } from '@jest/globals';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
   return {
@@ -39,7 +51,7 @@ function makePanelMessages(): ChatMessage[] {
   return [...makeMessages(), PANEL_MESSAGE] as never;
 }
 
-function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.RefObject<PanelHandle | null> }) {
+function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.RefObject<PanelHandle | null>; userId?: string | null }) {
   const openTab = jest.fn();
   const closePanel = jest.fn();
   const handle = { openTab, closePanel, openPanel: jest.fn(), closePanelForce: jest.fn() } as unknown as PanelHandle;
@@ -51,7 +63,7 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
       messages: overrides.messages ?? makeMessages(),
       panelRef: overrides.panelRef ?? ({ current: handle } as React.RefObject<PanelHandle | null>),
       section: 'managed' as const,
-      userId: null,
+      userId: overrides.userId ?? null,
       botId: 'bot-1',
       toggleFavorite: jest.fn().mockResolvedValue(true),
       favoritePending: jest.fn().mockReturnValue(false),
@@ -65,7 +77,42 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
 beforeEach(() => {
   jest.clearAllMocks();
   useTaskConversationNavigationStore.getState().resetAll();
+  useTaskSidePanelStore.getState().resetAll();
+  useTaskSessionAssociationStore.getState().reset();
+  mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
+  mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
   window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
+});
+
+it('收藏状态未知时禁用星标，后台确认后解除', () => {
+  const { options } = makeOptions({});
+  const { result, rerender } = renderHook(({ session }) => useChatHeaderPanels({ ...options, session }), {
+    initialProps: { session: makeSession({ favorite: undefined }) },
+  });
+  expect(result.current.favorites.disabled).toBe(true);
+  rerender({ session: makeSession({ favorite: false }) });
+  expect(result.current.favorites.disabled).toBe(false);
+});
+
+it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务副屏', async () => {
+  const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
+  mockGetTaskBySession.mockResolvedValue({
+    ok: true,
+    data: [
+      { task_id: 'task-root', owner_user_id: 'u1', node_id: 'node-root', updated_at: null },
+    ],
+  });
+
+  renderHook(() => useChatHeaderPanels(options));
+
+  await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+  expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
+  expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-root',
+    type: 'taskPanel.TaskLoopView',
+  });
+  expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-root');
 });
 
 it('定位历史消息时收起覆盖面板，露出会话中的高亮消息', () => {
@@ -174,6 +221,37 @@ it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即�
   // autoCloseWhenEmpty 弹回等真实关态事件同样同步。
   act(() => result.current.onSidePaneIsOpenChange(false));
   expect(result.current.sidePaneOpen).toBe(false);
+});
+
+it('TaskPanel-only 会话在关闭后 Monitor 仍可点，并用 task tab 快照重开', () => {
+  const { options, openTab, closePanel } = makeOptions({ messages: makeMessages() });
+  useTaskSessionAssociationStore.getState().setActiveSession('sess-1');
+  useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-1', ['task-1']);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('task-1', {
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+    closable: true,
+    params: { taskId: 'task-1' },
+  });
+
+  const { result } = renderHook(() => useChatHeaderPanels(options));
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(1);
+  expect(openTab.mock.calls[0][0]).toMatchObject({
+    id: 'task-task-1',
+    title: '当前任务',
+    type: 'taskPanel.TaskLoopView',
+  });
+
+  act(() => result.current.toggleSidePane());
+  expect(closePanel).toHaveBeenCalledTimes(1);
+  expect(result.current.sidePaneDisabled).toBe(false);
+
+  act(() => result.current.toggleSidePane());
+  expect(openTab).toHaveBeenCalledTimes(2);
 });
 
 it('打开按消息标记幂等重建 tabs：BCS 天气卡（单引号 cardId/type/tab）原样重建 openTab 载荷', () => {

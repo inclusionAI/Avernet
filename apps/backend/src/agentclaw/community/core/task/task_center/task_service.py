@@ -45,6 +45,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_runner.execution_adapters import (
@@ -84,7 +85,7 @@ from agentclaw.community.core.task.task_center.task_recovery import (
     RelayRecoveryStrategy,
     TaskRecoveryCoordinator,
 )
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
+from agentclaw.community.core.task.task_dispatch.task_settings import RELAY_EXECUTION
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 logger = logging.getLogger("task.service")
@@ -114,7 +115,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
         bot_service=None,
         staff_dept: StaffDeptPlugin | None = None,
-        task_auth_gate=None,
         task_search_skill_enabled: bool = False,
         task_settings=None,
         api_base_url: str | None = None,
@@ -142,7 +142,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         self._bot_service = bot_service
         self._staff_dept = staff_dept
         self._api_base_url = api_base_url
-        self._task_auth_gate = task_auth_gate
         self._task_search_skill_enabled = task_search_skill_enabled
         self._task_settings = task_settings
         self._bot_token_provider = bot_token_provider
@@ -152,7 +151,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         self._task_context_service = task_context_service
         self._delivery_intents = delivery_intents
         self._intake_handler = intake_handler
-        # claim_on JOIN 经 self._task_auth_gate 传入 dispatcher(不进签名,保持覆写 seam)。
         self._centralized_adapter = self._build_centralized_adapter(
             bot=bot, bcs=bcs, discover=discover
         )
@@ -257,7 +255,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             discover=discover,
             bcn=self._bcn,
             bcs_identity=self._bcs_identity,
-            auth_gate=self._task_auth_gate,
             task_search_skill_enabled=self._task_search_skill_enabled,
             task_settings=self._task_settings,
             api_base_url=self._api_base_url,
@@ -455,8 +452,7 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                         ),
                     },
                 )
-        else:
-            request = normalize_owner_bot_id(request)
+        request = normalize_owner_bot_id(request)
         requested_orchestration_mode = self._normalize_orchestration_mode(
             request.execution_config.get("orchestration_mode")
         )
@@ -775,18 +771,14 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             return
         await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
-    @staticmethod
-    @staticmethod
-    def _hydrate_root_dashboard_runtime(
-        graph: TaskExecutionGraph, task_id: str
-    ) -> None:
-        task_service_queries._hydrate_root_dashboard_runtime(graph, task_id)
-
     def get_task_context(self, task_id: str) -> TaskContext:
         return task_service_queries.get_task_context(self, task_id)
 
     def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
         return self._graph.get_node_context(task_id, node_id)
+
+    def get_task_nodes_by_session(self, session_id: str) -> list[TaskNodeSessionRef]:
+        return task_service_queries.get_task_nodes_by_session(self, session_id)
 
     def get_task_dashboard(
         self,

@@ -84,12 +84,21 @@ function Fixture() {
     </>
   );
 }
+let codingFixtureCreatePromise: Promise<void> | null = null;
+
 function CodingFixture() {
   const sessions = useConversationSessions(codingOptions);
   const placeholder = useConversationSessionPlaceholder({ ...codingOptions, sessions });
   return (
     <>
       <Button onClick={() => openManagedBotViaRoute('coding:owner', sessions)}>深链进入 Coding</Button>
+      <Button
+        onClick={() => {
+          codingFixtureCreatePromise = sessions.createSession(codingBotView.bot.botId);
+        }}
+      >
+        Coding Bot 新建
+      </Button>
       {placeholder && <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />}
     </>
   );
@@ -242,6 +251,51 @@ it('Coding Bot creation always delegates to AIXCoding and never falls back to th
     title: '新对话',
   });
   expect(botSessionService.createSession).not.toHaveBeenCalled();
+});
+
+it('Coding Bot 新建在途时用鱼骨屏承接，不再短暂显示未选会话空态', async () => {
+  const pendingCreate = deferred<{ ok: true; session: { sessionId: string; title: string } }>();
+  const createSession = jest.fn(() => pendingCreate.promise);
+  extendCapabilities({
+    getCodingBotConversationHost: () => ({
+      status: 'available',
+      value: { Stage: () => null, createSession },
+    }),
+  });
+
+  render(<CodingFixture />);
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 Coding' }));
+  await screen.findByText('Coding Bot 暂无会话');
+
+  act(() => {
+    store.getState().setManagedBotCache(
+      codingBotView.bot.botId,
+      managedViewOf(
+        codingBotView.bot.botId,
+        'all',
+        undefined,
+        firstPageOf([s('Coding 旧会话', codingBotView.bot.botId)], 1),
+      ),
+    );
+  });
+  expect(screen.getByText('请选择一个会话')).toBeInTheDocument();
+
+  codingFixtureCreatePromise = null;
+  fireEvent.click(screen.getByRole('button', { name: 'Coding Bot 新建' }));
+
+  expect(screen.getByRole('status', { name: '加载会话列表' })).toBeInTheDocument();
+  expect(screen.queryByText('请选择一个会话')).not.toBeInTheDocument();
+  expect(screen.queryByText('Bot 暂无会话')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '创建中…' })).not.toBeInTheDocument();
+
+  await act(async () => {
+    pendingCreate.resolve({
+      ok: true,
+      session: { sessionId: 'coding-session', title: '新对话' },
+    });
+    await codingFixtureCreatePromise;
+  });
+  expect(screen.queryByRole('status', { name: '加载会话列表' })).not.toBeInTheDocument();
 });
 
 it('loading does not show old chat or a false empty prompt, then waits for a manual pick', async () => {

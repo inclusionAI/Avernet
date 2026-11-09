@@ -63,9 +63,16 @@ class OpenClawSessionPort(Protocol):
         model: str | None = None,
         token: str | None = None,
     ) -> dict:
-        """Call `sessions.patch` to create a new session and return the raw params dict.
+        """Create using exactly one `sessions.patch` RPC, with no readback.
 
-        Raises `RuntimeError` on gateway error.
+        Return the original request params plus `canonical_session_id` (the
+        acknowledged key) and `resolved_model` (the resolved provider/model ID).
+        Both additions are non-empty strings from the successful response,
+        not inferred from the caller's key or requested model. The core
+        adapter exposes them as `ext_info.openclaw_creation.session_id/model`
+        while retaining the legacy Session id/key/model for direct clients.
+
+        Raises `RuntimeError` on gateway error or an incomplete acknowledgement.
         """
         ...
 

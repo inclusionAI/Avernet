@@ -2,6 +2,7 @@
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
+import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
@@ -29,7 +30,7 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
-  /** 「通用协作能力」能力集只读查看装配（我的/团队 Bot 非空；好友 Bot 为 null，
+  /** 「通用协作能力」能力集只读查看装配（我的/团队空间 Bot 非空；好友 Bot 为 null，
    *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
   capabilitySets: ComposerCapabilitySetsState | null;
 }
@@ -58,7 +59,7 @@ export function useBotSessionFilesFeature(
     ...(stage ? ([stage] as const) : []),
   );
   const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
-  const skillsState = useBotSkills(bot, userId);
+  const skillsState = useBotSkills(bot, userId, false);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
   const senderRef = useRef<SenderRef | null>(null);
@@ -100,7 +101,11 @@ export function useBotSessionFilesFeature(
   }, [upload.removeTask, upload.tasks]);
 
   const handleSelectSkill = useCallback((skillName: string) => {
-    senderRef.current?.insert(`/${skillName} `, 'end');
+    // 选中后的文本插入由命令面板默认替换完成（subConfig.format 定制 `/${name}`，触发
+    // token 被整段替换为 `/task-loop `）。此处不再 insert('end')：它基于受控回流前的
+    // 旧 DOM 追加，会覆盖面板的替换结果，造成 '/s/task-loop' 残留（2026-11-04 实测
+    // 反馈修复）；签名保留供 buildBotSessionCommandItems 的 subConfig.onSelect 调用。
+    void skillName;
     senderRef.current?.focus?.();
   }, []);
 
@@ -143,31 +148,32 @@ export function useBotSessionFilesFeature(
     [files, handleReference],
   );
 
-  const skillItems = useMemo<CommandItem[]>(
-    () =>
-      skillsState.skills.map((s) => ({
+  const onSearchSkills = useCallback(async (query: string): Promise<CommandItem[]> => {
+    const skills = await skillsState.loadSkills();
+    const keyword = query.trim().toLowerCase();
+    return skills.filter((skill) => skill.name.toLowerCase().includes(keyword)).map((s) => ({
         id: `__skill__${s.skillId}`,
         name: s.name,
         description: s.description || (s.active ? '已激活' : '未激活'),
         icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
         data: { skill_id: s.skillId },
-      })),
-    [skillsState.skills],
-  );
+      }));
+  }, [skillsState.loadSkills]);
 
   // /skill /file /clear 命令项装配抽取到 botSessionCommandItems.tsx（纯配置，行为不变）。
   const commandItems = useMemo<CommandItem[]>(
     () =>
       buildBotSessionCommandItems({
         canUseSkills,
-        skillItems,
+        skillItems: [],
+        onSearchSkills,
         onSearchFiles,
         skillsLoading: skillsState.isLoading,
         filesLoading: files.isLoadingList,
         onClear,
         onSelectSkill: handleSelectSkill,
       }),
-    [canUseSkills, skillItems, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [canUseSkills, onSearchSkills, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
   );
 
   const command = useMemo<CommandConfig>(
@@ -193,6 +199,9 @@ export function useBotSessionFilesFeature(
   const closeFileDrawer = useCallback(() => setDrawerOpen(false), []);
   const openUpload = useCallback(() => setUploadOpen(true), []);
 
+  // 资源管理面板 → Bot 完整资源目录：露出/置灰/跨空间切换由独立 Hook 承担。
+  const resourceJump = useBotResourceJump(bot, stage);
+
   const featureNode = (
     <BotSessionFileOverlays
       botId={botId}
@@ -209,6 +218,7 @@ export function useBotSessionFilesFeature(
       onOpenUpload={openUpload}
       onAddToSession={addReadyUploadsToSession}
       onReference={handleReference}
+      resourceJump={resourceJump}
     />
   );
 
