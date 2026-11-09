@@ -88,3 +88,16 @@ async fn sqlite_accepts_maximum_snapshot_but_refuses_non_provider_principal() {
     assert!(c.bot_repo.initialize_provider_authority("bot", init).await.is_err());
     assert_eq!(count(&c, "SELECT COUNT(*) AS n FROM edge_grants").await, 0);
 }
+
+#[tokio::test]
+async fn sqlite_case_and_accent_distinct_identities_match_mysql_and_memory() {
+    let c = fixture().await;
+    c.db.execute(DbStatement::with_params(
+        "INSERT INTO bcs_bots (bot_uuid,env,actor_kind,name) VALUES ('human_bob',?,'human','Original Bob')",
+        vec![bcs_config::resolve_env_str().into()])).await.unwrap();
+    c.bot_repo.initialize_provider_authority("bot", initialization(&["Carol", "carol", "Bob", "Jose", "José"])).await.unwrap();
+    for user in ["Carol", "carol", "Bob", "Jose", "José"] {
+        assert_eq!(c.authority_store.role(&format!("human_{user}"), "bot").await.unwrap(), Some(BotAccessRelation::Manager));
+    }
+    assert_eq!(c.authority_store.role("human_bob", "bot").await.unwrap(), None);
+}

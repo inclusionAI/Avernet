@@ -344,7 +344,16 @@ initial manager Human actors, manager edges and the Provider `initialize` audit
 snapshot together. An initialized Bot never reapplies the snapshot. Ordinary
 Provider Bot/binding creation retains its previous transaction boundary; A2A
 includes managers in its whole-registration composite. Human-token registration
-must supply an empty initial-manager list. No schema or runtime permission change.
+must supply an empty initial-manager list. No runtime permission-policy change.
+MySQL migration 043 aligns the actor registry and active identity-reference
+keys/predicates to utf8mb4_bin, so distinct principals do not alias grants, runtime
+profiles, group/session membership, routing or actor-scoped content. The complete
+32-column/23-table inventory and maintenance requirements are in the review-followup spec. SQLite and Memory already compare these IDs byte-exactly. No lowercasing,
+identity remapping or historical migration rewrite is allowed. Apply with writers
+stopped before multi-user admission; retain the collation on application rollback.
+The native MySQL manager test drives the full migration chain, retained-row upgrade,
+case/accent-distinct and existing-Human cases, ordinary partial initialization and
+A2A whole-registration failure rollback/retry.
 
 The input is bounded to 101 entries (100 initial managers). SQL adds five steps
 inside the existing transaction for a nonempty set: one batched Human insert,

@@ -422,7 +422,7 @@ impl ProviderManagementService for ProviderManagement {
                     webhook_url: command.webhook_url,
                     bot_name: command.name,
                     summary: command.summary,
-                    owners: command.owners,
+                    owners: vec![owner.clone()],
                     provider_bot_ref: command.provider_bot_ref,
                     domains: command.domains,
                     skills: command.skills,

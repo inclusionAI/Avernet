@@ -67,13 +67,13 @@ async fn provider_initializes_first_owner_and_remaining_managers() {
 #[tokio::test]
 async fn normalizes_duplicates_and_audits_provider_snapshot() {
     let f = Fixture::new().await;
-    let result = f.management.register_provider_bot(f.command(&[" alice ", " bob ", "bob", "alice", "Carol", "carol"])).await.unwrap();
+    let result = f.management.register_provider_bot(f.command(&[" alice ", " bob ", "bob", "alice", "Carol", "carol", "Jose", "José"])).await.unwrap();
     let state = f.repo.authority_state().read().await;
     let audit = state.audit.iter().find(|a| a.bot_id == result.bot_uuid && a.action == "initialize").unwrap();
     assert_eq!(audit.actor_kind, "provider");
     assert_eq!(audit.actor_id, format!("provider_{}", f.provider_id));
     let snapshot: serde_json::Value = serde_json::from_str(&audit.after_state).unwrap();
-    assert_eq!(snapshot["managers"], serde_json::json!(["human_bob", "human_Carol", "human_carol"]));
+    assert_eq!(snapshot["managers"], serde_json::json!(["human_bob", "human_Carol", "human_carol", "human_Jose", "human_José"]));
 }
 
 #[tokio::test]

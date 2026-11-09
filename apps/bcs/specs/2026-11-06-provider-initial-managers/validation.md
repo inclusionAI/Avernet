@@ -1,5 +1,8 @@
 # Validation — Provider initial managers
 
+The results below describe the original implementation. For the subsequent code
+review fixes, MySQL migration 043 and full Singlebox run, see `review-followup.md`.
+
 ## Executed
 
 - Red test: `bcs-bot::provider_initial_managers` initially failed with the

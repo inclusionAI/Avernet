@@ -2,6 +2,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 #[path = "../../../test-support/authority_mysql_chain.rs"]
 mod mysql_chain;
+#[path = "provider_initial_managers_mysql/registration.rs"]
+mod registration;
 use bcs_bot_store::PersistentBotRepo;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement};
 use bcs_service_api::{port::repo::{BotRepoPort, BotAuthorityRepoPort}, types::bot_authority::{
@@ -52,5 +54,29 @@ async fn provider_initial_managers_mysql_full_chain() {
     db.execute(DbStatement::new("ALTER TABLE edge_grants DROP CHECK reject_initial_manager")).await.unwrap();
     repo.initialize_provider_authority("fail-bot", init(vec!["rollback-manager".into()], "failure-init")).await.unwrap();
     assert_eq!(authority.role("human_rollback-manager", "fail-bot").await.unwrap(), Some(BotAccessRelation::Manager));
+    registration::retained_upgrade(db.as_ref()).await;
+    assert_eq!(authority.role("human_alice", "batch-bot").await.unwrap(), Some(BotAccessRelation::Owner));
+    assert_eq!(authority.role("human_manager-1", "batch-bot").await.unwrap(), Some(BotAccessRelation::Manager));
+    assert_eq!(authority.role("human_manager-0", "batch-bot").await.unwrap(), None);
+    // The identity contract is byte-exact, including under default MySQL collation.
+    for (index, managers) in [vec!["Carol", "carol"], vec!["Bob"], vec!["Jose", "José"]].into_iter().enumerate() {
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind,created_by) VALUES (?, ?, ?, 'bot', 'alice')",
+            vec![format!("case-bot-{index}").into(), format!("Case Bot {index}").into(), env.clone().into()])).await.unwrap();
+        if index == 1 {
+            db.execute(DbStatement::with_params(
+                "INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_bob','Original Bob',?,'human')",
+                vec![env.clone().into()])).await.unwrap();
+        }
+        let bot = format!("case-bot-{index}");
+        repo.initialize_provider_authority(&bot, init(managers.iter().map(|id| (*id).into()).collect(), &format!("case-init-{index}")))
+            .await.expect("case/accent-distinct managers must not collide");
+        for user in managers {
+            assert_eq!(authority.role(&format!("human_{user}"), &bot).await.unwrap(), Some(BotAccessRelation::Manager));
+        }
+    }
+    assert_eq!(authority.role("human_bob", "case-bot-1").await.unwrap(), None);
+    registration::verify(db.clone(), &env).await;
+    registration::distinct_runtime_profiles_and_memberships(db, &env).await;
     database.close().await;
 }

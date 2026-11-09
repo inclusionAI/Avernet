@@ -55,8 +55,11 @@ pub struct RegisterProviderBotParams {
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
-    /// Registration snapshot: first user is owner, remaining users are initial managers.
-    /// Requires 1..=101 raw user IDs; replay never synchronizes existing authority.
+    /// Ordinary ProviderBotCoreService identity registration accepts exactly one
+    /// owner; it does NOT initialize authority and rejects multi-user snapshots.
+    /// ProviderManagement splits its public snapshot before calling that Core.
+    /// A2aProviderRegistrationCoreService instead consumes the entire 1..=101
+    /// snapshot in its atomic identity/Card/authority composite.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     pub domains: Vec<String>,
@@ -328,6 +331,9 @@ pub trait ProviderBotCoreService: Send + Sync {
             request_id: None,
         })
     }
+    /// Create/replay identity and delivery metadata only. Requires exactly one
+    /// `params.owners` entry; use ProviderManagement for owner/manager initialization.
+    /// Multi-user input is InvalidOperation before any Bot writes, never ignored.
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,

@@ -175,6 +175,14 @@ impl ProviderCore {
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         let provider_bot_ref = identity.provider_bot_ref;
         let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
+        // This Core creates identity/delivery metadata, not authority. The
+        // application must split its owner/manager snapshot before calling it.
+        if owners.len() != 1 {
+            return Err(ServiceError::InvalidOperation {
+                message: "identity registration requires exactly one owner; use ProviderManagement for initial managers".into(),
+                request_id: None,
+            });
+        }
         let (owner, _) = bcs_service_api::types::bot_authority::normalize_provider_owners(&owners)?;
         let owner = owner.as_str();
         if let Some(url) = webhook_url.as_deref() {

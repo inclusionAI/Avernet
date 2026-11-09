@@ -19,7 +19,10 @@ webhook_url are rejected. Provider/ref, a nonempty `owners` initialization snaps
 and existing admission rules remain required. The first user becomes owner; the
 remaining distinct users become initial managers (1–101 raw input entries, trimmed
 and validated before Card fetch). This extends the Provider ID registration
-contract; the separate public v0.1 registration retains its single-owner policy. Provider Admin Bearer is authenticated before external
+contract; the separate public v0.1 registration retains its single-owner policy.
+Identity comparison is byte-exact, including case/accent distinctions. MySQL
+requires migration 043 for actor-key uniqueness before accepting these snapshots;
+SQLite and Memory already have the required semantics. Provider Admin Bearer is authenticated before external
 access. Core repeats Provider/credential/admission checks before atomic creation.
 
 A2A Bot names always equal Card.name, including the legacy registration entry.

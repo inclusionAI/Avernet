@@ -141,6 +141,14 @@ validated and deduplicated without changing the first owner. Blank IDs,
 `human_`-prefixed actor IDs, control characters and IDs over 128 UTF-8 bytes
 are rejected before Bot creation. The owner is excluded from managers.
 
+User IDs are case- and accent-sensitive: `Carol`/`carol` and `Jose`/`José`
+are separate principals, never aliases. MySQL deployments must apply migration
+`043_actor_identity_collation.sql` before accepting these snapshots. It aligns
+`bcs_bots.bot_uuid` and active actor-reference keys/predicates (including grants,
+runtime profiles and group/session memberships) with the byte-exact SQLite/Memory
+and authority contract. Stop writers for the complete migration. Preserve this migration on application rollback once
+case/accent-distinct IDs have been admitted; do not fold or merge stored identities.
+
 Provider Admin Bearer authorizes this initial identity declaration. Manager
 Human actors are created when absent, but tombstoned/non-Human identities fail
 closed. Owner/version, manager actors/edges and the Provider-attributed

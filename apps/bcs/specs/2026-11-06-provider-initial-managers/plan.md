@@ -4,7 +4,7 @@
 
 **Goal:** Interpret Provider registration `owners` as one owner followed by initial managers.
 
-**Architecture:** Preserve Provider authentication and existing manager command restrictions. Add a Provider-only authority initialization operation to Registry Core/Repo; commit initial manager Human actors, edges, owner/version and audit in the same transaction/staged memory publication. Existing initialized bots never synchronize managers on replay. Extend the existing A2A atomic registration payload with initial managers; Human-token registration supplies an empty list. No schema migration.
+**Architecture:** Preserve Provider authentication and existing manager command restrictions. Add a Provider-only authority initialization operation to Registry Core/Repo; commit initial manager Human actors, edges, owner/version and audit in the same transaction/staged memory publication. Existing initialized bots never synchronize managers on replay. Extend the existing A2A atomic registration payload with initial managers; Human-token registration supplies an empty list. The review follow-up adds MySQL migration 043 to align actor unique keys with the byte-exact identity contract; see `review-followup.md`.
 
 **Tech Stack:** Rust, Tokio, SQL plugin transactions (SQLite/MySQL), shared MemoryBotRepo.
 
