@@ -18,10 +18,16 @@ interface Props {
   bot: BotDomain;
   children: ReactNode;
   onPublicationChanged?: () => Promise<void>;
+  onPublicationGateBlocked?: (bot: BotDomain) => void;
 }
 
 /** 状态下拉直接提供当前版本可执行的操作，确认后调用原生命周期接口。 */
-export function BotStatusPublicationMenu({ bot, children, onPublicationChanged }: Props) {
+export function BotStatusPublicationMenu({
+  bot,
+  children,
+  onPublicationChanged,
+  onPublicationGateBlocked,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState<{ item: ServicePublication; action: PublicationMenuAction }>();
   const closeTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -34,7 +40,12 @@ export function BotStatusPublicationMenu({ bot, children, onPublicationChanged }
   useEffect(() => () => clearTimeout(closeTimer.current), []);
   const publication = publicationManagementAvailability(bot);
   const enabled = bot.serviceMode === 'service' && publication.visible && Boolean(onPublicationChanged);
-  const menu = useBotPublicationMenu(bot, enabled && open, onPublicationChanged);
+  const menu = useBotPublicationMenu(
+    bot,
+    enabled && open,
+    onPublicationChanged,
+    onPublicationGateBlocked,
+  );
   if (!enabled) return <>{children}</>;
 
   const disabledReason =
