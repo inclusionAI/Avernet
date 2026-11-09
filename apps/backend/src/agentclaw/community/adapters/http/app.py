@@ -23,8 +23,6 @@ the worker's injector (``bootstrap`` → ``startup`` → yield → ``shutdown`` 
 components that own it, and ``app.state.injector`` is the single injector handle.
 """
 import asyncio
-import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -38,6 +36,7 @@ from agentclaw.community.adapters.http.space_knowledge.registration import mount
 # fork.
 from agentclaw.community.adapters.http.boot import (
     BootMode,
+    install_openclaw_config_path,
     install_worker_runtime_guard,
     require_worker_injector,
 )
@@ -69,30 +68,9 @@ register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, bef
 _boot_mode = BootMode.detect()
 # ──────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# Pre-import side effects: AGENTCLAW_CONFIG_PATH + OpenClaw DB config
-# =============================================================================
-def _set_openclaw_config_path():
-    """Set AGENTCLAW_CONFIG_PATH env var so OpenClaw can find application.yaml."""
-    try:
-        from pathlib import Path
-        # B11: configs live in the community subtree (agentclaw/community/configs);
-        # a deploy's assembled runtime `configs/` (cwd) holds them too. This file is
-        # at agentclaw/community/adapters/http/app.py, so parents[2] is
-        # agentclaw/community.
-        possible_config_dirs = [
-            Path.cwd() / "configs",
-            Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
-        ]
-        for config_dir in possible_config_dirs:
-            if config_dir.exists() and (config_dir / "application.yaml").exists():
-                os.environ["AGENTCLAW_CONFIG_PATH"] = str(config_dir)
-                logging.info(f"Set AGENTCLAW_CONFIG_PATH to {config_dir}")
-                break
-    except Exception as e:
-        logging.warning(f"Could not set AGENTCLAW_CONFIG_PATH: {e}")
-
-_set_openclaw_config_path()  # noqa: FLA010 — composition root, must run at import time before OpenClaw imports below read AGENTCLAW_CONFIG_PATH
+# OpenClaw reads its configuration path during the router imports below, so
+# this pre-import bootstrap must run before them.
+install_openclaw_config_path()  # noqa: FLA010 — composition root, must run at import time before OpenClaw imports below read AGENTCLAW_CONFIG_PATH
 
 # =============================================================================
 # Router imports (post-DI-bootstrap)
@@ -162,6 +140,7 @@ from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
+from agentclaw.community.adapters.http.service_bot.router_eval import router as service_bot_eval_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
@@ -958,6 +937,7 @@ app.include_router(bot_dormant_internal_router)
 mount_space_routers(app)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
+app.include_router(service_bot_eval_router)
 app.include_router(service_bot_file_count_router)
 app.include_router(bot_collaborator_router)
 app.include_router(skill_scan.router)

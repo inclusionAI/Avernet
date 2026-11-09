@@ -55,6 +55,9 @@ def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.service_bot_eval import (
+        TestServiceBotEvalModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.bot_manager_sync import (
         TestBotManagerSyncModule,
     )
@@ -84,6 +87,7 @@ def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
         TestApprovalWorkflowModule(),
         TestStaffDeptModule(),
         TestBotPublishApprovalModule(),
+        TestServiceBotEvalModule(),
         # Singlebox uses the same real delivery stack as community.
         *([TestBotManagerSyncModule()] if manager_sync_fake else []),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
@@ -353,6 +357,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.bot_publish_approval import (
             CommunityBotPublishApprovalModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.service_bot_eval import (
+            CommunityServiceBotEvalModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
@@ -398,6 +405,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityApprovalWorkflowModule(),
             CommunityStaffDeptModule(),
             CommunityBotPublishApprovalModule(),
+            CommunityServiceBotEvalModule(),
             # Notify sender — no-op (no DingTalk in community; B11 Phase A).
             CommunityNotifyModule(),
             # 评测环境 Prod 绑定。

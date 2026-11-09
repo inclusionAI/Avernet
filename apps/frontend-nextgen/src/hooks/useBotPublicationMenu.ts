@@ -1,6 +1,7 @@
 import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
+import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -41,7 +42,12 @@ function rowPublication(bot: BotDomain, items: ServicePublication[]) {
 }
 
 /** 仅打开菜单时获取生命周期；确认前再次核对可用操作，避免使用过期状态。 */
-export function useBotPublicationMenu(bot: BotDomain, open: boolean, onChanged?: () => Promise<void>) {
+export function useBotPublicationMenu(
+  bot: BotDomain,
+  open: boolean,
+  onChanged?: () => Promise<void>,
+  onPublicationGateBlocked?: (bot: BotDomain) => void,
+) {
   const [items, setItems] = useState<ServicePublication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -88,7 +94,14 @@ export function useBotPublicationMenu(bot: BotDomain, open: boolean, onChanged?:
       if (current?.publicationId !== item.publicationId || !current.availableActions.includes(action)) {
         throw new Error('发布状态已更新，请重新打开状态菜单后操作。');
       }
-      if (action === 'publish_staging') Tracert.click(Points.botWorkshop.publishPre, { bot_id: bot.id });
+      if (action === 'publish_staging') {
+        const gate = await serviceBotEvalService.precheck(bot.id, String(item.version), bot.ownerId);
+        if (!gate.allowed) {
+          onPublicationGateBlocked?.(bot);
+          return false;
+        }
+        Tracert.click(Points.botWorkshop.publishPre, { bot_id: bot.id });
+      }
       if (action === 'publish_online') Tracert.click(Points.botWorkshop.publishOnline, { bot_id: bot.id });
       switch (action) {
         case 'publish_staging':
