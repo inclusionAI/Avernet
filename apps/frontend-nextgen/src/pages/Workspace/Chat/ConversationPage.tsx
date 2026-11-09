@@ -4,7 +4,7 @@
 // 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
 import { getCapabilities } from '@/capabilities';
 import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
-import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
+import { ConversationTargetPlaceholder } from './components/ConversationTargetPlaceholder';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { sortSpacesBySidebarOrder } from '@/domain/spaceContext';
@@ -268,9 +268,7 @@ export default function ConversationPage(): JSX.Element {
             // 其他加载/失败/筛选空态继续由宿主占位，不启动消息 Runtime。
             <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
           ) : selectedBotPending ? (
-            <section aria-label="加载 Bot 会话" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-              <ChatMessageSkeleton ariaLabel="加载 Bot 会话" />
-            </section>
+            <ConversationTargetPlaceholder directory={directory} />
           ) : (
             <StandardConversationStageContainer
               bot={interactiveBot}

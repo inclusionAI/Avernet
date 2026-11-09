@@ -20,7 +20,7 @@ export function isManagedConversationSection(
 }
 
 export interface ConversationRouteState {
-  /** 缺省表示尚未选择 Bot;选中后由 section + botId 区分管理 / 团队 / 好友 Bot。 */
+  /** 缺省表示尚未选择 Bot。入向兼容纯 bot_id，目录唯一匹配后规范为 botId；选中由 section + botId 区分。 */
   botId?: string;
   /** 缺省表示 section 尚未解析,由 Hook 的目录匹配推导;规范 URL 必须写出。 */
   section?: ConversationBotSection;
