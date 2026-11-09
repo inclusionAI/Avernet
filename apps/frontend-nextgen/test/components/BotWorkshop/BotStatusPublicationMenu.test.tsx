@@ -4,6 +4,7 @@ import { BotStatusPublicationMenu } from '@/components/BotWorkshop/BotCard/BotSt
 import type { ServicePublication } from '@/domain/botEditor';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { toast } from 'sonner';
@@ -19,6 +20,9 @@ jest.mock('@/services/botWorkshop/botEditorService', () => ({
   },
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/services/botWorkshop/serviceBotEvalService', () => ({
+  serviceBotEvalService: { precheck: jest.fn() },
+}));
 const bot = mapBotDto({
   bot_id: 'bot-1',
   card_id: 'bot-1:17',
@@ -40,9 +44,11 @@ const item: ServicePublication = {
   updatedAt: '',
 };
 const load = botEditorService.listLifecycle as jest.Mock;
+const precheck = serviceBotEvalService.precheck as jest.Mock;
 beforeEach(() => {
   jest.clearAllMocks();
   load.mockResolvedValue([item]);
+  precheck.mockResolvedValue({ gate_status: 'SKIPPED', gate_result: 'PASS', allowed: true });
 });
 function setup(currentBot = bot) {
   const refresh = jest.fn().mockResolvedValue(undefined);
@@ -217,7 +223,39 @@ test('V3 草稿行仅展示 V3 的预发操作', async () => {
   fireEvent.click(screen.getByRole('button', { name: '发布到预发' }));
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '发布到预发' }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  expect(precheck).toHaveBeenCalledWith(bot.id, '3', bot.ownerId);
   expect(botEditorService.advanceLifecycle).toHaveBeenCalledWith(bot.id, 'prestable', bot.ownerId);
+});
+
+test('评测门禁未通过时拦截预发推进并引导评测', async () => {
+  const blocked = jest.fn();
+  const refresh = jest.fn().mockResolvedValue(undefined);
+  const draftItem = {
+    ...item,
+    publicationId: 18,
+    cardId: 'bot-1:18',
+    version: 3,
+    status: 'draft',
+    availableActions: ['publish_staging'],
+  } as ServicePublication;
+  load.mockResolvedValue([draftItem]);
+  precheck.mockResolvedValue({ gate_status: 'BLOCKED', gate_result: 'FAIL', allowed: false });
+  render(
+    <BotStatusPublicationMenu
+      bot={{ ...bot, cardId: 'bot-1:18', publicationVersion: 3, lifecycle: 'draft' }}
+      onPublicationChanged={refresh}
+      onPublicationGateBlocked={blocked}
+    >
+      草稿
+    </BotStatusPublicationMenu>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '服务 Bot 发布状态' }));
+  fireEvent.click(await screen.findByRole('button', { name: '发布到预发' }));
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '发布到预发' }));
+  await waitFor(() => expect(precheck).toHaveBeenCalledWith(bot.id, '3', bot.ownerId));
+  expect(blocked).toHaveBeenCalledWith(expect.objectContaining({ id: bot.id, publicationVersion: 3 }));
+  expect(botEditorService.advanceLifecycle).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
 });
 
 test('当前版本没有操作时，不展示其他版本的操作', async () => {

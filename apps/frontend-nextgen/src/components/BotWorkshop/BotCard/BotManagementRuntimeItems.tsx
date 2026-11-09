@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, ClipboardCheck, History } from 'lucide-react';
 import {
   canRestartFailedServiceBot,
   botDeleteDisabledReason,
@@ -16,6 +16,8 @@ interface BotManagementRuntimeItemsProps {
   onClose: () => void;
   onConfirm: (action: BotCardManagementAction) => void;
   onManagePublication?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
+  onOpenEvalHistory?: (bot: BotDomain) => void;
 }
 
 export function BotManagementRuntimeItems({
@@ -24,6 +26,8 @@ export function BotManagementRuntimeItems({
   onClose,
   onConfirm,
   onManagePublication,
+  onOpenEvaluation,
+  onOpenEvalHistory,
 }: BotManagementRuntimeItemsProps) {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
@@ -83,6 +87,34 @@ export function BotManagementRuntimeItems({
               ) : (
                 <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>
               )}
+            </Button>
+          ) : null}
+          {isServiceBot && bot.lifecycle === 'draft' && bot.evalGateVisible === true && onOpenEvaluation ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={<ClipboardCheck className="size-4" />}
+              onClick={() => {
+                onClose();
+                onOpenEvaluation(bot);
+              }}
+            >
+              发起评测
+            </Button>
+          ) : null}
+          {isServiceBot && onOpenEvalHistory ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={<History className="size-4" />}
+              onClick={() => {
+                onClose();
+                onOpenEvalHistory(bot);
+              }}
+            >
+              历史评测记录
             </Button>
           ) : null}
           {restartUnsupported || !isServiceBot || restartDeclared ? (
