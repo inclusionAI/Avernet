@@ -12,7 +12,7 @@ use bcs_test_support::{NoopCollaborationRuntimeService, NoopMessageFlowService};
 
 #[derive(Default)]
 struct RecordingFlow {
-    calls: Mutex<Vec<(String, Vec<String>, String, bool)>>,
+    calls: Mutex<Vec<(String, String, bool)>>,
     sessions: Option<Arc<MemorySessionRepo>>,
     fail: bool,
 }
@@ -26,9 +26,9 @@ impl MessageFlowService for RecordingFlow {
     async fn register_task_run_alias(&self, task_id: &str, run_id: &str, bot_id: &str) -> ServiceResult<TaskRunAliasRegistration> { NoopMessageFlowService.register_task_run_alias(task_id, run_id, bot_id).await }
     async fn handle_task_dispatch(&self, cmd: TaskDispatchCommand) -> ServiceResult<TaskDispatchOutcome> { NoopMessageFlowService.handle_task_dispatch(cmd).await }
     async fn handle_task_complete(&self, cmd: TaskCompleteCommand) -> ServiceResult<TaskCompleteOutcome> { NoopMessageFlowService.handle_task_complete(cmd).await }
-    async fn cancel_session_deliveries(&self, session_id: &str, bot_ids: &[String], reason: &str) -> ServiceResult<()> {
+    async fn cancel_session_deliveries(&self, session_id: &str, reason: &str) -> ServiceResult<()> {
         let still_present = match &self.sessions { Some(repo) => repo.get(session_id).await.is_some(), None => false };
-        self.calls.lock().unwrap().push((session_id.into(), bot_ids.to_vec(), reason.into(), still_present));
+        self.calls.lock().unwrap().push((session_id.into(), reason.into(), still_present));
         if self.fail { return Err(ServiceError::InternalError("injected cleanup failure".into())); }
         Ok(())
     }
@@ -71,10 +71,8 @@ async fn delete_cancels_the_session_queue_before_removing_the_session() {
     assert!(service.delete(&session_id).await.unwrap());
     let calls = flow.calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 1);
-    let (id, mut bots, reason, still_present) = calls[0].clone();
-    bots.sort();
+    let (id, reason, still_present) = calls[0].clone();
     assert_eq!(id, session_id);
-    assert_eq!(bots, vec!["bot-a".to_string(), "bot-b".to_string()]);
     assert_eq!(reason, "session_deleted");
     assert!(still_present, "cleanup runs while the Session can still be retried");
 }

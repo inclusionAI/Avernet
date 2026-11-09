@@ -71,7 +71,7 @@ async fn deleting_a_session_settles_its_lane() {
     let queued = s.assign("dddddddd000000000000000000000000").await;
     // Cleanup runs before the Session row is removed; the marker alone must
     // keep the cancelled task's notice out of the still-present Session.
-    bounded(s.f.flow.cancel_session_deliveries(SESSION, &["bot-observer".into(), "bot-unrelated".into()], "session_deleted")).await
+    bounded(s.f.flow.cancel_session_deliveries(SESSION, "session_deleted")).await
         .expect("cleanup succeeds");
     assert_eq!(s.row(&queued.delivery_id).await.state.status, Status::Cancelled, "never-sent rows are cancelled");
     let cancelling = s.row(&started.delivery_id).await;
@@ -79,5 +79,5 @@ async fn deleting_a_session_settles_its_lane() {
     assert_eq!(cancelling.cancel_reason.as_deref(), Some("session_deleted"));
     assert_eq!(s.result_legs().await, 0);
     // Idempotent: a second sweep finds nothing left to change.
-    bounded(s.f.flow.cancel_session_deliveries(SESSION, &["bot-observer".into()], "session_deleted")).await.unwrap();
+    bounded(s.f.flow.cancel_session_deliveries(SESSION, "session_deleted")).await.unwrap();
 }

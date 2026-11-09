@@ -199,12 +199,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
-        // Lane keys of the queue must be read before the Session row is gone.
-        let bot_ids: Vec<String> = match &self.message_flow {
-            Some(_) => self.inner.get(session_id).await?
-                .map(|session| session.participants.into_iter().map(|p| p.bot_uuid).collect())
-                .unwrap_or_default(),
-            None => Vec::new(),
+        // Only an existing Session has a queue to settle.
+        let exists = match &self.message_flow {
+            Some(_) => self.inner.get(session_id).await?.is_some(),
+            None => false,
         };
         self.collaboration_runtime
             .cancel_session_runs(session_id, "session_deleted")
@@ -215,10 +213,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                 )))
             })?;
         // Settle the queue BEFORE removing the Session: a cleanup failure
-        // must fail the delete while the Session (and its lane keys) still
-        // exist, so retrying the delete retries the cleanup.
-        if let (false, Some(flow)) = (bot_ids.is_empty(), &self.message_flow) {
-            flow.cancel_session_deliveries(session_id, &bot_ids, "session_deleted").await
+        // must fail the delete while the Session still exists, so retrying
+        // the delete retries the cleanup.
+        if let (true, Some(flow)) = (exists, &self.message_flow) {
+            flow.cancel_session_deliveries(session_id, "session_deleted").await
                 .map_err(|error| SessionUseCaseError::Internal(ServiceError::InternalError(format!(
                     "Failed to cancel queued deliveries for deleted session '{session_id}': {error}"
                 ))))?;

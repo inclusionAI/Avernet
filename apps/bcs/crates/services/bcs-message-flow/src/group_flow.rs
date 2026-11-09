@@ -682,10 +682,9 @@ impl MessageFlowService for BcsMessageFlow {
     async fn cancel_session_deliveries(
         &self,
         session_id: &str,
-        bot_ids: &[String],
         reason: &str,
     ) -> ServiceResult<()> {
-        crate::session_delivery_cleanup::cancel(self, session_id, bot_ids, reason).await
+        crate::session_delivery_cleanup::cancel(self, session_id, reason).await
     }
 
     async fn resolve_chat_abort_scope(

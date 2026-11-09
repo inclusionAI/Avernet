@@ -37,6 +37,10 @@ impl ManagedMessageDeliveryService for Racing {
 }
 
 async fn queued(races: usize) -> (Racing, PersistedMessageDelivery) {
+    queued_for("bot", races).await
+}
+
+async fn queued_for(bot: &str, races: usize) -> (Racing, PersistedMessageDelivery) {
     let inner = Arc::new(ManagedMessageDelivery::new(Arc::new(bcs_message_store::MemoryMessageRepo::new())));
     let row = inner.admit(AdmitMessageDeliveries {
         display_message: None, message_id: "m".into(), flow_kind: DeliveryFlowKind::Group, now_ms: 1,
@@ -45,7 +49,7 @@ async fn queued(races: usize) -> (Racing, PersistedMessageDelivery) {
             group_id: "g".into(), session_id: "s".into(), sender_id: "human".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: serde_json::json!({"text": "m"}), client_msg_id: Some("m".into()),
             owner_bot_id: None, created_at: 1, run_id: String::new() },
-        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind: DeliveryType::Send,
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send,
             max_queued: 10, semantic_projection_json: serde_json::json!({"version": 1}), run_id: None }],
     }).await.unwrap().deliveries.remove(0);
     (Racing { inner, races: AtomicUsize::new(races) }, row)
@@ -58,14 +62,24 @@ async fn status(service: &Racing, row: &PersistedMessageDelivery) -> Status {
 #[tokio::test]
 async fn a_lost_version_race_is_reloaded_and_retried() {
     let (service, row) = queued(2).await;
-    cancel_lanes(&service, "s", &["bot".into()], "session_deleted").await.unwrap();
+    cancel_session(&service, "s", "session_deleted").await.unwrap();
     assert_eq!(status(&service, &row).await, Status::Cancelled);
 }
 
 #[tokio::test]
 async fn a_row_that_stays_active_fails_the_cleanup() {
     let (service, row) = queued(CANCEL_ATTEMPTS).await;
-    let error = cancel_lanes(&service, "s", &["bot".into()], "session_deleted").await.unwrap_err();
+    let error = cancel_session(&service, "s", "session_deleted").await.unwrap_err();
     assert!(error.to_string().contains("1 delivery cancellation(s) failed"), "{error}");
     assert_eq!(status(&service, &row).await, Status::Queued, "the Session must not be deleted over a live row");
+}
+
+#[tokio::test]
+async fn lanes_of_bots_no_longer_in_the_session_are_cancelled_too() {
+    // The cleanup is keyed by Session, not by the current participant list:
+    // a Bot removed while its delivery was pending is still covered.
+    let (service, row) = queued_for("removed-bot", 0).await;
+    cancel_session(&service, "s", "session_deleted").await.unwrap();
+    assert_eq!(status(&service, &row).await, Status::Cancelled);
+    assert_eq!(service.lookup(DeliveryLookup::SessionUnfinished { session: "s".into(), limit: 10 }).await.unwrap().len(), 0);
 }

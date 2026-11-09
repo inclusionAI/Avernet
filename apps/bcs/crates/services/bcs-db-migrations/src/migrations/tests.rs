@@ -277,7 +277,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
 
     let report = check_sqlite_migrations(&db).await?;
-    assert_eq!(report.pending_versions.len(), 42);
+    assert_eq!(report.pending_versions.len(), 43);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());

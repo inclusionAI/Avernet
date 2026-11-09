@@ -38,6 +38,10 @@ pub enum DeliveryLookup {
     /// At most one live context: expiration filtering must precede LIMIT.
     LanePendingContextCarrier { bot: String, session: String, now_ms: i64 },
     Message(String),
+    /// Unfinished Sends (Queued/Dispatching/Running/Unknown) of one Session,
+    /// whoever the target Bot is, in no particular order. Bounded by `limit`
+    /// (at most 500) and served by `idx_delivery_session_unfinished`.
+    SessionUnfinished { session: String, limit: usize },
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }
 

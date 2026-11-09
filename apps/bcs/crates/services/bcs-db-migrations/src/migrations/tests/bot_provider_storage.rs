@@ -61,6 +61,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     assert_eq!(mysql[39], "040_bot_avatar.sql");
     assert_eq!(mysql[40], "041_group_agent_cards.sql");
     assert_eq!(mysql[41], "042_auth_session_version.sql");
+    assert_eq!(mysql[42], "043_delivery_session_lookup.sql");
 }
 
 #[tokio::test]

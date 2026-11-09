@@ -27,14 +27,16 @@ const CANCEL_ATTEMPTS: usize = 3;
 pub(crate) async fn cancel(
     flow: &BcsMessageFlow,
     session_id: &str,
-    bot_ids: &[String],
     reason: &str,
 ) -> ServiceResult<()> {
     match flow.managed_deliveries.as_ref() {
-        Some(service) => cancel_lanes(service.as_ref(), session_id, bot_ids, reason).await,
+        Some(service) => cancel_session(service.as_ref(), session_id, reason).await,
         None => Ok(()),
     }
 }
+
+/// Rows read per Session page (the lookup itself caps at 500).
+const PAGE: usize = 200;
 
 /// Active rows this cleanup must still cancel. Anything else is terminal or
 /// already carries a durable cancel intent.
@@ -43,20 +45,29 @@ fn needs_cancel(row: &PersistedMessageDelivery) -> bool {
         && matches!(row.state.status, Status::Queued | Status::Dispatching | Status::Running | Status::Unknown)
 }
 
-async fn cancel_lanes(
+/// Every unfinished Send of the Session, whoever the target Bot is now: a Bot
+/// removed from the Session while its delivery was running is still here.
+/// Cancelled rows leave the lookup, so pages advance by themselves; a page
+/// that only repeats rows already attempted ends the sweep.
+async fn cancel_session(
     service: &dyn ManagedMessageDeliveryService,
     session_id: &str,
-    bot_ids: &[String],
     reason: &str,
 ) -> ServiceResult<()> {
+    let mut attempted = std::collections::BTreeSet::new();
     let mut failed = 0usize;
-    for bot in bot_ids {
-        // Bounded by the per-Bot `max_queued` policy; served by the lane index.
+    loop {
         let rows = service
-            .lookup(DeliveryLookup::Lane { bot: bot.clone(), session: session_id.to_owned() })
+            .lookup(DeliveryLookup::SessionUnfinished { session: session_id.to_owned(), limit: PAGE })
             .await
             .map_err(|error| ServiceError::InternalError(format!("session delivery lookup failed: {error}")))?;
-        for row in rows.into_iter().filter(|row| row.session_id == session_id) {
+        let fresh: Vec<_> = rows.into_iter()
+            .filter(|row| row.session_id == session_id && attempted.insert(row.delivery_id.clone()))
+            .collect();
+        if fresh.is_empty() {
+            break;
+        }
+        for row in fresh {
             if let Err(error) = cancel_row(service, row, reason).await {
                 failed += 1;
                 tracing::warn!(%session_id, %error, "session delete: delivery cancellation failed");

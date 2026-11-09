@@ -624,6 +624,10 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             DeliveryLookup::LanePendingContexts { bot, session } => { params.extend([bot.into(), session.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' LIMIT 100" }
             DeliveryLookup::LanePendingContextCarrier { bot, session, now_ms } => { params.extend([bot.into(), session.into(), now_ms.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' AND (expire_at_ms IS NULL OR expire_at_ms > ?) LIMIT 1" }
             DeliveryLookup::Message(id) => { params.push(id.into()); "source_message_id = ?" }
+            DeliveryLookup::SessionUnfinished { session, limit } => {
+                params.extend([session.into(), (limit.min(500) as i64).into()]);
+                "session_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown') LIMIT ?"
+            }
             DeliveryLookup::Successor { bot, session, after_seq, exclude, now_ms } => {
                 params.extend([bot.into(), session.into(), after_seq.into(), exclude.into(), now_ms.into()]);
                 "target_bot_id = ? AND session_id = ? AND source_session_seq > ? AND delivery_id <> ? AND kind = 'send' AND status = 'queued' AND may_have_been_sent = 0 AND (expire_at_ms IS NULL OR expire_at_ms > ?) ORDER BY source_session_seq LIMIT 1"

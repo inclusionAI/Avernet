@@ -145,10 +145,9 @@ impl MessageFlowService for InstrumentedMessageFlowService {
     async fn cancel_session_deliveries(
         &self,
         session_id: &str,
-        bot_ids: &[String],
         reason: &str,
     ) -> ServiceResult<()> {
-        self.inner.cancel_session_deliveries(session_id, bot_ids, reason).await
+        self.inner.cancel_session_deliveries(session_id, reason).await
     }
 
     async fn rebind_channel_source_message(
@@ -231,7 +230,7 @@ mod tests {
 
     /// Records Session queue cleanup; everything else is the Noop flow.
     #[derive(Default)]
-    struct RecordingFlow(std::sync::Mutex<Vec<(String, Vec<String>, String)>>);
+    struct RecordingFlow(std::sync::Mutex<Vec<(String, String)>>);
 
     #[async_trait::async_trait]
     impl MessageFlowService for RecordingFlow {
@@ -242,8 +241,8 @@ mod tests {
         async fn register_task_run_alias(&self, task_id: &str, run_id: &str, bot_id: &str) -> ServiceResult<TaskRunAliasRegistration> { NoopMessageFlowService.register_task_run_alias(task_id, run_id, bot_id).await }
         async fn handle_task_dispatch(&self, cmd: TaskDispatchCommand) -> ServiceResult<TaskDispatchOutcome> { NoopMessageFlowService.handle_task_dispatch(cmd).await }
         async fn handle_task_complete(&self, cmd: TaskCompleteCommand) -> ServiceResult<TaskCompleteOutcome> { NoopMessageFlowService.handle_task_complete(cmd).await }
-        async fn cancel_session_deliveries(&self, session_id: &str, bot_ids: &[String], reason: &str) -> ServiceResult<()> {
-            self.0.lock().unwrap().push((session_id.into(), bot_ids.to_vec(), reason.into()));
+        async fn cancel_session_deliveries(&self, session_id: &str, reason: &str) -> ServiceResult<()> {
+            self.0.lock().unwrap().push((session_id.into(), reason.into()));
             Ok(())
         }
     }
@@ -252,8 +251,7 @@ mod tests {
     async fn session_queue_cleanup_is_forwarded_not_swallowed_by_the_default() {
         let inner = Arc::new(RecordingFlow::default());
         let instrumented = InstrumentedMessageFlowService::new(inner.clone(), Arc::from("test"));
-        instrumented.cancel_session_deliveries("session-1", &["bot-a".into()], "session_deleted").await.unwrap();
-        assert_eq!(*inner.0.lock().unwrap(),
-            vec![("session-1".to_string(), vec!["bot-a".to_string()], "session_deleted".to_string())]);
+        instrumented.cancel_session_deliveries("session-1", "session_deleted").await.unwrap();
+        assert_eq!(*inner.0.lock().unwrap(), vec![("session-1".to_string(), "session_deleted".to_string())]);
     }
 }
