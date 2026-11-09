@@ -243,6 +243,36 @@ impl DeliveryRuntime {
                 }
             }};
         }
+        // Transport completions (send outcome, abort outcome, pre-I/O
+        // registration failure) are one-shot evidence: an outage keeps them
+        // retrying exactly like `storage!` instead of dropping them, and only
+        // a deterministic fault falls through to row isolation.
+        macro_rules! evidence {
+            ($id:expr, $work:expr) => {{
+                let delivery_id: String = ($id).to_string();
+                match crate::storage_retry::retry(Some(shutdown.clone()), "scheduler_evidence",
+                    crate::storage_retry::managed_storage, || $work).await {
+                    Ok(value) => value,
+                    Err(error) if crate::storage_retry::managed_storage(&error) => return Err(error),
+                    Err(_) => match self.row_op(&delivery_id, &mut isolation, || $work).await {
+                        Some(value) => value,
+                        None => continue,
+                    },
+                }
+            }};
+        }
+        macro_rules! evidence_transition {
+            ($command:expr) => {{
+                let command = $command;
+                evidence!(command.delivery_id.clone(), self.transition(command.clone()))
+            }};
+        }
+        macro_rules! evidence_get {
+            ($id:expr) => {{
+                let id: String = ($id).to_string();
+                evidence!(id.clone(), self.get(&id))
+            }};
+        }
         storage!(self.service.recover(now_ms()));
         let epoch = Instant::now();
         // Never store old-policy future deadlines: new intervals apply to the
@@ -696,11 +726,11 @@ impl DeliveryRuntime {
                             // All subsequent failures are conservative possible sends.
                             // Registration failure is provably before transport I/O.
                             if !matches!(tokio::time::timeout(self.config.io_timeout, self.preparation.before_send(&started, &prepared.command)).await, Ok(Ok(()))) {
-                                let Some(current) = row_get!(&started.delivery_id) else { continue; };
+                                let Some(current) = evidence_get!(&started.delivery_id) else { continue; };
                                 let retry = current.attempt_no <= retries;
                                 let mut failed = event(&current, Event::DefinitelyNotSent { retry });
                                 failed.request_id = Some(request_id);
-                                row_transition!(failed.clone());
+                                evidence_transition!(failed.clone());
                                 continue;
                             }
                             let io = self.transport.clone();
@@ -719,7 +749,7 @@ impl DeliveryRuntime {
                             });
                         }
                         WorkResult::Sent(id, request_id, result) => {
-                            if let Some(row) = row_get!(&id) {
+                            if let Some(row) = evidence_get!(&id) {
                                 // Submission is not ACK. A delivered=true result keeps
                                 // dispatching until a trusted Bot event proves receipt.
                                 {
@@ -751,7 +781,7 @@ impl DeliveryRuntime {
                                     };
                                     let mut command = event(&row, next);
                                     command.request_id = Some(request_id);
-                                    row_transition!(command.clone());
+                                    evidence_transition!(command.clone());
                                 }
                             }
                         }
@@ -763,7 +793,7 @@ impl DeliveryRuntime {
                     if let Some(Err(error)) = &result {
                         tracing::warn!(delivery_id=%id, error_kind=error.as_ref(), reason=abort_reason(error), "delivery abort transport failed");
                     }
-                    if let Some(row) = row_get!(&id) {
+                    if let Some(row) = evidence_get!(&id) {
                         if row.abort_request_id.as_ref() != Some(&abort_request_id) { continue; }
                         let acknowledged = matches!(result, Some(Ok(ref r)) if r.target_bot_id == row.target_bot_id
                             && downstream_run_id.as_ref().is_some_and(|id| r.aborted_run_ids.len() == 1 && r.aborted_run_ids.contains(id)));
@@ -771,7 +801,7 @@ impl DeliveryRuntime {
                         if matches!(result, Some(Err(bcs_service_api::ServiceError::BotMethodUnsupported { .. } | bcs_service_api::ServiceError::InvalidOperation { .. }))) {
                             command.transport_context_json = Some(serde_json::json!({"task_cancel_rejected":true}));
                         }
-                        row_transition!(command.clone());
+                        evidence_transition!(command.clone());
                     }
                 }
             }

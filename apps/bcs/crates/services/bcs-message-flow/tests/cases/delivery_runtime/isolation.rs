@@ -85,3 +85,39 @@ async fn persistent_storage_fault_never_settles_a_healthy_row() -> Result<(), Bo
     // retried, then skipped, and keeps its Queued state.
     scenario(true, true).await
 }
+
+#[tokio::test]
+async fn transport_evidence_outlives_the_bounded_row_retries() -> Result<(), Box<dyn std::error::Error>> {
+    // More consecutive storage failures than the row retry budget (3): the
+    // send and abort outcomes are one-shot evidence and must still persist.
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let faults = Arc::new(failing_delivery::FailingDelivery::new(service.clone()));
+    faults.arm("submitted", 4);
+    faults.arm("aborted", 4);
+    service.admit(command("evidence", "session")).await?;
+    let io = Arc::new(RecordingIo { service: service.clone(), sent: Default::default(), aborts: Default::default(), fail_send: false, fail_registration: false });
+    let mut worker = runtime(service.clone(), io.clone());
+    worker.service = faults.clone();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+    let row = tokio::time::timeout(Duration::from_secs(10), wait_submitted(&service, "evidence")).await??;
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id,
+        expected_state_version: row.state.state_version, event: Event::CancelRequested,
+        now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
+        transport_context_json: None, deadline_at_ms: Some(chrono::Utc::now().timestamp_millis() + 10_000),
+        caller_cancel: None, caller_terminal: None }).await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let row = service.snapshot(None).await.unwrap().remove(0);
+            if row.state.status == Status::Cancelled { break; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await?;
+    assert_eq!(faults.remaining(), 0);
+    assert_eq!(*io.sent.lock().await, vec!["evidence"], "never resent");
+    assert_eq!(*io.aborts.lock().await, vec!["evidence"], "the confirmed abort was not lost");
+    assert!(!task.is_finished());
+    stop.send(true)?;
+    task.await??;
+    Ok(())
+}
