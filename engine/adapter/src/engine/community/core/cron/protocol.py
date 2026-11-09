@@ -26,6 +26,16 @@ from engine.community.plugin_api.cron.models import (
 from engine.community.core.engine.context import AuthContext
 
 
+class CronDetailLookup(Protocol):
+    """Optional detail lookup; True only when the upstream confirms absence.
+
+    A None job with False means the lookup was inconclusive. Existing
+    CronService implementations are not required to implement this capability.
+    """
+
+    async def get_job_for_detail(self, job_id: str) -> tuple[CronJob | None, bool]: ...
+
+
 @runtime_checkable
 class CronService(Protocol):
     """Backend talks to the cron engine through this Protocol.

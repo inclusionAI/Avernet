@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     RoutineUpdate,
     ScheduleTrigger,
 )
+from agentclaw.community.core.cron.errors import CronApiTimeoutError, CronRelayError
 
 
 # Unit calls assert domain exceptions; HTTP envelope behavior is covered separately.
@@ -644,6 +645,30 @@ class _StubCronDetailService:
             "runtime_stage": runtime_stage,
         }
         return {"success": True, "data": self._payload}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body,expected_status", [
+    ('{"detail":"Task not found","code":"cron.task_not_found.v1"}', 404),
+    ('{"detail":"Not Found"}', 502),
+    ('{"detail":"Task not found"}', 502),
+    ('{"detail":"Task not found","code":"other"}', 502),
+    ('invalid', 502),
+])
+async def test_detail_classifies_only_versioned_missing_response(body, expected_status):
+    from agentclaw.community.adapters.http.openapi_v1.routines.relay import call_cron
+    from agentclaw.community.core.cron.errors import CronRelayError
+    from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterEndpointNotFoundError
+
+    async def get_cron_detail(**kwargs):
+        raise DeviceAdapterEndpointNotFoundError(body)
+
+    expected = HTTPException if expected_status == 404 else CronRelayError
+    with pytest.raises(expected) as caught:
+        await call_cron(get_cron_detail, request=_request_without_trace(), actor=None,
+                        recognize_missing=True, task_id="t1")
+    assert (caught.value.status_code if expected_status == 404 else caught.value.error_code) == expected_status
+    assert body not in str(caught.value)
 
 
 @pytest.mark.asyncio
@@ -1394,12 +1419,6 @@ async def test_list_routine_runs_handles_bare_data_list_defensively():
 # applied by the app-level envelope handler. So in a direct unit call, the
 # raised domain errors propagate; the assertions below nail that they carry the
 # right type / error_code so the app-level map returns the right envelope.
-from agentclaw.community.core.cron.errors import (
-    CronApiTimeoutError,
-    CronRelayError,
-)
-
-
 class _RaisingCronRunService:
     def __init__(self, exc):
         self._exc = exc

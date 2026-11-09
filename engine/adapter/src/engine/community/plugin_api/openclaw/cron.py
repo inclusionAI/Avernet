@@ -13,6 +13,12 @@ from __future__ import annotations
 from typing import Protocol
 
 
+class OpenClawCronDetailPort(Protocol):
+    """Optional detail query retaining a confirmed-missing result."""
+
+    async def cron_get_for_detail(self, job_id: str, token: str | None = None) -> tuple[dict | None, bool]: ...
+
+
 class OpenClawCronPort(Protocol):
     """Native cron operations over the OpenClaw gateway."""
 

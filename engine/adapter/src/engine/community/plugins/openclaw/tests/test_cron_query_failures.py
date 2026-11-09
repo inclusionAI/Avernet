@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from engine.community.api.cron.router import router, set_cron_api
 from engine.community.core.adapters.openclaw.cron import OpenClawCronAdapter
-from engine.community.openclaw.protocol import ResponseFrame
+from engine.community.openclaw.protocol import ErrorShape, ResponseFrame
 from engine.community.plugins.openclaw._cron import _CronPortMixin
 
 
@@ -84,3 +84,55 @@ def test_failed_query_can_recover_without_losing_existing_task(query):
     response = http.get("/api/cron/job-1")
     assert response.status_code == 200
     assert response.json()["data"]["id"] == "job-1"
+
+
+@pytest.mark.parametrize("code,message,expected", [
+    ("INVALID_REQUEST", "cron job not found: job-1", True),
+    ("INVALID_REQUEST", "cron job not found: another", False),
+    ("OTHER", "cron job not found: job-1", False),
+])
+def test_detail_marks_only_confirmed_missing(query, code, message, expected):
+    _, client, http = query
+    client.hello = SimpleNamespace(features=SimpleNamespace(methods=["cron.get"]))
+    client.send_request.side_effect = [ResponseFrame(id="first", ok=False, error=ErrorShape(code=code, message=message)),
+        ResponseFrame(id="list", ok=True, payload={"jobs": []})]
+    response = http.get("/api/cron/job-1")
+    assert response.status_code == 404
+    assert (response.json().get("code") == "cron.task_not_found.v1") is expected
+    if expected:
+        client.send_request.assert_awaited_once()
+
+
+def test_legacy_missing_is_not_confirmed(query):
+    _, client, http = query
+    client.send_request.return_value = ResponseFrame(id="list", ok=True, payload={"jobs": []})
+    response = http.get("/api/cron/job-1")
+    assert response.status_code == 404
+    assert "code" not in response.json()
+
+
+def test_inconclusive_get_can_fall_back_to_a_successful_lookup(query):
+    _, client, http = query
+    client.hello = SimpleNamespace(features=SimpleNamespace(methods=["cron.get"]))
+    client.send_request.side_effect = [
+        TimeoutError("first request timed out"),
+        ResponseFrame(id="retry", ok=True, payload={"jobs": [{"id": "job-1", "name": "job", "schedule": {}, "payload": {}}]}),
+    ]
+    assert http.get("/api/cron/job-1").status_code == 200
+
+
+def test_get_with_a_different_id_is_not_returned(query):
+    _, client, http = query
+    client.hello = SimpleNamespace(features=SimpleNamespace(methods=["cron.get"]))
+    client.send_request.return_value = ResponseFrame(id="first", ok=True, payload={"id": "other"})
+    assert http.get("/api/cron/job-1").status_code == 500
+
+
+def test_empty_get_payload_falls_back_to_list(query):
+    _, client, http = query
+    client.hello = SimpleNamespace(features=SimpleNamespace(methods=["cron.get"]))
+    client.send_request.side_effect = [
+        ResponseFrame(id="first", ok=True, payload={}),
+        ResponseFrame(id="list", ok=True, payload={"jobs": [{"id": "job-1", "name": "job", "schedule": {}, "payload": {}}]}),
+    ]
+    assert http.get("/api/cron/job-1").status_code == 200
