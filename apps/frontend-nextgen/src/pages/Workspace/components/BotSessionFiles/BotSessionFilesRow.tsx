@@ -1,7 +1,12 @@
 import { Button, ConfirmDialog, IconButton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import { formatFileSize, getPreviewKind } from '@/services/workspace/sessionFileUtils';
+import {
+  describeSessionFileCreator,
+  formatFileSize,
+  formatSessionUploadTime,
+  getPreviewKind,
+} from '@/services/workspace/sessionFileUtils';
 import { cn } from '@/utils/cn';
 import { Download, Eye, Reply, Trash2 } from 'lucide-react';
 import { SessionFileTypeIcon } from '../SessionFileTypeIcon';
@@ -24,8 +29,24 @@ interface BotSessionFilesRowProps {
  * 用 aria-disabled 而非原生 disabled——禁用态仍需 hover 出 Tooltip，
  * 原生 disabled button 不派发 pointer 事件会让提示失效。
  */
-export function BotSessionFilesRow({ file, onOpenPreview, onReference, onDownload, onDelete }: BotSessionFilesRowProps) {
+export function BotSessionFilesRow({
+  file,
+  onOpenPreview,
+  onReference,
+  onDownload,
+  onDelete,
+}: BotSessionFilesRowProps) {
   const previewable = getPreviewKind(file.displayName) !== 'other';
+  // 创建者来源合段（2026-11-09 契约）：creator_type 未知（旧引擎存量）为 null，整段不
+  // 渲染——不据资源 ID/文件名/登录用户猜测来源。
+  const creatorLabel = describeSessionFileCreator(file.creatorType, file.creatorName);
+  // 创建时间只认 created_at（UTC 锚）；缺失/非法不渲染时间段，不回退其它时间字段。
+  const timeLabel = formatSessionUploadTime(file.createdAt);
+  // 元数据三段「来源+创建者 · 创建时间 · 大小」逐段拼接：任一段缺省省略连带分隔点；
+  // 三段全空回退现状（sizeBytes 缺省时 formatFileSize 已给 '--'）。
+  const metaLine = [creatorLabel, timeLabel, formatFileSize(file.sizeBytes ?? 0)]
+    .filter((seg): seg is string => Boolean(seg))
+    .join(' · ');
   const rowContent = (
     <>
       <SessionFileTypeIcon name={file.displayName} className="h-5 w-5 shrink-0" />
@@ -36,12 +57,12 @@ export function BotSessionFilesRow({ file, onOpenPreview, onReference, onDownloa
           </TooltipTrigger>
           <TooltipContent>{file.displayName}</TooltipContent>
         </Tooltip>
-        {/* 元数据模型统一（2026-09-20 用户拍板）：两行结构与群聊侧同构；
-            单聊文件接口暂不返回上传者/时间，次行仅展示大小，
-            后端补齐字段后本行自动扩充（设计稿为「风太 · 09/15 14:22 · 7.0KB」）。 */}
-        <span className="mt-0.5 block truncate text-[11px] leading-[18px] text-muted-foreground">
-          {file.sizeBytes ? formatFileSize(file.sizeBytes) : '--'}
-        </span>
+        {/* 元数据模型统一（2026-09-20 用户拍板）：两行结构与群聊侧同构。预留位已兑现
+            （2026-11-09 契约）：单聊网关文件对象下发 creator_type/creator_name/created_at，
+            次行按设计稿模型扩充为「[来源+创建者] · [创建时间] · [大小]」，各段缺省省略、
+            不猜测；群聊 BCS 侧本轮未下发该组字段，其元数据行维持既有「上传者 · 时间 · 大小」，
+            两者不做对齐（数据面不同）。 */}
+        <span className="mt-0.5 block truncate text-[11px] leading-[18px] text-muted-foreground">{metaLine}</span>
       </div>
     </>
   );
@@ -67,9 +88,7 @@ export function BotSessionFilesRow({ file, onOpenPreview, onReference, onDownloa
           // PR#413 评审跟进 P3（#257104459）：视觉提示精简，读屏名称保留
           // 文件名——ariaLabel 恢复含文件名的完整可访问名称，读屏用户可区分行。
           ariaLabel={
-            previewable
-              ? `预览文件 ${file.displayName}`
-              : `预览文件 ${file.displayName}（该文件类型暂不支持预览）`
+            previewable ? `预览文件 ${file.displayName}` : `预览文件 ${file.displayName}（该文件类型暂不支持预览）`
           }
           icon={<Eye className="h-3.5 w-3.5" aria-hidden />}
           size="sm"

@@ -9,7 +9,8 @@
  *   （sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 保持为真实开合态——含
  *   消息渲染器挂载即 openTab 的「默认展开」；toggle 仅乐观翻转，真实态事件随后纠偏；
  *   会话切换复位——useBotChat 同边界 closePanelForce；无 <AixUI type="panel"> 内容时
- *   图标禁用，防 autoCloseWhenEmpty 弹回）。
+ *   图标禁用，防 autoCloseWhenEmpty 弹回）；右缘域面板开合互斥（让位收起/全收回开/
+ *   真实态收面板，修复侧边栏被悬浮副屏掩盖）统一委托 sidePanePanelMutex。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
@@ -27,6 +28,7 @@ import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
 import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSidePanePanelMutex } from './sidePanePanelMutex';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 // 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
@@ -70,6 +72,8 @@ export interface UseChatHeaderPanelsResult {
   openPanel: ChatHeaderPanelKind | null;
   togglePanel: (kind: ChatHeaderPanelKind) => void;
   closePanel: () => void;
+  /** 右缘域面板（资源抽屉含）即将展开前的副屏让位：收起副屏并记录回开标记，面板全收后自动回开。 */
+  dismissSidePaneForPanels: () => void;
   /** 关闭右缘面板与文件副屏（切换会话等场景复位）。 */
   resetAll: () => void;
   favorites: ChatHeaderFavoritesModel;
@@ -145,20 +149,34 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
   const [sidePaneOpen, setSidePaneOpen] = useState(false);
-  const onSidePaneIsOpenChange = useCallback((open: boolean) => setSidePaneOpen(open), []);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeHeaderPanels = useCallback(() => {
+    setOpenPanel(null);
+    options.closeFileDrawer();
+  }, [options.closeFileDrawer]);
+  // 右缘域面板 × 副屏互斥：副屏为 AppShell 悬浮层，展开后整条盖住右缘面板让位区——委托互斥 Hook。
+  const sidePaneMutex = useSidePanePanelMutex({
+    panelRef,
+    sidePaneOpen,
+    panelsOpen: openPanel !== null || options.fileDrawerOpen,
+    closePanels: closeHeaderPanels,
+    onMirrorChange: setSidePaneOpen,
+  });
 
   // 互斥开合：再次点击同一面板关闭；资源文件副屏与本组右缘面板同属头部域，一并互斥。
   const togglePanel = useCallback(
     (kind: ChatHeaderPanelKind) => {
       setOpenPanel((current) => {
         const next = current === kind ? null : kind;
-        if (next !== null) options.closeFileDrawer();
+        if (next !== null) {
+          options.closeFileDrawer();
+          sidePaneMutex.dismissSidePaneForPanels();
+        }
         return next;
       });
     },
-    [options],
+    [options, sidePaneMutex],
   );
   const closePanel = useCallback(() => setOpenPanel(null), []);
   const resetAll = useCallback(() => {
@@ -177,6 +195,8 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     // closePanelForce 经 onIsOpenChange(false) 已同步真实态；此复位防面板随舞台切换卸载
     // 而无事件发出的脱钩场景（与群侧孪生 useGroupChatHeaderPanels 一致）。
     if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/chat')) setSidePaneOpen(false);
+    // 让位回开标记同边界作废：副屏已 closePanelForce 清 tabs，回开会被 autoCloseWhenEmpty 空弹。
+    sidePaneMutex.clearSidePaneExclusion();
     setSessionEpoch((epoch) => epoch + 1);
   }
   useEffect(() => {
@@ -232,12 +252,13 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     openPanel,
     togglePanel,
     closePanel,
+    dismissSidePaneForPanels: sidePaneMutex.dismissSidePaneForPanels,
     resetAll,
     favorites,
     sidePaneOpen,
     sidePaneDisabled,
     toggleSidePane,
-    onSidePaneIsOpenChange,
+    onSidePaneIsOpenChange: sidePaneMutex.onSidePaneIsOpenChange,
     historySearch,
     highlightMessageId,
     locateMessage,
