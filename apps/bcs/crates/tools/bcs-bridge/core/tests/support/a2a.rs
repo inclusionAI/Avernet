@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 pub struct Mock {
     pub turns: Arc<Mutex<Vec<(String, Option<String>)>>>,
     pub release: CancellationToken,
+    pub progress_start: CancellationToken,
     pub decisions: Arc<Mutex<Vec<Value>>>,
 }
 impl EngineFactory for Mock {
@@ -31,16 +32,37 @@ impl Engine for Mock {
             abort.cancelled().await;
             return Err(TurnError::Aborted);
         }
-        let delta = if req.prompt == "large" { "x".repeat(1024 * 1024 + 1) } else { "答复: ".into() };
-        events.send(sse::chat_delta(&req.run_id, &delta)).await.map_err(|_| TurnError::Aborted)?;
-        if matches!(req.prompt.as_str(), "wait" | "hold" | "large") {
+        let progress_case = matches!(req.prompt.as_str(), "codex-progress" | "claude-progress" | "empty-progress");
+        if progress_case {
             tokio::select! {
                 _ = abort.cancelled() => return Err(TurnError::Aborted),
-                _ = self.release.cancelled(), if req.prompt == "hold" => {},
+                _ = self.progress_start.cancelled() => {},
+            }
+        }
+        let deltas: Vec<String> = match req.prompt.as_str() {
+            "codex-progress" => vec!["Checking the PR...".into()],
+            "claude-progress" => vec!["正在".into(), "分析".into()],
+            "empty-progress" => vec!["Working...".into()],
+            "large" => vec!["x".repeat(1024 * 1024 + 1)],
+            "large-progress-total" => vec!["x".repeat(512 * 1024), "x".repeat(512 * 1024 + 1)],
+            _ => vec!["答复: ".into()],
+        };
+        for delta in deltas { events.send(sse::chat_delta(&req.run_id, &delta)).await.map_err(|_| TurnError::Aborted)?; }
+        if progress_case || matches!(req.prompt.as_str(), "wait" | "hold" | "large" | "large-progress-total") {
+            tokio::select! {
+                _ = abort.cancelled() => return Err(TurnError::Aborted),
+                _ = self.release.cancelled(), if req.prompt == "hold" || progress_case => {},
             }
         }
         if req.prompt == "fail" { return Err(TurnError::Protocol("private-engine-diagnostic".into())); }
-        Ok(TurnOutcome { engine_session_id: Some(session), final_text: Some(format!("答复: {}", req.prompt)) })
+        let answer = match req.prompt.as_str() {
+            "codex-progress" => "Found two issues.".into(),
+            "claude-progress" => "完成了".into(),
+            "empty-progress" => String::new(),
+            "large-final" => "x".repeat(1024 * 1024 + 1),
+            _ => format!("答复: {}", req.prompt),
+        };
+        Ok(TurnOutcome { engine_session_id: Some(session), final_text: Some(answer) })
     }
 }
 

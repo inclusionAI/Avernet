@@ -107,9 +107,23 @@ Example send body:
 
 `SendMessage` normally waits for completion. `returnImmediately: true` returns
 an accepted Task for polling; streaming sends return a Task snapshot followed by
-artifact/status updates. Text uses one stable `answer` artifact: deltas append,
-then the final engine answer replaces/calibrates that artifact. Internal tool
-observations, thinking and engine diagnostics are not exposed as text output.
+artifact/status updates. Engine text deltas are streamed immediately as transient
+`working` status messages, separate from the `answer` artifact: Claude/Codex
+progress commentary is not guaranteed to be a prefix of their final answer.
+Each status message contains one chunk, not an accumulated answer; snapshots
+retain only the latest progress message, and progress is not added to history.
+The authoritative final text is published once as `answer` (`append=false`,
+`lastChunk=true`), followed by the terminal status after runtime cleanup. No
+provisional text enters answer artifacts in streams, queries or subscriptions.
+An empty final answer remains empty; progress is never used as a fallback answer.
+
+Progress is still live over SSE, but the answer artifact itself is not streamed
+token by token. Clients must render status messages separately if they want to
+show progress. The existing BCS A2A client treats them as diagnostic messages,
+not answer deltas, so this Bridge-only change does not make progress appear in
+BCS's answer UI. Native Bridge webhook/Plugin WebSocket output is unchanged.
+Internal tool observations, thinking and engine diagnostics are not exposed as
+text output.
 
 For another turn, send a **new messageId** and the returned `contextId`, omitting
 `taskId`. This resumes the existing durable engine session while creating a new
@@ -136,8 +150,9 @@ of a Task is unsupported; this endpoint never advertises input-wait support.
   Tasks are not evicted to admit more work. Restart loses Task lookup, results
   and receipts. Engine session mappings remain in the existing SQLite store;
   durable A2A job recovery is not implemented.
-- Requests and answers are limited to 1 MiB each. Runtime's existing 32 MiB /
-  16,384-record event retention budget and execution deadline also apply. The
+- Requests, cumulative progress text and final answers are limited to 1 MiB each.
+  Progress retains only the latest chunk, not a growing transcript. Runtime's
+  existing 32 MiB / 16,384-record event retention budget and execution deadline also apply. The
   completed A2A run's replay buffer is released; its bounded Task result remains.
 - Each subscriber buffers 64 events. A lagging subscriber receives an error and
   closes without canceling work; query/resubscribe for the current Task.

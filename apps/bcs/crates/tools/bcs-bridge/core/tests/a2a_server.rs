@@ -1,5 +1,7 @@
 #[path = "support/a2a.rs"]
 mod support;
+#[path = "support/a2a_progress.rs"]
+mod progress;
 use support::*;
 use a2a::TaskState;
 use serde_json::{json, Value};
@@ -202,7 +204,7 @@ async fn malformed_unsupported_and_version_errors_do_not_start_an_engine() {
 #[tokio::test]
 async fn failures_are_terminal_redacted_and_unsupported_interaction_does_not_hang() {
     let server = Server::new(&[("p", &["worker"])], true).await;
-    for prompt in ["fail", "interactive", "large"] {
+    for prompt in ["fail", "interactive", "large", "large-progress-total", "large-final"] {
         let response = server.post("p", "worker", "/message:send").json(&request(prompt, prompt)).send().await.unwrap();
         assert_eq!(response.status(), 200);
         let body = response.text().await.unwrap();
@@ -210,6 +212,7 @@ async fn failures_are_terminal_redacted_and_unsupported_interaction_does_not_han
         if prompt == "interactive" { assert_eq!(*server.mock.decisions.lock().unwrap(), vec![json!({"decision":"deny"})]); }
         let value: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(value["task"]["status"]["state"], "TASK_STATE_FAILED", "{body}");
+        assert!(value["task"]["artifacts"].is_null(), "failed tasks must not turn provisional output into answers");
         assert!(server.states[0].sessions.active_run("worker", &format!("a2a:{}", value["task"]["contextId"].as_str().unwrap())).await.is_none());
     }
     server.close().await;

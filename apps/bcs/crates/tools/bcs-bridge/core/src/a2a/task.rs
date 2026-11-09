@@ -21,6 +21,7 @@ struct Projection {
     task: Task,
     handle: Option<RunHandle>,
     finished: Option<Instant>,
+    progress_bytes: usize,
 }
 
 fn status(state: TaskState, message: Option<&str>, id: &str, context: &str) -> TaskStatus {
@@ -46,7 +47,7 @@ impl TaskEntry {
             status: status(TaskState::Working, None, &id, &context),
             artifacts: None, history: Some(vec![input]), metadata: None,
         };
-        Self { bot, id, context, inner: Mutex::new(Projection { task, handle: Some(handle), finished: None }),
+        Self { bot, id, context, inner: Mutex::new(Projection { task, handle: Some(handle), finished: None, progress_bytes: 0 }),
             events: broadcast::channel(64).0 }
     }
 
@@ -76,23 +77,35 @@ impl TaskEntry {
             && request.status_timestamp_after.is_none_or(|after| projection.task.status.timestamp.is_some_and(|at| at > after))
     }
 
-    /// Append token text without cloning the accumulated artifact on each token.
-    /// A final snapshot replaces that same artifact, never creates a second answer.
-    pub fn text(&self, text: &str, append: bool, last: bool) -> Result<(), ()> {
+    /// Progress chunks are transient status messages, not append-only answers.
+    /// Retain only the latest chunk for snapshots; bound total progress per Task.
+    pub fn progress(&self, text: &str) -> Result<(), ()> {
+        let mut projection = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if projection.finished.is_some() || projection.task.artifacts.is_some() || text.is_empty() { return Ok(()); }
+        let size = projection.progress_bytes.saturating_add(text.len());
+        if size > MAX_TEXT_BYTES { return Err(()); }
+        projection.progress_bytes = size;
+        projection.task.status = status(TaskState::Working, Some(text), &self.id, &self.context);
+        let _ = self.events.send(Arc::new(StreamResponse::StatusUpdate(TaskStatusUpdateEvent {
+            task_id: self.id.clone(), context_id: self.context.clone(),
+            status: projection.task.status.clone(), metadata: None,
+        })));
+        Ok(())
+    }
+
+    /// Publish the authoritative final text exactly as returned by the engine.
+    /// No provisional prefix exists for an append-only consumer to retract.
+    pub fn answer(&self, text: &str) -> Result<(), ()> {
         let mut projection = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if projection.finished.is_some() { return Ok(()); }
-        let artifacts = projection.task.artifacts.get_or_insert_with(Vec::new);
-        let old_len = artifacts.first().and_then(|a| a.parts.first()).and_then(Part::as_text).map_or(0, str::len);
-        if text.len().saturating_add(if append { old_len } else { 0 }) > MAX_TEXT_BYTES { return Err(()); }
+        if text.len() > MAX_TEXT_BYTES { return Err(()); }
         let artifact = Artifact { artifact_id: "answer".into(), name: None, description: None,
             parts: vec![Part::text(text)], metadata: None, extensions: None };
-        let append = append && !artifacts.is_empty();
-        if append {
-            if let a2a::PartContent::Text(value) = &mut artifacts[0].parts[0].content { value.push_str(text); }
-        } else { *artifacts = vec![artifact.clone()]; }
+        projection.task.artifacts = Some(vec![artifact.clone()]);
+        projection.task.status.message = None;
         let _ = self.events.send(Arc::new(StreamResponse::ArtifactUpdate(TaskArtifactUpdateEvent {
             task_id: self.id.clone(), context_id: self.context.clone(), artifact,
-            append: Some(append), last_chunk: Some(last), metadata: None,
+            append: Some(false), last_chunk: Some(true), metadata: None,
         })));
         Ok(())
     }
@@ -163,36 +176,48 @@ mod tests {
         TaskEntry::new("bot".into(), "context".into(), Message::new(Role::User, vec![Part::text("hello")]), handle)
     }
     #[tokio::test]
-    async fn snapshots_and_live_events_have_no_duplicate_prefix_and_lag_fails_only_subscription() {
+    async fn snapshots_keep_latest_progress_and_lag_fails_only_subscription() {
         let entry = entry();
-        entry.text("prefix", false, false).unwrap();
+        entry.progress("prefix").unwrap();
         let mut stream = entry.stream(None);
         let first = stream.next().await.unwrap().unwrap();
         let StreamResponse::Task(task) = first.as_ref() else { panic!("snapshot expected") };
-        assert_eq!(task.artifacts.as_ref().unwrap()[0].parts[0].as_text(), Some("prefix"));
-        entry.text("suffix", true, false).unwrap();
+        assert!(task.artifacts.is_none());
+        assert_eq!(task.status.message.as_ref().unwrap().parts[0].as_text(), Some("prefix"));
+        entry.progress("suffix").unwrap();
         let event = stream.next().await.unwrap().unwrap();
-        let StreamResponse::ArtifactUpdate(event) = event.as_ref() else { panic!("artifact expected") };
-        assert_eq!(event.append, Some(true)); assert_eq!(event.artifact.parts[0].as_text(), Some("suffix"));
-        for _ in 0..100 { entry.text("x", true, false).unwrap(); }
+        let StreamResponse::StatusUpdate(event) = event.as_ref() else { panic!("progress expected") };
+        assert_eq!(event.status.state, TaskState::Working);
+        assert_eq!(event.status.message.as_ref().unwrap().parts[0].as_text(), Some("suffix"));
+        for _ in 0..100 { entry.progress("x").unwrap(); }
         assert!(stream.next().await.unwrap().is_err());
         assert!(stream.next().await.is_none());
         assert!(!entry.inner.lock().unwrap().handle.as_ref().unwrap().abort.is_cancelled());
+        entry.answer("final").unwrap();
+        entry.progress("late progress").unwrap();
+        assert!(entry.snapshot(None).status.message.is_none());
         entry.finish(TaskState::Completed, None);
         assert_eq!(entry.wait(None).await.status.state, TaskState::Completed);
+        assert_eq!(entry.snapshot(None).artifacts.unwrap()[0].parts[0].as_text(), Some("final"));
     }
     #[test]
     fn terminal_immutability_size_limits_history_and_expiry() {
         let entry = entry();
-        assert!(entry.text(&"x".repeat(MAX_TEXT_BYTES + 1), false, false).is_err());
-        entry.text("a", false, false).unwrap();
-        assert!(entry.text(&"x".repeat(MAX_TEXT_BYTES), true, false).is_err());
-        assert_eq!(entry.snapshot(None).artifacts.unwrap()[0].parts[0].as_text(), Some("a"));
+        assert!(entry.progress(&"x".repeat(MAX_TEXT_BYTES + 1)).is_err());
+        entry.progress("a").unwrap();
+        assert!(entry.progress(&"x".repeat(MAX_TEXT_BYTES)).is_err());
+        assert!(entry.snapshot(None).artifacts.is_none());
+        assert_eq!(entry.snapshot(None).status.message.unwrap().parts[0].as_text(), Some("a"));
+        assert!(entry.answer(&"x".repeat(MAX_TEXT_BYTES + 1)).is_err());
+        assert!(entry.snapshot(None).artifacts.is_none());
+        entry.answer("final").unwrap();
         assert!(entry.snapshot(None).history.is_none());
         assert_eq!(entry.snapshot(Some(100)).history.unwrap().len(), 1);
         entry.finish(TaskState::Completed, None);
         entry.finish(TaskState::Canceled, None);
+        entry.progress("late").unwrap(); entry.answer("late").unwrap();
         assert_eq!(entry.snapshot(None).status.state, TaskState::Completed);
+        assert_eq!(entry.snapshot(None).artifacts.unwrap()[0].parts[0].as_text(), Some("final"));
         assert!(entry.cancel().is_err());
         assert!(!entry.expired());
         entry.inner.lock().unwrap().finished = Some(Instant::now() - TASK_TTL);

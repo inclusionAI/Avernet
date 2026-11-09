@@ -178,10 +178,12 @@ async fn collect(state: Arc<AppState>, task: Arc<TaskEntry>, handle: RunHandle, 
         if failed { continue; }
         let result = match record.event {
             StreamEvent::Chat(chat) => match chat.state {
-                ChatState::Delta => task.text(chat.delta_text.as_deref().unwrap_or(""), true, false),
+                // Engine deltas can be commentary, not a prefix of the final answer.
+                // Keep them live as diagnostic status messages, never answer artifacts.
+                ChatState::Delta => task.progress(chat.delta_text.as_deref().unwrap_or("")),
                 ChatState::Final => {
                     terminal = (TaskState::Completed, None);
-                    task.text(&crate::run::extract_message_text(chat.message.as_ref()), false, true)
+                    task.answer(&crate::run::extract_message_text(chat.message.as_ref()))
                 }
                 ChatState::Error => {
                     terminal = (TaskState::Failed, Some("Bridge engine execution failed"));
@@ -213,6 +215,70 @@ async fn collect(state: Arc<AppState>, task: Arc<TaskEntry>, handle: RunHandle, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn provisional_text_never_enters_answer_events_or_snapshots() {
+        // Both Codex commentary and Claude text_delta may differ from the final.
+        // Even an apparently matching prefix is not authoritative until Final.
+        for (deltas, final_text) in [
+            (vec!["Checking the PR..."], "Found two issues."),
+            (vec!["正在", "分析"], "完成了"),
+            (vec!["Hello "], "Hello from bridge"),
+            (vec!["Working..."], ""),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = crate::config::ProviderConfig::from_toml(
+                "provider_id='projection'\nlisten='127.0.0.1:0'\nbcs_to_provider_token='test'\nstate_path='state.db'\nbot=[]",
+                &dir.path().join("bridge.toml")).unwrap();
+            let state = Arc::new(AppState::new(config, &crate::engine::EngineRegistry::new()).unwrap());
+            let (handle, _) = state.runs.begin("task", "fp".into());
+            let task = Arc::new(TaskEntry::new("bot".into(), "context".into(),
+                a2a::Message::new(a2a::Role::User, vec![a2a::Part::text("input")]), handle.clone()));
+            let mut live = task.stream(None);
+            assert!(matches!(live.next().await.unwrap().unwrap().as_ref(), a2a::StreamResponse::Task(t) if t.artifacts.is_none()));
+            let records: Vec<_> = deltas.iter().enumerate().map(|(i, text)| crate::run::RunEvent {
+                run_id: "task".into(), seq: i as u64 + 1, ts: 0,
+                event: crate::sse::chat_delta("task", text),
+            }).collect();
+            let (drained, observed) = tokio::sync::oneshot::channel();
+            let (release, released) = tokio::sync::oneshot::channel();
+            let stream = futures::stream::iter(records).chain(futures::stream::once(async move {
+                // Polled only after collect has applied every provisional record.
+                drained.send(()).unwrap();
+                released.await.unwrap();
+                crate::run::RunEvent { run_id: "task".into(), seq: 100, ts: 0,
+                    event: crate::sse::chat_final("task", final_text.into()) }
+            })).boxed();
+            let owner = tokio::spawn(collect(state.clone(), task.clone(), handle, stream));
+            tokio::time::timeout(Duration::from_secs(5), observed).await.unwrap().unwrap();
+            assert!(task.snapshot(None).artifacts.is_none(), "GetTask must not publish provisional text as an answer");
+            // Progress is observable before the engine is allowed to finalize.
+            for expected in deltas {
+                let event = tokio::time::timeout(Duration::from_secs(5), live.next()).await.unwrap().unwrap().unwrap();
+                let a2a::StreamResponse::StatusUpdate(update) = event.as_ref() else { panic!("progress status expected") };
+                assert_eq!(update.status.state, TaskState::Working);
+                let message = update.status.message.as_ref().unwrap();
+                assert_eq!(message.role, a2a::Role::Agent);
+                assert_eq!(message.task_id.as_deref(), Some("task"));
+                assert_eq!(message.context_id.as_deref(), Some("context"));
+                assert_eq!(message.parts[0].as_text(), Some(expected));
+            }
+            let mut resumed = task.stream(None);
+            assert!(matches!(resumed.next().await.unwrap().unwrap().as_ref(), a2a::StreamResponse::Task(t) if t.artifacts.is_none()));
+            release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), owner).await.unwrap().unwrap();
+            for events in [live.collect::<Vec<_>>().await, resumed.collect::<Vec<_>>().await] {
+                assert_eq!(events.len(), 2, "only the authoritative answer and terminal may follow the snapshot");
+                let a2a::StreamResponse::ArtifactUpdate(update) = events[0].as_ref().unwrap().as_ref() else { panic!("answer expected") };
+                assert_eq!(update.artifact.artifact_id, "answer");
+                assert_eq!(update.artifact.parts[0].as_text(), Some(final_text));
+                assert_eq!(update.append, Some(false)); assert_eq!(update.last_chunk, Some(true));
+                assert!(matches!(events[1].as_ref().unwrap().as_ref(), a2a::StreamResponse::StatusUpdate(u) if u.status.state == TaskState::Completed));
+            }
+            assert_eq!(task.snapshot(None).artifacts.unwrap()[0].parts[0].as_text(), Some(final_text));
+            assert!(state.runs.get("task").is_none());
+        }
+    }
+
     #[tokio::test]
     async fn full_task_registry_rejects_new_work_without_evicting_retained_tasks() {
         let dir = tempfile::tempdir().unwrap();

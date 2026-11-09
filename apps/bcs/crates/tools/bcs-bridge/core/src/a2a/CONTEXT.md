@@ -31,9 +31,18 @@ snapshot. No token replay cursor or restart Task recovery is advertised.
 
 ## Access cost and compatibility
 
-Normal tokens append to an in-memory artifact and broadcast one delta: no SQL,
-credential reads, growing-queue scans, or full accumulated-output copies per
-token. Runtime retains its existing session mapping/inject persistence behavior.
+Engine text deltas are transient Working status messages, not answer artifacts:
+Claude/Codex commentary need not be a prefix of their authoritative final text.
+Only that final text populates the single `answer` artifact; an empty answer is
+not replaced by progress. Streams remain live, but clients must render status
+messages separately to show progress. The existing BCS client does not render
+these messages as answer deltas; its append-only projection remains unchanged.
+
+Each progress chunk updates a byte counter and replaces the latest status
+message, then broadcasts one event: no SQL, credential reads, growing-queue
+scans, accumulated transcript or full accumulated-output copies per token.
+Cumulative progress and the final answer are independently bounded to 1 MiB.
+Runtime retains its existing session mapping/inject persistence behavior.
 Get/List/admission lazily sweep at most 128 Task entries plus their message-ID
 index; List snapshots only the requested page (maximum 100). Existing gateway
 and plugin protocols are unchanged and A2A routes are absent without `[a2a]`.
