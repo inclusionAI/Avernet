@@ -17,7 +17,7 @@ pub struct SessionManagementServiceImpl {
 pub struct SessionManagementWithRuntimeCleanup {
     pub(super) inner: Arc<dyn SessionManagementService>,
     pub(super) collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
-
+    pub(super) message_flow: Option<Arc<dyn bcs_service_api::MessageFlowService>>,
 }
 
 impl SessionManagementWithRuntimeCleanup {
@@ -29,7 +29,14 @@ pub fn new(
         Self {
             inner,
             collaboration_runtime,
+            message_flow: None,
         }
+    }
+
+    /// Session deletion also settles the Session's unfinished delivery queue.
+    pub fn with_message_flow(mut self, message_flow: Arc<dyn bcs_service_api::MessageFlowService>) -> Self {
+        self.message_flow = Some(message_flow);
+        self
     }
 }
 
@@ -192,6 +199,13 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
+        // Lane keys of the queue must be read before the Session row is gone.
+        let bot_ids: Vec<String> = match &self.message_flow {
+            Some(_) => self.inner.get(session_id).await?
+                .map(|session| session.participants.into_iter().map(|p| p.bot_uuid).collect())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
         self.collaboration_runtime
             .cancel_session_runs(session_id, "session_deleted")
             .await
@@ -200,7 +214,17 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                     "Failed to cancel active state-machine runs for deleted session '{session_id}': {error}"
                 )))
             })?;
-        self.inner.delete(session_id).await
+        let deleted = self.inner.delete(session_id).await?;
+        // Cancel AFTER the delete so task failure notices find no Session and
+        // are dropped instead of being enqueued into the deleted Session.
+        // Best effort: the Session is already gone and the delivery
+        // scheduler converges any row this misses.
+        if let (true, Some(flow)) = (deleted, &self.message_flow) {
+            if let Err(error) = flow.cancel_session_deliveries(session_id, &bot_ids, "session_deleted").await {
+                tracing::warn!(%session_id, %error, "session deleted; queued delivery cleanup incomplete");
+            }
+        }
+        Ok(deleted)
     }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {

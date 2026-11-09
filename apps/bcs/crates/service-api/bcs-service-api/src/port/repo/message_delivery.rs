@@ -135,6 +135,34 @@ pub enum MessageDeliveryRepoError {
     Storage(String),
 }
 
+impl MessageDeliveryRepoError {
+    /// Group Session row is gone (deleted while deliveries were pending).
+    pub const CANONICAL_SESSION_MISSING: &'static str = "canonical_session_missing";
+    /// Direct A2A Session registry row is gone.
+    pub const SESSION_REGISTRY_MISSING: &'static str = "session_registry_missing";
+
+    /// The Session an admission targets no longer exists. Deterministic:
+    /// retrying the same admission can never succeed.
+    pub fn is_session_missing(&self) -> bool {
+        matches!(self, Self::Invalid(code)
+            if code == Self::CANONICAL_SESSION_MISSING || code == Self::SESSION_REGISTRY_MISSING)
+    }
+}
+
+#[cfg(test)]
+mod repo_error_tests {
+    use super::MessageDeliveryRepoError as E;
+
+    #[test]
+    fn session_missing_is_only_the_two_missing_codes() {
+        assert!(E::Invalid(E::CANONICAL_SESSION_MISSING.into()).is_session_missing());
+        assert!(E::Invalid(E::SESSION_REGISTRY_MISSING.into()).is_session_missing());
+        assert!(!E::Invalid("other".into()).is_session_missing());
+        assert!(!E::Storage(E::CANONICAL_SESSION_MISSING.into()).is_session_missing());
+        assert!(!E::Conflict.is_session_missing());
+    }
+}
+
 #[async_trait]
 pub trait MessageDeliveryRepoPort: Send + Sync {
     /// Atomically admit a same-session initialization batch. Implementations

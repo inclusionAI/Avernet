@@ -393,6 +393,8 @@ pub async fn wire_with_caller_assembly(
     Ok(flow)
 }
 
+const EPOCH_RESTART_BACKOFF: Duration = Duration::from_secs(5);
+
 /// Drop the epoch futures on demotion: no follower recovery and no new I/O.
 /// JoinSet drop aborts local I/O tasks; persisted send-start records remain
 /// uncertain until the next master's recovery (never blindly re-enqueued).
@@ -459,7 +461,21 @@ async fn run_on_master(
                         break;
                     }
                 }
-                result = &mut epoch => return result,
+                result = &mut epoch => {
+                    let error = match result {
+                        Ok(()) => return Ok(()),
+                        Err(error) => error,
+                    };
+                    // A failed epoch must not leave the queue dead until a
+                    // process restart: back off, then start a fresh epoch
+                    // (fresh recovery sweep) while leadership is still held.
+                    tracing::error!(%error, "delivery master epoch failed; restarting after backoff");
+                    tokio::select! {
+                        _ = shutdown.changed() => return Ok(()),
+                        _ = tokio::time::sleep(EPOCH_RESTART_BACKOFF) => {}
+                    }
+                    break;
+                }
                 _ = &mut sampler => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
                 _ = &mut reconciliation => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
             }

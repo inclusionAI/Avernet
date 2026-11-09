@@ -622,6 +622,8 @@ async fn assert_runtime_timeout_with_abort_ack(provider: bool) {
 
 #[path = "../support/task_handles.rs"]
 mod task_handles;
+#[path = "../support/deleted_session_queue.rs"]
+mod deleted_session_queue;
 
 /// The ordinary task fixture with only the ephemeral Caller context.
 async fn delegate_fixture(

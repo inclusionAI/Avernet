@@ -142,6 +142,15 @@ impl MessageFlowService for InstrumentedMessageFlowService {
         self.inner.cancel_latest_queued_message(cmd).await
     }
 
+    async fn cancel_session_deliveries(
+        &self,
+        session_id: &str,
+        bot_ids: &[String],
+        reason: &str,
+    ) -> ServiceResult<()> {
+        self.inner.cancel_session_deliveries(session_id, bot_ids, reason).await
+    }
+
     async fn rebind_channel_source_message(
         &self,
         source_run_id: &str,

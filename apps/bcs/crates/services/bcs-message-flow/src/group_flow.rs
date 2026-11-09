@@ -679,6 +679,15 @@ impl MessageFlowService for BcsMessageFlow {
         crate::delivery_control::cancel_latest_queued(self, cmd).await
     }
 
+    async fn cancel_session_deliveries(
+        &self,
+        session_id: &str,
+        bot_ids: &[String],
+        reason: &str,
+    ) -> ServiceResult<()> {
+        crate::session_delivery_cleanup::cancel(self, session_id, bot_ids, reason).await
+    }
+
     async fn resolve_chat_abort_scope(
         &self,
         group_id: &str,

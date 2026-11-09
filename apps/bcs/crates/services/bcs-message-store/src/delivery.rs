@@ -108,7 +108,7 @@ async fn control_page(db: &dyn bcs_db_api::DbPlugin, env: &str, category: usize,
     let mut params = vec![env.into()];
     if category != 2 { params.push(now.into()); }
     params.push((limit as i64).into());
-    db.query(DbStatement::with_params(format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND {predicate} ORDER BY {order} LIMIT ?"), params)).await.map_err(storage)?.into_iter().map(row_to_delivery).collect()
+    db.query(DbStatement::with_params(format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND {predicate} ORDER BY {order} LIMIT ?"), params)).await.map_err(storage).map(decode_batch)
 }
 
 const COLS: &[&str] = &[
@@ -154,6 +154,19 @@ const COLS: &[&str] = &[
 
 fn storage(error: impl std::fmt::Display) -> MessageDeliveryRepoError {
     MessageDeliveryRepoError::Storage(error.to_string())
+}
+
+/// Only backend/outage failures are retryable. Malformed input, conversion,
+/// unsupported operations and unique-key violations fail the same way on
+/// every attempt and must not pin a retrying caller.
+fn transaction_error(error: DbError) -> MessageDeliveryRepoError {
+    match error {
+        DbError::ConditionFailed { .. } => MessageDeliveryRepoError::Conflict,
+        ref duplicate if duplicate.is_duplicate_key() => MessageDeliveryRepoError::Conflict,
+        DbError::InvalidInput(_) | DbError::Unsupported(_) | DbError::Conversion(_) =>
+            MessageDeliveryRepoError::Invalid(format!("delivery transaction rejected: {error}")),
+        other => storage(other),
+    }
 }
 
 pub(crate) fn active(d: &PersistedMessageDelivery) -> bool {
@@ -223,10 +236,20 @@ pub(crate) fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, Me
                 Some(DbValue::Bool(_)) => "bool", Some(DbValue::F64(_)) => "f64",
             })).collect();
             tracing::warn!(operation = "decode_delivery", error_category = "column_conversion", column_types = ?types,
-                "delivery row decoding failed; payload omitted; scheduler may be backing off");
+                "delivery row decoding failed; payload omitted; row is skipped by scheduler batches");
         }
     }
-    result
+    // A corrupt row is a data fault, not a transient storage outage:
+    // retrying the same read can never succeed.
+    result.map_err(|_| MessageDeliveryRepoError::Invalid(CORRUPT_DELIVERY_ROW.into()))
+}
+
+pub(crate) const CORRUPT_DELIVERY_ROW: &str = "corrupt_delivery_row";
+
+/// Scheduler work batches must not let one corrupt row fail the whole page:
+/// the page is ordered, so the same row would poison every later read.
+pub(crate) fn decode_batch(rows: Vec<DbRow>) -> Vec<PersistedMessageDelivery> {
+    rows.into_iter().filter_map(|row| row_to_delivery(row).ok()).collect()
 }
 
 fn decode_delivery(row: &DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
@@ -462,7 +485,7 @@ impl MySqlMessageStore {
                         .get_message_by_id(&command.message.session_id, &id)
                         .await
                         .map_err(storage)?
-                        .ok_or_else(|| storage("idempotent message is missing"))?;
+                        .ok_or_else(|| MessageDeliveryRepoError::Invalid("idempotent_message_missing".into()))?;
                     admitted.push(DeliveryAdmissionResult {
                         deliveries: self.lookup(DeliveryLookup::Message(id)).await?,
                         message,
@@ -488,15 +511,15 @@ impl MySqlMessageStore {
             )]).await.map_err(storage)?;
             let rows = match sequence.first() {
                 Some(DbTransactionStepResult::Rows(rows)) => rows,
-                _ => return Err(storage("canonical session sequence query is missing")),
+                _ => return Err(MessageDeliveryRepoError::Invalid("canonical_session_sequence_missing".into())),
             };
             db_get_column(
-                rows.first().ok_or_else(|| if direct { MessageDeliveryRepoError::Invalid("session_registry_missing".into()) } else { storage("canonical session is missing") })?,
+                rows.first().ok_or_else(|| MessageDeliveryRepoError::Invalid(if direct { MessageDeliveryRepoError::SESSION_REGISTRY_MISSING } else { MessageDeliveryRepoError::CANONICAL_SESSION_MISSING }.into()))?,
                 "current_msg_seq",
             ).map_err(storage)? };
             let seq = old_seq
                 .checked_add(1 + i64::from(command.display_message.is_some()))
-                .ok_or_else(|| storage("session sequence exhausted"))?;
+                .ok_or_else(|| MessageDeliveryRepoError::Invalid("session_sequence_exhausted".into()))?;
             staged_seq = Some(seq);
             steps.push(DbTransactionStep::ExecuteChecked {
                 statement: DbStatement::with_params(format!("UPDATE {table} SET current_msg_seq = ? WHERE env = ? AND session_id = ? AND current_msg_seq = ?{type_filter}"),
@@ -554,7 +577,7 @@ impl MySqlMessageStore {
         transaction
             .map_err(|error| match error {
                 DbError::ConditionFailed { .. } => MessageDeliveryRepoError::Conflict,
-                other => storage(other),
+                other => transaction_error(other),
             })?;
         Ok(admitted)
         }.instrument(tracing::debug_span!(target: "bcs_reply_profile", "repo_writer_held")).await
@@ -674,7 +697,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
                 // Uncertain attempts retain transport correlation metadata so
                 // their terminal audit row can still explain late callbacks.
                 let columns = if matches!(status, "unknown" | "cancel_unknown") { &full_columns } else { &compact_columns };
-                rows.extend(self.db.query(DbStatement::with_params(format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND status = ? AND expire_at_ms <= ? ORDER BY expire_at_ms, delivery_id LIMIT ?"), vec![self.env.as_str().into(), status.into(), now_ms.into(), (size as i64).into()])).await.map_err(storage)?.into_iter().map(row_to_delivery).collect::<Result<Vec<_>,_>>()?);
+                rows.extend(self.db.query(DbStatement::with_params(format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND status = ? AND expire_at_ms <= ? ORDER BY expire_at_ms, delivery_id LIMIT ?"), vec![self.env.as_str().into(), status.into(), now_ms.into(), (size as i64).into()])).await.map_err(storage).map(decode_batch)?);
             }
             return Ok(rows);
         }
@@ -686,7 +709,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         };
         params.push((limit.min(200) as i64).into());
         let columns = COLS.iter().map(|c| match *c { "semantic_projection_json" => "'{}' AS semantic_projection_json", "transport_context_json" => "NULL AS transport_context_json", column => column }).collect::<Vec<_>>().join(",");
-        self.db.query(DbStatement::with_params(format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND delivery_id > ? AND {predicate} ORDER BY delivery_id LIMIT ?"), params)).await.map_err(storage)?.into_iter().map(row_to_delivery).collect()
+        self.db.query(DbStatement::with_params(format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND delivery_id > ? AND {predicate} ORDER BY delivery_id LIMIT ?"), params)).await.map_err(storage).map(decode_batch)
     }
     async fn queue_statistics(&self) -> Result<Vec<DeliveryQueueStatistic>, MessageDeliveryRepoError> {
         self.db.query(DbStatement::with_params("SELECT flow_kind, kind, status, COALESCE(wait_reason, 'none') AS wait_reason, COUNT(*) AS n, MIN(created_at_ms) AS oldest FROM bcs_message_deliveries WHERE env = ? AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown','pending_context','bound') GROUP BY flow_kind, kind, status, wait_reason", vec![self.env.as_str().into()])).await.map_err(storage)?.iter().map(|r| Ok(DeliveryQueueStatistic {

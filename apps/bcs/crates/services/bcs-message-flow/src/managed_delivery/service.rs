@@ -615,9 +615,10 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         if batch.is_empty() { break; }
         for row in batch {
             cursor = row.delivery_id.clone();
-            self.apply(DeliveryTransitionCommand {
+            let delivery_id = row.delivery_id;
+            match self.apply(DeliveryTransitionCommand {
                 caller_dispatch_commit: None,
-                delivery_id: row.delivery_id,
+                delivery_id: delivery_id.clone(),
                 expected_state_version: row.state.state_version,
                 event: Event::Recover,
                 now_ms,
@@ -629,7 +630,15 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 caller_cancel: None,
                 caller_terminal: None,
             })
-            .await?;
+            .await
+            {
+                Ok(_) => {}
+                // An outage fails the whole sweep so the caller retries it.
+                Err(error @ ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(_))) => return Err(error),
+                // One row's deterministic fault must not block takeover for
+                // every other row; the run-deadline control still bounds it.
+                Err(error) => tracing::error!(%delivery_id, %error, "delivery recovery skipped one row"),
+            }
         }
         }
         Ok(())
