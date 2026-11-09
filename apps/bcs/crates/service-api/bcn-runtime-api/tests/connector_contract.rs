@@ -39,6 +39,6 @@ async fn optional_operations_reject_on_trait_object_without_io() {
 
 #[test]
 fn credential_debug_cannot_expose_resolved_bytes() {
-    let credential = bcn_runtime_api::port::ResolvedCredential::new(b"sensitive-material".to_vec());
+    let credential = bcn_runtime_api::port::ResolvedCredential::new(b"test-token".to_vec());
     assert_eq!(format!("{credential:?}"), "ResolvedCredential([REDACTED])");
 }
