@@ -1,72 +1,282 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="1120" viewBox="0 0 1580 1120"><defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#667085"/></marker></defs><rect width="1580" height="1120" fill="#fff"/><style>text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}.title{font-size:25px;font-weight:bold}.field{font-size:16px}.label{font-size:15px;paint-order:stroke;stroke:white;stroke-width:6px;stroke-linejoin:round}</style><text x="40" y="44" class="title">Bot 内需求视图 · 新老表 ER 关系（建议设计）</text><text x="40" y="78" font-size="16">蓝色：新增必需表　橙色：可选新增表　灰色：已有表　实线：ID 引用　虚线：条件字段匹配（非已建外键）</text>
-<rect x="40" y="130" width="410" height="236" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M40 173H450" stroke="#1677ff"/>
-<text x="54" y="158" font-size="18" font-weight="bold">新增 · bot_requirement_session</text>
-<text x="54" y="198" class="field">PK id</text>
-<text x="54" y="224" class="field">tenant_id / environment</text>
-<text x="54" y="250" class="field">bot_id</text>
-<text x="54" y="276" class="field">session_source / external_session_id</text>
-<text x="54" y="302" class="field">dima_work_item_id → DIMA 需求</text>
-<text x="54" y="328" class="field">entry_channel</text>
-<text x="54" y="354" class="field">UK 完整会话身份（不含需求 ID）</text>
-<rect x="40" y="535" width="410" height="184" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M40 578H450" stroke="#1677ff"/>
-<text x="54" y="563" font-size="18" font-weight="bold">新增 · bot_session_delegation</text>
-<text x="54" y="603" class="field">PK id</text>
-<text x="54" y="629" class="field">REF parent_session_id</text>
-<text x="54" y="655" class="field">REF child_session_id</text>
-<text x="54" y="681" class="field">parent_run_source / parent_run_id</text>
-<text x="54" y="707" class="field">collaboration_id / dispatch_id</text>
-<rect x="590" y="370" width="410" height="184" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M590 413H1000" stroke="#1677ff"/>
-<text x="604" y="398" font-size="18" font-weight="bold">新增 · bot_session_channel</text>
-<text x="604" y="438" class="field">PK id</text>
-<text x="604" y="464" class="field">REF session_id</text>
-<text x="604" y="490" class="field">channel_type / channel_instance_id</text>
-<text x="604" y="516" class="field">purpose</text>
-<text x="604" y="542" class="field">UK session + type + instance + purpose</text>
-<rect x="590" y="690" width="410" height="158" rx="8" fill="#fff7e6" stroke="#d48806" stroke-width="2"/><path d="M590 733H1000" stroke="#d48806"/>
-<text x="604" y="718" font-size="18" font-weight="bold">可选 · bot_session_run</text>
-<text x="604" y="758" class="field">REF session_id</text>
-<text x="604" y="784" class="field">run_source / external_run_id</text>
-<text x="604" y="810" class="field">status / started_at / finished_at</text>
-<text x="604" y="836" class="field">UK session + source + external_run_id</text>
-<rect x="1120" y="130" width="420" height="132" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 173H1540" stroke="#86909c"/>
-<text x="1134" y="158" font-size="18" font-weight="bold">已有 · proxy_ding_app</text>
-<text x="1134" y="198" class="field">UK bot_id</text>
-<text x="1134" y="224" class="field">app_code / ding_app_key</text>
-<text x="1134" y="250" class="field">仅为钉应用资产，不是 Bot 主表</text>
-<rect x="1120" y="370" width="420" height="158" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 413H1540" stroke="#86909c"/>
-<text x="1134" y="398" font-size="18" font-weight="bold">已有 · proxy_group_session</text>
-<text x="1134" y="438" class="field">UK (session_key, bot_id)</text>
-<text x="1134" y="464" class="field">open_conversation_id / robot_code</text>
-<text x="1134" y="490" class="field">extra_data.runtimeSession（快照）</text>
-<text x="1134" y="516" class="field">extra_data.ddfSession（快照）</text>
-<rect x="1120" y="690" width="420" height="158" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 733H1540" stroke="#86909c"/>
-<text x="1134" y="718" font-size="18" font-weight="bold">已有 · proxy_group_card</text>
-<text x="1134" y="758" class="field">session_key / bot_id</text>
-<text x="1134" y="784" class="field">open_conversation_id / out_track_id</text>
-<text x="1134" y="810" class="field">extra_data.interaction.runId（部分）</text>
-<text x="1134" y="836" class="field">extra_data.callbackRouting.botId</text>
-<path d="M450 205 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
-<text x="640" y="194" class="label">N : 0..1 · bot_id 同域匹配</text>
-<path d="M450 300 H530 V430 H590" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
-<text x="480" y="350" class="label">1 : N · session_id = id</text>
-<path d="M190 366 V535" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
-<text x="55" y="438" class="label">1 : N · parent_session_id = id</text>
-<path d="M355 366 V535" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
-<text x="205" y="490" class="label">1 : N · child_session_id = id</text>
-<path d="M450 325 H505 V750 H590" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
-<text x="520" y="648" class="label">1 : N · session_id = id</text>
-<path d="M1000 440 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
-<text x="1008" y="423" class="label">群 ID 匹配</text>
-<path d="M1330 528 V690" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
-<text x="1190" y="609" class="label">1 : N* · 原绑定 → 卡片</text>
-<path d="M1000 780 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
-<text x="1003" y="761" class="label">Run 条件匹配*</text>
-<path d="M450 655 H555 V824 H590" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
-<text x="220" y="861" class="label">触发 Run 可定位 0..1 条索引*</text>
-<rect x="40" y="920" width="1500" height="163" rx="8" fill="#fafafa" stroke="#d9d9d9"/>
-<text x="60" y="950" font-size="17" font-weight="bold">关联键与边界</text>
-<text x="60" y="981" font-size="16">① 钉群：channel_type 为钉群时，channel_instance_id = open_conversation_id；群 ID 非唯一，不能据此确定具体旧会话行。</text>
-<text x="60" y="1009" font-size="16">② 旧绑定 → 卡片：仅在语义一致时按 (session_key, bot_id, open_conversation_id) 匹配；发卡 Bot 不等于执行 Bot。</text>
-<text x="60" y="1037" font-size="16">③ Run：委派按 (父会话, Run 来源, Run ID) 定位；卡片也须先确认会话及来源映射，不能仅凭 runId 关联。</text>
-<text x="60" y="1065" font-size="16">④ 一个执行会话最多绑定一个需求，冲突拒绝覆盖。DIMA 为外部系统；现有 Bot / Session / Run 权威表尚未确认。</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1980" viewBox="0 0 2560 1980">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8" fill="none" stroke="#475467" stroke-width="1.8" />
+    </marker>
+    <marker id="flow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8" fill="none" stroke="#D92D20" stroke-width="1.8" />
+    </marker>
+  </defs>
+  <rect width="2560" height="1980" fill="#fff" />
+  <style>
+text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
+.title{font-size:30px;font-weight:bold}
+.sub{font-size:16px;fill:#475467}
+.section{font-size:19px;font-weight:bold;fill:#344054}
+.box-title{font-size:18px;font-weight:bold}
+.field{font-size:15px;fill:#344054}
+.small{font-size:14px;fill:#697586}
+.label{font-size:14px;fill:#475467;paint-order:stroke;stroke:#fff;stroke-width:6px;stroke-linejoin:round}
+.flow-node{font-size:17px;font-weight:bold}
+.flow-sub{font-size:14px;fill:#344054}
+.flow-hint{font-size:13px;fill:#667085}
+.note{font-size:16px;fill:#344054}
+.note-title{font-size:19px;font-weight:bold}
+</style>
+  <text x="52" y="48" class="title">Bot 内需求视图 · 新老表 ER 关系（建议设计）</text>
+  <text x="52" y="82" class="field">蓝色：建议必需表　橙色：可选表　灰色：现有 proxy 表　绿色：accservice DDF 现有表　紫色：身份/结论说明　实线：ID 引用　虚线：跨系统条件匹配或非外键身份映射</text>
+  <circle cx="52" cy="108" r="5" fill="#1677ff" />
+  <text x="64" y="113" class="small">新增必需</text>
+  <circle cx="180" cy="108" r="5" fill="#d48806" />
+  <text x="192" y="113" class="small">可选</text>
+  <circle cx="310" cy="108" r="5" fill="#86909c" />
+  <text x="322" y="113" class="small">proxy 现有</text>
+  <circle cx="470" cy="108" r="5" fill="#12805c" />
+  <text x="482" y="113" class="small">DDF 现有</text>
+  <circle cx="640" cy="108" r="5" fill="#7d2ae8" />
+  <text x="652" y="113" class="small">身份/结论</text>
+  <text x="52" y="139" class="section">一、建议在线关联层</text>
+  <text x="670" y="139" class="section">二、现有 proxy 钉群链路</text>
+  <text x="1290" y="139" class="section">三、现有 accservice DDF 链路</text>
+  <text x="1930" y="139" class="section">四、派发事实与边界</text>
+  <rect x="52" y="160" width="550" height="322" rx="10" fill="#edf5ff" stroke="#1677ff" stroke-width="2" />
+  <path d="M52 203H602" stroke="#1677ff" stroke-width="1.4" />
+  <text x="68" y="189" class="box-title">新增 · bot_requirement_session</text>
+  <text x="586" y="189" text-anchor="end" class="small" fill="#1677ff">权威身份</text>
+  <text x="68" y="233" class="field">PK id</text>
+  <text x="68" y="259" class="field">tenant_id / environment</text>
+  <text x="68" y="285" class="field">bot_id</text>
+  <text x="68" y="311" class="field">session_source / external_session_id</text>
+  <text x="68" y="337" class="field">dima_work_item_id → 外部需求/工作项</text>
+  <text x="68" y="363" class="field">entry_channel</text>
+  <text x="68" y="389" class="field">session_role / identity_namespace（建议补充）</text>
+  <text x="68" y="415" class="field">一句话：sessionA、sessionB、sessionC 各自一行，不模糊合并</text>
+  <rect x="52" y="504" width="550" height="333" rx="10" fill="#edf5ff" stroke="#1677ff" stroke-width="2" />
+  <path d="M52 547H602" stroke="#1677ff" stroke-width="1.4" />
+  <text x="68" y="533" class="box-title">新增 · bot_session_delegation</text>
+  <text x="586" y="533" text-anchor="end" class="small" fill="#1677ff">父子事实</text>
+  <text x="68" y="577" class="field">PK id</text>
+  <text x="68" y="603" class="field">REF parent_session_id = sessionB 会话行 id</text>
+  <text x="68" y="629" class="field">REF child_session_id = sessionC 会话行 id</text>
+  <text x="68" y="655" class="field">parent_run_source / parent_run_id</text>
+  <text x="68" y="681" class="field">collaboration_id / collab_space_id</text>
+  <text x="68" y="707" class="field">dispatch_source / dispatch_id</text>
+  <text x="68" y="733" class="field">dispatch_fingerprint（可选镜像）</text>
+  <text x="68" y="759" class="field">定位：承接 A/B/C 的父子事实；不替代 DDF 现有表</text>
+  <rect x="52" y="885" width="550" height="250" rx="10" fill="#edf5ff" stroke="#1677ff" stroke-width="2" />
+  <path d="M52 928H602" stroke="#1677ff" stroke-width="1.4" />
+  <text x="68" y="914" class="box-title">新增 · bot_session_channel</text>
+  <text x="586" y="914" text-anchor="end" class="small" fill="#1677ff">渠道锚点</text>
+  <text x="68" y="958" class="field">PK id</text>
+  <text x="68" y="984" class="field">REF session_id</text>
+  <text x="68" y="1010" class="field">channel_type / channel_instance_id</text>
+  <text x="68" y="1036" class="field">channel_instance_id（钉群）= open_conversation_id</text>
+  <text x="68" y="1062" class="field">purpose</text>
+  <text x="68" y="1088" class="field">UK session + channel + purpose</text>
+  <rect x="52" y="1163" width="550" height="275" rx="10" fill="#fff7e6" stroke="#d48806" stroke-width="2" />
+  <path d="M52 1206H602" stroke="#d48806" stroke-width="1.4" />
+  <text x="68" y="1192" class="box-title">可选 · bot_session_run</text>
+  <text x="586" y="1192" text-anchor="end" class="small" fill="#d48806">Run 索引</text>
+  <text x="68" y="1236" class="field">PK id</text>
+  <text x="68" y="1262" class="field">REF session_id</text>
+  <text x="68" y="1288" class="field">run_source / external_run_id</text>
+  <text x="68" y="1314" class="field">status / started_at / finished_at</text>
+  <text x="68" y="1340" class="field">synced_at</text>
+  <text x="68" y="1366" class="field">UK session + run_source + external_run_id</text>
+  <text x="68" y="1392" class="field">仅作为 Run 索引；日志与产物按需读取</text>
+  <rect x="670" y="160" width="550" height="431" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
+  <path d="M670 203H1220" stroke="#86909c" stroke-width="1.4" />
+  <text x="686" y="189" class="box-title">现有 · proxy_group_session</text>
+  <text x="1204" y="189" text-anchor="end" class="small" fill="#86909c">JSON 快照</text>
+  <text x="686" y="233" class="field">PK id / bot_id / robot_code</text>
+  <text x="686" y="259" class="field">session_key = sessionA</text>
+  <text x="686" y="285" class="field">open_conversation_id（钉群通道锚点）</text>
+  <text x="686" y="311" class="field">status</text>
+  <text x="686" y="337" class="field">extra_data.runtimeSession：</text>
+  <text x="686" y="363" class="field">　bcsGroupId</text>
+  <text x="686" y="389" class="field">　bcsSessionId</text>
+  <text x="686" y="415" class="field">　teamclawSessionId = sessionB</text>
+  <text x="686" y="441" class="field">　runId（执行/任务快照）</text>
+  <text x="686" y="467" class="field">　taskId（业务触发锚点，视现有契约）</text>
+  <text x="686" y="493" class="field">extra_data.ddfSession：</text>
+  <text x="686" y="519" class="field">　ddfSessionId = sessionC</text>
+  <text x="686" y="545" class="field">　workflow</text>
+  <rect x="670" y="633" width="550" height="196" rx="10" fill="#f6f1ff" stroke="#7d2ae8" stroke-width="2" />
+  <path d="M670 676H1220" stroke="#7d2ae8" stroke-width="1.4" />
+  <text x="686" y="662" class="box-title">身份解释 · 钉群场景</text>
+  <text x="1204" y="662" text-anchor="end" class="small" fill="#7d2ae8">勿混用</text>
+  <text x="686" y="706" class="field">sessionA：发起建群的原页面会话</text>
+  <text x="686" y="732" class="field">sessionB：群内运行态 TC/DDF 父会话</text>
+  <text x="686" y="758" class="field">sessionC：分析后发起的 DDF 子会话（可选）</text>
+  <text x="686" y="784" class="field">openConversationId：群通道；taskId：业务项；都不是会话身份</text>
+  <rect x="670" y="885" width="550" height="250" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
+  <path d="M670 928H1220" stroke="#86909c" stroke-width="1.4" />
+  <text x="686" y="914" class="box-title">现有 · proxy_group_card</text>
+  <text x="1204" y="914" text-anchor="end" class="small" fill="#86909c">交互卡片</text>
+  <text x="686" y="958" class="field">PK id / bot_id</text>
+  <text x="686" y="984" class="field">session_key / open_conversation_id</text>
+  <text x="686" y="1010" class="field">out_track_id</text>
+  <text x="686" y="1036" class="field">extra_data.interaction.runId（部分链路）</text>
+  <text x="686" y="1062" class="field">extra_data.callbackRouting.botId</text>
+  <text x="686" y="1088" class="field">卡片需先确认 session / channel / Run，不能只用群或 runId</text>
+  <rect x="670" y="1163" width="550" height="225" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
+  <path d="M670 1206H1220" stroke="#86909c" stroke-width="1.4" />
+  <text x="686" y="1192" class="box-title">现有 · proxy_ding_app</text>
+  <text x="1204" y="1192" text-anchor="end" class="small" fill="#86909c">资产</text>
+  <text x="686" y="1236" class="field">PK id / owner_user_id</text>
+  <text x="686" y="1262" class="field">UK bot_id</text>
+  <text x="686" y="1288" class="field">app_code / ding_app_key</text>
+  <text x="686" y="1314" class="field">钉应用资产与凭据，不是 Bot 执行身份</text>
+  <rect x="1290" y="160" width="550" height="407" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
+  <path d="M1290 203H1840" stroke="#12805c" stroke-width="1.4" />
+  <text x="1306" y="189" class="box-title">DDF 现有 · accs_collab_task</text>
+  <text x="1824" y="189" text-anchor="end" class="small" fill="#12805c">协作主表</text>
+  <text x="1306" y="233" class="field">PK id（MySQL 自增）</text>
+  <text x="1306" y="259" class="field">UK collab_id / collab_space_id</text>
+  <text x="1306" y="285" class="field">session_id（CC 会话 UUID）</text>
+  <text x="1306" y="311" class="field">session_alias（引擎裸 session id）</text>
+  <text x="1306" y="337" class="field">work_item_provider / work_item_site</text>
+  <text x="1306" y="363" class="field">work_item_type / work_item_id（承接 taskId）</text>
+  <text x="1306" y="389" class="field">trigger_ref_json（触发来源快照）</text>
+  <text x="1306" y="415" class="field">initiator_bot_id / status / conclusion</text>
+  <text x="1306" y="441" class="field">组合：accs_collab_task 1 → N accs_member_task</text>
+  <rect x="1290" y="594" width="550" height="353" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
+  <path d="M1290 637H1840" stroke="#12805c" stroke-width="1.4" />
+  <text x="1306" y="623" class="box-title">DDF 现有 · accs_member_task</text>
+  <text x="1824" y="623" text-anchor="end" class="small" fill="#12805c">派发事实</text>
+  <text x="1306" y="667" class="field">PK id</text>
+  <text x="1306" y="693" class="field">collab_id → accs_collab_task.collab_id</text>
+  <text x="1306" y="719" class="field">UK (collab_id, member_task_id)</text>
+  <text x="1306" y="745" class="field">assignee_bot_id（被派发成员）</text>
+  <text x="1306" y="771" class="field">idem_key（派发幂等键）</text>
+  <text x="1306" y="797" class="field">dispatch_fingerprint（首次请求 SHA-256）</text>
+  <text x="1306" y="823" class="field">state / attempt_no / deadline</text>
+  <text x="1306" y="849" class="field">用途：现成 DDF 派发事实表；非独立 accs_dispatch 表</text>
+  <rect x="1290" y="981" width="550" height="335" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
+  <path d="M1290 1024H1840" stroke="#12805c" stroke-width="1.4" />
+  <text x="1306" y="1010" class="box-title">DDF 现有 · accs_member_task_attempt</text>
+  <text x="1824" y="1010" text-anchor="end" class="small" fill="#12805c">执行尝试</text>
+  <text x="1306" y="1054" class="field">PK id</text>
+  <text x="1306" y="1080" class="field">collab_id（冗余）</text>
+  <text x="1306" y="1106" class="field">member_task_id → accs_member_task.member_task_id</text>
+  <text x="1306" y="1132" class="field">UK (member_task_id, attempt_no)</text>
+  <text x="1306" y="1158" class="field">run_id（本次尝试的执行 Run）</text>
+  <text x="1306" y="1184" class="field">status / conclusion / started_at / ended_at</text>
+  <text x="1306" y="1210" class="field">组合：member_task 1 → N attempt</text>
+  <rect x="1290" y="1360" width="550" height="178" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
+  <path d="M1290 1403H1840" stroke="#12805c" stroke-width="1.4" />
+  <text x="1306" y="1389" class="box-title">DDF 现有 · accs_idempotency_record</text>
+  <text x="1824" y="1389" text-anchor="end" class="small" fill="#12805c">事件账本</text>
+  <text x="1306" y="1433" class="field">memberTasks.dispatch 的幂等账本</text>
+  <text x="1306" y="1459" class="field">只用于重放/去重；不是委派关系表</text>
+  <rect x="1930" y="160" width="580" height="246" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
+  <path d="M1930 203H2510" stroke="#12805c" stroke-width="1.4" />
+  <text x="1946" y="189" class="box-title">DDF 现有 · accs_slice_event</text>
+  <text x="2494" y="189" text-anchor="end" class="small" fill="#12805c">事件流</text>
+  <text x="1946" y="233" class="field">collab_id / member_task_id / attempt_id</text>
+  <text x="1946" y="259" class="field">slice_seq / event JSON</text>
+  <text x="1946" y="285" class="field">协作与执行过程事件流；用于审计和回放</text>
+  <rect x="1930" y="460" width="580" height="320" rx="10" fill="#f6f1ff" stroke="#7d2ae8" stroke-width="2" />
+  <path d="M1930 503H2510" stroke="#7d2ae8" stroke-width="1.4" />
+  <text x="1946" y="489" class="box-title">关键结论：已存在派发表</text>
+  <text x="2494" y="489" text-anchor="end" class="small" fill="#7d2ae8">结论</text>
+  <text x="1946" y="533" class="field">现成表：accs_member_task</text>
+  <text x="1946" y="559" class="field">链路：accs_collab_task 1 → N member_task 1 → N attempt</text>
+  <text x="1946" y="585" class="field">accs_member_task.dispatch_fingerprint 是列，不是独立表</text>
+  <text x="1946" y="611" class="field">accs_member_task_dispatch_fingerprint.sql 只是迁移文件</text>
+  <text x="1946" y="637" class="field">accs_idempotency_record 是 dispatch 幂等账本</text>
+  <text x="1946" y="663" class="field">不存在单独叫 accs_dispatch / accs_delegate 的表</text>
+  <rect x="1930" y="850" width="580" height="345" rx="10" fill="#f6f1ff" stroke="#7d2ae8" stroke-width="2" />
+  <path d="M1930 893H2510" stroke="#7d2ae8" stroke-width="1.4" />
+  <text x="1946" y="879" class="box-title">边界与幂等</text>
+  <text x="2494" y="879" text-anchor="end" class="small" fill="#7d2ae8">边界</text>
+  <text x="1946" y="923" class="field">sessionB 才是 DDF 父会话，sessionA 只留在建群入口</text>
+  <text x="1946" y="949" class="field">openConversationId 只做钉群通道，不作为会话身份</text>
+  <text x="1946" y="975" class="field">runId 是执行身份，不是 session 身份</text>
+  <text x="1946" y="1001" class="field">taskId 应映射 work_item_* 或 trigger_ref_json</text>
+  <text x="1946" y="1027" class="field">memberTasks.dispatch 要有稳定幂等键或 dispatch_fingerprint</text>
+  <text x="1946" y="1053" class="field">跨系统字段仍需生产结构核对；代码 DDL ≠ 生产已部署结构</text>
+  <text x="1930" y="1335" class="small">补充：必须先明确 BCS/TC/DDF 的 ID 命名空间再写映射</text>
+  <path d="M 327 482 L 327 504" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)" />
+  <text x="90" y="496" class="label">1 : N  parent/child_session_id</text>
+  <path d="M 327 837 L 327 885" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)" />
+  <text x="90" y="862" class="label">1 : N  session_id</text>
+  <path d="M 602 400 L 645 400 L 645 1300 L 602 1300" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="390" y="1075" class="label">1 : N  Run 可选索引</text>
+  <path d="M 360 300 L 670 300" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="380" y="286" class="label">sessionA/B/C → external_session_id</text>
+  <path d="M 670 430 L 640 430 L 640 930 L 602 930" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="610" y="916" class="label">group → channel</text>
+  <path d="M 945 591 L 945 633" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)" />
+  <text x="990" y="620" class="label">1 : 0..1  身份快照</text>
+  <path d="M 945 829 L 945 885" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)" />
+  <text x="990" y="861" class="label">群绑定 → 卡片</text>
+  <path d="M 945 1135 L 945 1163" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)" />
+  <text x="990" y="1153" class="label">bot_id 资产</text>
+  <path d="M 1565 567 L 1565 594" fill="none" stroke="#12805c" stroke-width="2" />
+  <text x="1585" y="584" class="label">1 : N  collab_id</text>
+  <path d="M 1565 947 L 1565 981" fill="none" stroke="#12805c" stroke-width="2" />
+  <text x="1585" y="970" class="label">1 : N  member_task_id</text>
+  <path d="M 1840 770 L 1930 290" fill="none" stroke="#12805c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="1860" y="660" class="label">dispatch 幂等</text>
+  <path d="M 1840 1120 L 1930 220" fill="none" stroke="#12805c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="1860" y="850" class="label">事件流（示例）</text>
+  <path d="M 602 610 L 1258 610 L 1258 380 L 1290 380" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="640" y="598" class="label">bot_session_delegation.collaboration_id → accs_collab_task.collab_id</text>
+  <path d="M 602 1250 L 630 1250 L 630 1520 L 1258 1520 L 1258 1120 L 1290 1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="640" y="1504" class="label">bot_session_run.external_run_id ↔ attempt.run_id（同源才可匹配）</text>
+  <path d="M 1290 240 L 602 240" fill="none" stroke="#D92D20" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="750" y="226" class="label" text-anchor="middle">建议：sessionB 落 accs_collab_task.session_id / session_alias；sessionA 不作为 DDF 父会话</text>
+  <rect x="40" y="1565" width="2480" height="350" rx="16" fill="#fbfdff" stroke="#98a2b3" stroke-width="2" />
+  <text x="64" y="1595" class="section">五、钉群场景身份串联（推荐路径）</text>
+  <rect x="64" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="79" y="1638" class="flow-node">sessionA</text>
+  <text x="79" y="1664" class="flow-sub">proxy_group_session.session_key</text>
+  <text x="79" y="1684" class="flow-sub">用户页面 + 架构 Bot</text>
+  <text x="79" y="1704" class="flow-sub">最初发起建群的入口会话</text>
+  <path d="M 399 1686 L 419 1686" fill="none" stroke="#D92D20" stroke-width="3" marker-end="url(#arr)" />
+  <rect x="419" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="434" y="1638" class="flow-node">钉群通道</text>
+  <text x="434" y="1664" class="flow-sub">openConversationId</text>
+  <text x="434" y="1684" class="flow-sub">群通道锚点</text>
+  <text x="434" y="1704" class="flow-sub">进入 bot_session_channel</text>
+  <text x="434" y="1724" class="flow-sub">不是 session 身份</text>
+  <path d="M 754 1686 L 774 1686" fill="none" stroke="#D92D20" stroke-width="3" marker-end="url(#arr)" />
+  <rect x="774" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="789" y="1638" class="flow-node">sessionB</text>
+  <text x="789" y="1664" class="flow-sub">runtimeSession.teamclawSessionId</text>
+  <text x="789" y="1684" class="flow-sub">群内运行态会话</text>
+  <text x="789" y="1704" class="flow-sub">DDF 父 session</text>
+  <text x="789" y="1724" class="flow-sub">先落权威会话行</text>
+  <path d="M 1109 1686 L 1129 1686" fill="none" stroke="#D92D20" stroke-width="3" marker-end="url(#arr)" />
+  <rect x="1129" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="1144" y="1638" class="flow-node">DDF 主表</text>
+  <text x="1144" y="1664" class="flow-sub">accs_collab_task</text>
+  <text x="1144" y="1684" class="flow-sub">session_id / session_alias = B</text>
+  <text x="1144" y="1704" class="flow-sub">work_item_id = taskId</text>
+  <text x="1144" y="1724" class="flow-sub">1 : N 成员任务</text>
+  <path d="M 1464 1686 L 1484 1686" fill="none" stroke="#D92D20" stroke-width="3" marker-end="url(#arr)" />
+  <rect x="1484" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="1499" y="1638" class="flow-node">派发事实</text>
+  <text x="1499" y="1664" class="flow-sub">accs_member_task</text>
+  <text x="1499" y="1684" class="flow-sub">collab_id</text>
+  <text x="1499" y="1704" class="flow-sub">assignee / state</text>
+  <text x="1499" y="1724" class="flow-sub">dispatch_fingerprint</text>
+  <path d="M 1819 1686 L 1839 1686" fill="none" stroke="#D92D20" stroke-width="3" marker-end="url(#arr)" />
+  <rect x="1839" y="1610" width="335" height="152" rx="14" fill="#fff" stroke="#475467" stroke-width="2" />
+  <text x="1854" y="1638" class="flow-node">执行尝试</text>
+  <text x="1854" y="1664" class="flow-sub">member_task_attempt</text>
+  <text x="1854" y="1684" class="flow-sub">member_task_id</text>
+  <text x="1854" y="1704" class="flow-sub">run_id</text>
+  <text x="1854" y="1724" class="flow-sub">1 : N attempt</text>
+  <path d="M 941 1762 L 941 1785" fill="none" stroke="#D92D20" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#arr)" />
+  <text x="964" y="1778" class="label">可派生 DDF 子会话</text>
+  <rect x="762" y="1785" width="360" height="130" rx="14" fill="#fff" stroke="#D92D20" stroke-width="2" />
+  <text x="777" y="1813" class="flow-node">sessionC（可选）</text>
+  <text x="777" y="1839" class="flow-sub">ddfSession.ddfSessionId</text>
+  <text x="777" y="1859" class="flow-sub">创建独立权威会话行</text>
+  <text x="777" y="1879" class="flow-sub">bot_session_delegation.child_session_id</text>
+  <text x="2080" y="1808" class="field">推荐：B 是 DDF 父 session，C 只作为子 session 另建行；taskId 是工作项锚点。</text>
+  <text x="2080" y="1838" class="field">若 sessionB 为完整复合键 → accs_collab_task.session_id；若为引擎裸 ID → session_alias。</text>
+  <text x="64" y="1948" class="small">说明：图中已有 accservice 表结构来自当前仓库 DDL；是否已在生产环境全部部署，仍需 ODC / 生产结构核对。</text>
 </svg>
