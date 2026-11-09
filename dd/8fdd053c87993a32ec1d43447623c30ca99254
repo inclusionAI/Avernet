@@ -1,0 +1,21 @@
+apps/baas/src/secbaas/community/core/service/publish_manage/_publish_service.py
+  s_a9973d16634159::t_3a336d3d14acb5 1222
+apps/baas/tests/unit/core/service/publish_manage/test_publish_service_coverage.py
+  s_a9973d16634159::t_88c466abc6ae5c 695-728
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd8fdd053c87993a32ec1d43447623c30ca99254",
+  "prompts": {},
+  "sessions": {
+    "s_a9973d16634159": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-1f98-7510-9813-d58fd147f9a6",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

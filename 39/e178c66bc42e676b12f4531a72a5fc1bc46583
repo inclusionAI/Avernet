@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-manifest-git.test.ts
+  h_43af82e14600e4 475,478-479,481-482,603,610-623,631,641-651,659,670-679,681
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-save.test.ts
+  h_43af82e14600e4 315,323-326,328
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-git-prepared.test.ts
+  h_43af82e14600e4 24,71-82
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-snapshot.test.ts
+  h_43af82e14600e4 98-108,301,305-313
+apps/evolverun/clawweb/public/modules/workflow/server/services/clawflows-git-client.ts
+  h_43af82e14600e4 487-490,492-495,499-514,593
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-candidate-save.ts
+  h_43af82e14600e4 265-271,274-278,295,297-301,305,313-314,401,451
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-git-prepared.ts
+  h_43af82e14600e4 78-91,93,104
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  h_43af82e14600e4 185,190-207,209-211,251-256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "39e178c66bc42e676b12f4531a72a5fc1bc46583",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

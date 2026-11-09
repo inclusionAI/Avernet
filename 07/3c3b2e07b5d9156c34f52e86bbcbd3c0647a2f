@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/cron/services/cron_runtime_targets.py
+  s_44a6b2a40672a4::t_d0511a18f0e912 14-16,36-37,321-329,342-392,394-401,403-409
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_44a6b2a40672a4::t_df6fa50f6f6600 2824-3054
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "073c3b2e07b5d9156c34f52e86bbcbd3c0647a2f",
+  "prompts": {},
+  "sessions": {
+    "s_44a6b2a40672a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a694-e92a-7412-8fe5-ee3adbe8bf6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

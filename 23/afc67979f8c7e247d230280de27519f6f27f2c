@@ -1,0 +1,19 @@
+docs/superpowers/plans/2026-11-03-caller-dispatch-stage-timeouts.md
+  s_e82c8d2a1ff4d0::t_2d3b7f777313ae 286,315,652
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23afc67979f8c7e247d230280de27519f6f27f2c",
+  "prompts": {},
+  "sessions": {
+    "s_e82c8d2a1ff4d0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b7964428-351c-48d8-a488-e8be6d2f7ccc",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

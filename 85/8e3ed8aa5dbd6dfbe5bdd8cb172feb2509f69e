@@ -1,0 +1,26 @@
+apps/backend/tests/community/acceptance/cron/test_cron_lifecycle.py
+  s_06f541974e11df::t_28c1ac1b587084 140
+  s_06f541974e11df::t_853508bda1586f 136-139
+apps/backend/src/agentclaw/community/core/cron/services/cron_relay.py
+  s_06f541974e11df::t_e024447eb9b319 48,636-639,669-682
+apps/backend/src/agentclaw/community/core/cron/services/cron_runtime_targets.py
+  s_06f541974e11df::t_c8986491fb84c6 31-36
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_06f541974e11df::t_dd58d9c97877be 428,430-432,434,436,439,454-457,476,484-531,589-590
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "858e3ed8aa5dbd6dfbe5bdd8cb172feb2509f69e",
+  "prompts": {},
+  "sessions": {
+    "s_06f541974e11df": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a192a7-9a43-7131-8768-07a080591422",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
