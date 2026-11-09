@@ -9,7 +9,6 @@ import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInsta
 import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
-import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -35,7 +34,6 @@ const BotWorkshopPage: React.FC = () => {
     if (keyword || createCloud) history.replace('/bot-workshop');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次性消费,workshop 方法每渲染重建不进依赖。
   }, []);
-  const [publicationBot, setPublicationBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
   const [containerBot, setContainerBot] = useState<BotDomain>();
@@ -157,7 +155,7 @@ const BotWorkshopPage: React.FC = () => {
                         getGeneralConfigAvailability(bot, workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
-                      onManagePublication={setPublicationBot}
+                      onPublicationChanged={() => workshop.retry({ silent: true })}
                       onAction={workshop.runAction}
                       onCopy={workshop.openCopy}
                       getCopyAvailability={workshop.getCopyAvailability}
@@ -223,14 +221,6 @@ const BotWorkshopPage: React.FC = () => {
           onRemoveCollaborator={workshop.removeCollaborator}
           onEditorRequestPolicyChange={workshop.updateEditorRequestPolicy}
           onRequestAccess={workshop.requestAccess}
-        />
-        <ServicePublicationDrawer
-          bot={publicationBot}
-          onClose={() => {
-            setPublicationBot(undefined);
-            void workshop.retry({ silent: true });
-          }}
-          onChanged={workshop.retry}
         />
         {generalConfigBot ? (
           <BotGeneralConfigDialog bot={generalConfigBot} onClose={() => setGeneralConfigBot(undefined)} />
