@@ -1,24 +1,21 @@
 //! Worker-owned external effects. Only canonical saved results cross the trusted inbox boundary.
 use crate::*;
+use std::time::Duration;
 pub(crate) async fn execute(
     ports: &RuntimePorts,
     judge: &dyn JudgeExecutor,
-    command: Command,
+    leased: &LeasedCommand,
     now: u64,
 ) -> RuntimeResult<()> {
+    let command=&leased.command;
     let event_id = EventId::new(
         command.command_id.scope.clone(),
         hash("worker-effect", &command.command_id)?,
     );
-    if ports
-        .inbox
-        .find_input(&command.session_id, &event_id)
-        .await?
-        .is_some()
-    {
-        return Ok(());
+    if let Some(input)=ports.inbox.find_input(&command.session_id,&event_id).await? {
+        return complete(ports,&leased.fence,input).await;
     }
-    let (kind, at_ms) = match command.effect {
+    let (kind, at_ms) = match command.effect.clone() {
         EffectIntent::SaveResult { intent } => {
             let result = ports.results.put_if_absent(intent).await?;
             let at = result.saved_at_ms;
@@ -46,18 +43,43 @@ pub(crate) async fn execute(
             ));
         }
     };
-    ports
-        .inbox
-        .append_and_wake(
-            &command.session_id,
-            SessionInput {
-                event_id,
-                at_ms,
-                kind,
-            },
-        )
-        .await?;
-    Ok(())
+    complete(ports,&leased.fence,SessionInput{event_id,at_ms,kind}).await
+}
+async fn complete(ports:&RuntimePorts,fence:&CommandDeliveryFence,input:SessionInput)->RuntimeResult<()> {
+    loop {
+        match ports.commands.complete_effect(fence,input.clone()).await {
+            Err(RuntimeError::Contention)=>tokio::time::sleep(Duration::from_millis(50)).await,
+            result=>return result.map(|_|()),
+        }
+    }
+}
+/// The owned task polls both I/O and its cancellation budgets independently of
+/// the business scheduler. Charge acquisition/renewal RTT against each lease.
+pub(crate) async fn supervise(ports:RuntimePorts,judge:Arc<dyn JudgeExecutor>,leased:LeasedCommand,now:u64,requested_at:tokio::time::Instant)->RuntimeResult<()> {
+    let deadline=tokio::time::Instant::now()+Duration::from_millis(RuntimeDefaults::default().stall_ms);
+    let initial_lease=requested_at+Duration::from_millis(leased.lease_ms);
+    if tokio::time::Instant::now()>=initial_lease {return Err(RuntimeError::OwnershipLost)}
+    let renew=async {
+        let mut lease_deadline=initial_lease;
+        loop {
+            let next=(tokio::time::Instant::now()+Duration::from_millis(1000)).min(lease_deadline);
+            tokio::time::sleep_until(next).await;
+            if tokio::time::Instant::now()>=lease_deadline {return Err(RuntimeError::OwnershipLost)}
+            let started=tokio::time::Instant::now();
+            match tokio::time::timeout_at(lease_deadline,ports.commands.renew_effect(&leased.fence)).await {
+                Ok(Ok(budget))=>{lease_deadline=started+Duration::from_millis(budget);},
+                Ok(Err(RuntimeError::Contention))=>{}, // authoritative reread; never replay business I/O
+                Ok(Err(error))=>return Err(error),
+                Err(_)=>return Err(RuntimeError::OwnershipLost),
+            }
+        }
+    };
+    tokio::select! {
+        biased;
+        _=tokio::time::sleep_until(deadline)=>Err(RuntimeError::Unavailable("effect deadline reached; durable command retained".into())),
+        result=execute(&ports,judge.as_ref(),&leased,now)=>result,
+        result=renew=>result,
+    }
 }
 
 /// Effects need continuous I/O polling, independent of shard-scan tick latency.

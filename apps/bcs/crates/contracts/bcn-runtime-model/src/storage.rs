@@ -89,6 +89,12 @@ pub struct AdmissionReceipt {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Command { pub command_id: CommandId, pub session_id: SessionId, pub effect: EffectIntent }
+/// Delivery generation is independent of the session's reducer ownership epoch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandDeliveryFence { pub command_id: CommandId, pub consumer: NodeIdentity, pub epoch: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LeasedCommand { pub command: Command, pub fence: CommandDeliveryFence, pub lease_ms: u64 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchPhase { Prepared, MayHaveSent, Accepted, ResultRecorded, Unknown }

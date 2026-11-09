@@ -64,3 +64,34 @@ pub async fn node_liveness_port_contract_tests(liveness: Arc<dyn NodeLivenessPor
     assert_eq!(unknown[0].node, other);
     assert_ne!(unknown[0].liveness, Liveness::Alive, "node name must not inherit another process's lease");
 }
+
+/// One published Judge command in an otherwise fresh scope; advance_clock sets
+/// its backend time. Assert expiry, ABA fencing and immutable completion retry.
+pub async fn command_effect_contract_tests(
+    bus:Arc<dyn bcn_runtime_api::port::repo::CommandBus>,inbox:Arc<dyn InboxPort>,
+    session:SessionId,first:NodeIdentity,second:NodeIdentity,input:SessionInput,
+    advance_clock:impl Fn(u64),
+) {
+    let a=bus.receive_effects(&session.scope,&first,None,10).await.unwrap().items.remove(0);
+    assert!(bus.renew_effect(&a.fence).await.unwrap()>0);
+    assert!(bus.receive_effects(&session.scope,&second,None,10).await.unwrap().items.is_empty());
+    advance_clock(5000);
+    assert_eq!(bus.renew_effect(&a.fence).await,Err(RuntimeError::OwnershipLost));
+    assert_eq!(bus.complete_effect(&a.fence,input.clone()).await,Err(RuntimeError::OwnershipLost));
+    let b=bus.receive_effects(&session.scope,&second,None,10).await.unwrap().items.remove(0);
+    advance_clock(9000);
+    let new_a=bus.receive_effects(&session.scope,&first,None,10).await.unwrap().items.remove(0);
+    assert!(new_a.fence.epoch>b.fence.epoch && b.fence.epoch>a.fence.epoch);
+    assert_eq!(bus.complete_effect(&a.fence,input.clone()).await,Err(RuntimeError::OwnershipLost));
+    assert_eq!(bus.complete_effect(&b.fence,input.clone()).await,Err(RuntimeError::OwnershipLost));
+    advance_clock(13000);
+    let renewed_a=bus.receive_effects(&session.scope,&first,None,10).await.unwrap().items.remove(0);
+    assert!(renewed_a.fence.epoch>new_a.fence.epoch,"expired same-owner reacquire needs a new generation");
+    assert_eq!(bus.complete_effect(&new_a.fence,input.clone()).await,Err(RuntimeError::OwnershipLost));
+    let pos=bus.complete_effect(&renewed_a.fence,input.clone()).await.unwrap();
+    assert_eq!(bus.complete_effect(&renewed_a.fence,input.clone()).await.unwrap(),pos);
+    let mut changed=input.clone();changed.at_ms+=1;
+    assert!(matches!(bus.complete_effect(&renewed_a.fence,changed).await,Err(RuntimeError::Conflict(_))));
+    assert_eq!(inbox.find_input(&session,&input.event_id).await.unwrap(),Some(input));
+    assert!(bus.receive_effects(&session.scope,&second,None,10).await.unwrap().items.is_empty());
+}

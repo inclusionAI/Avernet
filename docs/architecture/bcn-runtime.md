@@ -381,3 +381,31 @@ failures use redacted `BackendFailure`, mapped to fatal `RuntimeError::Storage`.
 Own heartbeat mutations propagate these errors. Peer observation still reports
 Alive when either slot proves life, Unknown on uncertain evidence without life,
 and Dead only when both slots are confirmed absent.
+
+Worker effects use `CommandBus::receive_effects`, `renew_effect` and
+`complete_effect`. Each leased command has an owner/incarnation and monotonically
+increasing delivery epoch, independent of session-shard ownership. Expiry and
+reacquisition increment the epoch even for the same process; a live renewal keeps
+it stable. Scheduler scans do not renew already leased Worker commands.
+
+An effect independently polls its 15s deadline and 1s renewal, bounded by the
+previously granted 3s lease even when the business tick is blocked. Acquisition and
+renewal budgets start before the request, charging its RTT conservatively. Lost
+ownership, expiry, backend error, effect deadline or dropped runtime scope cancels
+the effect future. No detached effect survives its owning slot/run scope.
+
+Completion validates the canonical Judge task/node/outcome or exact saved-result
+intent, then atomically checks delivery revision/owner/epoch while publishing
+input, wake, saved receipt and delivery ACK. Only exact committed retries are
+idempotent; branch/timestamp changes still conflict. Generic inbox append rejects
+Judge decisions. Backend time is checked before renewal/completion; the final CAS
+fences delivery generation, not an atomic server wall-clock expiry predicate.
+A takeover between precheck and commit therefore rejects the stale completion.
+Session reduction fences and the immutable external result barrier are unchanged.
+
+The additive delivery fields default when reading old rows, but mixing old and
+new Worker binaries is unsupported: stop older Workers before upgrading or use a
+fresh experimental namespace. At most 64 in-flight effects per Worker each add
+one bounded renewal per second: one two-row read, one server-time call and one CAS
+write (at most 192 atomic-backend calls/s per Worker before transport internals).
+This is a worst-case operation count, not a throughput or capacity claim.

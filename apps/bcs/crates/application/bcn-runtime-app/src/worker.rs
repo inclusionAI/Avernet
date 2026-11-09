@@ -14,7 +14,6 @@ use tokio::sync::Mutex;
 type WorkFuture = Pin<Box<dyn Future<Output = RuntimeResult<()>> + Send>>;
 struct PendingWork {
     future: WorkFuture,
-    started_at: u64,
 }
 struct State {
     pending: BTreeMap<CommandId, PendingWork>,
@@ -481,32 +480,30 @@ impl DefaultWorker {
             .recovery_concurrency
             .saturating_sub(s.pending.len() as u32);
         if remaining > 0 {
+            let requested_at=tokio::time::Instant::now();
             let page = self
                 .ports
                 .commands
-                .receive(
+                .receive_effects(
                     &self.node.scope,
                     &self.node,
-                    CommandConsumerKind::Worker,
                     s.commands.clone(),
                     remaining,
                 )
                 .await?;
             s.commands = page.next_cursor;
-            for command in page.items {
+            for leased in page.items {
+                let command=&leased.command;
                 if s.pending.contains_key(&command.command_id) {
                     continue;
                 }
                 let ports = self.ports.clone();
                 let judge = self.judge.clone();
-                let node = self.node.clone();
                 s.pending.insert(
                     command.command_id.clone(),
                     PendingWork {
-                        started_at: now,
                         future: results::drive(Box::pin(async move {
-                            results::execute(&ports, judge.as_ref(), command.clone(), now).await?;
-                            ports.commands.ack(&command.command_id, &node).await
+                            results::supervise(ports,judge,leased,now,requested_at).await
                         }), &self.effects),
                     },
                 );
@@ -517,12 +514,6 @@ impl DefaultWorker {
             let Some(mut work) = s.pending.remove(&id) else {
                 continue;
             };
-            if now.saturating_sub(work.started_at) >= d.stall_ms {
-                report.errors.push(RuntimeError::Unavailable(
-                    "effect I/O stalled; durable command retained".into(),
-                ));
-                continue;
-            }
             match work.future.as_mut().now_or_never() {
                 Some(Ok(())) => report.progressed += 1,
                 Some(Err(e)) => report.errors.push(e),

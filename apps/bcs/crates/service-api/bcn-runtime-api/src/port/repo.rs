@@ -51,6 +51,20 @@ pub trait CommandBus: Send + Sync {
     async fn publish(&self, fence: &OwnershipFence, effect: CommittedEffectRef) -> RuntimeResult<Command>;
     /// Advance next_cursor even on an empty eligible page, then cycle at end.
     async fn receive(&self, scope: &Scope, consumer: &NodeIdentity, kind: CommandConsumerKind, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<Command>>;
+    /// Worker-only delivery. Epoch increments on expiry/reacquisition (including the
+    /// same consumer); a live renewal keeps it stable. Start the local lease budget
+    /// before this request, conservatively charging the entire request RTT.
+    async fn receive_effects(&self, scope: &Scope, consumer: &NodeIdentity, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<LeasedCommand>>;
+    /// Renew only the current, unexpired Worker delivery generation. The returned
+    /// budget starts at request initiation locally, never response arrival.
+    async fn renew_effect(&self, fence: &CommandDeliveryFence) -> RuntimeResult<u64>;
+    /// Atomically fence current delivery owner+epoch, publish exact correlated
+    /// Judge/authoritative saved-result input + wake + receipt, and ACK delivery.
+    /// Preserve immutable input dedup and saved-result intent barriers. Exact
+    /// committed retry is idempotent; a stale generation cannot publish or ACK.
+    /// Expiry is checked with backend time before commit; the final transaction
+    /// fences generation/revision, not a server-side wall-clock predicate.
+    async fn complete_effect(&self, fence: &CommandDeliveryFence, input: SessionInput) -> RuntimeResult<u64>;
     /// Delivery ACK is not execution completion. Connector commands require a durable
     /// dispatch claim before ACK; active dispatch enumeration then owns recovery.
     async fn ack(&self, command_id: &CommandId, consumer: &NodeIdentity) -> RuntimeResult<()>;

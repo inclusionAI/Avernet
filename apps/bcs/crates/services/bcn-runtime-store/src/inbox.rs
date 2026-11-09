@@ -26,10 +26,33 @@ impl InboxPort for RuntimeStore {
         self.row(&session.scope, input_id(session, event)).await?.as_ref().map(|r| decode::<InboxEntry>(r).map(|e| e.input)).transpose()
     }
     async fn append_and_wake(&self, session: &SessionId, input: SessionInput) -> RuntimeResult<u64> {
+        if matches!(input.kind,SessionInputKind::JudgeDecided{..}) {return Err(invalid("Judge publication requires command completion fence"))}
+        let (position,conditions,mutations)=self.append_plan(session,&input).await?;
+        self.write(&session.scope, conditions, mutations).await?;
+        Ok(position)
+    }
+    async fn read_batch(&self, session: &SessionId, after: u64, limit: u32) -> RuntimeResult<Vec<InboxEntry>> {
+        let prefix = inbox_prefix(session);
+        let cursor = ScanCursor { scope: session.scope.clone(), partition: PARTITION.into(), prefix: prefix.clone(), after_key: inbox(session, after) };
+        let page = self.atomic.scan_page(&session.scope, PARTITION, &prefix, Some(cursor), limit as usize).await.map_err(storage)?;
+        page.entries.iter().map(|e| decode(&e.entry)).collect()
+    }
+    async fn advance(&self, session: &SessionId, fence: &OwnershipFence, through: u64) -> RuntimeResult<()> {
+        let cp = self.load(session).await?.ok_or(RuntimeError::NotFound)?;
+        if cp.fence != *fence || through > cp.consumed_input { return Err(invalid("uncommitted inbox cursor")); }
+        let rows = self.read_batch(session, 0, 100).await?;
+        let mutations = rows.into_iter().take_while(|e| e.position <= through).map(|e| Mutation::Delete { key: inbox(session, e.position) }).collect();
+        self.fenced_write(fence, vec![Condition { key: entity("checkpoint", &session.value), expected: Expected::Revision(cp.revision) }], mutations).await?;
+        Ok(())
+    }
+}
+
+impl RuntimeStore {
+    pub(crate) async fn append_plan(&self,session:&SessionId,input:&SessionInput)->RuntimeResult<(u64,Vec<Condition>,Vec<Mutation>)> {
         if self.load_spec(session).await?.is_none() { return Err(RuntimeError::NotFound); }
         // New tasks enter only through atomic admission; cancellation bypasses capacity.
         if matches!(input.kind, SessionInputKind::Submit { .. }) { return Err(invalid("Submit requires admission")); }
-        let (position, mut conditions, mut mutations) = self.input_plan(session, &input).await?;
+        let (position, mut conditions, mut mutations) = self.input_plan(session, input).await?;
         if let SessionInputKind::ResultSaved { result } = &input.kind {
             let intent = &result.intent;
             if intent.result_id.scope != session.scope || intent.task_id.scope != session.scope { return Err(invalid("saved result scope")); }
@@ -50,21 +73,6 @@ impl InboxPort for RuntimeStore {
                 conditions.push(condition(key, &row));
             }
         }
-        self.write(&session.scope, conditions, mutations).await?;
-        Ok(position)
-    }
-    async fn read_batch(&self, session: &SessionId, after: u64, limit: u32) -> RuntimeResult<Vec<InboxEntry>> {
-        let prefix = inbox_prefix(session);
-        let cursor = ScanCursor { scope: session.scope.clone(), partition: PARTITION.into(), prefix: prefix.clone(), after_key: inbox(session, after) };
-        let page = self.atomic.scan_page(&session.scope, PARTITION, &prefix, Some(cursor), limit as usize).await.map_err(storage)?;
-        page.entries.iter().map(|e| decode(&e.entry)).collect()
-    }
-    async fn advance(&self, session: &SessionId, fence: &OwnershipFence, through: u64) -> RuntimeResult<()> {
-        let cp = self.load(session).await?.ok_or(RuntimeError::NotFound)?;
-        if cp.fence != *fence || through > cp.consumed_input { return Err(invalid("uncommitted inbox cursor")); }
-        let rows = self.read_batch(session, 0, 100).await?;
-        let mutations = rows.into_iter().take_while(|e| e.position <= through).map(|e| Mutation::Delete { key: inbox(session, e.position) }).collect();
-        self.fenced_write(fence, vec![Condition { key: entity("checkpoint", &session.value), expected: Expected::Revision(cp.revision) }], mutations).await?;
-        Ok(())
+        Ok((position,conditions,mutations))
     }
 }
