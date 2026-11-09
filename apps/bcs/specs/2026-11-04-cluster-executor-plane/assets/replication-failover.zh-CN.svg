@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="600" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">存储故障转移:存储说 OK 时,有几台机器拿到了这次写入?</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">两边场景相同:A(一个 BCN 节点)崩溃;B 认领会话 S,把围栏令牌从 7 提到 8;然后存储主节点死亡。</text>
+
+  <!-- left: async -->
+  <rect x="24" y="72" width="444" height="420" rx="10" fill="#ffffff" stroke="#b3402e" stroke-width="1.4"/>
+  <text x="246" y="98" font-size="14" font-weight="bold" text-anchor="middle" fill="#b3402e">异步复制(Redis、MySQL 异步)</text>
+  <rect x="64" y="118" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="139" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">主节点 M</text>
+  <rect x="280" y="118" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="355" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">副本 R</text>
+  <text x="44" y="186" font-size="11.5" fill="#1c2420">1. B:在 M 上认领 → 令牌 8,所有者 B。M 回复 OK。</text>
+  <line x1="214" y1="200" x2="276" y2="200" stroke="#b9c6bf" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+  <text x="245" y="216" font-size="10.5" text-anchor="middle" fill="#5c6a62">"稍后"复制</text>
+  <text x="44" y="240" font-size="11.5" fill="#b3402e">2. 复制到达 R 之前 M 就死了。</text>
+  <text x="44" y="264" font-size="11.5" fill="#1c2420">3. R 被提升。R 上的租约 S:所有者 A,令牌 7。</text>
+  <text x="44" y="288" font-size="11.5" fill="#1c2420">4. C 在 R 上认领:7 → 8,所有者 C。OK。</text>
+  <rect x="44" y="304" width="404" height="56" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="246" y="326" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#b3402e">B 和 C 都持有"令牌 8"</text>
+  <text x="246" y="346" font-size="11" text-anchor="middle" fill="#1c2420">两者都通过围栏 → 两个写入者;B 之前的写入丢失</text>
+  <text x="44" y="388" font-size="11" fill="#5c6a62">另外:分区期间,被隔开的主节点会继续接受写入,</text>
+  <text x="44" y="404" font-size="11" fill="#5c6a62">直到其节点超时;它重新加入时这些写入被丢弃。</text>
+  <text x="44" y="428" font-size="11" fill="#5c6a62">WAIT 解决不了:故障转移可能提升一个没有这次写入</text>
+  <text x="44" y="444" font-size="11" fill="#5c6a62">的副本,而超时的 WAIT 也不会撤销这次写入。</text>
+  <text x="44" y="472" font-size="11.5" font-weight="bold" fill="#b3402e">"OK" = 写入在一台机器的内存里</text>
+
+  <!-- right: majority -->
+  <rect x="492" y="72" width="444" height="420" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
+  <text x="714" y="98" font-size="14" font-weight="bold" text-anchor="middle" fill="#157a55">多数派复制(OceanBase Paxos、Raft)</text>
+  <rect x="512" y="118" width="120" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="572" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Leader L</text>
+  <rect x="654" y="118" width="120" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="714" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#157a55">副本 1 ✓</text>
+  <rect x="796" y="118" width="120" height="40" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="856" y="143" font-size="12" text-anchor="middle" fill="#5c6a62">副本 2</text>
+  <text x="512" y="186" font-size="11.5" fill="#1c2420">1. B:认领 → 写入 L 和副本 1 的日志(3 个中的 2 个)→ OK。</text>
+  <text x="512" y="210" font-size="11.5" fill="#b3402e">2. L 死亡。</text>
+  <text x="512" y="234" font-size="11.5" fill="#1c2420">3. 选举需要多数派;三个副本中的任意两个多数派</text>
+  <text x="512" y="250" font-size="11.5" fill="#1c2420">   必有交集,且只有最新的副本才能胜出</text>
+  <text x="512" y="266" font-size="11.5" fill="#1c2420">   → 新 leader 拥有令牌 8,所有者 B。</text>
+  <text x="512" y="290" font-size="11.5" fill="#1c2420">4. C 以 WHERE token = 7 认领 → 0 行。</text>
+  <rect x="512" y="304" width="404" height="56" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="714" y="326" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">只有一个所有者:B</text>
+  <text x="714" y="346" font-size="11" text-anchor="middle" fill="#1c2420">已确认的写入不会消失</text>
+  <text x="512" y="388" font-size="11" fill="#5c6a62">被隔在少数派一侧的 leader 无法凑齐多数派,</text>
+  <text x="512" y="404" font-size="11" fill="#5c6a62">所以它的提交会失败:客户端收到错误,绝不会是假的 OK。</text>
+  <text x="512" y="428" font-size="11" fill="#5c6a62">代价:每次提交几毫秒;leader 切换期间</text>
+  <text x="512" y="444" font-size="11" fill="#5c6a62">写入会停顿几秒。</text>
+  <text x="512" y="472" font-size="11.5" font-weight="bold" fill="#157a55">"OK" = 写入已落在多数派的磁盘上</text>
+
+  <rect x="24" y="508" width="912" height="72" rx="10" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="44" y="532" font-size="12.5" font-weight="bold" fill="#9a6b0a">实现上的后果:提交的结果可能未知</text>
+  <text x="44" y="554" font-size="11.5" fill="#1c2420">leader 切换期间的在途事务,即使已经提交,也可能返回错误或超时。通过读回来确定结果</text>
+  <text x="44" y="570" font-size="11.5" fill="#1c2420">(租约所有者与令牌、write_seq、那一行)—— 绝不盲目重复一个非幂等的写入。</text>
+</svg>

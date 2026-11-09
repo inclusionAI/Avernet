@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2457a6"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9a6b0a"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="620" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">一轮请求的端到端流程</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">蓝色:控制通道(网关 ↔ 所有者)。橙色:消息队列(S 所在桶的增量频道 → 所有者;会话 Stream S → 网关)。绿色:带围栏的写入。</text>
+
+  <rect x="20" y="72" width="130" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="85" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">PA(经 LB)</text>
+  <rect x="210" y="72" width="150" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
+  <text x="285" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">网关 GW1</text>
+  <rect x="420" y="72" width="140" height="40" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="490" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">消息队列</text>
+  <rect x="620" y="72" width="170" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="705" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">执行器 E3(所有者)</text>
+  <rect x="820" y="72" width="120" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="880" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">供给智能体</text>
+  <line x1="85" y1="112" x2="85" y2="590" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="285" y1="112" x2="285" y2="590" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="490" y1="112" x2="490" y2="590" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="705" y1="112" x2="705" y2="590" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="880" y1="112" x2="880" y2="590" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+
+  <text x="6" y="146" font-size="11" font-weight="bold" fill="#5c6a62">1</text>
+  <line x1="89" y1="142" x2="281" y2="142" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="185" y="136" font-size="10.5" text-anchor="middle" fill="#1c2420">SendStreamingMessage</text>
+  <line x1="289" y1="160" x2="486" y2="160" stroke="#9a6b0a" stroke-dasharray="5 4" marker-end="url(#ao)"/>
+  <text x="388" y="154" font-size="10.5" text-anchor="middle" fill="#9a6b0a">读 session:{S}</text>
+
+  <text x="6" y="192" font-size="11" font-weight="bold" fill="#5c6a62">2</text>
+  <line x1="289" y1="188" x2="701" y2="188" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="600" y="182" font-size="10.5" text-anchor="middle" fill="#2457a6">Submit(round)</text>
+  <rect x="712" y="176" width="104" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="764" y="192" font-size="10" text-anchor="middle" fill="#157a55">去重 · 持久化</text>
+  <line x1="701" y1="214" x2="289" y2="214" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="600" y="228" font-size="10.5" text-anchor="middle" fill="#2457a6">Accepted(Task)</text>
+  <line x1="281" y1="226" x2="89" y2="226" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="185" y="240" font-size="10.5" text-anchor="middle" fill="#1c2420">第一个事件:Task</text>
+
+  <text x="6" y="272" font-size="11" font-weight="bold" fill="#5c6a62">3</text>
+  <line x1="701" y1="268" x2="289" y2="268" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="600" y="262" font-size="10.5" text-anchor="middle" fill="#2457a6">StartDispatch(D) · 记录:在 GW1 上</text>
+  <line x1="289" y1="288" x2="876" y2="288" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="800" y="282" font-size="10.5" text-anchor="middle" fill="#1c2420">A2A 流</text>
+
+  <text x="6" y="322" font-size="11" font-weight="bold" fill="#5c6a62">4</text>
+  <line x1="876" y1="318" x2="289" y2="318" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="800" y="312" font-size="10.5" text-anchor="middle" fill="#1c2420">artifact 分块</text>
+  <line x1="289" y1="334" x2="486" y2="334" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="388" y="346" font-size="10.5" text-anchor="middle" fill="#9a6b0a">deltas:{b}(200 ms)</text>
+  <line x1="494" y1="338" x2="701" y2="338" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="600" y="332" font-size="10.5" text-anchor="middle" fill="#9a6b0a">E3 订阅桶 b</text>
+  <rect x="712" y="326" width="104" height="24" rx="5" fill="#ffffff" stroke="#9a6b0a"/>
+  <text x="764" y="342" font-size="10" text-anchor="middle" fill="#9a6b0a">扇出逻辑</text>
+  <line x1="701" y1="360" x2="494" y2="360" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="600" y="374" font-size="10.5" text-anchor="middle" fill="#9a6b0a">XADD 41-c(增量)</text>
+  <line x1="486" y1="372" x2="289" y2="372" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <line x1="281" y1="384" x2="89" y2="384" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="185" y="398" font-size="10.5" text-anchor="middle" fill="#9a6b0a">文字发给 PA</text>
+
+  <text x="6" y="432" font-size="11" font-weight="bold" fill="#5c6a62">5</text>
+  <line x1="876" y1="428" x2="289" y2="428" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="800" y="422" font-size="10.5" text-anchor="middle" fill="#1c2420">input-required</text>
+  <line x1="289" y1="448" x2="701" y2="448" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="600" y="442" font-size="10.5" text-anchor="middle" fill="#2457a6">DispatchEvent(D, seq) → Ack</text>
+  <rect x="712" y="436" width="104" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="764" y="452" font-size="10" text-anchor="middle" fill="#157a55">提交 #42(发件箱)</text>
+  <line x1="701" y1="470" x2="494" y2="470" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="600" y="484" font-size="10.5" text-anchor="middle" fill="#9a6b0a">XADD 42-0</text>
+  <line x1="486" y1="482" x2="289" y2="482" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <line x1="281" y1="494" x2="89" y2="494" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+
+  <text x="6" y="532" font-size="11" font-weight="bold" fill="#5c6a62">6</text>
+  <line x1="876" y1="528" x2="289" y2="528" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="800" y="522" font-size="10.5" text-anchor="middle" fill="#1c2420">completed(最终)</text>
+  <line x1="289" y1="546" x2="701" y2="546" stroke="#2457a6" stroke-width="1.6" marker-end="url(#ab)"/>
+  <text x="600" y="540" font-size="10.5" text-anchor="middle" fill="#2457a6">DispatchResult(D, output) → Ack</text>
+  <rect x="712" y="534" width="104" height="24" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="764" y="550" font-size="10" text-anchor="middle" fill="#157a55">提交 #43(发件箱)</text>
+  <line x1="701" y1="566" x2="494" y2="566" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="600" y="580" font-size="10.5" text-anchor="middle" fill="#9a6b0a">XADD 43-0: completed</text>
+  <line x1="486" y1="578" x2="289" y2="578" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <line x1="281" y1="590" x2="89" y2="590" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="24" y="612" font-size="11" fill="#5c6a62">如果 E3 在第 4 步期间崩溃,PA 的流仍在 GW1 上保持打开并暂停;新所有者订阅 deltas:{b},从 GW1 取得 D 的输出(FetchBuffer)并继续。</text>
+</svg>

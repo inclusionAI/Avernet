@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="480" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">带围栏的写入是一个事务:先校验令牌,再写入</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">第 1 步锁住会话所在桶的租约行并校验令牌;如果令牌不是你的,整个事务回滚。</text>
+
+  <rect x="24" y="74" width="560" height="250" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
+  <text x="44" y="98" font-size="13" font-weight="bold" fill="#2457a6">一个事务(原子)</text>
+  <rect x="44" y="112" width="520" height="92" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">第 1 步 · 对桶行做带校验的 UPDATE(令牌必须匹配)</text>
+  <text x="60" y="156" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420">UPDATE bcs_task_leases SET fence_seq = fence_seq + 1</text>
+  <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE bucket = :b AND fencing_token = :mine  -- 1 行</text>
+  <text x="60" y="194" font-size="10.5" fill="#5c6a62">每个桶约 25 个会话:该行约 5% 的时间处于忙碌状态</text>
+  <rect x="44" y="216" width="520" height="92" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="60" y="238" font-size="12" font-weight="bold" fill="#1c2420">第 2…n 步 · 该会话的持久写入</text>
+  <text x="60" y="260" font-size="11.5" fill="#1c2420">运行状态 · 检查点 · Task 记录 · last_event_seq · unpublished · write_seq + 1</text>
+  <text x="60" y="278" font-size="11.5" fill="#1c2420">派发 / 投递记录(第 3 项)· 持久定时器</text>
+  <text x="60" y="298" font-size="10.5" fill="#5c6a62">全部与租约行在同一个数据库中</text>
+
+  <rect x="610" y="74" width="326" height="116" rx="10" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="626" y="98" font-size="13" font-weight="bold" fill="#157a55">令牌匹配</text>
+  <text x="626" y="120" font-size="11.5" fill="#1c2420">第 1 步改动 1 行 → 后续步骤执行 → COMMIT</text>
+  <text x="626" y="142" font-size="11.5" fill="#1c2420">锁一直持有到 COMMIT,所以对该桶的</text>
+  <text x="626" y="160" font-size="11.5" fill="#1c2420">认领或转移无法在中间提交</text>
+  <text x="626" y="180" font-size="10.5" fill="#5c6a62">S 的 write_seq 告诉交接后继哪里变了</text>
+  <rect x="610" y="206" width="326" height="118" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="626" y="230" font-size="13" font-weight="bold" fill="#b3402e">令牌已过期(有人认领了桶 b)</text>
+  <text x="626" y="252" font-size="11.5" fill="#1c2420">第 1 步改动 0 行 → 全部回滚</text>
+  <text x="626" y="274" font-size="11.5" fill="#1c2420">调用方得到 LeaseLost →</text>
+  <text x="626" y="292" font-size="11.5" font-weight="bold" fill="#b3402e">停止驱动 b 的会话,逐出它们,绝不重试</text>
+  <line x1="584" y1="160" x2="606" y2="140" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <line x1="584" y1="160" x2="606" y2="250" stroke="#5c6a62" marker-end="url(#ar)"/>
+
+  <rect x="24" y="344" width="912" height="118" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="44" y="368" font-size="13" font-weight="bold" fill="#1c2420">为什么并发的认领插不进校验与提交之间</text>
+  <text x="44" y="392" font-size="11.5" fill="#1c2420">认领(或交接中的转移)要更新同一个桶行,所以它会等到在途的带围栏事务提交,</text>
+  <text x="44" y="410" font-size="11.5" fill="#1c2420">再递增令牌。旧所有者之后的每次带围栏写入都会在第 1 步失败。必须恰好改动 1 行(ExecuteChecked)。</text>
+  <text x="44" y="436" font-size="11.5" fill="#5c6a62">规则:同一事务 · 同一数据库 · 一个会话位于其桶的校验之后 · LeaseLost 即停止 · 提交结果未知 → 读回,绝不盲目重试。</text>
+</svg>

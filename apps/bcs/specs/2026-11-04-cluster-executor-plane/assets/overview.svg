@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 680" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2457a6"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#157a55"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9a6b0a"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="680" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Two tiers: gateways hold connections, executors hold leases and fan out</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Output goes agent → gateway → delta channel → owner → session channel → subscribed gateways → PA. No load balancer between tiers.</text>
+
+  <!-- top row -->
+  <rect x="40" y="76" width="170" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="125" y="98" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Personal agent</text>
+  <text x="125" y="115" font-size="11" text-anchor="middle" fill="#5c6a62">A2A SSE / WS / gRPC stream</text>
+  <rect x="270" y="76" width="170" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="355" y="98" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Load balancer</text>
+  <text x="355" y="115" font-size="11" text-anchor="middle" fill="#5c6a62">any ready gateway</text>
+  <line x1="210" y1="101" x2="266" y2="101" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="540" y="76" width="180" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="630" y="98" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">A2A agent A</text>
+  <text x="630" y="115" font-size="11" text-anchor="middle" fill="#5c6a62">gateway dials out to it</text>
+  <rect x="750" y="76" width="180" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="840" y="98" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">A2A agent B</text>
+  <text x="840" y="115" font-size="11" text-anchor="middle" fill="#5c6a62">gateway dials out to it</text>
+
+  <!-- gateway tier -->
+  <rect x="24" y="160" width="912" height="150" rx="12" fill="#eef2fa" stroke="#2457a6" stroke-width="1.6"/>
+  <text x="44" y="182" font-size="13.5" font-weight="bold" fill="#2457a6">Gateway tier</text>
+  <text x="870" y="182" font-size="11.5" text-anchor="end" fill="#2457a6">every long-lived connection · no durable state</text>
+  <rect x="44" y="194" width="420" height="102" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="254" y="214" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Gateway GW1</text>
+  <text x="60" y="236" font-size="11" fill="#1c2420">• PA's stream for session S (reads S's stream)</text>
+  <text x="60" y="254" font-size="11" fill="#1c2420">• runs dispatch D: stream to the supply agent</text>
+  <text x="60" y="272" font-size="11" fill="#1c2420">• publishes D's deltas to deltas:{b}; control events to the owner</text>
+  <text x="60" y="288" font-size="10.5" fill="#5c6a62">keeps D's output until the owner acks the result</text>
+  <rect x="496" y="194" width="420" height="102" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="706" y="214" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Gateway GW2</text>
+  <text x="512" y="236" font-size="11" fill="#1c2420">• runs a dispatch to A2A agent B</text>
+  <text x="512" y="254" font-size="11" fill="#1c2420">• its deltas go to that bucket's delta channel</text>
+  <text x="512" y="272" font-size="11" fill="#1c2420">• a viewer of S, also reading S's stream</text>
+  <text x="512" y="288" font-size="10.5" fill="#5c6a62">reads by session, never by owner</text>
+
+  <line x1="355" y1="126" x2="300" y2="190" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="560" y1="130" x2="420" y2="190" stroke="#5c6a62" stroke-width="1.6" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text x="470" y="148" font-size="10.5" fill="#5c6a62">stream</text>
+  <line x1="900" y1="190" x2="900" y2="130" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- pub/sub -->
+  <rect x="560" y="326" width="356" height="44" rx="8" fill="#f7eed7" stroke="#9a6b0a" stroke-width="1.4"/>
+  <text x="738" y="345" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Message queue (Redis, sharded)</text>
+  <text x="738" y="361" font-size="10.5" text-anchor="middle" fill="#5c6a62">delta channel per bucket · Redis Stream per session</text>
+  <line x1="600" y1="326" x2="430" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-start="url(#ao)" marker-end="url(#ao)"/>
+  <line x1="820" y1="326" x2="800" y2="300" stroke="#9a6b0a" stroke-width="1.8" marker-end="url(#ao)"/>
+  <text x="612" y="320" font-size="10.5" fill="#9a6b0a">deltas in · S's events + deltas out</text>
+
+  <!-- executor tier -->
+  <rect x="24" y="384" width="912" height="110" rx="12" fill="#e3f0e9" stroke="#157a55" stroke-width="1.6"/>
+  <text x="44" y="406" font-size="13.5" font-weight="bold" fill="#157a55">Executor tier</text>
+  <text x="916" y="406" font-size="11.5" text-anchor="end" fill="#157a55">leases · runs · orchestration · fan-out · no long-lived connections</text>
+  <rect x="44" y="418" width="280" height="64" rx="8" fill="#ffffff" stroke="#157a55" stroke-width="1.6"/>
+  <text x="184" y="438" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Executor E3 — owner of S</text>
+  <text x="58" y="458" font-size="11" fill="#1c2420">owns bucket(S) (token n) · fenced writes</text>
+  <text x="58" y="474" font-size="11" fill="#1c2420">decides who sees what · publishes on S</text>
+  <rect x="340" y="418" width="280" height="64" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="480" y="438" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Executor E4</text>
+  <text x="354" y="458" font-size="11" fill="#1c2420">owns other buckets; next-ranked for b</text>
+  <text x="354" y="474" font-size="11" fill="#5c6a62">takes S over if E3 dies</text>
+  <rect x="636" y="418" width="280" height="64" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="776" y="438" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Executor E5 …</text>
+  <text x="650" y="458" font-size="11" fill="#1c2420">placement = rendezvous hash</text>
+  <text x="650" y="474" font-size="11" fill="#5c6a62">of buckets over executors</text>
+
+  <line x1="150" y1="296" x2="150" y2="414" stroke="#2457a6" stroke-width="1.8" marker-start="url(#ab)" marker-end="url(#ab)"/>
+  <text x="158" y="330" font-size="10.5" fill="#2457a6">control channel: Submit ·</text>
+  <text x="158" y="344" font-size="10.5" fill="#2457a6">control events · StartDispatch · Ack</text>
+  <line x1="300" y1="418" x2="600" y2="372" stroke="#9a6b0a" stroke-width="1.8" marker-start="url(#ao)" marker-end="url(#ao)"/>
+  <text x="330" y="372" font-size="10.5" fill="#9a6b0a">subscribe deltas:{b} · publish (token n)</text>
+
+  <!-- DB -->
+  <rect x="24" y="520" width="912" height="140" rx="12" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
+  <text x="480" y="646" font-size="13.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared HA database (OceanBase; SQLite in single-node mode) — the only place executors meet</text>
+  <rect x="44" y="534" width="270" height="92" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="179" y="554" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">bcs_node_roster</text>
+  <text x="58" y="574" font-size="11" fill="#1c2420">node_id · member_name · role · state</text>
+  <text x="58" y="590" font-size="11" fill="#1c2420">last_heartbeat_at · advertise_addr</text>
+  <text x="58" y="612" font-size="10.5" fill="#5c6a62">gateways and executors heartbeat</text>
+  <rect x="345" y="534" width="270" height="92" rx="8" fill="#e3f0e9" stroke="#157a55" stroke-width="1.6"/>
+  <text x="480" y="554" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">bcs_task_leases</text>
+  <text x="359" y="574" font-size="11" fill="#1c2420">bucket · node_id · fencing_token · adopted</text>
+  <text x="359" y="590" font-size="11" fill="#1c2420">4,096 rows, one per bucket</text>
+  <text x="359" y="612" font-size="10.5" fill="#157a55">authoritative: who owns each bucket</text>
+  <rect x="646" y="534" width="270" height="92" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="781" y="554" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Session data</text>
+  <text x="660" y="574" font-size="11" fill="#1c2420">sessions (bucket, pending flag, write_seq)</text>
+  <text x="660" y="590" font-size="11" fill="#1c2420">runs · dispatch records · Task records</text>
+  <text x="660" y="612" font-size="10.5" fill="#5c6a62">written only through the fence</text>
+  <line x1="184" y1="482" x2="420" y2="530" stroke="#157a55" stroke-width="1.8" marker-end="url(#ag)"/>
+  <line x1="260" y1="482" x2="740" y2="530" stroke="#157a55" stroke-width="1.8" marker-end="url(#ag)"/>
+  <text x="560" y="510" font-size="10.5" fill="#157a55">fence step + durable writes, one transaction</text>
+</svg>
