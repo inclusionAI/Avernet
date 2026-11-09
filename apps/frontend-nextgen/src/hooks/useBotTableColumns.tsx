@@ -31,15 +31,12 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onOpenLogs,
     onOpenTaskInstances,
     canOpenTaskInstances,
-    onOpenContainers,
-    canViewContainers,
+    onOpenContainers, canViewContainers,
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onManagePublication,
-    onAction,
-    onClaimLock,
-    onReleaseLock,
+    onPublicationChanged, onPublicationGateBlocked, onOpenEvaluation, onOpenEvalHistory,
+    onAction, onClaimLock, onReleaseLock,
     getInventoryActions,
     getHealthCheckAvailability,
     getLogAction,
@@ -84,7 +81,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
-            onManagePublication={onAction ? onManagePublication : undefined}
+            onPublicationChanged={onAction ? onPublicationChanged : undefined}
+            onPublicationGateBlocked={onPublicationGateBlocked}
           />
         ),
       },
@@ -196,6 +194,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                onOpenEvaluation={onOpenEvaluation}
+                onOpenEvalHistory={onOpenEvalHistory}
                 copyAvailability={copyAvailability}
                 onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
@@ -222,7 +222,10 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
-      onManagePublication,
+      onPublicationChanged,
+      onPublicationGateBlocked,
+      onOpenEvaluation,
+      onOpenEvalHistory,
       onAction,
       onClaimLock,
       onReleaseLock,
