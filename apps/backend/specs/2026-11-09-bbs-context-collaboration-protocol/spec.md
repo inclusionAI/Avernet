@@ -11,7 +11,7 @@
 
 > 在单 Bot 和 BCN 协作群之外，新增一种以持久、可投影、可演进的 **Collaboration Context** 为中心的自主协作模式：上下文拥有目标、可见范围、材料和业务状态；一个可版本化、可扩展、但不能执行任意代码的状态机决定下一步；由事件驱动公开讨论、任务接力、直接指派三种同一维度的协作模式推进同一目标。
 
-该模式与现有单 Bot 和 BCN 协作群并存，不是将二者升级或替换；也不是新建第二套执行调度系统。Collaboration Context 是这类新模式自己的协作中心，现有会话、群聊、任务图和帖子是它在不同阶段可绑定的协作表面或执行通道。
+该模式与现有单 Bot 和 BCN 协作群并存，不是将二者升级或替换；也不是新建第二套执行调度系统。BBS 帖子、任务图等是产品形态，可以在产品层基于这种新的协作模式组织公开讨论、任务接力或直接指派；它们不是被 Context “绑定”的协作表面，而是在产品业务中采用同一套协作模式的能力。
 
 ## 1. 背景与问题
 
@@ -21,7 +21,7 @@
 | --- | --- | --- | --- |
 | 单 Bot 会话 | 一个 Bot 对目标、材料和当前任务的理解 | 适合边界清晰、所需能力集中、协作方很少的任务；启动直接、链路短，Bot 可以基于自己看到的材料推理、调用工具并连续自主推进，编排成本最低 | 上下文主要是模型在当前会话中的工作记忆，而不是显式领域对象；目标、验收、当前阶段、下一步和执行证据缺少独立权威模型，推进高度依赖 Bot 每轮推理，难以用统一事件和状态机解释“为什么允许下一步” |
 | BCN 协作群 | 一组 Bot 的群消息、路由和运行过程 | 适合多角色协商和分工；消息、成员、路由、Manager / Worker、StateMachine 等机制能支持多 Bot 自治互动；协作过程对群内参与者可见 | 自主性主要体现在“群内如何互动”；目标、材料、责任边界和业务阶段仍内嵌在群消息或某次 Run 的上下文中，不是一等 Context；讨论、执行、代办和验收容易退化为群内的片段性行为，缺少贯穿全过程的显式状态和事件事实 |
-| Context 自主协作模式 | 持久 `CollaborationContext` | 把目标、材料、参与者、状态、事件和证据提升为协作中心；状态机决定当前业务阶段、下一步和允许的 `CollaborationMode`；单 Bot、BCN 群、Relay、Todo 等只是执行通道，由统一状态和事件治理推进 | 抽象层级更高，需要协议建模、状态机校验、事件幂等、权限投影和适配器测试；它不直接提升 Bot 的模型能力或工具能力，而是提供更稳定、更可治理、可跨协作方式解释的自主协作载体 |
+| Context 自主协作模式 | 持久 `CollaborationContext` | 把目标、材料、参与者、状态、事件和证据提升为协作中心；状态机决定当前业务阶段、下一步和允许的 `CollaborationMode`；单 Bot、BCN 群、Relay、Todo 等是产品形态或执行能力，可在该协议下承载协作，并统一受状态和事件治理 | 抽象层级更高，需要协议建模、状态机校验、事件幂等、权限投影和适配器测试；它不直接提升 Bot 的模型能力或工具能力，而是提供更稳定、更可治理、可跨协作方式解释的自主协作载体 |
 
 因此，Context 模式不是否定单 Bot 会话或 BCN 协作群；在合适的任务中，它们仍然是最直接的执行方式。Context 模式的增量价值是让自主行为不只依赖一次推理或一次群内协商，而是受持久目标、显式状态和可审计事件约束。
 
@@ -30,7 +30,7 @@
 ```text
 Collaboration Context 承载目标、材料、参与者和业务状态；
 State Machine 决定当前阶段、下一步和允许的协作模式；
-协作模式和执行通道负责实际沟通、执行或待办处理；
+协作模式决定业务形态；产品能力与执行载体承载具体沟通、执行或待办处理；
 ContextEvent 记录被接受的协作事实并驱动状态迁移。
 ```
 
@@ -48,7 +48,7 @@ ContextEvent 记录被接受的协作事实并驱动状态迁移。
 4. 可引用的工作材料，不保存字节。
 5. 业务状态与状态机定义版本。
 6. 事件日志与版本号。
-7. 一个或多个协作表面绑定，例如 BBS Topic、公开 API consumer、BCN 群、Task / Relay 执行。
+7. 可基于该协议接入的协作产品、执行载体或公开 API consumer，例如 BBS Topic、TaskGraph / Relay 执行、BCN 群。
 8. 轻量代办清单和可升级为正式 Work 的事项。
 
 ### 2.2 Command / Event / State / Transition
@@ -77,7 +77,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 - **G2** Context 具备可持久、可观察、可调试的业务状态。
 - **G3** 状态机可自定义扩展，但校验、授权、边界和审计由服务端治理。
 - **G4** Context 状态作为模式选择层，可按阶段在“公开讨论 / 任务接力 / 直接指派”之间切换，而不是提前把业务固化成一种运行时。
-- **G5** 把协作模式收敛为“公开讨论 / 任务接力 / 直接指派”三类；单 Bot、BCN 群、BCS Run 只是执行通道，不是协作模式。
+- **G5** 把协作模式收敛为“公开讨论 / 任务接力 / 直接指派”三类；单 Bot、BCN 群、BBS、TaskGraph 是产品形态或执行能力，可在产品层基于这三种模式组织协作，但它们本身不是协作模式。
 - **G6** BBS、任务图、Bot 和公开 API consumers 读取同一 Context 投影，避免同一 Context 对外出现多套业务进度。
 - **G7** 状态推进幂等、可恢复、可审计，可回放事实重建状态。
 
@@ -639,7 +639,7 @@ transitions:
 10. Content digest 和 revision 一起保存，已发布版本被 Context 绑定后不可原位修改。
 11. 升级状态机定义必须显式声明兼容策略；不声明时只能影响之后创建的新 Context。
 
-## 6. 协作模式与执行通道
+## 6. 协作模式与产品能力
 
 ### 6.1 协作模式
 
@@ -652,34 +652,34 @@ transitions:
 | `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `ContextModeBinding` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
 
 设计不变量：
-- 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 都不是新的协作模式；它们是执行通道或载体。
+- 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 是产品形态或执行能力，不是新的协作模式。
 - `public_discussion` 只表示公开讨论协作形态，BBS Topic 只是它的一种入口。
 - `task_relay` 表示把外部执行事实接纳进 Context，而不要求一定使用 Relay。
 - `direct_assignment` 表示“直接指定执行者”，不要求一定有多 Bot，也不要求一定有群；具体任务可由 `ContextTodo`、单条 Work 或参与者直接执行来承载。
 - 一个 Context 可在状态迁移中在三种模式之间切换，但同一时刻只有一个主模式。
 
-### 6.2 执行通道
+### 6.2 产品层与执行能力
 
-执行通道解决“协作事实发生在哪个入口或系统里”，不改变协作模式本身。
+以下产品或执行能力可以在产品层基于本协议组织协作；它们不是协作模式，也不是被 Context 绑定的“协作表面”，而是产品层采用这套协作模式后的具体承载能力。
 
-| 通道 | 职责 |
+| 产品 / 执行能力 | 协议视角的职责 |
 | --- | --- |
-| BBS Topic | 承载公开讨论、材料同步、结果 summaries |
-| Context portal / API | 提供快照、命令提交、状态查看 |
-| Task / Relay / TaskGraph | 承接任务接力，回传 Work 事实 |
-| BCS session / group | 承载 Bot 或群内互动、运行摘要、事件回投 |
-| Direct assignee | 承载直接指派给具体 Human / Bot / 代理的执行通道 |
-| External source channel | 承载外部来源阅读、修订同步、回写通道 |
+| BBS Topic | BBS 产品可基于 `public_discussion` 模式呈现公开讨论、材料同步和结果 summaries |
+| Context portal / API | 为消费者提供 Context 快照、命令提交和状态查看 |
+| Task / Relay / TaskGraph | Task 产品可基于 `task_relay` 模式组织任务接力，并回传已接纳的事实 |
+| BCS session / group | 可作为 Bot 或群产品基于 `direct_assignment` / `task_relay` 模式参与协作 |
+| Direct assignee | 可承载 `direct_assignment` 模式的具体 Human / Bot / 代理执行者 |
+| External source channel | 承载外部来源阅读、修订同步、回写能力 |
 
-通道只提交标准 Command 和 ContextEvent，不直接修改 Context 状态，也不提升权限。
+这些产品或执行能力只提交标准 Command 和 ContextEvent，不直接修改 Context 状态，也不提升权限。
 
 ### 6.3 模式选择规则
 
 1. 每个 State 必须声明 `allowed_modes`，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
 2. 模式切换只能通过 ContextCommand 和对应 Transition 完成。
-3. `ContextModeBinding` 记录当前模式、激活人、激活幂等键和可用执行通道。
+3. `ContextModeBinding` 记录当前模式、激活人、激活幂等键和可接入的产品或执行能力引用。
 4. 模式切换必须留下 `context.mode_switched` 事实，禁止只更新表字段而不写事件。
-5. 执行通道可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是公开讨论、任务接力还是直接指派。
+5. 产品或执行能力可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是 `public_discussion`、`task_relay` 还是 `direct_assignment`。
 6. `task_relay` 和 `direct_assignment` 可以依据需要创建 `ContextWorkBinding`、`ContextTodo` 或直接执行项。
 7. `ensure_work_binding` 只负责建立、复用或关闭协议绑定，不直接调用底层执行系统。
 8. 外部系统接纳的执行事实必须经 Adapter 转换为标准 `ContextEvent`。
@@ -810,7 +810,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ## 10. 当前协议如何支持公开讨论、任务代办
 
-本节说明当前协议对两个基础场景的一等支持方式；其他协作模式和执行通道只作为协议能力，不在本节展开为具体场景。
+本节说明当前协议对两个基础场景的一等支持方式；其他协作模式和产品能力只作为协议能力，不在本节展开为具体场景。
 
 ### 10.1 公开讨论
 
