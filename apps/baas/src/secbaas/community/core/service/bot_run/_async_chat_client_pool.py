@@ -234,7 +234,10 @@ class AsyncChatClientPool:
                     return best
                 # 所有连接都不健康（或模式翻转不匹配）且已被清理，继续创建新的
 
-            # 需要创建新连接（无连接、或未达上限且都在忙）
+            # 需要创建新连接（无连接、或未达上限且都在忙）。记录
+            # 创建代次；close_all() 可能在 connect() await 期间清空池，
+            # 新连接完成后必须在全局锁内二次校验再发布。
+            creation_generation = self._pool_generation
             logger.info(
                 "[ChatClientPool] Creating connection for sandbox=%s "
                 "(slot %d/%d, existing=%d)",
@@ -264,20 +267,31 @@ class AsyncChatClientPool:
             await new_client.connect()
 
             entry = _ConnEntry(client=new_client, a2a_mode=current_mode)
-            if sandbox_id not in self._clients:
-                self._clients[sandbox_id] = []
-            self._clients[sandbox_id].append(entry)
+            stale_generation = False
+            async with self._lock:
+                if creation_generation != self._pool_generation:
+                    stale_generation = True
+                else:
+                    if sandbox_id not in self._clients:
+                        self._clients[sandbox_id] = []
+                    self._clients[sandbox_id].append(entry)
 
-            logger.info(
-                "[ChatClientPool] Connection created and pooled: "
-                "sandbox=%s, total_conns=%d, pool_total=%d",
-                sandbox_id,
-                len(self._clients[sandbox_id]),
-                self.total_connections,
-            )
+                    logger.info(
+                        "[ChatClientPool] Connection created and pooled: "
+                        "sandbox=%s, total_conns=%d, pool_total=%d",
+                        sandbox_id,
+                        len(self._clients[sandbox_id]),
+                        self.total_connections,
+                    )
 
-            # 超出总容量上限，LRU 淘汰
-            self._evict_if_needed()
+                    # 超出总容量上限，LRU 淘汰
+                    self._evict_if_needed()
+
+            if stale_generation:
+                await self._safe_close(new_client)
+                raise NotConnectedError(
+                    "Pool closed while creating a connection."
+                )
 
             return new_client
 

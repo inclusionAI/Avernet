@@ -517,6 +517,46 @@ class TestInjectRouting:
             attachments=None,
         )
 
+    @pytest.mark.asyncio
+    async def test_close_all_during_connect_closes_unpublished_connection(self):
+        """close_all 与建连并发时不得留下未纳入快照的新连接。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            NotConnectedError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        client = MagicMock()
+        client.is_connected = True
+        client.is_reconnecting = False
+        client.has_active_sessions = False
+        client.active_session_count = 0
+        client.close = AsyncMock()
+        connect_started = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        async def blocked_connect():
+            connect_started.set()
+            await release_connect.wait()
+
+        client.connect = AsyncMock(side_effect=blocked_connect)
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_pool.AsyncChatClient",
+            return_value=client,
+        ):
+            get_task = asyncio.create_task(pool.get("sandbox-1", "ws://host/ws"))
+            await asyncio.wait_for(connect_started.wait(), timeout=1)
+            await pool.close_all()
+            release_connect.set()
+
+            with pytest.raises(NotConnectedError, match="Pool closed"):
+                await get_task
+
+        assert pool.total_connections == 0
+        client.close.assert_awaited_once()
+
 
 class TestTotalConnections:
     @pytest.mark.asyncio
