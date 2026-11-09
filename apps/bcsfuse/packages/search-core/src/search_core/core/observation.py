@@ -91,6 +91,8 @@ class EventSummaries:
             "result_cache": stages.get("result_cache_read", {}).get("cache", "skipped"),
             "stage_ms": {name: stage["elapsed_ms"] for name, stage in stages.items()},
         }
+        if "card_fetch_details" in summary:
+            record["card_fetch_details"] = summary["card_fetch_details"]
         record["results"] = results
         record["reasons"] = summary.get("reasons", ())
         if "error_type" in summary:
