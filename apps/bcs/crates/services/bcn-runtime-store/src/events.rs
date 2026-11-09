@@ -32,9 +32,14 @@ impl RuntimeStore {
         let (dispatch, dispatch_condition) = self.dispatch(fence, None).await?;
         let (canonical_task, node) = (&dispatch.record.context.task_id, &dispatch.record.context.node_id);
         if canonical_task != &task || id.scope != task.scope || !matches!(dispatch.record.operation, DispatchOperation::Send { .. }) || matches!(dispatch.record.phase, DispatchPhase::Prepared | DispatchPhase::ResultRecorded | DispatchPhase::Unknown) { return Err(invalid("connector event authority/phase")); }
+        let command_key = projection_command(&task, node);
+        let command_row = self.row(&task.scope, command_key.clone()).await?;
+        let command: CommandId = decode(command_row.as_ref().ok_or_else(|| conflict("projection command not committed"))?)?;
+        if command != dispatch.record.context.command_id { return Err(conflict("projection command superseded")); }
+        let command_condition = condition(command_key, &command_row);
         let fingerprint = fingerprint(&(fence, &task, &expected, &reset, &text))?;
         if let Some(cursor) = self.prior_publication(&id, &task, &fingerprint).await? {
-            self.write(&task.scope, vec![dispatch_condition], vec![]).await?; return Ok(cursor);
+            self.write(&task.scope, vec![dispatch_condition, command_condition], vec![]).await?; return Ok(cursor);
         }
         let key = entity("snapshot", &task.value);
         let row = self.row(&task.scope, key.clone()).await?;
@@ -46,7 +51,12 @@ impl RuntimeStore {
         if projections.next_cursor.is_some() { return Err(RuntimeError::CapacityExceeded); }
         let mut projections = projections.entries.iter().map(|r| decode::<Projection>(&r.entry)).collect::<RuntimeResult<Vec<_>>>()?;
         let position = projections.iter().position(|p| &p.node == node);
-        let is_reset = reset.is_some();
+        let requested_reset = reset.is_some();
+        let mut appended = snapshot.task.output.clone();
+        if let Some(text) = &text {
+            if let Some(MessagePart::Text { text: tail }) = appended.last_mut() { tail.push_str(text); }
+            else { appended.push(MessagePart::Text { text: text.clone() }); }
+        }
         let output = if let Some(output) = reset { output } else {
             let prior = position.and_then(|p| projections.get(p)).ok_or_else(|| conflict("reset required before delta"))?;
             if prior.fence != *fence { return Err(conflict("new connector fence requires reset")); }
@@ -61,6 +71,9 @@ impl RuntimeStore {
         if projections.len() > 32 { return Err(RuntimeError::CapacityExceeded); }
         projections.sort_by(|a,b| a.node.cmp(&b.node));
         snapshot.task.output = projections.into_iter().flat_map(|p| p.output).collect();
+        // Delta has no node/address field: use Reset unless a consumer's ordinary
+        // tail append produces exactly the new aggregate (including part boundaries).
+        let is_reset = requested_reset || appended != snapshot.task.output;
         snapshot.task.updated_at_ms = self.atomic.server_time_ms().await.map_err(storage)?;
         snapshot.cursor = if is_reset { EventCursor { epoch: expected.epoch.checked_add(1).ok_or_else(|| invalid("event epoch exhausted"))?, sequence: 1 } }
             else { EventCursor { epoch: expected.epoch, sequence: expected.sequence.checked_add(1).ok_or_else(|| invalid("event sequence exhausted"))? } };
@@ -68,7 +81,7 @@ impl RuntimeStore {
         let event = TaskEvent { id: id.clone(), task_id: task.clone(), cursor: snapshot.cursor.clone(), kind };
         let mut mutations = Self::event_mutations(&snapshot, &event, fingerprint)?;
         mutations.push(put(projection_key(&task, node), &projection)?);
-        self.write(&task.scope, vec![dispatch_condition, condition(key, &row), Condition { key: entity("event-published", &id.value), expected: Expected::Absent }], mutations).await?;
+        self.write(&task.scope, vec![dispatch_condition, command_condition, condition(key, &row), Condition { key: entity("event-published", &id.value), expected: Expected::Absent }], mutations).await?;
         Ok(snapshot.cursor)
     }
 }
@@ -85,7 +98,9 @@ impl TaskEventStore for RuntimeStore {
             self.fenced_write(fence, vec![], vec![]).await?; return Ok(cursor);
         }
         let mut cp = self.load(&session).await?.ok_or(RuntimeError::NotFound)?;
-        if !cp.pending_events.contains(&domain) { return Err(conflict("hard event not pending")); }
+        // Pending order is durable checkpoint commit order, including within a transition.
+        // Published-ID retries above remain idempotent after this head has advanced.
+        if cp.pending_events.first() != Some(&domain) { return Err(conflict("earlier committed hard event must publish first")); }
         let key = entity("snapshot", &domain.task_id.value);
         let row = self.row(&session.scope, key.clone()).await?;
         let mut snapshot: EventSnapshot = decode(row.as_ref().ok_or(RuntimeError::NotFound)?)?;

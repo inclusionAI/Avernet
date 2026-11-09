@@ -73,18 +73,23 @@ pub trait TaskEventStore: Send + Sync {
     /// Publish the authoritative pending event committed with the referenced session.
     /// Atomically check CURRENT ownership (including incarnation/epoch) and event/session scope;
     /// load the committed payload, append it and persist publication receipt before clearing pending.
-    /// Unknown/uncommitted events fail closed. Retry by event ID returns the same cursor after
+    /// Only the earliest pending event in durable session commit order may publish; later
+    /// events return Conflict and remain pending. Unknown/uncommitted events fail closed.
+    /// Retry by event ID returns the same cursor after
     /// checking ownership; stale owners return OwnershipLost without appending or acknowledging.
     /// Use the current task stream cursor, never ownership epoch as a connector projection epoch.
     /// No DispatchFence is required, including HumanInput before any agent dispatch.
     async fn publish_hard_event(&self, fence: &OwnershipFence, event: CommittedEventRef) -> RuntimeResult<EventCursor>;
-    /// Connector deltas only: fence against connector epoch and persisted Reset boundary.
+    /// Connector deltas only: fence against the latest committed task/node send command,
+    /// connector epoch and persisted Reset boundary. Superseded commands fail closed.
     /// event.cursor is the expected current task cursor; the store allocates the next.
+    /// Emit an aggregate Reset/new epoch if a task-tail Delta cannot represent the mutation.
     /// Reject Domain/Reset here; committed Worker facts use publish_hard_event instead.
     async fn append(&self, fence: &DispatchFence, event: TaskEvent) -> RuntimeResult<EventCursor>;
     /// Atomically persist this canonical node's projection and the aggregate task Reset.
     /// expected_cursor fences the task-wide stream; per-dispatch epochs are independent.
-    /// Retry by event identity is idempotent. Reset must precede deltas after takeover.
+    /// Check the latest committed task/node send command, including on identity retries.
+    /// Retry by event identity is idempotent while authoritative. Reset precedes takeover deltas.
     async fn publish_reset(&self, fence: &DispatchFence, snapshot: ConnectorProjection, event_id: EventId) -> RuntimeResult<EventCursor>;
     /// Snapshot/cursor and events must cover concurrent subscription without a gap.
     async fn read_after(&self, task_id: &TaskId, cursor: Option<EventCursor>, limit: u32) -> RuntimeResult<EventPage>;

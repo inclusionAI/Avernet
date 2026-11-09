@@ -18,3 +18,7 @@ pub(crate) fn query_prefix(ctx: &CallerContext, target: Option<&ExecutionTarget>
     let target = target.map(serde_json::to_string).transpose().map_err(|e| RuntimeError::InvalidInput(e.to_string()))?.unwrap_or_default();
     Ok(format!("task-index/{}/", digest(&[&ctx.principal, &target, session.map_or("", |s| s.value.as_str())])))
 }
+// The checkpoint CAS serializes changes to this task/node's projection authority.
+pub(crate) fn projection_command(task: &TaskId, node: &Option<String>) -> String {
+    format!("projection-command/{}", digest(&[&task.value, if node.is_some() { "node" } else { "direct" }, node.as_deref().unwrap_or("")]))
+}

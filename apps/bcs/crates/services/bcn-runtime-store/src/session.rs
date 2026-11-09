@@ -51,6 +51,8 @@ impl SessionStore for RuntimeStore {
         let mut conditions = vec![Condition { key: checkpoint_key.clone(), expected: Expected::Revision(cp.revision) }, condition(header_key.clone(), &header_row)];
         let mut mutations = Vec::new();
         let mut immutable = Vec::new();
+        let mut projection_commands = std::collections::BTreeMap::new();
+        let mut projection_nodes = std::collections::BTreeSet::new();
         let status_keys = commit.transition.effects.iter().map(|e| effect_command_id(&commit.session_id, e).map(|id| entity("delivery", &id.value)))
             .chain(commit.transition.events.iter().map(|e| Ok(entity("event-published", &e.event_id.value)))).collect::<RuntimeResult<Vec<_>>>()?;
         let statuses = self.rows(&commit.session_id.scope, &status_keys).await?;
@@ -60,6 +62,11 @@ impl SessionStore for RuntimeStore {
             let task = match effect { EffectIntent::SendAgent { task_id, .. } | EffectIntent::CancelAgent { task_id, .. } => task_id, EffectIntent::Judge { request } => &request.task_id, EffectIntent::SaveResult { intent } => &intent.task_id };
             if task.scope != commit.session_id.scope || !header.accepted.contains(task) { return Err(invalid("effect task not admitted in session")); }
             immutable.push((entity("command", &id.value), encode(&command)?));
+            if let EffectIntent::SendAgent { task_id, node_id, .. } = effect {
+                let key = projection_command(task_id, node_id);
+                if !projection_nodes.insert(key.clone()) { return Err(invalid("multiple sends for one task/node in a transition")); }
+                projection_commands.insert(entity("command", &id.value), (key, id));
+            }
             if let EffectIntent::SaveResult { intent } = effect {
                 if !intent.status.is_terminal() || intent.result_id.scope != task.scope { return Err(invalid("result intent")); }
                 immutable.push((entity("intent", &intent.result_id.value), encode(intent)?));
@@ -75,7 +82,12 @@ impl SessionStore for RuntimeStore {
         let existing = self.rows(&commit.session_id.scope, &immutable.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>()).await?;
         for ((key, value), row) in immutable.into_iter().zip(existing) {
             if let Some(row) = &row { if row.value != value { return Err(conflict("immutable outbox identity reused")); } }
-            else { mutations.push(Mutation::Put { key: key.clone(), value }); }
+            else {
+                mutations.push(Mutation::Put { key: key.clone(), value });
+                // Only the first commit of this immutable command supersedes the prior send.
+                // Replaying an older outbox effect must never restore its authority.
+                if let Some((key, id)) = projection_commands.remove(&key) { mutations.push(put(key, &id)?); }
+            }
             conditions.push(condition(key, &row));
         }
         let submitted_ids = consumed.iter().filter_map(|i| if let SessionInputKind::Submit { task } = &i.input.kind { Some(task.task_id.clone()) } else { None }).collect::<Vec<_>>();

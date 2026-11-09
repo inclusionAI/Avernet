@@ -105,7 +105,12 @@ called. That store returns the authoritative saved result; only then may a
 reducer publish terminal completion or advance dependent nodes. PendingResult
 is nonterminal. Result writes never overwrite an existing authoritative result.
 New connector epochs persist complete event projection before ordered Reset;
-old epochs cannot overwrite snapshots or append new events. Hard results require
+old epochs cannot overwrite snapshots or append new events. Each task/node also
+tracks its latest committed send command: continuation replacement revokes older
+commands' projection authority independently of dispatch epochs. A node Delta
+that cannot be represented as an aggregate task-tail append publishes an atomic
+aggregate Reset instead; consumers can reconstruct the snapshot, with higher
+bounded event bytes and a new task epoch. Hard results require
 a fenced receipt and atomic inbox append.
 
 Worker hard facts use `TaskEventStore::publish_hard_event(&OwnershipFence,
@@ -114,7 +119,9 @@ A committed HumanInput event can publish before any dispatch exists. The store
 validates current session ownership, incarnation, epoch and scope, then loads
 the immutable committed event payload rather than trusting a caller-provided
 body. It atomically appends that event and saves its publication receipt before
-acknowledging/clearing pending state. An unknown or uncommitted event fails
+acknowledging/clearing pending state. Publication must follow the checkpoint's
+earliest pending event in durable session commit order; a later reference
+returns Conflict and remains pending. An unknown or uncommitted event fails
 closed; a stale owner receives OwnershipLost without publishing or clearing it.
 A current owner can retry by event identity and receive the same cursor. Hard
 events use the authoritative task-stream cursor; ownership epochs do not become

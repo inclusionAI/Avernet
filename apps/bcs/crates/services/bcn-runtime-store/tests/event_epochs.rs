@@ -76,8 +76,94 @@ async fn parallel_node_resets_and_deltas_preserve_peer_projection() {
  let first = repo.publish_reset(&dispatches[0].fence, ConnectorProjection { task_id: req.task.task_id.clone(), output: vec![MessagePart::Text { text: "A".into() }], expected_cursor: EventCursor { epoch: 0, sequence: 0 } }, EventId::new(scope(), "reset-a")).await.unwrap();
  let second = repo.publish_reset(&dispatches[1].fence, ConnectorProjection { task_id: req.task.task_id.clone(), output: vec![MessagePart::Text { text: "B".into() }], expected_cursor: first }, EventId::new(scope(), "reset-b")).await.unwrap();
  assert_eq!(second.epoch, 2);
- repo.append(&dispatches[0].fence, TaskEvent { id: EventId::new(scope(), "delta-a"), task_id: req.task.task_id.clone(), cursor: second, kind: TaskEventKind::Delta { text: "+".into() } }).await.unwrap();
+ repo.append(&dispatches[0].fence, TaskEvent { id: EventId::new(scope(), "delta-a"), task_id: req.task.task_id.clone(), cursor: second.clone(), kind: TaskEventKind::Delta { text: "+".into() } }).await.unwrap();
  let snapshot = repo.read_snapshot(&req.task.task_id).await.unwrap().unwrap();
  assert_eq!(snapshot.task.output, vec![MessagePart::Text { text: "A+".into() }, MessagePart::Text { text: "B".into() }]);
  assert_eq!(snapshot.task.status, TaskStatus::Submitted);
+ // Replay the wire events using only public Reset/Delta semantics.
+ let mut replay = vec![MessagePart::Text { text: "A".into() }, MessagePart::Text { text: "B".into() }];
+ let page = repo.read_after(&req.task.task_id, Some(second), 10).await.unwrap();
+ for event in page.events {
+  match event.kind {
+   TaskEventKind::Reset { snapshot } => replay = snapshot.output,
+   TaskEventKind::Delta { text } => if let Some(MessagePart::Text { text: tail }) = replay.last_mut() { tail.push_str(&text); } else { replay.push(MessagePart::Text { text }); },
+   _ => panic!("unexpected event"),
+  }
+ }
+ assert_eq!(replay, snapshot.task.output);
+
 }
+
+async fn sending(repo: &RuntimeStore, req: &AdmissionRequest, cp: &SessionCheckpoint, effect: &EffectIntent) -> DispatchRecord {
+ let id = effect_command_id(&req.spec.session_id, effect).unwrap();
+ repo.publish(&cp.fence, CommittedEffectRef { session_id: req.spec.session_id.clone(), command_id: id.clone() }).await.unwrap();
+ let d = repo.claim(&id, node("connector")).await.unwrap();
+ repo.mark_may_have_sent(&d.fence, d.revision).await.unwrap()
+}
+#[tokio::test]
+async fn human_continuation_rejects_superseded_reset_and_delta_after_restart() {
+ use bcn_runtime_api::core::SessionRunner;
+ use bcn_session_runner::DirectA2aRunner;
+ let (repo, atomic, req) = fixture(); let cp = submitted(&repo, &req).await;
+ let old_effect = cp.pending_effects[0].clone();
+ let old = sending(&repo, &req, &cp, &old_effect).await;
+ let initial = ConnectorProjection { task_id: req.task.task_id.clone(), output: vec![MessagePart::Text { text: "old".into() }], expected_cursor: EventCursor { epoch: 0, sequence: 0 } };
+ let old_id = EventId::new(scope(), "old-reset");
+ repo.publish_reset(&old.fence, initial.clone(), old_id.clone()).await.unwrap();
+ let event = AgentEvent::InputRequired { handle: ExecutionHandle { target: binding().target, binding_version: "v1".into(), remote_task_id: Some("remote".into()), remote_context_id: Some("context".into()) }, prompt: vec![MessagePart::Text { text: "continue?".into() }] };
+ let input = SessionInput { event_id: EventId::new(scope(), "input-required"), at_ms: 1001, kind: SessionInputKind::Agent { task_id: req.task.task_id.clone(), node_id: None, dispatch_id: old.fence.dispatch_id.clone(), event: event.clone() } };
+ let old = repo.save_receipt(&old.fence, old.revision, DispatchReceipt::Agent { event }, &req.spec.session_id, input.clone()).await.unwrap();
+ let cp = repo.load(&req.spec.session_id).await.unwrap().unwrap();
+ let transition = DirectA2aRunner.reduce(&cp.state, &input).unwrap();
+ let cp = repo.commit(SessionCommit { session_id: req.spec.session_id.clone(), fence: cp.fence, expected_revision: cp.revision, consumed_input: 2, transition }).await.unwrap();
+ let interaction_id = cp.state.current_task.as_ref().unwrap().nodes["direct"].interaction_id.clone().unwrap();
+ let input = SessionInput { event_id: EventId::new(scope(), "reply"), at_ms: 1002, kind: SessionInputKind::HumanReply { task_id: req.task.task_id.clone(), interaction_id, caller: req.caller.clone(), message: Message { message_id: MessageId::new(scope(), "reply"), context_id: Some(req.spec.session_id.clone()), task_id: Some(req.task.task_id.clone()), parts: vec![MessagePart::Text { text: "yes".into() }] } } };
+ let position = repo.append_and_wake(&req.spec.session_id, input.clone()).await.unwrap();
+ let transition = DirectA2aRunner.reduce(&cp.state, &input).unwrap(); let effect = transition.effects[0].clone();
+ let cp = repo.commit(SessionCommit { session_id: req.spec.session_id.clone(), fence: cp.fence, expected_revision: cp.revision, consumed_input: position, transition }).await.unwrap();
+ let new = sending(&repo, &req, &cp, &effect).await;
+ assert_eq!(old.fence.epoch, new.fence.epoch); // Independent dispatch epochs cannot order generations.
+ // Recommitting an old immutable effect must not restore its projection authority.
+ let cp = repo.load(&req.spec.session_id).await.unwrap().unwrap();
+ repo.commit(SessionCommit { session_id: req.spec.session_id.clone(), fence: cp.fence, expected_revision: cp.revision, consumed_input: position, transition: Transition { next_state: cp.state, effects: vec![old_effect], events: vec![], timer_changes: vec![] } }).await.unwrap();
+ let repo = RuntimeStore::new(atomic);
+ let before = repo.read_snapshot(&req.task.task_id).await.unwrap().unwrap().cursor;
+ assert!(repo.append(&old.fence, TaskEvent { id: EventId::new(scope(), "old-before-reset"), task_id: req.task.task_id.clone(), cursor: before.clone(), kind: TaskEventKind::Delta { text: "stale".into() } }).await.is_err());
+ let current = repo.publish_reset(&new.fence, ConnectorProjection { task_id: req.task.task_id.clone(), output: vec![MessagePart::Text { text: "new".into() }], expected_cursor: before }, EventId::new(scope(), "new-reset")).await.unwrap();
+ assert!(repo.publish_reset(&old.fence, ConnectorProjection { task_id: req.task.task_id.clone(), output: vec![MessagePart::Text { text: "old restored".into() }], expected_cursor: current.clone() }, EventId::new(scope(), "old-again")).await.is_err());
+ assert!(repo.append(&old.fence, TaskEvent { id: EventId::new(scope(), "old-delta"), task_id: req.task.task_id.clone(), cursor: current.clone(), kind: TaskEventKind::Delta { text: "stale".into() } }).await.is_err());
+ assert!(repo.publish_reset(&old.fence, initial, old_id).await.is_err());
+ assert_eq!(repo.read_snapshot(&req.task.task_id).await.unwrap().unwrap().task.output, vec![MessagePart::Text { text: "new".into() }]);
+ repo.append(&new.fence, TaskEvent { id: EventId::new(scope(), "new-delta"), task_id: req.task.task_id.clone(), cursor: current, kind: TaskEventKind::Delta { text: "+".into() } }).await.unwrap();
+}
+async fn hard_event_order(terminal: bool) {
+ use std::sync::Arc;
+ use bcn_runtime_store::LocalResultStore;
+ let (repo, atomic, req) = fixture(); let cp = activated(&repo, &req).await;
+ let first = DomainEvent { event_id: EventId::new(scope(), "working"), task_id: req.task.task_id.clone(), kind: DomainEventKind::TaskStatusChanged { status: TaskStatus::Working } };
+ let last = DomainEvent { event_id: EventId::new(scope(), "last"), task_id: req.task.task_id.clone(), kind: if terminal { DomainEventKind::TaskStatusChanged { status: TaskStatus::Completed } } else { DomainEventKind::InputRequired { interaction_id: InteractionId::new(scope(), "interaction"), prompt: "choose".into() } } };
+ let intent = ResultIntent { result_id: ResultId::new(scope(), "result"), task_id: req.task.task_id.clone(), node_id: None, attempt: 0, status: TaskStatus::Completed, output: vec![], error: None };
+ let cp = repo.commit(SessionCommit { session_id: req.spec.session_id.clone(), fence: cp.fence, expected_revision: cp.revision, consumed_input: 0, transition: Transition { next_state: cp.state, effects: vec![], events: vec![first.clone()], timer_changes: vec![] } }).await.unwrap();
+ let cp = repo.commit(SessionCommit { session_id: req.spec.session_id.clone(), fence: cp.fence, expected_revision: cp.revision, consumed_input: 0, transition: Transition { next_state: cp.state, effects: if terminal { vec![EffectIntent::SaveResult { intent: intent.clone() }] } else { vec![] }, events: vec![last.clone()], timer_changes: vec![] } }).await.unwrap();
+ if terminal { LocalResultStore::new(repo.clone(), Arc::new(repo.clone()), RuntimeProfile::Test).unwrap().put_if_absent(intent).await.unwrap(); }
+ let repo = RuntimeStore::new(atomic);
+ let reference = |event: &DomainEvent| CommittedEventRef { session_id: req.spec.session_id.clone(), event_id: event.event_id.clone() };
+ assert!(repo.publish_hard_event(&cp.fence, reference(&last)).await.is_err());
+ assert_eq!(repo.read_snapshot(&req.task.task_id).await.unwrap().unwrap().task.status, TaskStatus::Submitted);
+ let (a, b) = tokio::join!(repo.publish_hard_event(&cp.fence, reference(&first)), repo.publish_hard_event(&cp.fence, reference(&last)));
+ a.unwrap();
+ let last_cursor = repo.publish_hard_event(&cp.fence, reference(&last)).await.unwrap();
+ if let Ok(cursor) = b { assert_eq!(cursor, last_cursor); }
+ let (retry_first, retry_last) = tokio::join!(repo.publish_hard_event(&cp.fence, reference(&first)), repo.publish_hard_event(&cp.fence, reference(&last)));
+ assert_eq!(retry_first.unwrap(), EventCursor { epoch: 0, sequence: 1 });
+ assert_eq!(retry_last.unwrap(), last_cursor);
+ let page = repo.read_after(&req.task.task_id, Some(EventCursor { epoch: 0, sequence: 0 }), 10).await.unwrap();
+ assert_eq!(page.events.len(), 2);
+ assert_eq!(page.events[0].id, first.event_id); assert_eq!(page.events[1].id, last.event_id);
+ assert_eq!(page.snapshot.task.status, if terminal { TaskStatus::Completed } else { TaskStatus::InputRequired });
+ assert!(repo.load(&req.spec.session_id).await.unwrap().unwrap().pending_events.is_empty());
+}
+#[tokio::test]
+async fn terminal_hard_events_preserve_commit_order_under_reverse_publish_and_retry() { hard_event_order(true).await; }
+#[tokio::test]
+async fn nonterminal_hard_events_preserve_commit_order_under_reverse_publish_and_retry() { hard_event_order(false).await; }
