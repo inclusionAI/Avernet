@@ -396,12 +396,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         Returns:
             WsConnectionInfo with ws://stub-teclaw:{port}{path} URL.
         """
-        logger.info(
-            "[stub-teclaw] resolve_ws bot_id=%s port=%d path=%s",
-            bot_id,
-            port,
-            path,
-        )
+        logger.info("[stub-teclaw] resolve_ws")
         return WsConnectionInfo(
             ws_url=f"ws://stub-teclaw:{port}{path}",
             token=f"stub-jwt-{bot_id}",

@@ -143,12 +143,7 @@ class StubDockerSandboxPlugin(DockerSandboxPlugin):
         path: str,
     ) -> WsConnectionInfo:
         normalized_path = "/" + path.lstrip("/")
-        logger.info(
-            "[stub] resolve_ws_conn_info device_id=%s port=%d path=%s",
-            paas_device_id,
-            port,
-            normalized_path,
-        )
+        logger.info("[stub] resolve_ws_conn_info")
         return WsConnectionInfo(
             ws_url=f"ws://127.0.0.1:{port}{normalized_path}",
             token="",

@@ -125,6 +125,119 @@ class BotWebSocketClient:
 
     # ── 公开 API ──────────────────────────────────────────────────────────
 
+    async def _abort_connect_attempt(self) -> None:
+        """Synchronously detach, then clean every partially-created resource.
+
+        Failure and cancellation paths reuse this helper. The original exception is
+        re-raised by the caller; cleanup errors are logged by stable class only and
+        cannot replace the original failure.
+        """
+        recv_task = self._recv_task
+        ws = self._ws
+        self._recv_task = None
+        self._ws = None
+        self._connected = False
+        self._handshake_complete = False
+        for future in self._pending_requests.values():
+            if not future.done():
+                future.cancel()
+        self._pending_requests.clear()
+
+        if recv_task is not None and not recv_task.done():
+            recv_task.cancel()
+        if recv_task is not None:
+            try:
+                await recv_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to cancel handshake receive task: error_class=%s",
+                    type(exc).__name__,
+                )
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to close handshake WebSocket: error_class=%s",
+                    type(exc).__name__,
+                )
+
+    async def _connect(self, **kwargs: Any) -> dict[str, Any]:
+        """Create and validate a connection, cleaning all state on failure."""
+        headers = self._get_default_headers()
+        logger.info("Connecting to WebSocket endpoint")
+        get_http_header_plugin().inject_header(headers)
+
+        ssl_context: ssl.SSLContext | None = None
+        if self.uri.startswith("wss://"):
+            ssl_context = ssl.create_default_context()
+            if kwargs["disable_ssl_verify"]:
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+
+        additional_headers = websockets.Headers(headers)
+        connect_kwargs: dict[str, Any] = {
+            "additional_headers": additional_headers,
+            "ssl": ssl_context,
+            "open_timeout": kwargs["open_timeout"],
+            "ping_interval": None,
+            "max_size": kwargs["max_size"],
+        }
+        if _is_loopback_websocket_uri(self.uri):
+            connect_kwargs["proxy"] = None
+            logger.debug("WebSocket connection uses direct loopback transport")
+
+        request_id: str | None = None
+        try:
+            self._ws = await asyncio.wait_for(
+                websockets.connect(self.uri, **connect_kwargs),
+                timeout=kwargs["timeout"],
+            )
+            self._connected = True
+            logger.info("WebSocket connection established successfully")
+            self._recv_task = asyncio.create_task(self._recv_loop())
+
+            request_id = self._next_request_id()
+            connect_params = {
+                "minProtocol": self.PROTOCOL_VERSION,
+                "maxProtocol": self.PROTOCOL_VERSION,
+                "client": {
+                    "id": self.client_id,
+                    "version": self.client_version,
+                    "platform": self.platform,
+                    "mode": self.mode,
+                },
+            }
+            request_frame = {
+                "type": "req",
+                "id": request_id,
+                "method": "connect",
+                "params": connect_params,
+            }
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[dict[str, Any]] = loop.create_future()
+            self._pending_requests[request_id] = future
+            await self._ws.send(json.dumps(request_frame))
+            response = await asyncio.wait_for(future, timeout=kwargs["timeout"])
+            if not response.get("ok"):
+                error = response.get("error", {})
+                logger.warning(
+                    "Handshake rejected: error_code=%s",
+                    error.get("code"),
+                    exc_info=False,
+                )
+                raise RuntimeError("Handshake failed")
+            payload: dict[str, Any] = response.get("payload", {})
+            self._server_info = payload.get("server", {})
+            self._features = payload.get("features", {})
+            self._handshake_complete = True
+            return payload
+        except BaseException:
+            await self._abort_connect_attempt()
+            raise
+
     async def connect(
         self,
         timeout: float = 10.0,
@@ -132,110 +245,25 @@ class BotWebSocketClient:
         open_timeout: float = 10.0,
         max_size: int = 10 * 2**20,
     ) -> dict[str, Any]:
-        """连接到服务器并完成握手
+        """Connect, complete protocol handshake, and own cleanup until success.
 
         Args:
-            timeout: 整体握手超时时间（秒），包括 TCP 连接 + HTTP 升级 + 等待握手响应
-            disable_ssl_verify: 是否禁用 SSL 证书验证（仅用于测试）
-            open_timeout: WebSocket 连接建立（TCP + HTTP 升级）超时时间（秒），
-                None 表示与 timeout 一致
-            max_size: 单条 WebSocket 消息最大字节数，None 表示不限制。
-                websockets 库默认为 1MiB (2**20)，超过会抛 ConnectionClosedError。
+            timeout: Overall handshake timeout in seconds.
+            disable_ssl_verify: Disable SSL verification (used by tests).
+            open_timeout: TCP/HTTP upgrade timeout in seconds.
+            max_size: Maximum WebSocket message size in bytes.
 
         Returns:
-            握手响应 payload
+            The handshake response payload.
         """
         if self._ws is not None:
             raise RuntimeError("Already connected")
-
-        headers = self._get_default_headers()
-        logger.info(f"Connecting to: {self.uri}")
-        get_http_header_plugin().inject_header(headers)
-
-        # SSL 配置
-        ssl_context: ssl.SSLContext | None = None
-        if self.uri.startswith("wss://"):
-            ssl_context = ssl.create_default_context()
-            if disable_ssl_verify:
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-
-        # 建立 WebSocket 连接
-        # ping_interval=None: 禁用协议层 ping/pong 心跳，
-        # 因为服务端（FastAPI/Starlette）不会自动回复 pong，
-        # 会导致 keepalive ping timeout 断连。
-        # 连接存活性由服务端应用层 tick 事件（每 30s）保证。
-        additional_headers = websockets.Headers(headers)
-        connect_kwargs: dict[str, Any] = {
-            "additional_headers": additional_headers,
-            "ssl": ssl_context,
-            "open_timeout": open_timeout,
-            "ping_interval": None,
-            "max_size": max_size,
-        }
-        if _is_loopback_websocket_uri(self.uri):
-            # websockets reads proxy settings independently of NO_PROXY.
-            # Adapter endpoints are loopback-only and must connect directly.
-            connect_kwargs["proxy"] = None
-            logger.debug("WebSocket connection uses direct loopback transport")
-        self._ws = await asyncio.wait_for(
-            websockets.connect(self.uri, **connect_kwargs),
+        return await self._connect(
             timeout=timeout,
+            disable_ssl_verify=disable_ssl_verify,
+            open_timeout=open_timeout if open_timeout is not None else timeout,
+            max_size=max_size,
         )
-        self._connected = True
-        logger.info("WebSocket connection established successfully")
-
-        # 启动后台接收循环
-        self._recv_task = asyncio.create_task(self._recv_loop())
-
-        # 发送 connect 握手请求
-        request_id = self._next_request_id()
-        connect_params = {
-            "minProtocol": self.PROTOCOL_VERSION,
-            "maxProtocol": self.PROTOCOL_VERSION,
-            "client": {
-                "id": self.client_id,
-                "version": self.client_version,
-                "platform": self.platform,
-                "mode": self.mode,
-            },
-        }
-
-        request_frame = {
-            "type": "req",
-            "id": request_id,
-            "method": "connect",
-            "params": connect_params,
-        }
-
-        # 注册 Future 等待响应
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._pending_requests[request_id] = future
-
-        await self._ws.send(json.dumps(request_frame))
-
-        # 等待握手响应
-        try:
-            response = await asyncio.wait_for(future, timeout=timeout)
-        except TimeoutError:
-            self._pending_requests.pop(request_id, None)
-            raise TimeoutError("Handshake timeout")
-        finally:
-            self._pending_requests.pop(request_id, None)
-
-        if not response.get("ok"):
-            error = response.get("error", {})
-            raise RuntimeError(
-                f"Handshake failed: {error.get('code')} - {error.get('message')}"
-            )
-
-        payload: dict[str, Any] = response.get("payload", {})
-        self._server_info = payload.get("server", {})
-        self._features = payload.get("features", {})
-        self._handshake_complete = True
-
-        return payload
 
     async def chat_send(
         self,
@@ -399,14 +427,17 @@ class BotWebSocketClient:
         try:
             async for raw_message in self._ws:
                 if isinstance(raw_message, bytes):
-                    logger.warning(f"Received binary: {repr(raw_message[:100])}...")
+                    logger.warning(
+                        "Received binary WebSocket frame: length=%d",
+                        len(raw_message),
+                    )
                     continue
                 await self._handle_message(raw_message)
         except websockets.ConnectionClosedOK:
-            logger.info("WebSocket connection closed normally, uri=%s", self.uri)
+            logger.info("WebSocket connection closed normally")
         except Exception as e:
             close_exc = e
-            logger.error("WebSocket recv loop error: %s, uri=%s", e, self.uri)
+            logger.error("WebSocket recv loop failed: error_class=%s", type(e).__name__)
         finally:
             self._connected = False
             self._handshake_complete = False
@@ -419,14 +450,17 @@ class BotWebSocketClient:
                     )
             self._pending_requests.clear()
             # 通知上层连接断开（事件驱动，替代轮询）
-            if self._disconnect_callback is not None:
+            if self._disconnect_callback is not None and self._ws is not None:
                 try:
                     result = self._disconnect_callback("disconnect", {})
                     if asyncio.iscoroutine(result):
                         # 在 recv_loop 已结束的上下文中调度协程
                         asyncio.ensure_future(result)
                 except Exception as e:
-                    logger.error("Disconnect callback error: %s, uri=%s", e, self.uri)
+                    logger.error(
+                        "Disconnect callback failed: error_class=%s",
+                        type(e).__name__,
+                    )
 
     async def _handle_message(self, message: str) -> None:
         """处理收到的文本消息"""
@@ -434,7 +468,7 @@ class BotWebSocketClient:
             logger.debug("Received text message: length=%d", len(message))
             data = json.loads(message)
             frame_type = data.get("type")
-            logger.debug(f"Parsed message: type={frame_type}, keys={list(data.keys())}")
+            logger.debug("Parsed WebSocket JSON frame")
 
             if frame_type == "res":
                 request_id = data.get("id")
@@ -453,7 +487,10 @@ class BotWebSocketClient:
                         if asyncio.iscoroutine(coro):
                             await coro
                     except Exception as e:
-                        logger.error(f"Event handler error for '{event_name}': {e}")
+                        logger.error(
+                            "Event handler failed: error_class=%s",
+                            type(e).__name__,
+                        )
 
                 wildcard_handler = self._event_handlers.get("*")
                 if wildcard_handler:
@@ -462,21 +499,25 @@ class BotWebSocketClient:
                         if asyncio.iscoroutine(coro):
                             await coro
                     except Exception as e:
-                        logger.error(f"Wildcard event handler error: {e}")
+                        logger.error(
+                            "Wildcard event handler failed: error_class=%s",
+                            type(e).__name__,
+                        )
 
             elif frame_type == "hello-ok":
                 self._server_info = data.get("server", {})
                 self._features = data.get("features", {})
                 self._handshake_complete = True
-                logger.info(f"Handshake complete: server={self._server_info}")
+                logger.info("Handshake complete")
 
             else:
-                logger.warning(
-                    f"Unknown frame type: {frame_type}, full message: {data}"
-                )
+                logger.warning("Unknown WebSocket frame ignored")
 
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON: {e}")
+            logger.error(
+                "Invalid WebSocket JSON frame: error_class=%s",
+                type(e).__name__,
+            )
 
     async def _send_request(
         self,

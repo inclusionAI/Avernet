@@ -729,13 +729,7 @@ class RealK8sSandboxPlugin(K8sSandboxPlugin):
         Performs a fresh read_namespaced_pod() call every time (no IP caching).
         Raises RuntimeError(503) if Pod IP is not yet assigned.
         """
-        logger.info(
-            "[real] resolve_ws_conn_info device_id=%s port=%d path=%s namespace=%s",
-            paas_device_id,
-            port,
-            path,
-            namespace,
-        )
+        logger.info("[real] resolve_ws_conn_info")
         try:
             pod_name = self._parse_pod_name(paas_device_id)
             client = self._ensure_client()

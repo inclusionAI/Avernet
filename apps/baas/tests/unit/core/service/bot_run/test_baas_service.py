@@ -13,6 +13,7 @@ Covers:
 
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import ANY as _MOCK_ANY
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -3656,3 +3657,333 @@ class TestSessionPendingDispatch:
                     session_pending=True,
                 )
         mat.assert_awaited_once()
+
+
+# ==================== target-bound BaaS remint ====================
+
+
+class TestTargetBoundBaaSRemint:
+    """BaaS remints are explicit internal results and never cross targets."""
+
+    def _minter(self, service: BaasBotService, *, uri: str = WS_URL):
+        return service._token_minter_for(
+            _make_binding_info(),
+            SESSION_ID,
+            context=_make_context(tenant=TENANT),
+            expected_uri=uri,
+        )
+
+    @pytest.mark.asyncio
+    async def test_minter_returns_token_bound_to_expected_uri(
+        self, service, wss_resolver
+    ):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        fresh = _make_conn_info()
+        fresh = WsConnectionInfo(
+            ws_url=WS_URL,
+            token="x",
+            target=TARGET,
+            expires_at=fresh.expires_at,
+        )
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            new=AsyncMock(return_value=fresh),
+        ):
+            minted = await self._minter(service)()
+
+        assert isinstance(minted, ProxypassTokenMint)
+        assert minted.token == fresh.token
+        assert minted.connection_uri == WS_URL
+
+    @pytest.mark.asyncio
+    async def test_minter_fails_when_resolved_uri_drifts(self, service, wss_resolver):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTargetMismatchError,
+        )
+
+        drifted = _make_conn_info()
+        drifted = WsConnectionInfo(
+            ws_url="wss://gateway.example/proxypass/other-device:20003/ws",
+            token="y",
+            target="other-device:20003",
+            expires_at=drifted.expires_at,
+        )
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            new=AsyncMock(return_value=drifted),
+        ):
+            with pytest.raises(ProxypassTargetMismatchError):
+                await self._minter(service)()
+
+    @pytest.mark.asyncio
+    async def test_minter_returns_no_proxy_result_for_same_uri(
+        self, service, wss_resolver
+    ):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        fresh = _make_conn_info()
+        fresh = WsConnectionInfo(
+            ws_url=WS_URL,
+            token="",
+            target=TARGET,
+            expires_at=fresh.expires_at,
+        )
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            new=AsyncMock(return_value=fresh),
+        ):
+            result = await self._minter(service)()
+
+        assert isinstance(result, NoProxypassToken)
+        assert result.connection_uri == WS_URL
+
+
+# ==================== WSS resolution log redaction ====================
+
+
+def _captured_logger_text(mock_logger: MagicMock) -> str:
+    return "\n".join(
+        str(item)
+        for method in ("debug", "info", "warning", "error", "exception")
+        for item in getattr(mock_logger, method).call_args_list
+    )
+
+
+class TestWssResolutionLogRedaction:
+    """Remint re-enters dispatcher/facade/provider; identifiers cannot hit logs."""
+
+    @staticmethod
+    def make_dispatcher():
+        from secbaas.community.core.service.bot_runtime.dispatcher import (
+            DefaultBotWssDispatcher,
+        )
+
+        bot = MagicMock()
+        bot.id = "bot-row-id"
+        device = SimpleNamespace(
+            device_uuid="PRIVATE-DEVICE-UUID",
+            provider_device_id="PRIVATE-DEVICE@123",
+            status="ACTIVE",
+        )
+        bot_repo = MagicMock()
+        bot_repo.get_active_by_bot_uuid.return_value = bot
+        device_repo = MagicMock()
+        device_repo.list_by_bot_id.return_value = [device]
+        facade = MagicMock(spec=AsyncMock)
+        facade.resolve_ws_conn_info = AsyncMock(return_value=_make_conn_info())
+        return DefaultBotWssDispatcher(
+            bot_repo=bot_repo,
+            device_repo=device_repo,
+            paas_facade=facade,
+        )
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_success_does_not_log_private_target(self):
+        dispatcher = self.make_dispatcher()
+        with (
+            patch(
+                "secbaas.community.core.service.bot_runtime.dispatcher._wss_dispatcher.logger"
+            ) as wss_logger,
+            patch(
+                "secbaas.community.core.service.bot_runtime.dispatcher._base_dispatcher.logger"
+            ) as base_logger,
+        ):
+            await dispatcher.dispatch_bot_ws_conn_info(
+                bot_uuid="PRIVATE-BOT-UUID",
+                port=20003,
+                path="/private/path/ws",
+                tenant=TENANT,
+            )
+
+        for logger in (wss_logger, base_logger):
+            logged = _captured_logger_text(logger)
+            for sensitive in (
+                "PRIVATE-BOT-UUID",
+                "PRIVATE-DEVICE-UUID",
+                "PRIVATE-DEVICE@123",
+                "/private/path/ws",
+                WS_URL,
+                TARGET,
+            ):
+                assert sensitive not in logged
+
+    @pytest.mark.asyncio
+    async def test_full_remint_chain_logs_no_sensitive_connector_data(self):
+        """BaaS → dispatcher → facade → TeClaw/plugin must all stay sanitized."""
+        from secbaas.community.api.device_manage import TeClawCredentials
+        from secbaas.community.core.service.bot_run import (
+            BotEngineAdapterRegistry,
+        )
+        from secbaas.community.core.service.bot_runtime.dispatcher import (
+            DefaultBotWssDispatcher,
+        )
+        from secbaas.community.core.service.paas import (
+            PaasServiceFacade,
+            TeClawPaasService,
+        )
+        from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
+        from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
+
+        private_device_id = "PRIVATE-DEVICE-ID@77"
+        private_path = "/private/path/ws"
+        private_ws_url = f"ws://stub-teclaw:20003{private_path}"
+        private_target = "TECLAW_PRIVATE-DEVICE-ID@77:20003"
+        private_token = f"stub-jwt-{private_device_id.split('@')[0]}"
+        raw_error = "raw failure token=SENSITIVE-TOKEN target=private-device"
+
+        bot_repo = MagicMock()
+        bot_repo.get_active_by_bot_uuid.return_value = SimpleNamespace(
+            id=9001,
+        )
+        device_repo = MagicMock()
+        device_repo.list_by_bot_id.return_value = [
+            SimpleNamespace(
+                device_uuid="PRIVATE-DEVICE-UUID",
+                provider_device_id=private_device_id,
+                status="ACTIVE",
+            )
+        ]
+        plugin = StubTeClawBotPlugin()
+        provider = TeClawPaasService(
+            plugin=plugin,
+            credentials=TeClawCredentials(
+                template_id=77,
+                template_uuid="PRIVATE-TEMPLATE",
+                tenant_name=TENANT,
+            ),
+        )
+        factory = MagicMock()
+        factory.create.return_value = provider
+        facade = PaasServiceFacade(
+            device_repository=MagicMock(),
+            device_template_service=MagicMock(),
+            factory=factory,
+        )
+        facade._device_template_service.get_by_template_id.return_value = (
+            SimpleNamespace(
+                template_id=77,
+                template_uuid="PRIVATE-TEMPLATE",
+                tenant=TENANT,
+                type="TECLAW",
+            )
+        )
+        facade._logger = MagicMock()
+        provider._logger = MagicMock()
+
+        dispatcher = DefaultBotWssDispatcher(
+            bot_repo=bot_repo,
+            device_repo=device_repo,
+            paas_facade=facade,
+        )
+        service = BaasBotService(
+            config=BaasBotServiceConfig(
+                adapter_port=20003,
+                ws_path=private_path,
+            ),
+            client_pool=MagicMock(spec=AsyncChatClientPool),
+            wss_resolver=dispatcher,
+            session_service=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+            eval_consistency_check=NoopEvalConsistencyCheck(),
+        )
+        binding = _make_binding_info(device_provider="other", device_id="unused")
+        # Empty engine type intentionally selects config.ws_path; otherwise the
+        # default ``openclaw`` path replaces the synthetic private path.
+        binding.engine_type = ""
+        context = _make_context(tenant=TENANT)
+        minter = service._token_minter_for(
+            binding,
+            SESSION_ID,
+            context,
+            expected_uri=private_ws_url,
+        )
+
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.logger"
+            ) as baas_logger,
+            patch(
+                "secbaas.community.core.service.bot_runtime.dispatcher._wss_dispatcher.logger"
+            ) as wss_logger,
+            patch(
+                "secbaas.community.core.service.bot_runtime.dispatcher._base_dispatcher.logger"
+            ) as base_logger,
+            patch("secbaas.community.plugins.bot.teclaw._stub.logger") as plugin_logger,
+        ):
+            minted = await minter()
+            assert minted.token == private_token
+            assert minted.connection_uri == private_ws_url
+
+            plugin.resolve_ws_conn_info = AsyncMock(side_effect=RuntimeError(raw_error))
+            with pytest.raises(Exception):
+                await minter()
+            plugin.resolve_ws_conn_info.assert_awaited_once()
+
+        loggers = {
+            "baas": baas_logger,
+            "wss": wss_logger,
+            "base": base_logger,
+            "facade": facade._logger,
+            "provider": provider._logger,
+            "plugin": plugin_logger,
+        }
+        for layer, mocked_logger in loggers.items():
+            logged = _captured_logger_text(mocked_logger)
+            for sensitive in (
+                "PRIVATE-DEVICE-ID",
+                "PRIVATE-DEVICE-UUID",
+                private_path,
+                private_ws_url,
+                private_target,
+                private_token,
+                "SENSITIVE-TOKEN",
+                raw_error,
+            ):
+                assert sensitive not in logged, f"{layer} leaked {sensitive!r}"
+
+    @pytest.mark.asyncio
+    async def test_facade_success_and_failure_log_stable_categories_only(self):
+        from secbaas.community.core.service.paas._facade import PaasServiceFacade
+
+        template = SimpleNamespace(tenant="PRIVATE-TENANT", template_uuid="PRIVATE-T")
+        template_service = MagicMock()
+        template_service.get_by_template_id.return_value = template
+        service = MagicMock()
+        service.resolve_ws_conn_info = AsyncMock(return_value=_make_conn_info())
+        service.close = AsyncMock()
+        factory = MagicMock()
+        factory.create.return_value = service
+        facade = PaasServiceFacade(
+            device_repository=MagicMock(),
+            device_template_service=template_service,
+            factory=factory,
+        )
+        with patch.object(facade, "_logger") as facade_logger:
+            await facade.resolve_ws_conn_info(
+                "PRIVATE-DEVICE@123", 20003, "/private/path/ws"
+            )
+
+            service.resolve_ws_conn_info = AsyncMock(
+                side_effect=RuntimeError("raw error PRIVATE-TOKEN PRIVATE-TENANT")
+            )
+            with pytest.raises(Exception):
+                await facade.resolve_ws_conn_info(
+                    "PRIVATE-DEVICE@123", 20003, "/private/path/ws"
+                )
+
+        logged = _captured_logger_text(facade_logger)
+        for sensitive in (
+            "PRIVATE-DEVICE@123",
+            "/private/path/ws",
+            WS_URL,
+            "PRIVATE-TOKEN",
+        ):
+            assert sensitive not in logged

@@ -239,13 +239,7 @@ class StubK8sSandboxPlugin(K8sSandboxPlugin):
         namespace: str,
     ) -> WsConnectionInfo:
         normalized_path = "/" + path.lstrip("/")
-        logger.info(
-            "[stub] resolve_ws_conn_info device_id=%s port=%d path=%s namespace=%s",
-            paas_device_id,
-            port,
-            normalized_path,
-            namespace,
-        )
+        logger.info("[stub] resolve_ws_conn_info")
         return WsConnectionInfo(
             ws_url=f"ws://localhost:{port}{normalized_path}",
             token="",

@@ -17,6 +17,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import websockets
 
 from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
@@ -710,17 +711,106 @@ class TestHandleMessage:
             json.dumps({"type": "event", "event": "some.event", "payload": {}})
         )
 
+    # [单测用例]测试场景：二进制帧不输出原始内容
+    async def test_recv_loop_binary_frame_is_logged_without_payload(
+        self, client, caplog
+    ):
+        """Binary frames are visible by length only and never replay raw bytes."""
+
+        class _BinaryOnceWebSocket:
+            async def __aiter__(self):
+                yield b"SENSITIVE-BINARY-PAYLOAD"
+
+        client._ws = _BinaryOnceWebSocket()
+        client._connected = True
+        client._handshake_complete = True
+        disconnect = MagicMock()
+        client.on_disconnect(disconnect)
+
+        with caplog.at_level("WARNING"):
+            await client._recv_loop()
+
+        disconnect.assert_called_once_with("disconnect", {})
+        assert "length=24" in caplog.text
+        assert "SENSITIVE-BINARY-PAYLOAD" not in caplog.text
+
+    # [单测用例]测试场景：接收循环异常只记录稳定类别
+    async def test_recv_loop_failures_and_callback_failure_do_not_leak_details(
+        self, client, caplog
+    ):
+        """Close, receive, and callback failures log stable classes only."""
+
+        class _FailingWebSocket:
+            def __init__(self, exc: BaseException) -> None:
+                self._exc = exc
+
+            async def __aiter__(self):
+                raise self._exc
+                yield b"unreachable"
+
+        async def _run_once(ws, *, callback=None):
+            client._ws = ws
+            client._connected = True
+            client._handshake_complete = True
+            client._disconnect_callback = callback
+            with caplog.at_level("ERROR"):
+                await client._recv_loop()
+
+        with caplog.at_level("ERROR"):
+            await _run_once(
+                _FailingWebSocket(websockets.ConnectionClosedOK(None, None))
+            )
+        caplog.clear()
+        await _run_once(
+            _FailingWebSocket(RuntimeError("SENSITIVE-RECV-FAILURE")),
+            callback=MagicMock(),
+        )
+        assert "error_class=RuntimeError" in caplog.text
+        assert "SENSITIVE-RECV-FAILURE" not in caplog.text
+
+        caplog.clear()
+        callback = MagicMock(side_effect=RuntimeError("SENSITIVE-CALLBACK-FAILURE"))
+
+        class _EmptyWebSocket:
+            async def __aiter__(self):
+                return
+                yield b"unreachable"
+
+        await _run_once(_EmptyWebSocket(), callback=callback)
+        assert "error_class=RuntimeError" in caplog.text
+        assert "SENSITIVE-CALLBACK-FAILURE" not in caplog.text
+
     # [单测用例]测试场景：无效 JSON 被捕获
-    async def test_handle_message_invalid_json(self, client):
-        """Invalid JSON is caught and logged, not raised."""
-        await client._handle_message("not valid json {{{")
+    async def test_handle_message_invalid_json(self, client, caplog):
+        """Invalid JSON is caught and logged without replaying its body."""
+        malformed = "SENSITIVE-TOKEN not valid json {{{"
+        with caplog.at_level("ERROR"):
+            await client._handle_message(malformed)
+
+        assert "error_class=JSONDecodeError" in caplog.text
+        assert "SENSITIVE-TOKEN" not in caplog.text
 
     # [单测用例]测试场景：未知帧类型被记录
-    async def test_handle_message_unknown_frame_type(self, client):
-        """Unknown frame types are logged as warning, not raised."""
-        await client._handle_message(
-            json.dumps({"type": "weird_frame", "data": "something"})
-        )
+    async def test_handle_message_unknown_frame_type(self, client, caplog):
+        """Unknown frame types are logged without the frame name or payload."""
+        with caplog.at_level("WARNING"):
+            await client._handle_message(
+                json.dumps(
+                    {
+                        "type": "SENSITIVE-TYPE",
+                        "token": "SENSITIVE-TOKEN",
+                        "data": "SENSITIVE-PAYLOAD",
+                    }
+                )
+            )
+
+        assert "Unknown WebSocket frame ignored" in caplog.text
+        for sensitive in (
+            "SENSITIVE-TYPE",
+            "SENSITIVE-TOKEN",
+            "SENSITIVE-PAYLOAD",
+        ):
+            assert sensitive not in caplog.text
 
     # [单测用例]测试场景：同时调用特定和通配符处理器
     async def test_both_specific_and_wildcard_handlers_called(self, client):
@@ -1303,3 +1393,150 @@ class TestTraceIdInjection:
             )
 
         assert client._send_request_frame.await_args.args[0]["params"]["traceId"] == "-"
+
+
+# ==================== handshake failure ownership ====================
+
+
+class _SilentLogger:
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def info(self, message: str, *_args: object, **_kwargs: object) -> None:
+        self.calls.append(str(message))
+
+    def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+        self.calls.append(str(message))
+
+    def error(self, message: str, *_args: object, **_kwargs: object) -> None:
+        self.calls.append(str(message))
+
+
+class TestConnectFailureCleanup:
+    """Handshake failures must not leak the receive task, WS, or state."""
+
+    @staticmethod
+    def make_ws() -> AsyncMock:
+        ws = AsyncMock()
+        ws.close = AsyncMock()
+
+        class _HangingAsyncIterator:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                await asyncio.Event().wait()
+                raise StopAsyncIteration
+
+        # MagicMock drops AsyncMock's implicit self argument; each call still
+        # returns the same permanently-pending async iterator.
+        ws.__aiter__ = MagicMock(return_value=_HangingAsyncIterator())
+
+        async def hang_send(_data: str) -> None:
+            # The response future is the part that intentionally never resolves.
+            return
+
+        ws.send = hang_send
+        return ws
+
+    @pytest.mark.asyncio
+    async def test_handshake_timeout_closes_every_partial_resource(self, client):
+        ws = self.make_ws()
+
+        async def mock_connect(*_args: object, **_kwargs: object):
+            return ws
+
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+            side_effect=mock_connect,
+        ):
+            with pytest.raises(TimeoutError):
+                await client.connect(timeout=0.01)
+
+        assert client._ws is None
+        assert client._recv_task is None
+        assert client._connected is False
+        assert client._handshake_complete is False
+        assert client._pending_requests == {}
+        assert ws.close.await_count >= 1
+        if client._recv_task is not None:
+            assert client._recv_task.done()
+
+    @pytest.mark.asyncio
+    async def test_handshake_cancellation_propagates_and_cleans(self, client):
+        ws = self.make_ws()
+        mutable = {"ws": ws}
+
+        async def mock_connect(*_args: object, **_kwargs: object):
+            return mutable["ws"]
+
+        logger = _SilentLogger()
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+                side_effect=mock_connect,
+            ),
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.logger",
+                logger,
+            ),
+        ):
+            task = asyncio.create_task(client.connect(timeout=2.0))
+            await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert client._ws is None
+        assert client._recv_task is None
+        assert client._connected is False
+        assert client._handshake_complete is False
+        assert client._pending_requests == {}
+        assert ws.close.await_count >= 1
+        assert all(
+            "wss://test.example.com/ws" not in message for message in logger.calls
+        )
+
+    @pytest.mark.asyncio
+    async def test_connect_failure_does_not_log_raw_exception(self, client):
+        raw_error = RuntimeError("raw-token=SECRET and ws://private-target/ws")
+        logger = _SilentLogger()
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+                side_effect=raw_error,
+            ),
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.logger",
+                logger,
+            ),
+        ):
+            with pytest.raises(RuntimeError):
+                await client.connect(timeout=0.01)
+
+        assert all("SECRET" not in message for message in logger.calls)
+        assert all("private-target" not in message for message in logger.calls)
+
+    @pytest.mark.asyncio
+    async def test_failed_connect_disconnected_callback_without_outer_side_effect(self):
+        uri = "ws://private-target/api/openclaw/ws"
+        failed_client = BotWebSocketClient(uri=uri)
+        disconnect_calls: list[object] = []
+        failed_client.on_disconnect(lambda *_args: disconnect_calls.append(_args))
+
+        ws = self.make_ws()
+
+        async def mock_connect(*_args: object, **_kwargs: object):
+            return ws
+
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+            side_effect=mock_connect,
+        ):
+            with pytest.raises(TimeoutError):
+                await failed_client.connect(timeout=0.01)
+
+        # The pending receive task is not a published connection; cleanup must not
+        # invoke the callback that the orchestration layer uses for live sessions.
+        assert disconnect_calls == []
+        assert failed_client.connected is False

@@ -907,10 +907,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         # Parse raw_paas_device_id (without @template_id suffix) and template_id
         raw_id, template_id = self._parse_device_id(paas_device_id)
 
-        self._logger.info(
-            f"Resolving WebSocket connection info: paas_device_id={paas_device_id}, "
-            f"raw_id={raw_id}, template_id={template_id}"
-        )
+        self._logger.info("Resolving WebSocket connection info")
 
         service = None
         try:
@@ -956,8 +953,8 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             ) from e
         except PaasError as e:
             self._logger.error(
-                f"resolve_ws_conn_info failed for {paas_device_id}: "
-                f"{e.code} - {e.message}"
+                "resolve_ws_conn_info failed: error_code=%s",
+                e.code,
             )
             raise DeviceFacadeException(
                 operation="resolve_ws_conn_info",
@@ -972,11 +969,13 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             # Common expected error: machine offline - log as warning to reduce alert noise
             if e.error_code == "MACHINE_OFFLINE":
                 self._logger.warning(
-                    f"resolve_ws_conn_info failed for {paas_device_id}: [{e.error_code}] {e.message}"
+                    "resolve_ws_conn_info failed: error_code=%s",
+                    e.error_code,
                 )
             else:
                 self._logger.error(
-                    f"resolve_ws_conn_info failed for {paas_device_id}: {e}"
+                    "resolve_ws_conn_info failed: error_class=%s",
+                    type(e).__name__,
                 )
             raise DeviceFacadeException(
                 operation="resolve_ws_conn_info",
@@ -991,7 +990,10 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 ),
             ) from e
         except Exception as e:
-            self._logger.error(f"resolve_ws_conn_info failed for {paas_device_id}: {e}")
+            self._logger.error(
+                "resolve_ws_conn_info failed: error_class=%s",
+                type(e).__name__,
+            )
             raise DeviceFacadeException(
                 operation="resolve_ws_conn_info",
                 platform_type=await self._get_platform_type(service)

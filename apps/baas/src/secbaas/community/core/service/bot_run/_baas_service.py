@@ -58,6 +58,11 @@ from ._bot_run_utils import (
     strip_agent_main_prefix,
 )
 from ._internal_protocols import BotService
+from ._proxypass_token import (
+    NoProxypassToken,
+    ProxypassTargetMismatchError,
+    ProxypassTokenMint,
+)
 
 if TYPE_CHECKING:
     from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
@@ -408,7 +413,9 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
-            token_minter=self._token_minter_for(binding_info, session_id, context),
+            token_minter=self._token_minter_for(
+                binding_info, session_id, context, expected_uri=conn_info.ws_url
+            ),
         )
 
         try:
@@ -510,7 +517,9 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
-            token_minter=self._token_minter_for(binding_info, session_id, context),
+            token_minter=self._token_minter_for(
+                binding_info, session_id, context, expected_uri=conn_info.ws_url
+            ),
         )
 
         auth_token = context.build_auth_token() if context else None
@@ -600,7 +609,9 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
-            token_minter=self._token_minter_for(binding_info, session_id, context),
+            token_minter=self._token_minter_for(
+                binding_info, session_id, context, expected_uri=conn_info.ws_url
+            ),
         )
 
         try:
@@ -834,7 +845,9 @@ class BaasBotService(BotService):
                 conn_info.ws_url,
                 headers,
                 session_key=session_id,
-                token_minter=self._token_minter_for(binding_info, session_id, context),
+                token_minter=self._token_minter_for(
+                    binding_info, session_id, context, expected_uri=conn_info.ws_url
+                ),
             )
 
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
@@ -928,20 +941,28 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         session_id: str | None = None,
         context: BotChatContext | None = None,
-    ) -> Callable[[], Awaitable[str]]:
-        """后台交互答复派发的按需续签闭包（评审 P2）。
+        *,
+        expected_uri: str,
+    ) -> Callable[[], Awaitable[ProxypassTokenMint | NoProxypassToken]]:
+        """后台派发与重连共用的目标绑定续签闭包。
 
-        绑定本服务真实的签发入口（_resolve_ws_connection_for_binding 的
-        resolve→token 管线）——不做任何池 key 形态解析；失败由调用方回退
-        last-known token。直连/无代理凭证场景 resolve 返回空串，客户端
-        空值守卫保持既有值。
+        ``expected_uri`` 是构造连接时已经确定并交给连接池的完整 URI。重新
+        resolve 后若得到不同 URI，则该 token 属于另一个设备/路由，必须失败，
+        不能被错误地发送到旧 URI。无代理凭证仍返回内部 ``NoProxypassToken``,
+        由调用方按既有空 token 契约处理。
         """
 
-        async def _remint() -> str:
+        async def _remint() -> ProxypassTokenMint | NoProxypassToken:
             fresh = await self._resolve_ws_connection_for_binding(
                 binding_info, session_id, context
             )
-            return fresh.token
+            if fresh.ws_url != expected_uri:
+                raise ProxypassTargetMismatchError(
+                    "resolved WebSocket target changed since connection creation"
+                )
+            if not fresh.token:
+                return NoProxypassToken(connection_uri=expected_uri)
+            return ProxypassTokenMint(token=fresh.token, connection_uri=expected_uri)
 
         return _remint
 

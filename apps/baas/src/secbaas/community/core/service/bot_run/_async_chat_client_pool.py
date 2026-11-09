@@ -27,12 +27,14 @@ from secbaas.community.logger import get_logger
 
 from ..bot_interaction import BotInteractionService
 from ._async_chat_client import AsyncChatClient
+from ._proxypass_token import NoProxypassToken, ProxypassTokenMint
 
 logger = get_logger("core-bot-run")
 
 # 敏感日志豁免片段的 TTL 缓存时长（秒）：过期后重新查 DB，
 # 配置变更无需重启即可生效
 _BYPASS_KEYS_TTL_SECONDS = 60.0
+ProxypassTokenMinter = Callable[[], Awaitable[ProxypassTokenMint | NoProxypassToken]]
 
 
 @dataclass
@@ -115,7 +117,7 @@ class AsyncChatClientPool:
         uri: str,
         headers: dict[str, str] | None = None,
         session_key: str | None = None,
-        token_minter: Callable[[], Awaitable[str]] | None = None,
+        token_minter: ProxypassTokenMinter | None = None,
     ) -> AsyncChatClient:
         """获取该 sandbox_id 对应的连接（Least-Sessions 选择，On-demand 扩容）
 

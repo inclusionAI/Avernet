@@ -113,12 +113,13 @@ class TestResolveBotDeviceMonitorLog:
         monitor_msgs = [m for m in caplog.messages if m.startswith("Monitor:")]
         assert len(monitor_msgs) == 1
         msg = monitor_msgs[0]
-        assert "bot_uuid=bot-uuid-001" in msg
-        assert "tenant=test_tenant" in msg
-        assert "env=prod" in msg
+        assert "operation=device_resolution" in msg
         assert "selection_method=consistent_hashing" in msg
-        assert "device_affinity=session-sticky" in msg
-        assert "provider_device_id=container--machine--user" in msg
+        assert "affinity_configured=True" in msg
+        assert "bot-uuid-001" not in msg
+        assert "test_tenant" not in msg
+        assert "session-sticky" not in msg
+        assert "container--machine--user" not in msg
 
     @pytest.mark.asyncio
     async def test_monitor_log_device_affinity_none(
@@ -156,8 +157,8 @@ class TestResolveBotDeviceMonitorLog:
         assert len(monitor_msgs) == 1
         msg = monitor_msgs[0]
         assert "selection_method=random" in msg
-        assert "device_affinity=None" in msg
-        assert "provider_device_id=container--machine--user" in msg
+        assert "affinity_configured=False" in msg
+        assert "container--machine--user" not in msg
 
     @pytest.mark.asyncio
     async def test_monitor_log_not_emitted_when_provider_device_id_none(

@@ -72,9 +72,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             )
 
         # Auto-select flow (existing behavior)
-        logger.info(
-            f"Dispatching WS connection: bot_uuid={bot_uuid}, port={port}, path={path}"
-        )
+        logger.info("Dispatching WS connection: operation=auto-select")
 
         _, _, paas_device_id = await self._resolve_bot_device(
             bot_uuid=bot_uuid,
@@ -83,7 +81,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             device_affinity=device_affinity,
         )
 
-        logger.info(f"Using paas_device_id: {paas_device_id}")
+        logger.info("Selected device for WS connection: operation=auto-select")
 
         conn_info = await self._paas_facade.resolve_ws_conn_info(
             paas_device_id=paas_device_id,
@@ -93,10 +91,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         )
         conn_info.device_id = paas_device_id
 
-        logger.info(
-            f"Dispatched WS connection: ws_url={conn_info.ws_url}, "
-            f"target={conn_info.target}"
-        )
+        logger.info("Dispatched WS connection: operation=auto-select")
 
         return conn_info
 
@@ -122,15 +117,12 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             NoActiveDevicesError: Device is not in ACTIVE status
         """
         env = get_current_env()
-        logger.info(
-            f"Resolving WS for specific device: bot_uuid={bot_uuid}, "
-            f"device_uuid={device_uuid}"
-        )
+        logger.info("Resolving WS for specific device: operation=specific-device")
 
         # 1. Look up bot
         bot = self._bot_repo.get_active_by_bot_uuid(bot_uuid, tenant, env)
         if not bot:
-            logger.warning(f"Bot not found: bot_uuid={bot_uuid}, tenant={tenant}")
+            logger.warning("Bot not found during WS resolution")
             raise BotNotFoundError(bot_uuid)
 
         # 2. List all devices for this bot and find the specific one
@@ -148,16 +140,14 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         )
         # fmt: on
         if not device:
-            logger.warning(f"Device {device_uuid} not found for bot {bot_uuid}")
+            logger.warning("Device not found during WS resolution")
             raise NoDevicesFoundError(
                 f"Device {device_uuid} not found for bot {bot_uuid}"
             )
 
         # 3. Validate device is ACTIVE
         if device.status != "ACTIVE":
-            logger.warning(
-                f"Device {device_uuid} is not active (status={device.status})"
-            )
+            logger.warning("Device is not active during WS resolution")
             raise NoActiveDevicesError(
                 f"Device {device_uuid} is not active (status={device.status})"
             )
@@ -167,10 +157,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         if paas_device_id is None:
             raise RuntimeError(f"Device {device_uuid} has no provider_device_id")
 
-        logger.info(
-            f"Using specific device: device_uuid={device_uuid}, "
-            f"paas_device_id={paas_device_id}"
-        )
+        logger.info("Selected device for WS connection: operation=specific-device")
 
         # 5. Resolve WS connection info via PaaS facade
         conn_info = await self._paas_facade.resolve_ws_conn_info(
@@ -182,9 +169,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         conn_info.device_id = paas_device_id
 
         logger.info(
-            f"Dispatched WS connection for specific device: "
-            f"device_uuid={device_uuid}, ws_url={conn_info.ws_url}, "
-            f"target={conn_info.target}"
+            "Dispatched WS connection for specific device: operation=specific-device"
         )
 
         return conn_info

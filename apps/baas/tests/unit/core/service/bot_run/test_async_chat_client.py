@@ -2071,13 +2071,26 @@ class TestInteractionDispatchRemint:
         cmd.resolution.kind = "exec"
         svc.claim_for_dispatch.return_value = cmd
         client._interaction_service = svc
+        client_uri = client.uri
         deadline = int(_time.time() * 1000) + 60_000
-        return client, a2a, svc
+        return client, a2a, svc, client_uri
 
     @pytest.mark.asyncio
     async def test_remints_before_resolve(self, mock_bot_ws):
-        minter = AsyncMock(return_value="sample")
-        client, a2a, svc = self._make_client(minter)
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        minter = AsyncMock(
+            return_value=ProxypassTokenMint(
+                token="sample",
+                connection_uri=(
+                    "wss://agentclawproxy-pre.alipay.com/proxypass/"
+                    "ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+                ),
+            )
+        )
+        client, a2a, svc, _uri = self._make_client(minter)
 
         await client._dispatch_interaction_answer(
             session_key="sk",
@@ -2092,23 +2105,139 @@ class TestInteractionDispatchRemint:
         assert a2a.interaction_resolve.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_minter_failure_falls_back_without_blocking(self, mock_bot_ws):
-        minter = AsyncMock(side_effect=RuntimeError("mint down"))
-        client, a2a, svc = self._make_client(minter)
-
-        await client._dispatch_interaction_answer(
-            session_key="sk",
-            interaction_id="i1",
-            deadline_ms=int(_time.time() * 1000) + 60_000,
+    async def test_matching_no_token_continues_without_refresh(
+        self, mock_bot_ws, caplog
+    ):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
         )
+
+        minter = AsyncMock(
+            return_value=NoProxypassToken(
+                connection_uri=(
+                    "wss://agentclawproxy-pre.alipay.com/proxypass/"
+                    "ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+                ),
+            )
+        )
+        client, a2a, _svc, _uri = self._make_client(minter)
+
+        with caplog.at_level("WARNING"):
+            await client._dispatch_interaction_answer(
+                session_key="sk",
+                interaction_id="i1",
+                deadline_ms=int(_time.time() * 1000) + 60_000,
+            )
+
+        a2a.refresh_proxypass_token.assert_not_called()
+        assert a2a.interaction_resolve.await_count == 1
+        assert "sample-token" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_matching_no_token_continues_on_last_known_token(
+        self, mock_bot_ws, caplog
+    ):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        minter = AsyncMock(
+            return_value=NoProxypassToken(
+                connection_uri=(
+                    "wss://agentclawproxy-pre.alipay.com/proxypass/"
+                    "ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+                ),
+            )
+        )
+        client, a2a, _svc, _uri = self._make_client(minter)
+        client.headers["x-proxypass-token"] = "last-known"
+
+        with caplog.at_level("WARNING"):
+            await client._dispatch_interaction_answer(
+                session_key="sk",
+                interaction_id="i1",
+                deadline_ms=int(_time.time() * 1000) + 60_000,
+            )
+
+        a2a.refresh_proxypass_token.assert_not_called()
+        assert a2a.interaction_resolve.await_count == 1
+        assert "last-known" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_target_mismatch_falls_back_without_cross_target_refresh(
+        self, mock_bot_ws, caplog
+    ):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        wrong_uri = "wss://device-b.example/private/path/ws"
+        minter = AsyncMock(
+            return_value=ProxypassTokenMint(
+                token="TARGET-B-TOKEN",
+                connection_uri=wrong_uri,
+            )
+        )
+        client, a2a, _svc, _uri = self._make_client(minter)
+
+        with caplog.at_level("WARNING"):
+            await client._dispatch_interaction_answer(
+                session_key="sk",
+                interaction_id="i1",
+                deadline_ms=int(_time.time() * 1000) + 60_000,
+            )
+
+        a2a.refresh_proxypass_token.assert_not_called()
+        assert a2a.interaction_resolve.await_count == 1
+        assert "proxypass target changed" in caplog.text
+        assert "TARGET-B-TOKEN" not in caplog.text
+        assert wrong_uri not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invalid_minter_result_continues_on_last_known_token(
+        self, mock_bot_ws, caplog
+    ):
+        minter = AsyncMock(return_value="legacy-bare-token")
+        client, a2a, _svc, _uri = self._make_client(minter)
+
+        with caplog.at_level("WARNING"):
+            await client._dispatch_interaction_answer(
+                session_key="sk",
+                interaction_id="i1",
+                deadline_ms=int(_time.time() * 1000) + 60_000,
+            )
+
+        a2a.refresh_proxypass_token.assert_not_called()
+        assert a2a.interaction_resolve.await_count == 1
+        assert "proxypass result invalid" in caplog.text
+        assert "legacy-bare-token" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_minter_failure_redacts_raw_error_and_continues(
+        self, mock_bot_ws, caplog
+    ):
+        raw_error = "raw failure token=SENSITIVE-TOKEN uri=wss://private/target"
+        minter = AsyncMock(side_effect=RuntimeError(raw_error))
+        client, a2a, _svc, _uri = self._make_client(minter)
+
+        with caplog.at_level("WARNING"):
+            await client._dispatch_interaction_answer(
+                session_key="sk",
+                interaction_id="i1",
+                deadline_ms=int(_time.time() * 1000) + 60_000,
+            )
+
         a2a.refresh_proxypass_token.assert_not_called()
         assert a2a.interaction_resolve.await_count == 1, (
             "铸造失败回退 last-known token，不得阻断派发"
         )
+        assert "RuntimeError" in caplog.text
+        assert "SENSITIVE-TOKEN" not in caplog.text
+        assert "wss://private/target" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_no_minter_falls_back_without_blocking(self, mock_bot_ws):
-        client, a2a, svc = self._make_client(None)
+        client, a2a, svc, _uri = self._make_client(None)
 
         await client._dispatch_interaction_answer(
             session_key="sk",

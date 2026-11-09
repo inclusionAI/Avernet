@@ -94,7 +94,7 @@ class BotBaseDispatcher:
             self._bot_repo.get_active_by_bot_uuid, bot_uuid, tenant, env
         )
         if not bot:
-            logger.warning(f"Bot not found: bot_uuid={bot_uuid}, tenant={tenant}")
+            logger.warning("Bot not found during device resolution")
             raise BotNotFoundError(bot_uuid)
 
         # 2. Get devices associated with bot
@@ -102,31 +102,27 @@ class BotBaseDispatcher:
             self._device_repo.list_by_bot_id, bot_id=bot.id, tenant=tenant, env=env
         )
         if not devices:
-            logger.warning(f"No devices found for bot: bot_uuid={bot_uuid}")
+            logger.warning("No devices found during device resolution")
             raise NoDevicesFoundError(bot_uuid)
 
-        logger.info(f"Found {len(devices)} devices for bot {bot_uuid}")
+        logger.info("Found devices during device resolution: count=%d", len(devices))
 
         # 3. Select an ACTIVE device
         selection_method = (
             "consistent_hashing" if device_affinity is not None else "random"
         )
         logger.info(
-            f"Selecting device: bot_uuid={bot_uuid}, "
-            f"method={selection_method}, "
-            f"device_affinity={device_affinity!r}"
+            "Selecting device: method=%s affinity_configured=%s",
+            selection_method,
+            device_affinity is not None,
         )
         device = select_active_device(devices, device_affinity=device_affinity)
         if not device:
-            logger.warning(
-                f"No active devices for bot: bot_uuid={bot_uuid}, "
-                f"device_statuses={[d.status for d in devices]}"
-            )
+            logger.warning("No active devices during device resolution")
             raise NoActiveDevicesError(bot_uuid)
 
         logger.info(
-            f"Selected device: device_uuid={device.device_uuid}, "
-            f"provider_device_id={device.provider_device_id}, status={device.status}"
+            "Selected device during device resolution: status=%s", device.status
         )
 
         # 4. Validate provider_device_id
@@ -135,10 +131,10 @@ class BotBaseDispatcher:
             raise RuntimeError(f"Device {device.device_uuid} has no provider_device_id")
 
         logger.info(
-            f"Monitor: bot_uuid={bot_uuid}, tenant={tenant}, env={env}, "
-            f"selection_method={selection_method}, "
-            f"device_affinity={device_affinity}, "
-            f"provider_device_id={paas_device_id}"
+            "Monitor: operation=device_resolution "
+            "selection_method=%s affinity_configured=%s",
+            selection_method,
+            device_affinity is not None,
         )
 
         return bot, device, paas_device_id

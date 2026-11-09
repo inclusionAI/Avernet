@@ -32,10 +32,28 @@ from ._interaction_protocol import (
     EngineInteractionRequestedEvent,
     EngineInteractionResolvedEvent,
 )
+from ._proxypass_token import (
+    NoProxypassToken,
+    ProxypassTargetMismatchError,
+    ProxypassTokenMint,
+)
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
+
+# Reconnect mints are bounded; a blocking minter still needs an await point to be
+# cancellable. Keep this below the proxy token TTL and near the WS handshake budget.
+PROXYPASS_MINT_TIMEOUT_SECONDS = 10.0
+# Early frames can arrive between protocol handshake completion and publication.
+# Buffer exact handler calls fail-closed; never publish a partial event sequence.
+CANDIDATE_PENDING_CALL_LIMIT = 128
+
+# Keep the Proxypass auth key in one named constant so direct dictionary
+# literals elsewhere do not re-encode the header as a credential value.
+PROXYPASS_HEADER = "x-proxypass-token"
+
+ProxypassTokenMinter = Callable[[], Awaitable[ProxypassTokenMint | NoProxypassToken]]
 
 
 def _strip_ws_endpoint_suffix(path: str) -> str:
@@ -177,6 +195,74 @@ class NotConnectedError(Exception):
     """连接未建立或已断开时抛出。"""
 
 
+class _ReconnectCandidate:
+    """Ownership and early-event state for an unpublished WS reconnect."""
+
+    __slots__ = (
+        "client",
+        "published",
+        "disconnected",
+        "overflow",
+        "_pending_calls",
+        "_pending_call_limit",
+    )
+
+    def __init__(
+        self, client: Any, pending_call_limit: int = CANDIDATE_PENDING_CALL_LIMIT
+    ) -> None:
+        self.client = client
+        self.published = False
+        self.disconnected = False
+        self.overflow = False
+        self._pending_calls: list[tuple[Callable[..., Any], tuple[Any, ...]]] = []
+        self._pending_call_limit = pending_call_limit
+
+    def wrap_event(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """Buffer the exact handler call until the candidate is published."""
+
+        def _wrapped(*args: Any) -> Any:
+            if self.published:
+                return handler(*args)
+            if self.disconnected or self.overflow:
+                return None
+            if len(self._pending_calls) >= self._pending_call_limit:
+                self.overflow = True
+                return None
+            self._pending_calls.append((handler, args))
+            return None
+
+        return _wrapped
+
+    def wrap_disconnect(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """Buffer candidate disconnects, then delegate after publication."""
+
+        def _wrapped(*args: Any) -> None:
+            if self.published:
+                handler(*args)
+                return
+            self.disconnected = True
+
+        return _wrapped
+
+    def publish_and_flush(self) -> None:
+        """Publish synchronously, then replay calls in their original order."""
+        if self.published or self.disconnected or self.overflow:
+            raise RuntimeError("invalid reconnect candidate publication")
+        if not self.client.connected:
+            raise RuntimeError("reconnect candidate is not connected")
+        self.published = True
+        pending_calls = self._pending_calls
+        self._pending_calls = []
+        for handler, args in pending_calls:
+            try:
+                handler(*args)
+            except Exception as exc:
+                logger.error(
+                    "Buffered reconnect event handler failed: error_class=%s",
+                    type(exc).__name__,
+                )
+
+
 class AsyncChatClient:
     """WebSocket 聊天客户端封装类（纯异步版本）
 
@@ -220,7 +306,7 @@ class AsyncChatClient:
         interaction_service: BotInteractionService | None = None,
         a2a_mode: str = "off",
         sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None = None,
-        proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
+        proxypass_token_minter: ProxypassTokenMinter | None = None,
     ):
         """初始化客户端
 
@@ -368,6 +454,8 @@ class AsyncChatClient:
         duck-typed 转发内部 A2A 子客户端；v3 WS 握手早已完成、无请求
         级鉴权，无此方法即跳过；未连接（_client=None）同样跳过。
         """
+        if self._closed_intentionally:
+            return
         token = (headers or {}).get("x-proxypass-token", "")
         if token:
             self.headers["x-proxypass-token"] = token
@@ -404,7 +492,11 @@ class AsyncChatClient:
                 except A2aUnavailableError as e:
                     if self._a2a_mode == "on":
                         raise
-                    logger.info("[a2a-gate] probing failed (%s) — v3", e)
+                    logger.info(
+                        "[a2a-gate] probing failed, reason=a2a-unavailable, "
+                        "exception_class=%s",
+                        type(e).__name__,
+                    )
         if _client is None:
             _client = BotWebSocketClient(
                 uri=self.uri,
@@ -438,8 +530,8 @@ class AsyncChatClient:
             else:
                 hello = await _client.connect()
         except Exception as e:
-            logger.error(f"Connect failed: {e}")
-            raise e
+            logger.error("Connect failed: error_class=%s", type(e).__name__)
+            raise
         self._client = _client
         # 启动后台重连监控（仅在 max_retries > 0 时）
         if self._max_retries > 0 and self._reconnect_monitor is None:
@@ -1526,10 +1618,11 @@ class AsyncChatClient:
         error = completed.exception()
         if error is not None:
             logger.error(
-                "[interaction] dispatch task failed: sessionKey=%s interactionId=%s",
+                "[interaction] dispatch task failed: "
+                "sessionKey=%s interactionId=%s error_class=%s",
                 key[0],
                 key[1],
-                exc_info=(type(error), error, error.__traceback__),
+                type(error).__name__,
             )
 
     async def _dispatch_interaction_answer(
@@ -1580,18 +1673,37 @@ class AsyncChatClient:
                 # last-known token（警告日志），不得阻断派发。
                 if client is self._client and self._proxypass_token_minter is not None:
                     try:
-                        client.refresh_proxypass_token(
-                            {
-                                "x-proxypass-token": (
-                                    await self._proxypass_token_minter()
+                        minted = await self._proxypass_token_minter()
+                        if isinstance(minted, ProxypassTokenMint):
+                            if minted.connection_uri == self.uri:
+                                client.refresh_proxypass_token(
+                                    {PROXYPASS_HEADER: minted.token}
                                 )
-                            }
-                        )
-                    except Exception:
+                            else:
+                                logger.warning(
+                                    "[interaction] proxypass target changed; "
+                                    "resolve continues on last-known token"
+                                )
+                        elif isinstance(minted, NoProxypassToken):
+                            if minted.connection_uri != self.uri:
+                                logger.warning(
+                                    "[interaction] proxypass target changed; "
+                                    "resolve continues on last-known token"
+                                )
+                            # A matching NoProxypassToken is a valid refresh
+                            # result. Keep the last-known headers (which may or
+                            # may not contain a token) and proceed with resolve.
+                        else:
+                            logger.warning(
+                                "[interaction] proxypass result invalid; "
+                                "resolve continues on last-known token"
+                            )
+                    except Exception as exc:
                         logger.warning(
                             "[interaction] proxypass re-mint failed; "
-                            "resolve continues on last-known token",
-                            exc_info=True,
+                            "resolve continues on last-known token, "
+                            "exception_class=%s",
+                            type(exc).__name__,
                         )
                 try:
                     exchange = await client.interaction_resolve(
@@ -1601,10 +1713,11 @@ class AsyncChatClient:
                     )
                 except Exception as exc:
                     logger.warning(
-                        "[interaction] dispatch failed: sessionKey=%s interactionId=%s",
+                        "[interaction] dispatch failed: "
+                        "sessionKey=%s interactionId=%s exception_class=%s",
                         session_key,
                         interaction_id,
-                        exc_info=True,
+                        type(exc).__name__,
                     )
                     interaction_service.mark_failed(
                         session_key=session_key,
@@ -1758,12 +1871,7 @@ class AsyncChatClient:
         已完成（chat_complete 已置位）的会话跳过，避免把
         已正常收尾的结果覆盖成 error。
         """
-        logger.info(
-            "[on_disconnect] event=%s, payload=%s, uri=%s",
-            event_name,
-            payload,
-            self.uri,
-        )
+        logger.info("[on_disconnect] event=%s", event_name)
         for session_key, state in self._sessions.items():
             if state.chat_complete.is_set():
                 continue
@@ -1780,52 +1888,138 @@ class AsyncChatClient:
         """
         self._disconnect_event.set()
 
-    async def _reconnect_loop(self) -> None:
-        """后台监控连接状态，断连时自动重连。
+    async def _mint_reconnect_headers(self) -> dict[str, str] | None:
+        """Return a target-bound local header snapshot, or None for a failed attempt.
 
-        使用 _disconnect_event 事件驱动检测断连（替代轮询），
-        当底层 BotWebSocketClient 断连时被唤醒，以 exponential backoff
-        尝试重建连接。重连成功后新请求可继续使用；在途会话已在
-        _on_disconnect 中被标记为终态 error，不再等待自身 timeout。
+        A returned ``None`` intentionally means “failed attempt”; this helper never
+        falls back to a stale token. Cancellation is allowed to escape ``wait_for``
+        so ``close()`` can stop a reconnect during a cooperative minter await.
+        """
+        attempt_headers = dict(self.headers)
+        if self._proxypass_token_minter is None:
+            return attempt_headers
+
+        try:
+            minted = await asyncio.wait_for(
+                self._proxypass_token_minter(),
+                timeout=PROXYPASS_MINT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning(
+                "[AsyncChatClient] proxypass refresh failed: "
+                "reason=proxypass-mint-timeout"
+            )
+            return None
+        except ProxypassTargetMismatchError:
+            logger.warning(
+                "[AsyncChatClient] proxypass refresh failed: "
+                "reason=proxypass-target-mismatch"
+            )
+            return None
+        except (TypeError, ValueError):
+            logger.warning(
+                "[AsyncChatClient] proxypass refresh failed: "
+                "reason=proxypass-invalid-result"
+            )
+            return None
+        except Exception as exc:
+            logger.warning(
+                "[AsyncChatClient] proxypass refresh failed: "
+                "reason=proxypass-mint-failed exception_class=%s",
+                type(exc).__name__,
+            )
+            return None
+
+        if isinstance(minted, ProxypassTokenMint):
+            if minted.connection_uri != self.uri:
+                logger.warning(
+                    "[AsyncChatClient] proxypass refresh failed: "
+                    "reason=proxypass-target-mismatch"
+                )
+                return None
+            attempt_headers["x-proxypass-token"] = minted.token
+            return attempt_headers
+        if isinstance(minted, NoProxypassToken):
+            if minted.connection_uri != self.uri:
+                logger.warning(
+                    "[AsyncChatClient] proxypass refresh failed: "
+                    "reason=proxypass-target-mismatch"
+                )
+                return None
+            if attempt_headers.get("x-proxypass-token"):
+                logger.warning(
+                    "[AsyncChatClient] proxypass refresh failed: "
+                    "reason=proxypass-invalid-result"
+                )
+                return None
+            return attempt_headers
+
+        logger.warning(
+            "[AsyncChatClient] proxypass refresh failed: "
+            "reason=proxypass-invalid-result"
+        )
+        return None
+
+    def _candidate_failure_reason(self, candidate: _ReconnectCandidate) -> str | None:
+        """Return the first reason blocking candidate publication, if any."""
+        if self._closed_intentionally:
+            return "client-closed"
+        if candidate.disconnected:
+            return "candidate-disconnected"
+        if candidate.overflow:
+            return "candidate-overflow"
+        if not candidate.client.connected:
+            return "candidate-not-connected"
+        return None
+
+    @staticmethod
+    async def _close_unpublished_candidate(candidate: _ReconnectCandidate) -> None:
+        """Close a candidate that must not be published; cleanup is best effort."""
+        try:
+            await candidate.client.close()
+        except Exception as exc:
+            logger.warning(
+                "[AsyncChatClient] reconnect candidate close failed: "
+                "reason=candidate-close-failed exception_class=%s",
+                type(exc).__name__,
+            )
+
+    async def _reconnect_loop(self) -> None:
+        """Background monitor that rebuilds only a validated target-bound connection.
+
+        Existing retry count and exponential backoff are unchanged. Every attempt
+        owns its local header snapshot and unpublished client until the no-await
+        publication check passes. Cancellation propagates and resets reconnection.
         """
         while not self._closed_intentionally:
-            # 等待连接断开：事件驱动，比轮询更及时
             if self._client is not None and self._client.connected:
-                # 还在线，等待断连事件或短暂检查
                 self._disconnect_event.clear()
-                # 用 wait_for 实现可中断的等待
                 try:
                     await asyncio.wait_for(self._disconnect_event.wait(), timeout=1.0)
                 except TimeoutError:
                     pass
-                # 重新检查状态
                 if self._client is not None and self._client.connected:
                     continue
-                # 断连了，继续走重连逻辑
 
-            # 连接已断开
             if self._closed_intentionally:
                 break
 
             self._reconnecting = True
             reconnected = False
+            try:
+                for attempt in range(1, self._max_retries + 1):
+                    backoff = self._retry_base_backoff * (2 ** (attempt - 1))
+                    logger.info(
+                        "[AsyncChatClient] Reconnect attempt %d/%d after %.1fs",
+                        attempt,
+                        self._max_retries,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    if self._closed_intentionally:
+                        break
 
-            for attempt in range(1, self._max_retries + 1):
-                backoff = self._retry_base_backoff * (2 ** (attempt - 1))
-                logger.info(
-                    "[AsyncChatClient] Reconnect attempt %d/%d after %.1fs (uri=%s)",
-                    attempt,
-                    self._max_retries,
-                    backoff,
-                    self.uri,
-                )
-                await asyncio.sleep(backoff)
-
-                if self._closed_intentionally:
-                    break
-
-                try:
-                    # 清理旧连接
+                    # Keep the old connection separate until the replacement is ready.
                     if self._client is not None:
                         try:
                             await self._client.close()
@@ -1833,57 +2027,94 @@ class AsyncChatClient:
                             pass
                         self._client = None
 
-                    # 重建连接
-                    new_client = BotWebSocketClient(
-                        uri=self.uri,
-                        client_id=self.client_id,
-                        client_version=self.client_version,
-                        headers=self.headers,
-                    )
-                    new_client.on_event("chat", self._on_chat)
-                    new_client.on_event("agent", self._on_agent)
-                    new_client.on_event(
-                        "interaction.requested", self._on_interaction_requested
-                    )
-                    new_client.on_event(
-                        "interaction.resolved", self._on_interaction_resolved
-                    )
-                    new_client.on_event(
-                        "mode_transition.resolved",
-                        self._on_mode_transition_resolved,
-                    )
-                    new_client.on_event("error", self._on_error)
-                    new_client.on_event("*", self._log_event)
-                    new_client.on_disconnect(self._on_disconnect)
+                    attempt_headers = await self._mint_reconnect_headers()
+                    if attempt_headers is None:
+                        continue
 
-                    await new_client.connect()
-                    self._client = new_client
-                    self._disconnect_event.clear()
-                    reconnected = True
-                    logger.info(
-                        "[AsyncChatClient] Reconnected successfully "
-                        "on attempt %d (uri=%s)",
-                        attempt,
-                        self.uri,
-                    )
-                    break
-                except Exception as retry_exc:
-                    logger.warning(
-                        "[AsyncChatClient] Reconnect attempt %d failed: %s",
-                        attempt,
-                        retry_exc,
-                    )
+                    candidate: _ReconnectCandidate | None = None
+                    try:
+                        new_client = BotWebSocketClient(
+                            uri=self.uri,
+                            client_id=self.client_id,
+                            client_version=self.client_version,
+                            headers=attempt_headers,
+                        )
+                        candidate = _ReconnectCandidate(new_client)
+                        candidate.client.on_event(
+                            "chat", candidate.wrap_event(self._on_chat)
+                        )
+                        candidate.client.on_event(
+                            "agent", candidate.wrap_event(self._on_agent)
+                        )
+                        candidate.client.on_event(
+                            "interaction.requested",
+                            candidate.wrap_event(self._on_interaction_requested),
+                        )
+                        candidate.client.on_event(
+                            "interaction.resolved",
+                            candidate.wrap_event(self._on_interaction_resolved),
+                        )
+                        candidate.client.on_event(
+                            "mode_transition.resolved",
+                            candidate.wrap_event(self._on_mode_transition_resolved),
+                        )
+                        candidate.client.on_event(
+                            "error", candidate.wrap_event(self._on_error)
+                        )
+                        candidate.client.on_event(
+                            "*", candidate.wrap_event(self._log_event)
+                        )
+                        candidate.client.on_disconnect(
+                            candidate.wrap_disconnect(self._on_disconnect)
+                        )
 
-            self._reconnecting = False
+                        await candidate.client.connect()
+                        failure_reason = (
+                            self._candidate_failure_reason(candidate)
+                            if candidate is not None
+                            else "candidate-not-created"
+                        )
+                        if failure_reason is not None:
+                            logger.warning(
+                                "[AsyncChatClient] Reconnect attempt %d failed: "
+                                "reason=%s",
+                                attempt,
+                                failure_reason,
+                            )
+                            if candidate is not None:
+                                await self._close_unpublished_candidate(candidate)
+                            continue
+
+                        # No await between publication checks and this assignment.
+                        self._client = candidate.client
+                        candidate.publish_and_flush()
+                        self._disconnect_event.clear()
+                        reconnected = True
+                        logger.info(
+                            "[AsyncChatClient] Reconnected successfully on attempt %d",
+                            attempt,
+                        )
+                        break
+                    except Exception as exc:
+                        logger.warning(
+                            "[AsyncChatClient] Reconnect attempt %d failed: "
+                            "reason=reconnect-failed exception_class=%s",
+                            attempt,
+                            type(exc).__name__,
+                        )
+                        if candidate is not None and not candidate.published:
+                            await self._close_unpublished_candidate(candidate)
+                        continue
+                    except BaseException:
+                        if candidate is not None and not candidate.published:
+                            await self._close_unpublished_candidate(candidate)
+                        raise
+            finally:
+                self._reconnecting = False
 
             if not reconnected:
-                # 重试耗尽，在途请求会通过自身 timeout 自然超时
                 logger.error(
-                    "[AsyncChatClient] All %d reconnect attempts exhausted, "
-                    "giving up (uri=%s)",
+                    "[AsyncChatClient] All %d reconnect attempts exhausted, giving up",
                     self._max_retries,
-                    self.uri,
                 )
                 break
-
-            # 重连成功，继续监控循环

@@ -34,6 +34,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
 from secbaas.community.core.service.bot_run._async_chat_client_pool import (
     AsyncChatClientPool,
 )
+from secbaas.community.core.service.bot_run._proxypass_token import ProxypassTokenMint
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 # ==================== Fixtures ====================
@@ -905,11 +906,15 @@ class TestTokenMinterForSandbox:
         minter = kwargs["token_minter"]
         assert minter is not None, "Claw 路径必须携带续签闭包"
         token = await minter()
-        assert isinstance(token, str) and token, (
+        expected_uri = stub_pool.get.await_args.args[1]
+        assert isinstance(token, ProxypassTokenMint) and token.token, (
             "闭包应经真实 secret_store 签出可用 token"
         )
-        # 同一 sandbox 二次续签返回有效值（模拟答复延迟到达再派发）
-        assert isinstance(await minter(), str)
+        assert token.connection_uri == expected_uri
+        # 同一 sandbox 二次续签返回相同 URI 绑定的有效结果
+        reminted = await minter()
+        assert isinstance(reminted, ProxypassTokenMint)
+        assert reminted.connection_uri == expected_uri
 
     @pytest.mark.asyncio
     async def test_minter_uses_secret_store_not_key_parsing(self, mock_pool):
@@ -922,10 +927,37 @@ class TestTokenMinterForSandbox:
             engine_adapter_registry=BotEngineAdapterRegistry({}),
         )
         svc._secret_store.generate_proxy_token.return_value = "re-minted"
-        minter = svc._token_minter_for("ARCA-SANDBOX-x@0")
+        expected_uri = (
+            "wss://proxy.test.com/proxypass/ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+        )
+        minter = svc._token_minter_for("ARCA-SANDBOX-x@0", expected_uri=expected_uri)
         target_used = svc._secret_store.generate_proxy_token
-        tok = await minter()
-        assert tok == "re-minted"
+        mint = await minter()
+        assert isinstance(mint, ProxypassTokenMint)
+        assert mint.token == "re-minted"
+        assert mint.connection_uri == expected_uri
         assert target_used.call_args.kwargs["target"] == svc._get_path_target(
             "ARCA-SANDBOX-x@0"
         )
+
+    @pytest.mark.asyncio
+    async def test_minter_empty_token_returns_target_bound_no_token(self, mock_pool):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        svc = ClawBotService(
+            config=_make_config(),
+            client_pool=mock_pool,
+            secret_store=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+        )
+        svc._secret_store.generate_proxy_token.return_value = ""
+        expected_uri = (
+            "wss://proxy.test.com/proxypass/ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+        )
+        mint = await svc._token_minter_for(
+            "ARCA-SANDBOX-x@0", expected_uri=expected_uri
+        )()
+        assert isinstance(mint, NoProxypassToken)
+        assert mint.connection_uri == expected_uri

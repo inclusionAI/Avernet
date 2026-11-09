@@ -1299,24 +1299,32 @@ class TestReconnectLoop:
         )
         await client.connect()
 
-        # Simulate disconnect
-        mock_bot_ws_instance.connected = False
+        # Simulate disconnect on the published client, then provide a separate
+        # healthy replacement instance (production uses a real new client).
+        first_instance = mock_bot_ws_instance
+        first_instance.connected = False
+        second_instance = MagicMock()
+        second_instance.connected = True
+        second_instance.connect = AsyncMock(return_value={"server": {}})
+        second_instance.close = AsyncMock()
+        second_instance.on_event = MagicMock()
+        second_instance.on_disconnect = MagicMock()
+        mock_bot_ws.reset_mock()
+        mock_bot_ws.return_value = second_instance
         client._notify_disconnect()
 
         # Wait for reconnect to happen
         await asyncio.sleep(0.1)
 
-        # The second BotWebSocketClient instance should have been created
-        assert mock_bot_ws.call_count >= 2
-        assert (
-            mock_bot_ws_instance.on_event.call_args_list.count(
-                call(
-                    "mode_transition.resolved",
-                    client._on_mode_transition_resolved,
-                )
-            )
-            >= 2
-        )
+        assert mock_bot_ws.call_count == 1
+        assert second_instance in (client._client,)
+        registered_events = [c.args[0] for c in second_instance.on_event.call_args_list]
+        assert "mode_transition.resolved" in registered_events
+        second_instance.on_disconnect.assert_called_once()
+        disconnect_wrapper = second_instance.on_disconnect.call_args.args[0]
+        client._disconnect_event.clear()
+        disconnect_wrapper("disconnect", {})
+        assert client._disconnect_event.is_set()
 
         await client.close()
 
@@ -3174,3 +3182,534 @@ class TestV3FallbackConcurrentInit:
         single.simulate_disconnect()
         assert acc._v3_routed_sessions == {}, "断连后归属未整体收口"
         await acc.close()
+
+
+# ==================== target-bound proxypass reconnect ====================
+
+
+class _FakeReconnectClient:
+    connected = False
+    instances: list["_FakeReconnectClient"] = []
+
+    fail_before_publish = False
+    early_call_count = 1
+    emit_wildcard = True
+
+    def __init__(self, uri: str, *, headers: dict, **_kwargs: object) -> None:
+        self.uri = uri
+        self.headers = headers
+        self.events: dict[str, object] = {}
+        self.disconnect_handler = None
+        self.close = AsyncMock()
+        self.connected = False
+        self.connect_result: dict = {"server": {"host": "fake"}}
+        type(self).instances.append(self)
+
+    def on_event(self, name: str, handler: object) -> None:
+        self.events[name] = handler
+
+    def on_disconnect(self, handler: object) -> None:
+        self.disconnect_handler = handler
+
+    async def connect(self) -> dict:
+        # Candidate wrappers are installed before connect; these calls emulate
+        # early frames arriving during/from the handshake response.
+        chat = self.events.get("chat")
+        if callable(chat):
+            for _ in range(self.early_call_count):
+                chat({"sessionKey": "early-session"})
+        if self.emit_wildcard:
+            wildcard = self.events.get("*")
+            if callable(wildcard):
+                wildcard("chat", {"seq": 1})
+        self.connected = True
+        if self.disconnect_handler is not None and self.fail_before_publish:
+            self.disconnect_handler("disconnect", {})
+            self.connected = False
+        return self.connect_result
+
+
+class TestTargetBoundResultTypesValidation:
+    """Minted results must validate their target-bound fields eagerly."""
+
+    def test_token_mint_rejects_empty_token(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        with pytest.raises(ValueError):
+            ProxypassTokenMint(token="", connection_uri="ws://device/ws")
+
+    def test_token_mint_rejects_empty_target(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        with pytest.raises(ValueError):
+            ProxypassTokenMint(token="fresh", connection_uri="")
+
+    def test_no_token_rejects_empty_target(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        with pytest.raises(ValueError):
+            NoProxypassToken(connection_uri="")
+
+
+class TestTargetBoundProxypassReconnect:
+    """Reconnects mint before the handshake and bind the token to the same URI."""
+
+    @staticmethod
+    def _client(**kwargs: object) -> AsyncChatClient:
+        return AsyncChatClient(
+            uri="ws://gateway.example/proxypass/device-a/api/openclaw/ws",
+            max_retries=1,
+            retry_base_backoff=0,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_mints_replaces_only_token_and_replays_early_calls(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        uri = "ws://gateway.example/proxypass/device-a/api/openclaw/ws"
+        minter_calls: list[object] = []
+
+        async def minter() -> object:
+            minter_calls.append(object())
+            return ProxypassTokenMint(token="fresh", connection_uri=uri)
+
+        client = self._client(
+            headers={"x-proxypass-token": "stale", "X-Keep": "kept"},
+            proxypass_token_minter=minter,
+        )
+        old = _FakeReconnectClient(uri, headers={})
+        old.connected = False
+        client._client = old
+        client._on_chat = MagicMock()
+        client._log_event = MagicMock()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(1000):
+                if client._client is not old:
+                    break
+                await asyncio.sleep(0.001)
+
+        assert len(_FakeReconnectClient.instances) == 1
+        new = _FakeReconnectClient.instances[0]
+        assert new.headers == {
+            "x-proxypass-token": "fresh",
+            "X-Keep": "kept",
+        }
+        assert client._client is new
+        assert client.headers == {
+            "x-proxypass-token": "stale",
+            "X-Keep": "kept",
+        }
+        client._on_chat.assert_called_once_with({"sessionKey": "early-session"})
+        client._log_event.assert_called_once_with("chat", {"seq": 1})
+        new.close.assert_not_awaited()
+        old.close.assert_awaited_once()
+
+        # The real reconnect task keeps monitoring after publication; the direct
+        # invocation is stopped exactly like close() stops it.
+        loop_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+
+    @pytest.mark.asyncio
+    async def test_published_candidate_disconnect_forwards_to_outer_session(self):
+        """After publication, a normal disconnect must behave like the outer callback."""
+        client = self._client()
+        state = _setup_session_state(client, "session-under-test")
+        state.stream_queue = asyncio.Queue()
+        old = _FakeReconnectClient(client.uri, headers={})
+        old.connected = False
+        client._client = old
+        client._on_chat = MagicMock()
+        client._log_event = MagicMock()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(1000):
+                if client._client is not old:
+                    break
+                await asyncio.sleep(0.001)
+
+        new = _FakeReconnectClient.instances[0]
+        assert client._client is new
+        assert client._disconnect_event.is_set() is False
+        assert callable(new.disconnect_handler)
+
+        new.connected = False
+        new.disconnect_handler("disconnect", {"reason": "normally-closed"})
+
+        assert client._disconnect_event.is_set()
+        assert state.state == "error"
+        assert state.chat_complete.is_set()
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "error"
+        assert chunk.content == "connection lost"
+
+        loop_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+
+    @pytest.mark.asyncio
+    async def test_matching_no_token_accepts_no_token_handshake(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        uri = self._client().uri
+        minter = AsyncMock(return_value=NoProxypassToken(connection_uri=uri))
+        client = self._client(headers={}, proxypass_token_minter=minter)
+        client._client = None
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(1000):
+                if _FakeReconnectClient.instances:
+                    break
+                await asyncio.sleep(0.001)
+
+            assert len(_FakeReconnectClient.instances) == 1
+            assert _FakeReconnectClient.instances[0].headers == {}
+            minter.assert_awaited_once()
+
+            # A successful reconnect is a monitor loop, not a finite task.
+            loop_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop_task
+
+    @pytest.mark.asyncio
+    async def test_matching_no_token_fails_with_existing_token(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            NoProxypassToken,
+        )
+
+        uri = self._client(headers={"x-proxypass-token": "stale"}).uri
+        minter = AsyncMock(return_value=NoProxypassToken(connection_uri=uri))
+        client = self._client(
+            headers={"x-proxypass-token": "stale"},
+            proxypass_token_minter=minter,
+        )
+        client._client = None
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            await client._reconnect_loop()
+
+        assert _FakeReconnectClient.instances == []
+        minter.assert_awaited_once()
+        assert client.headers["x-proxypass-token"] == "stale"
+
+    @pytest.mark.asyncio
+    async def test_uri_mismatch_suppresses_handshake_and_last_known_token(self):
+        from secbaas.community.core.service.bot_run._proxypass_token import (
+            ProxypassTokenMint,
+        )
+
+        minter = AsyncMock(
+            return_value=ProxypassTokenMint(
+                token="x", connection_uri="ws://device-b/ws"
+            )
+        )
+        client = self._client(
+            headers={"x-proxypass-token": "stale"},
+            proxypass_token_minter=minter,
+        )
+        client._client = None
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            await client._reconnect_loop()
+
+        assert _FakeReconnectClient.instances == []
+        minter.assert_awaited_once()
+        assert client._client is None
+        assert client.headers["x-proxypass-token"] == "stale"
+
+    @pytest.mark.asyncio
+    async def test_mint_exception_does_not_fall_back(self):
+        minter = AsyncMock(side_effect=RuntimeError("fresh mint exploded"))
+        client = self._client(
+            headers={"x-proxypass-token": "stale"},
+            proxypass_token_minter=minter,
+        )
+        client._client = None
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            await client._reconnect_loop()
+
+        minter.assert_awaited_once()
+        assert _FakeReconnectClient.instances == []
+
+    @pytest.mark.asyncio
+    async def test_mint_timeout_consumes_one_attempt_of_two(self):
+        attempts = 0
+
+        async def slow_minter() -> str:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.sleep(10)
+            return "unused"
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.PROXYPASS_MINT_TIMEOUT_SECONDS",
+            0.01,
+        ):
+            client = self._client(
+                headers={"x-proxypass-token": "stale"},
+                proxypass_token_minter=slow_minter,
+            )
+            client._max_retries = 2
+            client._client = None
+            with patch(
+                "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+                _FakeReconnectClient,
+            ):
+                _FakeReconnectClient.instances.clear()
+                await client._reconnect_loop()
+
+        assert attempts == 2
+        assert _FakeReconnectClient.instances == []
+
+    @pytest.mark.asyncio
+    async def test_no_minter_with_initial_empty_headers_stays_empty(self):
+        client = self._client(headers={})
+        client._client = None
+        client._notify_disconnect()
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(1000):
+                if client._client is not None:
+                    break
+                await asyncio.sleep(0.001)
+
+        assert len(_FakeReconnectClient.instances) == 1
+        assert _FakeReconnectClient.instances[0].headers == {}
+
+        loop_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+
+    @pytest.mark.asyncio
+    async def test_no_minter_keeps_snapshot_behavior(self):
+        client = self._client(headers={"x-proxypass-token": "legacy"})
+        client._client = None
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(100):
+                if client._client is not None:
+                    break
+                await asyncio.sleep(0.001)
+
+        assert len(_FakeReconnectClient.instances) == 1
+        assert _FakeReconnectClient.instances[0].headers == {
+            "x-proxypass-token": "legacy"
+        }
+
+        loop_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+
+    @pytest.mark.asyncio
+    async def test_close_cancellation_propagates_and_resets_reconnecting(self):
+        started = asyncio.Event()
+
+        async def slow_minter() -> str:
+            started.set()
+            await asyncio.Event().wait()
+            return "unused"
+
+        client = self._client(proxypass_token_minter=slow_minter)
+        client._client = None
+        loop = asyncio.create_task(client._reconnect_loop())
+        await started.wait()
+        loop.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop
+        assert client._reconnecting is False
+
+    @pytest.mark.asyncio
+    async def test_candidate_disconnected_before_publish_is_fail_closed(self):
+        client = self._client()
+        uri = client.uri = "ws://gateway.example/proxypass/device-a/ws"
+        client._client = None
+        candidate_client = _FakeReconnectClient(uri, headers={})
+        candidate_client.fail_before_publish = True
+
+        def factory(*_args: object, **_kwargs: object) -> _FakeReconnectClient:
+            return candidate_client
+
+        client._on_chat = MagicMock()
+        client._notify_disconnect()
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            factory,
+        ):
+            await client._reconnect_loop()
+
+        assert client._client is None
+        client._on_chat.assert_not_called()
+        candidate_client.close.assert_awaited_once()
+        assert client._disconnect_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_buffered_handler_failure_keeps_candidate_published(self, caplog):
+        """One bad buffered handler must not abandon a live replacement."""
+        client = self._client()
+        old = _FakeReconnectClient(client.uri, headers={})
+        old.connected = False
+        client._client = old
+        client._on_chat = MagicMock(
+            side_effect=RuntimeError("SENSITIVE-HANDLER-FAILURE")
+        )
+        client._log_event = MagicMock()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            _FakeReconnectClient,
+        ):
+            _FakeReconnectClient.instances.clear()
+            loop_task = asyncio.create_task(client._reconnect_loop())
+            for _ in range(1000):
+                if client._client is not old:
+                    break
+                await asyncio.sleep(0.001)
+
+        new = _FakeReconnectClient.instances[0]
+        assert client._client is new
+        assert new.connected is True
+        client._on_chat.assert_called_once()
+        # The dedicated-handler failure must not block wildcard replay.
+        client._log_event.assert_called_once_with("chat", {"seq": 1})
+        new.close.assert_not_awaited()
+        assert client._disconnect_event.is_set() is False
+
+        logged = caplog.text
+        assert "RuntimeError" in logged
+        assert "SENSITIVE-HANDLER-FAILURE" not in logged
+
+        loop_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+
+    @pytest.mark.asyncio
+    async def test_candidate_overflow_through_reconnect_is_fail_closed(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            CANDIDATE_PENDING_CALL_LIMIT,
+        )
+
+        candidate_client = _FakeReconnectClient(self._client().uri, headers={})
+        candidate_client.early_call_count = CANDIDATE_PENDING_CALL_LIMIT + 1
+
+        def factory(*_args: object, **_kwargs: object) -> _FakeReconnectClient:
+            return candidate_client
+
+        client = self._client()
+        client._client = None
+        client._on_chat = MagicMock()
+        client._notify_disconnect()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            factory,
+        ):
+            await client._reconnect_loop()
+
+        assert client._client is None
+        client._on_chat.assert_not_called()
+        candidate_client.close.assert_awaited_once()
+        assert client._disconnect_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_closed_after_connect_before_publish_does_not_publish(self):
+        outer_client = self._client()
+        outer_client._client = None
+        candidate_client = _FakeReconnectClient(outer_client.uri, headers={})
+        outer_client._on_chat = MagicMock()
+        outer_client._notify_disconnect()
+
+        class _ConnectCloseFake(_FakeReconnectClient):
+            async def connect(self) -> dict:
+                result = await super().connect()
+                outer_client._closed_intentionally = True
+                return result
+
+        candidate_client.__class__ = _ConnectCloseFake
+
+        def factory(*_args: object, **_kwargs: object) -> _FakeReconnectClient:
+            return candidate_client
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
+            factory,
+        ):
+            await outer_client._reconnect_loop()
+
+        assert outer_client._client is None
+        outer_client._on_chat.assert_not_called()
+        candidate_client.close.assert_awaited_once()
+        assert outer_client._disconnect_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_candidate_overflow_buffers_fail_closed(self):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            _ReconnectCandidate,
+        )
+
+        fake_client = MagicMock()
+        fake_client.connected = True
+        candidate = _ReconnectCandidate(fake_client, pending_call_limit=1)
+        handler = MagicMock()
+
+        wrapped = candidate.wrap_event(handler)
+        wrapped("first")
+        wrapped("second")
+        assert candidate.overflow is True
+
+        with pytest.raises(RuntimeError, match="invalid reconnect candidate"):
+            candidate.publish_and_flush()
+        # Overflow is fail closed: even the buffered first call must not leak.
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_closed_client_does_not_refresh_auth(self):
+        client = self._client()
+        client._closed_intentionally = True
+        client.refresh_outbound_auth({"x-proxypass-token": "new-token"})
+        assert "x-proxypass-token" not in client.headers

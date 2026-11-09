@@ -39,6 +39,10 @@ from ._async_session_client import AsyncSessionClient
 from ._async_session_client import SessionInfo as AdapterSessionInfo
 from ._bot_run_utils import resolve_user_id
 from ._internal_protocols import BotService
+from ._proxypass_token import (
+    NoProxypassToken,
+    ProxypassTokenMint,
+)
 
 if TYPE_CHECKING:
     from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
@@ -239,7 +243,10 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            token_minter=self._token_minter_for(sandbox_id, expected_uri=url),
         )
 
         try:
@@ -307,7 +314,10 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            token_minter=self._token_minter_for(sandbox_id, expected_uri=url),
         )
 
         auth_token = context.build_auth_token() if context else None
@@ -372,7 +382,10 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            token_minter=self._token_minter_for(sandbox_id, expected_uri=url),
         )
 
         try:
@@ -560,7 +573,7 @@ class ClawBotService(BotService):
                 url,
                 headers,
                 session_key=session_id,
-                token_minter=self._token_minter_for(sandbox_id),
+                token_minter=self._token_minter_for(sandbox_id, expected_uri=url),
             )
 
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
@@ -760,17 +773,20 @@ class ClawBotService(BotService):
         """
         return f"ARCA_{sandbox_id}:{self._config.adapter_port}"
 
-    def _token_minter_for(self, sandbox_id: str) -> Callable[[], Awaitable[str]]:
-        """后台交互答复派发的按需续签闭包（评审 P2）。
+    def _token_minter_for(
+        self,
+        sandbox_id: str,
+        *,
+        expected_uri: str,
+    ) -> Callable[[], Awaitable[ProxypassTokenMint | NoProxypassToken]]:
+        """Target-bound proxypass remint for reconnects and background dispatch."""
 
-        绑定本服务真实的签发入口（与 _get_headers 同一条
-        generate_proxy_token 管线），不做任何池 key 形态解析；直连/
-        无代理凭证场景返回空串，由客户端的空值守卫保持既有值。
-        """
-
-        async def _remint() -> str:
+        async def _remint() -> ProxypassTokenMint | NoProxypassToken:
             target = self._get_path_target(sandbox_id)
-            return self._secret_store.generate_proxy_token(target=target)
+            token = self._secret_store.generate_proxy_token(target=target)
+            if not token:
+                return NoProxypassToken(connection_uri=expected_uri)
+            return ProxypassTokenMint(token=token, connection_uri=expected_uri)
 
         return _remint
 
