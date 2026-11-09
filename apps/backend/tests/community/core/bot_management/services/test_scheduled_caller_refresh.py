@@ -3,7 +3,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.services import bot_service as bot_service_module
 from agentclaw.community.core.bot_management.services.bot_service import BotService, BotServiceError
+
+
+@pytest.fixture(autouse=True)
+def enabled_refresh(monkeypatch):
+    shipped_default = getattr(bot_service_module, "SCHEDULED_CALLER_REFRESH_ENABLED", None)
+    monkeypatch.setattr(bot_service_module, "SCHEDULED_CALLER_REFRESH_ENABLED", True, raising=False)
+    return shipped_default
 
 
 def _service(bot_type="service"):
@@ -137,3 +145,29 @@ def test_default_service_bot_keeps_stable_entity_for_caller_refresh():
     with patch("agentclaw.community.core.bot_management.utils.resolve_agent_code", return_value="agent-1"):
         service.hot_update_passport_token_to_device("default", "current-owner", "owner-secret")
     assert service._scheduled_caller_refresh.refresh.call_args.kwargs["entity_id"] == "stable-entity"
+
+
+def test_scheduled_caller_refresh_ships_disabled(enabled_refresh):
+    assert enabled_refresh is False
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_disabled_refresh_keeps_owner_success_without_new_dependencies(monkeypatch, caplog, configured):
+    caplog.set_level("INFO")
+    monkeypatch.setattr(bot_service_module, "SCHEDULED_CALLER_REFRESH_ENABLED", False, raising=False)
+    service = _service()
+    port = service._scheduled_caller_refresh
+    port.refresh.side_effect = AssertionError("Caller must not execute")
+    if not configured:
+        del service._scheduled_caller_refresh
+    with patch.object(bot_service_module, "get_current_env", side_effect=AssertionError("Caller preparation must not execute")), patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code", return_value="agent-1"
+    ):
+        result = service.hot_update_passport_token_to_device("service-1", "current-owner", "owner-secret")
+    assert result == {"token_prefix": "owner-secret", "bindings": [{"binding_id": 7}]}
+    service._hot_update_service_bot_passport_token.assert_called_once()
+    port.refresh.assert_not_called()
+    assert "reason=disabled" in caplog.text
+    assert "scheduled_caller_refresh_requested" not in caplog.text
+    assert "scheduled_caller_refresh_failed" not in caplog.text
+    assert "owner-secret" not in caplog.text

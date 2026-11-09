@@ -179,6 +179,9 @@ PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 # aggregate failure.
 _CALLER_REFRESH_MAX_WORKERS = 5
 
+# Rollout gate: enable only after the tcauthmng ASC Facade is deployed.
+SCHEDULED_CALLER_REFRESH_ENABLED = False
+
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
     """构建操作人上下文。"""
@@ -6039,7 +6042,12 @@ class BotService(BotServiceProtocol):
                     "skipped": True,
                     "reason": f"unsupported bot_type: {bot_type}",
                 }
-            if bot_type == "service" and self._scheduled_caller_refresh is not None:
+            if bot_type == "service" and not SCHEDULED_CALLER_REFRESH_ENABLED:
+                logger.info(
+                    "scheduled_caller_refresh_skipped bot_id=%s owner_user_id=%s reason=disabled",
+                    bot_id, user_id,
+                )
+            if SCHEDULED_CALLER_REFRESH_ENABLED and bot_type == "service" and self._scheduled_caller_refresh is not None:
                 refresh_fields = {
                     "bot_id": bot_id, "owner_user_id": user_id,
                 }

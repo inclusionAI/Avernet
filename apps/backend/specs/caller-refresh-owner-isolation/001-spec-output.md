@@ -5,3 +5,8 @@ User requires all newly added Caller refresh failures to log safe metadata only 
 Implementation: latest GitHub dev in new Avernet worktree, follow-up PR because3513 merged. Update README/protocol commentary to match best-effort caller side effect. Keep OCB gitlink governed by remote dev; update open OCB5920 metadata with dependency/result.
 
 Tests first reproduce provider/timeout/preparation/scope errors breaking owner result; verify real HTTP200 envelope on Caller failure, original owner error still fails, owner result unchanged, safe logs and tenant restoration. Run callback/Passport/handoff/DI/architecture regressions and independent review, then normal topic push and PR.
+
+
+## Default-off rollout gate
+
+User requested temporarily closing the owner-callback Caller refresh branch until tcauthmng is deployed. Add module-level SCHEDULED_CALLER_REFRESH_ENABLED=False as the first condition, so disabled callbacks avoid Caller dependencies/metadata/probes/RPC/outbound and preserve original owner result. Log fixed reason=disabled with safe Bot/owner identifiers. Existing enabled-path isolation tests explicitly enable the gate; verify shipped default is False and disabled callbacks cannot invoke failing/new dependencies, including absent optional port. This gate applies to owner-triggered runtime refresh, not interactive ASC ensure. Update REL20261110 PR3788 and keep dev PR3786 consistent.
