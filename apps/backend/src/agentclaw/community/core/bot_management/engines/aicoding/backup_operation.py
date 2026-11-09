@@ -44,6 +44,10 @@ current_backup: ContextVar[BackupOperation | None] = ContextVar(
 )
 
 
+def backup_operation_type() -> str:
+    return "recycle" if current_backup.get() is not None else "restart"
+
+
 def backup_deadline(
     *, started, ordinary_budget, fastdisk_budget, required, strict_deadline
 ):

@@ -59,9 +59,6 @@ class AicodingRecycleMixin:
     def prepare_recycle(self, ctx, *, record, save, **kwargs):
         """Same config, budget and receipt policy as restart, no restart mutation."""
         started = record["backup_started_at"]
-        policy = record.get("fail_block")
-        if policy is None:
-            policy = save(fail_block=self._fastdisk_backup_blocking())["fail_block"]
         operation = BackupOperation(
             operation_id=record["operation_id"],
             started_at=started,
@@ -70,6 +67,9 @@ class AicodingRecycleMixin:
         )
         reset_handle = current_backup.set(operation)
         try:
+            policy = record.get("fail_block")
+            if policy is None:
+                policy = save(fail_block=self._fastdisk_backup_blocking())["fail_block"]
             verify = self.prepare_restart(
                 ctx,
                 **kwargs,

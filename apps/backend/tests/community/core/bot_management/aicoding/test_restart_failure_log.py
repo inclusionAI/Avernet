@@ -1,5 +1,6 @@
 """Alert-ready coding restart diagnostics, without changing lifecycle decisions."""
 import logging
+import time
 from unittest.mock import patch
 
 import pytest
@@ -10,7 +11,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.restart_backup imp
 )
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartSuperseded
 from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
-from tests.community.core.bot_management.aicoding.test_restart_fastdisk import committed, executor, strict_strategy
+from tests.community.core.bot_management.aicoding.test_restart_fastdisk import committed, executor, runtime_with, strict_strategy
 
 
 @pytest.mark.parametrize(('target', 'sandbox', 'expected'), [
@@ -47,7 +48,8 @@ def test_strict_backup_alarm_includes_exact_container_and_failure_stage(
     assert alarms
     for record in alarms:
         line = record.getMessage()
-        assert record.levelno == logging.ERROR
+        assert record.levelno == logging.WARNING
+        assert "operation_type=restart" in line
         assert f'bot_id=b arca_id={expected} target_id={target}' in line
         assert f'operation_id={OPERATION}' in line
         assert f'phase={phase} ' in line
@@ -85,6 +87,8 @@ def test_unknown_identity_and_untrusted_fields_cannot_forge_log_fields(caplog):
     assert '\n' not in line
     assert 'bot_id=b_status_success arca_id=- target_id=BOT-logical' in line
     assert 'status=success' not in line
+    assert caplog.records[-1].levelno == logging.ERROR
+    assert 'operation_type=restart' in line
 
 
 def test_superseded_delivery_is_not_a_failed_restart_alarm(caplog):
@@ -156,3 +160,92 @@ def test_env_uses_existing_data_environment_and_owner_is_sanitized(server_env, e
     assert f'env={expected} ' in line
     assert 'owner_id=owner_phase_forged' in line
     assert 'phase=forged' not in line and '\n' not in line
+
+
+@pytest.mark.parametrize("operation_type", ["restart", "recycle"])
+@pytest.mark.parametrize("blocking", [False, True])
+@pytest.mark.parametrize("phase", ["prepare", "verify"])
+@pytest.mark.parametrize("reason", ["backup_failed", "timeout", "transport_error"])
+def test_backup_failure_logs_identify_operation_and_warn_even_when_blocking(
+    operation_type, blocking, phase, reason, caplog,
+):
+    from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import current_backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+    from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
+
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
+    failure = {
+        "backup_failed": response("failed"),
+        "timeout": TimeoutError("private timeout details"),
+        "transport_error": ConnectionError("private transport details"),
+    }[reason]
+    execute = executor(([committed()] if phase == "verify" else []) + [failure])
+    runtime = runtime_with(execute)
+    strategy = strict_strategy()
+    strategy._common_config_provider().get_value.return_value = blocking
+    ctx = BotProvisioningContext(
+        bot_id="b", owner_id="owner", bot_type="personal", active_engine="aicoding"
+    )
+    record = {"operation_id": OPERATION, "backup_started_at": time.time()}
+
+    def save(**changes):
+        record.update(changes)
+        return dict(record)
+
+    def prepare():
+        kwargs = dict(
+            device_id="BOT-logical",
+            restart_dependencies=RestartBackupDependencies.for_instance(runtime),
+        )
+        if operation_type == "recycle":
+            return strategy.prepare_recycle(ctx, record=record, save=save, **kwargs)
+        return strategy.prepare_restart(ctx, operation_id=OPERATION, **kwargs)
+
+    if blocking:
+        with pytest.raises(backup.RestartBackupBlocked) as raised:
+            prepare()()
+        # The task summary runs after the recycle context has been reset.
+        assert current_backup.get() is None
+        log_restart_failure(raised.value, bot_id="b", phase="task_failed")
+    else:
+        prepare()()
+        if operation_type == "recycle":
+            assert record["warning"]["code"] == "BACKUP_FAILED_CONTINUE"
+
+    records = [r for r in caplog.records if "event=aicoding_restart_" in r.getMessage()]
+    assert records
+    assert all(f"operation_type={operation_type}" in r.getMessage() for r in records)
+    failures = [r for r in records if f"reason={reason}" in r.getMessage()]
+    assert failures
+    assert all(r.levelno == logging.WARNING for r in failures)
+    assert all(r.levelno < logging.ERROR for r in records)
+    assert any(MARKER in r.getMessage() for r in records) is blocking
+    assert "private" not in caplog.text
+    assert current_backup.get() is None
+
+
+def test_recycle_config_warning_is_tagged_and_context_does_not_leak(caplog):
+    from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import current_backup
+    from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
+
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
+    strategy = strict_strategy()
+    strategy._common_config_provider().get_value.side_effect = RuntimeError("private config")
+    ctx = BotProvisioningContext(
+        bot_id="b", owner_id="owner", bot_type="personal", active_engine="aicoding"
+    )
+    record = {"operation_id": OPERATION, "backup_started_at": time.time()}
+
+    def save(**changes):
+        record.update(changes)
+        return dict(record)
+
+    strategy.prepare_recycle(ctx, record=record, save=save)()
+    config_log = next(r for r in caplog.records if "phase=config" in r.getMessage())
+    assert config_log.levelno == logging.WARNING
+    assert "operation_type=recycle" in config_log.getMessage()
+    assert record["fail_block"] is False
+    assert current_backup.get() is None
+    strategy._fastdisk_backup_blocking()
+    assert "operation_type=restart" in caplog.records[-1].getMessage()
+    assert "private config" not in caplog.text

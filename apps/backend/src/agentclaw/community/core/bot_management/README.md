@@ -251,6 +251,10 @@ finish the task without issuing a provider workflow. All veto classification,
 operation failure, guard ownership, replay checks and failure persistence live in
 `engines/aicoding/restart_backup.py`; there is no shared backup exception or
 separate published-restart mixin. Failure-log formatting also lives in this file.
+Backup logs retain their existing event names and include `operation_type=restart`
+or `operation_type=recycle`. Backup failures use WARNING even when the configured
+guard blocks the operation; unrelated lifecycle failures remain ERROR. Wrapped
+failure summaries retain the originating operation type after context cleanup.
 The common publish flow keeps its original orchestration inside `execute_restart`
 and enters the strategy's `published_restart_scope`; it does not extract a second
 common execution function. The scope yields an empty result to proceed, or a
