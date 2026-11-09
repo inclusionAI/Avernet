@@ -80,6 +80,7 @@ impl RegisterServiceImpl {
     /// idempotence key, never client data.
     fn ownership_initialization(staff_no: &str) -> OwnershipInitialization {
         OwnershipInitialization {
+            initial_manager_user_ids: Vec::new(),
             owner_user_id: staff_no.to_string(),
             mutation: AuthorityMutation {
                 mutation_id: uuid::Uuid::new_v4().to_string(),

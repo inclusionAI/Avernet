@@ -66,9 +66,19 @@ impl BotRepoPort for MemoryBotRepo {
         owner_user_id: &str,
         mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
     ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
-        self.initialize_owned_bot_memory(bot_id, owner_user_id, &mutation)
+        self.initialize_owned_bot_memory(bot_id, owner_user_id, &mutation, &[])
             .await
     }
+
+    async fn initialize_provider_authority(
+        &self, bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
+        crate::ownership_managers::validate_provider_initialization(&initialization)?;
+        self.initialize_owned_bot_memory(bot_id, &initialization.owner_user_id,
+            &initialization.mutation, &initialization.initial_manager_user_ids).await
+    }
+
 
     async fn ownership_governance_state(
         &self,
@@ -327,8 +337,10 @@ impl BotRepoPort for MemoryBotRepo {
     ) -> ServiceResult<Vec<RegisteredBot>> {
         let current_env = resolve_env();
         let owner_actor = format!("human_{created_by}");
-        let bots = self.bots.read().await;
+        // Match registration/retirement: authority before bots. Never wait for
+        // authority while pinning bots against an initializer's write lock.
         let authority = self.authority.read().await;
+        let bots = self.bots.read().await;
         let mut candidates: Vec<RegisteredBot> = bots
             .values()
             .filter(|b| !b.is_expired())

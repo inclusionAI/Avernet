@@ -619,6 +619,15 @@ impl BotProviderRepoPort for DbProviderStore {
         self.create_provider_bot_composite(record, capabilities, owner, token, &initialization, None, RegistrationAuthority::HumanToken).await
     }
 
+    async fn create_provider_admin_bot_with_ownership(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities,
+        owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        self.create_provider_bot_composite(record, capabilities, owner, token, &initialization,
+            None, RegistrationAuthority::ProviderAdmin).await
+    }
+
     async fn create_a2a_provider_bot_with_ownership(
         &self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
         initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,

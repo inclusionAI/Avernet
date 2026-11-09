@@ -14,7 +14,8 @@ async fn cannot_delete_human_who_owns_live_bot() {
     let core = Arc::new(BotCore::with_repo(repo.clone()));
     let bot = core.register_with_ownership(TrustedBotRegistration {
         capabilities: BotCapabilities { name: Some("owned".into()), ..Default::default() },
-        initialization: OwnershipInitialization { owner_user_id: "alice".into(), mutation: AuthorityMutation {
+        initialization: OwnershipInitialization { initial_manager_user_ids: Vec::new(),
+                owner_user_id: "alice".into(), mutation: AuthorityMutation {
             mutation_id: "review-create".into(), actor: AuthorityActor::Human { user_id: "alice".into() },
         } },
     }).await.unwrap();

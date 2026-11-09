@@ -205,6 +205,8 @@ pub struct RegisterProviderBotRequest {
     #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
+    /// Registration snapshot: first user is owner, remaining users are initial managers.
+    /// Requires 1..=101 raw user IDs; replay never synchronizes existing authority.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     /// Domains this bot covers (same semantics as `POST /bots/onboard`).

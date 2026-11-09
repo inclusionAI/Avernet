@@ -45,7 +45,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     // human-mention migration is MySQL version 030, Group context
     // owners is 034, collaboration drafts is 035 and bot authority
     // is MySQL version 036.
-    assert_eq!(versions, (1..=42).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=44).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
@@ -61,6 +61,8 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     assert_eq!(mysql[39], "040_bot_avatar.sql");
     assert_eq!(mysql[40], "041_group_agent_cards.sql");
     assert_eq!(mysql[41], "042_auth_session_version.sql");
+    assert_eq!(mysql[42], "043_actor_identity_collation.sql");
+    assert_eq!(mysql[43], "044_actor_identity_no_pad.sql");
 }
 
 #[tokio::test]

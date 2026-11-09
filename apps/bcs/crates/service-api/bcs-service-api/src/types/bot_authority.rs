@@ -115,6 +115,8 @@ pub struct AuthorityMutation {
 /// Trusted initialization payload for a Bot's ownership
 /// (spec §10: owner + version in the same transaction).
 pub struct OwnershipInitialization {
+    /// Provider-only creation snapshot; never a manager synchronization command.
+    pub initial_manager_user_ids: Vec<String>,
     pub owner_user_id: String,
     pub mutation: AuthorityMutation,
 }
@@ -541,3 +543,7 @@ mod tests {
         assert!(!replay.changed);
     }
 }
+
+#[path = "provider_authority_initialization.rs"]
+mod provider_initialization;
+pub use provider_initialization::{normalize_provider_owners, validate_initial_managers};

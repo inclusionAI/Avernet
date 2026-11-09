@@ -264,6 +264,7 @@ async fn memory_registration_refuses_tombstoned_or_miskinded_owner() {
             "33333333",
             "new-token",
             OwnershipInitialization {
+                initial_manager_user_ids: Vec::new(),
                 owner_user_id: "33333333".to_string(),
                 mutation: AuthorityMutation {
                     mutation_id: "review-registration".to_string(),
