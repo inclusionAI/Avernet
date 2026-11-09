@@ -1,5 +1,6 @@
 apps/frontend-nextgen/scripts/public-tests.list
   s_cf4651e8741385::t_2fa51600646127 92,116-118
+  s_46bcfe8c4c3bdf::t_e2ec7f3638a479 115
 apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
   s_cf4651e8741385::t_3158db1879b3c5 20-22,94-113,134-143,154-183,233-242,281
 apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
@@ -19,6 +20,14 @@ apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
   "base_commit_sha": "7d816def42fa2dd95d40ee29eb900fbd09ec4cf8",
   "prompts": {},
   "sessions": {
+    "s_46bcfe8c4c3bdf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5d246eaa-c821-4882-91d4-4aa45f4572de",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
     "s_cf4651e8741385": {
       "agent_id": {
         "tool": "antcc",
