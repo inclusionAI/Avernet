@@ -35,10 +35,15 @@ class SessionCreateError(ExpertChatError):
 class ConnectionError(ExpertChatError):
     """获取连接信息失败"""
 
-    def __init__(self, message: str, error_code: str = None, original_error: str = None):
+    def __init__(
+        self, message: str, error_code: str = None, original_error: str = None,
+        *, caller_device_unavailable: bool = False,
+    ):
         super().__init__(message)
         self.error_code = error_code
         self.original_error = original_error
+        # Only a typed BaaS no-active-device response on the caller path sets this.
+        self.caller_device_unavailable = caller_device_unavailable
 
 
 class ChatPermissionError(RuntimeError):
