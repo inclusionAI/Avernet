@@ -100,11 +100,10 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | 对象 | 类型 | 主要身份 / 相等性 | 权威关系 | 生命周期 |
 | --- | --- | --- | --- | --- |
 | `CollaborationContext` | 聚合根 | `context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
-| `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有 | 随 `context.info_updated` 事实演进 |
-| `ContextInput` | 子实体 | `context_id + input_id + source` | 组织协作输入及其来源，不拥有内容 | 由输入创建或导入事件维护 |
-| `InputSource` | 值对象 | `source_kind + source_id + revision` | 标识 Dima 项目空间、TaskDiscover 事件集合等外部来源 | 随输入事实演进 |
-| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 引用具体材料，不拥有内容 | 由 ContextInput / ContextDeliverable 选择性持有 |
-| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 记录协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
+| `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有，统一承载目标、输入来源与输入材料引用 | 随 `context.info_updated` 事实演进 |
+| `InputSource` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，标识 Dima 项目空间、TaskDiscover 模块自动挖掘的事件集合等外部来源 | 随 envelope 事实演进 |
+| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，稳定引用具体输入材料，不拥有内容 | 随 envelope 事实演进 |
+| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 ContextOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
 | `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作模式和参与者集合 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
@@ -112,7 +111,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
 | `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
-| `ContextOutcome` | 子实体 | `context_id + outcome_id` | 终态前的验收裁决事实 | 责任人显式裁决 |
+| `ContextOutcome` | 子实体 | `context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
 
 整体对象关系如下；该图表达协议语义，不代表数据库表结构或实现类图。
@@ -127,7 +126,6 @@ flowchart TB
   subgraph Context["CollaborationContext 聚合"]
     root["CollaborationContext"]
     envelope["ContextEnvelope"]
-    contextInput["ContextInput"]
     inputSource["InputSource"]
     material["ContextMaterialReference"]
     collaborationMode["CollaborationMode"]
@@ -152,14 +150,13 @@ flowchart TB
   adapter --> event
 
   root --> envelope
-  root --> contextInput
-  contextInput --> inputSource
-  contextInput --> material
+  envelope --> inputSource
+  envelope --> material
   root --> collaborationMode
   collaborationMode --> participant
-  root --> deliverable
   root --> todo
   root --> outcome
+  outcome --> deliverable
   root --> event
   root --> transition
   root --> stateBinding
@@ -189,8 +186,7 @@ CollaborationContext
   ├─ context_id / scope / title
   ├─ envelope
   ├─ responsible_actor_ref
-  ├─ input                     # ContextInput
-  ├─ deliverables[]           # ContextDeliverable
+  ├─ outcomes[]                 # ContextOutcome
   ├─ collaboration_mode       # CollaborationMode
   ├─ state_machine_binding    # ContextStateMachineBinding
   ├─ version / event_cursor / state_fencing_token
@@ -207,55 +203,48 @@ CollaborationContext
 
 ### 4.3 值对象：ContextEnvelope
 
+`ContextEnvelope` 是业务意图、约束、验收口径、协作输入来源和输入材料引用的统一权威值对象。`InputSource` 与 `ContextMaterialReference` 都从这里持有，不再独立建 `ContextInput` 实体。
+
 ```text
 ContextEnvelope
   ├─ objective / background
+  ├─ input_sources[]          # InputSource[]
+  ├─ material_refs[]           # ContextMaterialReference[]
   ├─ constraints[] / deliverable_specs[]
   ├─ acceptance[] / language / locale
   ├─ origin_ref / visibility
   └─ envelope_revision
 ```
 
-- 每次可审计变更产生 `context.info_updated`。
-- 它是业务意图和验收口径，不是 prompt，也不是权限边界。
-- 字段必须经 schema 校验，不允许无限开放 JSON。
+`InputSource` 用 `source_kind + source_id + revision` 标识一个外部来源版本，例如：
 
-### 4.4 子实体：ContextInput
+- Dima 项目空间
+- TaskDiscover 模块自动挖掘的事件集合
 
-`ContextInput` 是协作输入的一等子实体，用来组织“这个 Context 依赖的输入材料”以及这些材料来自哪个外部系统。它不是聚合根，也不拥有外部内容；它只保存来源与材料引用。
-
-```text
-ContextInput
-  ├─ input_id / input_kind
-  ├─ source                     # InputSource
-  ├─ material_refs[]           # ContextMaterialReference[]
-  └─ source_revision / visibility / scope
-```
-
-`InputSource` 是 `ContextInput` 内的值对象，用 `source_kind + source_id + revision` 标识来源版本，例如 **Dima 项目空间**或 **TaskDiscover 模块自动挖掘的事件集合**。
+`ContextMaterialReference` 用 `source_kind + source_id + revision / digest` 稳定引用一份具体材料；它只保存引用、版本和可见范围，不保存材料正文、token、cookie 或私有路径。
 
 设计约束：
-- 一个 Context 可以有多个 `ContextInput`。
-- `material_refs[]` 只表示“协作输入”，不表示交付结果，也不承载状态机语义。
-- `source` 只保留稳定引用，不保存材料正文、token、cookie、临时签名 URL 或私有路径。
-- `ContextInput` 与 `ContextDeliverable` 的职责互斥；同一材料可在两边出现，但由所在关系决定是输入还是结果。
+- `input_sources[]` 和 `material_refs[]` 共同表达“协作输入”。
+- 输入信息属于 envelope revision，没有独立生命周期，也不作为新的子实体存在。
+- 每次可审计变更必须产生 `context.info_updated` 事实。
+- 它是业务意图和输入边界，不是 prompt，也不是授权边界。
+- 字段必须经过 schema 校验，不允许无限开放 JSON。
 
-### 4.5 值对象：ContextMaterialReference
+### 4.4 子实体：ContextOutcome
+
+`ContextOutcome` 是本轮协作的验收裁决对象；`ContextDeliverable` 从这里持有，不再由 `CollaborationContext` 根直接保存。
 
 ```text
-ContextMaterialReference
-  ├─ material_ref_id / source_kind / source_id
-  ├─ revision / digest
-  ├─ display_name
-  └─ visibility / scope / authorization_ref
+ContextOutcome
+  ├─ outcome_id
+  ├─ decision                     # accepted / rejected
+  ├─ judged_by / judged_at
+  ├─ reason_ref
+  ├─ deliverables[]              # ContextDeliverable[]
+  └─ visibility
 ```
 
-- `(source_kind, source_id, revision)` 是自然身份。
-- 它只保存稳定引用，不保存内容或权限。
-- 材料下载、预览和解密仍由原系统独立授权。
-- 来源版本冲突必须形成 `source.revision_detected` 或 `source.sync_conflicted` 事件。
-
-### 4.6 子实体：ContextDeliverable
+`ContextDeliverable` 是 `ContextOutcome` 内的产出事实，字段可以精简为：
 
 ```text
 ContextDeliverable
@@ -263,16 +252,17 @@ ContextDeliverable
   ├─ artifact_ref
   ├─ produced_by / produced_at
   ├─ producing_event_refs[] / evidence_refs[]
-  ├─ acceptance_ref
-  └─ visibility
+  └─ acceptance_ref
 ```
 
-- 产出结果必须先形成 `deliverable.produced`；envelope 更新只能声明规格，不能伪装成结果。
-- `spec_ref` 必须指向 envelope 中的 `deliverable_spec_id`。
-- 驳回后的返工会生成新的 `ContextDeliverable`，历史结果事实保留。
-- `ContextDeliverable` 不承载状态机，不决定业务终态。
+设计约束：
+- 一个 Context 同一时刻只有一个 active `ContextOutcome`；一个 `ContextOutcome` 可以包含多个 `ContextDeliverable`。
+- 验收通过、驳回或返工都必须通过 `outcome.accepted` / `outcome.rejected` 完成。
+- `ContextOutcome` 先记录“结果是什么”，再记录“是否被验收”；二者都属于同一个判定单元。
+- `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
+- 根只保存 `outcomes[]`，交付物由对应 Outcome 持有。
 
-### 4.7 子实体：CollaborationMode
+### 4.5 子实体：CollaborationMode
 
 `CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
 
@@ -292,7 +282,7 @@ CollaborationMode
 - participants 是协作关系，不是权限本身。
 - `active_work_ref` 属于聚合根，不属于 `CollaborationMode`。
 
-### 4.8 子实体：ContextParticipant
+### 4.6 子实体：ContextParticipant
 
 `ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。
 
