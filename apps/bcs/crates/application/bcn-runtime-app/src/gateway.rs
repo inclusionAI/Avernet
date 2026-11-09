@@ -146,6 +146,22 @@ impl DefaultGateway {
                 ));
             }
         };
+        let (node_id, _) = active.nodes.iter().find(|(_, node)|
+            node.phase == NodePhase::WaitingInput && node.interaction_id.as_ref() == Some(&interaction_id))
+            .ok_or_else(|| RuntimeError::Conflict("interaction is not waiting".into()))?;
+        let node = cp.state.graph.get(node_id)
+            .ok_or_else(|| RuntimeError::Storage("interaction node missing".into()))?;
+        match &node.kind {
+            NormalizedNodeKind::HumanInput { .. } => {},
+            NormalizedNodeKind::BotTask { binding_key, .. } => {
+                let binding = cp.spec.bindings.get(binding_key)
+                    .ok_or_else(|| RuntimeError::Storage("interaction binding missing".into()))?;
+                if !binding.capabilities.input_continuation {
+                    return Err(RuntimeError::Unsupported("input continuation unavailable".into()));
+                }
+            }
+            _ => return Err(RuntimeError::Storage("interaction on non-input node".into())),
+        }
         if !task.active_interactions.iter().any(|i|i.interaction_id==interaction_id) {
             return Err(RuntimeError::Conflict("question publication pending; retry reply".into()));
         }

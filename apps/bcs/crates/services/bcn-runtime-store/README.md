@@ -260,3 +260,15 @@ Admission validates created/updated time, and publication validates monotonic
 max(previous, server clock), within RFC3339 year9999 before durable changes. Wire
 status.timestamp uses exactly that stored value. The additional fixed query rows
 and indexes do not change the existing1 MiB per-value or8 MiB transaction limits.
+
+### Single-owner session admission
+
+The private session header now persists owner principal alongside spec and accepted
+tasks; scope remains in the storage key. Header CAS checks the principal in the
+same transaction as receipt/task/inbox/wake. New headers require nonblank owners;
+missing owner on older headers decodes without adoption. Fresh admission is denied
+while existing exact receipts, authorized task reads, checkpoint activation and
+recovery remain available. This adds no repository read or transaction to admission.
+Stop older writers before using the strengthened contract in the same namespace.
+The optional Worker diagnostic observer adds one recovery_status point read per
+session turn, including a quarantined turn; it performs no scan or extra mutation.

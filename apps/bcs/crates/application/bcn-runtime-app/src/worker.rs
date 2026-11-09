@@ -35,6 +35,7 @@ pub struct DefaultWorker {
     state: Mutex<State>,
     life: Mutex<Lifecycle>,
     effects: results::EffectRegistry,
+    observer: Option<Arc<dyn RuntimeObserverPort>>,
 }
 impl DefaultWorker {
     async fn run_business(&self, mut shutdown: CancellationReceiver) -> RuntimeResult<()> {
@@ -80,6 +81,7 @@ impl DefaultWorker {
             clock,
             life: Mutex::new(Lifecycle::default()),
             effects: Arc::new(std::sync::Mutex::new(Vec::new())),
+            observer: None,
             state: Mutex::new(State {
                 pending: BTreeMap::new(),
                 owned: BTreeMap::new(),
@@ -92,6 +94,10 @@ impl DefaultWorker {
                 completed: 0,
             }),
         })
+    }
+    pub fn with_observer(mut self, observer: Arc<dyn RuntimeObserverPort>) -> Self {
+        self.observer = Some(observer);
+        self
     }
     async fn ownership(
         &self,
@@ -205,12 +211,18 @@ impl DefaultWorker {
         Ok(())
     }
     async fn session(&self, session: &SessionId, fence: OwnershipFence) -> RuntimeResult<u32> {
+        let previous = if self.observer.is_some() {
+            self.ports.sessions.recovery_status(session).await?
+        } else { None };
         let guard = self
             .ports
             .sessions
             .begin_recovery(session, &fence, RuntimeDefaults::default().poison_takeovers)
             .await?;
         if guard.quarantined {
+            if previous.as_ref().is_none_or(|old| !old.quarantined || old.fence != guard.fence) {
+                if let Some(observer) = &self.observer { observer.session_quarantined(session, &guard); }
+            }
             return Err(RuntimeError::Unavailable(
                 "session quarantined after unsuccessful takeovers".into(),
             ));

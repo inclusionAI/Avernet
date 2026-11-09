@@ -71,7 +71,7 @@ async fn streaming_terminal_and_premature_eof_retain_output_and_identity() {
         let events=c.send_streaming_message(request()).await.unwrap().collect::<Vec<_>>().await;
         assert!(events.iter().any(|e|matches!(e,Ok(AgentEvent::Accepted{handle:h}) if h==&handle())));
         if complete {assert!(matches!(events.last(),Some(Ok(AgentEvent::Completed{output})) if output==&vec![MessagePart::Text{text:"partial".into()}]));}
-        else {assert!(matches!(events.last(),Some(Ok(AgentEvent::ObservationFailed{output,..})) if output==&vec![MessagePart::Text{text:"partial".into()}]));}
+        else {assert!(matches!(events.last(),Some(Err(ConnectorError::MayHaveBeenAccepted(_))))); assert!(events.iter().any(|e|matches!(e,Ok(AgentEvent::Delta{text}) if text=="partial")));}
         assert_eq!(f.calls.lock().unwrap().len(),1);
     }
 }

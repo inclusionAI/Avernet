@@ -91,3 +91,14 @@ Unsupported or oversized status content records observation_error. Streaming
 status-message projection waits for the validated status before classifying a
 failure: completed/failed/canceled remains terminal; a live status remains
 ObservationFailed, with the actual handle and bounded artifact partial retained.
+
+Clean nonterminal A2A EOF and the bounded wire decoder's local transport read
+failure emit MayHaveBeenAccepted, allowing the application to query/subscribe with
+the persisted handle. Partial Delta output is retained within existing limits.
+The current wire API exposes A2AError rather than a separate transport variant;
+classification requires INTERNAL_ERROR, no details, and the exact locally generated
+`A2A subscription interrupted` diagnostic from response.chunk. JSON-RPC peer error
+messages are normalized by the decoder and cannot spoof this discriminator.
+Malformed/incomplete frames, oversized observations, changed identity and peer
+errors remain ObservationFailed. Loopback tests cover both bindings, reset/EOF,
+query/subscription recovery and peer-error spoofing. No send replay is introduced.

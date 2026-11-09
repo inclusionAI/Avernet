@@ -409,3 +409,47 @@ fresh experimental namespace. At most 64 in-flight effects per Worker each add
 one bounded renewal per second: one two-row read, one server-time call and one CAS
 write (at most 192 atomic-backend calls/s per Worker before transport internals).
 This is a worst-case operation count, not a throughput or capacity claim.
+
+## Session authority and recovery corrections
+
+Admission establishes a single authenticated principal as the durable session
+owner, scoped by environment/tenant/namespace. The owner check and frozen spec,
+receipt, task and input append share the admission CAS. Another principal cannot
+join an existing context even if both initial gateway lookups found no session.
+Same-principal messages and exact retries remain valid. Existing headers without
+an owner remain readable and recoverable, and exact retained receipts can replay;
+fresh admissions fail closed. Owner inference/adoption is not a migration policy.
+Do not mix pre-owner admission writers with these writers in one namespace.
+
+Gateway replies resolve the active interaction's frozen BotTask binding before
+appending input; input_continuation=false returns Unsupported. Explicit HumanInput
+and supported BotTask replies retain their normal semantics. A previously durable
+unsupported reply is consumed as a local failed node through immutable result
+intent and saved-result barriers. Its remote handle remains available for the
+existing cancellation path, and Direct context reuse is blocked because local
+failure does not prove remote termination. Other sessions remain usable.
+
+A2A stream EOF or a classified local transport interruption retains already saved
+handles and bounded partial output and schedules query, or subscription where
+query is unsupported. It never repeats the original send. Missing handles or
+missing recovery capabilities resolve as execution_unknown. Malformed frames,
+identity changes, unsupported content and observation-budget failures remain
+explicit ObservationFailed outcomes, not generic recovery retries.
+
+Management admission validates the complete graph and binding target identities
+before resolving transport routes. It resolves only referenced BotTask agents,
+with one Bot/Provider/Card lookup per distinct target (at most five), plus the
+Group, binding and definition reads. Up to 32 node aliases may share a target;
+unused participants cause no route lookup. HumanInput/Judge/graph validation uses
+the same pure validator as frozen-spec admission. These are bounded logical port
+calls, not a claim that every management implementation performs one SQL query.
+
+`port::RuntimeObserverPort` is an optional synchronous diagnostic seam, injected
+with DefaultWorker.with_observer or bootstrap build_with_observer. It must perform
+bounded work promptly without external I/O. Worker compares durable recovery
+metadata before beginning recovery and emits for a newly quarantined session or
+a new ownership fence encountering quarantine, never for repeat polling of the
+same fence. Enabling the observer adds one recovery-status point read per session
+turn. This is best effort: a crash between the durable update and callback may
+lose a signal; no transactional diagnostic outbox or guaranteed alert delivery is
+claimed. No unbounded process-local dedup cache is used.

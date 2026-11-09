@@ -56,6 +56,10 @@ impl AgentCatalog for CatalogGate {
     }
 }
 pub fn build(config:RuntimeConfig,components:Components,ports:Option<RuntimePorts>)->RuntimeResult<Runtime> {
+    build_with_observer(config, components, ports, None)
+}
+/// Optional bounded diagnostics, selected only at the composition root.
+pub fn build_with_observer(config:RuntimeConfig,components:Components,ports:Option<RuntimePorts>,observer:Option<Arc<dyn RuntimeObserverPort>>)->RuntimeResult<Runtime> {
     config.validate()?;
     let ports=match(config.storage,ports){
         (StorageSelection::Memory,None)=>memory_ports(&config)?,
@@ -66,9 +70,11 @@ pub fn build(config:RuntimeConfig,components:Components,ports:Option<RuntimePort
     let runners:Vec<Arc<dyn SessionRunner>>=vec![Arc::new(DirectA2aRunner),Arc::new(StructuredGroupRunner)];
     let catalog=Arc::new(CatalogGate{inner:components.catalog,scope:config.scope.clone(),allowlist:config.allowlist});
     let identity=|role:&str|NodeIdentity{scope:config.scope.clone(),node_id:role.into(),incarnation:uuid::Uuid::new_v4().to_string()};
+    let mut worker=DefaultWorker::new(identity("worker"),ports.clone(),runners.clone(),components.judge,clock.clone())?;
+    if let Some(observer)=observer {worker=worker.with_observer(observer);}
     Ok(Runtime{
         gateway:Arc::new(DefaultGateway::new(ports.clone(),runners.clone(),catalog,components.policies,clock.clone(),config.enabled)?),
-        worker:Arc::new(DefaultWorker::new(identity("worker"),ports.clone(),runners,components.judge,clock.clone())?),
+        worker:Arc::new(worker),
         connector:Arc::new(DefaultConnector::new(identity("connector"),ports,components.connectors,clock)?),
     })
 }

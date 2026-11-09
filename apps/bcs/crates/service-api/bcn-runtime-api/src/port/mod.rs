@@ -76,3 +76,11 @@ pub trait RuntimeLiveness: Send + Sync {
     async fn inspect_batch(&self, nodes: &[NodeIdentity]) -> RuntimeResult<Vec<NodeObservation>>;
     async fn mark_draining(&self, node: &NodeIdentity) -> RuntimeResult<()>;
 }
+
+/// Best-effort operational diagnostic; never an execution or delivery authority.
+/// Implementations must return promptly with bounded work and no external I/O.
+/// Called once per committed quarantine transition/new ownership fence; a crash
+/// between the durable update and this callback may lose the signal.
+pub trait RuntimeObserverPort: Send + Sync {
+    fn session_quarantined(&self, session: &SessionId, recovery: &SessionRecovery);
+}

@@ -26,15 +26,18 @@ pub fn validate_common(spec: &SessionSpec, kind: RunnerKind) -> RuntimeResult<()
     {
         return Err(RuntimeError::AccessDenied);
     }
-    if spec.policy.execution_timeout_ms == 0
-        || spec.policy.human_timeout_ms == 0
-        || spec.policy.max_pending_tasks == 0
+    validate_policy(&spec.policy)
+}
+fn validate_policy(policy: &ExecutionPolicy) -> RuntimeResult<()> {
+    if policy.execution_timeout_ms == 0
+        || policy.human_timeout_ms == 0
+        || policy.max_pending_tasks == 0
     {
         return invalid("positive timeouts and queue limit required");
     }
-    if spec.policy.max_pending_tasks > 16
-        || spec.policy.max_graph_nodes > 32
-        || spec.policy.max_agents > 5
+    if policy.max_pending_tasks > 16
+        || policy.max_graph_nodes > 32
+        || policy.max_agents > 5
     {
         return invalid("policy exceeds MVP limits");
     }
@@ -50,7 +53,17 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
         .definition
         .as_ref()
         .ok_or_else(|| RuntimeError::InvalidInput("missing definition".into()))?;
-    if let Some(selected) = &spec.live_output_nodes {
+    let targets = spec.bindings.iter().map(|(key,binding)|(key.clone(),binding.target.clone())).collect();
+    validate_graph(d, &spec.policy, &targets, spec.live_output_nodes.as_deref())
+}
+/// Validate all executable graph semantics before resolving external agent routes.
+/// Binding targets are management identities only; no transport is selected here.
+pub fn validate_graph(
+    d: &StateMachineDefinition, policy: &ExecutionPolicy,
+    bindings: &BTreeMap<String, AgentId>, live_output_nodes: Option<&[String]>,
+) -> RuntimeResult<()> {
+    validate_policy(policy)?;
+    if let Some(selected) = live_output_nodes {
         let unique: BTreeSet<_> = selected.iter().collect();
         if unique.len() != selected.len() || selected.iter().any(|id|
             !d.nodes.get(id).is_some_and(|n| n.final_output && n.kind == StateMachineNodeKind::BotTask)) {
@@ -71,7 +84,7 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
     if d.defaults.max_attempts != 1 {
         return unsupported("automatic retries are unsupported");
     }
-    if d.nodes.is_empty() || d.nodes.len() > spec.policy.max_graph_nodes as usize {
+    if d.nodes.is_empty() || d.nodes.len() > policy.max_graph_nodes as usize {
         return Err(RuntimeError::CapacityExceeded);
     }
     let mut predecessors: BTreeMap<String, BTreeSet<String>> = d
@@ -107,11 +120,10 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
                 let Some(StateMachineAssignee::BotBinding { binding }) = &n.assignee else {
                     return invalid("bot_task requires bot_binding");
                 };
-                let b = spec
-                    .bindings
+                let b = bindings
                     .get(binding)
                     .ok_or_else(|| RuntimeError::InvalidInput("missing frozen binding".into()))?;
-                agents.insert(b.target.clone());
+                agents.insert(b.clone());
                 false
             }
             StateMachineNodeKind::HumanInput => {
@@ -132,7 +144,7 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
             return invalid("node timeout must be positive");
         }
         if let Some(j) = &n.judge {
-            if !spec.policy.judge_available {
+            if !policy.judge_available {
                 return unsupported("Judge unavailable");
             }
             if j.judge_type.as_deref().unwrap_or("llm") != "llm" || !j.extensions.is_empty() {
@@ -180,7 +192,7 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
             }
         }
     }
-    if agents.len() > spec.policy.max_agents as usize {
+    if agents.len() > policy.max_agents as usize {
         return Err(RuntimeError::CapacityExceeded);
     }
     let roots: Vec<_> = predecessors

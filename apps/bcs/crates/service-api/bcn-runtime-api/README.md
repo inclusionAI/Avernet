@@ -82,3 +82,19 @@ reply requests before submit unless the implementation provides receipt support;
 ordinary submission remains compatible. DefaultGateway uses existing authorization
 and payload/idempotency validation, then one bounded Inbox.find_input point read.
 No new persistence row, historical scan or process-local reply cache is introduced.
+
+## Admission ownership and diagnostics
+
+AdmissionStore.admit atomically establishes/checks the authenticated session owner
+from AdmissionRequest.caller. Existing receipt replay remains compatible; ownerless
+legacy headers deny fresh admission but permit reads/checkpoint recovery. No
+public DTO field was added. This is a strengthened repository behavior contract,
+so alternate AdmissionStore implementations must apply the same CAS requirement.
+
+RuntimeObserverPort is an additive optional outbound port, with synchronous
+session_quarantined(SessionId, SessionRecovery) notification. Implementations must
+be bounded and return promptly without external I/O. DefaultWorker.with_observer
+and bootstrap build_with_observer opt into diagnostics; existing constructors and
+build remain compatible. Metadata-only notification occurs after the durable
+quarantine transition/new fence and can be lost on a process crash before the
+callback. Existing quarantine containment is unchanged; delivery is not guaranteed.

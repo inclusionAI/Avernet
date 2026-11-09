@@ -95,3 +95,16 @@ pub async fn command_effect_contract_tests(
     assert_eq!(inbox.find_input(&session,&input.event_id).await.unwrap(),Some(input));
     assert!(bus.receive_effects(&session.scope,&second,None,10).await.unwrap().items.is_empty());
 }
+
+/// Invoke a real observer with scoped durable quarantine evidence. The fixture
+/// assertion inspects its actual diagnostic sink/counter, not a mocked call.
+pub fn runtime_observer_port_contract_tests(
+    observer: &dyn bcn_runtime_api::port::RuntimeObserverPort,
+    session: &SessionId, recovery: &SessionRecovery,
+    assert_diagnostic: impl FnOnce(&SessionId, &SessionRecovery),
+) {
+    assert!(recovery.quarantined);
+    assert_eq!(session_shard(session), recovery.fence.shard);
+    observer.session_quarantined(session, recovery);
+    assert_diagnostic(session, recovery);
+}

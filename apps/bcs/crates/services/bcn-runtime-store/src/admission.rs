@@ -5,13 +5,18 @@ use bcn_runtime_model::*;
 use bcn_runtime_api::port::repo::AdmissionStore;
 use crate::{RuntimeStore, keys::*, persistence::*};
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SessionHeader { pub spec: SessionSpec, pub accepted: Vec<TaskId> }
+pub(crate) struct SessionHeader {
+    pub spec: SessionSpec, pub accepted: Vec<TaskId>,
+    // Absent only on pre-owner records: readable/recoverable, never adoptable.
+    #[serde(default)] pub owner: Option<String>,
+}
 #[derive(Serialize, Deserialize)]
 pub(crate) struct AdmittedTask { pub metadata: TaskMetadata, pub admission_id: AdmissionId }
 #[async_trait]
 impl AdmissionStore for RuntimeStore {
     async fn admit(&self, req: AdmissionRequest) -> RuntimeResult<AdmissionReceipt> {
         let scope = &req.admission_id.scope;
+        if req.caller.principal.trim().is_empty() { return Err(RuntimeError::AccessDenied); }
         crate::task_index::timestamp(req.task.created_at_ms)?;
         crate::task_index::timestamp(req.task.updated_at_ms)?;
         // Reserve output (896 KiB) and active questions (64 KiB) independently.
@@ -42,8 +47,9 @@ impl AdmissionStore for RuntimeStore {
         }
         if rows[2].is_some() { return Err(conflict("task already admitted")); }
         let mut header: SessionHeader = match &rows[1] {
-            Some(row) => decode(row)?, None => SessionHeader { spec: req.spec.clone(), accepted: vec![] },
+            Some(row) => decode(row)?, None => SessionHeader { spec: req.spec.clone(), accepted: vec![], owner: Some(req.caller.principal.clone()) },
         };
+        if header.owner.as_deref() != Some(req.caller.principal.as_str()) { return Err(RuntimeError::AccessDenied); }
         if serde_json::to_value(&header.spec).map_err(|e| invalid(&e.to_string()))? != serde_json::to_value(&req.spec).map_err(|e| invalid(&e.to_string()))? { return Err(conflict("session spec frozen")); }
         if header.accepted.len() >= header.spec.policy.max_pending_tasks as usize { return Err(RuntimeError::CapacityExceeded); }
         header.accepted.push(req.task.task_id.clone());

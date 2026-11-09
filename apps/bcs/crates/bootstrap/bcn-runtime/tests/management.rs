@@ -4,6 +4,7 @@ use bcn_runtime::{management::*,manifest::*};
 use bcn_runtime_model::*;
 use bcn_runtime_api::port::*;
 use bcs_service_api::{ServiceResult,port::repo::{*,a2a_bot::*,bot_provider::*}};
+#[path="management_counts.rs"] mod counts;
 struct Cards;
 #[async_trait]
 impl A2aBotRepoPort for Cards {
@@ -29,9 +30,19 @@ async fn current_management_route_selects_new_binding_while_history_stays_exact(
  let bots=Arc::new(bcs_bot_store::provider::MemoryBotProviderStore::new(Arc::new(bcs_bot_store::MemoryBotRepo::with_base_dir(fixture_dir.clone())),providers.clone()));
  bots.create_provider_bot(bcs_domain::bot_provider::BotProviderRecord{bot_uuid:"agent".into(),provider_id:"p".into(),provider_bot_ref:"b".into(),connection_mode:bcs_domain::bot_provider::BotConnectionMode::Gateway,webhook_url:None,is_deleted:false},Default::default(),"alice","fixture-runtime-token").await.unwrap();
  let old=entry("http://localhost:1234");let new=entry("http://localhost:4321");
- let manifest=Arc::new(TransportManifest{entries:vec![old.clone(),new.clone()]});manifest.validate().unwrap();
+ let mut entries=vec![old.clone(),new.clone()];
+ for i in 0..5 {
+  let id=format!("agent{i}");let bot=bots.get_provider_bot("agent").await.unwrap().unwrap();
+  let mut extra=bot.clone();extra.bot_uuid=id.clone();extra.provider_bot_ref=id.clone();
+  bots.create_provider_bot(extra,Default::default(),"alice",&format!("fixture-runtime-token-{i}")).await.unwrap();
+  let mut transport=old.clone();transport.binding.target.value=id.clone();transport.binding.binding_id=id.clone();
+  if let TransportRoute::Provider{provider_bot_ref,..}=&mut transport.route {*provider_bot_ref=id;}
+  transport.binding.binding_version=transport.version().unwrap();entries.push(transport);
+ }
+ let manifest=Arc::new(TransportManifest{entries});manifest.validate().unwrap();
  let collaboration=Arc::new(bcs_collaboration_store::MemoryCollaborationStore::new());
- let catalog=ManagementCatalog{ports:ManagementPorts{bots:bots.clone(),providers:providers.clone(),cards:Arc::new(Cards),groups:Arc::new(bcs_group_store::MemoryGroupRepo::new()),bindings:collaboration.clone(),definitions:collaboration},manifest:manifest.clone(),policy:ExecutionPolicy{execution_timeout_ms:60000,human_timeout_ms:60000,judge_available:false,max_pending_tasks:16,max_graph_nodes:32,max_agents:5}};
+ let counted=Arc::new(counts::CountingBots::new(bots.clone()));
+ let catalog=ManagementCatalog{ports:ManagementPorts{bots:counted.clone(),providers:providers.clone(),cards:Arc::new(Cards),groups:Arc::new(bcs_group_store::MemoryGroupRepo::new()),bindings:collaboration.clone(),definitions:collaboration},manifest:manifest.clone(),policy:ExecutionPolicy{execution_timeout_ms:60000,human_timeout_ms:60000,judge_available:false,max_pending_tasks:16,max_graph_nodes:32,max_agents:5}};
  let caller=CallerContext{scope:old.binding.target.scope.clone(),principal:"alice".into(),trace_id:None};let session=SessionId::new(caller.scope.clone(),"session");let target=ExecutionTarget::Agent{agent_id:old.binding.target.clone()};
  let frozen=catalog.resolve(&caller,&target,&session).await.unwrap();assert_eq!(frozen.bindings["agent"],old.binding);
  bots.update_provider_webhook("p","agent",Some("http://localhost:4321".into()),1).await.unwrap();
@@ -47,6 +58,7 @@ async fn current_management_route_selects_new_binding_while_history_stays_exact(
  catalog.ports.bindings.upsert(binding.clone()).await.unwrap();
  let group_target=ExecutionTarget::Group{group_id:GroupId::new(caller.scope.clone(),"group")};
  let group=catalog.resolve(&caller,&group_target,&session).await.unwrap();assert_eq!(group.kind,RunnerKind::StructuredGroup);assert_eq!(group.bindings["agent"],current.bindings["agent"]);
+ counts::check_bounds(&catalog,&caller,&group_target,&session,counted.as_ref()).await;
  binding.group_version=2;catalog.ports.bindings.upsert(binding).await.unwrap();
  assert!(catalog.resolve(&caller,&group_target,&session).await.is_err(),"mismatched group version cannot freeze mixed management state");
  let mut provider=providers.get_provider("p").await.unwrap().unwrap();provider.config=r#"{"downlink":{"enabled":false,"webhook_url":"http://localhost:4321","protocol_version":"2.0","auth_mode":"static_bearer"}}"#.into();

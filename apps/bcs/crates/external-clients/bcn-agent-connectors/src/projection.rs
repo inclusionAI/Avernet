@@ -69,7 +69,18 @@ pub(crate) fn stream(binding:FrozenTargetBinding, expected:Option<ExecutionHandl
         loop {
             if let Some(event)=s.pending.pop_front() { return Some((Ok(event),s)); }
             if s.done {return None;}
-            let Some(Ok(event))=s.wire.next().await else {s.done=true;return Some((Ok(observation(&s.text)),s));};
+            let event=match s.wire.next().await {
+                Some(Ok(event))=>event,
+                // The bounded REST/RPC decoder emits this fixed local error only
+                // for response.chunk transport failure. Peer errors, malformed
+                // frames and budget/identity failures remain observation failures.
+                None=>{s.done=true;return Some((Err(uncertain()),s));},
+                Some(Err(error)) if error.code==a2a::error_code::INTERNAL_ERROR
+                    && error.message=="A2A subscription interrupted" && error.details.is_none()=>{
+                    s.done=true;return Some((Err(uncertain()),s));
+                }
+                Some(Err(_))=>{s.done=true;return Some((Ok(observation(&s.text)),s));},
+            };
             if s.apply(event).is_err() {s.done=true;s.pending.push_back(observation(&s.text));}
         }
     }).boxed()

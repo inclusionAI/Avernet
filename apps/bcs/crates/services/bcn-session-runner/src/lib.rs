@@ -271,12 +271,21 @@ fn reduce(
                     } else {
                         let binding = binding(&t.next_state, &node)?;
                         if !binding.capabilities.input_continuation {
-                            return Err(RuntimeError::Unsupported(
-                                "input continuation unavailable".into(),
-                            ));
+                            // Compatibility for replies durably accepted before
+                            // admission checked this capability. Consume locally
+                            // through the same immutable saved-result barrier.
+                            if task.nodes[&node].handle.is_some() {
+                                cancel_agent(&mut t, &task, &node)?;
+                            }
+                            if t.next_state.kind == RunnerKind::DirectA2a {
+                                t.next_state.context_blocked = true;
+                            }
+                            freeze_node(&mut t, &mut task, &node, TaskStatus::Failed,
+                                vec![], Some(RuntimeError::Unsupported("input continuation unavailable".into())));
+                        } else {
+                            send(&mut t, &mut task, &node, message.clone(), input.at_ms)?;
+                            status(&mut t, &mut task, TaskStatus::Working);
                         }
-                        send(&mut t, &mut task, &node, message.clone(), input.at_ms)?;
-                        status(&mut t, &mut task, TaskStatus::Working);
                     }
                 }
             }

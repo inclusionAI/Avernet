@@ -73,10 +73,25 @@ impl AgentCatalog for ManagementCatalog {
                 let definition=self.ports.definitions.get(&reference.id,reference.version).await.map_err(unavailable)?.ok_or(RuntimeError::NotFound)?;
                 if definition.id!=reference.id || definition.version!=reference.version {return Err(RuntimeError::InvalidInput("management definition version mismatch".into()))}
                 let bcs_domain::CollaborationRuntimeDefinition::StateMachine(sm)=definition.runtime else {return Err(RuntimeError::Unsupported("group runtime is not structured".into()))};
-                for (key,participant) in definition.participants {
-                    let ids=binding.participant_bindings.get(&key).map(|b|b.bot_ids.clone()).unwrap_or_else(||participant.bot_id.into_iter().collect());
+                if sm.nodes.len() > 32 {return Err(RuntimeError::CapacityExceeded)}
+                let mut targets=BTreeMap::new();
+                for node in sm.nodes.values() {
+                    if node.kind!=bcs_domain::StateMachineNodeKind::BotTask {continue;}
+                    let Some(bcs_domain::StateMachineAssignee::BotBinding{binding:key})=&node.assignee else {
+                        return Err(RuntimeError::InvalidInput("bot_task requires bot_binding".into()));
+                    };
+                    if targets.contains_key(key) {continue;}
+                    let participant=definition.participants.get(key).ok_or_else(||RuntimeError::InvalidInput("missing participant".into()))?;
+                    let ids=binding.participant_bindings.get(key).map(|b|b.bot_ids.clone()).unwrap_or_else(||participant.bot_id.clone().into_iter().collect());
                     if ids.len()!=1 || !group.participants.iter().any(|p|p.bot_uuid==ids[0]) {return Err(RuntimeError::InvalidInput("group requires one existing agent per binding".into()))}
-                    bindings.insert(key,self.agent(&AgentId::new(ctx.scope.clone(),ids[0].clone())).await?);
+                    targets.insert(key.clone(),AgentId::new(ctx.scope.clone(),ids[0].clone()));
+                }
+                bcn_session_runner::validation::validate_graph(&sm,&self.policy,&targets,None)?;
+                // Aliases of the same agent share one admission-time route read.
+                let mut resolved=BTreeMap::new();
+                for (key,id) in targets {
+                    if !resolved.contains_key(&id) {resolved.insert(id.clone(),self.agent(&id).await?);}
+                    bindings.insert(key,resolved[&id].clone());
                 }
                 (RunnerKind::StructuredGroup,Some(sm))
             }

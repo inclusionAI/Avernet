@@ -27,6 +27,9 @@ pub trait SessionStore: Send + Sync {
 #[async_trait]
 pub trait AdmissionStore: Send + Sync {
     /// Receipt + inbox + wake must be durable before success; digest mismatch is Conflict.
+    /// Atomically establish/check the session's scoped authenticated owner with
+    /// the frozen spec and append. Ownerless legacy sessions reject fresh admission;
+    /// exact existing receipts and checkpoint/read recovery remain valid.
     async fn admit(&self, request: AdmissionRequest) -> RuntimeResult<AdmissionReceipt>;
     async fn get_receipt(&self, id: &AdmissionId) -> RuntimeResult<Option<AdmissionReceipt>>;
     async fn repair_pending(&self, scope: &Scope, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<AdmissionReceipt>>;
