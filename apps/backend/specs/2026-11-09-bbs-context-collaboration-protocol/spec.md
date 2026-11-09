@@ -107,10 +107,10 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作模式和参与者集合 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
-| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision | 创建时绑定，显式迁移 revision |
+| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
-| `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
+| `ContextTodo` | 子实体 | `context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
 | `ContextOutcome` | 子实体 | `context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
 
@@ -154,17 +154,14 @@ flowchart TB
   envelope --> material
   root --> collaborationMode
   collaborationMode --> participant
-  root --> todo
+  stateBinding --> todo
   root --> outcome
   outcome --> deliverable
-  root --> event
-  root --> transition
   root --> stateBinding
 
   stateDef -. 冻结 revision .-> stateBinding
   stateBinding --> transition
   event --> transition
-  transition --> root
   event --> snapshot
   root --> snapshot
   snapshot --> bbsDiscussion
@@ -188,7 +185,7 @@ CollaborationContext
   ├─ responsible_actor_ref
   ├─ outcomes[]                 # ContextOutcome
   ├─ collaboration_mode       # CollaborationMode
-  ├─ state_machine_binding    # ContextStateMachineBinding
+  ├─ state_machine_binding    # ContextStateMachineBinding，持有 ContextTodo[]
   ├─ version / event_cursor / state_fencing_token
   ├─ active_work_ref
   └─ created_by / created_from / created_at / updated_at / closed_at
@@ -196,7 +193,7 @@ CollaborationContext
 
 聚合根不变量：
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 输入、交付物、协作模式、Todo、Outcome、来源引用、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。
+- 输入、交付物、协作模式、Todo、Outcome、来源引用、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。ContextTodo 属于 active state machine binding，不是根级独立字段。
 - 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `visibility` / `scope`。
 - 终态后可继续追加公开事件，但不能自动改变终态。
 - `responsible_actor_ref` 必须由授权主体和现有身份系统确认，不能由 Bot 自主声明。
@@ -459,7 +456,7 @@ transitions:
 3. Context 根上的 `collaboration_mode` 统一包装当前模式和 participants；`active_work_ref` 记录当前活跃正式 Work。
 4. 模式切换必须留下 `context.mode_switched` 事实，禁止只更新表字段而不写事件。
 5. 产品或执行能力可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是 `public_discussion`、`task_relay` 还是 `direct_assignment`。
-6. `task_relay` 依据需要建立 `active_work_ref`；`direct_assignment` 可使用 `ContextTodo`、直接参与者执行或 `active_work_ref`。
+6. `task_relay` 依据需要建立 `active_work_ref`；`direct_assignment` 可使用当前 ContextStateMachineBinding 持有的 `ContextTodo`、直接参与者执行或 `active_work_ref`。
 7. `ensure_work_request` 只负责产生确定性的 `work.requested` 处理结果，不直接调用底层执行系统。
 8. 外部系统接纳的执行事实必须经 Adapter 转换为标准 `ContextEvent`。
 9. 模式本身不代表权限，执行前仍须独立校验身份、作用域、材料授权和主体归属。
