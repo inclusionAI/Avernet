@@ -36,7 +36,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onManagePublication,
+    onPublicationChanged,
     onAction,
     onClaimLock,
     onReleaseLock,
@@ -84,7 +84,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
-            onManagePublication={onAction ? onManagePublication : undefined}
+            onPublicationChanged={onAction ? onPublicationChanged : undefined}
           />
         ),
       },
@@ -219,7 +219,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
-      onManagePublication,
+      onPublicationChanged,
       onAction,
       onClaimLock,
       onReleaseLock,
