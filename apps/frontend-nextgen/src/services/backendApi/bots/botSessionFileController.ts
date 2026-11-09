@@ -25,6 +25,16 @@ export interface BotSessionFileDto {
   content_hash: string | null;
   task_version: number | null;
   error_code: string | null;
+  /**
+   * 创建者信息（2026-11-09 契约：OpenAPI 网关列表 `data.files` 与单文件响应同步下发；
+   * 旧引擎/旧网关可缺字段——故 optional）。仅展示用：不参与权限判断，前端不向任何
+   * 登记/上传接口提交这三个字段。
+   */
+  creator_type?: 'bot' | 'user' | null;
+  /** 创建时快照名（用户/Bot 后续改名不回写） */
+  creator_name?: string | null;
+  /** 资源首次登记时刻，UTC ISO 8601（可能带微秒精度）；缺失时为 null */
+  created_at?: string | null;
 }
 
 /** upload-intents 请求体单文件描述(文档 §4.1)。 */
