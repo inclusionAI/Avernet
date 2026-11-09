@@ -1,5 +1,6 @@
 //! Pure deterministic core implementations of `SessionRunner`.
 mod direct;
+mod failure;
 mod graph;
 mod structured;
 pub mod validation;
@@ -125,6 +126,9 @@ fn reduce(
         events: vec![],
         timer_changes: vec![],
     };
+    if let SessionInputKind::TaskFailure { task_id, error, output } = &input.kind {
+        return failure::fail(t, task_id, error, output);
+    }
     if let SessionInputKind::Submit { task } = &input.kind {
         if state.context_blocked {
             return Err(RuntimeError::ContextBlocked);
@@ -380,7 +384,7 @@ fn reduce(
                 }
             }
         }
-        SessionInputKind::TimerFired { timer_id } => {
+        SessionInputKind::TimerFired { timer_id, output } => {
             let node = task
                 .nodes
                 .iter()
@@ -410,7 +414,7 @@ fn reduce(
                     &mut task,
                     &node,
                     TaskStatus::Failed,
-                    vec![],
+                    output.clone(),
                     Some(error),
                 );
             }

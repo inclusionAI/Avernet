@@ -144,7 +144,7 @@ are included. No transaction spans network delivery or result-store I/O.
 | Activation | 3 R + 1 T | owner twice + header/checkpoint, 1 checkpoint mutation |
 | Deactivation | 3 R + 1 T | checkpoint + header/input head + owner; one wake delete |
 | Load/load_spec | 1 R | one entity |
-| Session commit | 7 R + 0–1 S + 1 T | consumes <=100 inputs, new effects/events <=32 each; up to32 new send-authority mutations; overall T <=100 conditions/mutations |
+| Session commit | 7 R + 0–1 S + 1 T | consumes <=100 inputs, new effects <=64/events <=32; up to32 new send-authority mutations; overall T <=100 conditions/mutations |
 | Ordinary inbox append | 2 R + 1 T | header + sequence/dedup; 4 mutations |
 | ResultSaved confirmation | above + 1–2 R | intent/task/receipt, optional final task receipt; <=6 mutations |
 | Inbox read | 1 S | <=100 entries after cursor |
@@ -188,3 +188,20 @@ it proves local semantics only, not production durability/failover or capacity.
 Focused helper modules separate versioned persistence, delivery leases, query
 indexes and the explicit local result adapter from the planned repository
 modules. Each source file stays below 1000 lines with one responsibility.
+
+### Application recovery extensions
+
+`begin_recovery` reads one recovery row then performs one ownership-fenced CAS
+(transaction + ownership point read). Distinct ownership fences increment the
+counter; repeated same-fence calls preserve it. Real checkpoint progress writes
+its reset in the existing checkpoint transaction (one extra mutation).
+`recovery_status` is one point read and works independently of checkpoint schema.
+`find_input` is one point read of retained dedup data. `read_projection` reads
+dispatch then two canonical command/projection keys, rejecting superseded sends.
+CommandConsumerKind filters candidates before leasing with no extra storage
+calls; empty filtered pages retain cursors. LivenessAdapter translates the
+infrastructure contract without changing its storage operations. AtomicStore
+LimitExceeded becomes explicit RuntimeError::CapacityExceeded. The transition
+outbox limit is 64 effects (still subject to existing 100-condition/mutation/byte
+bounds), allowing 32 cancellation intents plus one bounded task failure result.
+These are unreleased v1 extensions; no production backend is selected here.

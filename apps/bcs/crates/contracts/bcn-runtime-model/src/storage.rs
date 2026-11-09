@@ -194,3 +194,17 @@ pub fn session_shard(session: &SessionId) -> ShardId {
     let hash = Sha256::digest(session.value.as_bytes());
     ShardId { scope: session.scope.clone(), number: u16::from_be_bytes([hash[0], hash[1]]) % 1024 }
 }
+
+/// Routing is applied before leasing a command, so independent consumers never steal work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandConsumerKind { Worker, Connector }
+impl CommandConsumerKind {
+    pub fn accepts(self, effect: &EffectIntent) -> bool {
+        matches!((self, effect), (Self::Worker, EffectIntent::SaveResult { .. } | EffectIntent::Judge { .. })
+            | (Self::Connector, EffectIntent::SendAgent { .. } | EffectIntent::CancelAgent { .. }))
+    }
+}
+/// Durable poison guard. Publication/activation/no-op commits never reset this counter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRecovery { pub fence: OwnershipFence, pub takeovers: u32, pub quarantined: bool }

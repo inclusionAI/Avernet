@@ -5,6 +5,12 @@ use bcn_runtime_api::port::repo::{SessionStore, InboxPort};
 use crate::{RuntimeStore, keys::*, persistence::*, admission::{SessionHeader, AdmittedTask}};
 #[async_trait]
 impl SessionStore for RuntimeStore {
+    async fn begin_recovery(&self, session: &SessionId, fence: &OwnershipFence, threshold: u32) -> RuntimeResult<SessionRecovery> {
+        self.begin_session_recovery(session, fence, threshold).await
+    }
+    async fn recovery_status(&self, session: &SessionId) -> RuntimeResult<Option<SessionRecovery>> {
+        self.row(&session.scope, entity("recovery", &session.value)).await?.as_ref().map(decode).transpose()
+    }
     async fn activate(&self, spec: SessionSpec, state: RunnerState, fence: OwnershipFence) -> RuntimeResult<SessionCheckpoint> {
         if session_shard(&spec.session_id) != fence.shard || state.session_id != spec.session_id || state.schema_version != CHECKPOINT_SCHEMA_VERSION { return Err(invalid("activation identity/schema")); }
         self.ownership_condition(&fence).await?;
@@ -40,7 +46,7 @@ impl SessionStore for RuntimeStore {
         if commit.consumed_input < cp.consumed_input || commit.consumed_input - cp.consumed_input > 100 { return Err(invalid("input batch bound")); }
         let state = &commit.transition.next_state;
         if state.schema_version != CHECKPOINT_SCHEMA_VERSION || state.session_id != cp.spec.session_id || state.target != cp.spec.target || state.kind != cp.spec.kind || state.policy != cp.spec.policy || state.bindings != cp.spec.bindings || state.graph != cp.state.graph { return Err(invalid("checkpoint frozen identity/schema")); }
-        if state.pending_tasks.len() > cp.spec.policy.max_pending_tasks as usize || commit.transition.effects.len() > 32 || commit.transition.events.len() > 32 { return Err(RuntimeError::CapacityExceeded); }
+        if state.pending_tasks.len() > cp.spec.policy.max_pending_tasks as usize || commit.transition.effects.len() > 64 || commit.transition.events.len() > 32 { return Err(RuntimeError::CapacityExceeded); }
         let count = (commit.consumed_input - cp.consumed_input) as u32;
         let consumed = if count == 0 { vec![] } else { self.read_batch(&commit.session_id, cp.consumed_input, count).await? };
         if consumed.len() as u64 != commit.consumed_input - cp.consumed_input { return Err(invalid("input cursor past durable inbox")); }
@@ -100,6 +106,9 @@ impl SessionStore for RuntimeStore {
             if let SessionInputKind::ResultSaved { result } = &item.input.kind {
                 if result.intent.node_id.is_none() { header.accepted.retain(|t| t != &result.intent.task_id); }
             }
+        }
+        if commit.consumed_input > cp.consumed_input || commit.transition.next_state != cp.state {
+            mutations.push(put(entity("recovery", &commit.session_id.value), &SessionRecovery { fence: commit.fence.clone(), takeovers: 0, quarantined: false })?);
         }
         cp.state = commit.transition.next_state;
         cp.consumed_input = commit.consumed_input;

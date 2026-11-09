@@ -11,6 +11,10 @@ pub trait OwnershipPort: Send + Sync {
 }
 #[async_trait]
 pub trait SessionStore: Send + Sync {
+    /// Fence and count distinct ownership changes before activation/reduction. Persisted
+    /// independently of checkpoint decoding; only a real progress commit resets it.
+    async fn begin_recovery(&self, session_id: &SessionId, fence: &OwnershipFence, threshold: u32) -> RuntimeResult<SessionRecovery>;
+    async fn recovery_status(&self, session_id: &SessionId) -> RuntimeResult<Option<SessionRecovery>>;
     async fn activate(&self, spec: SessionSpec, state: RunnerState, fence: OwnershipFence) -> RuntimeResult<SessionCheckpoint>;
     async fn load_spec(&self, session_id: &SessionId) -> RuntimeResult<Option<SessionSpec>>;
     /// Remove wake only when no inbox, timers, current/queued task or outbox remains.
@@ -29,6 +33,8 @@ pub trait AdmissionStore: Send + Sync {
 }
 #[async_trait]
 pub trait InboxPort: Send + Sync {
+    /// Point read of retained dedup authority, including after inbox reclamation.
+    async fn find_input(&self, session_id: &SessionId, event_id: &EventId) -> RuntimeResult<Option<SessionInput>>;
     /// Trusted internal boundary, never a protocol input API. Input append and wake
     /// are atomic; repeated event_id is idempotent. Submit must use AdmissionStore.
     /// ResultSaved may only carry an actual authoritative ResultStore return; verify
@@ -44,7 +50,7 @@ pub trait CommandBus: Send + Sync {
     /// Load canonical committed effect, atomically enqueue and acknowledge only its identity.
     async fn publish(&self, fence: &OwnershipFence, effect: CommittedEffectRef) -> RuntimeResult<Command>;
     /// Advance next_cursor even on an empty eligible page, then cycle at end.
-    async fn receive(&self, scope: &Scope, consumer: &NodeIdentity, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<Command>>;
+    async fn receive(&self, scope: &Scope, consumer: &NodeIdentity, kind: CommandConsumerKind, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<Command>>;
     /// Delivery ACK is not execution completion. Connector commands require a durable
     /// dispatch claim before ACK; active dispatch enumeration then owns recovery.
     async fn ack(&self, command_id: &CommandId, consumer: &NodeIdentity) -> RuntimeResult<()>;
@@ -70,6 +76,10 @@ pub trait DispatchStore: Send + Sync {
 }
 #[async_trait]
 pub trait TaskEventStore: Send + Sync {
+    /// Read only this canonical send command's node output, never the task aggregate.
+    /// Resolve immutable dispatch context and reject a superseded command. Recovery
+    /// must first persist dispatch takeover, then read and publish a new fenced Reset.
+    async fn read_projection(&self, dispatch_id: &DispatchId) -> RuntimeResult<Option<Vec<MessagePart>>>;
     /// Publish the authoritative pending event committed with the referenced session.
     /// Atomically check CURRENT ownership (including incarnation/epoch) and event/session scope;
     /// load the committed payload, append it and persist publication receipt before clearing pending.

@@ -142,6 +142,9 @@ pub(crate) fn apply_agent(
             vec![],
             Some(error.clone()),
         ),
+        AgentEvent::FailedWithOutput { error, output } => freeze_node(
+            t, task, node, TaskStatus::Failed, output.clone(), Some(error.clone()),
+        ),
         AgentEvent::Aborted {
             affected_remote_task_ids,
         } => {

@@ -17,7 +17,7 @@ pub(crate) fn condition(key: String, row: &Option<VersionedValue>) -> Condition 
 }
 pub(crate) fn put<T: Serialize>(key: String, value: &T) -> RuntimeResult<Mutation> { Ok(Mutation::Put { key, value: encode(value)? }) }
 pub(crate) fn storage(error: StorageError) -> RuntimeError {
-    match error { StorageError::ConditionFailed { .. } => RuntimeError::Conflict("concurrent update; retry from durable state".into()), error => RuntimeError::Storage(error.to_string()) }
+    match error { StorageError::LimitExceeded(_) => RuntimeError::CapacityExceeded, StorageError::ConditionFailed { .. } => RuntimeError::Conflict("concurrent update; retry from durable state".into()), error => RuntimeError::Storage(error.to_string()) }
 }
 impl RuntimeStore {
     pub(crate) async fn rows(&self, scope: &Scope, keys: &[String]) -> RuntimeResult<Vec<Option<VersionedValue>>> {

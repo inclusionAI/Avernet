@@ -311,7 +311,7 @@ fn cancel_requires_evidence_and_timeout_cancels_downstream() {
         .reduce(
             &accepted.next_state,
             &input(SessionInputKind::TimerFired {
-                timer_id: deadline.timer_id.clone(),
+                timer_id: deadline.timer_id.clone(), output: vec![],
             }),
         )
         .unwrap();
@@ -387,7 +387,7 @@ fn continuation_has_distinct_status_event_ids_and_ignores_old_deadline() {
         .reduce(
             &resumed.next_state,
             &input(SessionInputKind::TimerFired {
-                timer_id: old.timer_id.clone(),
+                timer_id: old.timer_id.clone(), output: vec![],
             }),
         )
         .unwrap();
@@ -669,7 +669,7 @@ fn cancelled_execution_deadline_does_not_end_current_human_wait() {
     ).unwrap();
     let stale = DirectA2aRunner.reduce(
         &recovered,
-        &input(SessionInputKind::TimerFired { timer_id: execution_timer }),
+        &input(SessionInputKind::TimerFired { timer_id: execution_timer, output: vec![] }),
     ).unwrap();
     assert_eq!(stale.next_state, recovered);
     assert!(stale.effects.is_empty());
@@ -677,8 +677,18 @@ fn cancelled_execution_deadline_does_not_end_current_human_wait() {
     assert!(stale.timer_changes.is_empty());
     let expired = DirectA2aRunner.reduce(
         &stale.next_state,
-        &input(SessionInputKind::TimerFired { timer_id: human_timer }),
+        &input(SessionInputKind::TimerFired { timer_id: human_timer, output: vec![] }),
     ).unwrap();
     assert_eq!(expired.next_state.current_task.as_ref().unwrap().status, TaskStatus::PendingResult);
     assert!(expired.effects.iter().any(|effect| matches!(effect, EffectIntent::SaveResult { .. })));
+}
+#[test]
+fn application_failure_keeps_frozen_intent_against_late_remote_completion() {
+ let first=started();
+ let failure=DirectA2aRunner.reduce(&first.next_state,&input(SessionInputKind::TaskFailure {task_id:TaskId::new(scope(),"t"),error:RuntimeError::CapacityExceeded,output:vec![]})).unwrap();
+ assert!(failure.next_state.context_blocked);
+ let intent=failure.next_state.current_task.as_ref().unwrap().result_intent.clone().unwrap();
+ let late=DirectA2aRunner.reduce(&failure.next_state,&agent(&failure.next_state,AgentEvent::Completed{output:message().parts})).unwrap();
+ assert_eq!(late.next_state.current_task.as_ref().unwrap().result_intent,Some(intent));
+ assert!(late.effects.is_empty());
 }

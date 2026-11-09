@@ -39,3 +39,23 @@ These signature/record changes require corresponding new-runtime consumer
 updates and explicit offline migration/discard of pre-release records missing
 required context. The legacy runtime is unchanged. See the runtime-store README
 for persistence semantics, bounds, cost accounting and production limitations.
+
+## Application lifecycle additions
+
+The new application consumes `RuntimeLiveness` (RuntimeResult) through the
+store-layer `LivenessAdapter`; infrastructure NodeLivenessPort remains separate.
+CommandBus.receive requires CommandConsumerKind and filters before leasing, so
+Worker result/judge and Connector send/cancel consumers cannot steal work.
+InboxPort.find_input is a trusted bounded dedup lookup retained after reclamation;
+Gateway authorizes the original task before using it. TaskEventStore.read_projection
+resolves a dispatch's own canonical node and rejects superseded commands.
+SessionStore.begin_recovery/recovery_status persist poison metadata independently
+of checkpoint decoding; only a progressing checkpoint commit resets it.
+
+Default runtime drain calls start/poll a drain without blocking to the deadline;
+run polls them with an injected clock and shutdown channel. Application tick/step
+entrypoints live on the implementations for deterministic scheduling. No
+constructor selects a concrete backend/transport. Consumers of the unreleased v1
+receive signature must pass the explicit kind. There are no other repository
+implementations in this workspace; production implementations must implement the
+new methods before composition. This does not change legacy runtime contracts.

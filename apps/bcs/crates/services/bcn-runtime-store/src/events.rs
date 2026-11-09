@@ -87,6 +87,16 @@ impl RuntimeStore {
 }
 #[async_trait]
 impl TaskEventStore for RuntimeStore {
+    async fn read_projection(&self, id: &DispatchId) -> RuntimeResult<Option<Vec<MessagePart>>> {
+        use bcn_runtime_api::port::repo::DispatchStore;
+        let record = self.read(id).await?.ok_or(RuntimeError::NotFound)?;
+        if !matches!(record.operation, DispatchOperation::Send { .. }) { return Err(invalid("projection requires send")); }
+        let task = &record.context.task_id; let node = &record.context.node_id;
+        let rows = self.rows(&id.scope, &[projection_command(task, node), projection_key(task, node)]).await?;
+        let command: CommandId = decode(rows[0].as_ref().ok_or_else(|| conflict("projection command absent"))?)?;
+        if command != record.context.command_id { return Err(conflict("projection command superseded")); }
+        rows[1].as_ref().map(|row| decode::<Projection>(row).map(|p| p.output)).transpose()
+    }
     async fn publish_hard_event(&self, fence: &OwnershipFence, reference: CommittedEventRef) -> RuntimeResult<EventCursor> {
         if session_shard(&reference.session_id) != fence.shard || reference.event_id.scope != reference.session_id.scope { return Err(invalid("hard event scope/shard")); }
         self.ownership_condition(fence).await?;

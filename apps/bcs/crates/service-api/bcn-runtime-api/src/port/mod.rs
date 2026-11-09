@@ -58,3 +58,13 @@ pub trait JudgeExecutor: Send + Sync {
     async fn execute(&self, request: JudgeRequest) -> RuntimeResult<String>;
 }
 pub trait Clock: Send + Sync { fn now_ms(&self) -> u64; }
+
+/// Business-facing failure discovery, adapted from infrastructure at composition time.
+/// Unknown never authorizes takeover; TTL does not revoke ownership.
+#[async_trait]
+pub trait RuntimeLiveness: Send + Sync {
+    async fn register(&self, node: NodeIdentity, ttl_ms: u64) -> RuntimeResult<()>;
+    async fn renew(&self, node: &NodeIdentity, ttl_ms: u64) -> RuntimeResult<()>;
+    async fn inspect_batch(&self, nodes: &[NodeIdentity]) -> RuntimeResult<Vec<NodeObservation>>;
+    async fn mark_draining(&self, node: &NodeIdentity) -> RuntimeResult<()>;
+}

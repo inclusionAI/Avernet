@@ -16,3 +16,16 @@ epochs. Projection inputs cannot supply status or admission metadata. These are
 pre-release v1 corrections; payloads missing required dispatch context must be
 explicitly migrated/discarded before writers are enabled. No legacy runtime
 payload or session is changed.
+
+Application compatibility: SubmitRequest.interaction_id and
+AgentSendResponse::Message.handle are optional serde-default fields (omitted
+when None); an actual remote context-only handle is valid. TimerFired.output is
+serde-default empty, frozen into the durable timer before reduction. Existing
+Failed retains its original shape; FailedWithOutput represents bounded partial
+output without inventing a handle. Internal TaskFailure is a Worker-only input
+for a bounded result-barrier failure of an already accepted input. External
+protocol clients must not construct SessionInput. CommandConsumerKind routes
+before leasing; SessionRecovery is durable poison metadata, not process memory.
+Older readers do not understand new tagged variants; deploy new contracts,
+reducers, stores and applications together in the explicitly enabled namespace.
+No old runtime session migration or permissive decoding fallback is provided.

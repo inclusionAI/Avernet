@@ -25,7 +25,7 @@ fn valid_handle(operation: &DispatchOperation, handle: &ExecutionHandle) -> bool
 fn terminal(receipt: &DispatchReceipt) -> bool {
     match receipt {
         DispatchReceipt::Cancellation { .. } => true,
-        DispatchReceipt::Agent { event } => match event { AgentEvent::Completed { .. } | AgentEvent::Failed { .. } | AgentEvent::Aborted { .. } => true, AgentEvent::Snapshot { snapshot } => snapshot.status.is_terminal(), _ => false },
+        DispatchReceipt::Agent { event } => match event { AgentEvent::Completed { .. } | AgentEvent::Failed { .. } | AgentEvent::FailedWithOutput { .. } | AgentEvent::Aborted { .. } => true, AgentEvent::Snapshot { snapshot } => snapshot.status.is_terminal(), _ => false },
     }
 }
 impl RuntimeStore {

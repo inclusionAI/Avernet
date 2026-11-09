@@ -53,7 +53,12 @@ pub struct AgentSendRequest {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AgentSendResponse { Message { parts: Vec<MessagePart> }, Task { snapshot: ExecutionSnapshot } }
+pub enum AgentSendResponse { Message {
+    parts: Vec<MessagePart>,
+    /// Actual server context from a direct Message response; no remote task is invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handle: Option<ExecutionHandle>,
+}, Task { snapshot: ExecutionSnapshot } }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionSnapshot { pub handle: ExecutionHandle, pub status: TaskStatus, pub output: Vec<MessagePart>, pub error: Option<RuntimeError> }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,6 +71,8 @@ pub enum AgentEvent {
     AuthRequired { handle: ExecutionHandle },
     Completed { output: Vec<MessagePart> },
     Failed { error: RuntimeError },
+    /// Terminal failure without a remote handle, preserving bounded partial output.
+    FailedWithOutput { error: RuntimeError, output: Vec<MessagePart> },
     Aborted { affected_remote_task_ids: Vec<String> },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

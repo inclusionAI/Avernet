@@ -30,7 +30,7 @@ impl CommandBus for RuntimeStore {
         ]).await?;
         Ok(command)
     }
-    async fn receive(&self, scope: &Scope, consumer: &NodeIdentity, after: Option<String>, limit: u32) -> RuntimeResult<Page<Command>> {
+    async fn receive(&self, scope: &Scope, consumer: &NodeIdentity, kind: CommandConsumerKind, after: Option<String>, limit: u32) -> RuntimeResult<Page<Command>> {
         if &consumer.scope != scope { return Err(invalid("consumer scope")); }
         let page = self.page(scope, "command-ready/", after, limit).await?;
         let commands = page.entries.iter().map(|r| decode::<Command>(&r.entry)).collect::<RuntimeResult<Vec<_>>>()?;
@@ -40,7 +40,7 @@ impl CommandBus for RuntimeStore {
         let mut conditions = vec![]; let mut mutations = vec![]; let mut received = vec![];
         for ((command, key), row) in commands.into_iter().zip(keys).zip(rows) {
             let mut delivery: Delivery = decode(row.as_ref().ok_or(RuntimeError::NotFound)?)?;
-            if delivery.acked || (delivery.consumer.as_ref().is_some_and(|n| n != consumer) && delivery.until_ms > now) { continue; }
+            if !kind.accepts(&command.effect) || delivery.acked || (delivery.consumer.as_ref().is_some_and(|n| n != consumer) && delivery.until_ms > now) { continue; }
             delivery.consumer = Some(consumer.clone()); delivery.until_ms = now.checked_add(3000).ok_or_else(|| invalid("lease overflow"))?;
             conditions.push(condition(key.clone(), &row)); mutations.push(put(key, &delivery)?); received.push(command);
         }

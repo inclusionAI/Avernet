@@ -302,3 +302,30 @@ explicit offline migration/discard; hashed IDs are never reverse-parsed. The
 legacy loop and its in-flight sessions remain unchanged. The runtime-store README
 records per-operation bounded calls, scan costs and remaining infrastructure
 limitations; no production readiness follows from local tests.
+
+## Default application lifecycle
+
+`application/bcn-runtime-app` orchestrates injected service contracts with
+separate Gateway, Worker and Connector lifecycles. Concrete repositories,
+reducers and transports are wired in tests or bootstrap. Application depends on
+the business RuntimeLiveness facade; its reusable store-layer adapter wraps the
+infrastructure NodeLivenessPort. It never imports AtomicStore or concrete clients.
+
+CommandConsumerKind routes Worker result/judge versus Connector send/cancel
+before leasing. Retained inbox dedup and original-task authorization make reply/
+cancel retries stable after clocks, interactions and current tasks advance.
+Optional SubmitRequest.interaction_id disambiguates parallel HumanInput. Optional
+Message response handle preserves actual server context without inventing tasks.
+FailedWithOutput and frozen TimerFired.output preserve per-node partial output
+through transport uncertainty, timeout and restart. Their compatibility defaults
+and deployment propagation are documented in the model/API READMEs.
+
+Recovery requires current fences, own-heartbeat warm-up, explicit Dead evidence,
+and persisted poison counts. TTL is never ownership expiry. Connector takeover
+first changes its dispatch fence, then reads its canonical node projection and
+publishes Reset; peer projections are never inferred from aggregate output.
+Terminal publication still waits for authoritative ResultSaved. The application
+README records tick bounds, 64 KiB per-node/input limits, aggregate checkpoint
+budgets, immutable-result-preserving TaskFailure fallback, nonblocking drain,
+and actual repository access costs. New namespace admission remains explicit;
+no legacy in-flight migration or production wiring is introduced by this crate.

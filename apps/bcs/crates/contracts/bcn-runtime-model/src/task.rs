@@ -13,7 +13,13 @@ pub struct Message {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MessagePart { Text { text: String }, Data { value: Value }, File { uri: String, media_type: String } }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SubmitRequest { pub target: ExecutionTarget, pub message: Message }
+pub struct SubmitRequest {
+    pub target: ExecutionTarget,
+    pub message: Message,
+    /// Selects an original active HumanInput; absent is inferred only when unique.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_id: Option<InteractionId>,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus { Submitted, Working, InputRequired, AuthRequired, PendingResult, Completed, Failed, Cancelled }

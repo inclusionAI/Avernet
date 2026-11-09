@@ -21,6 +21,10 @@ impl RuntimeStore {
 }
 #[async_trait]
 impl InboxPort for RuntimeStore {
+    async fn find_input(&self, session: &SessionId, event: &EventId) -> RuntimeResult<Option<SessionInput>> {
+        if session.scope != event.scope { return Err(RuntimeError::AccessDenied); }
+        self.row(&session.scope, input_id(session, event)).await?.as_ref().map(|r| decode::<InboxEntry>(r).map(|e| e.input)).transpose()
+    }
     async fn append_and_wake(&self, session: &SessionId, input: SessionInput) -> RuntimeResult<u64> {
         if self.load_spec(session).await?.is_none() { return Err(RuntimeError::NotFound); }
         // New tasks enter only through atomic admission; cancellation bypasses capacity.

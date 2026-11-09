@@ -328,6 +328,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcn-runtime-app"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-domain",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "bcn-runtime-model"
 version = "0.1.4-beta.3"
 dependencies = [

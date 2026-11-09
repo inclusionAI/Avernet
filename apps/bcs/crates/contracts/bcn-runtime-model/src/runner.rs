@@ -100,9 +100,12 @@ pub enum SessionInputKind {
     JudgeDecided { task_id: TaskId, node_id: String, branch: String },
     HumanReply { task_id: TaskId, interaction_id: InteractionId, caller: CallerContext, message: Message },
     Cancel { command: CancelCommand },
-    TimerFired { timer_id: TimerId },
+    TimerFired { timer_id: TimerId, #[serde(default)] output: Vec<MessagePart> },
     ResultSaved { result: SavedResult },
     EffectFailed { operation_id: OperationId, error: RuntimeError },
+    /// Internal bounded fallback for an accepted input that cannot be checkpointed.
+    /// The Worker commits this reduction at the original inbox position.
+    TaskFailure { task_id: TaskId, error: RuntimeError, output: Vec<MessagePart> },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transition {

@@ -14,7 +14,7 @@ async fn conformance_ownership() {
 async fn conformance_inbox() {
  let (repo, _, req) = fixture(); let cp = submitted(&repo, &req).await;
  repo.advance(&req.spec.session_id, &cp.fence, 1).await.unwrap();
- inbox_port_contract_tests(Arc::new(repo), req.spec.session_id, SessionInput { event_id: EventId::new(scope(), "timer"), at_ms: 1000, kind: SessionInputKind::TimerFired { timer_id: TimerId::new(scope(), "deadline") } }).await;
+ inbox_port_contract_tests(Arc::new(repo), req.spec.session_id, SessionInput { event_id: EventId::new(scope(), "timer"), at_ms: 1000, kind: SessionInputKind::TimerFired { timer_id: TimerId::new(scope(), "deadline"), output: vec![] } }).await;
 }
 #[tokio::test]
 async fn conformance_liveness() {
