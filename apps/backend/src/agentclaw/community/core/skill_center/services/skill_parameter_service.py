@@ -34,6 +34,7 @@ class SkillParameterService:
         file_path: str | None = None,
         *,
         engine_io_enabled: bool = True,
+        strict_write_errors: bool = False,
     ):
         """
         初始化服务
@@ -44,10 +45,12 @@ class SkillParameterService:
             engine_io_enabled: 是否对 engine 读写 ``skill_parameters.json``。teclaw
                 不使用该文件（engine 不持有/不消费它），故由工厂置 ``False``，使
                 load/save 成为 no-op，不向 engine 发起任何读写。
+            strict_write_errors: 设备适配器要求写失败抛出领域错误时启用。
         """
         self._storage = storage
         self._file_path = file_path or SKILL_PARAMETERS_FILE_PATH
         self._engine_io_enabled = engine_io_enabled
+        self._strict_write_errors = strict_write_errors
         self._data: dict[str, Any] = {}
         # 注意：不在这里调用 _load()，因为需要异步调用
         # 由调用方在需要时调用 async_load()
@@ -119,6 +122,8 @@ class SkillParameterService:
             return True
         except Exception as e:
             logger.error(f"[SkillParameterService] Failed to save parameters: {e}")
+            if self._strict_write_errors:
+                raise LocalSkillStorageError() from e
             return False
 
     def get_skill_parameters(self, skill_name: str) -> dict[str, Any]:
@@ -145,7 +150,11 @@ class SkillParameterService:
                 skill_name: parameters,
             },
         }
-        saved = await self.async_save()
+        try:
+            saved = await self.async_save()
+        except Exception:
+            self._data = previous
+            raise
         if not saved:
             self._data = previous
         return saved
@@ -161,7 +170,11 @@ class SkillParameterService:
             remaining = dict(previous["parameters"])
             remaining.pop(skill_name, None)
             self._data = {**previous, "parameters": remaining}
-            saved = await self.async_save()
+            try:
+                saved = await self.async_save()
+            except Exception:
+                self._data = previous
+                raise
             if not saved:
                 self._data = previous
             return saved
