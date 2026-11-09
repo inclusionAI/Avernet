@@ -40,11 +40,11 @@ class BotActivateResult(BaseModel):
 
 
 class BotRecycleResult(BotLifecycleResult):
-    """Admission handle; only the already-recycled path is immediately complete."""
+    """Engine-selected result: coding admission or default synchronous completion."""
 
     operation_id: str | None = Field(
         default=None,
-        description="Durable recycle handle; absent when already recycled.",
+        description="Coding recycle handle; absent for synchronous or already-recycled results.",
     )
     phase: str | None = Field(
         default=None,

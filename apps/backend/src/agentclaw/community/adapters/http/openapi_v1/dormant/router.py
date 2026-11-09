@@ -52,7 +52,7 @@ async def recycle_dormant_bot(
         BotDormantRecycleOperationProtocol
     ),
 ) -> Envelope[BotRecycleResult]:
-    """Durably submit recycling; backup and release never run in this request."""
+    """Recycle via engine policy: coding admits durable work; others complete synchronously."""
     result = await run_in_threadpool(
         service.submit,
         bot_id=bot_id,

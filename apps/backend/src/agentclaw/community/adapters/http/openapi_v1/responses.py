@@ -133,7 +133,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
 )
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
-from agentclaw.community.core.bot_dormant.recycle_state import RecycleUnavailable
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaBusyError,
     BotQuotaExceededError,

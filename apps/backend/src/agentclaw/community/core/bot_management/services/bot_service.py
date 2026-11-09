@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
-from agentclaw.community.core.bot_dormant.recycle_state import assert_not_recycling
+from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
 from .resource_mutation import held_resource_lock, serialize_resource_release
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
@@ -4069,7 +4069,7 @@ class BotService(BotServiceProtocol):
 
         try:
             bot = self.validate_delete_bot(bot_id, user_id)
-            assert_not_recycling(bot)
+            assert_lifecycle_mutable(bot)
             # Resolve before grant withdrawal, device release or soft deletion.
             provider_address = provider_address_kwargs(bot)
             from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
@@ -4462,7 +4462,7 @@ class BotService(BotServiceProtocol):
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-        assert_not_recycling(bot)
+        assert_lifecycle_mutable(bot)
 
         # 桌面 bot 的设备管理走 BaaS 流程，不应通过 DeviceService 释放，
         # 也不应清空 binding_id/device_id（桌面 bot 的 delete/restart 由 DesktopBotService 处理）。
@@ -4671,7 +4671,7 @@ class BotService(BotServiceProtocol):
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-        assert_not_recycling(bot)
+        assert_lifecycle_mutable(bot)
 
         entity_id = bot.get("entity_id")
         entity_type = bot.get("entity_type", "staff")
@@ -4753,7 +4753,7 @@ class BotService(BotServiceProtocol):
     async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
         """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
-        assert_not_recycling(bot)
+        assert_lifecycle_mutable(bot)
         ctx, strategy = resolve_restart_strategy(bot)
         from agentclaw.community.core.bot_management.engines.restart_contract import RestartServices
 
@@ -4800,7 +4800,7 @@ class BotService(BotServiceProtocol):
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-        assert_not_recycling(bot)
+        assert_lifecycle_mutable(bot)
 
         if self.is_teclaw_bot(bot.get("active_engine")):
             logger.warning(
@@ -5030,7 +5030,7 @@ class BotService(BotServiceProtocol):
         handed_off = False
         resource_token = held_resource_lock.set((env, entity_id, bot_id, user_id))
         try:
-            assert_not_recycling(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
+            assert_lifecycle_mutable(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
             # Under-lock verification: the backup must still match the binding
             # and container identity we are about to replace. On failure the
             # existing except/finally below releases the lock untouched.

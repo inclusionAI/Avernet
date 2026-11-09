@@ -51,9 +51,10 @@ class BotDormantAuditServiceProtocol(Protocol):
 
 @runtime_checkable
 class BotDormantRecycleOperationProtocol(Protocol):
-    """Durable recycle admission and OWNER-scoped read-only latest operation.
+    """Engine-dispatched recycle and OWNER-scoped read-only latest operation.
 
-    submit returns an operation handle, not proof of release. get_operation
+    Coding submit returns an operation handle; default engines finish synchronously.
+    get_operation
     returns only the current/latest matching handle, hiding others as not-found.
     Backup/release errors after acceptance are reported in the operation result.
     """

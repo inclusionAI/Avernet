@@ -1,20 +1,23 @@
 """Recycle adapts backup policy without installing restart mutation state."""
 
-from unittest.mock import MagicMock
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
-
-from agentclaw.community.core.bot_dormant.recycle_runtime import DeviceRecycleRuntime
-from agentclaw.community.core.bot_dormant.recycle_state import RecycleTargetChanged
+from agentclaw.community.core.bot_management.engines.aicoding import (
+    restart_backup as backup,
+)
 from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import (
     BackupOperation,
     BackupPersistenceError,
     current_backup,
 )
-from agentclaw.community.core.bot_management.engines.aicoding import (
-    restart_backup as backup,
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
+    AicodingRecycleRuntime,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+    RecycleTargetChanged,
 )
 
 
@@ -37,7 +40,9 @@ def test_persistence_failure_is_never_best_effort():
 
 
 def test_confirmed_targets_survive_redelivery_without_restart_context():
-    reset_handle = current_backup.set(BackupOperation("a" * 32, time.time(), confirmed={"s1"}))
+    reset_handle = current_backup.set(
+        BackupOperation("a" * 32, time.time(), confirmed={"s1"})
+    )
     try:
         assert backup._confirmed_targets() == {"s1"}
     finally:
@@ -65,7 +70,7 @@ def test_baas_new_physical_device_with_same_binding_blocks_release():
     devices, bots, deps = MagicMock(), MagicMock(), MagicMock()
     binding = SimpleNamespace(device_id="d1", device_provider="baas", device_props={})
     devices.get_device.return_value = binding
-    runtime = DeviceRecycleRuntime(lambda: devices, bots, deps)
+    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
     target = {
         "binding_id": 1,
         "provider": "baas",
@@ -95,7 +100,7 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
     devices.get_device.return_value = SimpleNamespace(
         device_id="d1", device_provider="arca", device_props={"sandbox_id": "s1"}
     )
-    runtime = DeviceRecycleRuntime(lambda: devices, bots, deps)
+    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
     bot = {"bot_id": "b1", "owner_id": "u1", "binding_id": 1}
     target = runtime.target(bot)
     record = {
@@ -103,7 +108,13 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
         "backup_started_at": time.time(),
         "target": target,
     }
-    strategy, ctx = MagicMock(), MagicMock()
+    from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+        AicodingProvisioningStrategy,
+    )
+
+    strategy, ctx = AicodingProvisioningStrategy("claude_code"), MagicMock()
+    strategy._fastdisk_backup_blocking = MagicMock()
+    strategy.prepare_restart = MagicMock()
     strategy._fastdisk_backup_blocking.return_value = False
 
     def save(**changes):
@@ -121,7 +132,7 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
 
     strategy.prepare_restart.side_effect = prepare
     monkeypatch.setattr(
-        "agentclaw.community.core.bot_dormant.recycle_runtime.resolve_restart_strategy",
+        "agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime.resolve_restart_strategy",
         lambda _: (ctx, strategy),
     )
     runtime.prepare(bot, record, save)

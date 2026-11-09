@@ -590,7 +590,7 @@ def resolve_outbound_rule_envelope(
 
 
 def resolve_restart_strategy(bot):
-    """Resolve restart policy through the existing provisioning composition root."""
+    """Resolve engine lifecycle policy through the existing provisioning composition root."""
     return resolve_provisioning(
         bot_id=str(bot.get('bot_id') or ''),
         owner_id=str(bot.get('owner_id') or bot.get('entity_id') or ''),
@@ -674,3 +674,9 @@ __all__ = [
     "resolve_provisioning",
     "resolve_outbound_rule_envelope",
 ]
+
+
+def assert_lifecycle_mutable(bot: dict) -> None:
+    """Dispatch lifecycle veto policy without teaching callers engine state."""
+    ctx, strategy = resolve_restart_strategy(bot)
+    strategy.assert_lifecycle_mutable(ctx, bot)

@@ -14,7 +14,6 @@ Follows new architecture conventions:
 - Does not depend on old services/device/ code
 """
 
-from agentclaw.community.core.devices.services.recycle_release import BaasRecycleReleaseMixin
 import json
 import threading
 import uuid
@@ -82,7 +81,7 @@ class LocalDeviceReleaseError(DeviceServiceError):
         self.message = message
 
 
-class LocalDeviceService(BaasRecycleReleaseMixin, DeviceService):
+class LocalDeviceService(DeviceService):
     """Singlebox device service backed by BaaS.
 
     Each bot is allocated/released via BaaS create_bot/destroy_bot.

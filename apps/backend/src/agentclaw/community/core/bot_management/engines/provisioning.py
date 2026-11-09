@@ -241,6 +241,21 @@ class EngineProvisioningStrategy(ABC):
         ``apps/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
 
+    def execute_recycle(self, ctx: BotProvisioningContext, recycle, *, services=None, **kwargs):
+        """Default engines retain synchronous recycling; engines may own durable work."""
+        return recycle(**kwargs)
+
+    def get_recycle_operation(self, ctx: BotProvisioningContext, *, services=None, **kwargs):
+        """Return an engine-owned operation result, or None when no operation exists."""
+        return None
+
+    def assert_lifecycle_mutable(self, ctx: BotProvisioningContext, bot: dict) -> None:
+        """Engine-owned in-flight work may veto a conflicting lifecycle mutation."""
+
+    def execute_resource_release(self, ctx: BotProvisioningContext, bot: dict, release, *, lifecycle):
+        """Default engines add no release lock or journal checks."""
+        return release()
+
     def prepare_restart(
         self, ctx: BotProvisioningContext, **kwargs
     ) -> Optional[Callable[[], None]]:

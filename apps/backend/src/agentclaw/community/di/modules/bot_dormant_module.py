@@ -14,9 +14,9 @@ forward reference (TYPE_CHECKING guard) that injector cannot resolve by type
 annotation alone.  We use a ``@provider`` factory to pass the already-bound
 BotServiceProtocol explicitly.
 """
+
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import Any, Callable
 
 from agentclaw.community.api.bot_dormant_service import (
@@ -37,19 +37,12 @@ from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.protocols import (
     BotServiceProtocol as _DormantBotServiceProtocol,
 )
-from agentclaw.community.core.bot_dormant.recycle_operation import (
-    RecycleHandler,
-    RecycleOperationService,
-    RecycleTaskLifecycle,
-)
-from agentclaw.community.core.bot_dormant.recycle_runtime import DeviceRecycleRuntime
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
-from agentclaw.community.core.bot_dormant.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_dormant.scan_policy import DormantScanPolicyService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
-from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
-    RestartBackupDependencies,
+from agentclaw.community.core.bot_management.engines.recycle_contract import (
+    RecycleServices,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError as BotManagementNotFoundError,
@@ -58,20 +51,11 @@ from agentclaw.community.core.bot_startup_script.protocols import (
     TeclawEngineTestProtocol,
 )
 from agentclaw.community.core.common_config import CommonWhiteListService
-from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.repository.implementations.bot.recycle import (
     RecycleRepository,
 )
-from agentclaw.community.core.repository.protocols.bot import (
-    BotRepository,
-    BotRestartLockRepositoryProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot.recycle import (
     BotRecycleRepositoryProtocol,
-)
-from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import (
-    TaskQueueService,
 )
 from agentclaw.community.di.config import (
     DormantConfig,
@@ -79,15 +63,13 @@ from agentclaw.community.di.config import (
     DormantNotifyConfig,
     SecretNamesConfig,
     TaskQueueConfig,
-    TaskQueueWorkerConfig,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.utils.env_utils import get_current_env
-from injector import Binder, Injector, Module, inject, provider, singleton
+from injector import Binder, Module, inject, provider, singleton
 
 logger = get_logger()
 
@@ -142,8 +124,9 @@ class BotDormantModule(Module):
         binder.bind(BaasDormantClient, to=BaasDormantClient, scope=singleton)
         binder.bind(WhitelistService, to=WhitelistService, scope=singleton)
         binder.bind(DormantInternalService, to=DormantInternalService, scope=singleton)
-        binder.bind(DormantScanPolicyService, to=DormantScanPolicyService, scope=singleton)
-        binder.bind(RecycleBotService, to=RecycleBotService, scope=singleton)
+        binder.bind(
+            DormantScanPolicyService, to=DormantScanPolicyService, scope=singleton
+        )
         binder.bind(DormantAuditService, to=DormantAuditService, scope=singleton)
 
     @singleton
@@ -196,80 +179,24 @@ class BotDormantModule(Module):
     @singleton
     @provider
     @inject
-    def recycle_operations(
-        self,
-        store: BotRecycleRepositoryProtocol,
-        bots: BotRepository,
-        queue: TaskQueueService,
-        locks: BotRestartLockRepositoryProtocol,
-        dependencies: RestartBackupDependencies,
-        config: TaskQueueConfig,
-        worker: TaskQueueWorkerConfig,
-        injector: Injector,
-        engine_test: Callable[[], TeclawEngineTestProtocol],
-    ) -> RecycleOperationService:
-        @contextmanager
-        def guard(bot):
-            env, entity = get_current_env(), bot.get("entity_id")
-            if not entity:
-                raise RecycleUnavailable("Bot lock identity unavailable")
-            lock = locks.acquire(
-                env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
-            )
-            if lock is None:
-                # Admission/receipt verification only: the durable journal, not
-                # this short TTL, protects a long-running operation.
-                stale = locks.get_if_stale(env, entity, bot["bot_id"], 120)
-                # Never reap a legacy release/restart lock: provider calls may
-                # outlive 120s without a durable recycle journal protecting them.
-                if stale is not None and stale.holder_user_id.startswith("recycle:"):
-                    locks.release(env, entity, bot["bot_id"], stale.lock_token)
-                    lock = locks.acquire(
-                        env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
-                    )
-            if lock is None:
-                from agentclaw.community.core.bot_management.services.bot_service import (
-                    BotInvalidLifecycleStateError,
-                )
-
-                raise BotInvalidLifecycleStateError(
-                    bot_id=bot["bot_id"], current_status="BUSY"
-                )
-            try:
-                yield
-            finally:
-                locks.release(env, entity, bot["bot_id"], lock.lock_token)
-
-        return RecycleOperationService(
-            store=store,
-            queue=queue,
-            guard=guard,
-            app=config.app,
-            worker_enabled=worker.enabled,
-            is_teclaw=lambda engine: engine_test().is_teclaw(engine),
-            runtime=DeviceRecycleRuntime(
-                lambda: injector.get(DeviceService), bots, dependencies
-            ),
-        )
-
-    @singleton
-    @provider
-    @inject
     def recycle_operation_protocol(
-        self, service: RecycleOperationService
+        self, service: RecycleBotService
     ) -> BotDormantRecycleOperationProtocol:
         return service
 
     @singleton
     @provider
     @inject
-    def recycle_task_lifecycle(
+    def recycle_bot_service(
         self,
-        service: RecycleOperationService,
-        registry: HandlerRegistry,
+        bot_service: _DormantBotServiceProtocol,
         passport: PassportPlugin,
-    ) -> RecycleTaskLifecycle:
-        return RecycleTaskLifecycle(registry, RecycleHandler(service, passport))
+        services: RecycleServices,
+        audit: DormantAuditService,
+    ) -> RecycleBotService:
+        return RecycleBotService(
+            bot_service, passport, recycle_services=services, audit_service=audit
+        )
 
     @singleton
     @provider

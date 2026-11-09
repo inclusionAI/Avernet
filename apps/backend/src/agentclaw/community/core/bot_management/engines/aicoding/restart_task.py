@@ -108,7 +108,7 @@ class AicodingDurableRestartMixin:
 
         bot_id, owner_id = kwargs["bot_id"], kwargs["user_id"]
         bot = services.get_bot(bot_id, owner_id)
-        from agentclaw.community.core.bot_dormant.recycle_state import assert_not_recycling
+        from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import assert_not_recycling
         assert_not_recycling(bot)
         if not supports(bot) or bot.get("active_engine") != ctx.active_engine:
             raise BotServiceError("Bot 引擎已变化，请重新提交重启")

@@ -74,8 +74,8 @@ class ActivateBotService:
                 "teclaw bots use their engine-owned lifecycle"
             )
 
-        from agentclaw.community.core.bot_dormant.recycle_state import assert_not_recycling
-        assert_not_recycling(bot)
+        from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
+        assert_lifecycle_mutable(bot)
         status = bot.get("status")
         if self._activation_control is not None:
             status, claimed = self._activation_control.claim_activation(bot_id, owner_id)

@@ -34,6 +34,8 @@ provides:
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
   - "AicodingRestartLifecycle"
+  - "AicodingRecycleMixin"
+  - "AicodingRecycleLifecycle"
   - "AicodingArtifactTransferStrategy"
   - "ArtifactTransferStrategy"
   - "DefaultArtifactTransferStrategy"
@@ -420,3 +422,17 @@ handoff task/journal. Only current committed facts are sent; delivery failure
 cannot change `SUCCEEDED`. This does not enable handoff initiation or establish
 real credential/device acceptance. See the
 [ownership boundary](ownership_sync/README.md) and its operations link.
+
+### Coding recycle strategy
+
+`EngineProvisioningStrategy.execute_recycle` mirrors `execute_restart`: default
+engines invoke the existing synchronous callback, while `AicodingRecycleMixin`
+admits durable work. `prepare_recycle` reuses `prepare_restart` inside AICoding,
+including its config reader, shared backup helper, receipts and timeout constants.
+The coding package owns `recycle_task`, `recycle_state`, `recycle_runtime` and
+`recycle_release`; it does not add methods to the shared DeviceService surface.
+ARCA SDK primitives are bound through `ArcaRecycleTransport` in composition roots,
+like `ArcaRestartTransport`; BaaS/local release uses existing BaaS capabilities.
+Generic lifecycle calls dispatch engine veto/release hooks and never interpret
+`ext.recycle` or fastdisk policy themselves. Persistence/atomic completion remains
+in the repository package, while transport and public schema remain in adapters.
