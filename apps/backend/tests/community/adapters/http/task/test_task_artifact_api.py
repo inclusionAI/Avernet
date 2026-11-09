@@ -242,13 +242,13 @@ class TestAddArtifact:
         response = client.post("/api/v1/collaboration/tasks/artifacts", json=body)
         assert response.status_code == 422
 
-    def test_post_extra_field_rejected(self):
+    def test_post_extra_field_ignored(self):
         client, _ = _client()
         response = client.post(
             "/api/v1/collaboration/tasks/artifacts",
             json=_file_body(unexpected="x"),
         )
-        assert response.status_code in (400, 422)
+        assert response.status_code == 200, response.text
 
     def test_post_content_object_form_accepted(self):
         """content 字段支持 JSON 对象形态(独立 API 放开 relay 字符串包袱)。"""

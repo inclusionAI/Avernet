@@ -1,6 +1,7 @@
 """BCSFuse-only Relay candidate retrieval.
 
-The Relay ``/search`` HTTP contract stays unchanged. BCSFuse semantic search is
+Relay ``/search`` retains its required fields and candidate response; an optional
+viewer pair scopes discovery through existing product policies. BCSFuse semantic search is
 the sole candidate source for task candidate-query retrieval; empty or failed
 semantic results stay empty instead of falling back to low-accuracy tokenized
 catalog keyword search.
@@ -14,6 +15,7 @@ from typing import Any
 import uuid
 
 from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogCaller
+from agentclaw.community.core.task.domain.search_viewer import SearchViewerType, normalize_search_viewer
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     CandidateSearchResult,
     KeywordHit,
@@ -75,6 +77,8 @@ class SemanticKeywordBotDiscover:
         max_tokens: int = 5,
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
     ) -> CandidateSearchResult:
         """Search BCSFuse with the full candidate query.
 
@@ -87,6 +91,7 @@ class SemanticKeywordBotDiscover:
         Bot candidates. The keyword-port parameters remain accepted for the
         existing candidate-search call shape.
         """
+        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         normalized = str(query or "").strip()
         if not normalized:
             return CandidateSearchResult([], [], 0, [])
@@ -96,6 +101,7 @@ class SemanticKeywordBotDiscover:
             semantic_top_k=SEMANTIC_TOP_K,
             min_score=min_score,
             filters=filters,
+            **viewer,
         )
         if result is not None:
             return result
@@ -139,7 +145,10 @@ class SemanticKeywordBotDiscover:
         semantic_top_k: int,
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
     ) -> CandidateSearchResult | None:
+        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         if self._semantic_discover is None:
             logger.warning(
                 "semantic_search_not_configured query=%r; returning empty candidates",
@@ -164,10 +173,10 @@ class SemanticKeywordBotDiscover:
                     user_id="",
                     top_k=semantic_top_k,
                     min_score=min_score,
-                    filters=filters
-                    if filters is not None
-                    else {"runtime_state": ["online"]},
-                    catalog_filters=_DISPATCH_CATALOG_FILTERS,
+                    **({"runtime_state": "online", **viewer} if viewer else {
+                        "filters": filters if filters is not None else {"runtime_state": ["online"]},
+                        "catalog_filters": _DISPATCH_CATALOG_FILTERS,
+                    }),
                     caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
                     request_id=request_id,
                 )

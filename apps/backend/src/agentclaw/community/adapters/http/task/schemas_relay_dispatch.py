@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class TaskDispatchRequestDTO(BaseModel):
     """Dispatch a persisted Relay successor from its current origin generation."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     task_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)

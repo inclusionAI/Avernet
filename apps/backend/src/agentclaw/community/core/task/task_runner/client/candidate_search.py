@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from agentclaw.community.core.task.domain.search_viewer import SearchViewerType, normalize_search_viewer
+
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 
 logger = logging.getLogger("task.candidate.search")
@@ -112,8 +114,13 @@ async def search_candidates(
     max_tokens: int = MAX_SEARCH_TOKENS,
     min_score: float = MIN_SCORE,
     filters: dict[str, Any] | None = None,
+    viewer_actor_type: SearchViewerType | None = None,
+    viewer_actor_id: str | None = None,
 ) -> CandidateSearchResult:
     """Search the same tokenized catalog candidate set for every task mode."""
+    viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
+    if viewer and not callable(getattr(discover, "search_full_query", None)):
+        raise ValueError("viewer-scoped search requires a semantic discovery adapter")
     if discover is None:
         tokens = search_tokens(query, max_tokens=max_tokens)
         return CandidateSearchResult([], tokens, 0, [])
@@ -130,6 +137,7 @@ async def search_candidates(
             max_tokens=max_tokens,
             min_score=min_score,
             filters=filters,
+            **viewer,
         )
 
     tokens = search_tokens(query, max_tokens=max_tokens)
