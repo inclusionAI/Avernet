@@ -387,3 +387,95 @@ async fn parallel_timer_inputs_freeze_own_partial_before_restart_and_ignore_late
     assert_eq!(done.status, TaskStatus::Failed);
     assert_eq!(done.output, [text("a"), text("b")].concat());
 }
+
+#[tokio::test]
+async fn lost_delta_response_retries_exact_operation_before_peer_change_and_recovery() {
+    let mut f = Fixture::new();
+    let fault = Arc::new(faults::EventsFault::new(f.repo.clone()));
+    f.ports.events = fault.clone();
+    let g = gateway(&f, json!({"a":bot(),"b":bot()}));
+    let w = f.worker("w");
+    let task = start_parallel(&f, &g, &w, group_request("delta-retry")).await;
+    let transport = Arc::new(Transport::new(vec![Ok(AgentEvent::Delta { text: "abc".into() })]));
+    let c = f.connector("old", transport.clone());
+    c.tick().await.unwrap();
+    c.tick().await.unwrap();
+    fault.delta_after_commit.store(true, Ordering::SeqCst);
+    f.clock.set(1400);
+    assert!(!c.tick().await.unwrap().errors.is_empty());
+    let records = DispatchStore::scan_active(f.repo.as_ref(), &scope(), None, 10).await.unwrap().items;
+    assert_eq!(records.len(), 2);
+    let mut own = None;
+    for r in &records { if f.repo.read_projection(&r.fence.dispatch_id).await.unwrap() == Some(text("abc")) { own = Some(r); } }
+    let own = own.unwrap();
+    let peer = records.iter().find(|r| r.fence.dispatch_id != own.fence.dispatch_id).unwrap();
+    let snapshot = f.repo.read_snapshot(&task.task_id).await.unwrap().unwrap();
+    f.repo.publish_reset(&peer.fence, ConnectorProjection { task_id: task.task_id.clone(), output: text("peer"), expected_cursor: snapshot.cursor }, EventId::new(scope(), "peer-between-retries")).await.unwrap();
+    f.clock.set(2500);
+    c.tick().await.unwrap();
+    assert_eq!(f.repo.read_projection(&own.fence.dispatch_id).await.unwrap(), Some(text("abc")));
+    assert_eq!(f.repo.read_projection(&peer.fence.dispatch_id).await.unwrap(), Some(text("peer")));
+    let attempts = fault.delta_attempts.lock().unwrap().clone();
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0], attempts[1], "ID, cursor and payload survive ambiguous response");
+    drop(c);
+    let recovered = f.connector("new", Arc::new(Transport::new(vec![])));
+    for now in [3500, 4500, 5500, 6500] { f.clock.set(now); recovered.tick().await.unwrap(); }
+    for (record, expected) in [(own, "abc"), (peer, "peer")] {
+        let record = f.repo.read(&record.fence.dispatch_id).await.unwrap().unwrap();
+        assert!(matches!(record.receipt, Some(DispatchReceipt::Agent { event: AgentEvent::FailedWithOutput { output, error: RuntimeError::ExecutionUnknown } }) if output == text(expected)));
+    }
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn local_stream_overflow_blocks_queued_direct_and_persists_supported_cancel() {
+    let f = Fixture::new();
+    let g = f.gateway();
+    let first = g.submit(caller(), request("overflow-running")).await.unwrap();
+    let mut next = request("overflow-queued"); next.message.context_id = Some(first.session_id.clone());
+    let second = g.submit(caller(), next).await.unwrap();
+    let w = f.worker("w");
+    w.step(&first.session_id).await.unwrap();
+    let transport = Arc::new(Transport::new(vec![Ok(AgentEvent::Accepted { handle: handle() }), Ok(AgentEvent::Delta { text: "中文".repeat(15000) })]));
+    transport.query.lock().unwrap().status = TaskStatus::Working;
+    let c = f.connector("c", transport.clone());
+    c.tick().await.unwrap(); c.tick().await.unwrap();
+    w.step(&first.session_id).await.unwrap();
+    c.tick().await.unwrap();
+    f.results.down.store(true, Ordering::SeqCst);
+    w.step(&first.session_id).await.unwrap();
+    let cp = f.repo.load(&first.session_id).await.unwrap().unwrap();
+    assert!(cp.state.context_blocked, "local observation failure cannot prove remote stop");
+    assert_eq!(g.get(caller(), first.task_id.clone()).await.unwrap().status, TaskStatus::PendingResult);
+    let commands = f.repo.receive(&scope(), &node("inspect"), CommandConsumerKind::Connector, None, 10).await.unwrap().items;
+    assert!(commands.iter().any(|command| matches!(&command.effect, EffectIntent::CancelAgent { request, .. } if request.handle == handle())));
+    f.results.down.store(false, Ordering::SeqCst);
+    f.pump(&w, &c, 25).await;
+    let first = g.get(caller(), first.task_id).await.unwrap();
+    assert_eq!(first.status, TaskStatus::Failed);
+    assert_eq!(first.error, Some(RuntimeError::CapacityExceeded));
+    assert!(!first.output.is_empty());
+    assert_ne!(g.get(caller(), second.task_id).await.unwrap().status, TaskStatus::Completed);
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn oversized_snapshots_preserve_remote_termination_evidence_and_durable_handle() {
+    for terminal in [false, true] {
+        let f = Fixture::new(); let g = f.gateway(); let w = f.worker("w");
+        let task = g.submit(caller(), request("snapshot-overflow")).await.unwrap();
+        w.step(&task.session_id).await.unwrap();
+        let c = f.connector("c", Arc::new(Transport::new(vec![Ok(AgentEvent::Snapshot { snapshot: ExecutionSnapshot {
+            handle: handle(), status: if terminal { TaskStatus::Completed } else { TaskStatus::Working },
+            output: text(&"x".repeat(65536)), error: None,
+        } })])));
+        c.tick().await.unwrap(); c.tick().await.unwrap();
+        w.step(&task.session_id).await.unwrap();
+        let cp = f.repo.load(&task.session_id).await.unwrap().unwrap();
+        assert_eq!(cp.state.context_blocked, !terminal);
+        assert_eq!(cp.state.current_task.as_ref().unwrap().status, TaskStatus::PendingResult);
+        let commands = f.repo.receive(&scope(), &node("inspect"), CommandConsumerKind::Connector, None, 10).await.unwrap().items;
+        assert_eq!(commands.iter().any(|c| matches!(&c.effect, EffectIntent::CancelAgent { request, .. } if request.handle == handle())), !terminal);
+    }
+}

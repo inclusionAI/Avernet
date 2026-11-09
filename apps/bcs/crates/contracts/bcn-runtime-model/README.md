@@ -29,3 +29,9 @@ before leasing; SessionRecovery is durable poison metadata, not process memory.
 Older readers do not understand new tagged variants; deploy new contracts,
 reducers, stores and applications together in the explicitly enabled namespace.
 No old runtime session migration or permissive decoding fallback is provided.
+
+`AgentEvent::ObservationFailed { error, output }` is distinct from remote
+Failed/FailedWithOutput: local observation stopped without proving remote
+termination. Its durable receipt drives the application's TaskFailure path,
+retaining the saved-result barrier, known-handle cancellation and uncertain
+Direct context blocking. Existing failure wire shapes are unchanged.

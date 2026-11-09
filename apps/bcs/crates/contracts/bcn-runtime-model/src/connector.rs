@@ -73,6 +73,8 @@ pub enum AgentEvent {
     Failed { error: RuntimeError },
     /// Terminal failure without a remote handle, preserving bounded partial output.
     FailedWithOutput { error: RuntimeError, output: Vec<MessagePart> },
+    /// Local observation stopped; remote termination is not established.
+    ObservationFailed { error: RuntimeError, output: Vec<MessagePart> },
     Aborted { affected_remote_task_ids: Vec<String> },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

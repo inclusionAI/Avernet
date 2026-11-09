@@ -145,6 +145,9 @@ pub(crate) fn apply_agent(
         AgentEvent::FailedWithOutput { error, output } => freeze_node(
             t, task, node, TaskStatus::Failed, output.clone(), Some(error.clone()),
         ),
+        // The application commits TaskFailure from this validated durable input.
+        // Observation loss is never authoritative remote termination.
+        AgentEvent::ObservationFailed { error, .. } => return Err(error.clone()),
         AgentEvent::Aborted {
             affected_remote_task_ids,
         } => {

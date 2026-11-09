@@ -107,3 +107,9 @@ The normalized unique terminal is derived from validated source final_output:
 Bot terminals must explicitly set final_output, final_output cannot have outgoing
 transitions, and every node must reach the one terminal. Canonical terminal
 HumanInput is also supported. No source-selected final output is discarded.
+
+Validated ObservationFailed inputs return their error to the application; they
+never freeze a node as authoritative remote termination. Worker derives the
+bounded TaskFailure transition from that durable input/checkpoint (and canonical
+dispatch handle if needed), then commits at the original input position. Reducer
+execution remains pure and late/superseded dispatch inputs remain no-ops.

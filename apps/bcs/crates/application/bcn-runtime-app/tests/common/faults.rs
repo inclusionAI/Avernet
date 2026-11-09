@@ -2,6 +2,8 @@ use super::*;
 pub struct EventsFault {
     pub inner: Arc<RuntimeStore>,
     pub reset: AtomicBool,
+    pub delta_after_commit: AtomicBool,
+    pub delta_attempts: std::sync::Mutex<Vec<TaskEvent>>,
     pub hard_after_commit: AtomicBool,
 }
 impl EventsFault {
@@ -9,6 +11,8 @@ impl EventsFault {
         Self {
             inner,
             reset: AtomicBool::new(false),
+            delta_after_commit: AtomicBool::new(false),
+            delta_attempts: std::sync::Mutex::new(vec![]),
             hard_after_commit: AtomicBool::new(false),
         }
     }
@@ -31,7 +35,11 @@ impl TaskEventStore for EventsFault {
         }
     }
     async fn append(&self, f: &DispatchFence, e: TaskEvent) -> RuntimeResult<EventCursor> {
-        self.inner.append(f, e).await
+        self.delta_attempts.lock().unwrap().push(e.clone());
+        let cursor = self.inner.append(f, e).await?;
+        if self.delta_after_commit.swap(false, Ordering::SeqCst) {
+            Err(RuntimeError::Unavailable("lost delta response".into()))
+        } else { Ok(cursor) }
     }
     async fn publish_reset(
         &self,

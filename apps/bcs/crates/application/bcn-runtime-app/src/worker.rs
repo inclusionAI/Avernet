@@ -226,6 +226,9 @@ impl DefaultWorker {
             let transition = match reducer.reduce(&cp.state, &entry.input) {
                 Ok(t) if transition_fits(&cp, &t)? => t,
                 Ok(_) => fallback(reducer, &cp, &entry.input, RuntimeError::CapacityExceeded)?,
+                Err(e) if matches!(&entry.input.kind, SessionInputKind::Agent { event: AgentEvent::ObservationFailed { .. }, .. }) => {
+                    self.observation_failure(reducer, &cp, &entry.input, e).await?
+                }
                 Err(e @ (RuntimeError::ContextBlocked | RuntimeError::CapacityExceeded)) => {
                     fallback(reducer, &cp, &entry.input, e)?
                 }
@@ -318,6 +321,33 @@ impl DefaultWorker {
         }
         Ok(progressed)
     }
+    async fn observation_failure(
+        &self, reducer: &dyn SessionRunner, cp: &SessionCheckpoint,
+        input: &SessionInput, error: RuntimeError,
+    ) -> RuntimeResult<Transition> {
+        let SessionInputKind::Agent { task_id, node_id, dispatch_id, .. } = &input.kind else {
+            return Err(RuntimeError::InvalidInput("observation input required".into()));
+        };
+        let record = self.ports.dispatches.read(dispatch_id).await?.ok_or(RuntimeError::NotFound)?;
+        if record.context.session_id != cp.spec.session_id || &record.context.task_id != task_id || &record.context.node_id != node_id {
+            return Err(RuntimeError::AccessDenied);
+        }
+        // Snapshot may have saved its handle immediately before observation failed,
+        // without an Accepted input. Restore that canonical handle through the pure
+        // reducer, then commit its state and TaskFailure together at the original input.
+        if let Some(handle) = record.handle {
+            let accepted = reducer.reduce(&cp.state, &SessionInput {
+                event_id: input.event_id.clone(), at_ms: input.at_ms,
+                kind: SessionInputKind::Agent { task_id: task_id.clone(), node_id: node_id.clone(), dispatch_id: dispatch_id.clone(), event: AgentEvent::Accepted { handle } },
+            })?;
+            let mut recovered = cp.clone(); recovered.state = accepted.next_state;
+            let mut failed = fallback(reducer, &recovered, input, error)?;
+            for effect in accepted.effects { if !failed.effects.contains(&effect) { failed.effects.push(effect); } }
+            failed.events.extend(accepted.events);
+            failed.timer_changes.extend(accepted.timer_changes);
+            Ok(failed)
+        } else { fallback(reducer, cp, input, error) }
+    }
     /// At most 64 sessions and 64 command executions, plus 64 shard inspections per tick.
     /// Transient failures are reported and back off; accepted data stays in durable indexes.
     pub async fn tick(&self) -> RuntimeResult<TickReport> {
@@ -339,12 +369,15 @@ impl DefaultWorker {
             return Ok(report);
         }
         let d = RuntimeDefaults::default();
-        let mut sessions = s.active.clone();
+        // Retained sessions are a hint, never a lifetime reservation of the turn budget.
+        let mut sessions = if s.life.phase == RuntimePhase::Running { BTreeSet::new() } else { s.active.clone() };
         if s.life.phase == RuntimePhase::Running {
+            // Reserve at least half the turn for existing durable wake work even
+            // when new admissions continuously fill the repair page.
             let page = self
                 .ports
                 .admissions
-                .repair_pending(&self.node.scope, s.repair.clone(), d.recovery_concurrency)
+                .repair_pending(&self.node.scope, s.repair.clone(), d.recovery_concurrency / 2)
                 .await?;
             s.repair = page.next_cursor;
             for receipt in page.items {
@@ -362,7 +395,10 @@ impl DefaultWorker {
             }
         }
         let owned: Vec<_> = s.owned.keys().copied().collect();
+        let mut inspected = 0;
         for offset in 0..owned.len().min(d.recovery_concurrency as usize) {
+            if sessions.len() >= d.recovery_concurrency as usize { break; }
+            inspected += 1;
             let n = owned[(s.owned_offset as usize + offset) % owned.len()];
             let shard = ShardId {
                 scope: self.node.scope.clone(),
@@ -381,7 +417,10 @@ impl DefaultWorker {
                 }
             }
         }
-        s.owned_offset = s.owned_offset.wrapping_add(d.recovery_concurrency as u16);
+        s.owned_offset = s.owned_offset.wrapping_add(inspected);
+        for session in &s.active {
+            if sessions.len() < d.recovery_concurrency as usize { sessions.insert(session.clone()); }
+        }
         s.active = sessions.clone();
         for session in sessions {
             let result = async {
@@ -526,7 +565,7 @@ fn fallback(
             ..
         } => snapshot.output.clone(),
         SessionInputKind::Agent {
-            event: AgentEvent::Completed { output } | AgentEvent::FailedWithOutput { output, .. },
+            event: AgentEvent::Completed { output } | AgentEvent::FailedWithOutput { output, .. } | AgentEvent::ObservationFailed { output, .. },
             ..
         } => output.clone(),
         _ => vec![],

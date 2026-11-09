@@ -26,6 +26,7 @@ struct Actor {
     next_query: u64,
     pending: Option<(DispatchReceipt, SessionInput)>,
     observed: Option<AgentEvent>,
+    projection: Option<projection::PendingProjection>,
 }
 struct State {
     life: Lifecycle,
@@ -131,6 +132,7 @@ impl DefaultConnector {
                 next_query: now,
                 pending: None,
                 observed: None,
+                projection: None,
             },
         );
         Ok(())
@@ -249,8 +251,11 @@ impl DefaultConnector {
                     }
                 }
                 Err(RuntimeError::CapacityExceeded) => {
+                    let terminated = matches!(&actor.observed, Some(AgentEvent::Completed { .. } | AgentEvent::Failed { .. } | AgentEvent::FailedWithOutput { .. }))
+                        || matches!(&actor.observed, Some(AgentEvent::Snapshot { snapshot }) if snapshot.status.is_terminal());
                     actor.observed = None;
-                    self.terminal_failure(&mut actor, RuntimeError::CapacityExceeded, now)?;
+                    if terminated { self.terminal_failure(&mut actor, RuntimeError::CapacityExceeded, now)?; }
+                    else { self.observation_failure(&mut actor, RuntimeError::CapacityExceeded, now)?; }
                     match self.persist(&mut actor).await {
                         Ok(true) => s.completed += 1,
                         Ok(false) => {
@@ -419,7 +424,7 @@ impl DefaultConnector {
                 .await?;
         }
         if matches!(a.record.operation, DispatchOperation::Send { .. }) && !a.reset {
-            projection::reset(&self.ports, &a.record, a.output.clone(), a.sequence).await?;
+            projection::reset(&self.ports, &a.record, a.output.clone(), a.sequence, &mut a.projection).await?;
             a.reset = true;
             a.sequence += 1;
         }
@@ -479,7 +484,7 @@ impl DefaultConnector {
     }
     async fn flush(&self, a: &mut Actor, now: u64) -> RuntimeResult<()> {
         if !a.pending_text.is_empty() {
-            projection::delta(&self.ports, &a.record, a.pending_text.clone(), a.sequence).await?;
+            projection::delta(&self.ports, &a.record, a.pending_text.clone(), a.sequence, &mut a.projection).await?;
             a.pending_text.clear();
             a.sequence += 1;
             a.last_emit = now;
@@ -517,7 +522,7 @@ impl DefaultConnector {
                 }
                 if size(&a.output)? > MAX_CONTENT_BYTES {
                     a.output = projection::bounded_output(a.output.clone(), MAX_CONTENT_BYTES);
-                    return self.terminal_failure(a, RuntimeError::CapacityExceeded, now);
+                    return self.observation_failure(a, RuntimeError::CapacityExceeded, now);
                 }
                 a.pending_text.push_str(&text);
                 return Ok(());
@@ -534,11 +539,11 @@ impl DefaultConnector {
                 snapshot.error = snapshot.error.map(bounded_error);
                 if size(&snapshot.output)? > MAX_CONTENT_BYTES {
                     a.output = projection::bounded_output(snapshot.output, MAX_CONTENT_BYTES);
-                    return self.terminal_failure(a, RuntimeError::CapacityExceeded, now);
+                    return if snapshot.status.is_terminal() { self.terminal_failure(a, RuntimeError::CapacityExceeded, now) } else { self.observation_failure(a, RuntimeError::CapacityExceeded, now) };
                 }
                 a.output = snapshot.output.clone();
                 a.pending_text.clear();
-                projection::reset(&self.ports, &a.record, a.output.clone(), a.sequence).await?;
+                projection::reset(&self.ports, &a.record, a.output.clone(), a.sequence, &mut a.projection).await?;
                 a.sequence += 1;
                 if snapshot.status.is_terminal() {
                     a.stream = None;
@@ -549,6 +554,10 @@ impl DefaultConnector {
                     snapshot.error = Some(RuntimeError::Unavailable("remote failed".into()));
                 }
                 AgentEvent::Snapshot { snapshot }
+            }
+            AgentEvent::ObservationFailed { error, output } => {
+                a.output = projection::bounded_output(output, MAX_CONTENT_BYTES);
+                return self.observation_failure(a, error, now);
             }
             AgentEvent::Failed { error } => return self.terminal_failure(a, error, now),
             AgentEvent::FailedWithOutput { error, output } => {
@@ -591,6 +600,14 @@ impl DefaultConnector {
                 now,
             ),
         }
+    }
+    fn observation_failure(&self, a: &mut Actor, error: RuntimeError, now: u64) -> RuntimeResult<()> {
+        a.io = None;
+        a.stream = None;
+        a.pending_text.clear();
+        self.agent_receipt(a, AgentEvent::ObservationFailed {
+            error: bounded_error(error), output: projection::bounded_output(a.output.clone(), MAX_CONTENT_BYTES),
+        }, now)
     }
     fn terminal_failure(&self, a: &mut Actor, error: RuntimeError, now: u64) -> RuntimeResult<()> {
         let error = bounded_error(error);

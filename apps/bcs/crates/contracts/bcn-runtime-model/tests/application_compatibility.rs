@@ -48,3 +48,11 @@ fn old_timer_input_defaults_partial_output_to_empty() {
     let input:SessionInputKind=serde_json::from_value(json!({"kind":"timer_fired","timer_id":{"scope":{"environment":"test","tenant":"tenant","namespace":"new"},"value":"timer"}})).unwrap();
     assert!(matches!(input,SessionInputKind::TimerFired{output,..} if output.is_empty()));
 }
+
+#[test]
+fn local_observation_failure_has_distinct_wire_identity() {
+    let event = AgentEvent::ObservationFailed { error: RuntimeError::CapacityExceeded, output: vec![] };
+    let value = serde_json::to_value(&event).unwrap();
+    assert_eq!(value["kind"], "observation_failed");
+    assert_eq!(serde_json::from_value::<AgentEvent>(value).unwrap(), event);
+}

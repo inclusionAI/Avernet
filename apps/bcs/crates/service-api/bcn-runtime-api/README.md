@@ -59,3 +59,10 @@ constructor selects a concrete backend/transport. Consumers of the unreleased v1
 receive signature must pass the explicit kind. There are no other repository
 implementations in this workspace; production implementations must implement the
 new methods before composition. This does not change legacy runtime contracts.
+
+Connector publication callers must retain the entire operation (ID, expected
+cursor, payload) across ambiguous failures. RuntimeStore checks publication
+dedup before returning `Conflict("task projection cursor changed")`; this
+specific response permits rebuilding against a fresh cursor. Generic conflicts
+and storage errors do not prove the original publication was uncommitted and
+must first retry the identical operation.
