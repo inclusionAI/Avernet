@@ -126,22 +126,42 @@ class QueuedMessageCancellationStory(ResultQueueStory):
 
         # Resume dispatch and prove the scheduler is live with a probe in the
         # kept Session; the deleted Session's queued work must never reach
-        # the Provider, before or after the probe is dispatched.
+        # the Provider, before or after the probe is dispatched. Earlier
+        # phases can leave Bot-to-Bot replies in flight on the same lanes
+        # (max_running=1), so keep completing other dispatched work while
+        # waiting instead of assuming the lanes are idle.
         self.post("/control/provider/clear", mock=True)
         self.set_paused(False)
         _, probe_id = self.send(ws, [self.driver])
-        probe = self.wait("probe dispatched after the delete", lambda: self.deliveries(probe_id),
-                          lambda rows: any(row["kind"] == "send" and row["status"] in ("dispatching", "running")
-                                           for row in rows))
-        sent = next(row for row in probe if row["kind"] == "send")
+        probe_run = next(row for row in self.deliveries(probe_id) if row["kind"] == "send")["run_id"]
+        bots = {bot["provider_bot_ref"]: bot for bot in self.bots}
+        completed: set[str] = set()
+
+        def complete_kept(skip: str | None) -> list[dict]:
+            # Each run is called back exactly once; the probe is skipped
+            # until it has been observed dispatching.
+            for request in self.captured():
+                body = request["body"]
+                run_id = body.get("id")
+                if (body.get("method") != "chat.send" or body.get("session_id") != kept_session
+                        or run_id == skip or run_id in completed):
+                    continue
+                bot = bots.get(body.get("to_bot", {}).get("provider_bot_ref"))
+                if bot is not None:
+                    self.callback(request, bot, "NO_REPLY")
+                    completed.add(run_id)
+            return self.deliveries(probe_id)
+
+        self.wait("probe dispatched after the delete", lambda: complete_kept(probe_run),
+                  lambda rows: any(row["kind"] == "send" and row["status"] in ("dispatching", "running")
+                                   for row in rows))
         self.wait("Provider receives the probe", self.captured,
-                  lambda requests: any(item["body"].get("id") == sent["run_id"] for item in requests))
+                  lambda requests: any(item["body"].get("id") == probe_run for item in requests))
         for _ in range(10):
             assert not any(item["body"].get("session_id") == doomed_session for item in self.captured()), \
                 "Queued messages of a deleted Session must be cancelled, not dispatched"
             time.sleep(0.1)
-        self.complete_dispatched_work()
-        self.wait("probe work completes", lambda: self.deliveries(probe_id),
+        self.wait("probe work completes", lambda: complete_kept(None),
                   lambda rows: bool(rows) and all(row["status"] in ("completed", "cancelled")
                                                 for row in rows if row["kind"] == "send"))
         print("  PASS: deleting a Session cancels its queued messages", flush=True)
