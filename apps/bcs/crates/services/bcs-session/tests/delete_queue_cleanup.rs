@@ -1,5 +1,5 @@
-//! Session deletion settles the Session's delivery queue after the delete,
-//! and a cleanup failure never fails the (already committed) delete.
+//! Session deletion settles the Session's delivery queue before the delete;
+//! a cleanup failure fails the delete and leaves the Session retryable.
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -64,7 +64,7 @@ async fn session_service(flow: Arc<RecordingFlow>, repo: Arc<MemorySessionRepo>)
 }
 
 #[tokio::test]
-async fn delete_cancels_the_session_queue_after_the_session_is_gone() {
+async fn delete_cancels_the_session_queue_before_removing_the_session() {
     let repo = Arc::new(MemorySessionRepo::new());
     let flow = Arc::new(RecordingFlow { sessions: Some(repo.clone()), ..Default::default() });
     let (service, session_id) = session_service(flow.clone(), repo).await;
@@ -76,15 +76,17 @@ async fn delete_cancels_the_session_queue_after_the_session_is_gone() {
     assert_eq!(id, session_id);
     assert_eq!(bots, vec!["bot-a".to_string(), "bot-b".to_string()]);
     assert_eq!(reason, "session_deleted");
-    assert!(!still_present, "cleanup runs after the delete so notices find no Session");
+    assert!(still_present, "cleanup runs while the Session can still be retried");
 }
 
 #[tokio::test]
-async fn cleanup_failure_does_not_fail_the_delete() {
+async fn cleanup_failure_fails_the_delete_and_keeps_the_session() {
     let repo = Arc::new(MemorySessionRepo::new());
     let flow = Arc::new(RecordingFlow { fail: true, ..Default::default() });
-    let (service, session_id) = session_service(flow.clone(), repo).await;
-    assert!(service.delete(&session_id).await.unwrap());
+    let (service, session_id) = session_service(flow.clone(), repo.clone()).await;
+    let error = service.delete(&session_id).await.unwrap_err();
+    assert!(error.to_string().contains("Failed to cancel queued deliveries"), "{error}");
+    assert!(repo.get(&session_id).await.is_some(), "the delete can be retried");
     assert_eq!(flow.calls.lock().unwrap().len(), 1);
 }
 

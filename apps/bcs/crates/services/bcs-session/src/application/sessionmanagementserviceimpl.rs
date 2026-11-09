@@ -214,17 +214,16 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                     "Failed to cancel active state-machine runs for deleted session '{session_id}': {error}"
                 )))
             })?;
-        let deleted = self.inner.delete(session_id).await?;
-        // Cancel AFTER the delete so task failure notices find no Session and
-        // are dropped instead of being enqueued into the deleted Session.
-        // Best effort: the Session is already gone and the delivery
-        // scheduler converges any row this misses.
-        if let (true, Some(flow)) = (deleted, &self.message_flow) {
-            if let Err(error) = flow.cancel_session_deliveries(session_id, &bot_ids, "session_deleted").await {
-                tracing::warn!(%session_id, %error, "session deleted; queued delivery cleanup incomplete");
-            }
+        // Settle the queue BEFORE removing the Session: a cleanup failure
+        // must fail the delete while the Session (and its lane keys) still
+        // exist, so retrying the delete retries the cleanup.
+        if let (false, Some(flow)) = (bot_ids.is_empty(), &self.message_flow) {
+            flow.cancel_session_deliveries(session_id, &bot_ids, "session_deleted").await
+                .map_err(|error| SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to cancel queued deliveries for deleted session '{session_id}': {error}"
+                ))))?;
         }
-        Ok(deleted)
+        self.inner.delete(session_id).await
     }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {

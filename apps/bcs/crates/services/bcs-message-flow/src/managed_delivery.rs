@@ -33,6 +33,17 @@ pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
 /// very steps that may be the deterministic fault.
 pub(crate) const SCHEDULER_QUARANTINED: &str = "scheduler_quarantined";
 
+/// Session deletion cancels the Session's lane rows before the Session row is
+/// removed. Their task notices would be enqueued into a Session that is about
+/// to disappear, so the cancel carries this marker and builds no notice.
+pub(crate) const SESSION_DELETING: &str = "session_deleting";
+
+fn is_session_deleting(command: &DeliveryTransitionCommand) -> bool {
+    command.event == Event::CancelRequested
+        && command.transport_context_json.as_ref()
+            .and_then(|v| v.get(SESSION_DELETING)).and_then(|v| v.as_bool()) == Some(true)
+}
+
 pub(crate) fn is_quarantine(command: &DeliveryTransitionCommand) -> bool {
     command.event == Event::PreparationFailed
         && command.transport_context_json.as_ref()
@@ -157,11 +168,12 @@ impl ManagedMessageDelivery {
         // Only discover immutable ownership before locking. State is reloaded
         // and validated below after all source/reply-target locks are held.
         let quarantine = is_quarantine(&command);
+        let suppress_notice = quarantine || is_session_deleting(&command);
         let initial = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         let owner = initial.target_bot_id.clone();
         let mut bots = vec![owner.clone()];
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
-        if command.reply.is_none() && !quarantine && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
+        if command.reply.is_none() && !suppress_notice && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
             | Event::DefinitelyNotSent { .. } | Event::TransportUnknown | Event::Recover) {
             if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Invalid(format!("task intent: {e}")))? {
@@ -328,7 +340,7 @@ impl ManagedMessageDelivery {
         // Protected result park carried to the post-commit publish below:
         // (parked identity, result message id, Manager target).
         let mut pending_result_park: Option<(crate::queued_task_terminal::ResultLegIdentity, String, String)> = None;
-        if command.reply.is_none() && outcome.changed && !quarantine {
+        if command.reply.is_none() && outcome.changed && !suppress_notice {
             // Protected result routing (caller-enabled Manager): the §15.4
             // gate refuses ordinary content dispatch, so the failure notice
             // must carry its own protected material and park the session

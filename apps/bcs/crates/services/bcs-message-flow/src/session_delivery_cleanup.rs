@@ -1,11 +1,12 @@
-//! Settle the unfinished queue of a deleted Session.
+//! Settle the unfinished queue of a Session that is being deleted.
 //!
-//! Called after the Session row is gone. Never-sent rows are cancelled in
+//! Called before the Session row is removed, so a failure here fails the
+//! delete and the delete can be retried. Never-sent rows are cancelled in
 //! place; maybe-sent rows get a durable cancel intent, and the delivery
 //! scheduler performs the actual Bot abort I/O asynchronously (control loop:
-//! `cancelling` rows without an abort request). Task failure notices built by
-//! these transitions are dropped by the queue because the Session no longer
-//! exists, so nothing new is enqueued into the deleted Session.
+//! `cancelling` rows without an abort request). The cancel carries the
+//! `session_deleting` marker so no task notice is enqueued into the Session;
+//! later terminal notices find the Session gone and are dropped.
 use crate::BcsMessageFlow;
 use bcs_domain::DeliveryType;
 use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
@@ -53,7 +54,10 @@ pub(crate) async fn cancel(
                 request_id: None,
                 actor_id: None,
                 reply: None,
-                transport_context_json: Some(serde_json::json!({ "cancel_reason": reason })),
+                transport_context_json: Some(serde_json::json!({
+                    "cancel_reason": reason,
+                    crate::managed_delivery::SESSION_DELETING: true,
+                })),
                 deadline_at_ms: Some(now_ms.saturating_add(CANCEL_DEADLINE_MS)),
             };
             match service.transition(command).await {
