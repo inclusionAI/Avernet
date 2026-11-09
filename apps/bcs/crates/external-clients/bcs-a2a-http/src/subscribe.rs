@@ -1,4 +1,5 @@
 //! Canonical POST subscription for A2A 1.0.1, without legacy URL/method fallback.
+use bcs_network_tracing::RequestBuilderExt;
 use a2a::{A2AError, StreamResponse};
 use futures::{stream::{self, BoxStream}, StreamExt};
 
@@ -10,6 +11,7 @@ struct Decoder {
     data: Vec<String>,
     event_bytes: usize,
     started: bool,
+    rpc_id: Option<String>,
 }
 
 impl Decoder {
@@ -35,7 +37,9 @@ impl Decoder {
                 self.event_bytes = 0;
                 if self.data.is_empty() { continue; }
                 let data = std::mem::take(&mut self.data).join("\n");
-                return serde_json::from_str(&data).map(Some)
+                let value = serde_json::from_str(&data).map_err(|_|A2AError::parse_error("SSE contains invalid JSON"))?;
+                let value = if let Some(id) = &self.rpc_id { crate::jsonrpc::decode(value, id)? } else { value };
+                return serde_json::from_value(value).map(Some)
                     .map_err(|_|A2AError::parse_error("SSE contains invalid StreamResponse"));
             }
             if line.starts_with(':') { continue; }
@@ -46,11 +50,17 @@ impl Decoder {
 }
 
 pub(super) async fn post_stream<T: serde::Serialize + ?Sized>(
-    http: &reqwest::Client, url: &str, request: &T,
+    http: &bcs_network_tracing::ClientWithDefaults<reqwest::Client>, url: &str, request: &T,
+) -> Result<BoxStream<'static, Result<StreamResponse, A2AError>>, A2AError> {
+    post_stream_with_rpc(http, url, request, None).await
+}
+
+pub(super) async fn post_stream_with_rpc<T: serde::Serialize + ?Sized>(
+    http: &bcs_network_tracing::ClientWithDefaults<reqwest::Client>, url: &str, request: &T, rpc_id: Option<String>,
 ) -> Result<BoxStream<'static, Result<StreamResponse, A2AError>>, A2AError> {
     let response = tokio::time::timeout(std::time::Duration::from_secs(15),
-        http.post(url).header("A2A-Version", "1.0").header("Accept", "text/event-stream")
-            .json(request).send()).await
+        http.request(|http| http.post(url).header("A2A-Version", "1.0").header("Accept", "text/event-stream")
+            .json(request)).send_traced()).await
         .map_err(|_|A2AError::internal("A2A subscription header timeout"))?
         .map_err(|_|A2AError::internal("A2A subscription connection failed"))?;
     let status = response.status();
@@ -65,13 +75,31 @@ pub(super) async fn post_stream<T: serde::Serialize + ?Sized>(
                 }
                 body.extend_from_slice(&chunk);
             }
+            if let Some(id)=&rpc_id {
+                if let Ok(value)=serde_json::from_slice(&body) {
+                    if let Err(error)=crate::jsonrpc::decode(value,id) {return Ok(error);}
+                }
+            }
             Ok(crate::client_json::http_error(status.as_u16(), &body))
         }).await.map_err(|_|A2AError::internal("A2A error response timed out"))??);
     }
     let mime = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v|v.to_str().ok())
         .and_then(|v|v.split(';').next()).map(str::trim);
+    if rpc_id.is_some() && mime.is_some_and(|v|v.eq_ignore_ascii_case("application/json")) {
+        return Err(tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let mut response=response;let mut body=Vec::new();
+            while let Some(chunk)=response.chunk().await.map_err(|_|A2AError::internal("RPC error response incomplete"))? {
+                if body.len().saturating_add(chunk.len())>MAX_EVENT_BYTES {return Err(A2AError::invalid_agent_response());}
+                body.extend_from_slice(&chunk);
+            }
+            let value=serde_json::from_slice(&body).map_err(|_|A2AError::invalid_agent_response())?;
+            match crate::jsonrpc::decode(value,rpc_id.as_deref().unwrap_or("")) {
+                Err(error)=>Ok(error),Ok(_)=>Err(A2AError::invalid_agent_response()),
+            }
+        }).await.map_err(|_|A2AError::internal("RPC error response timed out"))??);
+    }
     if !mime.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream")) { return Err(A2AError::invalid_agent_response()); }
-    Ok(stream::try_unfold((response, Decoder::default(), false), |(mut response, mut decoder, mut eof)| async move {
+    Ok(stream::try_unfold((response, Decoder { rpc_id, ..Default::default() }, false), |(mut response, mut decoder, mut eof)| async move {
         loop {
             if let Some(event) = decoder.next(eof)? { return Ok(Some((event, (response, decoder, eof)))); }
             if eof {

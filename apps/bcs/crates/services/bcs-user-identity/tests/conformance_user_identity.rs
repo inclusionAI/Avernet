@@ -33,34 +33,28 @@ async fn run_contract<R: UserIdentityRepoPort + ?Sized>(repo: &R) {
     assert!(repo.lookup_by_user_id("nonexistent", "cookie").await.is_none());
     assert!(repo.lookup_by_user_id(&id1, "google").await.is_none());
 
-    // update_token: write token, then find by token.
-    repo.update_token(&id1, "jwt-abc-123", 9999).await.unwrap();
-    let by_token = repo.get_by_token("jwt-abc-123").await.expect("should find by token");
-    assert_eq!(by_token.user_id, id1);
-    assert_eq!(by_token.auth_source, "cookie");
-    // external_user_name tracks the provider's latest name (refreshed on the
-    // repeat login above)...
-    assert_eq!(by_token.external_user_name.as_deref(), Some("张三改名"));
-    // ...but the internal user_name is initialized from the FIRST login's
-    // external name and is NOT overwritten on subsequent logins.
-    assert_eq!(by_token.user_name.as_deref(), Some("张三"));
-    // avatar was updated on the repeat ensure_identity call above
-    assert_eq!(by_token.avatar.as_deref(), Some("https://img.url/new"));
+    // (V1 API auth plan, Task 11) The legacy `update_token`/`get_by_token`
+    // single-session cases that lived here are REPLACED by the strict
+    // session coverage over the same stores: `conformance_auth_session_
+    // memory.rs` / `conformance_auth_session_sqlite.rs` drive the central
+    // `auth_session_repo_port_contract_tests` (install → rotate → revoke
+    // atomicity, single active session via revision CAS), together with
+    // `oauth_session_engine_contract_tests`. The legacy unconditional
+    // token writer is gone by contract.
 
-    // get_by_token: unknown token returns None.
+    // get_by_token: there is no legacy binding writer, so any raw token
+    // lookup finds nothing (sessions are found by hash through the strict
+    // session columns).
     assert!(repo.get_by_token("nonexistent-token").await.is_none());
-
-    // update_token: overwrite token (single-session model).
-    repo.update_token(&id1, "jwt-new-token", 10000).await.unwrap();
-    assert!(repo.get_by_token("jwt-abc-123").await.is_none(), "old token should no longer match");
-    let by_new = repo.get_by_token("jwt-new-token").await.expect("should find by new token");
-    assert_eq!(by_new.user_id, id1);
 
     // get_by_user_id_display: look up by user_id.
     let by_id = repo.get_by_user_id_display(&id1).await.expect("should find by user_id");
     assert_eq!(by_id.user_id, id1);
     assert_eq!(by_id.user_name.as_deref(), Some("张三"));
     assert_eq!(by_id.avatar.as_deref(), Some("https://img.url/new"));
+    // The joined display row still reports the provider's latest
+    // external_user_name and avatar from the repeat login above.
+    assert_eq!(by_id.external_user_name.as_deref(), Some("张三改名"));
 
     // get_by_user_id_display: unknown user_id returns None.
     assert!(repo.get_by_user_id_display("nonexistent").await.is_none());
@@ -82,10 +76,10 @@ async fn sqlite_store_passes_contract() {
 // MySQL conformance parity (Rule 25):
 //
 // `DbUserIdentityStore::mysql` and `::sqlite` are the SAME struct over the same
-// `dyn DbPlugin` SQL; `flavor` differs only in `update_token`'s timestamp
-// expression (`FROM_UNIXTIME(?)` vs `datetime(?, 'unixepoch')`) — every other
-// statement is flavor-independent. The sqlite run above therefore exercises the
-// shared production code path. A real MySQL/OB server is not available in CI,
+// `dyn DbPlugin` SQL; every statement is flavor-independent (the legacy
+// `update_token` timestamp dialect branch was removed with the unsafe
+// writer in Task 11). The sqlite run above therefore exercises the shared
+// production code path. A real MySQL/OB server is not available in CI,
 // so the live MySQL path is verified by the dev/pre smoke tests rather than
 // here. This test pins the structural parity (both constructors build the same
 // store type and report the expected flavor) so the assumption can't silently

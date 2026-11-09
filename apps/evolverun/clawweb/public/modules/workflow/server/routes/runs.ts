@@ -1,3 +1,6 @@
+import type { RunSubworkflowsReader } from "../contracts/run-subworkflows.js";
+import { createRunReadRouter } from "../services/run-read-http.js";
+
 /**
  * Runs API routes — reads from flow_runs, node_executions, flow_events.
  * Matches ClawFlow's /api/runs endpoints for zero frontend changes.
@@ -115,9 +118,13 @@ export function createRunsRouter(
   botPermRepo: BotWorkflowPermissionRepository | null = null,
   workflowSpecRepo: WorkflowSpecRepository | null = null,
   executionStepLogRepo: ExecutionStepLogRepository | null = null,
-  facadeRepo: FacadeBindingRepository | null = null,
+  facadeRepo: FacadeBindingRepository | RunSubworkflowsReader | null = null,
+  runSubviews: RunSubworkflowsReader | null = null,
 ): Router {
   const router = Router();
+  const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
+  const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
+  router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo, executionStepLogRepo, effectiveRunSubviews));
 
   /** GET / — list flow runs, filtered by view permission if botOwnerId provided */
   router.get("/", asyncHandler(async (_req: Request, res: Response) => {
@@ -665,7 +672,7 @@ export function createRunsRouter(
         inputJson: run.input_json,
         workflowId: run.workflow_id,
         lookupBoundCommand: async () => {
-          const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(run.workflow_id) : [];
+          const bindings = effectiveFacadeRepo ? await effectiveFacadeRepo.findByWorkflowId(run.workflow_id) : [];
           return bindings[0]?.command ?? null;
         },
       });

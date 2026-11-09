@@ -130,6 +130,32 @@ def _extra_config_to_publish_config(
     return None
 
 
+def terminal_eligible_devices(devices: list[Any]) -> list[Any]:
+    """Select the devices a terminal publish (DESTROY/STOP) must tear down.
+
+    ``RELEASED`` is the only status whose provider resource is already gone
+    (ADR-0004: "container destroyed, PaaS DESTROYED"), so it is the only
+    status excluded. Every other status - ``ACTIVE``, ``PENDING``, ``FAILED``,
+    ``STOPPED``, ``OFFLINE``, ``UPDATING`` - may still hold a sandbox, a
+    half-provisioned container, or a provider record, and is therefore a
+    legitimate teardown target.
+
+    This is deliberately broader than the ``ACTIVE``-only rule used by
+    CREATE/UPDATE/SCALE publishes: residue left behind by an earlier failed
+    publish must not block a later DESTROY of the same bot. Both
+    ``create_publish`` (Step 2.5 batch sizing) and
+    ``_create_device_records_for_publish`` (record creation) call this so the
+    batch plan and the device-record selection can never disagree.
+    """
+    from secbaas.community.api.device_manage import DeviceStatus
+
+    excluded = DeviceStatus.RELEASED.value
+    return sorted(
+        [d for d in devices if d.status != excluded],
+        key=lambda d: d.id,
+    )
+
+
 @dataclass
 class BatchConfig:
     """Internal batch configuration for stage generation."""
@@ -632,14 +658,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             # device. Use the same eligibility rule as
             # _create_device_records_for_publish so the batch plan and the
             # device-record selection can never disagree on the target set.
-            from secbaas.community.api.device_manage import DeviceStatus
-
             existing_devices = self._device_repo.list_by_bot_id(
                 bot_id=bot.id, tenant=tenant, env=env
             )
-            target_device_count = len(
-                [d for d in existing_devices if d.status == DeviceStatus.ACTIVE.value]
-            )
+            target_device_count = len(terminal_eligible_devices(existing_devices))
             logger.info(
                 f"Resolved target_device_count={target_device_count} for "
                 f"{publish_type.value}: bot_id={bot.id}"
@@ -1182,7 +1204,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         - RESTART: devices per scope (all/unhealthy)
         - SCALE_UP: new devices via DeviceService.create_device()
         - SCALE_DOWN: oldest ACTIVE devices
-        - DESTROY: ACTIVE devices
+        - DESTROY: every non-RELEASED device (see terminal_eligible_devices)
         """
         from secbaas.community.api.device_manage import (
             DeviceConfig,
@@ -1385,28 +1407,24 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             all_devices = device_repo.list_by_bot_id(
                 bot_id=bot_id, tenant=tenant, env=env
             )
-            eligible_devices = sorted(
-                [d for d in all_devices if d.status == DeviceStatus.ACTIVE.value],
-                key=lambda d: d.id,
-            )
+            eligible_devices = terminal_eligible_devices(all_devices)
             event_type = PublishEventType.DESTROY.value
             logger.info(
                 f"[create_device_records] DESTROY publish_id={publish_id} "
-                f"found {len(eligible_devices)} ACTIVE devices"
+                f"found {len(eligible_devices)} non-RELEASED devices"
+                f" out of {len(all_devices)}"
             )
 
         elif publish_type == PublishType.STOP:
             all_devices = device_repo.list_by_bot_id(
                 bot_id=bot_id, tenant=tenant, env=env
             )
-            eligible_devices = sorted(
-                [d for d in all_devices if d.status == DeviceStatus.ACTIVE.value],
-                key=lambda d: d.id,
-            )
+            eligible_devices = terminal_eligible_devices(all_devices)
             event_type = PublishEventType.STOP.value
             logger.info(
                 f"[create_device_records] STOP publish_id={publish_id} "
-                f"found {len(eligible_devices)} ACTIVE devices"
+                f"found {len(eligible_devices)} non-RELEASED devices"
+                f" out of {len(all_devices)}"
             )
 
         elif publish_type == PublishType.UPDATE_DEVICE:
@@ -1446,12 +1464,24 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
 
         if not eligible_devices:
+            # DESTROY tolerates an empty teardown set when every device is
+            # RELEASED: the bot has nothing left to tear down, so the publish
+            # proceeds as an idempotent no-op instead of being rejected. This
+            # is the only way DESTROY reaches an empty set under the broadened
+            # terminal_eligible_devices rule, and keeping the check explicit
+            # means a future widening of the eligible set cannot silently turn
+            # into an unconditional no-op.
+            #
+            # STOP is deliberately excluded: a STOP with no teardown target
+            # must keep surfacing as an error so a bot is never silently
+            # "stopped" while residue has not actually been dealt with.
             if publish_type == PublishType.DESTROY and all(
                 device.status == DeviceStatus.RELEASED.value for device in all_devices
             ):
                 logger.info(
                     f"[create_device_records] DESTROY publish_id={publish_id} "
-                    "has no non-released devices; allowing an idempotent no-op"
+                    f"has {len(all_devices)} devices, all RELEASED; "
+                    "allowing an idempotent no-op"
                 )
                 return
 
@@ -3705,6 +3735,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     tenant=tenant,
                     device_uuid=device_record.device_uuid,
                     modifier=operator,
+                    allow_residue_success=True,
                 )
 
                 if not destroy_response.success:

@@ -7,10 +7,10 @@ use secrecy::Secret;
 use serde::{Deserialize, Serialize};
 
 use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, BcsFuseConfig, CacheConfig, ChannelConfigSection,
-    DatabaseConfig, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
-    HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LoggingConfig, ManifestConfig,
-    SecretConfig, SecurityConfig, UserDirectoryConfig,
+    ApiConfig, AuthChainConfig, AuthSdkConfig, BcsFuseConfig, CacheConfig,
+    ChannelConfigSection, DatabaseConfig, DingTalkAccountConfig, EventingConfig,
+    FusionProviderConfig, HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LoggingConfig,
+    ManifestConfig, SecretConfig, SecurityConfig, UserDirectoryConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 
@@ -136,6 +136,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
 
+    /// Legacy scoped-token registration opt-in. Public v0.1 management accepts
+    /// anonymous Cards by contract; delivery of admitted Cards needs no opt-in.
+    #[serde(default)]
+    pub a2a_allow_anonymous:bool,
     /// Human approval waits pause execution but remain bounded by these caps.
     #[serde(default)]
     pub a2a_input:super::a2a_input::A2aInputConfig,
@@ -250,6 +254,14 @@ pub struct BcsConfig {
     /// default (`bcs_auth_api::AuthConfig::default`).
     #[serde(default)]
     pub auth: AuthChainConfig,
+
+    /// Independent V1 API authentication configuration (`[api]` section).
+    /// Absent keeps compatibility semantics; a present `[api.auth]` is
+    /// structurally parsed (reserved public fields + plugin tables) and
+    /// validated against the registered sources at startup by the
+    /// api.auth registry.
+    #[serde(default)]
+    pub api: ApiConfig,
 
     /// CORS configuration for browser clients.
     #[serde(default)]
@@ -471,6 +483,7 @@ impl Default for BcsConfig {
             human_notify: HumanNotifyConfig::default(),
             message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
+            a2a_allow_anonymous:false,
             a2a_input:super::a2a_input::A2aInputConfig::default(),
             a2a_grpc:None,
             collaboration: CollaborationConfig::default(),
@@ -495,6 +508,7 @@ impl Default for BcsConfig {
             auth_sdk: AuthSdkConfig::default(),
             user_directory: UserDirectoryConfig::default(),
             auth: AuthChainConfig::default(),
+            api: ApiConfig::default(),
             cors: CorsConfig::default(),
             group_logger: None,
             provider_chat_run_timeout_ms: default_provider_chat_run_timeout_ms(),

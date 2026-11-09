@@ -63,7 +63,10 @@ impl std::fmt::Debug for BotConfig {
 pub struct ProviderConfig {
     pub provider_id: String,
     pub provider_auth: Option<String>,
-    pub api_url: Option<String>,
+    /// Global CLI API endpoint resolved by the bridge application at startup.
+    /// This field is kept in memory and is never read from persisted Provider TOML.
+    #[serde(skip)]
+    pub cli_api_base_url: Option<String>,
     #[serde(default)]
     pub mode: ConnectionMode,
     pub listen: Option<SocketAddr>,
@@ -98,11 +101,18 @@ impl ProviderConfig {
     /// Applied to each engine subprocess; never mutates the bridge environment.
     pub fn execution_env(&self, bot: &BotConfig) -> Vec<(String, String)> {
         let mut env = Vec::new();
+        if let Some(url) = self.cli_api_base_url.as_ref().filter(|url| !url.trim().is_empty()) {
+            env.push(("BCS_API_BASE_URL".into(), url.clone()));
+        }
         if self.provider_auth.as_deref() == Some("agentpass-subbots") {
             env.push(("BCN_AUTH_MODE".into(), "agentpass-subbots".into()));
-            env.push(("BCN_ACTOR_BOT_ID".into(), bot.bot_id.clone().unwrap_or_default()));
         }
-        if let Some(url) = &self.api_url { env.push(("BCS_API_BASE_URL".into(), url.clone())); }
+        if let Some(id) = bot.bot_id.as_ref().filter(|id| !id.trim().is_empty()) {
+            env.push(("BCN_ACTOR_BOT_ID".into(), id.clone()));
+        }
+        if let Some(token) = bot.token.as_ref().filter(|token| !token.trim().is_empty()) {
+            env.push(("BCN_BOT_TOKEN".into(), token.clone()));
+        }
         env
     }
     pub fn load(path: &Path) -> Result<Self, ConfigError> {

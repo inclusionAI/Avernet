@@ -8,9 +8,9 @@ use serde_json::json;
 
 async fn database() -> Arc<LocalSqliteDbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db
@@ -196,4 +196,87 @@ async fn refresh_and_availability_have_one_bounded_query_even_on_failure() {
     assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
     assert!(store.availability_many(&ids).await.is_err());
     assert_eq!(db.queries.load(Ordering::SeqCst),1);
+}
+
+#[tokio::test]
+async fn name_change_releases_old_name_and_soft_deletion_releases_current_name() {
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let first=store.replace(&record()).await.unwrap();
+    assert_eq!(store.get_by_name("provider","Agent").await.unwrap(),Some(first.clone()));
+    let mut renamed=first.clone();renamed.agent_card["name"]=json!("订单助手");
+    renamed.agent_card_url=None;
+    let renamed=store.replace(&renamed).await.unwrap();
+    assert!(store.get_by_name("provider","Agent").await.unwrap().is_none());
+    assert_eq!(store.get_by_name("provider","订单助手").await.unwrap(),Some(renamed.clone()));
+    assert!(store.get_by_name("other-provider","订单助手").await.unwrap().is_none());
+    let rows=db.query(DbStatement::new("SELECT name,JSON_EXTRACT(bot_info,'$.name') AS info_name FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("订单助手"));
+    assert_eq!(rows[0].get_string("info_name").unwrap().as_deref(),Some("订单助手"));
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode) VALUES ('second','test','provider','second','gateway')")).await.unwrap();
+    let mut competing=record();competing.bot_uuid="second".into();competing.provider_bot_ref="second".into();
+    competing.agent_card["name"]=json!("订单助手");
+    assert!(matches!(store.replace(&competing).await,Err(bcs_service_api::ServiceError::A2aManagement(error)) if error.code==bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::BotNameConflict));
+    assert!(store.get("second").await.unwrap().is_none());
+    assert_eq!(store.get("bot").await.unwrap(),Some(renamed.clone()));
+    competing.agent_card["name"]=json!("Agent");
+    let second=store.replace(&competing).await.unwrap();
+    assert_eq!(store.get_by_name("provider","Agent").await.unwrap(),Some(second.clone()));
+    let mut conflict=second.clone();conflict.agent_card["name"]=json!("订单助手");
+    assert!(matches!(store.replace(&conflict).await,Err(bcs_service_api::ServiceError::A2aManagement(error)) if error.code==bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::BotNameConflict));
+    assert_eq!(store.get("second").await.unwrap(),Some(second));
+    assert_eq!(store.get("bot").await.unwrap(),Some(renamed));
+    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    assert!(store.get_by_name("provider","订单助手").await.unwrap().is_none());
+    let reused=store.replace(&conflict).await.unwrap();
+    assert_eq!(store.get_by_name("provider","订单助手").await.unwrap(),Some(reused));
+
+}
+
+#[tokio::test]
+async fn concurrent_explicit_replacements_return_their_own_committed_revision() {
+    let db=database().await;let store=DbA2aBotStore::sqlite(db,"test".into());
+    let mut left=record();left.agent_card["name"]=json!("Left");
+    let mut right=record();right.agent_card["name"]=json!("Right");right.agent_card_url=None;
+    let (left,right)=tokio::join!(store.replace(&left),store.replace(&right));
+    let left=left.unwrap();let right=right.unwrap();
+    assert_ne!(left.revision,right.revision);
+    assert_eq!(left.agent_card["name"],"Left");assert_eq!(right.agent_card["name"],"Right");
+    let last=if left.revision>right.revision {left} else {right};
+    assert_eq!(last.revision,2);assert_eq!(store.get("bot").await.unwrap(),Some(last));
+}
+
+#[tokio::test]
+async fn existing_duplicate_names_are_reported_as_conflicts() {
+    let db=database().await;let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    store.replace(&record()).await.unwrap();
+    // Existing legacy duplicates must not require a migration or select an arbitrary Bot.
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,name,connection_mode) VALUES ('legacy','test','provider','Agent','plugin')")).await.unwrap();
+    assert!(matches!(store.get_by_name("provider","Agent").await,Err(bcs_service_api::ServiceError::Conflict(_))));
+    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE bot_uuid='legacy'")).await.unwrap();
+    assert!(store.get_by_name("provider","Agent").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn source_identity_constraints_apply_to_direct_store_writes_and_are_scoped() {
+    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::{SOURCE_AGENT_EXTENSION,ManagementCode as Code}};
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let mut first=record();
+    first.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001Ab","party":"first_party"}}]});
+    assert!(store.compare_and_set(&first,0).await.unwrap());
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode) VALUES ('second','test','provider','second','gateway'),('foreign','test','other-provider','foreign','gateway')")).await.unwrap();
+    let mut second=first.clone();second.bot_uuid="second".into();second.provider_bot_ref="second".into();second.agent_card["name"]=json!("Second");
+    assert!(matches!(store.compare_and_set(&second,0).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentConflict));
+    assert!(store.get("second").await.unwrap().is_none());
+    let mut foreign=second.clone();foreign.bot_uuid="foreign".into();foreign.provider_id="other-provider".into();foreign.provider_bot_ref="foreign".into();
+    assert!(store.compare_and_set(&foreign,0).await.unwrap());
+    for replacement in [json!([]),json!([{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001ab"}}])] {
+        let mut changed=first.clone();changed.agent_card["name"]=json!("Must not rename");changed.agent_card["capabilities"]["extensions"]=replacement;
+        assert!(matches!(store.replace(&changed).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentChangeNotAllowed));
+        assert_eq!(store.get("bot").await.unwrap().unwrap(),first);
+    }
+    let mut updated=first.clone();updated.agent_card["capabilities"]["extensions"][0]["params"]["party"]=json!("third_party");
+    let updated=store.replace(&updated).await.unwrap();assert_eq!(updated.revision,2);
+    assert!(!store.compare_and_set(&first,0).await.unwrap());
 }

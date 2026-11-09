@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-jwt = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }

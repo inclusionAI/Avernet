@@ -22,6 +22,14 @@ pending message before exposing interaction cards or issuing a continuation.
 It does not call a Core contract via an import or facade re-export. Bootstrap
 supplies the application implementation; no implementation selection occurs here.
 
+REST clients retain default headers in `ClientWithDefaults`, outside the
+underlying reqwest transport. They are merged before tracing, so stale trace
+aliases and absent baggage cannot return at send time. Card fetch stays untraced;
+DNS pinning, TLS, credentials and redirect policy are unchanged. The binding
+exposes its five explicit BCS operations; its previous unused SDK `Deref` escape
+hatch is removed so calls cannot silently bypass the controlled header path.
+`bind_rest_client` accepts the wrapper (or a default-free reqwest client).
+
 Initial stream, async continuation, Task query/cancel and subscription share
 bounded REST error parsing so ProtoJSON typed ErrorInfo survives SDK binding
 gaps. A complete initial 400/401/403/404/405/406/415/422 rejection is Failed with
@@ -169,3 +177,33 @@ The terminal transaction adds at most one scoped context upsert, with no
 per-token writes or additional recovery scan. A failed binding CAS rolls back
 the context upsert as well. Contexts remain isolated by the full Bot/Session,
 Provider/interface and route scope.
+
+
+## Non-streaming tracking and authentication
+
+A validated Card with streaming absent/false selects Poll; true selects Stream.
+Poll uses SendMessage with returnImmediately=true, then GetTask at one-second
+intervals. Each query is bounded by 15 seconds and the remaining run deadline;
+three consecutive query failures stop tracking and invoke existing exact-task
+cleanup. Successfully applied snapshots reset this counter. Poll never invokes
+SubscribeToTask or SendStreamingMessage. Message replies finish directly; Task
+snapshots share prefix-preserving text projection and real taskId cancellation.
+Optional tool/Structured Input extensions are not negotiated in Poll mode;
+required stream-only extensions fail Card validation. INPUT_REQUIRED and
+AUTH_REQUIRED are unsupported waits and follow failure/cancellation handling.
+
+The run freezes either Provider Bearer credential kind or explicit anonymous
+mode. Anonymous HTTP/gRPC clients do not look up or transmit Provider credentials.
+Authentication errors never switch a run to anonymous or change its binding.
+
+## JSON-RPC 1.0 binding
+
+`jsonrpc` implements SendMessage, SendStreamingMessage, GetTask, CancelTask and
+SubscribeToTask on the selected endpoint. Requests use the pinned SDK models,
+PascalCase method names, A2A-Version and negotiated extension headers. Responses
+must match JSON-RPC 2.0 and request ID; errors retain numeric codes and typed data,
+not remote diagnostics. The shared bounded SSE decoder unwraps each RPC response
+before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
+binding fallback are introduced. Run persistence records json_rpc separately.
+
+Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.

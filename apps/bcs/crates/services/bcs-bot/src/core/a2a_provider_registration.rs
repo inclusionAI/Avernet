@@ -34,11 +34,9 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         let provider = self.providers.get_provider(provider_id, admin_token).await?;
         if provider.disabled { return Err(ServiceError::Forbidden("provider_disabled".into())); }
         let downlink = parse_downlink_config(&provider.config)?;
-        let credential = self.providers.get_downlink_credential(provider_id).await?;
-        if !downlink.enabled || credential.disabled || credential.secret_value.trim().is_empty()
-            || credential.credential_kind != "downlink_bcs_to_provider" {
-            return Err(invalid("A2A requires an enabled downlink credential"));
-        }
+        if !downlink.enabled {return Err(invalid("A2A requires enabled Provider downlink"));}
+        self.providers.a2a_authentication(provider_id,&card.agent_card).await?;
+        if params.bot_name!=bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(invalid)? {return Err(invalid("Bot name must match AgentCard.name"));}
         if params.connection_mode != ProviderBotConnectionMode::Gateway || params.webhook_url.is_some()
             || params.owners.len() != 1 || params.owners[0].trim().is_empty()
             || !(2..=64).contains(&params.bot_name.chars().count()) || params.bot_name != params.bot_name.trim()
@@ -62,7 +60,7 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         let owner = params.owners[0].trim();
         let capabilities = BotCapabilities { name: Some(params.bot_name), summary: params.summary,
             domains: params.domains, skills: params.skills, scopes: params.scopes,
-            visibility: "protected".into(), agent_code: identity.agent_code.clone(), ..Default::default() };
+            visibility: card.visibility.as_str().into(), agent_code: identity.agent_code.clone(), ..Default::default() };
         let bot = BotProviderRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), connection_mode: ProviderBotConnectionMode::Gateway,
             webhook_url: None, is_deleted: false };

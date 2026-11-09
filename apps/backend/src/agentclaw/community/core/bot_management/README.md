@@ -72,6 +72,7 @@ consumes:
   - "CapabilityDesiredStateRepositoryProtocol"
   - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.core.caller_identity.scheduled_refresh
   - agentclaw.community.api.bot_ownership_sync
   - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.plugin_api.bcs_ownership

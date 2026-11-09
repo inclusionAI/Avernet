@@ -29,6 +29,8 @@ pub mod onboard;
 pub mod organizations;
 pub mod providers;
 pub mod a2a_bots;
+pub mod a2a_names;
+pub mod a2a_management;
 pub mod register;
 pub mod secret;
 pub mod services;

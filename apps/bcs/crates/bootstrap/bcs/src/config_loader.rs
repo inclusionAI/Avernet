@@ -175,18 +175,31 @@ fn is_sensitive_config_key(key: &str) -> bool {
 ///
 /// TOML is converted through `toml::Value` so the result is merge-compatible
 /// with JSON configs. `path_display` is used only for error messages.
+///
+/// This is the shared entry for both the single-file and overlay loader
+/// paths; the `api.auth` value-domain guards run here per parsed file:
+/// TOML Datetime/Float are rejected before the `serde_json::to_value`
+/// conversion and JSON Null/float/non-i64 numbers before any merge, with
+/// sanitized errors that carry field path + category only.
 pub(crate) fn parse_config_content(
     ext: &str,
     content: &str,
     path_display: &str,
 ) -> Result<Value, ConfigLoadError> {
     match ext.to_lowercase().as_str() {
-        "json" => serde_json::from_str(content)
-            .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string())),
+        "json" => {
+            let value: Value = serde_json::from_str(content)
+                .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string()))?;
+            crate::api_auth_config_values::validate_api_auth_json_value(&value)
+                .map_err(ConfigLoadError::InvalidApiAuthValue)?;
+            Ok(value)
+        }
         "toml" => {
             // Convert TOML to JSON Value for merge compatibility
             let toml_value: toml::Value = toml::from_str(content)
                 .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string()))?;
+            crate::api_auth_config_values::validate_api_auth_toml_value(&toml_value)
+                .map_err(ConfigLoadError::InvalidApiAuthValue)?;
             serde_json::to_value(toml_value)
                 .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string()))
         }
@@ -448,6 +461,13 @@ pub enum ConfigLoadError {
     /// Failed to parse config file
     #[error("Failed to parse {0}: {1}")]
     Parse(String, String),
+
+    /// An `api.auth` config value is outside the supported value domain.
+    /// The message is pre-sanitized (field path + category only, spec C3);
+    /// it is deliberately not a `Parse` error so value-domain failures keep
+    /// their own classification in format-fallback and overlay handling.
+    #[error("Invalid api.auth configuration value: {0}")]
+    InvalidApiAuthValue(String),
 
     /// Failed to deserialize config
     #[error("Failed to deserialize config: {0}")]

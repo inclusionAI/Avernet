@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
-    converter_creation,
-    router,
-)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
@@ -35,6 +32,16 @@ ENGINE_SESSION = {
     "gmt_modified": "2026-07-30T09:12:04+00:00",
     "message_count": 2,
     "ext_info": {"internal": "should not be published"},
+}
+
+ENGINE_CREATED_SESSION = {
+    **ENGINE_SESSION,
+    "model": None,
+    "message_count": 0,
+    "ext_info": {"openclaw_creation": {
+        "session_id": f"agent:main:{SESSION_ID}",
+        "model": "openai/gpt-5.4",
+    }},
 }
 
 ENGINE_MESSAGE = {
@@ -188,78 +195,71 @@ def test_set_favorite_is_idempotent_and_encodes_only_the_upstream_path(
 
 
 def test_create_session_fills_user_id_from_the_principal(client, relay):
-    canonical = {
-        **ENGINE_SESSION,
-        "id": f"agent:main:{SESSION_ID}",
-        "title": "T_2d20edc1-2f84-4524-8486-15bbd7078d42",
-        "model": "openai/gpt-5.4",
-        "gmt_created": "2026-07-30T09:00:01+00:00",
-        "gmt_modified": "2026-07-30T09:00:01+00:00",
-    }
-    relay.results = [
-        EngineResult(data={**ENGINE_SESSION, "title": "T_suffix"}),
-        EngineResult(data=[canonical]),
-    ]
+    relay.results = [EngineResult(data={**ENGINE_CREATED_SESSION, "title": "T_suffix"})]
     resp = client.post(_base(), json={"title": "T"})
     assert resp.status_code == 201, resp.json()
     assert relay.calls[0]["body"]["user_id"] == OWNER
     data = resp.json()["data"]
-    assert data["session_id"] == canonical["id"]
+    assert data["session_id"] == f"agent:main:{SESSION_ID}"
     assert data["model"] == "openai/gpt-5.4"
     assert data["title"] == "T"
     assert data["gmt_create"] == ENGINE_SESSION["gmt_created"]
     assert data["gmt_modified"] == ENGINE_SESSION["gmt_modified"]
-    assert relay.calls[1]["method"] == "GET"
-    assert relay.calls[1]["path"] == "/api/sessions"
+    assert data["message_count"] == 0
+    assert "ext_info" not in data
+    assert len(relay.calls) == 1
+    assert relay.calls[0]["method"] == "POST"
+    assert relay.calls[0]["path"] == "/api/sessions"
 
 
-def test_create_session_reconciles_openclaw_lowercased_cloud_user_id(client, relay):
+@pytest.mark.parametrize("agent", ["main", "custom-agent"])
+def test_create_session_uses_acknowledged_key_without_guessing(client, relay, agent):
     relative_id = "session:ABC-123:user:CloudUser"
-    canonical_id = "agent:main:session:abc-123:user:clouduser"
+    canonical_id = f"agent:{agent}:session:abc-123:user:clouduser"
     relay.results = [
-        EngineResult(data={**ENGINE_SESSION, "id": relative_id}),
-        EngineResult(data=[{**ENGINE_SESSION, "id": canonical_id}]),
+        EngineResult(data={
+            **ENGINE_CREATED_SESSION,
+            "id": relative_id,
+            "ext_info": {"openclaw_creation": {
+                "session_id": canonical_id, "model": "openai/gpt-5.4",
+            }},
+        }),
     ]
 
     resp = client.post(_base(), json={"title": "Cloud"})
 
     assert resp.status_code == 201, resp.json()
     assert resp.json()["data"]["session_id"] == canonical_id
+    assert len(relay.calls) == 1
 
 
-@pytest.mark.parametrize(
-    ("candidate_id", "created_id", "expected"),
-    [
-        ("Opaque-ID", "Opaque-ID", True),
-        ("opaque-id", "Opaque-ID", False),
-        (
-            "agent:main:session:abc-123:user:clouduser",
-            "session:ABC-123:user:CloudUser",
-            True,
-        ),
-        (
-            "agent:other:session:abc-123:user:clouduser",
-            "agent:main:session:ABC-123:user:CloudUser",
-            False,
-        ),
-        (
-            "session:abc-123:user:clouduser",
-            "session:ABC-123:user:CloudUser",
-            False,
-        ),
-    ],
-)
-def test_create_session_reconciliation_matches_only_managed_openclaw_keys(
-    candidate_id, created_id, expected
-):
-    assert converter_creation._matches(candidate_id, created_id) is expected
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
+def test_create_keeps_stage_and_instance_on_its_only_forward(client, relay, stage):
+    relay.set_bot_type("service")
+    relay.results = [EngineResult(data=ENGINE_CREATED_SESSION)]
+
+    response = client.post(
+        _base(), json={"model": "requested-alias"},
+        params={"stage": stage, "device_uuid": "instance-B"},
+    )
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["data"]["model"] == "openai/gpt-5.4"
+    assert len(relay.calls) == 1
+    call = relay.calls[0]
+    assert call["method"] == "POST"
+    assert call["stage"] == stage
+    assert call["device_uuid"] == "instance-B"
+    assert call["body"]["model"] == "requested-alias"
+    assert call["body"]["user_id"] == OWNER
 
 
-def test_create_session_other_engine_does_not_add_reconciliation_call(client, relay):
+@pytest.mark.parametrize("engine", ["claude_code", "hermes", "deepseek_harness", "teclaw", "aicoding"])
+def test_create_session_other_engine_keeps_existing_response(client, relay, engine):
     relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
         bot_id=BOT,
         bot_type="personal",
-        active_engine="claude_code",
+        active_engine=engine,
         owner_id=OWNER,
     )
     relay.results = [EngineResult(data=ENGINE_SESSION)]
@@ -268,30 +268,25 @@ def test_create_session_other_engine_does_not_add_reconciliation_call(client, re
 
     assert resp.status_code == 201, resp.json()
     assert relay.paths == ["/api/sessions"]
-
-
-def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
-    client, relay, monkeypatch
-):
-    monkeypatch.setattr(converter_creation, "_DELAYS", (0.0, 0.0, 0.0))
-    relay.results = [EngineResult(data=ENGINE_SESSION)]
-    original_call = relay.call
-    list_attempts = 0
-
-    async def fail_only_list(**kwargs):
-        nonlocal list_attempts
-        if kwargs["method"] == "GET":
-            list_attempts += 1
-            raise EngineUpstreamError("list temporarily unavailable")
-        return await original_call(**kwargs)
-
-    relay.call = fail_only_list
-
-    resp = client.post(_base(), json={"title": "T"})
-
-    assert resp.status_code == 201, resp.json()
     assert resp.json()["data"]["session_id"] == SESSION_ID
-    assert list_attempts == 3
+    assert resp.json()["data"]["model"] == ENGINE_SESSION["model"]
+
+
+@pytest.mark.parametrize("title", [None, "", "Named_with_underscores"])
+def test_create_preserves_title_and_creation_times_without_list(client, relay, title):
+    relay.results = [EngineResult(data={
+        **ENGINE_CREATED_SESSION,
+        "title": "Named_2d20edc1-2f84-4524-8486-15bbd7078d42",
+    })]
+
+    response = client.post(_base(), json={} if title is None else {"title": title})
+
+    assert response.status_code == 201, response.json()
+    data = response.json()["data"]
+    assert data["title"] == ("Named" if title is None else title)
+    assert data["gmt_create"] == ENGINE_CREATED_SESSION["gmt_created"]
+    assert data["gmt_modified"] == ENGINE_CREATED_SESSION["gmt_modified"]
+    assert len(relay.calls) == 1
 
 
 def test_create_rejects_an_agent_one_engine_would_silently_drop(client, relay):
@@ -313,7 +308,7 @@ def test_create_does_not_forward_an_agent_field(client, relay):
     """The field is gone from the model, so nothing may reach the engine under
     that key — an empty value forwarded anyway would still read as 'no agent'
     on an engine that treats absence and blank differently."""
-    relay.results = [EngineResult(data=ENGINE_SESSION)]
+    relay.results = [EngineResult(data=ENGINE_CREATED_SESSION)]
     resp = client.post(_base(), json={"title": "T"})
     assert resp.status_code == 201, resp.json()
     assert "agent_id" not in relay.calls[0]["body"]
@@ -819,6 +814,8 @@ def test_a_service_bot_is_served_and_addressed_at_its_draft_device(
     internal default would resolve.
     """
     relay.set_bot_type("service")
+    if method == "post":
+        relay.results = [EngineResult(data=ENGINE_CREATED_SESSION)]
     kwargs = {"json": {}} if method in ("post", "patch") else {}
     resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
     assert resp.status_code in (200, 201), resp.json()
@@ -887,6 +884,8 @@ def test_a_collaborated_personal_bot_is_served_to_its_operators(
     hold the console, adjudicated per caller instead of refused for all.
     """
     relay.add_operator("u2")
+    if method == "post":
+        relay.results = [EngineResult(data=ENGINE_CREATED_SESSION)]
     client = make_client(router, caller="u2")
     kwargs = {"json": {}} if method in ("post", "patch") else {}
     kwargs["params"] = {"owner_id": OWNER}

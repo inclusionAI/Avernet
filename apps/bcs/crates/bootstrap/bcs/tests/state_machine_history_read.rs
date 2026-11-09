@@ -2,7 +2,7 @@
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use async_trait::async_trait;
 use axum::{body::{Body, to_bytes}, http::{HeaderMap, Request, StatusCode, Uri}, Router};
-use bcs_api_http::{ApiState, PrincipalVerifier, PrincipalVerificationError};
+use bcs_api_http::{ApiState, CredentialKind, PrincipalVerifier, PrincipalVerificationError, VerifiedRequestIdentity};
 use bcs_app_session::SessionServiceImpl;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_domain::MessageViewScope;
@@ -52,14 +52,14 @@ impl UserIdentityPort for Identity {
     async fn ensure_identity(&self, _: &str, _: &str, _: Option<&str>, _: Option<&str>, _: &str) -> Result<String, AuthError> { panic!("history created identity") }
     async fn get_identity_by_token(&self, _: &str) -> Result<Option<UserIdentityInfo>, AuthError> { Ok(None) }
     async fn get_identity_by_user_id(&self, _: &str) -> Result<Option<UserIdentityInfo>, AuthError> { Ok(None) }
-    async fn update_token(&self, _: &str, _: &str, _: u64) -> Result<(), AuthError> { panic!("history updated identity") }
 }
 #[async_trait]
 impl PrincipalVerifier for Identity {
-    async fn verify(&self, _: &HeaderMap) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
-        Ok(AuthenticatedCaller { tenant: None, user: Some(AuthenticatedUserIdentity {
+    async fn verify(&self, _: &HeaderMap) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
+        let caller = AuthenticatedCaller { tenant: None, user: Some(AuthenticatedUserIdentity {
             id: self.0.clone(), username: self.0.clone(), display_name: None, full_name: None,
-        }), bot: None, app: None, access_key: None })
+        }), bot: None, app: None, access_key: None };
+        Ok(VerifiedRequestIdentity::pin(caller, "history-identity", CredentialKind::ExplicitToken))
     }
 }
 

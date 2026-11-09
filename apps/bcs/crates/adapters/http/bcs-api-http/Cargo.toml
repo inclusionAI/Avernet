@@ -34,6 +34,9 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+bcs-app-auth = { workspace = true }
+bcs-auth-api = { workspace = true }
+bcs-auth-oauth = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-config = { workspace = true }

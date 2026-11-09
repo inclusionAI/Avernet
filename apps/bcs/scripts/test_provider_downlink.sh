@@ -137,11 +137,11 @@ CASES
 run_quick_suite() {
     run_case \
         "HTTP routes: provider registration and Provider Bot registration" \
-        "$CARGO_BIN" test -p bcs-http --test provider_routes_contract
+        "$CARGO_BIN" test -p bcs-http --test suite_providers provider_routes_contract -- --skip channel_provider_routes_contract
 
     run_case \
         "/bot/events: Provider Bot final callback auth and run-context handling" \
-        "$CARGO_BIN" test -p bcs-http --test bot_events_contract
+        "$CARGO_BIN" test -p bcs-http --test suite_bots bot_events_contract
 
     run_case \
         "Bootstrap integration: downlink group message and Provider final callback" \
@@ -163,11 +163,11 @@ run_full_suite() {
 
     run_case \
         "HTTP routes: provider registration and Provider Bot registration" \
-        "$CARGO_BIN" test -p bcs-http --test provider_routes_contract
+        "$CARGO_BIN" test -p bcs-http --test suite_providers provider_routes_contract -- --skip channel_provider_routes_contract
 
     run_case \
         "/bot/events: Provider Bot final callback auth and run-context handling" \
-        "$CARGO_BIN" test -p bcs-http --test bot_events_contract
+        "$CARGO_BIN" test -p bcs-http --test suite_bots bot_events_contract
 
     run_case \
         "HTTP Provider transport: webhook body, auth header and history response" \
@@ -175,11 +175,11 @@ run_full_suite() {
 
     run_case \
         "Message-flow: provider history and delivery targets" \
-        "$CARGO_BIN" test -p bcs-message-flow --test contract_message_flow provider
+        "$CARGO_BIN" test -p bcs-message-flow --test suite_routing provider
 
     run_case \
         "Message-flow: accepted chat.send records callback run context" \
-        "$CARGO_BIN" test -p bcs-message-flow --test contract_message_flow accepted_chat_send_records_run_context_for_callback
+        "$CARGO_BIN" test -p bcs-message-flow --test suite_routing accepted_chat_send_records_run_context_for_callback
 
     run_case \
         "System messages: resolve Provider delivery target" \

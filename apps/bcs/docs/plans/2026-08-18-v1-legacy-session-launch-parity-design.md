@@ -318,7 +318,7 @@ delivery and is accepted for both kinds:
 - StateMachine Group Chat receives the free-chat fallback SessionContext.
 - StateMachine service invocation starts the run and does not emit
   SessionContext, so the value has no effect.
-- ManagerWorker always sends to the Manager even when `inject` is requested.
+- Chat drivers and ManagerWorker Managers honor `context_delivery`; omitted values default to `send`.
 - Other participants receive injected context.
 
 SessionContext notification remains best-effort and asynchronous, matching the

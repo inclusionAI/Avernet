@@ -197,7 +197,7 @@ async def test_check_alive_all_retries_fail_returns_unknown():
             bot_id="bot_fail", entity_id="e_fail", minutes=30
         )
 
-    assert result == AliveResult(result="unknown", last_session_time=None)
+    assert result == AliveResult(result="unknown", last_session_time=None, error_type="ConnectError")
     assert http.get.call_count == 3
 
 

@@ -16,7 +16,7 @@ import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const allowed: PolicyResult = { allowed: true };
 
@@ -455,4 +455,51 @@ it('group advanced config tolerates malformed historical DingTalk binding fields
     fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
   }).not.toThrow();
   expect(screen.getByText('钉钉机器人配置')).toBeInTheDocument();
+});
+
+it('new DingTalk bindings default to Send and save the selected Inject value', async () => {
+  const onSaveDingTalk = jest.fn(async () => false);
+  render(<GroupManagePanel {...groupProps()} onSaveDingTalk={onSaveDingTalk} />);
+  fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+  fireEvent.click(screen.getByRole('button', { name: '绑定钉钉机器人' }));
+  const delivery = screen.getByRole('button', { name: 'Group context 投递方式' });
+  expect(delivery).toHaveTextContent('Send');
+  fireEvent.click(delivery);
+  fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+  fireEvent.change(screen.getByPlaceholderText('请输入钉钉开放平台 Robot Code'), { target: { value: 'robot-test' } });
+  fireEvent.change(screen.getByPlaceholderText('请输入钉钉开放平台 app_key'), { target: { value: 'test-key' } });
+  fireEvent.change(screen.getByPlaceholderText('请输入钉钉开放平台 app_secret'), { target: { value: 'test-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存绑定' }));
+  await waitFor(() =>
+    expect(onSaveDingTalk).toHaveBeenCalledWith(expect.objectContaining({ groupContextDelivery: 'inject' })),
+  );
+});
+
+it.each(['send', 'inject'] as const)('existing DingTalk binding displays and edits context delivery %s', (value) => {
+  render(
+    <GroupManagePanel
+      {...groupProps()}
+      dingTalkBinding={{
+        bindingId: 'binding-test',
+        status: 'active',
+        config: {
+          robotCode: 'robot-test',
+          appKey: 'test-key',
+          appSecret: '',
+          enableStreamOutput: false,
+          cardTemplateId: '',
+          groupChatScope: 'conversation_shared',
+          outboundVisibility: 'lead_only',
+          groupContextDelivery: value,
+        },
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+  expect(screen.getByText(value === 'inject' ? 'Inject' : 'Send')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+  expect(screen.getByRole('button', { name: 'Group context 投递方式' })).toHaveTextContent(
+    value === 'inject' ? 'Inject' : 'Send',
+  );
+  expect(screen.getByText(/仅对该绑定后续新建的会话生效/)).toBeInTheDocument();
 });

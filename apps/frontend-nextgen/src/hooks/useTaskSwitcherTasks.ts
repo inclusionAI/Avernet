@@ -191,10 +191,16 @@ export function useTaskSwitcherTasks(
   }, [associatedTaskIds, currentTaskId, enabled, markTaskUpdates, userId]);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), SWITCHER_REFRESH_MS);
+    // 后台标签页暂停全量任务轮询，回到前台立即补一次；不改变任务过滤完整性。
+    const refreshVisible = () => {
+      if (document.visibilityState !== 'hidden') void refresh();
+    };
+    refreshVisible();
+    const timer = setInterval(refreshVisible, SWITCHER_REFRESH_MS);
+    document.addEventListener('visibilitychange', refreshVisible);
     return () => {
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
       requestIdRef.current += 1;
     };
   }, [refresh]);

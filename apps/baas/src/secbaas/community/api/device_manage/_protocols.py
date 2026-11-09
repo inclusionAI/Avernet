@@ -103,8 +103,17 @@ class DeviceService(Protocol):
         device_uuid: str,
         modifier: str,
         for_restart: bool = False,
+        allow_residue_success: bool = False,
     ) -> DestroyDeviceResponse:
-        """Destroy device by UUID: terminates PaaS container, soft-deletes DB record."""
+        """Destroy device by UUID: terminates PaaS container, soft-deletes DB record.
+
+        ``allow_residue_success`` marks a teardown where "the sandbox is already
+        gone" is the expected outcome rather than an anomaly: DESTROY and STOP
+        pass True so an unreachable or absent sandbox completes the publish.
+        SCALE_DOWN leaves it False, because there the bot keeps running on the
+        surviving devices and a failed teardown that is reported as success
+        would hide a container that is still up.
+        """
         ...
 
     async def stop_device_by_uuid(

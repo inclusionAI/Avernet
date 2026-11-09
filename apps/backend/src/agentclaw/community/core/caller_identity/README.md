@@ -8,6 +8,8 @@ provides:
   - CallerIdentityService
   - CallerIamTokenService
   - CallerSessionValidator
+  - ScheduledCallerRefreshProtocol
+  - NoopScheduledCallerRefresh
 consumes:
   - CallerTokenProviderProtocol
   - CallerRuntimeUpdaterProtocol
@@ -97,3 +99,16 @@ the Owner for permission and runtime requests. No browser request or response
 schema changes. Consumers constructing this internal context must supply entity;
 the in-repository producer and tests are updated together. A missing entity must
 not silently bypass another user's lock by querying a new Owner-qualified key.
+
+`ScheduledCallerRefreshProtocol` v1 is an additive Service API invoked after a
+service Bot's Owner Passport runtime update succeeds. The composition root binds
+a no-op in public profiles and an enterprise service when ASC is supported.
+The explicit Bot entity is stable across Owner handoff; implementations resolve
+each actual Caller and sandbox independently. A refresh error fails the callback
+so existing Owner notification retries apply. This contract adds no scheduler
+and makes no continuous-validity guarantee between Owner renewal callbacks.
+
+For direct legacy `BotService` construction, omission of the optional refresh
+port means no scheduled-credential capability is installed. Production DI always
+provides an explicit no-op or enterprise implementation; errors from an installed
+implementation are never treated as an unconfigured capability.

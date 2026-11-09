@@ -248,6 +248,12 @@ pub async fn registration_chain() -> RegistrationChain {
             .await
             .expect("registration chain schema");
     }
+    for sql in bcs_db_api::split_sql_statements(&[
+        include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql"),
+        include_str!("../../../../../migrations/sqlite/040_bot_avatar.sql"),
+    ].concat()) {
+        inner.execute(DbStatement::new(sql)).await.expect("A2A registration schema");
+    }
     let db = ChainFailDb::new(inner);
     let env = bcs_config::resolve_env_str();
     let bot_repo = Arc::new(PersistentBotRepo::with_sql_flavor(

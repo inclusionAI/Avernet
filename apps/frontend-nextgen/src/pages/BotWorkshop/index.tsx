@@ -161,6 +161,7 @@ const BotWorkshopPage: React.FC = () => {
                       onAction={workshop.runAction}
                       onCopy={workshop.openCopy}
                       getCopyAvailability={workshop.getCopyAvailability}
+                      onRetryCopy={(bot) => void workshop.retryCopy(bot.id)}
                       onClaimLock={workshop.claimLock}
                       onReleaseLock={workshop.releaseLock}
                       getInventoryActions={(bot) => ({

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import (
+    NoopScheduledCallerRefresh, ScheduledCallerRefreshProtocol,
+)
+
 from agentclaw.community.api.caller_identity_service import (
     CallerIdentityServiceProtocol,
 )
@@ -122,6 +126,12 @@ class CallerIdentityModule(Module):
             to=UnavailableCallerTokenProvider,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def scheduled_caller_refresh(self) -> ScheduledCallerRefreshProtocol:
+        """Community-safe no-op; enterprise composition supplies ASC support."""
+        return NoopScheduledCallerRefresh()
 
     @singleton
     @provider

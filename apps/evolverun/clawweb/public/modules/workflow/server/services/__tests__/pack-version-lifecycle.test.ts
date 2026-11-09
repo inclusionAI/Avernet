@@ -7,6 +7,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { stringify } from 'yaml';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
+import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
@@ -32,12 +33,12 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
     { path: 'scripts/run.sh', operation: 'replace' as const, contentBase64: Buffer.from('echo edited\n').toString('base64'), mode: '100755' as const },
     { path: 'asset.bin', operation: 'create' as const, contentBase64: 'AP8B', mode: '100644' as const },
   ];
-  const save = () => savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
-    requestId: saveId, sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null, changes: changedFiles() });
+  const save = (sourceCommit = original) => savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
+    requestId: saveId, sourceVersion: 'draft', sourceCommit, expectedSavedHead: sourceCommit, changes: changedFiles() });
   const deploy = (candidateCommit?: string, requestId = deployId) => {
     const history = new WorkflowDeployHistoryRepository(db);
     const service = new AutoHealDeployService(db, new WorkflowSpecRepository(db, history), history,
-      { hasEditPermission: async () => true, hasExecutePermission: async () => true } as never, config(), author);
+      new BotWorkflowPermissionRepository(db), config(), author);
     return service.deploy({ workflowId: 'flow', actorId: 'editor', candidateCommit, requestId, autoRun: false });
   };
   beforeEach(() => {
@@ -57,6 +58,8 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY,bot_id TEXT,bot_owner_id TEXT,workflow_id TEXT,env TEXT,can_view INTEGER,can_execute INTEGER,can_edit INTEGER,gmt_create INTEGER,gmt_modified INTEGER);
       CREATE TABLE facade_bindings (command TEXT PRIMARY KEY,workflow_id TEXT,pack_id TEXT,remark TEXT,gmt_create INTEGER,gmt_modified INTEGER);`);
     raw.prepare('INSERT INTO workflow_specs(workflow_id,pack_id,spec_json,title,owner_id) VALUES (?,?,?,?,?)').run('flow','pack',JSON.stringify(spec),spec.title,'editor');
+    raw.prepare('INSERT INTO bot_workflow_permissions(bot_id,bot_owner_id,workflow_id,env,can_view,can_execute,can_edit) VALUES (NULL,?,?,?,?,?,?)')
+      .run('editor', 'flow', 'test', 1, 1, 1);
     db = new SqliteDatabase(raw);
   });
   afterEach(async () => { vi.restoreAllMocks(); if (db) await db.close(); if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
@@ -64,24 +67,26 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
   const saveWorkflow = (actor = 'editor') => {
     const history = new WorkflowDeployHistoryRepository(db);
     return new AutoHealSaveService(db, new WorkflowSpecRepository(db, history), history,
-      { hasEditPermission: async (_workflow: string, user: string) => user === 'editor' } as never, config(), author)
+      new BotWorkflowPermissionRepository(db), config(), author)
       .save({ workflowId: 'flow', actorId: actor, spec: edited, requestId: saveId });
   };
   const remoteGit = (...args: string[]) => git(root, '--git-dir', remote, ...args);
   const draftTitle = async () => JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title;
 
-  it('saves workflow and Pack files separately, then deploys their combined content', async () => {
-    expect(await saveWorkflow()).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'pack' });
+  it('saves workflow and Pack files to wf, then tags their exact saved commit', async () => {
+    const workflowSaved = await saveWorkflow();
+    expect(workflowSaved).toMatchObject({ ok: true, saved: true, workflowId: 'flow', packId: 'pack', branch: 'wf/flow' });
     expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
-    const saved = await save();
-    expect(saved.branch).toBe('saved/flow');
-    expect(remoteGit('show', `${saved.commit}:workflows/flow.yaml`)).toBe(stringify(spec).trim());
-    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    const saved = await save(workflowSaved.commit!);
+    expect(saved.branch).toBe('wf/flow');
+    expect(remoteGit('show', `${saved.commit}:workflows/flow.yaml`)).toBe(stringify(edited).trim());
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(saved.commit);
     expect(remoteGit('tag', '--list')).toBe('');
     const released = await deploy(saved.commit);
     expect(released).toMatchObject({ ok: true, deployed: true, version: 1, deployNumber: 1, tagName: 'deploy/flow/#1' });
     expect(remoteGit('rev-parse', 'refs/tags/deploy/flow/#1^{commit}')).toBe(released.commit);
-    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(released.commit);
+    expect(released.commit).toBe(saved.commit);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(saved.commit);
     expect(remoteGit('show', `${released.commit}:workflows/flow.yaml`)).toBe(stringify(edited).trim());
     expect(remoteGit('show', `${released.commit}:keep.txt`)).toBe('untouched');
     expect(remoteGit('rev-parse', `${released.commit}:asset.bin`)).toBe(remoteGit('rev-parse', `${saved.commit}:asset.bin`));
@@ -94,7 +99,7 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
 
   it('rejects workflow YAML changes through Pack-file save', async () => {
     await expect(savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
-      sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null,
+      sourceVersion: 'draft', sourceCommit: original, expectedSavedHead: original,
       changes: [{ path: 'workflows/flow.yaml', operation: 'replace', contentBase64: Buffer.from(stringify(edited)).toString('base64'), mode: '100644' }] }))
       .rejects.toMatchObject({ code: 'WORKFLOW_YAML_REQUIRES_DB_SAVE' });
     expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
@@ -109,29 +114,28 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
 
   it.each(['../escape', '.git/config', 'scripts/../../escape'])('rejects unsafe path %s before pushing', async file => {
     await expect(savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
-      sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null,
+      sourceVersion: 'draft', sourceCommit: original, expectedSavedHead: original,
       changes: [{ path: file, operation: 'create', contentBase64: 'YQ==', mode: '100644' }] })).rejects.toThrow();
     expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
     expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
   });
 
   it('retains a completed DB draft when the separate Pack save conflicts', async () => {
-    await saveWorkflow();
-    git(work, 'push', 'origin', 'HEAD:refs/heads/saved/flow');
+    const workflowSaved = await saveWorkflow();
     await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
     expect(await draftTitle()).toBe(edited.title);
-    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(original);
-    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(workflowSaved.commit);
     expect(remoteGit('tag', '--list')).toBe('');
   });
 
   it('does not treat a repeated request ID as an idempotent replay', async () => {
     const first = await save();
     await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
-    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(first.commit);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(first.commit);
     const one = await deploy(first.commit); const two = await deploy(first.commit);
     expect(two.deployNumber).toBe(one.deployNumber + 1);
-    expect(two.commit).not.toBe(one.commit);
+    expect(two.commit).toBe(one.commit); expect(two.tagName).not.toBe(one.tagName);
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 2 });
   });
 
@@ -141,8 +145,7 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
       requestId: '33333333-3333-4333-8333-333333333333', sourceVersion: 'draft', sourceCommit: first.commit, expectedSavedHead: first.commit,
       changes: [{ path: 'keep.txt', operation: 'replace', contentBase64: Buffer.from('new draft').toString('base64'), mode: '100644' }] });
     await expect(deploy(first.commit)).rejects.toMatchObject({ status: 409, code: 'CANDIDATE_NOT_SAVED' });
-    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(next.commit);
-    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(next.commit);
     expect(remoteGit('tag', '--list')).toBe('');
   });
 
@@ -153,11 +156,11 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
       if (args[0][0] === 'push') throw new Error('connection lost after push');
       return result;
     });
-    await expect(save()).rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'saved/flow', commit: expect.any(String) });
-    const actual = remoteGit('rev-parse', 'refs/heads/saved/flow');
+    await expect(save()).rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'wf/flow', commit: expect.any(String) });
+    const actual = remoteGit('rev-parse', 'refs/heads/wf/flow');
     expect(actual).not.toBe(original);
     expect(remoteGit('show', `${actual}:scripts/run.sh`)).toBe('echo edited');
-    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(actual);
     await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
     const input = { db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor', requestId: saveId };
     await expect(readPackOperationFromRemote(input)).rejects.toMatchObject({ status: 503, code: 'OPERATION_RECOVERY_UNAVAILABLE' });
@@ -165,13 +168,13 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
   });
 
   it('reports Git-success DB-failure without claiming activation or rolling back the remote', async () => {
-    await saveWorkflow(); const saved = await save();
+    const workflowSaved = await saveWorkflow(); const saved = await save(workflowSaved.commit!);
     raw.exec("CREATE TRIGGER fail_release BEFORE INSERT ON workflow_deploy_history BEGIN SELECT RAISE(ABORT, 'injected DB failure'); END");
     await expect(deploy(saved.commit)).rejects.toMatchObject({ code: 'DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN', requestId: deployId, cause: expect.any(Error) });
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
     expect(remoteGit('tag', '--list')).toBe('deploy/flow/#1');
     expect(remoteGit('rev-parse', 'refs/tags/deploy/flow/#1^{commit}')).toBe(remoteGit('rev-parse', 'refs/heads/wf/flow'));
-    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(saved.commit);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(saved.commit);
     expect(await draftTitle()).toBe(edited.title);
   });
 

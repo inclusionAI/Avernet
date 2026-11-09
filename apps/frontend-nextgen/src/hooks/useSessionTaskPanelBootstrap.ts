@@ -125,15 +125,17 @@ export function useSessionTaskPanelBootstrap({
   sessionId,
   userId,
   panelRef,
+  enabled = true,
 }: {
   sessionId: string | null;
   userId: string | null;
   panelRef: PanelRef;
+  enabled?: boolean;
 }): void {
   // effect 依赖已限定会话边界；不要额外缓存执行标记，否则已取消的恢复会阻挡
   // selectedSession 短暂为空后重入同一会话（以及 StrictMode 的 effect 重放）。
   useEffect(() => {
-    if (!sessionId || !userId) return undefined;
+    if (!enabled || !sessionId || !userId) return undefined;
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
     const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
     if (!sessionOwnerUserId) return undefined;
@@ -218,7 +220,7 @@ export function useSessionTaskPanelBootstrap({
     return () => {
       cancelled = true;
     };
-  }, [panelRef, sessionId, userId]);
+  }, [enabled, panelRef, sessionId, userId]);
 }
 
 export default useSessionTaskPanelBootstrap;

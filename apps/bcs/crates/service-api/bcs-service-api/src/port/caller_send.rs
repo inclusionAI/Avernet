@@ -15,8 +15,14 @@
 //! - `request_digest` and `control_revision` are BCS-local dispatch facts;
 //!   the HTTP adapter constructs Accepted from the in-flight command, not
 //!   Provider echoes. They are not serialized into the Provider request;
-//! - synchronous `{"ok":true}` means accepted, never completed. Existing
+//! - synchronous `{"ok":true}`, or a successful negotiated SSE response with
+//!   its reader/correlation installed, means accepted, never completed. Existing
 //!   run-correlated bot events own asynchronous results and terminal state;
+//! - the configured HTTP adapter registers non-secret run/scope/abort context
+//!   before I/O and fences each run to SSE or callback reception. SSE uses the
+//!   run deadline/idle bound, never the finite ACK budget or a total HTTP timeout;
+//!   explicit rejections release the transport registration for history redrive,
+//!   but uncertain sends must not be automatically retried;
 //! - identity and history isolation constraints remain enforced independently
 //!   of ACK shape. This port does not define a second task lifecycle.
 

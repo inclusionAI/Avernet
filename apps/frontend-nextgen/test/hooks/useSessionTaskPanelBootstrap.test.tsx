@@ -72,6 +72,18 @@ beforeEach(() => {
   useTaskSessionAssociationStore.getState().reset();
 });
 
+it('历史未就绪时不请求任务，历史就绪后保留原恢复流程', async () => {
+  const panel = makePanelRef();
+  const { rerender } = renderHook(({ ready }) => useSessionTaskPanelBootstrap({
+    sessionId: 'sess-1', userId: 'u1', panelRef: panel.ref, enabled: ready,
+  }), { initialProps: { ready: false } });
+  expect(mockGetTaskBySession).not.toHaveBeenCalled();
+  expect(mockListMyTasks).not.toHaveBeenCalled();
+  rerender({ ready: true });
+  await waitFor(() => expect(mockGetTaskBySession).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(mockListMyTasks).toHaveBeenCalledTimes(1));
+});
+
 describe('findLatestTaskForSession', () => {
   it('只选择当前会话中最后更新的任务', () => {
     const older = taskRecord('task-old', '2026-10-27 10:00:00');

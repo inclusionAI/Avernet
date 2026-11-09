@@ -170,7 +170,7 @@ impl PersistentBotRepo {
             let bot_info_params = columns.bot_info_params;
             if let Some(token) = session_token {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -184,7 +184,7 @@ impl PersistentBotRepo {
                 self.db_execute_affected(&sql, params).await
             } else {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);

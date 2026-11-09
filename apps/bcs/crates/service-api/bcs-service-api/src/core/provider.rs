@@ -83,6 +83,13 @@ pub trait ProviderCoreService: Send + Sync {
         })
     }
 
+    /// Freeze a previously resolved Provider name before using it for A2A.
+    /// Fails if a concurrent rename invalidated the supplied identity/name pair.
+    async fn pin_a2a_provider_name(&self, provider_id: &str, name: &str) -> ServiceResult<()> {
+        let _ = (provider_id, name);
+        Err(ServiceError::InternalError("A2A Provider name reservation unavailable".into()))
+    }
+
     async fn register_provider_with_policy(
         &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
         created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
@@ -151,6 +158,11 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<RegisteredProvider>;
 
     async fn authenticate_provider_admin(&self, token: &str) -> ServiceResult<ProviderRecord>;
+    /// Chooses a satisfiable Card requirement using deployment policy and current credentials.
+    async fn a2a_authentication(&self, _provider_id:&str, _card:&serde_json::Value)
+        ->ServiceResult<bcs_domain::a2a_auth::A2aAuthentication> {
+        Err(ServiceError::InvalidOperation {message:"A2A authentication policy is not configured".into(),request_id:None})
+    }
     async fn get_downlink_credential(&self, provider_id: &str)
     -> ServiceResult<ProviderCredential>;
     async fn get_provider(

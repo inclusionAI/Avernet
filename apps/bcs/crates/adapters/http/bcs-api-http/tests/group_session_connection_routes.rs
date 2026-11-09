@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{
-    PrincipalVerificationError, PrincipalVerifier, group_session_connection_router,
+    CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+    VerifiedRequestIdentity, group_session_connection_router,
 };
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
@@ -25,12 +26,12 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         match headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
         {
-            Some("yes") => Ok(self.caller.clone()),
+            Some("yes") => Ok(VerifiedRequestIdentity::pin(self.caller.clone(), "test-double", CredentialKind::GatewayPrincipalHeader)),
             Some("invalid") => Err(PrincipalVerificationError::Invalid("bad signature".into())),
             _ => Err(PrincipalVerificationError::Missing),
         }
@@ -154,7 +155,7 @@ fn app(
     service: Arc<FakeConnectionService>,
     caller: AuthenticatedCaller,
 ) -> axum::Router {
-    group_session_connection_router(service, Arc::new(HeaderVerifier { caller }))
+    group_session_connection_router(service, Arc::new(HeaderVerifier { caller }), None)
 }
 
 #[tokio::test]

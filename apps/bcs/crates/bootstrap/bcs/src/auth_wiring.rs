@@ -138,7 +138,7 @@ fn build_builtin_auth_plugin(
     name: &str,
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
-    user_identity_port: Option<Arc<dyn UserIdentityPort>>,
+    session_identity_port: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
 ) -> Result<Option<Box<dyn AuthPlugin>>, ()> {
     match name {
         "session" => {
@@ -151,15 +151,27 @@ fn build_builtin_auth_plugin(
         // the JWT). The plugin name is intentionally NOT a provider name —
         // `oauth_session` enables session verification, it does not select
         // Google/GitHub. Provider selection happens via `[auth.oauth.*]`.
+        //
+        // STRICT construction only (the unsafe-construction seam was
+        // deleted in the Task 11 entrypoint migration): verification
+        // enforces signature + environment + session-instance revision +
+        // revocation, so every accepted session was issued through the
+        // engine's install lifecycle (the shared login entrypoints do
+        // exactly that).
         "oauth_session" => {
-            if let (Some(oauth), Some(port)) = (&config.oauth, &user_identity_port) {
-                Ok(Some(Box::new(OAuthSessionPlugin::new(
-                    oauth.jwt_secret.clone(),
-                    Arc::clone(port),
+            if let (Some(oauth), Some(identities)) = (&config.oauth, &session_identity_port) {
+                let engine = bcs_auth_oauth::OAuthSessionEngine::new(
+                    bcs_jwt::OAuthSessionJwt::new(&oauth.jwt_secret),
+                    Arc::clone(identities),
+                    oauth.env.clone(),
+                    oauth.idle_timeout_secs(),
+                );
+                Ok(Some(Box::new(OAuthSessionPlugin::new_with_session_engine(
+                    Arc::new(engine),
                 ))))
             } else {
                 tracing::warn!(
-                    "oauth_session plugin requested but OAuth config or UserIdentityPort missing"
+                    "oauth_session plugin requested but OAuth config or strict session identity port missing"
                 );
                 Ok(None)
             }
@@ -173,6 +185,7 @@ pub fn try_build_auth_chain_with_factories(
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     user_identity_port: Option<Arc<dyn UserIdentityPort>>,
+    session_identity_port: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
     extension_factories: &[AuthPluginFactory],
 ) -> Result<AuthPluginChain, String> {
     let mut plugins: Vec<Box<dyn AuthPlugin>> = Vec::new();
@@ -181,7 +194,7 @@ pub fn try_build_auth_chain_with_factories(
             name,
             config,
             Arc::clone(&bot_registry),
-            user_identity_port.clone(),
+            session_identity_port.clone(),
         ) {
             Ok(Some(plugin)) => {
                 plugins.push(plugin);
@@ -260,12 +273,14 @@ pub fn build_auth_chain_with_factories(
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     user_identity_port: Option<Arc<dyn UserIdentityPort>>,
+    session_identity_port: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
     extension_factories: &[AuthPluginFactory],
 ) -> AuthPluginChain {
     match try_build_auth_chain_with_factories(
         config,
         bot_registry,
         user_identity_port,
+        session_identity_port,
         extension_factories,
     ) {
         Ok(chain) => chain,
@@ -282,8 +297,15 @@ pub fn build_auth_chain(
     config: &AuthConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     user_identity_port: Option<Arc<dyn UserIdentityPort>>,
+    session_identity_port: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
 ) -> AuthPluginChain {
-    build_auth_chain_with_factories(config, bot_registry, user_identity_port, &[])
+    build_auth_chain_with_factories(
+        config,
+        bot_registry,
+        user_identity_port,
+        session_identity_port,
+        &[],
+    )
 }
 
 /// Construct one `OAuthProvider` from a configured provider instance.
@@ -441,7 +463,7 @@ mod tests {
             }
         });
 
-        let chain = build_auth_chain_with_factories(&config, bot_registry, None, &[factory]);
+        let chain = build_auth_chain_with_factories(&config, bot_registry, None, None, &[factory]);
 
         assert_eq!(chain.plugin_names(), vec!["custom_auth"]);
     }
@@ -454,7 +476,7 @@ mod tests {
         let bot_registry: Arc<dyn BotRegistryCoreService> =
             Arc::new(bcs_bot::BotCore::with_base_dir(data_dir.path().to_path_buf()));
 
-        let chain = build_auth_chain(&config, bot_registry, None);
+        let chain = build_auth_chain(&config, bot_registry, None, None);
 
         assert_eq!(chain.plugin_names(), vec!["custom_auth"]);
     }
@@ -468,7 +490,7 @@ mod tests {
         let bot_registry: Arc<dyn BotRegistryCoreService> =
             Arc::new(bcs_bot::BotCore::with_base_dir(data_dir.path().to_path_buf()));
 
-        let error = match try_build_auth_chain_with_factories(&config, bot_registry, None, &[]) {
+        let error = match try_build_auth_chain_with_factories(&config, bot_registry, None, None, &[]) {
             Ok(_) => panic!("strict auth should reject missing plugin"),
             Err(error) => error,
         };

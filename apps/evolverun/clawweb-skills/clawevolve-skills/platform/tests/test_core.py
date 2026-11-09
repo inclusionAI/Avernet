@@ -15,6 +15,9 @@ class BusinessCoreTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        patcher = patch.object(runtime, 'SOURCE_WORKSPACE', self.root / 'runtime')
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.input = self.root / 'input.json'
         self.input.write_text('{}')
         skill = self.root / 'SKILL.md'
@@ -77,8 +80,8 @@ class BusinessCoreTest(unittest.TestCase):
         session = core.BusinessCore(self.context)
         with self.assertRaises(core.CoreWaiting) as caught:
             session('analysis', {}, {})
-        with patch.object(runtime, '_http', side_effect=TimeoutError('lost reply')):
-            with self.assertRaises(TimeoutError):
+        with patch.object(runtime, '_http', side_effect=TimeoutError('lost reply')), patch.object(runtime.time, 'sleep'):
+            with self.assertRaises(runtime.RuntimeFailure):
                 session.report_waiting(self.args, caught.exception)
         with self.assertRaisesRegex(runtime.RuntimeFailure, 'uncertain outcome'):
             core.BusinessCore(self.context)('analysis', {}, {})

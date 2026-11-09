@@ -26,7 +26,11 @@ use bcs_service_api::application::caller_container::{
 };
 use bcs_service_api::application::caller_handoff::{HandoffClaim, HumanCallerDeliveryHandoffService};
 
-use readiness::dispatch_handoff_scope;
+// Re-exported (was a private `use`): the result-leg identity park in
+// queued_task_terminal must derive the SAME claim key the dispatch claim
+// (dispatch_once) and the readiness probe use — scope drift between park
+// and claim is a silent permanent identity loss (readiness.rs contract).
+pub(crate) use readiness::dispatch_handoff_scope;
 use bcs_service_api::application::caller_identity::CallerExecutionToken as ProofToken;
 use bcs_service_api::port::{
     CallerContainerMinimum, CallerDispatchAck, CallerDispatchAssociation, CallerExecutionSendPort, CallerOpaqueRef, ContainerRunAssociation,
@@ -173,37 +177,6 @@ pub enum CallerDispatchOutcome {
     OutcomeUnknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CallerDispatchError {
-    /// No identity parked for this scope (admission never published, or
-    /// already claimed/expired). Fail closed; never owner-dispatch.
-    #[error("caller identity unavailable")]
-    IdentityUnavailable,
-    /// Container preparation refused (not ready, linkage corrupt, isolation
-    /// below requirement). Identity already consumed by the claim.
-    #[error("caller container preparation failed")]
-    PreparationFailed,
-    /// The identity plugin refused to issue (gate: bad input, expired
-    /// subject, misconfigured keys).
-    #[error("caller identity plugin refused to issue")]
-    IssueFailed,
-    /// Structural input invalid (attempt 0, empty facts, inverted clocks).
-    #[error("invalid caller dispatch input")]
-    InvalidInput,
-    /// The identity plugin refused the subject establishment (the
-    /// ingress→trusted-subject exchange failed — trusted ingress refused,
-    /// a misconfigured profile, or a trust window that already ended).
-    /// Identity already consumed by the claim — the human re-submits.
-    #[error("caller subject establishment failed")]
-    EstablishFailed,
-    /// The typed `commit_caller_dispatch` CAS refused the canonical digest
-    /// (association drift, stale version, status divergence). Network has
-    /// already been touched at preparation, so callers must converge this
-    /// conservatively; the one-shot identity is consumed.
-    #[error("caller dispatch commit refused")]
-    CommitFailed,
-}
-
 /// The runtime-facing seam. All collaborators are injected ports/services;
 /// composition root owns their assembly.
 #[derive(Clone)]
@@ -235,6 +208,11 @@ pub struct CallerDispatchPipeline {
     /// this constructor from the opaque ref (never materializing it).
     #[allow(dead_code)]
     container_ttl_ms: i64,
+    /// Per-stage liveness budget shared by every bounded stage (spec
+    /// 2026-11-03). The composition root passes the same 30s the ordinary
+    /// runtime uses as `io_timeout`; tests shrink it to assert the
+    /// stage-timeout convergence.
+    stage_timeout: std::time::Duration,
     /// §6.8 same-dispatch barrier redrive (review-V B3.2): the backfill
     /// port + the parked inputs + the backoff ladder. The parks carry
     /// runtime-only identity material (the ORIGINAL issued command), so
@@ -279,6 +257,7 @@ impl CallerDispatchPipeline {
             barrier_backoff_ms: Arc::new(barrier::default_backoff()),
             delivery_term: None,
             container_ttl_ms,
+            stage_timeout: DEFAULT_STAGE_TIMEOUT,
         }
     }
 
@@ -348,6 +327,14 @@ impl CallerDispatchPipeline {
     /// runs un-fenced — production wiring always supplies it.
     pub fn with_delivery_term(mut self, token: Arc<std::sync::atomic::AtomicU64>) -> Self {
         self.delivery_term = Some(token);
+        self
+    }
+
+    /// Sets the per-stage liveness bound shared by every pipeline stage
+    /// (spec 2026-11-03); production wiring mirrors the ordinary path's
+    /// `io_timeout` (30s).
+    pub fn with_stage_timeout(mut self, budget: std::time::Duration) -> Self {
+        self.stage_timeout = budget;
         self
     }
 
@@ -549,12 +536,20 @@ impl CallerDispatchPipeline {
             now_ms,
         );
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "handoff_claim", "caller protected dispatch stage");
-        let ingress = match self.handoff.claim(&scope, claim).await {
-            Ok(ingress) => ingress,
+        // Stage liveness (spec 2026-11-03): a claim that exceeded its bound
+        // left the slot state unprovable — the claim may or may not have been
+        // consumed. The conservative `other` arm (Failed, lane released) is
+        // the only honest convergence; `IdentityUnavailable` would assert a
+        // provable refusal this is not.
+        let ingress = match stage_bound(self.stage_timeout, "handoff_claim", self.handoff.claim(&scope, claim)).await {
+            Some(Ok(ingress)) => ingress,
             // Everything short of a successful claim means no identity is
             // available for this scope; identity carries no expiry window,
             // so age can never be the refusal reason.
-            Err(_) => return Err(CallerDispatchError::IdentityUnavailable),
+            Some(Err(_)) => return Err(CallerDispatchError::IdentityUnavailable),
+            // The stage budget lapsed mid-claim: converges Failed via the
+            // conservative `other` arm below.
+            None => return Err(CallerDispatchError::StageTimeout { stage: "handoff_claim" }),
         };
         // No identity window participates in dispatch: the effective bound
         // is the row's run budget only, and no clock comparison rejects.
@@ -594,19 +589,27 @@ impl CallerDispatchPipeline {
             now_ms,
         };
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "container_prepare", "caller protected dispatch stage");
-        let prepared = match self.preparation.prepare(target, service_credential, ensure, now_ms).await {
-            Ok(PrepareOutcome::Prepared { descriptor, effective_deadline_ms: _ }) => {
+        // Stage liveness (spec 2026-11-03, 计划期修订): the ordinary path
+        // wraps its network deliver in `io_timeout`; the ensure adapter
+        // self-limits (10s) but the outer stage budget still bounds the
+        // wait so a wedged port converges, never hangs the lane forever.
+        let prepared = match stage_bound(self.stage_timeout, "container_ensure", self.preparation.prepare(target, service_credential, ensure, now_ms)).await {
+            Some(Ok(PrepareOutcome::Prepared { descriptor, effective_deadline_ms: _ })) => {
                 // The effective bound is the row's run budget only; the
                 // container's own deadline stays container housekeeping
                 // (descriptor/observe TTL) and never trims authorization.
                 (descriptor, effective_not_after)
             }
-            Err(CallerPreparationError::Gateway { unknown_outcome: true, .. }) => {
+            // Budget lapsed mid-ensure: the container may exist but the
+            // outcome is unprovable — conservative Failed, the adapter
+            // self-limits below stay the precision instrument.
+            None => return Err(CallerDispatchError::StageTimeout { stage: "container_ensure" }),
+            Some(Err(CallerPreparationError::Gateway { unknown_outcome: true, .. })) => {
                 // Ambiguous container preparation after a network attempt:
                 // executing further is premature; identity is consumed.
                 return Err(CallerDispatchError::PreparationFailed);
             }
-            Err(_) => return Err(CallerDispatchError::PreparationFailed),
+            Some(Err(_)) => return Err(CallerDispatchError::PreparationFailed),
         };
         let (descriptor, effective_deadline) = prepared;
         // Observe index seeding (spec §6.9/§10.8 replacement rule): every
@@ -644,31 +647,42 @@ impl CallerDispatchPipeline {
         // display identity — and the established window caps every later
         // stage (only shrinks, never extends).
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "establish_subject", "caller protected dispatch stage");
-        let established = self
+        let established = match stage_bound(self.stage_timeout, "establish_subject", self
             .identity
             .establish_subject(bcs_caller_identity_api::EstablishCallerSubject {
                 ingress: (*ingress).clone(),
                 now_ms,
-            })
+            }))
             .await
-            .map_err(|error| {
+        {
+            Some(Ok(established)) => established,
+            Some(Err(error)) => {
                 tracing::warn!(
                     request_id = %bcs_observability::CurrentRequestId,
                     dispatch_id = %facts.dispatch_id,
                     error = ?error,
                     "caller identity plugin refused to establish the subject"
                 );
-                CallerDispatchError::EstablishFailed
-            })?;
+                return Err(CallerDispatchError::EstablishFailed);
+            }
+            None => return Err(CallerDispatchError::StageTimeout { stage: "establish_subject" }),
+        };
         // Advisory caller-context lifetime for the wire envelope; never a
         // rejection basis.
         let identity_deadline = established.expires_at_ms;
         let identity_subject = established.subject_ref.expose_ref().to_string();
         let identity_subject_type = established.subject_ref.ref_type();
         let subject_ref = established.subject_ref;
+        // The registry lookup is in-process and fast, but the spec counts the
+        // `target_agent_code` hunt inside the issue stage's liveness bound so
+        // a wedged registry port cannot stretch the budget unmeasured.
+        let agent_code = match stage_bound(self.stage_timeout, "issue_execution", self.target_agent_code(&facts.target_bot_id)).await {
+            Some(code) => code,
+            None => return Err(CallerDispatchError::StageTimeout { stage: "issue_execution" }),
+        };
         let issue_input = IssueCallerExecution {
             staff_no: opaque_from(ingress.actor()),
-            agent_code: self.target_agent_code(&facts.target_bot_id).await,
+            agent_code,
             sandbox_container_id: descriptor.sandbox_container_id.clone(),
             subject: subject_ref,
             run: bcs_caller_identity_api::CallerRunBinding {
@@ -698,9 +712,9 @@ impl CallerDispatchPipeline {
             now_ms,
         };
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "issue_execution", "caller protected dispatch stage");
-        let proof: ProofToken = match self.identity.issue_execution(issue_input).await {
-            Ok(token) => token,
-            Err(error) => {
+        let proof: ProofToken = match stage_bound(self.stage_timeout, "issue_execution", self.identity.issue_execution(issue_input)).await {
+            Some(Ok(token)) => token,
+            Some(Err(error)) => {
                 tracing::warn!(
                     request_id = %bcs_observability::CurrentRequestId,
                     dispatch_id = %facts.dispatch_id,
@@ -709,6 +723,7 @@ impl CallerDispatchPipeline {
                 );
                 return Err(CallerDispatchError::IssueFailed);
             }
+            None => return Err(CallerDispatchError::StageTimeout { stage: "issue_execution" }),
         };
 
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "digest_commit", "caller protected dispatch stage");
@@ -760,10 +775,16 @@ impl CallerDispatchPipeline {
                         control_revision: facts.control_revision,
                     },
                 };
-            managed
-                .commit_caller_dispatch(commit_command)
-                .await
-                .map_err(|_| CallerDispatchError::CommitFailed)?;
+            match stage_bound(self.stage_timeout, "digest_commit", managed.commit_caller_dispatch(commit_command)).await {
+                // The old semantics converge any commit failure (CAS
+                // refusal included) as CommitFailed; the budget lapse
+                // converges the same conservative way — only the log WARN
+                // distinguishes them (the StageTimeout record on the way
+                // out names the stage).
+                Some(Ok(_)) => {}
+                Some(Err(_)) => return Err(CallerDispatchError::CommitFailed),
+                None => return Err(CallerDispatchError::StageTimeout { stage: "digest_commit" }),
+            }
         }
 
         // ---- Protected send. ----
@@ -820,9 +841,11 @@ impl CallerDispatchPipeline {
                                 .as_ref()
                                 .map(|history| history.history_cutoff_seq)
                                 .unwrap_or(0),
-                            // Run budget only: the lineage's lifetime is the
-                            // run window, never a token/container advisory.
-                            expires_at_ms: effective_not_after,
+                            // The lineage window: run budget BOUNDED by the
+                            // established subject's TTL — identity may only
+                            // shorten the visible expiry, never relabel-up
+                            // (the identity plugin's MAC binding rejects it).
+                            expires_at_ms: effective_not_after.min(identity_deadline),
                             // spec §8.3 delegation-only material: the root's
                             // stable pseudonymous subject, runtime-only,
                             // from the claimed ingress actor — the delegate
@@ -837,7 +860,16 @@ impl CallerDispatchPipeline {
             facts.shared_content_kind.clone(), proof, at_term);
         if !self.delivery_term_is_current(at_term) { return Err(CallerDispatchError::CommitFailed); }
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "send", "caller protected dispatch stage");
-        let send_result = self.sender.send_caller_execution(target, service_credential, command.clone()).await;
+        // Stage liveness (spec 2026-11-03, 计划期修订): the ordinary path
+        // wraps its deliver in `io_timeout` (TransportUnknown on expiry);
+        // the send adapter self-limits at `callback_timeout_ms` and returns
+        // `Ack::Unknown` — the stage budget only converges a wedged port,
+        // and converges it the SAME way the adapter's own limit would:
+        // OutcomeUnknown, the only honest evidence for an in-flight send.
+        let send_result = match stage_bound(self.stage_timeout, "send", self.sender.send_caller_execution(target, service_credential, command.clone())).await {
+            Some(result) => result,
+            None => return Ok(CallerDispatchOutcome::OutcomeUnknown),
+        };
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "send_returned", "caller protected dispatch stage");
         match send_result {
             Ok(CallerDispatchAck::Accepted { .. }) => {
@@ -949,8 +981,12 @@ mod observe;
 mod accepted;
 mod delegate;
 mod readiness;
+mod errors;
+mod stage;
 pub use barrier::HistoryBarrierConverger;
 pub use delegate::{DelegateDispatchError, DelegateDispatchFacts};
+pub use errors::CallerDispatchError;
+use stage::{DEFAULT_STAGE_TIMEOUT, stage_bound};
 
 // ---- small adapters (opaque wrapping only; no secret materialization) ----
 

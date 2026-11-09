@@ -2,8 +2,19 @@ openapi: 3.1.0
 info:
   title: BCN Internal API
   version: 1.0.0
-  description: Versioned internal contract for trusted BCN collaboration services.
+  description: >-
+    Versioned internal contract for trusted BCN collaboration services.
+    Protected internal routes authenticate through the same configurable
+    V1 source chain as the public surface (see
+    ../authentication/contract.md): a strict chain in configured order
+    with no fallback on failure. Signed Bot/App/AccessKey principals keep
+    their existing trust path; a strict-auth backing dependency outage on
+    any source surfaces as 503 / 50300 / auth_dependency_unavailable, and
+    the long-standing Bot identity store fault keeps its 502 /
+    bot_identity_unavailable mapping.
 paths:
+  /api/v1/collaboration/invite-codes/init:
+    $ref: ./internal/invite-codes.yaml#/InitInviteCodesPath
   /api/v1/collaboration/drafts/{draftId}/revisions/{revision}:
     $ref: ./internal/collaboration-drafts.yaml#/RevisionPath
   /api/v1/collaboration/drafts/{draftId}/revisions/{revision}/validate:

@@ -912,6 +912,10 @@ class BotInventoryItem(BaseModel):
     status: str = Field(
         description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
     )
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="Derive-on-read copy operation state for this bot; null when the bot is not a copy dst or the copy already converged. FE uses it for the copy-progress badge and retry action on inventory cards.",
+    )
     publish: InventoryPublication | None = Field(
         default=None,
         description="Publication represented by this service card; null for non-service Bots or when no publication exists.",

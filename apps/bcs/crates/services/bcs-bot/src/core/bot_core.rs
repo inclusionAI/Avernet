@@ -51,7 +51,7 @@ pub struct BotCore {
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
     pub(super) bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
-    a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
+    pub(super) a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
     a2a_url_guard:bcs_route_security::OutboundUrlGuard,
     a2a_grpc_urls:Vec<String>,
 }
@@ -99,6 +99,9 @@ impl BotCore {
             a2a_grpc_urls:vec![],
         }
     }
+
+    /// Compatibility builder; admitted anonymous Cards no longer need a runtime opt-in.
+    pub fn with_a2a_anonymous(self,_allow:bool)->Self {self}
 
     pub fn with_a2a_route_policy(mut self, guard:bcs_route_security::OutboundUrlGuard, grpc_urls:Vec<String>)->Self {
         self.a2a_url_guard=guard;self.a2a_grpc_urls=grpc_urls;self

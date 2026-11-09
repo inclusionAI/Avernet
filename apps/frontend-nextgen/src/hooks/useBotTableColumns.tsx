@@ -1,4 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
+import BotCopyRetryAction from '@/components/BotWorkshop/BotCard/BotCopyRetryAction';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
@@ -8,6 +9,7 @@ import type { BotTableColumnOptions } from '@/components/BotWorkshop/BotCard/bot
 import BotTagsCell from '@/components/BotWorkshop/BotCard/BotTagsCell';
 import BotVersionCell from '@/components/BotWorkshop/BotCard/BotVersionCell';
 import { type DataTableColumn } from '@/components/ui/DataTable';
+import { BOT_COPY_FEATURE_ENABLED } from '@/hooks/useBotWorkshopCopyHost';
 import { botTableEngineVersionKey } from '@/hooks/useBotTableEngineVersions';
 import { getBotEntryAvailability, type BotDomain } from '@/services/botWorkshop';
 import { useMemo } from 'react';
@@ -46,6 +48,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onGeneralConfig,
     getCopyAvailability,
     onCopy,
+    onRetryCopy,
     onOpenEngineInfo,
     onUpdateEngineVersion,
   } = options;
@@ -139,6 +142,12 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
+          // 复制失败(gated):仅 copy_state.status === FAILED 时,操作列折叠为重试入口。
+          // 中间态(复制中)不再占用操作列 —— dst bot 未收敛,但用户仍可走正常 actions 查看进度,
+          // 不强行塞重试按钮(避免对 RUNNING/FILE_SYNCED 的 bot 误导「可重试」)。
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
+          if (copyState?.status === 'FAILED' && onRetryCopy)
+            return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
@@ -228,6 +237,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onGeneralConfig,
       getCopyAvailability,
       onCopy,
+      onRetryCopy,
       onOpenEngineInfo,
       onUpdateEngineVersion,
       engineVersionStates,

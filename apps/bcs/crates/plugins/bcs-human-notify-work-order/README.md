@@ -33,7 +33,7 @@ and provider builds together.
 
 - `cargo test -p bcs-human-notify-work-order`
 - `cargo test -p bcs-human-notify-dummy` (shared Plugin API conformance)
-- `cargo test -p bcs-message-flow --test contract_human_notify_context`
+- `cargo test -p bcs-message-flow --test suite_coordination contract_human_notify_context`
 - `cargo test -p bcs --lib human_notify`
 
 Payload tests cover named/unnamed contexts, group-only messages, UTF-8 truncation

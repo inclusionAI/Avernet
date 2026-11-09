@@ -141,7 +141,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
       )}
       {showGrid && activeActor && (
         // dmore：3 列卡片网格，16px 间距（页头下 16px 起）。
-        <div ref={gridRef} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div ref={gridRef} data-guide-target="discover-public-bot-list" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {vm.bots.map((bot) => (
             <SquareBotCard
               key={getPublicBotTargetId(bot)}

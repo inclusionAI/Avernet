@@ -356,7 +356,11 @@ impl bcs_service_api::port::OrchestrationCallerDispatchPort for CallerDispatchPi
                 group_id: d.group_id.clone(),
                 session_id: d.session_id.clone(),
                 history_cutoff_seq: lineage.history_cutoff_seq,
-                expires_at_ms: effective_deadline,
+                // The node lineage inherits the parent's already-bounded
+                // window: identity expiry may only shorten, never extend —
+                // a relabel-up beyond the subject's minted TTL fails the
+                // identity plugin's MAC binding on every later hop.
+                expires_at_ms: effective_deadline.min(lineage.expires_at_ms),
                 identity_subject: lineage.identity_subject.clone(),
                 identity_subject_type: lineage.identity_subject_type,
                 delegate_subject: lineage.delegate_subject.clone(),
@@ -432,9 +436,12 @@ impl bcs_service_api::port::OrchestrationInstanceRegistrar for CallerDispatchPip
                 group_id: association.group_id.clone(),
                 session_id: association.session_id.clone(),
                 history_cutoff_seq: association.history_cutoff_seq,
-                // Run-budget fact from the association; never a token
-                // advisory and never a rejection basis.
-                expires_at_ms: association.expires_at_ms,
+                // The association's run-budget expiry may run past the
+                // freshly minted subject's TTL; the lineage window is the
+                // run budget BOUNDED by that established identity window —
+                // identity may only shorten the visible expiry, never
+                // relabel-up (the identity plugin's MAC binding rejects it).
+                expires_at_ms: association.expires_at_ms.min(established.expires_at_ms),
                 identity_subject: established.subject_ref.expose_ref().to_string(),
                 identity_subject_type: established.subject_ref.ref_type(),
                 delegate_subject: association.ingress.actor().staff_no.clone(),

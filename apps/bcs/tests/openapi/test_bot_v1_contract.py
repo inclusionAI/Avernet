@@ -82,6 +82,7 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
 
     common_required = {
         "bot_id",
+        "avatar_url",
         "kind",
         "name",
         "visibility",
@@ -95,6 +96,11 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
     }
     physical = variants["bot"]
     human = variants["human"]
+
+    for variant in (physical, human):
+        avatar = variant["properties"]["avatar_url"]
+        assert avatar["type"] == "string"
+        assert avatar["nullable"] is True
 
     assert physical["additionalProperties"] is False
     assert human["additionalProperties"] is False

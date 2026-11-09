@@ -1,4 +1,3 @@
-import { MessageViewScopeMenuButton } from '@/components/MessageViewScope';
 import { Badge, Button, IconButton } from '@/components/ui';
 import {
   AlertDialog,
@@ -14,10 +13,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
 import { cn } from '@/utils/cn';
-import { ChevronDown, MoreHorizontal, Plus, Settings2, Share2, Trash2 } from 'lucide-react';
+import { ChevronDown, MoreHorizontal, Settings2, Share2, Trash2 } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 import { SharePopover } from '../ManagePanel/SharePopover';
 import { SessionScopeFilter } from '../SessionScopeFilter';
+import { CreateSessionMenu } from './CreateSessionMenu';
 import { GroupAvatarStack } from './GroupAvatarStack';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
 import { KIND_LABEL } from './GroupItem.types';
@@ -165,20 +165,10 @@ export const GroupItem = React.memo(function GroupItem({
           )}
           onClick={(event) => event.stopPropagation()}
         >
-          {viewerKind === 'user' ? (
-            <MessageViewScopeMenuButton onSelect={(scope) => onCreateSession(group.groupId, scope)} />
-          ) : (
-            <IconButton
-              label="新建会话"
-              size="sm"
-              icon={<Plus className="h-3.5 w-3.5" />}
-              className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateSession(group.groupId);
-              }}
-            />
-          )}
+          <CreateSessionMenu
+            viewerKind={viewerKind}
+            onCreate={(scope, contextDelivery) => onCreateSession(group.groupId, scope, contextDelivery)}
+          />
           <SessionScopeFilter
             compact
             value={sessionTab}

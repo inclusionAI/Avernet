@@ -18,6 +18,9 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
@@ -25,6 +28,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
+)
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import BotInventoryService
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
@@ -127,6 +133,15 @@ def client(bot_service, desktop_service, publication_repo, access_service):
             binder.bind(DesktopBotInventoryPort, to=desktop_service)
             binder.bind(BusinessSpaceContextProtocol, to=space)
             binder.bind(BotInventoryServiceProtocol, to=inventory)
+            # list_inventory derives copy_state per card (Route B / FE contract):
+            # no ac_bot_copy row for these legacy fixtures → build_copy_state_summary
+            # returns None at the first guard, so no apply_repo calls land.
+            copy_repo = MagicMock()
+            copy_repo.get_by_dst_bot_id.return_value = None
+            binder.bind(BotCopyRepositoryProtocol, to=copy_repo)
+            binder.bind(
+                BotConfigManifestApplyRepositoryProtocol, to=MagicMock()
+            )
 
     app = FastAPI()
     app.include_router(router)

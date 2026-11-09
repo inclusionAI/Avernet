@@ -1,0 +1,228 @@
+//! Token-scoped public Card admission; legacy ID management remains separate.
+use super::*;
+use bcs_service_api::application::a2a_bot::{ManagedA2aCard, RegisterAgentCommand};
+use bcs_service_api::types::a2a_bot::a2a_management::{
+    self as policy, ManagementCode as Code, ManagementError,
+};
+
+fn failure(code: Code, field: &str, reason: &'static str) -> ServiceError {
+    ManagementError::new(code, field, reason).into()
+}
+fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
+    Ok(ManagedA2aCard {
+        provider_name: provider.into(),
+        agent_name: bcs_service_api::types::a2a_bot::card_bot_name(&record.agent_card)
+            .map_err(|_| failure(Code::InvalidCard, "agent_card.name", "INVALID_NAME"))?
+            .into(),
+        bot_id: record.bot_uuid,
+        agent_card_url: record.agent_card_url,
+        agent_card: record.agent_card,
+    })
+}
+impl A2aBotManagement {
+    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String)> {
+        let provider = self.providers.authenticate_provider_admin(token).await?;
+        if provider.disabled {
+            return Err(failure(Code::PermissionDenied, "", "PROVIDER_DISABLED"));
+        }
+        let name = provider
+            .slug
+            .filter(|s| bcs_service_api::types::a2a_bot::valid_provider_name(s))
+            .ok_or_else(|| failure(Code::ServiceUnavailable, "", "PROVIDER_NAME_NOT_CONFIGURED"))?;
+        self.providers
+            .pin_a2a_provider_name(&provider.provider_id, &name)
+            .await?;
+        Ok((provider.provider_id, name))
+    }
+    async fn public_record(&self, provider: &str, name: &str) -> ServiceResult<A2aBotRecord> {
+        bcs_service_api::types::a2a_bot::card_bot_name(&serde_json::json!({"name":name}))
+            .map_err(|_| failure(Code::InvalidRequest, "agent_name", "INVALID_NAME"))?;
+        let record = self
+            .core
+            .get_by_name(provider, name)
+            .await?
+            .ok_or_else(|| failure(Code::BotNotFound, "agent_name", "NOT_FOUND"))?;
+        self.core
+            .provider_binding(provider, &record.bot_uuid)
+            .await?;
+        Ok(record)
+    }
+    async fn public_load(
+        &self,
+        source: A2aCardSource,
+    ) -> ServiceResult<(
+        Option<String>,
+        bcs_service_api::port::a2a_card::ValidatedA2aCard,
+    )> {
+        let (url, card) = match source {
+            A2aCardSource::Inline(raw) => {
+                policy::validate_management_card(&raw)?;
+                (None, self.fetcher.validate(raw, false).await?)
+            }
+            A2aCardSource::Url(url) => {
+                policy::validate_card_url(&url)?;
+                let card = self.fetcher.fetch(&url, false).await?;
+                policy::validate_management_card(&card.raw)?;
+                (Some(url), card)
+            }
+        };
+        Ok((url, card))
+    }
+    pub(super) async fn public_register(
+        &self,
+        command: RegisterAgentCommand,
+    ) -> ServiceResult<ManagedA2aCard> {
+        let (provider_id, provider_name) =
+            self.public_provider(&command.provider_admin_token).await?;
+        let provider = self
+            .providers
+            .get_provider_by_slug(&provider_name)
+            .await?
+            .ok_or_else(|| failure(Code::ServiceUnavailable, "", "PROVIDER_UNAVAILABLE"))?;
+        if provider.auth_mode != bcs_service_api::ProviderAuthMode::StaticBearer {
+            return Err(failure(
+                Code::PermissionDenied,
+                "",
+                "IDENTITY_AWARE_ADMISSION_REQUIRED",
+            ));
+        }
+        if command.owners.len() != 1
+            || command.owners[0].trim().is_empty()
+            || command.owners[0] != command.owners[0].trim()
+            || command.owners[0].starts_with("human_")
+            || command.owners[0].chars().any(char::is_control)
+        {
+            return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED"));
+        }
+        let (url, card) = self.public_load(command.source).await?;
+        policy::validate_summary(command.summary.as_deref(), &card.raw)?;
+        let outcome = self
+            .register_loaded_with_visibility(
+                bcs_service_api::RegisterProviderBotCommand {
+                    avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
+                    provider_id,
+                    provider_admin_token: command.provider_admin_token,
+                    name: String::new(),
+                    provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),
+                    owners: command.owners,
+                    summary: command.summary,
+                    webhook_url: None,
+                    domains: vec![],
+                    skills: vec![],
+                    scopes: vec![],
+                    bot_uuid: None,
+                    reject_existing_bot_uuid: true,
+                    connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
+                },
+                url,
+                card,
+                command.now_ms,
+                command.visibility,
+            )
+            .await?;
+        let record = self
+            .core
+            .get_card(&outcome.bot_uuid)
+            .await?
+            .ok_or_else(|| failure(Code::InternalError, "", "REGISTERED_CARD_MISSING"))?;
+        view(&provider_name, record)
+    }
+    pub(super) async fn public_get(
+        &self,
+        token: &str,
+        name: &str,
+    ) -> ServiceResult<ManagedA2aCard> {
+        let (provider, label) = self.public_provider(token).await?;
+        view(&label, self.public_record(&provider, name).await?)
+    }
+    pub(super) async fn public_update(
+        &self,
+        token: &str,
+        name: &str,
+        source: Option<A2aCardSource>,
+        visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
+    ) -> ServiceResult<ManagedA2aCard> {
+        let (provider, label) = self.public_provider(token).await?;
+        if source.is_none() && visibility.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
+        let target = self.public_record(&provider, name).await?;
+        let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
+        // Retry only local CAS races, never the outbound fetch. Each attempt
+        // rechecks the original identity and name, so a reused name cannot retarget.
+        for _ in 0..3 {
+            self.authorize(&provider, token).await?;
+            let current = self
+                .core
+                .get_card(&target.bot_uuid)
+                .await?
+                .filter(|v| {
+                    v.provider_id == provider
+                        && v.agent_card.get("name").and_then(serde_json::Value::as_str)
+                            == Some(name)
+                })
+                .ok_or_else(|| failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED"))?;
+            let (url,raw)=match &loaded {Some((url,card))=>(url.clone(),card.raw.clone()),None=>(current.agent_card_url.clone(),current.agent_card.clone())};
+            policy::validate_source_transition(&current.agent_card, &raw)?;
+            let revision = current
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
+            let next = A2aBotRecord {
+                agent_card_url: url.clone(),
+                agent_card: raw,
+                revision,
+                ..current
+            };
+            match self.core.commit_card_with_visibility(next, revision - 1, visibility).await {
+                Ok(record) => return view(&label, record),
+                Err(ServiceError::Conflict(_)) => continue,
+                Err(ServiceError::Forbidden(_)) => {
+                    return Err(failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED"));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(failure(
+            Code::TargetChanged,
+            "agent_name",
+            "CONCURRENT_UPDATE",
+        ))
+    }
+    pub(super) async fn public_refresh(
+        &self,
+        token: &str,
+        name: &str,
+    ) -> ServiceResult<ManagedA2aCard> {
+        let (provider, label) = self.public_provider(token).await?;
+        let old = self.public_record(&provider, name).await?;
+        let url = old
+            .agent_card_url
+            .clone()
+            .ok_or_else(|| failure(Code::CardUrlRequired, "agent_card_url", "URL_REQUIRED"))?;
+        let (_, card) = self.public_load(A2aCardSource::Url(url)).await?;
+        self.authorize(&provider, token).await?;
+        policy::validate_source_transition(&old.agent_card, &card.raw)?;
+        let revision = old
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
+        let next = A2aBotRecord {
+            agent_card: card.raw,
+            revision,
+            ..old
+        };
+        let record =
+            self.core
+                .commit_card(next, revision - 1)
+                .await
+                .map_err(|error| match error {
+                    ServiceError::Conflict(_) => {
+                        failure(Code::RefreshSuperseded, "agent_card", "CONCURRENT_UPDATE")
+                    }
+                    ServiceError::Forbidden(_) => {
+                        failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED")
+                    }
+                    other => other,
+                })?;
+        view(&label, record)
+    }
+}

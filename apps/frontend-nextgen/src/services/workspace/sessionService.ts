@@ -1,5 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import type { SessionParticipantMode } from '@/services/backendApi/collaboration/sessionController';
 import {
@@ -63,6 +63,7 @@ export const sessionService = {
     title?: string,
     contextQuery?: string,
     messageViewScope?: MessageViewScope,
+    contextDelivery?: GroupContextDelivery,
   ): Promise<DomainResult<SessionView>> {
     try {
       // acting_bot_id 传当前角色 id（human_xxx 或 botId:ownerId），让后端以该身份创建会话。
@@ -71,6 +72,7 @@ export const sessionService = {
         title: title || undefined,
         input: contextQuery ? { query: contextQuery } : undefined,
         ...(actingBotId ? { acting_bot_id: actingBotId } : {}),
+        ...(contextDelivery ? { context_delivery: contextDelivery } : {}),
         ...(messageViewScope ? { message_view_scope: messageViewScope } : {}),
       });
       return { ok: true, data: mapSessionDetail(resp.data!) };

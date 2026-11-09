@@ -26,4 +26,20 @@ characters of SHA-256 over the complete compact JWT. They may report an exact
 schema path such as `principals[0].tenant`, but must not log any compact-JWT
 segment, decoded payload, signature, signing key, credential, or claim value.
 
-This contract is preparatory: BCS V1 is not production-mounted by this change.
+This contract was originally preparatory ("BCS V1 is not production-mounted
+by this change"); as of the 2026-11 V1 API auth chain, BCS V1 IS
+production-mounted.
+
+**2026-11 composition note.** The X-Avernet-Principal verifier above is now
+ONE registered source of the configurable V1 authentication chain
+(`[api.auth]`), typically first in `chain`. The chain fixes precedence
+semantics the gateway alone never had: sources run in configured order, the
+first success short-circuits the rest, and an invalid credential, a policy
+rejection (403), or a strict dependency outage (503 / 50300 /
+`auth_dependency_unavailable`) is final — the chain is never re-entered to
+try another source. This gateway principal contract itself is unchanged:
+`alg=HS256`, `kid=bare`, `iss`/`aud`/`principals` verification, tenant
+agreement, and the credential-log red line all hold exactly as specified
+above. The full chain, its session JWT/cookie contracts, and the
+shared-writer safety rules are pinned in
+[../authentication/contract.md](../authentication/contract.md).

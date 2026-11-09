@@ -66,13 +66,6 @@ pub trait UserIdentityPort: Send + Sync {
         &self,
         user_id: &str,
     ) -> Result<Option<UserIdentityInfo>, AuthError>;
-
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError>;
 }
 
 /// `UserIdentityPort` backed by the auth plugin chain. Runs the chain over the
@@ -235,18 +228,6 @@ impl UserIdentityPort for ChainUserIdentityPort {
         match &self.inner {
             Some(port) => port.get_identity_by_user_id(user_id).await,
             None => Ok(None),
-        }
-    }
-
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError> {
-        match &self.inner {
-            Some(port) => port.update_token(user_id, token, expire_at).await,
-            None => Ok(()),
         }
     }
 }
@@ -705,9 +686,9 @@ impl HttpAppState {
 
     pub fn dispatch_visibility_sync(&self, request: VisibilitySyncRequest) {
         let visibility_sync = self.visibility_sync.clone();
-        let _sync_task = tokio::spawn(async move {
+        let _sync_task = tokio::spawn(bcs_network_tracing::in_current_context(async move {
             visibility_sync.sync_visibility(request).await;
-        });
+        }));
     }
 
     pub fn with_message_config(

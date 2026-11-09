@@ -461,39 +461,62 @@ pub(super) async fn handle_web_send_with_result(
     // per-turn budget and epoch seals. A refused capture (ledger saturated
     // with live captures) warns and continues — the message runs its
     // ordinary course and the relay-side stays fail-closed.
-    if let (Some(relay), true) = (
-        flow.caller_relay.as_ref(),
-        sender_type == SenderType::Human
-            && group.group_kind != GroupKind::Dm
-            && any_bot_caller_enabled,
-    ) {
-        if let Some(ingress) = cmd.caller_ingress.as_ref() {
-            let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());
-            let capture_turn = cmd
-                .source_im_message_id
-                .clone()
-                .or_else(|| cmd.idempotency_key.clone())
-                .unwrap_or_else(|| capture_session.clone());
-            let captured = relay.ledger.record(
-                &bcs_config::resolve_env_str(),
-                &capture_session,
-                &capture_turn,
-                ingress.clone(),
-                now_ms() as i64,
-                relay.capture_ttl_ms,
-            );
-            if captured {
-                tracing::info!(
-                    session = %capture_session,
-                    turn = %capture_turn,
-                    "caller relay captured the session's human ingress (bounded by TTL and per-turn redeem budget)"
+    let capture_gates_met = sender_type == SenderType::Human
+        && group.group_kind != GroupKind::Dm
+        && any_bot_caller_enabled;
+    if capture_gates_met {
+        if let Some(relay) = flow.caller_relay.as_ref() {
+            if let Some(ingress) = cmd.caller_ingress.as_ref() {
+                let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());
+                let capture_turn = cmd
+                    .source_im_message_id
+                    .clone()
+                    .or_else(|| cmd.idempotency_key.clone())
+                    .unwrap_or_else(|| capture_session.clone());
+                let captured = relay.ledger.record(
+                    &bcs_config::resolve_env_str(),
+                    &capture_session,
+                    &capture_turn,
+                    ingress.clone(),
+                    now_ms() as i64,
+                    relay.capture_ttl_ms,
                 );
+                if captured {
+                    tracing::info!(
+                        session = %capture_session,
+                        turn = %capture_turn,
+                        "caller relay captured the session's human ingress (bounded by TTL and per-turn redeem budget)"
+                    );
+                } else {
+                    tracing::warn!(
+                        session = %capture_session,
+                        "caller relay capture refused (ledger saturated with live captures); later relays stay closed"
+                    );
+                }
             } else {
+                // Every capture gate passed but the message carried no strict
+                // caller ingress — the single most expensive silent skip on
+                // this path: the session's later task-assign relays stay
+                // closed with nothing in the log pointing at the ingress side.
                 tracing::warn!(
-                    session = %capture_session,
-                    "caller relay capture refused (ledger saturated with live captures); later relays stay closed"
+                    group_id = %group.id,
+                    session_id = %cmd.session_id.as_deref().unwrap_or_default(),
+                    from_actor_id = %cmd.from_actor_id,
+                    "caller relay capture skipped: a caller-capable group got Human speech without a caller ingress"
                 );
             }
+        } else {
+            // The caller admission seam read at least one caller-enabled
+            // member, yet this composition carries no relay state (explicit
+            // [caller_identity.relay].enabled = false, or an assembly the
+            // deployment did not complete): without this line the whole
+            // owner→caller inheritance dies silently in this group.
+            tracing::warn!(
+                group_id = %group.id,
+                session_id = %cmd.session_id.as_deref().unwrap_or_default(),
+                from_actor_id = %cmd.from_actor_id,
+                "caller relay capture skipped: no relay state assembled while the group carries a caller-enabled member"
+            );
         }
     }
     // Submission eligibility fence BEFORE durable acceptance (spec §6.3

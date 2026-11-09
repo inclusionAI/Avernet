@@ -7,6 +7,7 @@ mod dispatch;
 #[path = "task_flow/output.rs"]
 mod output;
 pub use dispatch::handle_task_dispatch;
+pub(crate) use dispatch::dispatch_native;
 
 use std::collections::BTreeMap;
 

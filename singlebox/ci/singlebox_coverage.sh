@@ -17,8 +17,8 @@ mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 model_config_mode="${SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE:-mock}"
 module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 bcs_coverage_dir="$repo_root/apps/bcs/target/cov-e2e"
-bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-41}"
-bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-36}"
+bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-54}"
+bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-48}"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
 repair_provider_fixture=""
@@ -361,7 +361,7 @@ run_bcs_e2e() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     BCS_BOTS_DATA_DIR="$coverage_standalone_root/profiles" \
-    BCS_E2E_CHANGED_LINE_MIN="${BCS_E2E_CHANGED_LINE_MIN:-60}" \
+    BCS_E2E_CHANGED_LINE_MIN="${BCS_E2E_CHANGED_LINE_MIN:-65}" \
     BCS_E2E_CHANGED_BASE_REF="${BCS_E2E_CHANGED_BASE_REF:-${SINGLEBOX_BASE_REF:-origin/dev}}" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     bash "$repo_root/apps/bcs/scripts/e2e_coverage.sh" \
@@ -378,7 +378,8 @@ run_bcs_e2e() {
     endpoint_coverage.xml \
     endpoint_coverage.txt \
     cli_command_coverage.txt \
-    changed_line_coverage.json; do
+    changed_line_coverage.json \
+    oauth_e2e.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi
@@ -537,6 +538,7 @@ bcs_system = {
     "artifact_errors": bcs_artifact_errors,
     "artifacts": {
         "e2e_log": "bcs/e2e.log",
+        "oauth_e2e": "bcs/oauth_e2e.json",
         "cobertura": "bcs/cobertura.xml",
         "coverage_text": "bcs/coverage.txt",
         "summary": "bcs/summary.json",
@@ -640,6 +642,7 @@ verify_required_artifacts() {
     "$report_dir/baas-coverage.txt"
     "$report_dir/html/baas/index.html"
     "$report_dir/bcs/e2e.log"
+    "$report_dir/bcs/oauth_e2e.json"
     "$report_dir/bcs/cobertura.xml"
     "$report_dir/bcs/coverage.txt"
     "$report_dir/bcs/summary.json"

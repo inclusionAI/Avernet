@@ -86,3 +86,16 @@ def test_on_container_failed_is_failed_even_if_pre_succeeded():
         _apply(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.FAILED.value),
     ]
     assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="ACTIVE") == BotCopyStatus.FAILED
+
+
+def test_bot_failed_status_is_failed_even_when_applies_succeeded():
+    # Device allocation lives in bot_service.create_bot (_do_allocate), outside
+    # the apply engine — when it fails the bot row is FAILED but every apply
+    # record may have succeeded (pre_container SUCCEEDED, on_container never
+    # started). Without the FAILED-status gate the on-None branch would mask
+    # this as FILE_SYNCED; the gate short-circuits to FAILED so FE shows
+    # "复制失败" + retry rather than a stuck "复制中".
+    recs = [_apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value)]
+    assert compute_copy_status(
+        copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="FAILED"
+    ) == BotCopyStatus.FAILED
