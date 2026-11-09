@@ -9,7 +9,6 @@ from search_core.application.cache import CachedEmbedding, CachedRetrieval, Sear
 from search_core.application.catalog_retrieval import CatalogRetrieval
 from search_core.application.emergency import SearchCachePolicy
 from search_core.catalog.cards import is_label_filter
-from search_core.catalog.updates import CardUpdates
 from search_core.core.execution import DeadlineExecutor
 from search_core.core.retrieval import HybridRetrievalService
 
@@ -20,6 +19,7 @@ from app.domain.models.candidate_recommendation import (
 from app.domain.models.context_fragment import ContextFragment
 from app.domain.models.retrieval_mode import RetrievalMode
 from app.domain.models.worker_profile import WorkerProfile, WorkerProfileScanResult
+from app.tc.card_profiles import TcCardUpdates, current_profile_summary
 from app.tc.catalog import FILTER_FIELDS, TcDocumentConverter, matches_row
 
 
@@ -39,6 +39,7 @@ class TcSearch:
         instance_id,
         updates=None,
         retrieval_index=None,
+        profile_gateway=None,
     ):
         self.catalog, self.index, self.reranker = catalog, index, reranker
         self.storage_kind = "legacy" if updates is not None else "card"
@@ -62,7 +63,7 @@ class TcSearch:
         self.updates = (
             updates
             if updates is not None
-            else CardUpdates(
+            else TcCardUpdates(
                 catalog.repository,
                 embedding,
                 index,
@@ -71,6 +72,7 @@ class TcSearch:
                 filter_fields=FILTER_FIELDS,
                 document_converter=TcDocumentConverter(),
                 on_change=self.caches.changing,
+                profile_gateway=profile_gateway,
             )
         )
         if updates is not None:
@@ -194,7 +196,9 @@ class TcSearch:
             worker_id=row.card.agent_id,
             score=score,
             reasons=reasons or [],
-            short_profile=(data.get("description") or "")[:120],
+            short_profile=(
+                current_profile_summary(row) or data.get("description") or ""
+            )[:120],
             trust_level=data.get("trust_level", "guarded"),
             is_supplement=supplement,
         )
