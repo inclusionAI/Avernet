@@ -1,6 +1,6 @@
 """EngineRuntimeModule — production singleton for the engine-runtime relay.
 
-``EngineRuntimeRelay.__init__`` carries ``@inject`` and takes ``BotService``,
+``EngineRuntimeRelay.__init__`` carries ``@inject`` and takes ``RuntimeBotLookup``,
 ``DeviceContextResolver``, ``DeviceAdapterTransport`` and
 ``BotPublishRepositoryProtocol`` (a service bot's published runtime binding),
 so a ``configure`` self-binding plus the Protocol alias is all that is needed.
@@ -50,7 +50,7 @@ from agentclaw.community.core.repository.protocols.devices import (
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -76,7 +76,7 @@ class EngineRuntimeModule(Module):
     @inject
     def engine_connection_service(
         self,
-        bot_service: BotService,
+        bot_service: RuntimeBotLookup,
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         gateway: GatewayEndpoint,

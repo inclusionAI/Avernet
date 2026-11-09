@@ -32,10 +32,10 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
-  it('同路由就地改名项归组正确（Bot管理 / 发现）', () => {
+  it('同路由就地改名项归组正确（Bot 管理 / 发现）', () => {
     const merged = getMergedNavigationItems();
     const bot = merged.find((item) => item.id === 'bot-workshop');
-    expect(bot?.label).toBe('Bot管理');
+    expect(bot?.label).toBe('Bot 管理');
     expect(bot?.section).toBe('bot');
 
     const found = merged.find((item) => item.id === 'collaboration-square');

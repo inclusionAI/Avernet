@@ -1,3 +1,4 @@
+import { generateBotAvatar } from '@/domain/botAvatar';
 import * as botSessionController from '@/services/backendApi/bots/privateBotSessionController';
 import * as bbsTaskController from '@/services/backendApi/collaboration/bbsTaskController';
 import * as collaborationBotController from '@/services/backendApi/collaboration/collaborationBotController';
@@ -8,6 +9,7 @@ import { PublicBotCatalogError } from '@/services/backendApi/collaboration/publi
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { CollaborationSquareApiAdapter } from '@/services/collaborationSquare/collaborationSquareApiAdapter';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const mockedSearchPublicBots = jest.spyOn(publicBotController, 'searchPublicBots');
@@ -83,6 +85,7 @@ describe('CollaborationSquareApiAdapter', () => {
     await expect(new CollaborationSquareApiAdapter().listBots()).resolves.toEqual([
       {
         id: 'bot-1',
+        avatarUrl: generateBotAvatar('bot-1'),
         name: '公开助手',
         ownerName: 'Owner',
         description: '公开描述',
@@ -185,6 +188,7 @@ describe('CollaborationSquareApiAdapter', () => {
     expect(result).toEqual([
       {
         id: 'bot-smart-1',
+        avatarUrl: generateBotAvatar('bot-smart-1'),
         name: '会议助手',
         ownerName: 'Owner',
         description: '擅长会议纪要',
@@ -1212,6 +1216,10 @@ describe('CollaborationSquareApiAdapter', () => {
             { capability_id: 'antv', display_name: 'AntV 可视化图表' },
             { capability_id: 'dima', display_name: 'Dima MCP' },
           ],
+          skills: [
+            { skill_id: 'weekly-report', display_name: '风太周报' },
+            { skill_id: '', display_name: '   ' },
+          ],
         },
       });
 
@@ -1225,6 +1233,7 @@ describe('CollaborationSquareApiAdapter', () => {
           { id: 'antv', name: 'AntV 可视化图表' },
           { id: 'dima', name: 'Dima MCP' },
         ],
+        skills: [{ id: 'weekly-report', name: '风太周报' }],
       });
       expect(mockedGetPublicBotProfile).toHaveBeenCalledWith('20260413_uhup5rb8:246864', undefined);
     });
@@ -1248,6 +1257,8 @@ describe('CollaborationSquareApiAdapter', () => {
         description: '',
         engine: undefined,
         capabilities: [],
+        // 旧 envelope / BCS-only 画像缺省 skills：Mapper 统一回退空列表。
+        skills: [],
       });
     });
 
@@ -1258,6 +1269,32 @@ describe('CollaborationSquareApiAdapter', () => {
       await expect(new CollaborationSquareApiAdapter().getBotProfile('x:1')).rejects.toMatchObject({
         code: 'target_invalid',
       });
+    });
+
+    it('画像失败 cancel httpClient 已入队的默认 sonner 投递（改由弹窗内提示）', async () => {
+      const toastKey = 'notify:bots-catalog-profile-404';
+      useErrorNotifyStore.getState().enqueue({
+        toastKey,
+        message: 'Public bot profile not found',
+        apiPath: '/openapi/v1/bots/catalog/profile/x:1',
+      });
+      mockedGetPublicBotProfile.mockRejectedValue(
+        new BackendRequestError('not found', {
+          status: 404,
+          apiPath: '/openapi/v1/bots/catalog/profile/x:1',
+          toastKey,
+        }),
+      );
+
+      await expect(new CollaborationSquareApiAdapter().getBotProfile('x:1')).rejects.toMatchObject({
+        code: 'target_invalid',
+      });
+
+      const drained = useErrorNotifyStore.getState().drain();
+      expect(drained).toHaveLength(1);
+      // 观察者 drain 时会跳过 cancelled 项 → 不发起 sonner toast。
+      expect(drained[0].cancelled).toBe(true);
+      useErrorNotifyStore.getState().reset();
     });
 
     it('协议错误映射为 protocol_error', async () => {

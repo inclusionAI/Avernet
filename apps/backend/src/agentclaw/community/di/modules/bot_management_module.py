@@ -17,6 +17,8 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
+
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
 from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
@@ -62,6 +64,9 @@ from agentclaw.community.core.bot_collaborator.services.credentials_admins_write
 )
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
+)
+from agentclaw.community.core.bot_management.render_screen.backfill import (
+    RenderScreenOwnerScopeBackfill,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
@@ -301,6 +306,8 @@ class BotManagementModule(Module):
         # ``BcnService`` is built by the ``bcn_service`` provider below — it needs
         # the bcn-qualified HttpClient injected.
         binder.bind(RenderScreenService, to=RenderScreenService, scope=singleton)
+        # Lifecycle 参与方:startup 阶段归位协作者 scope 漂移的 render screen 记录(经 bindings 自动发现并调度)。
+        binder.bind(RenderScreenOwnerScopeBackfill, to=RenderScreenOwnerScopeBackfill, scope=singleton)
         # BotRepository: single unified ORM impl — runs on prod
         # OceanBase and SQLite via the injected DatabasePlugin.
         # RenderScreenRepository was already unified earlier.
@@ -505,6 +512,7 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         restart_backup_dependencies: RestartBackupDependencies,
+        scheduled_caller_refresh: ScheduledCallerRefreshProtocol,
         allocation_config: cfg.DeviceAllocationConfig,
         workspace_hosting_config: cfg.WorkspaceHostingConfig,
         device_binding_repo: DeviceBindingRepository,
@@ -553,6 +561,7 @@ class BotManagementModule(Module):
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
             restart_backup_dependencies=restart_backup_dependencies,
+            scheduled_caller_refresh=scheduled_caller_refresh,
             # Lazy for symmetry with the providers above, not for a cycle:
             # BotAppGrantService reaches only repositories. Resolved on demand
             # so bot deletion is the only thing that pays for it.

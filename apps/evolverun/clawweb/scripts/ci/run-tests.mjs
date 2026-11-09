@@ -126,7 +126,9 @@ export function main(args = process.argv.slice(2)) {
         '--coverage.include=src/**/*.{ts,tsx,js,jsx}',
         '--coverage.exclude=**/*.d.ts', '--coverage.exclude=**/*.{test,spec}.*',
         '--coverage.exclude=**/{__tests__,test,tests,fixtures,__fixtures__,dist,dist-server,node_modules}/**',
-      ], { cwd: pkg.root, stdio: 'inherit', timeout: 300_000, killSignal: 'SIGKILL',
+      // The workflow package includes real Git/SQLite integration suites; allow the
+      // same bounded ten-minute budget as builds so coverage can finish on CI.
+      ], { cwd: pkg.root, stdio: 'inherit', timeout: 600_000, killSignal: 'SIGKILL',
         env: { ...process.env, NODE_ENV: 'test', CI: 'true' } });
       row.exitCode = child.status;
       row.signal = child.signal;

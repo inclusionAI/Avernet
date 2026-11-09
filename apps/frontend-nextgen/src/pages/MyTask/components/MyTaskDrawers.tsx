@@ -33,6 +33,7 @@ export interface MyTaskDrawersProps {
   historyError: string | null;
   onOpenRoutineFromHistory: (botId: string, routineId: string) => void;
   botNameMap: Record<string, string>;
+  routineBotType?: string;
 }
 
 export function MyTaskDrawers({
@@ -54,6 +55,7 @@ export function MyTaskDrawers({
   historyError,
   onOpenRoutineFromHistory,
   botNameMap,
+  routineBotType,
 }: MyTaskDrawersProps) {
   // V2 导航按 taskId 分片缝合 taskSidePanelStore(抽屉/聊天两挂载点共享导航语义)。
   const navBinding = useTaskPanelNavBinding(selectedTaskId ?? '');
@@ -133,6 +135,7 @@ export function MyTaskDrawers({
       </Drawer>
 
       <MyTaskRoutineDrawer
+        botType={routineBotType}
         selectedRoutine={selectedRoutine}
         selectedRoutineKey={selectedRoutineKey}
         onCloseRoutine={onCloseRoutine}
@@ -143,6 +146,7 @@ export function MyTaskDrawers({
       />
 
       <MyTaskRoutineHistoryDrawer
+        botType={routineBotType}
         selectedRoutineHistoryId={selectedRoutineHistoryId}
         onCloseRoutineHistory={onCloseRoutineHistory}
         historyRuns={historyRuns}

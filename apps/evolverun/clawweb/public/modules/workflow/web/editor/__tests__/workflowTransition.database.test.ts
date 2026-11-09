@@ -56,7 +56,7 @@ it('clears DB baselines for new sessions and resets', () => {
   state().reset({ force: true }); expect(state()._databaseSpec).toBeNull()
 })
 
-it.each(['default', 'explicit', 'absent'] as const)('loads and clones historical null versions without weakening replacement validation: %s baseline', kind => {
+it.each(['default', 'explicit', 'absent'] as const)('loads and clones historical null versions and preserves them across replacement: %s baseline', kind => {
   const legacy = { ...source, version: null, custom: { preserved: false } }
   const db = kind === 'absent' ? null : { ...legacy, title: 'Historical draft', custom: { preserved: false } }
   if (kind === 'default') state().loadSpec(legacy)
@@ -73,8 +73,8 @@ it.each(['default', 'explicit', 'absent'] as const)('loads and clones historical
   expect(state().actionError).toBeNull(); expect(state().spec!.version).toBeNull()
   expect(state().isDirty).toBe(true)
   const before = state()
-  expect(state().replaceSession({ ...source, version: null }, before, false)).toBe(false)
-  expect(state()).toBe(before)
+  expect(state().replaceSession({ ...source, version: null }, before, false)).toBe(true)
+  expect(state().spec?.version).toBeNull(); expect(state()._databaseSpec?.version).toBeNull()
 })
 it('accepts a legacy null-version DB baseline without applying session-source version rules to loadSpec', () => {
   const legacyDb = { ...database, version: null }

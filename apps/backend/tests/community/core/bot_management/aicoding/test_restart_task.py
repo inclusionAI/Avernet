@@ -669,11 +669,13 @@ async def test_process_loss_after_mutation_is_not_replayed(setup):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [ConnectionError('old container unavailable'), TimeoutError('backup timed out')])
 async def test_real_backup_failure_keeps_durable_restart_running_without_failed_bot(setup, failure):
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
+
     s = setup
     await submit(s)
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
-    runtime.post_bots_api.side_effect = failure
+    runtime.post_bots_api.side_effect = [detection(), failure]
     devices = Mock()
     devices.get_device.return_value = s.binding
 
@@ -701,7 +703,8 @@ async def test_real_backup_failure_keeps_durable_restart_running_without_failed_
     # Redelivery observes the existing workflow instead of retrying backup/restart.
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
     s.service.restart_bot.assert_called_once()
-    assert runtime.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
+    assert runtime.post_bots_api.call_count == 2  # Detection succeeds, backup fails with blocking disabled.
+    assert journal(s.repo.bot)["backup_warning"]
 
 
 @pytest.mark.asyncio

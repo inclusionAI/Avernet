@@ -7,7 +7,6 @@ this API, so the engine's frame format never becomes a public contract.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import json
@@ -63,6 +62,7 @@ from agentclaw.community.core.expert_chat.errors import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.di.config import GatewayEndpoint
+from agentclaw.community.utils.runtime_list_timing import timed_thread
 from fastapi import APIRouter, Query, Request
 
 router = APIRouter(
@@ -229,8 +229,8 @@ async def get_connection(
     # ``async`` keeps it callable from the sync paths and keeps its declared
     # signature — which ``test_service_api_conformance`` pins, coroutine status
     # included — the same on both sides.
-    result = await asyncio.to_thread(
-        connections.build,
+    result = await timed_thread(
+        "connection", connections.build,
         **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         bot_id=bot_id,
         owner_id=owner_id,

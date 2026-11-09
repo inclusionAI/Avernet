@@ -68,7 +68,7 @@ async def test_real_coding_backup_transport_failure_still_upgrades_caller():
     result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
                                          owner_id=OWNER_ID, migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
-    assert svc._baas.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
+    svc._baas.post_bots_api.assert_called_once()  # Detection fails: skip helper and restart normally.
     build.upgrade_async.assert_awaited_once()
 
 
@@ -115,9 +115,10 @@ async def test_confirmed_fastdisk_caller_result_follows_guard(outcome, block_on_
                                               owner_id=OWNER_ID, migration_path='/artifact')
         assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
         build.upgrade_async.assert_awaited_once()
-    assert svc._baas.post_bots_api.call_count == (3 if outcome == 'partial_success' else 2)
+    assert svc._baas.post_bots_api.call_count == 2
     if outcome == 'partial_success':
-        assert 'phase=verify status=partial_success' in caplog.text
+        assert 'phase=prepared status=partial_success' in caplog.text
+        assert 'phase=verify status=' not in caplog.text
         assert 'AICODING_RESTART_FAILED' not in caplog.text
     config.get_value.assert_called_once()
     build.release_async.assert_not_called()

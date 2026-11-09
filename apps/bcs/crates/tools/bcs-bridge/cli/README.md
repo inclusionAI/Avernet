@@ -127,6 +127,22 @@ cwd = "/home/me/workspace"
 
 [registration]
 api_url = "https://bcs.example.com/prefix"
+
+# Optional: the runtime API endpoint used by bcs-cli launched by every Bot.
+# This is independent of the registration API above.
+[cli]
+api_base_url = "https://runtime-bcs.example.com"
+```
+
+`[cli].api_base_url` is global to the configuration; it cannot be set per
+Provider or per Bot. At build time, `BCS_CLI_API_URL` may provide a fallback:
+when `[cli].api_base_url` is absent or blank, the compiled value is used. If
+neither source resolves a URL, the bridge does not inject `BCS_API_BASE_URL`.
+The bridge does not inject the legacy `MOLTIS_BCS_URL` alias. A distribution can
+compile the fallback into its binary, for example:
+
+```bash
+BCS_CLI_API_URL="https://runtime-bcs.example.com" cargo build --release -p bcs-bridge-cli
 ```
 
 ## Claude completion mode (default: `hook_idle`)

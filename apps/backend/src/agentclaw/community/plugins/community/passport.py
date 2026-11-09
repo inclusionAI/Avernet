@@ -131,6 +131,12 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         )
         return result
 
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        # Self-issued credentials have no persisted historical handoff snapshot.
+        return None
+
     def owner_handoff_supported(
         self, *, bot_id: str, owner_workno: str, entity_id: str
     ) -> bool:

@@ -1,7 +1,7 @@
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
-/** 团队 Bot 摘要；entity_id 为实体，owner_id 为拥有者用户，不可混用。 */
+/** 团队空间 Bot 摘要；entity_id 为实体，owner_id 为拥有者用户，不可混用。 */
 export interface CollaboratingBotDto {
   avatar_url?: string | null;
   bot_id: string;

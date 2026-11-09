@@ -8,6 +8,7 @@ import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { ensureReactGlobal } from '@/services/workspace';
 import '@/services/workspace/chatBridge';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
@@ -40,7 +41,11 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
   const incoming = props.params ?? {};
   const taskId = typeof incoming.taskId === 'string' ? incoming.taskId : '';
   React.useEffect(() => {
-    if (taskId) useTaskConversationNavigationStore.getState().rememberTaskTab(taskId, props.tab);
+    if (!taskId) return;
+    useTaskConversationNavigationStore.getState().rememberTaskTab(taskId, props.tab);
+    // AixUI 历史卡片没有路由 intent；挂载即说明它已触发当前面板展示，
+    // 记为全局焦点以便 by_session 自动恢复在同一会话多任务时不抢焦点。
+    useTaskSidePanelStore.getState().setActiveTask(taskId);
   }, [props.tab, taskId]);
   // V2 导航按 taskId 分片缝合 taskSidePanelStore(nav 不进 params:params 需可序列化落库,
   // 且跨 tab 的选中/下钻态应由业务 store 统一持有,供 P4 会话联动消费)。hook 无条件调用。

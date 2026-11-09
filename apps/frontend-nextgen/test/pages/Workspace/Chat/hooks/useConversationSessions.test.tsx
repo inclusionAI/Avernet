@@ -190,6 +190,83 @@ describe('useConversationSessions', () => {
     extendCapabilities(defaultCapabilities);
   });
 
+  it('switches to a managed Coding Bot runtime before creating a cross-Bot session', async () => {
+    const codingBotA: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-a:2088',
+        realBotId: 'coding-a',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const codingBotB: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-b:2088',
+        realBotId: 'coding-b',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const createdSession = {
+      sessionId: 's-cross-bot',
+      title: '新对话',
+      messageCount: 0,
+      gmtModified: '2026-11-04T10:00:00.000Z',
+      gmtCreate: '2026-11-04T10:00:00.000Z',
+    };
+    type CreateResult = { ok: true; session: typeof createdSession };
+    let resolveCreate!: (result: CreateResult) => void;
+    const createPromise = new Promise<CreateResult>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const createCodingSession = jest.fn(() => createPromise);
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => null, createSession: createCodingSession },
+      }),
+    });
+    const { result } = renderSessions({ managedBots: [codingBotA, codingBotB], friendBots: [] });
+
+    act(() => {
+      useConversationStore.getState().selectConversation({
+        botId: codingBotA.bot.botId,
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: 's-a-current',
+      });
+    });
+
+    let createSessionPromise!: Promise<void>;
+    act(() => {
+      createSessionPromise = result.current.createSession(codingBotB.bot.botId);
+    });
+
+    expect(createCodingSession).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().selectedBotId).toBe(codingBotB.bot.botId);
+    expect(useConversationStore.getState().selectedSection).toBe('managed');
+    expect(useConversationStore.getState().selectedOrigin).toBe('mine');
+    expect(useConversationStore.getState().selectedSessionId).toBeNull();
+    expect(useConversationStore.getState().expandedBotIds[codingBotB.bot.botId]).toBe(true);
+    expect(result.current.isCreatingSession(codingBotB.bot.botId)).toBe(true);
+
+    await act(async () => {
+      resolveCreate({ ok: true, session: createdSession });
+      await createSessionPromise;
+    });
+
+    expect(useConversationStore.getState().selectedBotId).toBe(codingBotB.bot.botId);
+    expect(useConversationStore.getState().selectedSessionId).toBe('s-cross-bot');
+    expect(result.current.isCreatingSession(codingBotB.bot.botId)).toBe(false);
+    extendCapabilities(defaultCapabilities);
+  });
+
   it('keeps the loaded list when a Bot collapses and re-expands', async () => {
     listManagedSessions.mockResolvedValue(okPage(['s1']));
     const { result } = renderSessions();
@@ -542,7 +619,7 @@ it('a late response only caches the collapsed Bot without re-expanding it', asyn
   expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions.items).toHaveLength(1);
 });
 
-describe('团队 Bot 复用管理会话', () => {
+describe('我协作的 Bot 复用管理会话', () => {
   const teamBot: ConversationBotView = { ...managedBot, section: 'team' };
   it('展开走管理列表；切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
     listManagedSessions.mockResolvedValue(okPage(['first']));

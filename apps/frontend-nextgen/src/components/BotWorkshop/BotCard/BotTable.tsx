@@ -137,7 +137,7 @@ const BotTable: React.FC<BotTableProps> = ({
           ) : null
         }
         ariaLabel={ariaLabel}
-        minWidth={showOwner ? 'min-w-[1212px]' : 'min-w-[1132px]'}
+        minWidth={showOwner ? 'min-w-[1168px]' : 'min-w-[1088px]'}
       />
       {engineVersions.dialogs}
     </>

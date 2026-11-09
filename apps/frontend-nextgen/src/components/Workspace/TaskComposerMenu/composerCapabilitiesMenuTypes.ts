@@ -3,6 +3,7 @@
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
 import type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
+import type { ReactNode } from 'react';
 
 export interface ComposerCapabilitiesMenuProps {
   execution?: UseTaskExecutionResult;
@@ -20,11 +21,15 @@ export interface ComposerCapabilitiesMenuProps {
   onDynamicSelected?: () => void;
   /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
   onRemoveSelection?: (key: string) => void;
-  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队 Bot 传入）。
+  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队空间 Bot 传入）。
    * 不传时「通用协作能力」文案区不渲染——好友 Bot 会话与协作群即此形态，＋ 区独立保留。 */
   capabilitySets?: ComposerCapabilitySetsState | null;
   /** 调试会话仅复用附件与能力集入口，不暴露任务创建菜单。 */
   showTaskEntries?: boolean;
+  /** 平台注入的额外菜单行（capability 覆盖式，2026-11-04）：渲染函数收 close——
+   *  行点击后可收起外层「＋」菜单（如知识库行收起后唤起命令面板）。行样式与视觉
+   *  一致性由调用方负责（复用 MenuRow）。不传行为不变。 */
+  extraMenuRows?: (close: () => void) => ReactNode;
   className?: string;
   /**
    * ＋ 菜单打开回调（add-spm-tracking：调用方语义注入,如对话页埋「打开工作流菜单」）。

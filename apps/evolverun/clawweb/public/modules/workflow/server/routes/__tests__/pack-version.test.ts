@@ -11,8 +11,8 @@ function deps() {
     resolvePrincipal: vi.fn(async (_req: express.Request): Promise<{ actorId: string } | null> => ({ actorId: 'trusted' })),
     botPermRepo: { hasEditPermission: vi.fn(async () => true), hasExecutePermission: vi.fn(async () => false) },
     workflowSpecRepo: { findByWorkflowId: vi.fn(async () => ({ workflow_id: 'flow', pack_id: 'pack' })) },
-    readSnapshot: vi.fn(async () => ({ workflowId: 'flow', packId: 'historical', baseCommit: sha, baseRef: 'origin/wf/flow', files: [], draftHead: null, versionFiles: [{ path: 'x.bin', contentBase64: 'AP8=', mode: '100644' as const }] })),
-    saveCandidate: vi.fn(async () => ({ branch: 'saved/flow', commit: sha })),
+    readSnapshot: vi.fn(async () => ({ workflowId: 'flow', packId: 'historical', baseCommit: sha, baseRef: 'refs/tags/deploy/flow/#1', files: [], draftHead: null, versionFiles: [{ path: 'x.bin', contentBase64: 'AP8=', mode: '100644' as const }] })),
+    saveCandidate: vi.fn(async () => ({ branch: 'wf/flow', commit: sha })),
     readOperation: vi.fn(async (_requestId: string, _workflowId: string, _actorId: string) => ({ requestId: 'request-status-01', kind: 'save', state: 'unknown' })),
     reconcileOperation: vi.fn(async (_requestId: string, _workflowId: string, _actorId: string) => ({ requestId: 'request-status-01', kind: 'save', state: 'completed' })),
   };
@@ -62,9 +62,9 @@ it('passes the observed saved head for current edits even when release and saved
 });
 it('maps conflicts and sanitizes operational failures', async () => {
   const d = deps(); const url = await fixture(d);
-  d.saveCandidate.mockRejectedValueOnce(new PackCandidateConflictError()).mockRejectedValueOnce(new PackCandidateOutcomeUnknownError('saved/flow', sha)).mockRejectedValueOnce(new Error('secret URL/token'));
+  d.saveCandidate.mockRejectedValueOnce(new PackCandidateConflictError()).mockRejectedValueOnce(new PackCandidateOutcomeUnknownError('wf/flow', sha)).mockRejectedValueOnce(new Error('secret URL/token'));
   expect((await put(url, input)).status).toBe(409);
-  const unknown = await put(url, input); expect(unknown.status).toBe(503); expect(await unknown.json()).toEqual({ error: 'Save outcome unknown; inspect the Git branch manually before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: 'saved/flow', commit: sha });
+  const unknown = await put(url, input); expect(unknown.status).toBe(503); expect(await unknown.json()).toEqual({ error: 'Save outcome unknown; inspect the Git branch manually before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: 'wf/flow', commit: sha });
   const r = await put(url, input); expect(r.status).toBe(503); expect(await r.text()).not.toContain('secret');
 });
 it('fails closed when the host does not wire saving', async () => {
@@ -106,13 +106,13 @@ it('passes the stable request ID and server actor to save, rejecting forged iden
 it('exposes the journal recovery identity without leaking operational error details', async () => {
   const d = deps(); const url = await fixture(d);
   const requestId = 'save-unknown-001';
-  const error = new PackOperationError(503, 'SAVE_OUTCOME_UNKNOWN', requestId, 'saved/flow', sha);
+  const error = new PackOperationError(503, 'SAVE_OUTCOME_UNKNOWN', requestId, 'wf/flow', sha);
   error.message = 'secret remote URL, credentials and bundle';
   d.saveCandidate.mockRejectedValueOnce(error);
   const r = await put(url, { ...input, requestId });
   expect(r.status).toBe(503); expect(r.headers.get('cache-control')).toBe('no-store');
   expect(await r.json()).toEqual({ error: 'Workflow operation could not be completed', code: 'SAVE_OUTCOME_UNKNOWN',
-    requestId, branch: 'saved/flow', commit: sha });
+    requestId, branch: 'wf/flow', commit: sha });
 });
 
 it('keeps authenticated status reads separate from explicit reconciliation', async () => {

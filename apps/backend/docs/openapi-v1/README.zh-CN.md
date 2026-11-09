@@ -1071,13 +1071,15 @@ Generated OpenAPI 继续由 Backend Router 与 DTO 派生。
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/routines` | 列表（`bot_id`、`status`、分页） | `Envelope[Page[Routine]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | 列表（`bot_id`、`status`、分页） | `Envelope[RoutinePage]` |
 | POST | `/openapi/v1/bots/{bot_id}/routines` | 创建 | `201 Envelope[Routine]` |
 | GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 获取 | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 局部更新 | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 局部更新 | `Envelope[Routine or RoutineOperationBatch]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 删除 | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[Page[RoutineRun]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun or RoutineOperationBatch]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[RoutineRunPage]` |
+
+目标字段的位置、各方法默认值、Caller 权限与部分失败说明见[运行目标契约](engine-surface.zh-CN.md#routines-运行目标)。
 
 ### 🟩 lucas-xzp · P2 —— identity（3 个端点）· `openapi_v1/identity/router.py`
 读写某个 Agent 的身份 markdown 文件（RULES、SOUL 等），`file_type` 是枚举白名单。没有自己的

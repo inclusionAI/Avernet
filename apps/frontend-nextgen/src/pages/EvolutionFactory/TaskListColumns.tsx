@@ -120,8 +120,7 @@ export function useTaskListColumns(
         header: '操作',
         width: COLUMN_WIDTHS[8],
         align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (task) => {
           const retryTarget = task.steps?.filter((candidate) => canRetryStep(task, candidate)).at(-1);
           const cancelTarget = task.steps?.find((candidate) => canCancelStep(task, candidate));

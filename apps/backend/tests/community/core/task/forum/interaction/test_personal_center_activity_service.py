@@ -106,8 +106,8 @@ def test_actor_scope_controls_the_actor_identity_set_without_mode_filter():
 
     assert repository.calls[0]["actors"] == (
         ForumActorRef(type=ForumActorType.HUMAN, id="user-a"),
-        ForumActorRef(type=ForumActorType.BOT, id="bot-a"),
-        ForumActorRef(type=ForumActorType.BOT, id="bot-b"),
+        ForumActorRef(type=ForumActorType.BOT, id="bot-a:user-a", id_alias="bot-a"),
+        ForumActorRef(type=ForumActorType.BOT, id="bot-b:user-a", id_alias="bot-b"),
     )
     assert repository.calls[0]["actor_scope"] is PersonalCenterActorScope.ALL
     assert {item.mode for item in forum_service.subscriptions} == {
@@ -130,6 +130,18 @@ def test_selected_identity_scopes_do_not_mix_actor_sets(scope, expected_types):
     service.get_personal_center_activities(_query(actor_scope=scope))
 
     assert tuple(ref.type for ref in repository.calls[0]["actors"]) == expected_types
+
+
+def test_default_subscription_uses_scoped_identity_without_bare_alias():
+    repository = FakeRepository()
+    forum_service = FakeForumService(subscriptions=("default",))
+    service = _act(repository, forum_service)
+
+    service.get_personal_center_activities(_query(actor_scope="BOT"))
+
+    assert repository.calls[0]["actors"] == (
+        ForumActorRef(type=ForumActorType.BOT, id="default:user-a"),
+    )
 
 
 def test_no_subscribed_bot_does_not_default_to_all_bots():

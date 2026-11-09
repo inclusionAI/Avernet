@@ -1,3 +1,4 @@
+import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
@@ -131,9 +132,13 @@ export type FindWorkflowTypesPageResult = {
 
 export class FlowRunRepository {
   readonly fanoutState: FanoutStateRepository;
+  readonly ordinaryRequests: OrdinaryRunRequestService;
 
   constructor(private db: IDatabase) {
     this.fanoutState = new FanoutStateRepository(db);
+    this.ordinaryRequests = new OrdinaryRunRequestService(db, async (tx, run) => {
+      if (!await new FlowRunRepository(tx).insert(run)) throw new Error("Run persistence failed");
+    });
   }
 
   insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
@@ -186,7 +191,12 @@ export class FlowRunRepository {
         "SELECT * FROM flow_runs WHERE flow_id = ?",
         [flowId],
       );
-      return rows[0] ?? null;
+      if (!rows[0]) return null;
+      // SELECT * must retain legacy fields, but internal incarnation markers
+      // are never part of a flow-run response or a repository caller's data.
+      const { ordinary_run_marker: _ordinaryMarker, parent_run_marker: _parentMarker,
+        child_run_marker: _childMarker, ...run } = rows[0] as FlowRunRow & Record<string, unknown>;
+      return run as FlowRunRow;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.findFullByFlowId failed: ${msg}`);

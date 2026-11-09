@@ -1,6 +1,7 @@
 import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
+import type { ParticipantSummaryReadDto } from './participantTypes';
 
 export type SessionKind = 'chat' | 'service_invocation';
 export type SessionStatus = 'running' | 'completed';
@@ -14,6 +15,8 @@ export interface SessionParticipantDto {
   joined_at?: number;
   /** 该成员的消息可见域（human 参与者专属；bot 不下发）。 */
   message_view_scope?: MessageViewScope;
+  /** 成员头像；旧响应可能缺省。 */
+  avatar_url?: string | null;
 }
 export interface SessionDetailData {
   session_id: string;
@@ -34,6 +37,10 @@ export interface SessionDetailData {
   /** 发起调用的主体标识（区分身份维度）。 */
   caller_principal?: string;
 }
+/** 会话列表轻量响应：participants 为成员摘要；详情接口仍返回 SessionDetailData。 */
+export type SessionSummaryData = Omit<SessionDetailData, 'participants'> & {
+  participants?: ParticipantSummaryReadDto[];
+};
 export interface SessionMessageData {
   id: string;
   timestamp: number;
@@ -168,7 +175,7 @@ export async function listGroupSessions(
   params: { view_bot_id?: string; offset?: number; limit?: number; status?: 'running' | 'completed' } = {},
 ) {
   return backendRequest<
-    BackendApiEnvelope<{ items: SessionDetailData[]; offset: number; limit: number; total: number }>
+    BackendApiEnvelope<{ items: SessionSummaryData[]; offset: number; limit: number; total: number }>
   >(`/openapi/v1/collaboration/groups/${group_id}/sessions`, {
     method: 'GET',
     params: params as Record<string, unknown>,

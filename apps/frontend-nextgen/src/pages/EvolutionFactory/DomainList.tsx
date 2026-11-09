@@ -119,8 +119,7 @@ export default function DomainList() {
         header: '操作',
         width: COLUMN_WIDTHS[5],
         align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (d) => (
           <Button
             type="button"

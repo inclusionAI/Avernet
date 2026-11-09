@@ -14,7 +14,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from agentclaw.community.core.repository.protocols.bot.ownership_sync import (
     OwnershipSyncReadRepository,
 )
-from agentclaw.community.kernel.bot_manager_sync import SnapshotUnavailable, SyncKey
+from agentclaw.community.kernel.bot_manager_sync import (
+    BOT_NOT_FOUND_CODE,
+    SnapshotUnavailable,
+    SyncKey,
+)
 from agentclaw.community.kernel.bot_ownership_sync import OwnershipFacts
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
@@ -43,7 +47,7 @@ class SqlOwnershipSyncReadRepository(OwnershipSyncReadRepository):
                         .one_or_none()
                     )
                     if bot is None:
-                        raise SnapshotUnavailable("bot_not_found")
+                        raise SnapshotUnavailable(BOT_NOT_FOUND_CODE)
                     try:
                         ext = json.loads(bot.ext or "{}")
                     except ValueError as exc:
@@ -58,6 +62,7 @@ class SqlOwnershipSyncReadRepository(OwnershipSyncReadRepository):
                         bot_type=bot.bot_type,
                         bcn_provider_bot_ref=ext.get("bcn_provider_bot_ref"),
                     )
+
             except SQLAlchemyError as exc:
                 raise SnapshotUnavailable("read_error") from exc
 

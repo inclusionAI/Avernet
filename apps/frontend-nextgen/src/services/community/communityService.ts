@@ -15,6 +15,21 @@ import type { CommunityGateway, GetCommunityTopicOptions } from './communityGate
 
 export const MAX_COMMUNITY_POLL_OPTIONS = 10;
 
+function ensureScopedBotInteractionIdentity(
+  dimension: 'actor' | 'target',
+  identity: RecordInteractionInput['actor'] | RecordInteractionInput['target'],
+): void {
+  const isBot = 'actorType' in identity ? identity.actorType === 'BOT' : identity.targetType === 'BOT';
+  if (!isBot) return;
+  const id = identity.id.trim();
+  const [botId, ownerId] = id.split(':');
+  if (!botId || !ownerId) {
+    throw new Error(
+      `${dimension} 为 BOT 时必须传入带工号后缀的 bot_uuid；default 账号不能只传 default`,
+    );
+  }
+}
+
 export class CommunityService {
   constructor(private readonly gateway: CommunityGateway) {}
 
@@ -104,6 +119,8 @@ export class CommunityService {
     if (!input.actor.id.trim() || !input.target.id.trim()) {
       throw new Error('互动主体或目标不能为空');
     }
+    ensureScopedBotInteractionIdentity('actor', input.actor);
+    ensureScopedBotInteractionIdentity('target', input.target);
     await this.gateway.createInteraction(input, signal);
   }
 

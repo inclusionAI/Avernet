@@ -15,10 +15,10 @@ function setup() {
     { path: `workflows/${id}.yaml`, contentBase64: btoa(JSON.stringify({ id, title: 'Workflow', nodes: [] })), mode: '100644' as const }]
   const candidate = [{ ...files[0], contentBase64: btoa('edited') }, ...files.slice(1)]
   updateVersion(session, 'current', { snapshot: { workflowId: id, packId: 'pack', canWrite: true,
-    baseRef: `origin/wf/${id}`, baseCommit: A, draftHead: null, versionFiles: files }, files: candidate })
+    baseRef: `refs/tags/deploy/${id}/#1`, baseCommit: A, draftHead: null, versionFiles: files }, files: candidate })
   return { id, session, candidate }
 }
-function result(id: string, requestId: string, commit = B): SaveResult { return { branch: `saved/${id}`, commit, requestId, version: 2, packId: 'pack' } }
+function result(id: string, requestId: string, commit = B): SaveResult { return { branch: `wf/${id}`, commit, requestId, version: 2, packId: 'pack' } }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 async function readBlob(blob: Blob): Promise<string> { return new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob) }) }
 
@@ -43,7 +43,7 @@ it('GET only observes an unknown save; POST reconcile verifies the completed ide
 
 it.each([
   { kind: 'deploy', state: 'completed' }, { kind: 'save', state: 'completed', requestId: 'other' },
-  { kind: 'save', state: 'completed', result: { branch: 'saved/wrong', commit: B } },
+  { kind: 'save', state: 'completed', result: { branch: 'wf/wrong', commit: B } },
 ])('does not clear a frozen attempt on unverified operation response: %j', async override => {
   const { id, session } = setup()
   vi.mocked(fetchJson).mockRejectedValueOnce(new TypeError('lost'))

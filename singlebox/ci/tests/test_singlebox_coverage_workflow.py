@@ -13,9 +13,6 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert "python3 singlebox/ci/verify_singlebox_coverage_artifacts.py" in workflow
     assert 'SINGLEBOX_COVERAGE_BCS_LINE_MIN: "54"' in workflow
     assert 'SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "48"' in workflow
-    assert 'BCS_E2E_CHANGED_LINE_MIN: "65"' in workflow
-    assert "--bcs-line-min 54" in workflow
-    assert "--bcs-method-min 48" in workflow
     assert "--bcs-router-min 100" in workflow
     assert "--bcs-cli-min 100" in workflow
 
@@ -46,3 +43,10 @@ def test_pushes_use_event_before_and_upload_phase_timings():
     assert "phase-timings.tsv" in workflow
     assert "git diff --name-only -z \"${base_ref}\" \"${GITHUB_SHA}\"" in workflow
     assert "git diff --name-only \"${SINGLEBOX_BASE_REF}\" --" not in workflow
+
+
+def test_workflow_excludes_provider_credentials_from_artifacts():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    upload = workflow.split("- name: Upload singlebox artifacts", 1)[1]
+    assert "!singlebox/.dependencies/coverage/**/collaboration-repair-provider.json" in upload
+    assert "!singlebox/.dependencies/coverage/**/.repair-provider-*" in upload

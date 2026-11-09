@@ -55,14 +55,35 @@ export async function buildTaskConversationNavigationTarget(record: TaskListItem
 
 /**
  * 任务切换必须以当前任务的主会话为边界，不能把用户的全部任务混进下拉列表。
- * 当前任务没有会话标识时只返回自身，避免把所有无会话历史任务错误聚合在一起。
+ * by_session 关联的任务可能来自第二棒 session，其 main_session_id 不同，因此
+ * associatedTaskIds 是补充使用 run_info.session_id 建立的关联集合。
  */
-export function filterTasksForCurrentConversation(records: TaskListItem[], currentTaskId: string): TaskListItem[] {
+export function filterTasksForCurrentConversation(
+  records: TaskListItem[],
+  currentTaskId: string,
+  associatedTaskIds?: readonly string[],
+): TaskListItem[] {
   const current = records.find((record) => record.task_id === currentTaskId);
   if (!current) return [];
   const currentSessionId = resolveTaskMainSessionId(current);
-  if (!currentSessionId) return [current];
-  return records.filter((record) => resolveTaskMainSessionId(record) === currentSessionId);
+  const associatedSet = associatedTaskIds?.length
+    ? new Set(associatedTaskIds.filter((taskId) => taskId !== currentTaskId))
+    : undefined;
+
+  if (!currentSessionId) {
+    if (!associatedSet) return [current];
+    return records.filter(
+      (record) => associatedSet.has(record.task_id) || record.task_id === currentTaskId,
+    );
+  }
+
+  const byTaskId = new Map<string, TaskListItem>();
+  for (const record of records) {
+    const sameMainSession = resolveTaskMainSessionId(record) === currentSessionId;
+    if (!sameMainSession && !associatedSet?.has(record.task_id)) continue;
+    byTaskId.set(record.task_id, byTaskId.get(record.task_id) ?? record);
+  }
+  return [...byTaskId.values()];
 }
 
 /**
@@ -88,6 +109,8 @@ export function toSwitcherItem(record: TaskListItem): TaskSwitcherItem {
   }
 }
 
+const EMPTY_ASSOCIATED_TASK_IDS: readonly string[] = [];
+
 interface TaskUpdateSnapshot {
   status: unknown;
   gmtModified: string;
@@ -101,10 +124,11 @@ interface TaskUpdateSnapshot {
  */
 export function useTaskSwitcherTasks(
   userId?: string,
-  options?: { enabled?: boolean; currentTaskId?: string },
+  options?: { enabled?: boolean; currentTaskId?: string; associatedTaskIds?: readonly string[] },
 ): { items: TaskSwitcherItem[]; records: TaskListItem[]; loading: boolean } {
   const enabled = options?.enabled !== false;
   const currentTaskId = options?.currentTaskId?.trim() ?? '';
+  const associatedTaskIds = options?.associatedTaskIds ?? EMPTY_ASSOCIATED_TASK_IDS;
   const [items, setItems] = useState<TaskSwitcherItem[]>([]);
   const [records, setRecords] = useState<TaskListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -130,7 +154,11 @@ export function useTaskSwitcherTasks(
         throw new Error(result.message || '任务列表加载失败');
       }
       const records = Array.isArray(result.data) ? result.data : normalizeMyTaskPage(result.data).items;
-      const conversationRecords = filterTasksForCurrentConversation(records, currentTaskId);
+      const conversationRecords = filterTasksForCurrentConversation(
+        records,
+        currentTaskId,
+        associatedTaskIds,
+      );
       const previousSnapshots = previousSnapshotsRef.current;
       // 首次加载只建立基线，不把历史任务误判为进展。
       const updatedTaskIds =
@@ -160,13 +188,19 @@ export function useTaskSwitcherTasks(
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [currentTaskId, enabled, markTaskUpdates, userId]);
+  }, [associatedTaskIds, currentTaskId, enabled, markTaskUpdates, userId]);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), SWITCHER_REFRESH_MS);
+    // 后台标签页暂停全量任务轮询，回到前台立即补一次；不改变任务过滤完整性。
+    const refreshVisible = () => {
+      if (document.visibilityState !== 'hidden') void refresh();
+    };
+    refreshVisible();
+    const timer = setInterval(refreshVisible, SWITCHER_REFRESH_MS);
+    document.addEventListener('visibilitychange', refreshVisible);
     return () => {
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
       requestIdRef.current += 1;
     };
   }, [refresh]);

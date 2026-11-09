@@ -39,16 +39,16 @@ class _Repo:
         self.calls.append(("upsert_subscription", kwargs))
         return BrowseSubscriptionUpsertResult(subscription=_record(mode=kwargs["mode"]), created=True)
 
-    def get_subscription(self, bot_id):
-        self.calls.append(("get_subscription", bot_id))
+    def get_subscription(self, bot_id, owner_user_id):
+        self.calls.append(("get_subscription", (bot_id, owner_user_id)))
         return _record()
 
     def list_subscriptions(self, **kwargs):
         self.calls.append(("list_subscriptions", kwargs))
         return BrowseSubscriptionPage(total=1, items=(_record(),))
 
-    def delete_subscription(self, bot_id):
-        self.calls.append(("delete_subscription", bot_id))
+    def delete_subscription(self, bot_id, owner_user_id):
+        self.calls.append(("delete_subscription", (bot_id, owner_user_id)))
         return True
 
     def list_browse_feed(self, **kwargs):
@@ -103,10 +103,10 @@ def test_list_subscriptions_normalises_mode_and_pagination():
 
 def test_get_and_delete_subscription_delegate_normalised_bot_id():
     svc = _service()
-    svc.get_subscription(bot_id=" bot-a ")
-    svc.delete_subscription(bot_id=" bot-a ")
-    assert _repo_calls(svc)[-2] == ("get_subscription", "bot-a")
-    assert _repo_calls(svc)[-1] == ("delete_subscription", "bot-a")
+    svc.get_subscription(bot_id=" bot-a ", owner_user_id=" 111111 ")
+    svc.delete_subscription(bot_id=" bot-a ", owner_user_id=" 111111 ")
+    assert _repo_calls(svc)[-2] == ("get_subscription", ("bot-a", "111111"))
+    assert _repo_calls(svc)[-1] == ("delete_subscription", ("bot-a", "111111"))
 
 
 def test_list_browse_feed_validates_pagination_and_accepts_empty_filters():

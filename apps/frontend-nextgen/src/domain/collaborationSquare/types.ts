@@ -185,6 +185,8 @@ export function getPublicBotActionKey(actor: FriendRequestActor, targetActorId: 
 export interface PublicBotProfile extends Omit<PublicBot, 'relationshipStatus' | 'capabilities'> {
   engine?: string;
   capabilities: Array<{ id: string; name: string }>;
+  /** 已公开技能清单（profile 端点 skills）；与 MCP 能力同口径、区分类别展示。 */
+  skills: Array<{ id: string; name: string }>;
 }
 
 export interface PublicGroup {
@@ -287,6 +289,8 @@ export interface BotCatalogViewModel {
   closeProfile: () => void;
   selectedBotId: string | null;
   botProfile: PublicBotProfile | null;
+  /** 画像（profile 端点）拉取失败的原因文案，非空时由弹窗内展示（不弹 toast）。 */
+  botProfileError: string | null;
   detailLoading: boolean;
   copyBotId: (id: string) => void;
 }

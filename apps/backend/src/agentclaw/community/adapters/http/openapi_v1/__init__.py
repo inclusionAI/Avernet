@@ -193,6 +193,7 @@ from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
 from .bots.copy import router as bot_copy_router
+from .bots.collaboration_repair import router as collaboration_repair_router
 from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -458,6 +459,10 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    # One-shot collaboration repair names a Bot and is its owner's command; the
+    # router also declares the own-bot grant itself, and the mount states the
+    # same decision so the assembled surface shows it.
+    collaboration_repair_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document

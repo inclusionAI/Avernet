@@ -19,7 +19,10 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 from agentclaw.community.core.task.domain.models import TaskOpResult
 from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
     BcsBotTokenProvider,
@@ -59,7 +62,11 @@ async def benchmark_execute_task_internal(
     """
     task_request = task_info_request_from_dto(body)
     prompt = format_benchmark_prompt(body.task_spec.model_dump())
-    bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
+    entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+        body.owner_bot_id,
+        body.owner_user_id,
+    )
+    bot_identity = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
 
     a2a_target_bot = str(body.execution_config.target_bot_id or "").strip() or None
     a2a_target_user = str(body.execution_config.target_user_id or "").strip() or None

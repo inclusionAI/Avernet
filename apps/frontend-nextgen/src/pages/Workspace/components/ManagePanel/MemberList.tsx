@@ -1,5 +1,7 @@
 import { MessageViewScopeBadge } from '@/components/MessageViewScope';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import {
+  Avatar,
   Badge,
   Button,
   Empty,
@@ -13,6 +15,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView, ParticipantView } from '@/domain/collaboration';
 import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
+import { imageAvatarSource } from '@/utils/avatarSource';
 import { MoreHorizontal, Plus, UserX } from 'lucide-react';
 import { useState } from 'react';
 import { AddMemberDialog } from './AddMemberDialog';
@@ -87,22 +90,6 @@ function getModeTone(participant: ParticipantView): 'success' | 'neutral' {
  *  二级 <300px 连管理角色（群主/主节点）也收起，只留类型标签，行内名字不再被挤压。 */
 const COLLAPSE_OPTIONAL = '@max-w-[400px]:hidden';
 const COLLAPSE_MANAGEMENT = '@max-w-[300px]:hidden';
-
-function Avatar({ participant }: { participant: ParticipantView }) {
-  const symbol = participant.name?.trim().charAt(0) || '?';
-  return (
-    <div
-      className={
-        participant.kind === 'bot'
-          ? // bot 图标对齐 Bot 工坊信息列首字母圆标：主色软底（bg-primary/10 + text-primary）。
-            'grid size-8 flex-none place-items-center rounded-full bg-primary/10 text-xs font-medium text-primary shadow-sm'
-          : 'grid size-8 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand shadow-sm'
-      }
-    >
-      {symbol}
-    </div>
-  );
-}
 
 export function MemberList({
   participants,
@@ -183,7 +170,17 @@ export function MemberList({
                 data-testid={`member-${participant.actorId}`}
                 className="@container flex items-center gap-2 border-b border-divider px-1 py-2 last:border-b-0 hover:bg-muted/50 transition-colors"
               >
-                <Avatar participant={{ ...participant, name: displayName }} />
+                {/* Bot 走统一头像链（URL→按 actorId 稳定默认图→本地图标）；Human 沿用首字/自有图片。 */}
+                {participant.kind === 'bot' ? (
+                  <BotDisplayAvatar
+                    botId={participant.actorId}
+                    name={displayName}
+                    avatarUrl={participant.avatarUrl}
+                    size={32}
+                  />
+                ) : (
+                  <Avatar name={displayName} src={imageAvatarSource(participant.avatarUrl)} size={32} />
+                )}
                 {/* 名字可能被徽标挤压截断：hover 显示全称。 */}
                 <TooltipProvider delayDuration={250}>
                   <Tooltip>

@@ -59,7 +59,9 @@ class BcsManagersPlugin(Plugin, Protocol):
 
         ``timeout_seconds`` bounds one attempt; no hidden retries. Any
         outcome other than a returned ``ManagerSetChange`` raises the
-        ``BcsManagersError`` classification above.
+        ``BcsManagersError`` classification above. A missing target is
+        REJECTED with ``kernel.bot_manager_sync.BOT_NOT_FOUND_CODE``;
+        consumers must not interpret it as a confirmed empty roster.
         """
         ...
 

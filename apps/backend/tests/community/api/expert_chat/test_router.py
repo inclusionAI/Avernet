@@ -174,6 +174,19 @@ class TestCallerConnection:
             },
         )
 
+    @pytest.mark.parametrize("offline", [True, False])
+    def test_connection_failure_logging(self, caller_connection_client, offline):
+        client, service, _ = caller_connection_client
+        service.get_authorized_caller_connection.side_effect = ConnectionError(
+            "connection failed", error_code="5001", caller_device_unavailable=offline,
+        )
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log, patch(
+            "agentclaw.community.adapters.http.expert_chat.router.super_admin", return_value=frozenset(),
+        ):
+            response = self._post(client)
+        assert response.json()["error_code"] == 5999
+        assert (log.warning.call_count, log.error.call_count) == ((1, 0) if offline else (0, 1))
+
     def test_passes_actor_role_and_logs_safe_success(
         self, caller_connection_client, caplog
     ):
@@ -398,6 +411,17 @@ class TestGetChatSession:
         data = response.json()
         assert data["success"] is False
         assert data["error_code"] == 5001
+
+    @pytest.mark.parametrize("offline", [True, False])
+    def test_get_chat_session_connection_log_level(self, client_with_mock, offline):
+        client, service = client_with_mock
+        service.get_chat_session.side_effect = ConnectionError(
+            "connection failed", error_code="5001", caller_device_unavailable=offline,
+        )
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log:
+            response = client.post("/api/v1/expert-chats/test_bot/test_owner/session")
+        assert response.json()["error_code"] == 5001
+        assert (log.warning.call_count, log.error.call_count) == ((1, 0) if offline else (0, 1))
 
     def test_get_chat_session_permission_denied(self, client_with_mock):
         client, mock_service = client_with_mock

@@ -1,7 +1,7 @@
 """Asynchronous provisioning for BBS periodic subscriptions.
 
-The HTTP toggle must only persist a new subscription after the Bot-side
-browse task is assembled and any historical digest task is removed. This
+The HTTP toggle persists a new subscription after the Bot-side browse task is
+assembled; historical digest cleanup is best-effort. This
 keeps ``ac_forum_browse_subscription`` a truthful switch: if provisioning
 fails, no new row is written and the user can retry.
 
@@ -70,7 +70,7 @@ class BbsBrowseSubscriptionProvisioner:
         self._digest_cron = digest_cron
         self._runner = runner
         self._scheduler = scheduler
-        self._pending: dict[str, _PendingSubscription] = {}
+        self._pending: dict[tuple[str, str], _PendingSubscription] = {}
 
     def join_or_refresh(
         self,
@@ -82,10 +82,14 @@ class BbsBrowseSubscriptionProvisioner:
         """Return a response projection and trigger best-effort provisioning.
 
         A new subscription is not persisted in this call. The caller receives a
-        202 projection; the background coroutine persists the row only after
-        both Bot-side crons are successfully assembled.
+        202 projection; the background coroutine persists the row once the
+        active browse cron is successfully assembled, while historical digest
+        cleanup remains best-effort.
         """
-        old = self._service.get_subscription(bot_id=bot_id)
+        old = self._service.get_subscription(
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+        )
 
         if old is not None and old.mode == BROWSE_MODE_OPENCLAW:
             result = self._service.upsert_subscription(
@@ -101,9 +105,8 @@ class BbsBrowseSubscriptionProvisioner:
                 persisted=True,
             )
 
-        pending = self._pending.get(bot_id)
+        pending = self._pending.get((bot_id, owner_user_id))
         if pending is not None and pending.task is not None:
-            pending.owner_user_id = owner_user_id
             pending.note = note
             return BrowseSubscriptionProvisionResult(
                 subscription=self._provisional_record(
@@ -128,7 +131,7 @@ class BbsBrowseSubscriptionProvisioner:
                 unregister_legacy_framework=legacy_framework,
             )
         )
-        self._pending[bot_id] = pending
+        self._pending[(bot_id, owner_user_id)] = pending
         return BrowseSubscriptionProvisionResult(
             subscription=self._provisional_record(
                 old=old,
@@ -140,9 +143,9 @@ class BbsBrowseSubscriptionProvisioner:
             persisted=False,
         )
 
-    async def cancel_pending(self, bot_id: str) -> None:
+    async def cancel_pending(self, *, bot_id: str, owner_user_id: str) -> None:
         """Cancel a pending toggle so a disable cannot be overridden later."""
-        pending = self._pending.pop(bot_id, None)
+        pending = self._pending.pop((bot_id, owner_user_id), None)
         if pending is None or pending.task is None:
             return
         if not pending.task.done():
@@ -159,7 +162,7 @@ class BbsBrowseSubscriptionProvisioner:
         OpenClaw row. A transient failure leaves the existing subscription
         unchanged and is visible in logs for a later toggle/retry.
         """
-        if bot_id in self._pending:
+        if (bot_id, owner_user_id) in self._pending:
             return
         pending = _PendingSubscription(
             bot_id=bot_id,
@@ -167,10 +170,11 @@ class BbsBrowseSubscriptionProvisioner:
             note=None,
         )
         pending.task = asyncio.create_task(self._repair(pending))
-        self._pending[bot_id] = pending
+        self._pending[(bot_id, owner_user_id)] = pending
 
     async def _repair(self, pending: _PendingSubscription) -> None:
         bot_id = pending.bot_id
+        owner_user_id = pending.owner_user_id
         try:
             await self._assemble(pending)
             logger.info(
@@ -185,8 +189,8 @@ class BbsBrowseSubscriptionProvisioner:
                 exc,
             )
         finally:
-            if self._pending.get(bot_id) is pending:
-                self._pending.pop(bot_id, None)
+            if self._pending.get((bot_id, owner_user_id)) is pending:
+                self._pending.pop((bot_id, owner_user_id), None)
 
     async def _provision(
         self,
@@ -195,13 +199,25 @@ class BbsBrowseSubscriptionProvisioner:
         unregister_legacy_framework: bool,
     ) -> None:
         bot_id = pending.bot_id
+        owner_user_id = pending.owner_user_id
         try:
-            await self._assemble(pending)
+            await self._browse_cron.ensure_cron(
+                bot_id=bot_id,
+                owner_user_id=pending.owner_user_id,
+            )
+            await self._cleanup_digest_cron(
+                bot_id=bot_id,
+                owner_user_id=pending.owner_user_id,
+            )
             result = self._service.upsert_subscription(
                 bot_id=bot_id,
                 owner_user_id=pending.owner_user_id,
                 mode=BROWSE_MODE_OPENCLAW,
                 note=pending.note,
+            )
+            await self._runner.push_install_bbs_skills(
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
             )
             if unregister_legacy_framework:
                 self._scheduler.unregister_bot(bot_id)
@@ -212,24 +228,22 @@ class BbsBrowseSubscriptionProvisioner:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 — explicit no-row-on-failure policy
+        except Exception as exc:  # noqa: BLE001 — keep an existing subscription usable
             logger.warning(
                 "[bbs-subscription] asynchronous provision failed bot=%s: %s",
                 bot_id,
                 exc,
             )
         finally:
-            if self._pending.get(bot_id) is pending:
-                self._pending.pop(bot_id, None)
+            if self._pending.get((bot_id, owner_user_id)) is pending:
+                self._pending.pop((bot_id, owner_user_id), None)
 
     async def _assemble(self, pending: _PendingSubscription) -> None:
         await self._browse_cron.ensure_cron(
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
-        # The digest-loop job is intentionally disabled. Remove any historical
-        # digest job so older subscriptions cannot continue ticking.
-        await self._digest_cron.remove_cron(
+        await self._cleanup_digest_cron(
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
@@ -237,6 +251,21 @@ class BbsBrowseSubscriptionProvisioner:
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
+
+    async def _cleanup_digest_cron(self, *, bot_id: str, owner_user_id: str) -> None:
+        """Best-effort removal of historical digest jobs before the active switch is persisted."""
+        try:
+            await self._digest_cron.remove_cron(
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — cleanup is not a switch precondition
+            logger.warning(
+                "[bbs-subscription] digest cleanup failed bot=%s owner=%s: %s",
+                bot_id,
+                owner_user_id,
+                exc,
+            )
 
     def _provisional_record(
         self,

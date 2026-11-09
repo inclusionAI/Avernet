@@ -9,6 +9,7 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
@@ -194,6 +195,20 @@ def _seed_happy_services(world) -> None:
             "delete": answer_record,
         },
     )
+
+    async def list_files(_self, _target, _session_key, *, session_user_id=None):
+        return [{"resource_id": record.resource_id, "display_name": record.display_name,
+                 "status": "ready", "size_bytes": record.size_bytes}]
+
+    async def open_content(_self, _target, _session_key, _resource_id, _disposition, *, session_user_id=None):
+        return _ContentUpstream()
+
+    async def delete_file(_self, _target, _session_key, _resource_id):
+        return None
+
+    bind_overrides(world, EngineSessionFilesProtocol, {
+        "list_files": list_files, "open_content": open_content, "delete_file": delete_file,
+    })
 
 
 _UPLOAD_BODY = {
