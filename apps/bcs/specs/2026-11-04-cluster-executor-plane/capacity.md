@@ -9,15 +9,15 @@
 | Heartbeat (renews all of an executor's buckets) | 1 write | per node per second |
 | Roster read | 1 read | per node per second |
 | Claim of a bucket (either outcome) | 2 in one transaction (conditional increment + read-back) | only after a crash or at first start: ~4096/N per dead executor, split over the survivors; never per session |
-| Fence step | +1 single-row PK read of the bucket row, shared lock (`FOR UPDATE` if shared locks are unavailable) | per owner write transaction |
+| Fence step | +1 single-row PK read of the bucket row, `FOR UPDATE` | per owner write transaction |
 | Transfer of a bucket | 1 | per drain or rebalance: ~4096/N per executor |
 | Inbound round persist | 1 | per round (required by write-before-ack) |
 | Owner pickup of fallback input | 1 indexed query over the owner's buckets **per executor per tick**, never per session | per executor per tick |
 | Failover | 1 indexed read of the dead executor's buckets (~4096/N rows) per survivor, then per claimed bucket, reads of its pending sessions in batches of 2,000 | once per dead executor; nothing to watch afterwards |
 | Transferred, not-yet-adopted buckets | 1 indexed query per executor per tick (`adopted = FALSE`, at most a few hundred rows; usually empty) | per executor per tick |
-| Session event (control event for subscribers) | +1 insert inside an existing fenced transaction, no extra round trip | per state change, interrupt or step result — a few per step, never per token |
-| Event log read | 1 indexed range read (`event_seq > :last`); catch-up reads up to 500 sessions per query | per gap or reconnect snapshot; batched catch-up only after a pub/sub disconnect, plus a safety check per unfinished session silent for 30 s — at 300 k streams ≤ 10 k sessions/s, i.e. ~20 queries/s |
-| Tokens (deltas) | **0** database statements. Per 200 ms batch: 1 publish on the bucket's delta channel (gateway → owner) and 1 on the session channel (owner → gateways), on the message queue | — (network and pub/sub capacity, never storage) |
+| Event (state change for the PA) | No extra statement: the Task record, `last_event_seq` and `unpublished` change inside the existing fenced transaction; then 1 stream append | per state change, interrupt or step result — a few per step, never per token |
+| Reconnect snapshot | **0** database statements: built from the session stream | per reconnect |
+| Tokens (deltas) | **0** database statements. Per 200 ms batch: 1 publish on the bucket's delta channel (gateway → owner) and 1 append to the session stream (owner → gateways) | — (network and pub/sub capacity, never storage) |
 | Gateway ↔ executor messages | 1 per round, per control event and per dispatch result | — (network, not storage) |
 
 The rule behind every row: costs scale with **nodes and buckets**, never
@@ -50,10 +50,15 @@ dispatches need ~3 GB across gateways and ~3 GB across executors. No storage
 operations; both copies are dropped when the step's result is recorded.
 
 **Message queue.** At 200 ms batches a stream publishes 5 delta messages/s
-into its bucket's delta channel and the owner 5 more into the session
-channel; 300 k concurrent streams are ~3 M publishes/s before fan-out
-(usually one subscriber per channel). Size the sharded pub/sub for that, or raise the
-batch interval.
+into its bucket's delta channel and the owner appends 5 more to the session
+stream; 300 k concurrent streams are ~3 M operations/s before fan-out
+(usually one reader per stream). Size Redis for that, or raise the batch
+interval.
+
+**Session stream memory.** A stream keeps entries since its latest snapshot
+(at most one step's output, ~10 KB, plus the snapshot itself) while its Task
+is open, and is deleted after the retention period. At 300 k open Tasks
+that is a few GB, plus replicas for quorum durability.
 
 ## 3. How to replace estimates with measurements
 

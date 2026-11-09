@@ -42,7 +42,7 @@ or on the load balancer.
 
 ## 2. The big picture
 
-![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams and dial-out streams to supply agents); they send rounds and control events to the session's owner executor over a direct control channel and publish deltas on the message queue, where the owner subscribes to its buckets' delta channels; the owner applies BCN's fan-out logic and publishes on the session's channel, which gateways subscribe to; executors hold leases and write the shared database.](assets/overview.svg)
+![Overview: the PA reaches a gateway through the load balancer; gateways hold every long-lived connection (PA streams and dial-out streams to supply agents); they send rounds and control events to the session's owner executor over a direct control channel and publish deltas on the message queue, where the owner subscribes to its buckets' delta channels; the owner applies BCN's fan-out logic and appends to the session's stream, which gateways read; executors hold leases and write the shared database.](assets/overview.svg)
 
 BCN has **two tiers**, which can ship as two deployments of one codebase:
 
@@ -63,7 +63,7 @@ split also turns an executor deploy into moving leases (§8).
 | **Placement** — rendezvous hashing of 4,096 buckets over the executors | Which executor *should* own S's bucket? | One extra hop or one rehydration |
 | **Lease + fencing token** — one row per bucket | Which executor *does* own S's bucket, and so drive S? | — this is the correctness mechanism |
 | **Routing** — forward to the owner, redirect on mismatch | How does a round reach the owner fast? | Falls back to a durable write |
-| **Event log + session channel** | How does every stream see every state change and every token, across owner changes? | Milliseconds on a planned handoff; after a failure, up to the takeover time (owner crash, ~6–8 s) or the 2 s catch-up (pub/sub outage); never a lost state change |
+| **Task record + session stream** | How does every stream see every state change and every token, across owner changes? | Milliseconds on a planned handoff; up to the takeover time (~6–8 s) after an owner crash; never a lost state change |
 
 Three kinds of traffic:
 
@@ -78,9 +78,9 @@ Three kinds of traffic:
   a running dispatch's deltas on the **message queue**, on the channel of the
   session's bucket; the owner subscribes to the delta channels of the buckets
   it owns.
-- **Executor → session channels → gateways**: the owner publishes each
-  session's events and deltas on the same message queue; every gateway
-  serving that session subscribes. This is BCN's fan-out.
+- **Executor → session channels → gateways**: the owner appends each
+  session's events and deltas to that session's Redis Stream; every gateway
+  serving the session reads it. This is BCN's fan-out.
 - **Gateway → supply agents**: outbound A2A streams. Every supply agent is
   an A2A agent that BCN dials out to; BCN accepts no inbound agent
   connections.
@@ -100,8 +100,8 @@ shared database is the only place they meet.
 | Entry gateway | The gateway that accepted the PA's connection for a request |
 | Dispatch gateway | The gateway running one dispatch: it holds the stream to the supply agent |
 | Delta channel | Bucket b's topic on the message queue: dispatch gateways publish deltas of b's sessions, b's owner subscribes (§7.2) |
-| Session channel | S's topic on the message queue; the owner publishes, gateways subscribe (§7.4) |
-| Subscriber | A gateway subscribed to S's channel, relaying to a client stream |
+| Session channel | `session:{S}`, a Redis Stream: the owner appends, gateways read from their last entry id (§7.4) |
+| Subscriber | A gateway reading S's stream, relaying to a client stream |
 | Delta | A piece of output text or artifact (a "token" chunk); goes to the owner, is fanned out, never stored |
 | Control event | Anything that changes what should happen next; recorded by the owner (§7.3) |
 | Claim / Transfer | Take a bucket nobody holds / hand one to a chosen successor |
@@ -286,33 +286,36 @@ the clear simply fails and the owner processes the input.
 
 ### 5.5 Fenced writes
 
-![A fenced write is one transaction: first the session's bucket lease row is locked in shared mode and its token checked, then the durable writes. A token that is not the writer's makes the whole transaction roll back; a claim or transfer of the bucket waits for in-flight fenced writes.](assets/fenced-write.svg)
+![A fenced write is one transaction: first the session's bucket lease row is locked (FOR UPDATE) and its token checked, then the durable writes. A token that is not the writer's makes the whole transaction roll back; a claim or transfer of the bucket waits for the in-flight fenced write.](assets/fenced-write.svg)
 
 Every durable write an owner makes is one transaction whose first step locks
 S's bucket row and checks the token:
 
 ```sql
 SELECT fencing_token FROM bcs_task_leases
- WHERE bucket = :b FOR SHARE;            -- must equal :mine, else LeaseLost
+ WHERE bucket = :b FOR UPDATE;           -- must equal :mine, else LeaseLost
 ```
 
 followed by the real writes for S (run state, checkpoints, dispatch records,
-control events for subscribers…, and `write_seq = write_seq + 1` on S's
-row). If the token is not mine, the transaction rolls back and the caller
-gets **LeaseLost**: stop driving the bucket's sessions, drop them from
-memory, never retry. The shared lock lets all of a bucket's sessions write
-concurrently, while a claim or transfer — an exclusive update of the same
-row — waits until every in-flight fenced write has committed; fenced writes
-that start after it see the new token. So there is no gap between "check"
-and "write" for a pause to fall into. (`write_seq` lets a handoff successor
-see what changed for each session.)
+the Task record, `last_event_seq` and `unpublished` (§7.4), and
+`write_seq = write_seq + 1` on S's row). If the token is not mine, the
+transaction rolls back and the caller gets **LeaseLost**: stop driving the
+bucket's sessions, drop them from memory, never retry. A claim or transfer
+updates the same row, so it waits until the in-flight fenced write has
+committed, and fenced writes that start after it see the new token. So there
+is no gap between "check" and "write" for a pause to fall into.
+(`write_seq` lets a handoff successor see what changed for each session.)
 
-**If the database offers no shared row locks,** use `FOR UPDATE`. It is just
-as safe, but it serializes fenced writes within a bucket: one transaction at
-a time, roughly a few hundred per second per bucket and about a million per
-second across 4,096 buckets. That is far above the expected control-write
-rate, but a hot bucket (one very busy group session, or skew) meets the
-limit first. Measure before choosing (§14).
+**Why an exclusive lock is enough.** `FOR UPDATE` runs a bucket's fenced
+writes one at a time, so what matters is how busy one bucket row gets:
+sessions per bucket, not the total. With 100,000 open sessions over 4,096
+buckets, a bucket holds about 25 sessions. At 10 k rounds/s × ~5 fenced
+writes ≈ 50 k writes/s, that is about 12 per bucket per second, each holding
+the lock a few milliseconds: a bucket row is busy about 5 % of the time.
+`FOR SHARE` would let a bucket's sessions write in parallel; it is an
+optional optimization if OceanBase supports shared row locks. A hot bucket
+(one very busy group session, or skew) is what to measure (§14); if buckets
+ever get hot, the fallback is a per-session fence (§15).
 
 Rules: the check and the writes are in **one transaction**, in the **same
 database**, for **one session** behind its bucket's check. If a commit's
@@ -368,8 +371,8 @@ executor (`BucketMap`), so the guess is almost always right.
 
 **Durable fallback**, run by whichever executor received the round: if S's
 bucket is claimable, that executor claims it and serves (placement is only a
-preference). Otherwise, in one transaction that holds the bucket row in
-shared mode, it records the round as input on S, sets S's pending-work flag,
+preference). Otherwise, in one transaction that holds the bucket row's
+lock, it records the round as input on S, sets S's pending-work flag,
 and acknowledges. Because of that lock, the fallback commits either before a
 claim of the bucket — so the new owner's scan of its new bucket (§9) finds
 the input — or after it, when it sees the new owner and forwards instead. An
@@ -377,12 +380,11 @@ owner that is alive but unreachable from the gateway finds such input with
 its per-tick pickup (one indexed query over its buckets). Gateways never
 touch leases.
 
-The entry gateway subscribes to S's session channel (§7.4) **before** it
-sends `Submit`, so nothing the owner publishes for this round can be missed,
-and relays it to the PA. For a brand-new session whose id only exists once
-the round is accepted, it subscribes on `Accepted`, which carries the
-current `event_seq` and `chunk_seq`, and catches up once from there with a
-snapshot (§7.5). Nothing here
+The entry gateway starts reading S's session channel (§7.4) from its
+current end **before** it sends `Submit`, so nothing the owner appends for
+this round can be missed, and relays it to the PA. For a brand-new session,
+whose id only exists once the round is accepted, it reads the new stream
+from its first entry as soon as `Accepted` names S. Nothing here
 depends on the load balancer: it needs only unique node ids, the shared
 database, direct peer addresses, and the same hash on every node. A balancer
 that hashes on a session header just makes forwarding rarer.
@@ -393,27 +395,30 @@ that hashes on a session header just makes forwarding rarer.
 
 ### 7.1 Connections
 
-![One round end to end: PA's SSE reaches GW1 through the load balancer; GW1 submits the round to owner E3; E3 places the dispatch on GW1; GW1 streams from the supply agent, publishes deltas on the delta channel of S's bucket (E3 subscribes) and sends control events to E3; E3 applies BCN's fan-out logic and publishes on session S's channel; GW1, subscribed to S, relays to the PA.](assets/round-flow.svg)
+![One round end to end: PA's SSE reaches GW1 through the load balancer; GW1 submits the round to owner E3; E3 places the dispatch on GW1; GW1 streams from the supply agent, publishes deltas on the delta channel of S's bucket (E3 subscribes) and sends control events to E3; E3 applies BCN's fan-out logic and appends to session S's stream; GW1, reading it, relays to the PA.](assets/round-flow.svg)
 
 | Leg | Protocol | Notes |
 | --- | --- | --- |
 | PA → load balancer → gateway | The PA's SSE, WebSocket or gRPC stream | An L4 balancer passes the connection through. An L7 balancer must not buffer responses and must allow idle gaps longer than the gateway's SSE heartbeat (`: ping` every 15–30 s) |
 | Gateway ↔ executor | One long-lived, multiplexed, bidirectional channel per pair (e.g. gRPC over HTTP/2) | Carries rounds, control events and results from dispatches, and dispatch commands; keepalive pings detect a dead peer in seconds |
 | Dispatch gateway → owner | **Delta channels** on the message queue, one per bucket | The dispatch gateway publishes each in-flight dispatch's deltas to `deltas:{bucket(S)}`; the owner subscribes to the delta channels of the buckets it owns, so nobody looks an owner up for a delta (§7.2) |
-| Executor → gateways | **Session channels** on the same message queue | BCN's fan-out: the owner publishes each session's events and deltas; every gateway serving that session subscribes (§7.4) |
+| Executor → gateways | **Session channels**: one Redis Stream per session | BCN's fan-out: the owner appends each session's events and deltas; every gateway serving that session reads it (§7.4) |
 | Gateway → supply agent | A2A `SendStreamingMessage` / `SubscribeToTask` | One per dispatch, opened by the dispatch gateway |
 
 ### 7.2 Dispatch placement and results
 
-When the owner starts a step, it chooses where the dispatch runs: by default
-the entry gateway of the caller's stream (one fewer hop for the PA's
-output), otherwise any healthy gateway (group members, background steps, a
-PA that disconnected).
+When the owner starts a step, it places the dispatch on **any healthy
+gateway**, the least loaded. An A2A agent is reached by an outbound call, so
+nothing ties a dispatch to a particular gateway, and its deltas reach the
+owner through the delta channel wherever it runs.
 
 The owner records **which gateway runs the dispatch** in the dispatch record,
-inside its fenced write (item 3 owns the record). That fact must be durable:
-a new owner needs it to supervise, cancel or collect the dispatch after a
-takeover.
+inside its fenced write (item 3 owns the record). If gateways sit behind an
+internal load balancer, the gateway that accepts `StartDispatch` reports its
+own id and the owner records that. The fact must be durable: a new owner
+needs it to supervise, cancel or collect the dispatch after a takeover.
+Per-agent limits (rate, concurrency) are no longer local to one gateway:
+they become shared, for example a counter in Redis.
 
 The dispatch gateway sends everything the agent produces to S's current
 owner, never to a fixed node:
@@ -476,106 +481,115 @@ never sees "completed" before the text.
 
 ### 7.4 Fan-out: session channels
 
-![Session channels: the owner commits control events to the event log, then publishes events and deltas on S's channel; gateways subscribed to S relay them. When the owner crashes, subscribers stay on the channel; the new owner republishes S's latest event and step buffer, subscribers detect any gap in event_seq and read the missing events from the log.](assets/subscriptions.svg)
+![Session channels: every session has a Redis Stream; the owner commits an event in its fenced write (Task record, last_event_seq, outbox), then appends it with an explicit id; gateways read the stream from their last id. When the owner crashes, readers keep reading the same stream; the new owner appends an Owner(token) marker, the outbox entries (duplicates are rejected by id) and the step's output as a replacement.](assets/subscriptions.svg)
 
-Every session S has a **channel** on a non-durable pub/sub. The owner is its
-only publisher; every gateway with a stream for S subscribes. Subscribers
-subscribe **by session, not by owner**, so an owner change is invisible to
-them: they stay on the channel, and whichever executor owns S publishes to
-it.
+Every session S has a **session channel**: a Redis Stream named
+`session:{S}`. The owner is its only writer; every gateway with a stream for
+S reads it from the last entry id it has seen. Gateways follow the session,
+not its owner, so an owner change is invisible to them: they keep reading
+the same stream, and whichever executor owns S appends to it.
 
-Messages on the channel:
+**A channel is just a name.** Nothing is created per session in advance:
+the first append creates the stream, and a gateway reading it costs one
+entry in the server's list of readers. One stream per session is therefore
+cheap, and finished sessions' streams are trimmed (below).
 
-- `Event(event_seq, token, event)` — a control event the PA must see. It is
-  **committed to the session event log first** (in the owner's fenced commit,
-  numbered by a per-session `event_seq`), then published.
-- `Delta(dispatch, chunk_seq, token, chunk)` — output text, never stored.
+**Three independent mappings.** Session S → bucket → owner executor is
+decided by the hash and the lease table (§4–§5). The name `session:{S}` →
+the Redis node that stores it is decided inside Redis Cluster, by hashing
+the name into one of 16,384 slots spread over its nodes: that is what
+"sharded" means, and only the Redis client libraries use it. S's PA stream →
+the gateway that holds it is wherever the load balancer sent the PA, and it
+exists only as that gateway's read position. None of them needs to line up
+with the others.
 
-Every message carries the publisher's **fencing token**. A subscriber drops
-any message with a token lower than the highest it has seen. A stale owner's
-`Event` never exists (its fenced commit fails), but a `Delta` is not stored,
-so two more rules keep a paused former owner's deltas away from clients:
-the **first thing a new owner publishes** after a claim or transfer is an
-`Owner(token)` marker, and every snapshot (§7.5) carries the current token,
-so a gateway that subscribes later knows it before it relays anything. A
-stale delta can still slip through in the moment between a claim and its
-marker; the new owner's republished step buffer is an `append: false`
-replacement and overwrites it.
+Entries are written with **explicit ids**:
 
-The pub/sub keeps nothing, so **the event log is the truth** and four rules
-close the gaps:
+| Entry | Id | Content |
+| --- | --- | --- |
+| Event | `<event_seq>-0` | A state change the PA must see: status, interrupt, a step's final output |
+| Delta | `<event_seq>-<chunk_seq>` | Output text, between the event it follows and the next one |
+| Snapshot | `<event_seq>-0` (replaces that event) | The whole Task as of that event: status, history, artifacts as an `append: false` replacement |
+| `Owner(token)` | the next free id | Written first by every new owner |
 
-1. **Gap detection.** `event_seq` has no holes. A subscriber that sees #43
-   after #41 reads #42 from the log (`ReadEvents(S, after = 41)`) before
-   relaying #43.
-2. **Republish on takeover.** A new owner republishes, for each session of a
-   bucket it claimed that has an unfinished Task, the latest event and the
-   step buffer. That reveals any event the old owner
-   committed but never published: even the last one, which no later event
-   would expose. Subscribers drop repeats by `event_seq` and `chunk_seq`.
-3. **Subscribe before reading.** A gateway subscribes to S *before* it asks
-   for a snapshot, and drops what the snapshot already contains (§7.5), so
-   nothing falls in between.
-4. **Catch up in batches, never per session.** Silence on a channel is
-   normal (long steps, human waits), so it triggers nothing by itself. A
-   gateway catches up when its pub/sub connection breaks or a shard fails
-   over: it re-subscribes and reads every affected session's missed events
-   with batched `ReadEvents([(S, after)…])` calls (up to 500 sessions per
-   call, answered by one indexed query), within a per-gateway budget of
-   concurrent calls, backing off on storage errors, every 2 s until the
-   connection is back. A slow safety check (each unfinished session silent
-   for 30 s, in the same batches) catches a message the pub/sub dropped
-   without a disconnect. Tokens pause; state changes are never lost.
+Redis rejects an id that is not greater than the stream's last one, so
+pushing the same entry twice is harmless: **republishing is idempotent by
+construction**.
 
-> **Guarantee:** every committed control event reaches every live subscriber
-> at least once and in order, however often ownership changes. Deltas are
-> best effort and may pause or reset after a failure; the final result is
-> exact.
+**Committed, then pushed.** An event first goes into the owner's fenced
+commit: the Task record changes, `last_event_seq` on the session row moves
+to the event's number, and the event joins `unpublished`, a small outbox on
+the session row. After the commit, the owner appends it to the stream and
+clears it from `unpublished` lazily, in its next commit. An owner that
+crashes between commit and append leaves the event in `unpublished`.
 
-**Product.** Any **sharded** pub/sub with cheap per-session channels: Redis 7+
-sharded pub/sub (`SSUBSCRIBE` / `SPUBLISH`) or NATS core; TBase only if it
-supports sharded pub/sub. Never classic Redis Cluster `PUBLISH`, which
-copies every message to every node, and never a durable queue, which would
-pay a replicated disk write for every token chunk and still not be the
-truth. Single-node mode uses an in-process channel.
+**Fencing tokens.** Every entry carries the writer's fencing token, and a
+gateway drops any entry whose token is lower than the highest it has seen. A
+stale owner can't commit new events (its fenced commit fails), but it could
+still append deltas; the `Owner(token)` marker tells readers the new token
+at once. A stale delta that slips in before the marker is overwritten by the
+new owner's `append: false` replacement.
+
+**Takeover.** For each session with an unfinished Task in a bucket it
+claimed or received, the new owner appends the `Owner(token)` marker, then
+the session's `unpublished` entries (any already in the stream are rejected
+by id), then the in-flight step's output from `FetchBuffer` (§7.2) as an
+`append: false` replacement.
+
+**Retention.** The owner appends a snapshot entry at least at each step end
+and may trim everything before the latest snapshot. A stream is deleted
+after its Task ends plus a retention period, so memory stays bounded even
+for long Tasks (capacity.md).
+
+**Requirements on the stream provider:**
+
+- **Quorum durability:** an acknowledged append must survive a failover. If
+  Redis could lose acknowledged entries, committed events would vanish from
+  delivery. This is a requirement, to be verified with a failover test
+  (§14).
+- **Reads at scale:** one blocking read (`XREAD BLOCK`) can only cover
+  streams in one hash slot, so a gateway with sessions spread over many
+  slots needs many blocking reads. The fallback is a light pub/sub
+  notification ("new entry on S") followed by a non-blocking range read
+  (`XRANGE`). Measure before choosing (§14).
+
+> **Guarantee:** every committed event reaches every gateway reading S's
+> stream, in order and at least once, however often ownership changes;
+> duplicates are rejected by id. Deltas may pause or be replaced after a
+> failure; the final result is exact.
+
+Single-node mode uses an in-process stream.
 
 ### 7.5 Reconnecting clients
 
 A2A does not ask for frame-by-frame replay: a client that reconnects calls
 `SubscribeToTask` and must get **one snapshot** — the current Task with its
-status, history and every artifact so far — then live events. Everything for
-the snapshot is on the owner:
+status, history and every artifact so far — then live events.
 
-| Part | Lives in | Durable? |
-| --- | --- | --- |
-| Status, history, interrupts, and artifacts of finished steps | The event log and step results | Yes |
-| The current step's output so far | The owner's **step buffer** (backed by the dispatch gateway's copy) | No — memory |
+The snapshot is built **from the stream only.** The reconnect may land on
+any gateway (GW2): GW2 reads `session:{S}` from its latest snapshot entry,
+applies the events and deltas after it, sends the PA the result as one
+snapshot, and keeps reading live from there. No call to the owner or the
+database is needed. If the step ends meanwhile, nothing is lost: the step's
+final event carries the full assembled artifact as an `append: false`
+replacement.
 
-The reconnect may land on any gateway (GW2):
+**If the stream can't provide a snapshot** (trimmed past what is needed, or
+lost), this iteration does not rebuild one from the database; that is
+deferred to the next iteration (§14).
 
-1. GW2 subscribes to S's channel and holds what arrives.
-2. GW2 asks the owner for `Snapshot(S)`: the durable part, the step buffer,
-   and the `event_seq` and `chunk_seq` it reflects.
-3. GW2 sends the PA the snapshot, then the held and live messages that come
-   after those sequence numbers.
+**If the owner changed,** the new owner already appended the step's output
+from the dispatch gateway (`FetchBuffer`, §7.2). **If the dispatch gateway
+died too,** the partial output survives at the supply agent: the dispatch's
+new gateway re-subscribes to the agent's task, whose snapshot includes the
+artifact so far, and the PA gets an `append: false` replacement. An agent
+that can't be re-subscribed has the step re-run, and the PA sees the
+partial text reset — the boundary we accept: the final result is exact;
+intermediate output may reset.
 
-If the step ends in between, nothing is lost: the step-result event carries
-the **full assembled artifact** as a replacement (`append: false`), and it is
-either already in the snapshot or arrives on the channel after it.
-
-**If the owner changed,** the new owner rebuilt the step buffer from the
-dispatch gateway (`FetchBuffer`, §7.2). **If the dispatch gateway died too,**
-the partial output survives at the supply agent: the dispatch's new gateway
-re-subscribes to the agent's task, whose snapshot includes the artifact so
-far, and the PA gets an `append: false` replacement. An agent that can't be
-re-subscribed has the step re-run, and the PA sees the partial text reset —
-the boundary we accept: the final result is exact; intermediate output may
-reset.
-
-Step buffers live only while their dispatch is in flight and are dropped
-once the owner has recorded the step's result. Exact replay by
-`Last-Event-ID` is an optional BCN extension: number the buffered chunks and
-send `id: <event_seq>.<chunk_seq>`.
+Exact replay by `Last-Event-ID` comes almost for free: stream ids are
+natural SSE ids (`id: <event_seq>-<chunk_seq>`). It is an optional BCN
+extension.
 
 ### 7.6 Gateway failure and drain
 
@@ -591,9 +605,9 @@ there:
   safe because side-effecting steps are dispatched only to agents with
   durable, queryable tasks (items 3 and 6).
 
-**A pub/sub outage** stalls tokens but loses no state change: gateways
-catch up from the event log in batches until channels recover (§7.4,
-rule 4).
+**A message-queue outage** stalls tokens but loses no state change:
+committed events wait in `unpublished`, and gateways resume reading each
+stream from their last id when it recovers (§7.4).
 
 **Draining a gateway** (deploys of this tier are rare):
 
@@ -739,8 +753,9 @@ For each resumed session: reload state from the database (exactly like
 resuming a cold session — *failover is a cache miss*), subscribe to the bucket's
 delta channel, check each in-flight dispatch's gateway in the roster (a live
 one hands over the step's output with `FetchBuffer`; a dead one means the
-dispatch is moved, §7.6), republish the session's latest event and
-step buffer (§7.4, rule 2), and resume.
+dispatch is moved, §7.6), append the `Owner(token)` marker, the
+session's `unpublished` entries and the step's output as an `append: false`
+replacement (§7.4), and resume.
 
 **Taking over earlier on evidence.** Because fencing makes a wrong guess
 safe, evidence can replace waiting: a restart at the same address frees the
@@ -774,13 +789,37 @@ and the recovery grace.
   resuming a months-old task, and crash failover are the same operation:
   reload from the database. (Step buffers are the one exception: soft, and
   backed by the dispatch gateway's copy and the agent's own task, §7.5.)
-- **Rebalancing moves buckets.** When an executor joins or returns, current
-  owners hand over the buckets it now ranks first for (§8.2), a few per
-  second so rehydration never spikes, idlest first.
+- **Rebalancing moves buckets** when an executor joins (§10.1).
 - A **stuck-session watchdog** (~5 min without progress) drops a wedged
   driver and reloads the session on the same owner; a session that keeps
   wedging is failed and reported; a stuck-dispatch
   watchdog (no progress count from the gateway) moves a wedged dispatch.
+
+### 10.1 Rebalancing when an executor joins
+
+Every bucket already has a live owner, so a new executor would sit idle
+unless buckets are handed to it:
+
+1. The newcomer registers as `active` and heartbeats. Owners wait until it
+   has been healthy for a **settling delay** (30 s), so a node that starts
+   and crashes repeatedly doesn't pull buckets back and forth.
+2. Each owner recomputes the ranking with the newcomer included. Only the
+   buckets the newcomer now ranks first for move — about 1/(N+1) of each
+   owner's buckets.
+3. Each owner hands those buckets over with the §8 handoff, **5 buckets/s
+   per owner**, idlest first, so the newcomer's session loads never spike.
+4. Gateways follow through their bucket-map refresh and `NOT_OWNER`.
+
+Example: going from 20 to 21 executors, the newcomer gets about 195
+buckets, about 10 from each owner; at 5 buckets/s per owner the rebalance
+takes a few seconds.
+
+| Case | What moves buckets |
+| --- | --- |
+| An executor joins | Rebalancing, after the settling delay |
+| An executor restarts in place (same address and `member_name`) | Its old buckets are claimable at once; it claims them back (§3) |
+| An executor drains (deploy, scale-down) | The drain hands its buckets to successors (§8) |
+| An executor crashes | Survivors claim its buckets (§9) |
 
 ---
 
@@ -798,14 +837,14 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 | Claim grace for non-preferred nodes | 1 s |
 | Buckets (fixed before launch) | 4,096 |
 | Pending sessions read per query when resuming a bucket | 2,000 |
-| Rebalance pace after an executor joins | 5 buckets/s |
+| Rebalance after an executor joins: settling delay / pace | 30 s / 5 buckets/s per owner |
 | Bucket map refresh at gateways | 10 s |
 | Safety-net sweep | 30–60 s |
 | Executor drain deadline | below the platform's stop-hook timeout (e.g. 25 s) |
 | Gateway–executor channel keepalive / dead after | 1 s / 3 s |
 | Delta batch interval (dispatch gateway → delta channel) | 200 ms |
-| Catch-up while a pub/sub connection is down: interval / sessions per call | 2 s / 500 |
-| Safety check for an unfinished, silent session | 30 s |
+| Snapshot entry in a session stream | at least at each step end |
+| Session stream kept after its Task ends | retention period (e.g. 24 h) |
 | Dispatch progress count | every 5 s |
 | Gateway drain deadline | sized to the platform's stop timeout (e.g. 60 s) |
 | Episode idle eviction | 10 min |
@@ -825,11 +864,13 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
   `(node_id, adopted)`, for a dead executor's buckets and for buckets
   transferred but not yet adopted.
 - **Session row** (columns this design needs on the session record):
-  `bucket`, `has_pending_work`, `pending_seq`, `write_seq`. Index:
-  `(bucket, has_pending_work)`, for resuming a bucket's pending sessions.
-- **Session event log** (logical): `session_id`, `event_seq`, event, written
-  only in fenced commits; kept until the Task ends plus item 4's retention
-  floor. Its physical home is open (§14).
+  `bucket`, `has_pending_work`, `pending_seq`, `write_seq`,
+  `last_event_seq`, `unpublished` (the outbox of events committed but not
+  yet appended, §7.4). Index: `(bucket, has_pending_work)`, for resuming a
+  bucket's pending sessions.
+- **Task record**: status, history (including interrupt messages) and the
+  artifacts of finished steps, written fenced; what GetTask and ListTasks
+  read.
 - **Dispatch location**: the dispatch record (item 3) names the gateway that
   runs it, written fenced.
 
@@ -838,25 +879,26 @@ single-node implementation and a no-op one):
 
 - **Roster** — register, heartbeat, set draining, read the live roster.
 - **Placement policy** — rank executors for a bucket (rendezvous by
-  default); choose a gateway for a dispatch (the caller's, else the least
+  default); choose a gateway for a dispatch (any healthy one, the least
   loaded).
 - **Task leases** — claim, transfer, list owned buckets, and a **fence
-  step** (lock the session's bucket row in shared mode and check the token)
+  step** (lock the session's bucket row `FOR UPDATE` and check the token)
   that other components put first in their transactions (item 3's dispatch
   records use it).
 - **Gateway–executor protocol**:
-  - gateway → executor: `Submit(round)`, `BucketMap()`, `Snapshot(S)`,
-    `ReadEvents(S, after_seq)`, `DispatchEvent(D, seq, event)`,
+  - gateway → executor: `Submit(round)`, `BucketMap()`,
+    `DispatchEvent(D, seq, event)`,
     `DispatchResult(D, seq, output)`, `Progress(D)`, `Abandoned(D)`;
   - executor → gateway: `Accepted(Task)`, `NOT_OWNER(X)`,
     `StartDispatch(D, target, request)`, `CancelDispatch(D)`, `Ack(D, seq)`,
     `FetchBuffer(D)`.
 - **Delta channel** (dispatch gateway → owner, on the message queue):
   `Delta(D, chunk_seq, chunk)` on `deltas:{bucket}`.
-- **Session channel** (owner → subscribers, on the message queue):
-  `Event(event_seq, token, event)` and `Delta(D, chunk_seq, token, chunk)`;
-  with a pub/sub implementation, an in-process one for single-node mode and a
-  no-op.
+- **Session channel** (owner → gateways, the Redis Stream `session:{S}`):
+  entries with explicit ids — events and snapshots `<event_seq>-0`, deltas
+  `<event_seq>-<chunk_seq>` — each carrying the fencing token, plus
+  `Owner(token)` markers; with a Redis implementation, an in-process one for
+  single-node mode and a no-op.
 
 Single-node mode runs both tiers in one process and the same lease logic on
 its local database, so the takeover path is exercised everywhere.
@@ -875,7 +917,7 @@ its local database, so the takeover path is exercised everywhere.
 | D6 | Rounds are written and picked up | Rounds are forwarded to the owner; the write is the fallback | Milliseconds instead of up to 1 s |
 | D7 | — | Stable `member_name` for placement | Placement survives restarts |
 | D8 | Any node serves any request; the owning node runs its own dial-out streams; dial-in sockets land on any node (planes 1 and 3) | A gateway tier holds every long-lived connection; executors hold none; every supply agent is dial-out | An executor crash or deploy pauses streams instead of closing them, and executor drain becomes moving leases |
-| D9 | — | The owner fans out on a per-session channel of a non-durable pub/sub; a durable per-session event log is the truth | Fan-out stays BCN's logic; owner changes are invisible to subscribers; no durable queue on the token path |
+| D9 | — | The owner fans out on a per-session Redis Stream with explicit ids; the committed Task record plus an outbox on the session row make delivery survive a crash | Fan-out stays BCN's logic; owner changes are invisible to readers; republishing is idempotent |
 | D10 | A lease per task session | One lease per bucket (4,096 fixed buckets); sessions inherit their bucket's owner and token | Ownership work is O(buckets): no claim per cold session, a failover claims ~4096/N rows, a drain transfers a few hundred, and the whole owner map fits in every gateway |
 
 ---
@@ -889,13 +931,14 @@ its local database, so the takeover path is exercised everywhere.
 | 3 | Node-to-node authentication | mTLS if available; else a shared secret on an internal-only port |
 | 4 | Deploy platform: stop timeout; group-level pre-stop hook? | Sizes both drain deadlines; avoids double moves |
 | 5 | Timer durability | Every run timer must be stored durably |
-| 6 | Physical home of the session event log | Extend item 3's delivery ledger rather than add an overlapping table |
+| 6 | Reconnect snapshot when the stream can't provide one | Deferred to the next iteration: rebuild it from the Task record |
 | 7 | Gateway and executor as separate deployments, or roles of one | Separate deployments from one codebase: gateways deploy rarely, executors often |
-| 8 | Exact replay by `Last-Event-ID` | Optional extension once the step buffer exists; snapshots are enough for A2A |
-| 9 | Message queue product for delta and session channels | A non-durable, sharded pub/sub: Redis 7+ sharded pub/sub or NATS core; TBase only if it supports sharded pub/sub. With a durable queue that keeps a short retention, B could replay b's delta channel from an offset instead of asking the agent (§8.1, step 6) |
+| 8 | Exact replay by `Last-Event-ID` | Stream ids are natural SSE ids; offer it as a BCN extension. Snapshots are enough for A2A |
+| 9 | Message queue products | Delta channels: a non-durable, sharded pub/sub (Redis 7+ sharded pub/sub or NATS core). Session channels: Redis Streams with **quorum durability** (no acknowledged entry lost on failover) — a requirement, verified with a failover test |
 | 10 | Delta channel granularity | One channel per bucket (an owner subscribes to ~4096/N channels); per-session channels only if one bucket's delta rate is too high for one subscriber |
-| 11 | Shared row locks for the fence step | Use `FOR SHARE` if OceanBase supports it; otherwise `FOR UPDATE`, and measure per-bucket write rates for hot buckets |
+| 11 | Hot buckets | `FOR UPDATE` by default; measure per-bucket write rates; `FOR SHARE` if OceanBase supports it |
 | 12 | Bucket count | 4,096, fixed before launch |
+| 13 | Reading many session streams | One blocking read covers one hash slot; measure, and fall back to a pub/sub notification plus `XRANGE` |
 
 ---
 
@@ -910,17 +953,19 @@ its local database, so the takeover path is exercised everywhere.
 | A lock service (etcd, ZooKeeper, Redlock) for ownership | The fencing check must run in the same transaction as the data it protects; Redlock has no fencing token at all |
 | The owning executor holds its own streams (one node type) | Every executor crash or deploy cuts streams; drain must wait for non-resumable steps |
 | Fan-out decided or performed in the gateway | Fan-out is BCN's logic: group membership, mentions, visibility, which member's stream is shown |
-| The owner tracks its subscribers itself (owner as broker) | Subscribers would have to follow every owner change; a pub/sub makes owner changes invisible, and is a high-throughput fan-out we need not build |
-| A durable queue for fan-out | A replicated disk write per token chunk, per-session topics don't scale, and it would still not be the truth |
+| The owner tracks its subscribers itself (owner as broker) | Subscribers would have to follow every owner change; a stream per session makes owner changes invisible, and is a high-throughput fan-out we need not build |
+| A disk-based durable queue (Kafka, RocketMQ) for fan-out | A replicated disk write per token chunk and heavyweight per-session topics; Redis Streams keep entries in memory, one cheap stream per session |
 | A message queue on the request path (e.g. a consistent-hash exchange) | A third membership view, lost ordering on rebalance, a second lease mechanism, and it cannot join the lease-row transaction the durable fallback relies on |
 | Every input and token through a cache's streams (queue-centric executor) | Storage operations grow with tokens, a queue hop before every round, and acknowledged-message durability rests on the cache's failover |
 | Redis as the system of record | Asynchronous replication can lose acknowledged writes and reissue a token |
+| Per-session fencing (`owner_token` on the session row) | Not needed at ~25 sessions per bucket; the fallback if buckets get hot |
 | One lease per session | O(sessions) claims for cold starts and failover, and failure discovery over millions of lease rows; buckets give the same safety with ~4096/N lease operations per failover |
 | Per-lease renewal | O(leases) writes per tick |
 | Polling for new rounds | Adds up to 1 s to TTFT |
 
-The only pub/sub on the hot path is the non-durable session channel (§7.4).
-A durable queue still fits **off** the hot path: outbound webhook push to
+On the hot path the message queue carries the delta channels (non-durable
+pub/sub) and the session channels (Redis Streams, §7.4). A disk-based durable
+queue still fits **off** the hot path: outbound webhook push to
 PAs (long retries, dead letters) and feeds for audit or analytics,
 preferably as a change stream from the database.
 

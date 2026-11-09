@@ -23,14 +23,12 @@ builds it to this contract:
 - **Look the owner up per control message** (hint cache + `NOT_OWNER`); never
   remember an owner for the life of a run. This is what lets a session move
   without touching any connection.
-- **Subscribe by session, never by owner** (design §7.4): subscribe to S's
-  channel before asking for a snapshot; drop messages the snapshot already
-  covers or that carry an older fencing token; read missing events from the
-  log on a gap in `event_seq`; after a pub/sub disconnect, catch up in
-  batches (up to 500 sessions per `ReadEvents` call) within a concurrency
-  budget, never with one poll per session.
-  Fan-out decisions are the owner's; the gateway only relays what is
-  published to it.
+- **Read by session, never by owner** (design §7.4): read S's stream
+  (`session:{S}`) from the last entry id relayed; start reading before
+  sending `Submit`; drop entries carrying an older fencing token than the
+  highest seen. On reconnect, build the snapshot from the stream's latest
+  snapshot entry plus the entries after it (design §7.5). Fan-out decisions
+  are the owner's; the gateway only relays what is appended.
 - **Keep each in-flight dispatch's output** until the owner acknowledges the
   result, and hand it to a new owner on `FetchBuffer` (design §7.2); with no
   buffer, answer by querying the agent's task (`GetTask` or a
@@ -41,15 +39,12 @@ builds it to this contract:
 - **Use the fence step** in every dispatch-record transaction: lock the
   session's bucket row in `bcs_task_leases` (one row per bucket) and check
   the token. A session has no lease of its own.
-- **Record where each dispatch runs:** the dispatch record names its gateway,
-  written fenced. When that gateway dies, the owner moves the dispatch to
+- **Record where each dispatch runs:** the dispatch record names its gateway
+  (any healthy one; the accepting gateway reports its id), written fenced. When that gateway dies, the owner moves the dispatch to
   another gateway, which reconciles by the recorded task id (read or
   re-subscribe, never blindly resend).
 - **Deduplicate dispatch reports** by `(dispatch, seq)`: a gateway retries
   control events and results until the owner acknowledges them.
-- **Host the session event log** (design §12): control events for subscribers,
-  numbered by `event_seq`, written in the same fenced commit as the state
-  they describe. Extending the delivery ledger is preferred over a new table.
 - **Reuse one delivery ledger.** Dispatch intent records should extend the
   existing per-delivery ledger rather than create a second one with
   overlapping meaning.

@@ -11,20 +11,20 @@
   <rect x="24" y="74" width="560" height="250" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
   <text x="44" y="98" font-size="13" font-weight="bold" fill="#2457a6">One transaction (atomic)</text>
   <rect x="44" y="112" width="520" height="92" rx="8" fill="#e3f0e9" stroke="#157a55"/>
-  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · lock the bucket row (shared) and check the token</text>
+  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · lock the bucket row (FOR UPDATE) and check the token</text>
   <text x="60" y="156" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT fencing_token FROM bcs_task_leases</text>
-  <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE bucket = :b FOR SHARE      -- must equal :mine</text>
-  <text x="60" y="194" font-size="10.5" fill="#5c6a62">shared: the bucket's other sessions keep writing in parallel</text>
+  <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE bucket = :b FOR UPDATE     -- must equal :mine</text>
+  <text x="60" y="194" font-size="10.5" fill="#5c6a62">~25 sessions per bucket: the row is busy ~5 % of the time</text>
   <rect x="44" y="216" width="520" height="92" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="60" y="238" font-size="12" font-weight="bold" fill="#1c2420">Step 2…n · the durable writes for this session</text>
-  <text x="60" y="260" font-size="11.5" fill="#1c2420">run status · checkpoints · history · write_seq + 1 on S's row</text>
+  <text x="60" y="260" font-size="11.5" fill="#1c2420">run status · checkpoints · Task record · last_event_seq · unpublished · write_seq + 1</text>
   <text x="60" y="278" font-size="11.5" fill="#1c2420">dispatch / delivery records (item 3) · durable timers</text>
   <text x="60" y="298" font-size="10.5" fill="#5c6a62">all in the same database as the lease row</text>
 
   <rect x="610" y="74" width="326" height="116" rx="10" fill="#e3f0e9" stroke="#157a55"/>
   <text x="626" y="98" font-size="13" font-weight="bold" fill="#157a55">Token matches</text>
   <text x="626" y="120" font-size="11.5" fill="#1c2420">step 1 returns :mine → steps run → COMMIT</text>
-  <text x="626" y="142" font-size="11.5" fill="#1c2420">the shared lock is held until COMMIT, so a claim</text>
+  <text x="626" y="142" font-size="11.5" fill="#1c2420">the lock is held until COMMIT, so a claim</text>
   <text x="626" y="160" font-size="11.5" fill="#1c2420">or transfer of the bucket cannot commit in between</text>
   <text x="626" y="180" font-size="10.5" fill="#5c6a62">S's write_seq tells a handoff successor what changed</text>
   <rect x="610" y="206" width="326" height="118" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
@@ -37,7 +37,7 @@
 
   <rect x="24" y="344" width="912" height="118" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="44" y="368" font-size="13" font-weight="bold" fill="#1c2420">Why a concurrent claim can't slip in between check and commit</text>
-  <text x="44" y="392" font-size="11.5" fill="#1c2420">A claim (or a handoff transfer) updates the bucket row, so it needs an exclusive lock. It waits until every in-flight fenced transaction commits,</text>
-  <text x="44" y="410" font-size="11.5" fill="#1c2420">then bumps the token. Every later fenced write by the old owner fails step 1. No shared locks? Use FOR UPDATE: just as safe, one write at a time per bucket.</text>
+  <text x="44" y="392" font-size="11.5" fill="#1c2420">A claim (or a handoff transfer) updates the same bucket row, so it waits until the in-flight fenced transaction commits,</text>
+  <text x="44" y="410" font-size="11.5" fill="#1c2420">then bumps the token. Every later fenced write by the old owner fails step 1. FOR SHARE is an optional optimization if the database supports it.</text>
   <text x="44" y="436" font-size="11.5" fill="#5c6a62">Rules: same transaction · same database · one session behind its bucket's check · LeaseLost means stop · unknown commit outcome → read back, never blind-retry.</text>
 </svg>

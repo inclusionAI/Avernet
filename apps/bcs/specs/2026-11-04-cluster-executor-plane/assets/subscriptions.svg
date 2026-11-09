@@ -1,10 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" font-family="Arial, Helvetica, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 580" font-family="Arial, Helvetica, sans-serif">
   <defs>
     <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
-    </marker>
-    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0L10 5L0 10z" fill="#2457a6"/>
     </marker>
     <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#157a55"/>
@@ -13,58 +10,62 @@
       <path d="M0 0L10 5L0 10z" fill="#9a6b0a"/>
     </marker>
   </defs>
-  <rect x="0" y="0" width="960" height="540" fill="#fafbf9"/>
+  <rect x="0" y="0" width="960" height="580" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Session channels survive an owner crash</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">Subscribers subscribe by session, so an owner change is invisible to them. The pub/sub keeps nothing; the event log is the truth.</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Each session has a Redis Stream. Commit first, then append with an explicit id; gateways read from their last id, so an owner change is invisible.</text>
 
-  <rect x="40" y="72" width="150" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
-  <text x="115" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Gateway GW1</text>
-  <rect x="250" y="72" width="140" height="40" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
-  <text x="320" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Channel S</text>
-  <rect x="450" y="72" width="160" height="40" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
-  <text x="530" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#b3402e">Executor E3 (owner)</text>
-  <rect x="640" y="72" width="140" height="40" rx="8" fill="#ffffff" stroke="#2457a6"/>
-  <text x="710" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Event log (DB)</text>
-  <rect x="800" y="72" width="140" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
-  <text x="870" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Executor E4</text>
-  <line x1="115" y1="112" x2="115" y2="420" stroke="#b9c6bf" stroke-dasharray="3 4"/>
-  <line x1="320" y1="112" x2="320" y2="420" stroke="#b9c6bf" stroke-dasharray="3 4"/>
-  <line x1="530" y1="112" x2="530" y2="250" stroke="#b9c6bf" stroke-dasharray="3 4"/>
-  <line x1="710" y1="112" x2="710" y2="420" stroke="#b9c6bf" stroke-dasharray="3 4"/>
-  <line x1="870" y1="112" x2="870" y2="420" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <rect x="30" y="72" width="150" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
+  <text x="105" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Gateway GW1</text>
+  <rect x="230" y="72" width="160" height="40" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="310" y="91" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Stream</text>
+  <text x="310" y="105" font-size="10.5" text-anchor="middle" fill="#5c6a62">session:{S}</text>
+  <rect x="440" y="72" width="150" height="40" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="515" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#b3402e">Executor E3 (owner)</text>
+  <rect x="630" y="72" width="150" height="40" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="705" y="91" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Session row (DB)</text>
+  <text x="705" y="105" font-size="10.5" text-anchor="middle" fill="#5c6a62">last_event_seq · unpublished</text>
+  <rect x="810" y="72" width="130" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="875" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Executor E4</text>
+  <line x1="105" y1="112" x2="105" y2="430" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="310" y1="112" x2="310" y2="430" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="515" y1="112" x2="515" y2="260" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="705" y1="112" x2="705" y2="430" stroke="#b9c6bf" stroke-dasharray="3 4"/>
+  <line x1="875" y1="112" x2="875" y2="430" stroke="#b9c6bf" stroke-dasharray="3 4"/>
 
-  <line x1="119" y1="134" x2="316" y2="134" stroke="#9a6b0a" stroke-dasharray="5 4" marker-end="url(#ao)"/>
-  <text x="218" y="128" font-size="10.5" text-anchor="middle" fill="#9a6b0a">subscribe S (once)</text>
-  <line x1="534" y1="158" x2="706" y2="158" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
-  <text x="620" y="152" font-size="10.5" text-anchor="middle" fill="#157a55">commit #41</text>
-  <line x1="526" y1="174" x2="324" y2="174" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
-  <text x="425" y="168" font-size="10.5" text-anchor="middle" fill="#9a6b0a">Event #41 (token n)</text>
-  <line x1="316" y1="186" x2="119" y2="186" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
-  <line x1="534" y1="212" x2="706" y2="212" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
-  <text x="620" y="206" font-size="10.5" text-anchor="middle" fill="#157a55">commit #42</text>
-  <rect x="455" y="222" width="150" height="34" rx="5" fill="#f8e6e1" stroke="#b3402e"/>
-  <text x="530" y="237" font-size="10.5" text-anchor="middle" fill="#b3402e">crashes before</text>
-  <text x="530" y="250" font-size="10.5" text-anchor="middle" fill="#b3402e">publishing #42</text>
+  <line x1="109" y1="134" x2="306" y2="134" stroke="#9a6b0a" stroke-dasharray="5 4" marker-end="url(#ao)"/>
+  <text x="208" y="128" font-size="10.5" text-anchor="middle" fill="#9a6b0a">read from last id</text>
+  <line x1="519" y1="158" x2="701" y2="158" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
+  <text x="610" y="152" font-size="10.5" text-anchor="middle" fill="#157a55">commit #41 (Task, outbox)</text>
+  <line x1="511" y1="176" x2="314" y2="176" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="412" y="170" font-size="10.5" text-anchor="middle" fill="#9a6b0a">XADD 41-0 (token n)</text>
+  <line x1="306" y1="190" x2="109" y2="190" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <line x1="519" y1="214" x2="701" y2="214" stroke="#157a55" stroke-width="1.6" marker-end="url(#ag)"/>
+  <text x="610" y="208" font-size="10.5" text-anchor="middle" fill="#157a55">commit #42 (Task, outbox)</text>
+  <rect x="440" y="226" width="150" height="34" rx="5" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="515" y="241" font-size="10.5" text-anchor="middle" fill="#b3402e">crashes before</text>
+  <text x="515" y="254" font-size="10.5" text-anchor="middle" fill="#b3402e">XADD 42-0</text>
 
-  <rect x="20" y="214" width="190" height="42" rx="6" fill="#ffffff" stroke="#b9c6bf"/>
-  <text x="115" y="232" font-size="10.5" text-anchor="middle" fill="#1c2420">PA's stream stays open;</text>
-  <text x="115" y="246" font-size="10.5" text-anchor="middle" fill="#1c2420">output pauses</text>
+  <rect x="10" y="216" width="190" height="42" rx="6" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="105" y="234" font-size="10.5" text-anchor="middle" fill="#1c2420">PA's stream stays open;</text>
+  <text x="105" y="248" font-size="10.5" text-anchor="middle" fill="#1c2420">output pauses</text>
 
-  <rect x="790" y="270" width="160" height="34" rx="5" fill="#ffffff" stroke="#157a55"/>
-  <text x="870" y="285" font-size="10.5" text-anchor="middle" fill="#157a55">claims S (token n+1),</text>
-  <text x="870" y="298" font-size="10.5" text-anchor="middle" fill="#157a55">FetchBuffer from GW1</text>
-  <line x1="866" y1="326" x2="324" y2="326" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
-  <text x="600" y="320" font-size="10.5" text-anchor="middle" fill="#9a6b0a">republish latest event #42 + step buffer (token n+1)</text>
-  <line x1="316" y1="338" x2="119" y2="338" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
-  <rect x="20" y="350" width="190" height="56" rx="6" fill="#f7eed7" stroke="#9a6b0a"/>
-  <text x="115" y="368" font-size="10.5" text-anchor="middle" fill="#9a6b0a">gap? read it from the log</text>
-  <text x="115" y="382" font-size="10.5" text-anchor="middle" fill="#9a6b0a">(ReadEvents after #41)</text>
-  <text x="115" y="396" font-size="10.5" text-anchor="middle" fill="#9a6b0a">drop lower tokens</text>
-  <line x1="214" y1="378" x2="706" y2="378" stroke="#5c6a62" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+  <rect x="800" y="276" width="150" height="34" rx="5" fill="#ffffff" stroke="#157a55"/>
+  <text x="875" y="291" font-size="10.5" text-anchor="middle" fill="#157a55">claims b (token n+1),</text>
+  <text x="875" y="304" font-size="10.5" text-anchor="middle" fill="#157a55">FetchBuffer for the step</text>
+  <line x1="871" y1="328" x2="709" y2="328" stroke="#157a55" marker-end="url(#ag)"/>
+  <text x="790" y="322" font-size="10.5" text-anchor="middle" fill="#157a55">read unpublished: [#42]</text>
+  <line x1="871" y1="356" x2="314" y2="356" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <text x="600" y="350" font-size="10.5" text-anchor="middle" fill="#9a6b0a">Owner(n+1) · XADD 42-0 · step output as append: false (token n+1)</text>
+  <line x1="306" y1="372" x2="109" y2="372" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ao)"/>
+  <rect x="10" y="384" width="190" height="42" rx="6" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="105" y="402" font-size="10.5" text-anchor="middle" fill="#9a6b0a">entries after 41-0, in order;</text>
+  <text x="105" y="416" font-size="10.5" text-anchor="middle" fill="#9a6b0a">drop lower tokens</text>
+  <text x="510" y="402" font-size="10.5" text-anchor="middle" fill="#5c6a62">an id already in the stream is rejected: republishing is harmless</text>
 
-  <rect x="24" y="432" width="912" height="92" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
-  <text x="44" y="456" font-size="13" font-weight="bold" fill="#1c2420">Guarantee</text>
-  <text x="44" y="478" font-size="11.5" fill="#1c2420">Every committed control event reaches every live subscriber at least once and in order (dedup by event_seq). Deltas are best effort; the final result is exact.</text>
-  <text x="44" y="498" font-size="11.5" fill="#1c2420">Rules: commit before publish · gap detection · republish on takeover · subscribe before snapshot · batched catch-up after a disconnect.</text>
-  <text x="44" y="516" font-size="11" fill="#5c6a62">Use a sharded, non-durable pub/sub (Redis 7 SPUBLISH or NATS core) — never classic cluster PUBLISH, never a durable queue.</text>
+  <rect x="24" y="444" width="912" height="120" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="44" y="468" font-size="13" font-weight="bold" fill="#1c2420">Guarantee</text>
+  <text x="44" y="490" font-size="11.5" fill="#1c2420">Every committed event reaches every gateway reading S's stream, in order and at least once; duplicates are rejected by id.</text>
+  <text x="44" y="508" font-size="11.5" fill="#1c2420">Deltas may be replaced after a failure; the final result is exact.</text>
+  <text x="44" y="528" font-size="11.5" fill="#1c2420">Rules: commit (Task record, last_event_seq, unpublished) before append · explicit ids · Owner(token) marker first · snapshot entry at each step end.</text>
+  <text x="44" y="548" font-size="11" fill="#5c6a62">Requires quorum durability from the stream provider (no acknowledged entry lost on failover).</text>
 </svg>

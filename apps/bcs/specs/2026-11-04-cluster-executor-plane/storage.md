@@ -18,9 +18,9 @@ OceanBase; Redis only for state that can be lost and rebuilt.**
 | Write scaling | Linear, sub-ms | By partitions; a few ms per commit |
 
 **Redis is a good fit for:** soft rate limits, read
-caches of rarely-changing content, best-effort wake-ups, and the
-non-durable session channels that carry fan-out (design §7.4; sharded
-pub/sub only).
+caches of rarely-changing content, best-effort wake-ups, the
+non-durable delta channels (sharded pub/sub), and — only with quorum
+durability — the session streams (design §7.4).
 
 ## 2. What a storage failover does
 
@@ -55,10 +55,11 @@ majority". (MySQL therefore requires lossless semi-synchronous replication.)
   `(bucket, session_id)`), because a partition key must be part of the
   primary key.
 - Default isolation is READ COMMITTED; the design relies only on row locks —
-  the shared (or exclusive) lock of the fence step and the exclusive lock of
-  a claim or transfer — which behave the same.
+  the `FOR UPDATE` lock of the fence step and of a claim or transfer — which
+  behave the same.
 - Avoid hot rows (any cluster-wide counter touched per request). A bucket
-  row is touched by every fenced write of its sessions, which is why the
-  fence step takes a shared lock where it can (design §5.5).
+  row is locked by every fenced write of its sessions, so what matters is
+  sessions per bucket: at ~25 a bucket row is busy ~5 % of the time
+  (design §5.5).
 - Handle unknown commit outcomes during leader switches by reading back
   ([design §5.5](design.md#55-fenced-writes)).
