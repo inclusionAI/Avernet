@@ -8,6 +8,7 @@ FastAPI would otherwise answer with ``{"detail": ...}`` or plain text.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -21,8 +22,10 @@ from gateway.community.adapters.web._envelope import install_error_envelope
 from gateway.community.adapters.web.app import create_app
 from gateway.community.config import CorsConfig
 from gateway.community.spi.auth import AuthError
+from gateway.community.tracer import get_tracer_plugin
 
 _ENVELOPE_KEYS = {"code", "message", "data", "request_id"}
+_ID = re.compile(r"[0-9a-f]{32}")
 
 
 class _Refusing:
@@ -65,7 +68,9 @@ def _envelope(resp: Any) -> dict[str, Any]:
     body = resp.json()
     assert set(body) == _ENVELOPE_KEYS
     assert body["data"] is None
-    assert isinstance(body["request_id"], str)
+    # Never empty and never the tracer's "-" placeholder, even with no span
+    # recording (this fixture app installs no tracing middleware at all).
+    assert _ID.fullmatch(body["request_id"])
     return body
 
 
@@ -127,3 +132,29 @@ def test_gateway_app_installs_the_envelope() -> None:
     resp = client.post("/admin/access-keys", json={})
     assert resp.status_code == 422
     assert _envelope(resp)["code"] == 422000
+
+
+def test_gateway_app_500_carries_the_requests_trace_id() -> None:
+    """The outermost 500 handler runs after the tracing span has closed; the id
+    must still be the one the request was traced under, not a placeholder."""
+    app = create_app()
+    seen: list[str] = []
+
+    @app.get("/admin/boom")
+    async def _boom() -> None:
+        seen.append(get_tracer_plugin().get_trace_id())
+        raise RuntimeError("exploded")
+
+    # Ahead of the catch-all forward route, which would otherwise claim the path.
+    app.router.routes.insert(0, app.router.routes.pop())
+    resp = TestClient(app, raise_server_exceptions=False).get("/admin/boom")
+
+    assert resp.status_code == 500
+    assert _ID.fullmatch(seen[0])
+    assert _envelope(resp)["request_id"] == seen[0]
+
+
+def test_each_request_gets_its_own_id(client: TestClient) -> None:
+    first = _envelope(client.get("/no-such-route"))["request_id"]
+    second = _envelope(client.get("/no-such-route"))["request_id"]
+    assert first != second

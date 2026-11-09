@@ -114,9 +114,13 @@ _MIGRATION_ERROR_STATUS: dict[str, tuple[int, int]] = {
 
 
 def _error(
-    status: int, subcode: int, message: str, data: Any | None = None
+    request: Request,
+    status: int,
+    subcode: int,
+    message: str,
+    data: Any | None = None,
 ) -> JSONResponse:
-    return error_response(status, message, subcode=subcode, data=data)
+    return error_response(request, status, message, subcode=subcode, data=data)
 
 
 @router.post("/access-keys", status_code=201)
@@ -131,7 +135,7 @@ async def issue_access_key(payload: AccessKeyRequest, request: Request) -> JSONR
         )
     except Exception:
         logger.exception("access key issuance failed")
-        return _error(500, 1, "access key issuance failed")
+        return _error(request, 500, 1, "access key issuance failed")
     return JSONResponse(
         status_code=201,
         content={
@@ -163,6 +167,7 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
         # before the blanket handler below, which would otherwise report this as
         # a 500 and leave them with nothing to change.
         return _error(
+            request,
             409,
             1,
             f"app_name {exc.app_name!r} is already used in env {exc.env!r}",
@@ -170,7 +175,7 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
         )
     except Exception:
         logger.exception("app registration failed")
-        return _error(500, 1, "app registration failed")
+        return _error(request, 500, 1, "app registration failed")
     # ``api_key`` is returned here and nowhere else, ever: the registry keeps
     # only its hash, so a caller who loses it must be issued a new one.
     return JSONResponse(
@@ -218,6 +223,7 @@ async def migrate_baas_key(
     if missing:
         # Reported here rather than by the request model — see its docstring.
         return _error(
+            request,
             400,
             1,
             f"missing required field(s): {', '.join(missing)}",
@@ -243,7 +249,7 @@ async def migrate_baas_key(
         # belongs in a log file. The source row is recoverable from ``app_name``
         # by way of the request that carried it.
         logger.exception("baas key migration failed: app_name=%s", app_name)
-        return _error(500, 1, "baas key migration failed")
+        return _error(request, 500, 1, "baas key migration failed")
 
     if not result.succeeded:
         # An unmapped outcome is a gap in this adapter, not something the caller
@@ -251,6 +257,7 @@ async def migrate_baas_key(
         # on. Unreachable while the pinning test passes.
         status, subcode = _MIGRATION_ERROR_STATUS.get(str(result.outcome), (500, 2))
         return _error(
+            request,
             status,
             subcode,
             result.message,

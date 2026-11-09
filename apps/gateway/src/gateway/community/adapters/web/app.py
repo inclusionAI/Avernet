@@ -85,14 +85,16 @@ def create_app() -> FastAPI:
         swagger_ui_parameters={"supportedSubmitMethods": []},
     )
 
-    tracer = get_tracer_plugin()
-    tracer.setup(config.app_name)
-    tracer.install_middleware(app)
-
     # The gateway's own failures (routing 404/405, request validation, a refused
     # credential raised from a dependency) answer in the response envelope, not
     # FastAPI's ``{"detail": ...}`` body. Upstream responses are relayed as-is.
+    # Installed before the tracer so its request-id middleware sits inside the
+    # span and every envelope carries the trace id, the 500 included.
     install_error_envelope(app)
+
+    tracer = get_tracer_plugin()
+    tracer.setup(config.app_name)
+    tracer.install_middleware(app)
 
     @app.get(
         "/api/test",

@@ -137,7 +137,7 @@ def _install_server_error_handler(app: FastAPI, allow_list: _OriginAllowList) ->
     """
 
     async def server_error(request: Request, exc: Exception) -> Response:
-        response = server_error_response()
+        response = server_error_response(request)
         origin = request.headers.get("origin")
         if origin and allow_list.allows(origin):
             response.headers["Access-Control-Allow-Origin"] = origin
