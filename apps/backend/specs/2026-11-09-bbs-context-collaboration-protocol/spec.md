@@ -113,7 +113,6 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
 | `ContextOutcome` | 子实体 | `context_id + outcome_id` | 终态前的验收裁决事实 | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
-| `ContextOutbox` | 技术一致性对象 | `outbox_id` | 投影投递恢复 | 按投递结果恢复或重试 |
 
 下文中的字段是协议语义设计，不是最终数据库 schema。实现可以使用不同表结构，但必须保持身份、归属、幂等和不变量语义。
 
@@ -151,7 +150,7 @@ CollaborationContext
 聚合根不变量：
 
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 参与者、Todo、Outcome、Surface、Mode 等事实不能直接改状态，必须形成合法 `ContextEvent`。
+- 参与者、Todo、Outcome、来源引用、Mode 等事实不能直接改状态，必须形成合法 `ContextEvent`。
 - 外部对象不能通过引用成为 Context 的一部分；只能被 Adapter 转换为事件事实。
 - 所有子实体和值对象都遵守 Context 的 `scope` 与 `visibility`，不能跨 Context 隐式共享。
 - 终态之后再追加公开评论或来源同步事件时，不能自动改变终态。
@@ -522,31 +521,6 @@ ContextSnapshot
 - 私有日志、token、路径、未公开评审批注和内部路由不得进入快照。
 - Snapshot 过期后可重新生成；删除投影不影响事件日志或聚合事实。
 
-### 4.15 技术对象：ContextOutbox
-
-`ContextOutbox` 不是业务领域对象，但属于协议的一致性边界，用于把已接纳本地事实可靠投递到 BBS、BCS、外部来源或消费者。
-
-```text
-ContextOutbox
-  ├─ outbox_id
-  ├─ context_id
-  ├─ event_id / transition_id
-  ├─ target_kind / target_ref
-  ├─ target_contract_ref
-  ├─ delivery_type / delivery_ref
-  ├─ dedupe_key
-  ├─ attempt_count / next_attempt_at
-  ├─ last_error_ref
-  └─ delivered_at / failed_state_ref
-```
-
-设计约束：
-
-- Outbox 与本地事实同事务登记，不使用伪成功隐藏投递失败。
-- 重试幂等以 `outbox_id` 或 `dedupe_key` 裁决。
-- Outbox 只投递过滤后的投影，不成为数据泄漏通道。
-- 投递失败保留可诊断错误；操作者可查看处理状态并显式重试。
-
 ## 5. 可扩展状态机
 
 ### 5.1 状态机合同
@@ -644,7 +618,7 @@ transitions:
 - `effects` 只能调用受注册的服务动作，例如 `ensure_work_binding`、`publish_snapshot`、`notify_responsible_user`、`close_topic`。
 - 守卫返回明确 `PASS`、`FAIL`、`BLOCKED` 事实，禁止静默失败。
 - 效果失败回滚状态迁移，或将 Context 置为合法 `blocked` 状态并保留错误事实，不得返回假成功。
-- 效果按声明执行一次，且有幂等标识；外部效果使用 outbox 恢复。
+- 效果按声明执行一次，并有幂等标识；外部效果可通过 outbox 或等价机制恢复，这不是领域对象要求。
 - 自定义状态机可以引用外部模型或规则结果，但必须把结果和证明记录在事件 payload 中，不能重复调用外部系统。
 
 禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 ContextModeBinding 关联。
@@ -695,7 +669,7 @@ transitions:
 | Task / Relay / TaskGraph | 承接任务接力，回传 Work 事实 |
 | BCS session / group | 承载 Bot 或群内互动、运行摘要、事件回投 |
 | Direct assignee | 承载直接指派给具体 Human / Bot / 代理的执行通道 |
-| External source surface | 承载外部来源阅读、修订同步、回写通道 |
+| External source channel | 承载外部来源阅读、修订同步、回写通道 |
 
 通道只提交标准 Command 和 ContextEvent，不直接修改 Context 状态，也不提升权限。
 
@@ -804,18 +778,18 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | Event / Transition | `event_id` 唯一；`context_id + source_event_id` / request 幂等键唯一；Transition 与触发事件一对一 |
 | Source refs / Mode / Work bindings | source_ref 唯一；mode binding 唯一；每个 Context 至多一个 active WorkBinding |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
-| Snapshot / Outbox | Snapshot 可重建；`outbox_id` 与投递 dedupe key 唯一；失败状态不可丢失 |
+| Snapshot / 投影投递 | Snapshot 可重建；投递记录与 dedupe key 唯一；失败状态不可丢失
 
 ### 8.2 ACID 与幂等
 
 - Context 版本、state fencing token 和事件序号共同防止将新命令应用到旧状态上。
 - 事件、Transition、状态机版本、Todo 变更和必要的业务外键必须同一事务提交。
 - 初次创建 Context 时，来源绑定与 `context.created` 事件在同一事务中闭环；数据库失败必须向调用方返回错误，不产生假成功。
-- `work.requested` 抢占成功后在同一上下文中保存幂等意图，再通过 outbox 触发外部启动；进程恢复后先读取外部状态，再决定继续、等待还是标记 blocked。
+- `work.requested` 抢占成功后在同一上下文中保存幂等意图，再通过 outbox 或等价机制触发外部启动；进程恢复后先读取外部状态，再决定继续、等待还是标记 blocked。
 - 相同 `request_id` / `source_event_id` 重放必须返回原结果；不同内容同 ID 返回冲突。
-- ContextWorkBinding 通过作用域内唯一活跃约束或等价 CAS 保证一个 Context 只有不多于一个活跃 Work；Surface 与 Mode Binding 激活仍按各自 activation request 幂等。
+- ContextWorkBinding 通过作用域内唯一活跃约束或等价 CAS 保证一个 Context 只有不多于一个活跃 Work；来源引用和 Mode Binding 的变化也按各自 request id 幂等。
 - 验收、取消、启动等命令使用 expected version 或状态 fencing token 串行裁决；输方收到冲突而不是覆盖赢家事实。
-- 外部投影失败不回滚本地事实；系统使用 outbox 有界重试、人工重试和明确的同步状态。
+- 外部投影失败不回滚本地事实；系统使用 outbox、事务性消息队列或等价机制做有界重试、人工重试和明确的同步状态。
 - 到达 `terminal_*` 状态后，仍可写入公开评论、来源同步或审计事实，但它们不能把 Context 拉出终态。
 - 事件日志是重建 Context 快照的依据；重建只能重放本地事实，不能重新执行外部副作用。
 
@@ -840,7 +814,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ### 10.1 公开讨论
 
-Context 可以由 BBS Topic 创建，或把已授权 Topic 作为 Surface 绑定：
+Context 可以由 BBS Topic 创建，或把已授权 Topic 作为来源引用：
 
 1. Topic 正文和回复不变，仍是 BBS 的权威内容。
 2. 每条 Post 通过 ForumAdapter 转换为 `discussion.posted` 事件；事件保留 `topic_id`、`post_id`、作者、引用楼层和可见范围。
@@ -861,7 +835,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 5. 状态机可以使用 `required_todos_are_done` guard，将所有必需 Todo 完成作为终态验收前置条件。
 6. 当单个“待办”需要真正执行、交付文件或产生外部副作用时，可作为后续独立扩展升级为 `WorkBinding`；本节只定义 Todo 本身，不定义 Work 的完整执行协议。
 7. Todo 取消会记录事件，已完成事实不因后续编辑被覆盖。
-8. 外部系统同步必须通过 outbox 和来源回写，失败不能被吞掉。
+8. 外部系统同步必须通过可靠投递机制和来源回写，失败不能被吞掉。
 
 ## 11. 分阶段交付
 
@@ -871,7 +845,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 | P2 | task_relay 模式、WorkBinding、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
 | P3 | direct_assignment 模式、required guard、Todo 升级 Work | Todo 并发、证据引用、终态守卫测试通过 |
 | P4 | public_discussion / task_relay / direct_assignment 三类模式接通 | BBS、Task、BCS 等通道权限、会话和事件映射回归通过 |
-| P5 | 外部来源 revision、同步冲突和回写 | Plugin conformance、inbox / outbox 和回环测试通过 |
+| P5 | 外部来源 revision、同步冲突和回写 | Plugin conformance、可靠投递和回环测试通过 |
 
 实现排序采用可独立上线的小步，而不是一次重构所有协作入口。每个阶段保持旧入口可用，并用功能开关控制新增 Context 入口。
 
