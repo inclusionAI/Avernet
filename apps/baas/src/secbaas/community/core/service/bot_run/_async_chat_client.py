@@ -301,6 +301,9 @@ class AsyncChatClient:
         # inject_message 的并发保护：只串行化 inject 之间的写入，不阻塞
         # observe-only inject 进入一个正在运行的 chat.send。
         self._active_inject_sessions: set[str] = set()
+        # 记录每个 inject 占位所属的连接代次。断连清理是异步任务，
+        # 必须按代次过滤，不能把快速重连后新代次的同 session 占位清掉。
+        self._active_inject_session_generations: dict[str, int] = {}
 
         # 重连状态标记
         self._reconnecting = False
@@ -822,6 +825,9 @@ class AsyncChatClient:
                         "Connection changed while waiting to inject message."
                     )
                 self._active_inject_sessions.add(session_key)
+                self._active_inject_session_generations[session_key] = (
+                    connection_generation
+                )
                 session_registered = True
 
             # 受并发信号量约束，提供背压。只在 acquire 成功后释放，避免
@@ -878,6 +884,7 @@ class AsyncChatClient:
             if session_registered and connection_generation == self._connection_generation:
                 async with self._condition:
                     self._active_inject_sessions.discard(session_key)
+                    self._active_inject_session_generations.pop(session_key, None)
                     self._condition.notify_all()
             if semaphore_acquired and self._concurrency_sem is not None:
                 self._concurrency_sem.release()
@@ -1027,6 +1034,7 @@ class AsyncChatClient:
             self._sessions.clear()
             self._active_sessions.clear()
             self._active_inject_sessions.clear()
+            self._active_inject_session_generations.clear()
             self._condition.notify_all()
 
     @staticmethod
@@ -1818,9 +1826,12 @@ class AsyncChatClient:
             payload,
             self.uri,
         )
+        disconnected_generation = self._connection_generation
         self._connection_generation += 1
         if self._active_inject_sessions:
-            asyncio.create_task(self._clear_active_inject_sessions())
+            asyncio.create_task(
+                self._clear_active_inject_sessions(disconnected_generation)
+            )
         for session_key, state in self._sessions.items():
             if state.chat_complete.is_set():
                 continue
@@ -1829,10 +1840,26 @@ class AsyncChatClient:
             )
         self._notify_disconnect()
 
-    async def _clear_active_inject_sessions(self) -> None:
-        """断连时释放旧连接的 inject 占位并唤醒同 session waiters。"""
+    async def _clear_active_inject_sessions(
+        self, disconnect_generation: int
+    ) -> None:
+        """释放指定断连代次的 inject 占位并唤醒同 session waiters。
+
+        任务可能在快速重连后才真正运行；只清理占位所属代次，避免
+        旧断连任务误删新连接上的同 session inject。
+        """
         async with self._condition:
-            self._active_inject_sessions.clear()
+            stale_sessions = {
+                session_key
+                for session_key in self._active_inject_sessions
+                if self._active_inject_session_generations.get(
+                    session_key, disconnect_generation
+                )
+                == disconnect_generation
+            }
+            self._active_inject_sessions.difference_update(stale_sessions)
+            for session_key in stale_sessions:
+                self._active_inject_session_generations.pop(session_key, None)
             self._condition.notify_all()
 
     def _notify_disconnect(self) -> None:
@@ -1920,6 +1947,9 @@ class AsyncChatClient:
                     new_client.on_disconnect(self._on_disconnect)
 
                     await new_client.connect()
+                    # 重连成功开启新的连接代次；旧断连清理任务即使延迟
+                    # 到此之后运行，也只能清理旧代次占位。
+                    self._connection_generation += 1
                     self._client = new_client
                     self._disconnect_event.clear()
                     reconnected = True

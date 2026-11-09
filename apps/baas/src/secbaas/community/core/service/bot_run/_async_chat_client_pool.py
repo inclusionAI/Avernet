@@ -26,7 +26,11 @@ from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 from ..bot_interaction import BotInteractionService
-from ._async_chat_client import AsyncChatClient, ConcurrentSessionError
+from ._async_chat_client import (
+    AsyncChatClient,
+    ConcurrentSessionError,
+    NotConnectedError,
+)
 
 logger = get_logger("core-bot-run")
 
@@ -111,6 +115,9 @@ class AsyncChatClientPool:
         # chat.inject RPC，避免多连接池中两个并发 inject 在首个 client
         # 登记 _active_inject_sessions 前分别拿到不同连接。
         self._inject_locks: dict[tuple[str, str], _InjectLockEntry] = {}
+        # close_all() 的代次；排队在关闭前的 inject 不得在释放后复活
+        # 新连接，关闭后的新调用仍可按新代次懒建连接。
+        self._pool_generation = 0
         # 全局锁，仅用于 _key_locks/_inject_locks 的创建/删除
         self._lock = asyncio.Lock()
 
@@ -295,7 +302,7 @@ class AsyncChatClientPool:
         不同 sandbox/session 的并发。
         """
         lock_key = (sandbox_id, session_key)
-        inject_entry = await self._get_inject_lock(lock_key)
+        inject_entry, pool_generation = await self._get_inject_lock(lock_key)
         inject_lock = inject_entry.lock
         acquired = False
         try:
@@ -310,6 +317,11 @@ class AsyncChatClientPool:
                 ) from exc
             acquired = True
 
+            if pool_generation != self._pool_generation:
+                raise NotConnectedError(
+                    "Pool closed while waiting to inject message."
+                )
+
             client = await self.get(
                 sandbox_id,
                 uri,
@@ -317,6 +329,8 @@ class AsyncChatClientPool:
                 session_key=session_key,
                 token_minter=token_minter,
             )
+            if pool_generation != self._pool_generation:
+                raise NotConnectedError("Pool closed before injecting message.")
             await client.inject_message(
                 message=message,
                 session_key=session_key,
@@ -331,6 +345,7 @@ class AsyncChatClientPool:
     async def close_all(self) -> None:
         """关闭池中所有连接"""
         async with self._lock:
+            self._pool_generation += 1
             all_entries: list[_ConnEntry] = []
             for entries in self._clients.values():
                 all_entries.extend(entries)
@@ -628,7 +643,7 @@ class AsyncChatClientPool:
 
     async def _get_inject_lock(
         self, lock_key: tuple[str, str]
-    ) -> _InjectLockEntry:
+    ) -> tuple[_InjectLockEntry, int]:
         """获取 sandbox/session 级 inject 锁并登记一个调用方引用。
 
         引用在等待锁之前登记，避免释放最后一个持有者时把仍有排队
@@ -640,7 +655,7 @@ class AsyncChatClientPool:
                 entry = _InjectLockEntry(lock=asyncio.Lock())
                 self._inject_locks[lock_key] = entry
             entry.users += 1
-            return entry
+            return entry, self._pool_generation
 
     async def _release_inject_lock(
         self, lock_key: tuple[str, str], entry: _InjectLockEntry

@@ -449,6 +449,74 @@ class TestInjectRouting:
         await first_task
         assert pool._inject_locks == {}
 
+    @pytest.mark.asyncio
+    async def test_close_all_rejects_pre_shutdown_inject_waiter(self):
+        """close_all 后关闭前排队的 inject 不得复活新连接。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            NotConnectedError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=1.0)
+        first = MagicMock()
+        second = MagicMock()
+        first.inject_message = AsyncMock()
+        second.inject_message = AsyncMock()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_inject(**kwargs):
+            started.set()
+            await release.wait()
+
+        first.inject_message.side_effect = blocked_inject
+        pool.get = AsyncMock(side_effect=[first, second])
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        waiter = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+        )
+        await asyncio.sleep(0)
+
+        await pool.close_all()
+        release.set()
+        await first_task
+        with pytest.raises(NotConnectedError, match="Pool closed"):
+            await waiter
+
+        assert pool.get.await_count == 1
+        assert pool._inject_locks == {}
+
+        # close_all 是可复用边界：关闭后的新调用取得新代次并可懒建连接。
+        await pool.inject_message(
+            "sandbox-1",
+            "ws://host/ws",
+            session_key="same-session",
+            message="after-close",
+        )
+        assert pool.get.await_count == 2
+        second.inject_message.assert_awaited_once_with(
+            message="after-close",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+
 
 class TestTotalConnections:
     @pytest.mark.asyncio

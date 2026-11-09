@@ -1743,6 +1743,41 @@ class TestInjectMessageSemaphore:
         assert client._active_inject_sessions == set()
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_disconnect_cleanup_does_not_clear_new_generation_marker(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """延迟的旧断连清理不能清除重连后新代次的 inject 占位。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "old"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        await client.connect()
+
+        old_generation = client._connection_generation
+        client._active_inject_sessions.add("old-session")
+        client._active_inject_session_generations["old-session"] = old_generation
+        client._on_disconnect("disconnect", {})
+
+        # 模拟旧清理 task 真正运行前已完成重连，并登记新代次占位。
+        client._connection_generation += 1
+        client._active_inject_sessions.add("new-session")
+        client._active_inject_session_generations["new-session"] = (
+            client._connection_generation
+        )
+        await asyncio.sleep(0)
+
+        assert client._active_inject_sessions == {"new-session"}
+        assert client._active_inject_session_generations == {
+            "new-session": client._connection_generation
+        }
+        await client.close()
+
 
 # ==================== ChatRequestError propagation tests ====================
 
