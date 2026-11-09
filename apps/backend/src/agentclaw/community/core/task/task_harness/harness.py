@@ -48,9 +48,7 @@ from agentclaw.community.core.task.task_harness.runtime_probe import (
 
 logger = logging.getLogger("task.harness")
 
-_DEFAULT_SLA_TIMEOUT = (
-    900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
-)
+_DEFAULT_SLA_TIMEOUT = 900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
 _DEFAULT_COOP_GROUP_SLA_TIMEOUT = 900.0  # coop_group RUNNING:15 分钟
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0  # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
@@ -102,14 +100,10 @@ class TaskHarness:
         self._runtime_probe = runtime_probe
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
-        self._probe_unavailable_max_cycles = max(
-            1, int(probe_unavailable_max_cycles)
-        )
+        self._probe_unavailable_max_cycles = max(1, int(probe_unavailable_max_cycles))
         self._relay_recovery = relay_recovery
         self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
-        self._relay_resume_max_send_failures = max(
-            1, int(relay_resume_max_send_failures)
-        )
+        self._relay_resume_max_send_failures = max(1, int(relay_resume_max_send_failures))
         self._task_context_service = task_context_service
         self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
@@ -251,10 +245,7 @@ class TaskHarness:
         now = self._clock()
         terminal_success_elapsed = 0.0
         if current.get("terminal_success_observed_at") is not None:
-            terminal_success_elapsed = max(
-                0.0,
-                now - float(current["terminal_success_observed_at"]),
-            )
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
         detail = {
             "runtime_state": result.state,
             "runtime_status": result.status,
@@ -274,15 +265,11 @@ class TaskHarness:
                 # observation. Time spent earlier in the engine's active state
                 # must not silently consume the silent-success recovery window.
                 current["terminal_success_observed_at"] = now
-            terminal_success_elapsed = max(
-                0.0, now - float(current["terminal_success_observed_at"])
-            )
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
             current["success_unreported"] += 1
             current["unknown"] = 0
             current["no_progress"] = 0
-            if terminal_success_elapsed >= terminal_success_unreported_seconds(
-                attempts
-            ):
+            if terminal_success_elapsed >= terminal_success_unreported_seconds(attempts):
                 reason = "terminal_success_unreported"
         elif result.state == "active":
             current["success_unreported"] = 0

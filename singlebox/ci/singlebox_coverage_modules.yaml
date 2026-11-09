@@ -43,13 +43,9 @@ modules:
       items:
         - POST /api/internal/tc-resource-context
     plugin_api:
-      status: applicable
-      reason: Singlebox selects the local Plugin API implementation while production selects authenticated HTTP delivery.
-      items:
-        - key: TcResourceReadyPublisherPlugin.publish
-          evidence:
-            path: src/agentclaw/community/plugins/local/tc_resource_ready.py
-            symbol: LocalTcResourceReadyPublisher.publish
+      status: not_applicable
+      reason: Automatic TC conversation-file resource-ready publication was retired; the publisher and protocol remain only for compatibility, and no production session-file path invokes them.
+      items: []
     thresholds:
       core_min_percent: 40.0
       router_min_percent: 100.0

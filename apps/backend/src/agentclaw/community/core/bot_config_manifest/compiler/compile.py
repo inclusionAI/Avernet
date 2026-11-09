@@ -41,6 +41,9 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import co
 from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_file_sync import (
+    compile_bot_file_sync,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
 from agentclaw.community.core.bot_config_manifest.binding import (
@@ -168,6 +171,12 @@ class ManifestCompiler(DesiredStateCompiler):
             script=compile_script(session, script) if script is not None else None,
             identity=await compile_identity(session, identity, **kwargs) if identity is not None else None,
             resources=await compile_resources(session, resources, **kwargs) if resources is not None else None,
+            # ``BOT_FILE_SYNC`` reclassifies the ``protocol: bot`` entries that sit
+            # under ``manifest.resources``: the same raw entries, scanned by a
+            # different compiler that owns a different convergence model. Reads
+            # them as-is — no resolver/content, because the sync builds paths and
+            # never fetches bytes through the content store.
+            bot_file_sync=compile_bot_file_sync(session, resources) if resources is not None else None,
             skills=(
                 await compile_skills(session, skills, validator=self._validator, **kwargs)
                 if skills is not None

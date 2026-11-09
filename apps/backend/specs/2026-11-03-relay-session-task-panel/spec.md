@@ -103,12 +103,12 @@ def get_task_nodes_by_session(session_id: str) -> list[TaskNodeSessionRef]
 ```
 
 `items[0]` 是默认恢复任务。`total` 是本次返回的 ref 数量。公开面与内部镜像路由使用
-同一 DTO。没有可见 task 时返回 404，不返回空列表 200。
+同一 DTO。没有可见 task 时返回 `items=[]`、`total=0` 的 200 信封。
 
 ## Frontend behavior
 
-`getTaskBySession(sessionId)` 把 HTTP 信封解析成 `TaskBySessionRef[] | null`。404、
-信封失败或网络异常都统一收敛为 null，不打扰会话。
+`getTaskBySession(sessionId)` 把 HTTP 信封解析成 `TaskBySessionRef[] | null`。空列表保持
+`[]`；旧后端 404、信封失败或网络异常统一收敛为 null，不打扰会话。
 
 `useSessionTaskPanelBootstrap` 顺序：
 
@@ -139,7 +139,7 @@ Backend:
 - Repository：同 session 多任务、多 retry、其它 session 分离；排序为最新持久化优先。
 - Service：同 session 多任务按 task id 去重、未越界环境、越界/不可见 task 被隐藏，
   callback 的 retry-first 方法不被调用。
-- Internal / public endpoint：列表信封、404、401。
+- Internal / public endpoint：列表信封、空结果、401。
 
 Frontend:
 

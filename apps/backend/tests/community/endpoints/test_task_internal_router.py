@@ -473,6 +473,35 @@ def by_session_happy():
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/by_session",
+    scenario="empty_ok",
+    seed=lambda w: bind_overrides(
+        w,
+        TaskServiceProtocol,
+        {"get_task_nodes_by_session": lambda _self, _session_id: []},
+    ),
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"session_id": "session-endpoint-missing"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "session-endpoint-missing",
+                "items": [],
+                "total": 0,
+            },
+        },
+    ),
+)
+def by_session_empty():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
     scenario="err_unauthenticated",
     input=CaseInput(query_params={"session_id": "session-endpoint-1"}),
     expect=ExpectError(status=401),

@@ -688,10 +688,7 @@ def test_complete_and_status_return_public_resources(client, resources, observer
     assert complete["creator_type"] == status["creator_type"] == "user"
     assert complete["created_at"] == status["created_at"] == "2026-10-30T00:00:00Z"
     assert [name for name, _ in resources.calls] == ["complete", "status"]
-    assert [record.status for record in observer.records] == [
-        SessionResourceStatus.DEVICE_SYNCING,
-        SessionResourceStatus.UPLOAD_URL_ISSUED,
-    ]
+    assert observer.records == []
 
 
 def test_engine_list_does_not_expose_backend_materialization_error_details(client, resources):
@@ -758,3 +755,34 @@ def test_upload_http_uses_only_verified_actor_name_when_actor_differs_from_owner
     assert kwargs["creator_name"] == expected
     assert runtime_bindings.requests[0].actor_user_id == OWNER
     assert runtime_bindings.requests[0].owner_id == actual_owner
+
+
+@pytest.mark.parametrize("operation", ["complete", "status"])
+def test_ready_session_files_do_not_publish_knowledge_events(
+    client,
+    resources,
+    observer,
+    monkeypatch,
+    operation,
+):
+    def ready(**kwargs):
+        resources.calls.append((operation, kwargs))
+        return resources._record(status=SessionResourceStatus.READY)
+
+    method = "complete_upload" if operation == "complete" else "get_status"
+    monkeypatch.setattr(resources, method, ready)
+    if operation == "complete":
+        response = client.post(
+            _base() + "/upload-complete",
+            json={
+                "resource_id": "sr_1",
+                "transfer_id": "tr_1",
+            },
+        )
+    else:
+        response = client.get(_base() + "/sr_1/materialize-status")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "ready"
+    assert resources.calls[-1][0] == operation
+    assert observer.records == []

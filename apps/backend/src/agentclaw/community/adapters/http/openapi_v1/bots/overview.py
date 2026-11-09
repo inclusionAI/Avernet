@@ -50,7 +50,7 @@ async def get_bot_overview(
 ) -> Envelope[BotOverview]:
     """Non-user overview of a Bot: engine-neutral fields plus engine payload."""
     try:
-        overview = service.get_overview(bot_id)
+        overview = await service.get_overview(bot_id)
     except BotOverviewNotFoundError:
         raise BotNotFoundError("Bot was not found") from None
     return envelope(overview, request)

@@ -23,21 +23,20 @@ internal_dependencies:
 
 ### Change impact
 
-The existing TC upload and materialization APIs remain the authoritative primary
-flow. Every production path that observes a `READY` resource invokes the same
-observer: legacy upload completion and status polling, the materialization
-callback, and the formal OpenAPI session-file completion and status operations.
+TC conversation-file automatic knowledge ingestion is retired. Upload completion,
+status polling, and the materialization callback (including the formal OpenAPI
+session-file endpoints) only execute the normal Session Resource flow. None of
+these routes resolves or invokes `TcResourceReadyObserverProtocol`.
 
-The coordinator publishes only `schema_version`, a deterministic `event_id`,
-and `res_id`. It does not retain browser-supplied session, group, member, user,
-file, transfer, or download data. The receiving OCB/ECB integration resolves
-those facts from authoritative storage by `res_id`.
+The coordinator and publisher contracts remain for compatibility, but no
+production session-file path schedules them. Do not reconnect them to READY
+observations. ECB rejects the old resource-ready notice with
+`410 TC_RESOURCE_READY_DISABLED` and no longer runs its automatic inbox consumers.
 
-Delivery remains best-effort and non-blocking. In-flight work is capped, and
-successful deliveries are deduplicated by a bounded TTL/LRU cache. Scheduling,
-overload, and downstream delivery failures are logged without changing the TC
-API result. There is no durable outbox, retry worker, or restart-safe guarantee
-in this phase.
+Normal attachment upload, materialization, content access, and reference remain
+unchanged. Explicit knowledge uploads/imports, existing knowledge, historical
+inbox records, and the internal trusted context API are not removed. Existing
+shared token/context wiring must remain available to its other consumers.
 
 The internal resource-context response preserves the uploader as `user_id` and
 resolves the Bot `owner_id` from the resource's persisted `binding_id`. The binding

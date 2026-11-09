@@ -43,7 +43,7 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 });
 
-it("round-trips child flow ids in the existing parent state_json API", async () => {
+it("preserves committed child flow ids and ignores stale fanouts in an ordinary state PUT", async () => {
   const fanoutState = {
     workflowId: "parent",
     subworkflowFanouts: {
@@ -54,10 +54,11 @@ it("round-trips child flow ids in the existing parent state_json API", async () 
       },
     },
   };
+  stateJson = JSON.stringify(fanoutState);
   const put = await fetch(`${baseUrl}/runs/parent/state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state_json: JSON.stringify(fanoutState) }),
+    body: JSON.stringify({ state_json: JSON.stringify({ workflowId: "updated", subworkflowFanouts: {} }) }),
   });
   expect(put.status).toBe(200);
 
@@ -65,6 +66,7 @@ it("round-trips child flow ids in the existing parent state_json API", async () 
   expect(get.status).toBe(200);
   const body = await get.json() as { data: { state_json: string } };
   const saved = JSON.parse(body.data.state_json) as typeof fanoutState;
+  expect(saved.workflowId).toBe("updated");
   expect(saved.subworkflowFanouts["run-experiments"].children[0].childFlowId).toBe("child-1");
   expect(saved.subworkflowFanouts["run-experiments"].children[0].nativeFlowId).toBe("native-1");
 });

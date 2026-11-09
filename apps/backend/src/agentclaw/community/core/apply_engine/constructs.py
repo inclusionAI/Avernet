@@ -65,6 +65,13 @@ class Section(StrEnum):
 
     #: The startup script's body, run when the bot's container starts.
     SCRIPT = "script"
+    #: A bot-to-bot workspace file sync. Single-valued because a copy moves one
+    #: source bot's workspace: the entry written under ``manifest.resources`` as
+    #: ``protocol: bot`` is reclassified here by the compiler, which is why this
+    #: section has no own key in the document grammar (a caller writes it as a
+    #: resources entry, not as ``manifest.bot_file_sync``). Converges through a
+    #: per-engine sync strategy, never through the content store.
+    BOT_FILE_SYNC = "bot_file_sync"
 
 
 #: Either of the two. A value's own type says which kind it is.
