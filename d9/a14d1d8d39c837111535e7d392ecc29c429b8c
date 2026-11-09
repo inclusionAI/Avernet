@@ -1,0 +1,23 @@
+apps/bcsfuse/packages/search-core/src/search_core/core/execution.py
+  s_9e428ec8192673::t_e9c5f4f1ee897e 16-21,51-52
+apps/bcsfuse/packages/search-core/src/search_core/core/observation.py
+  s_9e428ec8192673::t_f5ffaf7b4fb685 94-95
+apps/bcsfuse/packages/search-core/src/search_core/core/timing.py
+  s_9e428ec8192673::t_8f28c685619969 14-46,71-74,86-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9a14d1d8d39c837111535e7d392ecc29c429b8c",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

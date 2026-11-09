@@ -1,0 +1,28 @@
+apps/frontend-nextgen/src/components/Workspace/ChatLayoutPanelSlot.tsx
+  h_059e888e5e4e82 108-110,112
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 19-21
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChat.ts
+  h_059e888e5e4e82 10,23,114-115
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatPanelCleanup.ts
+  h_059e888e5e4e82 1-24
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  h_059e888e5e4e82 62-63,101-105
+apps/frontend-nextgen/test/components/Workspace/ChatLayoutPanelSlot.test.tsx
+  h_059e888e5e4e82 272,326,344-348,356-357
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 212-241
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  h_059e888e5e4e82 10,195-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "042a957ec77ac611bea39b6c7573dbf12e25831a",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
