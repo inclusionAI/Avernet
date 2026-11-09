@@ -101,8 +101,11 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | --- | --- | --- | --- | --- |
 | `CollaborationContext` | 聚合根 | `context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
 | `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有 | 随 `context.info_updated` 事实演进 |
-| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 引用外部材料，不拥有内容 | 随 envelope / material 事件保留历史 |
-| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 记录实际协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
+| `ContextInput` | 子实体 | `context_id + input_id + source` | 组织协作输入及其来源，不拥有内容 | 由输入创建或导入事件维护 |
+| `InputSource` | 值对象 | `source_kind + source_id + revision` | 标识 Dima 项目空间、TaskDiscover 事件集合等外部来源 | 随输入事实演进 |
+| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 引用具体材料，不拥有内容 | 由 ContextInput / ContextDeliverable 选择性持有 |
+| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 记录协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
+| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作模式和参与者集合 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
 | `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision | 创建时绑定，显式迁移 revision |
@@ -124,14 +127,16 @@ flowchart TB
   subgraph Context["CollaborationContext 聚合"]
     root["CollaborationContext"]
     envelope["ContextEnvelope"]
+    contextInput["ContextInput"]
+    inputSource["InputSource"]
     material["ContextMaterialReference"]
+    collaborationMode["CollaborationMode"]
     participant["ContextParticipant"]
     deliverable["ContextDeliverable"]
     todo["ContextTodo"]
     outcome["ContextOutcome"]
     event["ContextEvent"]
     transition["ContextTransition"]
-    mode["current_mode + active_work_ref"]
     stateBinding["ContextStateMachineBinding"]
   end
 
@@ -141,21 +146,22 @@ flowchart TB
 
   adapter["标准 Command / Adapter"]
   snapshot["ContextSnapshot"]
-  product["可基于本协议组织协作的产品层 / 执行能力"]
 
   bbsDiscussion --> adapter
   todoScenario --> adapter
-
   adapter --> event
+
   root --> envelope
-  root --> material
-  root --> participant
+  root --> contextInput
+  contextInput --> inputSource
+  contextInput --> material
+  root --> collaborationMode
+  collaborationMode --> participant
   root --> deliverable
   root --> todo
   root --> outcome
   root --> event
   root --> transition
-  root --> mode
   root --> stateBinding
 
   stateDef -. 冻结 revision .-> stateBinding
@@ -164,399 +170,145 @@ flowchart TB
   transition --> root
   event --> snapshot
   root --> snapshot
-  snapshot --> product
+  snapshot --> bbsDiscussion
+  snapshot --> todoScenario
 ```
-
-该图说明的是领域对象之间的协议关系，不代表任何一个产品必须直接暴露这些对象。产品层与执行能力先通过 Adapter 提交标准 Command，再进入聚合内的事件与状态迁移路径。
-下文中的字段是协议语义设计，不是最终数据库 schema。实现可以使用不同表结构，但必须保持身份、归属、幂等和不变量语义。
 
 ### 4.2 聚合根：CollaborationContext
 
-`CollaborationContext` 的职责是回答五个问题：
+`CollaborationContext` 是唯一业务权威，负责回答：
 
 1. 这个目标是什么、边界和验收口径是什么。
-2. 谁是责任人、参与者和可见范围。
+2. 谁是责任人，当前协作模式里的参与者和可见范围是什么。
 3. 哪些材料是协作输入，哪些交付物是协作结果。
 4. 当前业务阶段为什么合法、下一步允许什么。
 5. 当前协作模式是什么，以及有哪些产品或执行能力可以继续推进任务。
 
-核心字段设计：
-
 ```text
 CollaborationContext
-  ├─ context_id                 # 稳定 ID
-  ├─ scope                      # tenant / environment / visibility boundary
-  ├─ title                      # 用户可读标题
-  ├─ envelope                   # objective、deliverable_specs、acceptance 等值对象
-  ├─ responsible_actor_ref      # 业务责任人，必须是可解析的人类主体
-  ├─ participants[]            # 子实体
-  ├─ input_material_refs[]      # 稳定引用值对象，明确作为协作输入
-  ├─ deliverables[]            # ContextDeliverable 子实体，记录协作结果
-  ├─ state_machine_binding     # 子实体，唯一活跃绑定
-  ├─ event_cursor               # 事件序号 / 增量读取游标
-  ├─ version                    # 聚合乐观锁版本
-  ├─ state_fencing_token        # 状态迁移 fencing token
-  ├─ current_mode             # 当前协作模式，取值只有三类
-  ├─ active_work_ref          # 当前活跃正式 Work 的稳定外部引用；可为空
-  ├─ created_by / created_from  # 创建者和来源
-  └─ created_at / updated_at / closed_at
+  ├─ context_id / scope / title
+  ├─ envelope
+  ├─ responsible_actor_ref
+  ├─ input                     # ContextInput
+  ├─ deliverables[]           # ContextDeliverable
+  ├─ collaboration_mode       # CollaborationMode
+  ├─ state_machine_binding    # ContextStateMachineBinding
+  ├─ version / event_cursor / state_fencing_token
+  ├─ active_work_ref
+  └─ created_by / created_from / created_at / updated_at / closed_at
 ```
 
 聚合根不变量：
-
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 参与者、Todo、Outcome、来源引用、current_mode、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。
-- 外部对象不能通过引用成为 Context 的一部分；只能被 Adapter 转换为事件事实。
-- 所有子实体和值对象都遵守 Context 的 `scope` 与 `visibility`，不能跨 Context 隐式共享。
-- 终态之后再追加公开评论或来源同步事件时，不能自动改变终态。
-- `responsible_actor_ref` 不能由 Bot 自主声明或晋升；必须由授权主体和现有身份系统确认。
+- 输入、交付物、协作模式、Todo、Outcome、来源引用、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。
+- 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `visibility` / `scope`。
+- 终态后可继续追加公开事件，但不能自动改变终态。
+- `responsible_actor_ref` 必须由授权主体和现有身份系统确认，不能由 Bot 自主声明。
 
 ### 4.3 值对象：ContextEnvelope
 
-`ContextEnvelope` 是业务意图、边界和验收口径的值对象，不是发给模型的 prompt，也不是现有任务规格里的 `TaskSpec.Context`。它的作用是为所有协作模式提供同一份权威问题陈述。
-
 ```text
 ContextEnvelope
-  ├─ objective                 # 必填的业务目标
-  ├─ background                # 可补充的背景事实
-  ├─ constraints[]             # 技术或业务约束
-  ├─ deliverable_specs[]       # 期望交付物类型、编号和完成口径
-  ├─ acceptance[]              # 验收标准 / 判定依据
-  ├─ language / locale         # 呈现与摘要约束
-  ├─ origin_ref                # 来源帖子、需求或表单引用
-  ├─ visibility                # 公开、团队、租户或私有边界
-  └─ envelope_revision         # 当前投影版本，由事件推导
+  ├─ objective / background
+  ├─ constraints[] / deliverable_specs[]
+  ├─ acceptance[] / language / locale
+  ├─ origin_ref / visibility
+  └─ envelope_revision
 ```
 
+- 每次可审计变更产生 `context.info_updated`。
+- 它是业务意图和验收口径，不是 prompt，也不是权限边界。
+- 字段必须经 schema 校验，不允许无限开放 JSON。
+
+### 4.4 子实体：ContextInput
+
+`ContextInput` 是协作输入的一等子实体，用来组织“这个 Context 依赖的输入材料”以及这些材料来自哪个外部系统。它不是聚合根，也不拥有外部内容；它只保存来源与材料引用。
+
+```text
+ContextInput
+  ├─ input_id / input_kind
+  ├─ source                     # InputSource
+  ├─ material_refs[]           # ContextMaterialReference[]
+  └─ source_revision / visibility / scope
+```
+
+`InputSource` 是 `ContextInput` 内的值对象，用 `source_kind + source_id + revision` 标识来源版本，例如 **Dima 项目空间**或 **TaskDiscover 模块自动挖掘的事件集合**。
+
 设计约束：
+- 一个 Context 可以有多个 `ContextInput`。
+- `material_refs[]` 只表示“协作输入”，不表示交付结果，也不承载状态机语义。
+- `source` 只保留稳定引用，不保存材料正文、token、cookie、临时签名 URL 或私有路径。
+- `ContextInput` 与 `ContextDeliverable` 的职责互斥；同一材料可在两边出现，但由所在关系决定是输入还是结果。
 
-- `Update Envelope` 命令必须携带 `expected version` 或状态 fencing token。
-- envelope 的每次可审计变更都产生 `context.info_updated` 事实，不原地覆盖历史。
-- 交付物和验收标准可以映射为现有 `TaskSpec`，但本对象不被 `TaskSpec` 替代。
-- envelope 对 Bot 是投影材料，不是授权边界；Bot 能否读取内容由材料来源单独裁决。
-- 字段必须经过 schema 校验，不允许无限开放 JSON。
-
-### 4.4 值对象：ContextMaterialReference
-
-`ContextMaterialReference` 是稳定的材料引用，负责告诉各协作模式“协作输入在哪里、哪个版本、谁有权读”，本身不保存材料字节。
+### 4.5 值对象：ContextMaterialReference
 
 ```text
 ContextMaterialReference
-  ├─ material_ref_id           # Context 内稳定引用 ID
-  ├─ source_kind               # forum、task、document、repo、file、external_source 等
-  ├─ source_id                 # 来源系统的稳定对象 ID
-  ├─ revision / digest         # 来源版本或可校验摘要
-  ├─ display_name              # 安全展示名
-  ├─ scope / visibility         # 继承或收窄后的访问边界
-  └─ authorization_ref         # 材料授权检查引用，不包含权限本身
+  ├─ material_ref_id / source_kind / source_id
+  ├─ revision / digest
+  ├─ display_name
+  └─ visibility / scope / authorization_ref
 ```
 
-设计约束：
+- `(source_kind, source_id, revision)` 是自然身份。
+- 它只保存稳定引用，不保存内容或权限。
+- 材料下载、预览和解密仍由原系统独立授权。
+- 来源版本冲突必须形成 `source.revision_detected` 或 `source.sync_conflicted` 事件。
 
-- `(source_kind, source_id, revision)` 是自然身份；同一引用可以保留历史修订。
-- 不保存 token、cookie、临时签名 URL、引擎私有路径或文件正文。
-- 材料的实际下载、预览和解密仍由原系统独立授权。
-- 移除材料引用不会删除外部来源事实；事件中保留被移除前的引用事实。
-- 来源修订变化通过 `source.revision_detected` 进入时间线，由职责人明确处理冲突。
-
-### 4.5 子实体：ContextDeliverable
-
-`ContextDeliverable` 是协作结果的子实体，用来显式区分“协作输入”和“协作输出”。它不是新的状态机，也不是新的聚合根；它只是把协作已经产生的结果，和 Context 一开始声明的交付物规格建立稳定对应关系。
+### 4.6 子实体：ContextDeliverable
 
 ```text
 ContextDeliverable
-  ├─ deliverable_id
-  ├─ spec_ref                   # 对应 envelope 中的 deliverable_spec_id
-  ├─ artifact_ref                # ContextMaterialReference，指向实际产出
-  ├─ produced_by / produced_at   # 实际产出者 与 产出时间
-  ├─ producing_event_refs[]       # 产生该结果的事件链
-  ├─ evidence_refs[]             # 支撑性证据引用
-  ├─ acceptance_ref               # 关联 ContextOutcome 的验收/驳回事实
-  └─ visibility                   # 该结果对外可见的范围
+  ├─ deliverable_id / spec_ref
+  ├─ artifact_ref
+  ├─ produced_by / produced_at
+  ├─ producing_event_refs[] / evidence_refs[]
+  ├─ acceptance_ref
+  └─ visibility
+```
+
+- 产出结果必须先形成 `deliverable.produced`；envelope 更新只能声明规格，不能伪装成结果。
+- `spec_ref` 必须指向 envelope 中的 `deliverable_spec_id`。
+- 驳回后的返工会生成新的 `ContextDeliverable`，历史结果事实保留。
+- `ContextDeliverable` 不承载状态机，不决定业务终态。
+
+### 4.7 子实体：CollaborationMode
+
+`CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
+
+```text
+CollaborationMode
+  ├─ mode_id / mode_kind
+  ├─ participants[]            # ContextParticipant[]
+  ├─ mode_revision / started_at / ended_at
+  └─ mode_switched_event_refs[]
 ```
 
 设计约束：
+- 一个 Context 同一时刻只能有一个 active `CollaborationMode`。
+- `mode_kind` 只能取 `public_discussion`、`task_relay`、`direct_assignment`。
+- mode 与 participants 变更必须通过 `context.mode_switched`、`participant.role_granted`、`participant.role_revoked` 事件进入事实日志。
+- 当前 mode 受状态机 binding 的 `allowed_modes` 约束，不能绕过 `ContextTransition` 直接修改。
+- participants 是协作关系，不是权限本身。
+- `active_work_ref` 属于聚合根，不属于 `CollaborationMode`。
 
-- `input_material_refs[]` 只表示协作输入，不表示目标完成。
-- 产出结果必须先形成 `deliverable.produced` 事实；`context.info_updated` 只能声明交付物规格，不能直接生成结果。
-- `deliverables[]` 表示已经产生的协作结果，必须至少包含一个稳定外部成果引用。
-- `spec_ref` 必须指到 envelope 里的某个 `deliverable_spec_id`，避免没有定义的结果冒充交付物。
-- 同一份外部材料可以同时出现在输入引用和结果引用中；协议不依赖 `ContextMaterialReference` 变成某个“类型”，而是通过它所在的关系字段来判定用途。
-- `ContextDeliverable` 不承载状态机，不决定业务终态；验收仍由 `ContextOutcome` 和状态机裁决。
-- 只有完整、稳定且被对应事件支撑的成果引用才能成为结果交付物。
-- 驳回后的返工会生成新的 `ContextDeliverable`，历史结果事实保留。
+### 4.8 子实体：ContextParticipant
 
-### 4.6 子实体：ContextParticipant
-
-`ContextParticipant` 记录人类、Bot 或系统服务在当前 Context 中的参与身份和角色。
+`ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。
 
 ```text
 ContextParticipant
-  ├─ participant_id            # Context 内稳定 ID
-  ├─ actor_kind                # human / bot / service
-  ├─ actor_id                  # 由身份、Bot 或服务权威系统解析出的稳定 ID
-  ├─ roles[]                   # owner、responsible_user、contributor、reviewer、bot、adapter 等
-  ├─ scope                     # 参与作用域，可小于整个 Context
-  ├─ granted_by / granted_at   # 授权来源与时间
-  ├─ revoked_by / revoked_at   # 撤销来源与时间
-  ├─ membership_events[]       # 授权 / 撤销事实引用
-  └─ visited_at                # 最近读取投影时间，只作展示，不作为权限证据
+  ├─ participant_id / actor_kind / actor_id
+  ├─ roles[] / scope
+  ├─ granted_by / granted_at
+  ├─ revoked_by / revoked_at
+  ├─ membership_events[]
+  └─ visited_at
 ```
 
-设计约束：
-
-- 同一作用域内一个 actor 只有一个 active participant 记录；重新授权产生新事实。
-- 角色授予和撤销会产生 `participant.role_granted` / `participant.role_revoked` 事件。
-- Bot 参与者必须记录可验证的 Bot ID、Owner 或服务归属；不能由 Bot 自称。
-- 参与关系不是权限本身。每次执行命令时仍须重新校验身份、材料、外部系统和执行权限。
-- 公开可见的参与者投影可以隐藏 Bot 内部路由、归属或平台敏感字段。
-
-### 4.7 协议资源：ContextStateMachineDefinition
-
-`ContextStateMachineDefinition` 是版本化状态机合同，用于声明合法状态、迁移规则、治理类别和允许的协作方式。它被多个 Context 引用，但不因此成为协作聚合根，也不拥有任何 Context 事实。
-
-```text
-ContextStateMachineDefinition
-  ├─ definition_id             # 稳定合同 ID
-  ├─ revision                  # 不可变修订版本
-  ├─ schema_version            # context-state-machine/1
-  ├─ content_digest            # 冻结内容摘要
-  ├─ initial                   # 唯一起点
-  ├─ states{}                  # state id、governance kind、allowed modes、roles
-  ├─ transitions[]             # from、on、guard、effects、to、rule id
-  ├─ declared_guards[]         # 引用已注册谓词
-  ├─ declared_effects[]        # 引用已注册动作
-  ├─ declared_modes[]         # 引用允许的协作模式 kind
-  ├─ compatibility_policy      # revision 迁移策略
-  ├─ published_at              # 发布时间
-  └─ published_by              # 发布者
-```
-
-设计约束：
-
-- `definition_id + revision + content_digest` 是不可变合同引用。
-- 新 revision 不能让已绑定 Context 静默改变解释；必须使用显式迁移命令。
-- guard、effect 和 mode 均来自注册清单，不允许任意脚本或内联网络调用。
-- 校验规则见第 5.4 节。
-- 平台内置 template 与用户自定义 template 只在授权和审批流程上不同，在协议执行上相同。
-
-### 4.8 子实体：ContextStateMachineBinding
-
-`ContextStateMachineBinding` 是 Context 实例和某个 definition revision 之间的裁决绑定。
-
-```text
-ContextStateMachineBinding
-  ├─ context_id
-  ├─ binding_id                 # Context 内唯一
-  ├─ definition_id
-  ├─ definition_revision
-  ├─ content_digest             # 冻结合同摘要
-  ├─ current_state               # 唯一聚合级业务状态
-  ├─ governance_kind             # 由 definition state 推导的治理类别
-  ├─ allowed_modes              # 当前状态允许的协作模式
-  ├─ transition_cursor            # 最近一次迁移位置
-  ├─ state_fencing_token          # 防旧命令影响新状态
-  ├─ revision_migration_refs[]    # 显式迁移到新 revision 的事实引用
-  └─ bound_at / updated_at
-```
-
-设计约束：
-
-- 一个 Context 只有一个 active binding；显式迁移 revision 会保留旧 binding 事实并建立新 binding view。
-- `current_state` 只能由 `ContextTransition` 写入；任何 Adapter 都不能直接修改。
-- guard 结果必须写入迁移事实，供审计和重放解释。
-- 事件重放以绑定的 definition revision 与 digest 为准，不读取“最新版”。
-- revision 迁移前必须证明当前状态在新定义中存在或有明确映射。
-
-### 4.9 子实体：ContextEvent 与 ContextTransition
-
-`ContextEvent` 是服务端接纳后的 append-only 协作事实。`ContextTransition` 是状态机对该事实的一次确定性裁决记录。
-
-```text
-ContextEvent
-  ├─ context_id
-  ├─ event_id                  # 全局唯一
-  ├─ sequence                  # Context 内单调递增
-  ├─ event_type                 # context.*、discussion.*、todo.*、work.* 等
-  ├─ actor_ref                  # 人类、Bot 或服务 actor，解析后绑定
-  ├─ source_kind                # forum、task、bcs、api、source adapter 等
-  ├─ source_event_id            # 来源幂等键
-  ├─ request_id                 # 命令幂等键
-  ├─ payload_digest              # 结构化 payload 摘要
-  ├─ causation_event_ids[]       # 引发本事件的上游事实
-  ├─ visibility
-  ├─ accepted_at
-  └─ context_version             # 接纳时的聚合版本
-
-ContextTransition
-  ├─ context_id
-  ├─ transition_id
-  ├─ event_id                   # 触发事件，一对一唯一
-  ├─ transition_rule_id          # definition 中命中的规则 ID
-  ├─ from_state / to_state
-  ├─ governance_from / governance_to
-  ├─ guard_results[]            # guard id、PASS/FAIL/BLOCKED、原因摘要
-  ├─ effect_results[]           # effect id、副本、结果、幂等键
-  ├─ actor_ref
-  ├─ state_fencing_token
-  └─ created_at
-```
-
-设计约束：
-
-- Command 是意图，Event 是被接纳的事实；Adapter 不能把上游消息直接当作 Event 写入。
-- 同一 `event_id`、同一 `(source_kind, source_event_id)` 或同一命令幂等键重复提交必须返回同一结果。
-- 相同幂等键但不同内容返回冲突，不能接受并生成新事件。
-- 事件一旦接纳便不可修改；纠错使用补偿事件。
-- 不是每个事件都必须引起迁移；例如普通 `discussion.posted` 可只进入时间线。
-- Event、Transition、Context 版本和受影响的子实体必须同事务提交。
-- 高频投影可以折叠，但事实日志不得被折叠掉。
-- 重放事实只重建本地状态，不会再次调用外部副作用。
-
-#### 常用事件集合
-
-以下事件名是协议语义，不代表要求 HTTP DTO 或数据库列名完全相同。
-
-| 类别 | 事件 | 事实含义 | 常见来源 |
-| --- | --- | --- | --- |
-| 生命周期 | `context.created` / `context.info_updated` / `context.cancelled` | Context 建立、Envelope 或输入材料更新、主动取消 | Web、BBS、系统导入 |
-| 参与者 | `participant.role_granted` / `participant.role_revoked` | 参与者或角色变化 | 人类操作 / 授权适配器 |
-| 协作模式 | `context.mode_switched` | Context 从一种协作模式切换到另一种协作模式 | 人类、授权策略或状态机效果 |
-| 公开讨论 | `discussion.posted` / `decision.recorded` | 讨论事实、决定事实 | Topic、人类责任人 |
-| 代办 | `todo.created` / `todo.completed` / `todo.blocked` | 单条代办事实 | 人类 / Bot / 系统 |
-| 执行 | `work.started` / `work.completed` / `work.failed` | 上游执行事实被接纳 | Task、Relay、BCS |
-| 交付物 | `deliverable.produced` / `deliverable.superseded` | 实际结果产生、旧结果被新一轮替代 | 执行结果适配器 |
-| 验收 | `outcome.accepted` / `outcome.rejected` | 责任人对结果裁决 | 人类责任人 |
-| 外部来源 | `source.revision_detected` / `source.sync_conflicted` | 来源修订或冲突 | 来源适配器 |
-| 投影 | `snapshot.published` | 服务端为某个目标生成快照 | Context 服务 |
-
-### 4.10 外部来源引用（不建子实体）
-
-Context 不为外部入口单独建子实体。无需引入 `CollaborationSurfaceBinding`。
-
-外部入口只需要保留成稳定引用，并且由不同对象自然承载：
-
-- `created_from` / `origin_ref`：记录 Context 的创建来源，比如 BBS Topic。
-- `ContextMaterialReference`：记录外部材料或协作来源的稳定引用。
-- `ContextEvent.source_kind + source_event_id`：记录事件来源、来源 ID 和幂等事实。
-- `active_work_ref`：`task_relay` 或需要升级为正式 Work 的 `direct_assignment` 所使用的稳定外部执行引用。
-- `current_mode` + `source_kind / source_id`：记录当前协作模式和它实际使用的产品或执行来源。
-- Adapter / Source Plugin：负责外部入口与 Context 之间的协议转换和路由。
-
-设计不变量：
-
-- 外部入口本身不是 Context 的状态，也不是聚合内子实体。
-- 允许一个 Context 被多个外部入口引用；入口映射由 Adapter 或独立映射表维护，不提升为领域对象。
-- 外部入口自己的生命周期和状态只属于原系统。
-- Context 终态、Topic close、群会话变化互不隐式串写。
-- 公开入口上的可见字段必须由服务端重新投影，不能直接复制内部行。
-
-### 4.11 协作模式与执行事实（不建绑定子实体）
-
-Context 不需要 `ContextModeBinding`，也不需要 `ContextWorkBinding`。这两种关系都可以由更简的根字段、值对象和事件事实承载：
-
-- `current_mode`：当前协作模式，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
-- `active_work_ref`：当前活跃正式 Work 的稳定外部引用；只有 `task_relay` 或需要升级为正式 Work 的 `direct_assignment` 才需要非空。
-- `ContextTodo`：`direct_assignment` 的轻量承载实体。
-- `ContextEvent`：记录 `work.requested`、`work.started`、`work.completed`、`work.failed` 等执行事实。
-- `ContextTransition`：记录模式切换和业务状态迁移。
-
-设计约束：
-
-- `allowed_modes` 由当前 State 声明，`current_mode` 只能取 `public_discussion`、`task_relay`、`direct_assignment`。
-- 模式切换必须通过 `context.mode_switched` 事件完成，禁止只改字段。
-- `task_relay` 的执行对象由 `active_work_ref` 指向，禁止复制外部 TaskGraph / Relay / BCS Run 的内部图、路由或日志。
-- 一个 Context 同一时刻至多一个 `active_work_ref`。
-- 外部执行事实必须先在外部系统接纳，再由 Adapter 投影为 `work.*` 事件。
-- `direct_assignment` 不要求创建外部 Work；确需执行外部副作用时再显式进入 `active_work_ref` 对应的正式 Work。
-- Context 关闭或验收后必须显式清空 `active_work_ref`，外部产品仍自行维护它自己的 Work 生命周期。
-
-### 4.12 子实体：ContextTodo
-
-`ContextTodo` 是 Context 内的轻量代办事实，用于表达“还需要谁在当前 Context 内做一件小事”。它不定义新的 Context State，也不升级为第二套业务状态机。
-
-```text
-ContextTodo
-  ├─ context_id
-  ├─ todo_id
-  ├─ title / instruction
-  ├─ assigned_actor_ref          # 可为空；未指派时允许认领
-  ├─ required                    # 是否必须完成后才允许进入验收
-  ├─ due_at                      # 可为空；有值时用于提醒
-  ├─ created_by / created_at
-  ├─ material_refs[]              # 完成所需材料
-  ├─ latest_event_id / event_cursor
-  ├─ completed_by / completed_at / evidence_refs[]
-  ├─ blocked_by / blocked_at / blocker_refs[]
-  └─ cancelled_by / cancelled_at / cancellation_reason_ref
-```
-
-设计约束：
-
-- Todo 的当前展示字段由 `todo.created`、`todo.assigned`、`todo.completed`、`todo.blocked`、`todo.cancelled` 等事件推导。
-- 单条 Todo 完成不等于业务目标完成；业务终态仍必须经过状态机和责任人裁决。
-- `required_todos_are_done` guard 只检查 required Todo 的完成事实，不引用 Bot 自述。
-- Bot 认领或完成 Todo 时必须校验 Bot 归属、能力、材料权限和 assignee。
-- Todo 需要真实执行、交付文件或产生外部副作用时，显式升级为 `active_work_ref` 指向的正式 Work，历史 Todo 事实保留。
-- 编辑已完成 Todo 的说明不影响历史完成事实。
-
-### 4.13 子实体：ContextOutcome
-
-`ContextOutcome` 是业务责任人对目标交付的显式裁决事实。它不是另一个状态层，而是驱动状态机进入终态或返工状态的事件证据。
-
-```text
-ContextOutcome
-  ├─ context_id
-  ├─ outcome_id
-  ├─ decision                 # accepted / rejected
-  ├─ judged_by                 # 必须是授权责任人
-  ├─ judged_at
-  ├─ decision_reason_ref       # 裁决说明或讨论引用
-  ├─ deliverable_refs[]          # 被验收 / 驳回的 ContextDeliverable
-  ├─ evidence_refs[]             # Work 完成、Todo 完成、来源摘要等支撑事实
-  ├─ acceptance_refs[]           # 所满足的 envelope acceptance 项
-  ├─ rejected_reason_refs[]
-  └─ transition_ref             # 触发的状态迁移事实
-```
-
-设计约束：
-
-- `outcome.accepted` 与 `outcome.rejected` 是互斥事实；重复决策需使用补偿或后续新轮次事件。
-- 责任人身份在提交时重新验证，不能从历史 visible 参与关系直接继承权限。
-- 验收通过不自动修饰外部 Work 结果；外部结果由其原系统权威保存。
-- 驳回必须保留原因和证据引用，用于返回返工状态并驱动新一轮协作。
-- 管理员可以清理违规内容或取消 Context，但不能代替业务责任人验收。
-
-### 4.14 投影：ContextSnapshot
-
-`ContextSnapshot` 是面向 Bot、BBS、API consumer 或 BCS 群的服务端投影结果。它不是权威状态，也不是可编辑业务对象。
-
-```text
-ContextSnapshot
-  ├─ context_id
-  ├─ snapshot_id
-  ├─ snapshot_revision           # 由 event_cursor / context_version 推导
-  ├─ target_kind / target_id
-  ├─ context_state_view            # 当前状态、治理类别、允许动作摘要
-  ├─ envelope_view                 # 根据目标过滤后的目标与约束
-  ├─ participant_view[]            # 参与者可见摘要
-  ├─ input_material_view[]           # 按目标重新过滤后的协作输入引用
-  ├─ deliverable_view[]               # 可见交付物及结果引用
-  ├─ timeline_cursor / summary_ref
-  ├─ current_mode_view
-  ├─ active_work_ref_view
-  ├─ action_view[]                 # 可提议或可提交的命令摘要
-  ├─ generated_at
-  └─ snapshot_digest
-```
-
-设计约束：
-
-- Snapshot 必须由 Context 服务按目标授权重新计算或过滤；禁止直接复制内部表。
-- `available_actions` / `action_view` 只是展示，提交时仍重新执行全部校验。
-- 相同 `snapshot_revision` 与目标投影规则应生成稳定 digest，便于外部缓存。
-- 私有日志、token、路径、未公开评审批注和内部路由不得进入快照。
-- Snapshot 过期后可重新生成；删除投影不影响事件日志或聚合事实。
+- 同一作用域内一个 actor 只有一个 active participant。
+- Bot 参与者必须记录可验证的 Bot ID、Owner 或服务归属，不能由 Bot 自称。
+- 参与关系不是权限本身，每次命令执行前仍须重新校验身份、材料和执行能力。
 
 ## 5. 可扩展状态机
 
@@ -658,7 +410,7 @@ transitions:
 - 效果按声明执行一次，并有幂等标识；外部效果可通过 outbox 或等价机制恢复，这不是领域对象要求。
 - 自定义状态机可以引用外部模型或规则结果，但必须把结果和证明记录在事件 payload 中，不能重复调用外部系统。
 
-禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 `current_mode` 与 `active_work_ref` 事实关联。
+禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 `CollaborationMode` 与 `active_work_ref` 事实关联。
 
 ### 5.4 定义校验
 
@@ -686,7 +438,7 @@ transitions:
 | --- | --- | --- | --- |
 | `public_discussion`（公开讨论） | 通过公开讨论收敛共识、结论或共同认知 | `discussion.posted` / `decision.recorded` | BBS Topic、Context portal |
 | `task_relay`（任务接力） | 把明确工作交给既有 Task / Relay / TaskGraph 或相关执行系统 | `work.requested` / `work.*` / `active_work_ref` | Task / Relay、相关执行适配器 |
-| `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `current_mode` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
+| `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `CollaborationMode` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
 
 设计不变量：
 - 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 是产品形态或执行能力，不是新的协作模式。
@@ -714,7 +466,7 @@ transitions:
 
 1. 每个 State 必须声明 `allowed_modes`，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
 2. 模式切换只能通过 ContextCommand 和对应 Transition 完成。
-3. Context 根上的 `current_mode` 直接记录当前模式；`active_work_ref` 记录当前活跃正式 Work。
+3. Context 根上的 `collaboration_mode` 统一包装当前模式和 participants；`active_work_ref` 记录当前活跃正式 Work。
 4. 模式切换必须留下 `context.mode_switched` 事实，禁止只更新表字段而不写事件。
 5. 产品或执行能力可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是 `public_discussion`、`task_relay` 还是 `direct_assignment`。
 6. `task_relay` 依据需要建立 `active_work_ref`；`direct_assignment` 可使用 `ContextTodo`、直接参与者执行或 `active_work_ref`。
@@ -813,7 +565,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | --- | --- |
 | Context root + state binding | `context_id` 唯一；每 Context 一个 active binding；`context_id + current_state` 由事务写入 |
 | Event / Transition | `event_id` 唯一；`context_id + source_event_id` / request 幂等键唯一；Transition 与触发事件一对一 |
-| Source refs / current_mode / active_work_ref | source ref 唯一；每个 Context 至多一个 active_work_ref |
+| Source refs / collaboration_mode / active_work_ref | source ref 唯一；每个 Context 至多一个 active_work_ref |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
 | Snapshot / 投影投递 | Snapshot 可重建；投递记录与 dedupe key 唯一；失败状态不可丢失
 
