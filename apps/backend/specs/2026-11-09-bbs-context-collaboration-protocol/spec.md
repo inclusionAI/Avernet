@@ -108,7 +108,6 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
-| `CollaborationSurfaceBinding` | 子实体 | `context_id + binding_id` / 目标引用唯一 | 绑定协作入口，不拥有入口状态 | 显式绑定、停用、重绑 |
 | `ContextModeBinding` | 子实体 | `context_id + binding_id` | 绑定当前协作模式 | 状态机允许时激活 |
 | `ContextWorkBinding` | 子实体 | `context_id + binding_id` | 绑定正式 Work，不复制执行图 | `work.requested` 创建或复用 |
 | `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
@@ -377,31 +376,26 @@ ContextTransition
 | 外部来源 | `source.revision_detected` / `source.sync_conflicted` | 来源修订或冲突 | 来源适配器 |
 | 投影 | `snapshot.published` | 服务端为某个目标生成快照 | Context 服务 |
 
-### 4.10 子实体：CollaborationSurfaceBinding
+### 4.10 外部来源引用（不建子实体）
 
-`CollaborationSurfaceBinding` 记录 Context 与公开讨论、API consumer、群会话等入口之间的绑定关系。
+Context 不为外部入口单独建子实体。无需引入 `CollaborationSurfaceBinding`。
 
-```text
-CollaborationSurfaceBinding
-  ├─ context_id
-  ├─ binding_id
-  ├─ surface_kind               # bbs_topic、context_api、bcs_group、external_source 等
-  ├─ target_ref                 # 目标系统的稳定 ID
-  ├─ scope / visibility          # 绑定作用域
-  ├─ capabilities                # read_timeline、post_summary、write_command 等能力
-  ├─ adapter_ref                 # 处理协议转换的 Adapter 协议引用
-  ├─ active / activated_at / deactivated_at
-  ├─ established_by / established_at
-  └─ binding_events[]           # 绑定、停用、重绑事实引用
-```
+外部入口只需要保留成稳定引用，并且由不同对象自然承载：
 
-设计约束：
+- `created_from` / `origin_ref`：记录 Context 的创建来源，比如 BBS Topic。
+- `ContextMaterialReference`：记录外部材料或协作来源的稳定引用。
+- `ContextEvent.source_kind + source_event_id`：记录事件来源、来源 ID 和幂等事实。
+- `ContextWorkBinding`：记录正式 Work 落在哪个外部执行系统。
+- `ContextModeBinding.source_refs[]`：记录当前模式下可用的外部入口引用。
+- Adapter / Source Plugin：负责外部入口与 Context 之间的协议转换和路由。
 
-- 绑定保存稳定目标引用，不保存外部入口自己的内部状态。
+设计不变量：
+
+- 外部入口本身不是 Context 的状态，也不是聚合内子实体。
+- 允许一个 Context 被多个外部入口引用；入口映射由 Adapter 或独立映射表维护，不提升为领域对象。
+- 外部入口自己的生命周期和状态只属于原系统。
 - Context 终态、Topic close、群会话变化互不隐式串写。
-- 解绑和重绑必须显式提交，且使用 `expected version` 防止并发覆盖。
-- 允许多个 Surface 同时存在，但它们只能提交标准 Command 或读取被过滤的投影。
-- 公开 Surface 上的可见字段必须由服务端重新投影，不能直接复制内部行。
+- 公开入口上的可见字段必须由服务端重新投影，不能直接复制内部行。
 
 ### 4.11 子实体：ContextModeBinding 与 ContextWorkBinding
 
@@ -417,7 +411,7 @@ ContextModeBinding
   ├─ active / activated_at / deactivated_at
   ├─ activation_request_id       # 激活幂等键
   ├─ activated_by
-  └─ surface_binding_refs[]       # 本协作模式可使用的执行通道入口
+  └─ source_refs[]                 # 本协作模式可使用的稳定外部来源引用
 
 ContextWorkBinding
   ├─ context_id
@@ -728,7 +722,7 @@ apps/backend/src/agentclaw/community/
   api/collaboration_context/
     context_service_protocol.py       # Service API：consumer 调 core
   core/collaboration_context/
-    domain/models.py                  # 聚合、事件、状态、Binding、Todo
+    domain/models.py                  # 聚合、事件、状态、ModeBinding、Todo
     state_machine/engine.py           # 纯状态迁移决策
     state_machine/validators.py       # profile schema 校验
     services/context_service.py       # 应用服务与事务边界
@@ -758,7 +752,7 @@ Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin imp
 | Update Envelope | 目标、背景、约束、输入材料、交付物规格、验收，expected version | 新 Context version |
 | Apply Context Command | actor、Command、request ID、expected version | 接纳结果、状态变化、错误原因 |
 | List Context Actions | 当前 actor、状态 | 当前 allowed Commands |
-| Bind Surface / Mode | surface 或 mode 类型、目标、expected version | SurfaceBinding / ModeBinding |
+| Bind Source / Mode | source 引用或 mode 类型、目标、expected version | SourceRef / ModeBinding |
 | Create / Update Todo | title、instruction、assignee、required、expected version | Todo |
 | Complete / Block / Cancel Todo | todo ID、证据引用、expected version | Todo 事实与 Context state |
 | Publish Snapshot | target actor / group、输入材料与交付物可见范围 | Snapshot revision |
@@ -808,7 +802,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | --- | --- |
 | Context root + state binding | `context_id` 唯一；每 Context 一个 active binding；`context_id + current_state` 由事务写入 |
 | Event / Transition | `event_id` 唯一；`context_id + source_event_id` / request 幂等键唯一；Transition 与触发事件一对一 |
-| Surface / Mode / Work bindings | 绑定 ID 唯一；目标绑定可达性唯一；每个 Context 至多一个 active WorkBinding |
+| Source refs / Mode / Work bindings | source_ref 唯一；mode binding 唯一；每个 Context 至多一个 active WorkBinding |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
 | Snapshot / Outbox | Snapshot 可重建；`outbox_id` 与投递 dedupe key 唯一；失败状态不可丢失 |
 
@@ -873,7 +867,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 
 | 阶段 | 范围 | 准入条件 |
 | --- | --- | --- |
-| P1 | Context 聚合、基础 profile、事件日志、BBS surface 绑定、公开讨论状态和 timeline 只读 | 状态机 schema、事件幂等和权限测试通过 |
+| P1 | Context 聚合、基础 profile、事件日志、BBS 来源引用、公开讨论状态和 timeline 只读 | 状态机 schema、事件幂等和权限测试通过 |
 | P2 | task_relay 模式、WorkBinding、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
 | P3 | direct_assignment 模式、required guard、Todo 升级 Work | Todo 并发、证据引用、终态守卫测试通过 |
 | P4 | public_discussion / task_relay / direct_assignment 三类模式接通 | BBS、Task、BCS 等通道权限、会话和事件映射回归通过 |
