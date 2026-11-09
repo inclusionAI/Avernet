@@ -94,16 +94,43 @@ pub struct Command { pub command_id: CommandId, pub session_id: SessionId, pub e
 pub enum DispatchPhase { Prepared, MayHaveSent, Accepted, ResultRecorded, Unknown }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchFence { pub dispatch_id: DispatchId, pub owner: NodeIdentity, pub epoch: u64 }
+/// Each send/continue/cancel has its own stable dispatch and operation identity.
+/// A cancel freezes its binding independently and never reuses the send record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DispatchOperation {
+    Send { request: AgentSendRequest },
+    Cancel { dispatch_id: DispatchId, binding: FrozenTargetBinding, request: AgentCancelRequest },
+}
+impl DispatchOperation {
+    pub fn dispatch_id(&self) -> &DispatchId {
+        match self { Self::Send { request } => &request.dispatch_id, Self::Cancel { dispatch_id, .. } => dispatch_id }
+    }
+    pub fn operation_id(&self) -> &OperationId {
+        match self { Self::Send { request } => &request.operation_id, Self::Cancel { request, .. } => &request.operation_id }
+    }
+}
+/// Typed evidence survives recovery; Unknown cancellation must not become Aborted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DispatchReceipt {
+    Agent { event: AgentEvent },
+    Cancellation { outcome: CancelOutcome },
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DispatchRecord {
     pub fence: DispatchFence,
     pub revision: Revision,
-    pub request: AgentSendRequest,
+    pub operation: DispatchOperation,
     pub phase: DispatchPhase,
     pub handle: Option<ExecutionHandle>,
-    pub receipt: Option<AgentEvent>,
+    pub receipt: Option<DispatchReceipt>,
     pub updated_at_ms: u64,
 }
+/// Reference to an immutable event already committed with its session checkpoint.
+/// Publication loads authoritative payload/task identity; caller supplies no event body or epoch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommittedEventRef { pub session_id: SessionId, pub event_id: EventId }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventSnapshot { pub task: TaskView, pub cursor: EventCursor }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

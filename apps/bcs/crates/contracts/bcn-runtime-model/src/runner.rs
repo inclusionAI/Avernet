@@ -89,6 +89,7 @@ pub struct SessionInput { pub event_id: EventId, pub at_ms: u64, pub kind: Sessi
 pub enum SessionInputKind {
     Submit { task: QueuedTask },
     Agent { task_id: TaskId, node_id: Option<String>, dispatch_id: DispatchId, event: AgentEvent },
+    Cancellation { task_id: TaskId, node_id: Option<String>, dispatch_id: DispatchId, operation_id: OperationId, outcome: CancelOutcome },
     JudgeDecided { task_id: TaskId, node_id: String, branch: String },
     HumanReply { task_id: TaskId, interaction_id: InteractionId, caller: CallerContext, message: Message },
     Cancel { command: CancelCommand },

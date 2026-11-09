@@ -84,6 +84,18 @@ its dispatch fence before network I/O. It saves a remote handle immediately and
 uses query/subscription after uncertainty. A finite dedup window does not alone
 authorize replay; the capability must cover the operation's entire possible
 lifetime or enforce an immutable expiry. Otherwise expose execution_unknown.
+Durable dispatch uses `DispatchOperation::Send { request }` or
+`DispatchOperation::Cancel { dispatch_id, binding, request }`. Each send,
+continuation and cancel owns distinct stable dispatch/operation identities;
+cancel persists its exact target handle, scope flag and frozen binding. Claim
+and takeover return the same immutable operation. Every operation independently
+advances PREPARED → MAY_HAVE_SENT before its network call.
+`DispatchReceipt::Agent` retains agent events; `DispatchReceipt::Cancellation`
+retains the typed Confirmed / AlreadyTerminal / Unknown outcome and affected-task
+evidence. Receipt type must match operation type. Cancellation inbox input also
+retains dispatch ID, operation ID and the identical typed outcome; uncertain
+cancellation must never be translated into confirmed Aborted.
+
 Errors distinguish NotSent, MayHaveBeenAccepted, RemoteFailed, Unsupported and
 OwnershipLost. EOF without a terminal event cannot become success. Cancellation
 intent is not cancellation confirmation.
@@ -95,6 +107,25 @@ is nonterminal. Result writes never overwrite an existing authoritative result.
 New connector epochs persist complete event projection before ordered Reset;
 old epochs cannot overwrite snapshots or append new events. Hard results require
 a fenced receipt and atomic inbox append.
+
+Worker hard facts use `TaskEventStore::publish_hard_event(&OwnershipFence,
+CommittedEventRef { session_id, event_id })`, independently of Connector deltas.
+A committed HumanInput event can publish before any dispatch exists. The store
+validates current session ownership, incarnation, epoch and scope, then loads
+the immutable committed event payload rather than trusting a caller-provided
+body. It atomically appends that event and saves its publication receipt before
+acknowledging/clearing pending state. An unknown or uncommitted event fails
+closed; a stale owner receives OwnershipLost without publishing or clearing it.
+A current owner can retry by event identity and receive the same cursor. Hard
+events use the authoritative task-stream cursor; ownership epochs do not become
+Connector projection epochs. Connector `append` accepts only Delta, rejecting
+Domain and Reset; `publish_reset` retains its own Connector epoch checks.
+
+This pre-release contract correction replaces the send-only
+`DispatchRecord.request` with tagged `operation`, and the untyped agent-only
+receipt with `DispatchReceipt`. New serialization/consumer tests pin these
+shapes before concrete stores are introduced; legacy runtime formats are
+unchanged.
 
 ## Infrastructure Plugin API
 

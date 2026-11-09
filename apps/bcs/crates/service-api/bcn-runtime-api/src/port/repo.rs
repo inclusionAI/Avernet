@@ -41,18 +41,32 @@ pub trait CommandBus: Send + Sync {
 }
 #[async_trait]
 pub trait DispatchStore: Send + Sync {
-    async fn claim(&self, request: AgentSendRequest, owner: NodeIdentity) -> RuntimeResult<DispatchRecord>;
+    /// Persist the complete tagged operation. Validate scope/target/binding consistency;
+    /// dispatch and operation IDs are distinct for send, continuation and cancellation.
+    /// Reclaim/recovery must return the same immutable operation, never a fabricated send.
+    async fn claim(&self, operation: DispatchOperation, owner: NodeIdentity) -> RuntimeResult<DispatchRecord>;
     /// Commit MAY_HAVE_SENT under this fence before external I/O. PREPARED alone is unsent proof.
     async fn mark_may_have_sent(&self, fence: &DispatchFence, expected: Revision) -> RuntimeResult<DispatchRecord>;
     async fn save_handle(&self, fence: &DispatchFence, expected: Revision, handle: ExecutionHandle) -> RuntimeResult<DispatchRecord>;
     /// Atomically fence receipt and append correlated inbox input; stale connectors cannot publish hard results.
-    async fn save_receipt(&self, fence: &DispatchFence, expected: Revision, receipt: AgentEvent,
+    /// Receipt kind must match the operation; Cancellation preserves Unknown/AlreadyTerminal/Confirmed.
+    /// The correlated Cancellation input must carry the same dispatch/operation IDs and outcome.
+    async fn save_receipt(&self, fence: &DispatchFence, expected: Revision, receipt: DispatchReceipt,
         session_id: &SessionId, input: SessionInput) -> RuntimeResult<DispatchRecord>;
     async fn takeover(&self, current: &DispatchFence, next: NodeIdentity) -> RuntimeResult<DispatchRecord>;
 }
 #[async_trait]
 pub trait TaskEventStore: Send + Sync {
-    /// Fenced against connector epoch and the persisted Reset boundary.
+    /// Publish the authoritative pending event committed with the referenced session.
+    /// Atomically check CURRENT ownership (including incarnation/epoch) and event/session scope;
+    /// load the committed payload, append it and persist publication receipt before clearing pending.
+    /// Unknown/uncommitted events fail closed. Retry by event ID returns the same cursor after
+    /// checking ownership; stale owners return OwnershipLost without appending or acknowledging.
+    /// Use the current task stream cursor, never ownership epoch as a connector projection epoch.
+    /// No DispatchFence is required, including HumanInput before any agent dispatch.
+    async fn publish_hard_event(&self, fence: &OwnershipFence, event: CommittedEventRef) -> RuntimeResult<EventCursor>;
+    /// Connector deltas only: fence against connector epoch and persisted Reset boundary.
+    /// Reject Domain/Reset here; committed Worker facts use publish_hard_event instead.
     async fn append(&self, fence: &DispatchFence, event: TaskEvent) -> RuntimeResult<EventCursor>;
     /// Persist full snapshot before ordered Reset; retry continues a pending Reset before deltas.
     async fn publish_reset(&self, fence: &DispatchFence, snapshot: EventSnapshot, event_id: EventId) -> RuntimeResult<EventCursor>;
