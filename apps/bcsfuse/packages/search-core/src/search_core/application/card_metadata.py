@@ -1,5 +1,7 @@
 """Batch-enrich candidates using an application projection and bounded cache."""
 
+import asyncio
+from copy import deepcopy
 from dataclasses import replace
 
 from search_core.core.observation import events
@@ -63,13 +65,7 @@ class CardMetadataRetrieval:
         try:
             if missing:
                 with stage_timing("card_fetch"):
-                    fetched = await self.execution.call(
-                        self.repository.get_many_cards, missing
-                    )
-                for key, card in fetched.items():
-                    value = self.project_card(card)
-                    cards[key] = value
-                    self.state.put_result(self.cache, revision, key, value)
+                    await self._fetch_missing(cards, missing, revision, stage)
         except Exception as error:  # noqa: BLE001 -- preserve valid cached Cards
             events.record(
                 "search_stage_failure",
@@ -103,3 +99,49 @@ class CardMetadataRetrieval:
                 ),
             )
         return replace(result, items=items)
+
+    async def _load_batch(self, keys, revision):
+        fetched = await self.execution.call(self.repository.get_many_cards, keys)
+        cards = {}
+        for key, card in fetched.items():
+            cards[key] = self.project_card(card)
+            self.state.put_result(self.cache, revision, key, cards[key])
+        return cards
+
+    async def _fetch_missing(self, cards, missing, revision, stage):
+        if revision is None or not self.cache.enabled:
+            cards.update(await self._load_batch(missing, revision))
+            return
+
+        pending = self.state.pending_card_metadata
+        lookups = {key: pending.get((revision, key)) for key in missing}
+        new_keys = [key for key, task in lookups.items() if task is None]
+        stage["shared_loads"] = len(lookups) - len(new_keys)
+        if new_keys:
+            task = asyncio.create_task(self._load_batch(new_keys, revision))
+            # Publish the in-flight batch before yielding to other requests.
+            for key in new_keys:
+                pending[revision, key] = lookups[key] = task
+
+            def forget(completed):
+                for key in new_keys:
+                    pending.pop((revision, key))
+                if not completed.cancelled():
+                    completed.exception()  # The last waiter may have been cancelled.
+
+            task.add_done_callback(forget)
+
+        tasks = dict.fromkeys(lookups.values())
+        outcomes = await asyncio.gather(
+            *(asyncio.shield(task) for task in tasks), return_exceptions=True
+        )
+        loaded = dict(zip(tasks, outcomes))
+        error = None
+        for key, task in lookups.items():
+            batch = loaded[task]
+            if isinstance(batch, BaseException):
+                error = batch
+            elif key in batch:
+                cards[key] = deepcopy(batch[key])
+        if error is not None:
+            raise error

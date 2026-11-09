@@ -52,6 +52,8 @@ class SearchCaches:
         self._caches = ()
         self._logged_stats = {}
         self._metadata_cache = metadata_cache
+        # The retrieval variants share one event loop and the same Card cache.
+        self.pending_card_metadata = {}
 
     def configure(self, policy):
         caches = tuple(
