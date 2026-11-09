@@ -219,7 +219,6 @@ export function useSessionTaskPanelBootstrap({
 
     return () => {
       cancelled = true;
-      if (bootstrapKeyRef.current === bootstrapKey) bootstrapKeyRef.current = null;
     };
   }, [enabled, panelRef, sessionId, userId]);
 }
