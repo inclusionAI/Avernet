@@ -123,7 +123,11 @@ flowchart TB
     todoScenario["代办"]
   end
 
-  subgraph Context["CollaborationContext 聚合"]
+  subgraph AdapterLayer["Adapter 层"]
+    adapter["标准 Command / Adapter"]
+  end
+
+  subgraph Context["CollaborationContext 聚合 / 状态机合同"]
     root["CollaborationContext"]
     envelope["ContextEnvelope"]
     inputSource["InputSource"]
@@ -135,14 +139,14 @@ flowchart TB
     outcome["ContextOutcome"]
     event["ContextEvent"]
     transition["ContextTransition"]
-    stateBinding["ContextStateMachineBinding"]
+
+    subgraph StateMachine["状态机合同 / Binding"]
+      direction LR
+      stateDef["ContextStateMachineDefinition"]
+      stateBinding["ContextStateMachineBinding"]
+    end
   end
 
-  subgraph Contract["模板化协议资源"]
-    stateDef["ContextStateMachineDefinition"]
-  end
-
-  adapter["标准 Command / Adapter"]
   snapshot["ContextSnapshot"]
 
   bbsDiscussion --> adapter
