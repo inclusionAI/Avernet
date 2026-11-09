@@ -108,8 +108,6 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
-| `ContextModeBinding` | 子实体 | `context_id + binding_id` | 绑定当前协作模式 | 状态机允许时激活 |
-| `ContextWorkBinding` | 子实体 | `context_id + binding_id` | 绑定正式 Work，不复制执行图 | `work.requested` 创建或复用 |
 | `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
 | `ContextOutcome` | 子实体 | `context_id + outcome_id` | 终态前的验收裁决事实 | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
@@ -124,7 +122,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 2. 谁是责任人、参与者和可见范围。
 3. 哪些材料是协作输入，哪些交付物是协作结果。
 4. 当前业务阶段为什么合法、下一步允许什么。
-5. 哪些协作入口和驱动方式可以从当前阶段推进任务。
+5. 当前协作模式是什么，以及有哪些产品或执行能力可以继续推进任务。
 
 核心字段设计：
 
@@ -143,6 +141,7 @@ CollaborationContext
   ├─ version                    # 聚合乐观锁版本
   ├─ state_fencing_token        # 状态迁移 fencing token
   ├─ current_mode             # 当前协作模式，取值只有三类
+  ├─ active_work_ref          # 当前活跃正式 Work 的稳定外部引用；可为空
   ├─ created_by / created_from  # 创建者和来源
   └─ created_at / updated_at / closed_at
 ```
@@ -150,7 +149,7 @@ CollaborationContext
 聚合根不变量：
 
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 参与者、Todo、Outcome、来源引用、Mode 等事实不能直接改状态，必须形成合法 `ContextEvent`。
+- 参与者、Todo、Outcome、来源引用、current_mode、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。
 - 外部对象不能通过引用成为 Context 的一部分；只能被 Adapter 转换为事件事实。
 - 所有子实体和值对象都遵守 Context 的 `scope` 与 `visibility`，不能跨 Context 隐式共享。
 - 终态之后再追加公开评论或来源同步事件时，不能自动改变终态。
@@ -384,8 +383,8 @@ Context 不为外部入口单独建子实体。无需引入 `CollaborationSurfac
 - `created_from` / `origin_ref`：记录 Context 的创建来源，比如 BBS Topic。
 - `ContextMaterialReference`：记录外部材料或协作来源的稳定引用。
 - `ContextEvent.source_kind + source_event_id`：记录事件来源、来源 ID 和幂等事实。
-- `ContextWorkBinding`：记录正式 Work 落在哪个外部执行系统。
-- `ContextModeBinding.source_refs[]`：记录当前模式下可用的外部入口引用。
+- `active_work_ref`：`task_relay` 或需要升级为正式 Work 的 `direct_assignment` 所使用的稳定外部执行引用。
+- `current_mode` + `source_kind / source_id`：记录当前协作模式和它实际使用的产品或执行来源。
 - Adapter / Source Plugin：负责外部入口与 Context 之间的协议转换和路由。
 
 设计不变量：
@@ -396,44 +395,25 @@ Context 不为外部入口单独建子实体。无需引入 `CollaborationSurfac
 - Context 终态、Topic close、群会话变化互不隐式串写。
 - 公开入口上的可见字段必须由服务端重新投影，不能直接复制内部行。
 
-### 4.11 子实体：ContextModeBinding 与 ContextWorkBinding
+### 4.11 协作模式与执行事实（不建绑定子实体）
 
-`ContextModeBinding` 描述当前阶段采用哪种协作模式。协议中的三种协作模式处于同一维度：公开讨论、任务接力、直接指派。`ContextWorkBinding` 是执行层绑定，用于把任务接力或特殊直接指派落到 Task / Relay / BCS 等既有执行载体。
+Context 不需要 `ContextModeBinding`，也不需要 `ContextWorkBinding`。这两种关系都可以由更简的根字段、值对象和事件事实承载：
 
-```text
-ContextModeBinding
-  ├─ context_id
-  ├─ binding_id
-  ├─ mode_kind               # public_discussion / task_relay / direct_assignment
-  ├─ mode_policy_ref          # 说明该协作模式配置的稳定引用
-  ├─ allowed_by_state_rule       # 当时允许该协作模式的状态依据
-  ├─ active / activated_at / deactivated_at
-  ├─ activation_request_id       # 激活幂等键
-  ├─ activated_by
-  └─ source_refs[]                 # 本协作模式可使用的稳定外部来源引用
-
-ContextWorkBinding
-  ├─ context_id
-  ├─ binding_id
-  ├─ work_kind                  # task、relay、bcs_run 等
-  ├─ work_ref                   # 外部执行对象的稳定 ID
-  ├─ work_created               # 是否由 Context 效果创建，还是复用已有对象
-  ├─ active                     # 当前是否是唯一活跃正式 Work
-  ├─ activation_request_id       # 启动幂等键
-  ├─ start_rule_ref / end_rule_ref
-  ├─ adapter_ref                # Task / BCS / Relay Adapter 引用
-  ├─ accepted_event_refs[]       # 已接纳的执行事实
-  └─ created_at / closed_at
-```
+- `current_mode`：当前协作模式，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
+- `active_work_ref`：当前活跃正式 Work 的稳定外部引用；只有 `task_relay` 或需要升级为正式 Work 的 `direct_assignment` 才需要非空。
+- `ContextTodo`：`direct_assignment` 的轻量承载实体。
+- `ContextEvent`：记录 `work.requested`、`work.started`、`work.completed`、`work.failed` 等执行事实。
+- `ContextTransition`：记录模式切换和业务状态迁移。
 
 设计约束：
 
-- `allowed_modes` 由当前状态声明，取值空间只包含 `public_discussion`、`task_relay`、`direct_assignment`；越状态激活必须失败。
-- `ensure_work_binding` 只能创建、复用或关闭协议绑定，不能直接调用外部执行入口。
-- 一个 Context 至多一个 active `ContextWorkBinding`；并发启动由作用域唯一约束或 CAS 裁决。
-- 外部执行必须先在原系统接纳事实，再由 Adapter 投影为 `work.started`、`work.progressed`、`work.completed`、`work.failed`。
-- WorkBinding 不复制节点图、路由状态、BCS Run 内部状态或执行日志。
-- Context 关闭或验收完成后必须显式处理 WorkBinding；不能让外部 Work 无限期保持 active。
+- `allowed_modes` 由当前 State 声明，`current_mode` 只能取 `public_discussion`、`task_relay`、`direct_assignment`。
+- 模式切换必须通过 `context.mode_switched` 事件完成，禁止只改字段。
+- `task_relay` 的执行对象由 `active_work_ref` 指向，禁止复制外部 TaskGraph / Relay / BCS Run 的内部图、路由或日志。
+- 一个 Context 同一时刻至多一个 `active_work_ref`。
+- 外部执行事实必须先在外部系统接纳，再由 Adapter 投影为 `work.*` 事件。
+- `direct_assignment` 不要求创建外部 Work；确需执行外部副作用时再显式进入 `active_work_ref` 对应的正式 Work。
+- Context 关闭或验收后必须显式清空 `active_work_ref`，外部产品仍自行维护它自己的 Work 生命周期。
 
 ### 4.12 子实体：ContextTodo
 
@@ -461,7 +441,7 @@ ContextTodo
 - 单条 Todo 完成不等于业务目标完成；业务终态仍必须经过状态机和责任人裁决。
 - `required_todos_are_done` guard 只检查 required Todo 的完成事实，不引用 Bot 自述。
 - Bot 认领或完成 Todo 时必须校验 Bot 归属、能力、材料权限和 assignee。
-- Todo 需要真实执行、交付文件或产生外部副作用时，应显式升级为 `ContextWorkBinding`，历史 Todo 事实保留。
+- Todo 需要真实执行、交付文件或产生外部副作用时，显式升级为 `active_work_ref` 指向的正式 Work，历史 Todo 事实保留。
 - 编辑已完成 Todo 的说明不影响历史完成事实。
 
 ### 4.13 子实体：ContextOutcome
@@ -507,7 +487,8 @@ ContextSnapshot
   ├─ input_material_view[]           # 按目标重新过滤后的协作输入引用
   ├─ deliverable_view[]               # 可见交付物及结果引用
   ├─ timeline_cursor / summary_ref
-  ├─ mode_binding_view[]
+  ├─ current_mode_view
+  ├─ active_work_ref_view
   ├─ action_view[]                 # 可提议或可提交的命令摘要
   ├─ generated_at
   └─ snapshot_digest
@@ -548,7 +529,7 @@ states:
     display_name: 接力执行中
     allowed_modes: [task_relay, direct_assignment]
     entry_actions:
-      - ensure_work_binding
+      - ensure_work_request
   reviewing:
     kind: waiting
     display_name: 待验收
@@ -573,7 +554,7 @@ transitions:
     guard: actor_can_start_work
     to: handoff_running
     effects:
-      - ensure_work_binding
+      - ensure_work_request
   - from: [handoff_running]
     on: work.completed
     to: reviewing
@@ -615,13 +596,13 @@ transitions:
 状态机必须保持声明式：
 
 - `guard` 只能引用允许清单中的谓词，例如 `info_is_complete`、`actor_is_responsible_user`、`required_todos_are_done`、`work_binding_is_active`、`source_revision_is_current`。
-- `effects` 只能调用受注册的服务动作，例如 `ensure_work_binding`、`publish_snapshot`、`notify_responsible_user`、`close_topic`。
+- `effects` 只能调用受注册的服务动作，例如 `ensure_work_request`、`publish_snapshot`、`notify_responsible_user`、`close_topic`。
 - 守卫返回明确 `PASS`、`FAIL`、`BLOCKED` 事实，禁止静默失败。
 - 效果失败回滚状态迁移，或将 Context 置为合法 `blocked` 状态并保留错误事实，不得返回假成功。
 - 效果按声明执行一次，并有幂等标识；外部效果可通过 outbox 或等价机制恢复，这不是领域对象要求。
 - 自定义状态机可以引用外部模型或规则结果，但必须把结果和证明记录在事件 payload 中，不能重复调用外部系统。
 
-禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 ContextModeBinding 关联。
+禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 `current_mode` 与 `active_work_ref` 事实关联。
 
 ### 5.4 定义校验
 
@@ -648,8 +629,8 @@ transitions:
 | 模式 | 语义 | 协议产物 | 典型实现 |
 | --- | --- | --- | --- |
 | `public_discussion`（公开讨论） | 通过公开讨论收敛共识、结论或共同认知 | `discussion.posted` / `decision.recorded` | BBS Topic、Context portal |
-| `task_relay`（任务接力） | 把明确工作交给既有 Task / Relay / TaskGraph 或相关执行系统 | `work.requested` / `work.*` / `ContextWorkBinding` | Task / Relay、相关执行适配器 |
-| `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `ContextModeBinding` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
+| `task_relay`（任务接力） | 把明确工作交给既有 Task / Relay / TaskGraph 或相关执行系统 | `work.requested` / `work.*` / `active_work_ref` | Task / Relay、相关执行适配器 |
+| `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `current_mode` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
 
 设计不变量：
 - 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 是产品形态或执行能力，不是新的协作模式。
@@ -677,11 +658,11 @@ transitions:
 
 1. 每个 State 必须声明 `allowed_modes`，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
 2. 模式切换只能通过 ContextCommand 和对应 Transition 完成。
-3. `ContextModeBinding` 记录当前模式、激活人、激活幂等键和可接入的产品或执行能力引用。
+3. Context 根上的 `current_mode` 直接记录当前模式；`active_work_ref` 记录当前活跃正式 Work。
 4. 模式切换必须留下 `context.mode_switched` 事实，禁止只更新表字段而不写事件。
 5. 产品或执行能力可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是 `public_discussion`、`task_relay` 还是 `direct_assignment`。
-6. `task_relay` 和 `direct_assignment` 可以依据需要创建 `ContextWorkBinding`、`ContextTodo` 或直接执行项。
-7. `ensure_work_binding` 只负责建立、复用或关闭协议绑定，不直接调用底层执行系统。
+6. `task_relay` 依据需要建立 `active_work_ref`；`direct_assignment` 可使用 `ContextTodo`、直接参与者执行或 `active_work_ref`。
+7. `ensure_work_request` 只负责产生确定性的 `work.requested` 处理结果，不直接调用底层执行系统。
 8. 外部系统接纳的执行事实必须经 Adapter 转换为标准 `ContextEvent`。
 9. 模式本身不代表权限，执行前仍须独立校验身份、作用域、材料授权和主体归属。
 
@@ -696,7 +677,7 @@ apps/backend/src/agentclaw/community/
   api/collaboration_context/
     context_service_protocol.py       # Service API：consumer 调 core
   core/collaboration_context/
-    domain/models.py                  # 聚合、事件、状态、ModeBinding、Todo
+    domain/models.py                  # 聚合、事件、状态、Todo、WorkRef
     state_machine/engine.py           # 纯状态迁移决策
     state_machine/validators.py       # profile schema 校验
     services/context_service.py       # 应用服务与事务边界
@@ -721,12 +702,12 @@ Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin imp
 | 能力 | 输入 | 输出 |
 | --- | --- | --- |
 | Create Context | 作用域、来源、目标、可见性、profile ID、幂等键 | Context 快照 |
-| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、可执行 Actions 摘要 |
+| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、active_work_ref、可执行 Actions 摘要 |
 | Get Timeline | context ID、游标、分页 | 事件分页与完成证据引用 |
 | Update Envelope | 目标、背景、约束、输入材料、交付物规格、验收，expected version | 新 Context version |
 | Apply Context Command | actor、Command、request ID、expected version | 接纳结果、状态变化、错误原因 |
 | List Context Actions | 当前 actor、状态 | 当前 allowed Commands |
-| Bind Source / Mode | source 引用或 mode 类型、目标、expected version | SourceRef / ModeBinding |
+| Switch Mode | desired mode、target or source ref、expected version | mode switch result and active_work_ref |
 | Create / Update Todo | title、instruction、assignee、required、expected version | Todo |
 | Complete / Block / Cancel Todo | todo ID、证据引用、expected version | Todo 事实与 Context state |
 | Publish Snapshot | target actor / group、输入材料与交付物可见范围 | Snapshot revision |
@@ -776,7 +757,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | --- | --- |
 | Context root + state binding | `context_id` 唯一；每 Context 一个 active binding；`context_id + current_state` 由事务写入 |
 | Event / Transition | `event_id` 唯一；`context_id + source_event_id` / request 幂等键唯一；Transition 与触发事件一对一 |
-| Source refs / Mode / Work bindings | source_ref 唯一；mode binding 唯一；每个 Context 至多一个 active WorkBinding |
+| Source refs / current_mode / active_work_ref | source ref 唯一；每个 Context 至多一个 active_work_ref |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
 | Snapshot / 投影投递 | Snapshot 可重建；投递记录与 dedupe key 唯一；失败状态不可丢失
 
@@ -787,7 +768,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 - 初次创建 Context 时，来源绑定与 `context.created` 事件在同一事务中闭环；数据库失败必须向调用方返回错误，不产生假成功。
 - `work.requested` 抢占成功后在同一上下文中保存幂等意图，再通过 outbox 或等价机制触发外部启动；进程恢复后先读取外部状态，再决定继续、等待还是标记 blocked。
 - 相同 `request_id` / `source_event_id` 重放必须返回原结果；不同内容同 ID 返回冲突。
-- ContextWorkBinding 通过作用域内唯一活跃约束或等价 CAS 保证一个 Context 只有不多于一个活跃 Work；来源引用和 Mode Binding 的变化也按各自 request id 幂等。
+- Context 根通过唯一 `active_work_ref`、状态机 guard、乐观锁和状态 fencing token 保证同一 Context 只有一个活跃 Work；模式切换和工作请求也分别按 request id 幂等。
 - 验收、取消、启动等命令使用 expected version 或状态 fencing token 串行裁决；输方收到冲突而不是覆盖赢家事实。
 - 外部投影失败不回滚本地事实；系统使用 outbox、事务性消息队列或等价机制做有界重试、人工重试和明确的同步状态。
 - 到达 `terminal_*` 状态后，仍可写入公开评论、来源同步或审计事实，但它们不能把 Context 拉出终态。
@@ -833,7 +814,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 3. 人类和 Bot 都可以认领；Bot 提交完成时必须通过主体归属、能力、材料和权限校验。
 4. `todo.completed` 只证明该单条代办完成，不直接证明业务目标完成。
 5. 状态机可以使用 `required_todos_are_done` guard，将所有必需 Todo 完成作为终态验收前置条件。
-6. 当单个“待办”需要真正执行、交付文件或产生外部副作用时，可作为后续独立扩展升级为 `WorkBinding`；本节只定义 Todo 本身，不定义 Work 的完整执行协议。
+6. 当单个“待办”需要真正执行、交付文件或产生外部副作用时，可作为后续独立扩展升级为 `active_work_ref` 指向的正式 Work；本节只定义 Todo 本身，不定义 Work 的完整执行协议。
 7. Todo 取消会记录事件，已完成事实不因后续编辑被覆盖。
 8. 外部系统同步必须通过可靠投递机制和来源回写，失败不能被吞掉。
 
@@ -842,7 +823,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 | 阶段 | 范围 | 准入条件 |
 | --- | --- | --- |
 | P1 | Context 聚合、基础 profile、事件日志、BBS 来源引用、公开讨论状态和 timeline 只读 | 状态机 schema、事件幂等和权限测试通过 |
-| P2 | task_relay 模式、WorkBinding、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
+| P2 | task_relay 模式、active_work_ref、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
 | P3 | direct_assignment 模式、required guard、Todo 升级 Work | Todo 并发、证据引用、终态守卫测试通过 |
 | P4 | public_discussion / task_relay / direct_assignment 三类模式接通 | BBS、Task、BCS 等通道权限、会话和事件映射回归通过 |
 | P5 | 外部来源 revision、同步冲突和回写 | Plugin conformance、可靠投递和回环测试通过 |
@@ -904,22 +885,22 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 ## 13. 兼容与迁移
 
 - 既有 Topic、Post、TaskInfo、TaskGraph 和 BCS group 不做破坏性改写。
-- 历史内容不自动转换；Topic ↔ Context、Task ↔ WorkBinding 都使用显式绑定表。
+- 历史内容不自动转换；Topic ↔ Context、Task ↔ active_work_ref 都使用显式来源引用。
 - 旧客户端读取 Topic 或 Task 响应时忽略新增 Context 字段；未知字段不能导致旧行为改变。
 - 未绑定 Context 的任务、群和 BBS 帖子继续按现路径运行。
 - 新 Context 相关 API 与状态机 profile 单独发布 schema 版本；不做无版本自由 JSON。
 - 状态机定义发布后不可原位覆盖；需要新增 revision、声明兼容策略和测试。
-- 回滚时关闭新入口和对应协作模式，不让已有 Work 被孤立终止；历史事件、绑定和 Task / BCS 原始事实保留。
+- 回滚时关闭新入口和对应协作模式，不让已有 Work 被孤立终止；历史事件、来源引用和 Task / BCS 原始事实保留。
 - 不通过删除 Topic / Task 行或直接改写状态表来回滚；只通过功能开关和审核过的兼容版本退出。
 
 ## 14. 主要风险与决策
 
 | 风险 | 处理 |
 | --- | --- |
-| Context 变成第二个万能图模型 | 只保存业务阶段、事件和绑定；节点执行继续留在 TaskGraph / BCS / BCS StateMachine |
+| Context 变成第二个万能图模型 | 只保存业务阶段、事件、来源引用和 active_work_ref；节点执行继续留在 TaskGraph / BCS / BCS StateMachine |
 | 协作模式过度灵活，无法测试 | schema、guard、effect、mode 全部用白名单；自定义条目必须通过统一 conformance suite |
 | 公开讨论泄漏敏感执行事实 | 事件分级可见；投影在服务端过滤，公开边界不允许暴露原始日志、内部轨迹或私有路径 |
-| 模式并发导致双执行 | active WorkBinding、auto idempotency 和 expected version / fencing 共同保证 |
+| 模式并发导致双执行 | 唯一 `active_work_ref`、request id 幂等和 expected version / fencing 共同保证 |
 | 事件过多造成 Timeline 噪音 | 消息按层级、已读和压缩状态折叠；只读 projection 折叠，事件日志保留完整事实 |
 | 模型直接推进状态 | 状态变更必须来自受信 Actor / Service / Adapter 事件，LLM 输出默认无法直接作为状态事实 |
 | 高并发事件乱序 | Transition 只根据当前 state + accepted source event 推进；接收到缺失序号的事件不立即应用，等待补齐或回放 |
@@ -934,7 +915,7 @@ Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直
 3. 协作模式是否支持组合，如 task_relay 与 direct_assignment 并行活跃，或首版强制只有一个 current mode？
 4. Context 是否作为所有新 HELP Topic 默认创建，只在显式 Action 时显示，还是用户显式创建？
 5. Todo 是否作为 Context 内部实体落地，还是复用现有工作项仓储并只保留 Context 映射？
-6. `WorkBinding` 是否允许跨外部系统并存，但单个 Context 仍只允许一个活跃 Work？
+6. `active_work_ref` 是否允许跨外部系统并存，但单个 Context 仍只允许一个活跃正式 Work？
 7. Context 与 Topic、Task、BCS Run 的绑定关系是否需要显式版本字段以支持并发解绑和重绑？
 
 ## 16. 参考文档
