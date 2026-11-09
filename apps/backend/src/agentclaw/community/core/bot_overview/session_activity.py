@@ -30,12 +30,16 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: How many of the newest sessions to scan. The engine lists newest first,
-#: but Claude Code drops its BCS group sessions after paging, so a small
-#: window (not a single row) keeps one filtered row from hiding the answer.
-#: Kept small on purpose: OpenClaw fetches ``chat.history`` for every row of
-#: the page it returns, so the window size is that many extra RPCs.
+#: Rows per page. Kept small on purpose: OpenClaw fetches ``chat.history``
+#: for every row of the page it returns, so the page size is that many extra
+#: RPCs.
 SESSION_SCAN_LIMIT = 5
+#: Pages to scan before giving up. Claude Code pages *before* it drops its
+#: BCS group sessions, so a page can come back empty while older ordinary
+#: sessions exist. The engine lists newest first, so the first page that
+#: yields any time holds the newest visible session and the scan stops
+#: there. A Bot with no sessions at all costs every page; this bounds it.
+SESSION_SCAN_MAX_PAGES = 4
 #: Upper bound on the whole read, device resolution included. The relay's
 #: device leg can block for up to 30 s on a slow provider. A request that
 #: needs no user credential must not inherit that wait.
@@ -106,18 +110,9 @@ class EngineSessionActivityReader(BotSessionActivityReaderProtocol):
         if not bot_id or not owner_id:
             return None
         try:
-            # The Bot's own Owner is the caller: this is a platform read on the
-            # Bot's behalf, and the relay's operator gate admits the Owner.
-            result = await asyncio.wait_for(
-                self._relay.call(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    method="GET",
-                    path="/api/sessions",
-                    params={"limit": SESSION_SCAN_LIMIT, "offset": 0},
-                    timeout=self._timeout_s,
-                    stage=_stage_for(bot),
-                ),
+            # One budget for the whole scan, device resolution included.
+            return await asyncio.wait_for(
+                self._scan(bot_id=bot_id, owner_id=owner_id, stage=_stage_for(bot)),
                 timeout=self._timeout_s,
             )
         except Exception as exc:
@@ -128,13 +123,34 @@ class EngineSessionActivityReader(BotSessionActivityReaderProtocol):
                 type(exc).__name__,
             )
             return None
-        return newest_session_time(result.data)
+
+    async def _scan(self, *, bot_id: str, owner_id: str, stage: str) -> datetime | None:
+        for page in range(SESSION_SCAN_MAX_PAGES):
+            # The Bot's own Owner is the caller: this is a platform read on the
+            # Bot's behalf, and the relay's operator gate admits the Owner.
+            result = await self._relay.call(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                method="GET",
+                path="/api/sessions",
+                params={
+                    "limit": SESSION_SCAN_LIMIT,
+                    "offset": page * SESSION_SCAN_LIMIT,
+                },
+                timeout=self._timeout_s,
+                stage=stage,
+            )
+            newest = newest_session_time(result.data)
+            if newest is not None:
+                return newest
+        return None
 
 
 __all__ = [
     "BotSessionActivityReaderProtocol",
     "EngineSessionActivityReader",
     "SESSION_READ_TIMEOUT_S",
+    "SESSION_SCAN_MAX_PAGES",
     "SESSION_SCAN_LIMIT",
     "newest_session_time",
 ]

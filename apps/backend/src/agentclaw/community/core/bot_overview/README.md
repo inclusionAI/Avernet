@@ -71,8 +71,11 @@ engine; providers cannot report them (`EngineBotOverview` has no such fields).
   with the Bot's own Owner as caller (draft runtime; a `service` Bot's online
   runtime). Only that timestamp leaves the module. An unreachable runtime
   (no device, stage not live, engine error, or the 8 s budget) reports `null`
-  rather than failing the overview. The scan window is 5 rows because
-  OpenClaw fetches chat history for every returned row.
+  rather than failing the overview. Pages are 5 rows because OpenClaw
+  fetches chat history for every returned row; up to 4 pages are scanned,
+  stopping at the first that yields a time, because Claude Code drops BCS
+  group sessions after paging and can return an empty page while older
+  sessions exist.
 
 Skill Center read failures propagate: reporting an empty Skill set for a
 failed read would misstate the Bot.
