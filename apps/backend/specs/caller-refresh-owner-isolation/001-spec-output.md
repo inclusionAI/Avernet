@@ -10,3 +10,8 @@ Tests first reproduce provider/timeout/preparation/scope errors breaking owner r
 ## Default-off rollout gate
 
 User requested temporarily closing the owner-callback Caller refresh branch until tcauthmng is deployed. Add module-level SCHEDULED_CALLER_REFRESH_ENABLED=False as the first condition, so disabled callbacks avoid Caller dependencies/metadata/probes/RPC/outbound and preserve original owner result. Log fixed reason=disabled with safe Bot/owner identifiers. Existing enabled-path isolation tests explicitly enable the gate; verify shipped default is False and disabled callbacks cannot invoke failing/new dependencies, including absent optional port. This gate applies to owner-triggered runtime refresh, not interactive ASC ensure. Update REL20261110 PR3788 and keep dev PR3786 consistent.
+
+
+## PR CI failure repair
+
+Real JUnit artifacts from release run42644432021 and dev42644554524 each fail test_no_identity_vendor_in_core because the new rollout-gate Python comment names the credential vendor. Reproduce that architecture gate, replace only the comment and related core README vendor wording with neutral credential-provider terms, preserve default False and original behavior. Include identity-vendor architecture gate in release/dev targeted regression. Separately investigate Singlebox missing embedding CI configuration; do not fabricate credentials or lower gates.

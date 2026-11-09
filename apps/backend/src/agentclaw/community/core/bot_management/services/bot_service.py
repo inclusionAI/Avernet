@@ -179,7 +179,7 @@ PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 # aggregate failure.
 _CALLER_REFRESH_MAX_WORKERS = 5
 
-# Rollout gate: enable only after the tcauthmng ASC Facade is deployed.
+# Rollout gate: enable only after the scheduled credential provider is deployed.
 SCHEDULED_CALLER_REFRESH_ENABLED = False
 
 
