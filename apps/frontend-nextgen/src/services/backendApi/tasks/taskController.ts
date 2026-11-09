@@ -107,8 +107,9 @@ interface TaskBySessionData {
 
 /**
  * Resolve a chat session to every task node linked to it. This is used for
- * automatic side-panel recovery, so a miss or transport failure resolves to
- * null without surfacing a toast or blocking the conversation.
+ * automatic side-panel recovery, so an empty result returns [] and legacy 404
+ * or transport failures resolve to null without surfacing a toast or blocking
+ * the conversation.
  */
 export async function getTaskBySession(
   sessionId: string,
