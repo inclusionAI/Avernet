@@ -78,6 +78,49 @@ export function formatFileSize(bytes: number): string {
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+/**
+ * 创建者信息 → 文件行元数据「来源合段」（2026-11-09 契约，纯字符串拼装）。
+ *
+ * - `creator_type='bot'` → 「Bot 生成」；`'user'` → 「用户上传」；`creator_name` 非空时
+ *   追加「 · {名}」（创建时快照名，按普通文本渲染，不参与权限判断）。
+ * - `creator_name` null/空串/纯空白 → 只显来源标签（不显名、无占位符）。
+ * - `creator_type` null/缺失/未知值 → 返回 null：调用方整段不渲染，不据资源 ID/
+ *   文件名/登录用户猜测来源（旧引擎存量数据是常态非异常）；引擎将来新增枚举
+ *   与 null 合流，不猜测展示。
+ * - 文案与老前端（oc-web）add-session-file-creator-fields 逐字对齐——灰度切流下
+ *   同一文件在两套 UI 展示一致。
+ */
+export function describeSessionFileCreator(
+  creatorType: string | null | undefined,
+  creatorName: string | null | undefined,
+): string | null {
+  if (creatorType !== 'bot' && creatorType !== 'user') return null;
+  const label = creatorType === 'bot' ? 'Bot 生成' : '用户上传';
+  const name = (creatorName ?? '').trim();
+  return name ? `${label} · ${name}` : label;
+}
+
+/**
+ * 创建时间 ISO 串 → UTC `YYYY-MM-DD HH:mm:ss`。
+ *
+ * 用 UTC 分量（getUTC*）而非本地时区：后端 `created_at` 是 ISO 8601 UTC 锚
+ * （2026-11-09 契约，可能带微秒精度，秒级截断展示），引擎实例可能跑在与查看端
+ * 不同的时区，UTC 是唯一跨实例一致的展示锚，且与后端原值逐字对应——与老前端
+ * formatSessionUploadTime 同语义（含东八区查看端不得偏移成 +8 小时的行为）。
+ *
+ * null / undefined / 空串 / 非法日期 → null：legacy 文件缺 created_at 时调用方
+ * 整段不渲染（不显示 `--`/`—` 占位、不回退其它时间字段）。
+ */
+export function formatSessionUploadTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(
+    d.getUTCHours(),
+  )}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
 /** 取扩展名（小写，支持 .tar.gz 多段后缀）。 */
 export function getFileExt(name: string): string {
   if (!name) return '';

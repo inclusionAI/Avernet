@@ -12,7 +12,18 @@ describe('botSessionFileStore（单聊会话文件 store）', () => {
   it('resetForSession 清空列表与上传任务，但保留在途加载标志', () => {
     const store = useBotSessionFileStore.getState();
     store.setIsLoadingList(true);
-    store.setReadyFiles([{ resourceId: 'r1', displayName: 'a.json', status: 'ready', sizeBytes: 1, errorCode: null }]);
+    store.setReadyFiles([
+      {
+        resourceId: 'r1',
+        displayName: 'a.json',
+        status: 'ready',
+        sizeBytes: 1,
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
+    ]);
     store.addTask({
       localId: 't1',
       name: 'b.png',
