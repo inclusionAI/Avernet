@@ -1,0 +1,23 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_9e428ec8192673::t_710951c252af17 280-287
+apps/bcsfuse/internal/zbcsfuse_internal/providers/bcn_metadata.py
+  s_9e428ec8192673::t_325b19645a6570 5,7,11,25-34,40-48,59-65,67-74,118-119,185
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_9e428ec8192673::t_fe2345cf412e82 5,13-14,119,144-161,180,182-192,206-208,214-229,239-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "33958f4a9abfb2d194db5e303e0794f1604d94a4",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
