@@ -13,6 +13,12 @@ from search_core.core.observation import (
     remaining_timeout,
     upstream_status,
 )
+from search_core.core.timing import record_stage_elapsed
+
+
+def _load_card_metadata(submitted, function, args):
+    record_stage_elapsed("card_worker_wait", submitted)
+    return function(*args)
 
 
 class DeadlineExecutor:
@@ -42,6 +48,8 @@ class DeadlineExecutor:
                 raise TimeoutError("request budget exhausted")
             if inspect.iscoroutinefunction(function):
                 return await asyncio.wait_for(function(*args), timeout)
+            if self.name == "card_metadata":
+                function, args = _load_card_metadata, (time.monotonic(), function, args)
             future = self._executor.submit(copy_context().run, function, *args)
             # Cancellation propagates to queued work. A running SDK call must
             # terminate using its own network timeout; the host drains on exit.
