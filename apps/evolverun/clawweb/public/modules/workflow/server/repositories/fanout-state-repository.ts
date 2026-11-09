@@ -157,7 +157,6 @@ function validateGroup(value: unknown, parentFlowId: string, nodeId: string): as
     && Number.isFinite(config.cancelGraceSeconds) && config.cancelGraceSeconds > 0)), 'Invalid fanout limits');
   valid(value.childPublishedVersion === undefined || integer(value.childPublishedVersion, 1), 'Invalid child published version');
   valid(object(value.childWorkflow) && text(value.childWorkflow.id)
-    && (value.childWorkflow.version === undefined || integer(value.childWorkflow.version, -1))
     && Array.isArray(value.childWorkflow.nodes) && value.childWorkflow.nodes.every(node => object(node) && text(node.id) && object(node.executor)), 'Invalid child workflow snapshot');
   if (value.childResolved !== undefined) {
     const resolved = value.childResolved;
