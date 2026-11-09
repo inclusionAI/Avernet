@@ -21,7 +21,7 @@ remaining distinct users become initial managers (1–101 raw input entries, tri
 and validated before Card fetch). This extends the Provider ID registration
 contract; the separate public v0.1 registration retains its single-owner policy.
 Identity comparison is byte-exact, including case/accent distinctions. MySQL
-requires migration 043 for actor-key uniqueness before accepting these snapshots;
+requires corrected migration 043 and additive 044 (NO PAD utf8mb4_0900_bin) for actor-key uniqueness before accepting these snapshots;
 SQLite and Memory already have the required semantics. Provider Admin Bearer is authenticated before external
 access. Core repeats Provider/credential/admission checks before atomic creation.
 

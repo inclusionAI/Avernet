@@ -68,6 +68,17 @@ pub trait BotProviderRepoPort: Send + Sync {
         ))
     }
 
+    /// Provider-admin ordinary registration: Bot, binding and initial authority
+    /// commit together. Requires a Provider actor matching record.provider_id;
+    /// the Human-token entry remains Human-only. No version-0 Bot is published.
+    async fn create_provider_admin_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Provider-admin registration is not configured".into()))
+    }
+
     /// Strict create with Bot, ownership, gateway projection and validated
     /// A2A Card in one transaction. Card identities must equal the new Bot.
     async fn create_a2a_provider_bot_with_ownership(

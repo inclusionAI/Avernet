@@ -1,5 +1,9 @@
 # Provider Initial Managers Implementation Plan
 
+> Historical implementation/validation record. The 2026-11-09 fixes and current
+> transaction/migration contract are in [carolynli-followup.md](carolynli-followup.md).
+
+
 > Execute inline using executing-plans and test-driven-development; no separate agents.
 
 **Goal:** Interpret Provider registration `owners` as one owner followed by initial managers.

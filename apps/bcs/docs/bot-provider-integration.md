@@ -143,19 +143,31 @@ are rejected before Bot creation. The owner is excluded from managers.
 
 User IDs are case- and accent-sensitive: `Carol`/`carol` and `Jose`/`José`
 are separate principals, never aliases. MySQL deployments must apply migration
-`043_actor_identity_collation.sql` before accepting these snapshots. It aligns
+`043_actor_identity_collation.sql` and `044_actor_identity_no_pad.sql` before accepting these snapshots.
+The target is NO PAD `utf8mb4_0900_bin`, preserving retained trailing-space
+identities as well as case/accent differences; compatible engines must support
+this collation (never substitute PAD SPACE `utf8mb4_bin`). It aligns
 `bcs_bots.bot_uuid` and active actor-reference keys/predicates (including grants,
 runtime profiles and group/session memberships) with the byte-exact SQLite/Memory
 and authority contract. Stop writers for the complete migration. Preserve this migration on application rollback once
-case/accent-distinct IDs have been admitted; do not fold or merge stored identities.
+distinct IDs have been admitted; do not fold or merge stored identities.
+Original 043 bytes are archived under `migrations/legacy/mysql/`; the migration
+runner accepts only their exact pinned checksum without changing the stored
+history row. Migration 044 upgrades installations that already applied that
+original 043. See `specs/2026-11-06-provider-initial-managers/carolynli-followup.md`.
 
 Provider Admin Bearer authorizes this initial identity declaration. Manager
 Human actors are created when absent, but tombstoned/non-Human identities fail
 closed. Owner/version, manager actors/edges and the Provider-attributed
-initialization audit commit atomically. Ordinary registration retains its existing
-Bot/binding-before-authority boundary: failures return errors and may leave a
-version-0 Bot whose authority can be completed through existing replay-capable
-registration paths. Strict duplicate-conflict paths (including AgentPass subbots
+initialization audit commit atomically. Fresh ordinary registrations with a
+nonempty initial-manager set now commit Bot/binding and authority together,
+so `/bots/mine` cannot take over a partially registered Bot's initialization.
+A failed transaction leaves no Bot for owner-only migration; retry can create it
+with the complete snapshot. Single-owner registration keeps its existing boundary.
+Multi-user attachment/retry against an existing version-0 Bot returns Conflict
+before mutation and requires explicit authority reconciliation. Bots already
+initialized by pre-fix software are not automatically repaired: the registration
+snapshot cannot distinguish a missing manager from a subsequently revoked one. Strict duplicate-conflict paths (including AgentPass subbots
 and A2A) retain their existing duplicate policy. An already initialized
 Bot never has managers synchronized or a transferred owner reset by registration;
 Gateway/Plugin replay preserves subsequent grants and revocations. Existing

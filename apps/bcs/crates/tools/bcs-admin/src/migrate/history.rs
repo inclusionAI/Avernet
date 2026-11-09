@@ -205,6 +205,7 @@ pub(super) fn validate_mysql_migration_record(
     if applied.checksum != plan.checksum
         && !is_legacy_human_input_index_record(plan, applied)
         && !is_legacy_mysql_syntax_record(plan, applied)
+        && !is_legacy_actor_identity_record(plan, applied)
     {
         bail!(
             "mysql migration checksum mismatch for version {:03} ({}): applied={}, current={}",
@@ -311,4 +312,16 @@ pub(super) fn format_mysql_check_report(report: &MysqlMigrationCheckReport) -> S
         ));
     }
     output
+}
+
+// PR #3708 F2 explicitly corrects 043's PAD SPACE regression. Preserve the
+// exact historical record; migration 044 repairs its schema. Pin both bodies,
+// never accept arbitrary historical checksums or silently rewrite history.
+pub(super) fn is_legacy_actor_identity_record(
+    plan: &MysqlMigrationPlan, applied: &AppliedMysqlMigration,
+) -> bool {
+    plan.version == 43 && applied.version == 43 && applied.dialect == "mysql"
+        && plan.name == "actor_identity_collation" && applied.name == plan.name
+        && plan.checksum == "6552917207bee98cdac987e518b506aa568eef08566320db4caedb3d7cffcc79"
+        && applied.checksum == "6ee7a645bbf340b5ca71fa3a3ae21e64961f0925766f4c14edd0fb6f50204c24"
 }

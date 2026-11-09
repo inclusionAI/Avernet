@@ -341,6 +341,21 @@ pub trait ProviderBotCoreService: Send + Sync {
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)>;
 
+    /// Create a fresh multi-user registration atomically with its initial authority.
+    /// Initialized replays never synchronize managers. An existing version-0 Bot
+    /// with a nonempty snapshot conflicts: its earlier admission needs explicit
+    /// reconciliation, not a race with legacy owner-only migration.
+    /// Empty snapshots retain the identity-only compatibility entry above.
+    async fn register_provider_bot_with_initial_managers(
+        &self, provider_id: &str, provider_admin_token: &str,
+        params: RegisterProviderBotParams, initial_managers: Vec<String>,
+    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
+        if !initial_managers.is_empty() {
+            return Err(ServiceError::InternalError("atomic Provider authority registration is not configured".into()));
+        }
+        self.register_provider_bot_with_bot_uuid(provider_id, provider_admin_token, params).await
+    }
+
     async fn list_provider_bots(
         &self,
         provider_id: &str,

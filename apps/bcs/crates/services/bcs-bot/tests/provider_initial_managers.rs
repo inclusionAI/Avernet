@@ -9,10 +9,12 @@ use bcs_service_api::{
     port::repo::BotAuthorityRepoPort,
     types::{bot_authority::{BotAccessRelation, human_actor_id}, bot_profile::AvatarChange},
 };
-use bcs_test_support::NoopRelationCoreService;
+use bcs_relation::RelationCore;
 
 struct Fixture {
     management: ProviderManagement,
+    core: Arc<ProviderCore>,
+    relation: Arc<RelationCore>,
     repo: Arc<MemoryBotRepo>,
     registry: Arc<dyn BotRegistryCoreService>,
     provider_id: String,
@@ -29,14 +31,15 @@ impl Fixture {
             repo.clone(), providers.clone(), providers.clone(), providers.clone()));
         let core = Arc::new(ProviderCore::new(providers.clone(), providers.clone(), providers,
             registry.clone()).with_bot_provider_repo(metadata));
-        let management = ProviderManagement::new(core.clone(), core, registry.clone(), Arc::new(NoopRelationCoreService));
+        let relation = Arc::new(RelationCore::new());
+        let management = ProviderManagement::new(core.clone(), core.clone(), registry.clone(), relation.clone());
         let provider = management.register_provider(RegisterProviderCommand {
             name: "Provider".into(), webhook_url: Some("https://provider.example.com/webhook".into()),
             auth_mode: ProviderAuthMode::StaticBearer, created_by: "alice".into(),
             caller_capabilities: None, collaboration_scope: None, slug: None, admin_callback_url: None,
             protocol_version: None, coordination: None,
         }).await.unwrap();
-        Self { management, repo, registry, provider_id: provider.provider_id,
+        Self { management, core, relation, repo, registry, provider_id: provider.provider_id,
             token: provider.provider_admin_token, _dir: dir }
     }
     fn command(&self, owners: &[&str]) -> RegisterProviderBotCommand {
@@ -117,8 +120,9 @@ async fn failed_manager_validation_does_not_commit_owner_or_other_managers() {
     f.registry.register_with_owner_and_token("human_bob".into(), BotCapabilities::default(), "other", "other-token").await.unwrap();
     let mut c = f.command(&["alice", "carol", "bob"]); c.bot_uuid = Some("failed-bot".into());
     assert!(f.management.register_provider_bot(c).await.is_err());
-    let state = f.repo.ownership_governance_state("failed-bot").await.unwrap().unwrap();
-    assert_eq!(state.ownership_version, 0);
+    assert!(f.repo.ownership_governance_state("failed-bot").await.unwrap().is_none(),
+        "failed multi-user registration must not leave a Bot that mine can initialize owner-only");
+    assert!(f.repo.list_uninitialized_bots_by_creator("alice", 100).await.unwrap().is_empty());
     assert!(f.registry.get("human_carol").await.is_none());
     assert!(!f.repo.authority_state().read().await.audit.iter().any(|a| a.bot_id == "failed-bot"));
     let mut retry = f.command(&["alice", "carol"]); retry.bot_uuid = Some("failed-bot".into());
@@ -147,4 +151,58 @@ async fn registration_replay_preserves_a_transferred_owner_and_managers_cannot_t
         assert_eq!(f.repo.role("human_carol", "transfer-bot").await.unwrap(), Some(BotAccessRelation::Owner));
         assert_ne!(f.repo.role("human_alice", "transfer-bot").await.unwrap(), Some(BotAccessRelation::Owner));
     }
+}
+
+#[tokio::test]
+async fn mine_between_core_and_application_cannot_steal_initial_manager_snapshot() {
+    use bcs_service_api::{ProviderBotCoreService, RegisterProviderBotParams, port::repo::BotRepoPort};
+    for mode in [ProviderBotConnectionMode::Gateway, ProviderBotConnectionMode::Plugin] {
+        let f = Fixture::new().await;
+        let params = RegisterProviderBotParams { bot_name: "Managed Bot".into(),
+            owners: vec!["alice".into()], provider_bot_ref: "managed-ref".into(),
+            bot_uuid: Some("interleaved-bot".into()), connection_mode: mode,
+            webhook_url: None, summary: None, domains: vec![], skills: vec![], scopes: vec![], initial_caller: None };
+        f.core.register_provider_bot_with_initial_managers(&f.provider_id, &f.token, params, vec!["bob".into()]).await.unwrap();
+        // Force the review's exact pause: Core has returned, the application has
+        // not done its governance read. The mine sweep cannot find a v0 candidate.
+        assert!(f.repo.list_uninitialized_bots_by_creator("alice", 100).await.unwrap().is_empty());
+        assert_eq!(f.repo.role("human_bob", "interleaved-bot").await.unwrap(), Some(BotAccessRelation::Manager));
+        let mut replay = f.command(&["alice", "bob"]);
+        replay.bot_uuid = Some("interleaved-bot".into()); replay.connection_mode = mode;
+        f.management.register_provider_bot(replay).await.unwrap();
+        assert_eq!(f.repo.role("human_bob", "interleaved-bot").await.unwrap(), Some(BotAccessRelation::Manager));
+    }
+}
+
+#[tokio::test]
+async fn multi_user_attachment_refuses_uninitialized_existing_bot_without_mutation() {
+    use bcs_service_api::{BotCapabilities, port::repo::BotRepoPort};
+    let f = Fixture::new().await;
+    f.registry.register_with_owner_and_token("existing".into(), BotCapabilities::default(), "alice", "existing-token").await.unwrap();
+    let mut command = f.command(&["alice", "bob"]); command.bot_uuid = Some("existing".into());
+    assert!(matches!(f.management.register_provider_bot(command).await, Err(bcs_service_api::ServiceError::Conflict(_))));
+    assert_eq!(f.repo.ownership_governance_state("existing").await.unwrap().unwrap().ownership_version, 0);
+    assert_eq!(f.registry.load_token("existing").await.as_deref(), Some("existing-token"));
+    assert!(f.registry.get("human_bob").await.is_none());
+}
+
+#[tokio::test]
+async fn fresh_bot_cannot_collide_with_its_initial_human_identities() {
+    for id in ["human_alice", "human_bob"] {
+        let f = Fixture::new().await;
+        let mut command = f.command(&["alice", "bob"]); command.bot_uuid = Some(id.into());
+        assert!(f.management.register_provider_bot(command).await.is_err(), "physical Bot must not alias an initial Human");
+        assert!(f.registry.get(id).await.is_none());
+        assert!(!f.repo.authority_state().read().await.audit.iter().any(|a| a.bot_id == id));
+    }
+}
+
+#[tokio::test]
+async fn atomic_authority_registration_does_not_write_retired_creator_relations() {
+    use bcs_service_api::RelationCoreService;
+    let f = Fixture::new().await;
+    let bot = f.management.register_provider_bot(f.command(&["alice", "bob"])).await.unwrap();
+    assert!(f.relation.get_edge("human_alice", &bot.bot_uuid, &bcs_config::resolve_env_str()).await.unwrap().is_none(),
+        "atomic registration uses authority edges, like the trusted Human/A2A composites");
+    assert_eq!(f.repo.role("human_alice", &bot.bot_uuid).await.unwrap(), Some(BotAccessRelation::Owner));
 }

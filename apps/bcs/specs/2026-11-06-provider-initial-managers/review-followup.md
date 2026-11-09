@@ -1,5 +1,9 @@
 # Review follow-up
 
+> Historical implementation/validation record. The 2026-11-09 fixes and current
+> transaction/migration contract are in [carolynli-followup.md](carolynli-followup.md).
+
+
 ## Verified defects
 
 - Native MySQL 9.7.2, full original migration chain: `Carol`/`carol` manager

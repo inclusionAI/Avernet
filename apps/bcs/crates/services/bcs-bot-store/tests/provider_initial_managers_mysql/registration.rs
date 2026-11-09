@@ -37,8 +37,8 @@ pub(super) async fn verify(db: Arc<dyn DbPlugin>, env: &str) {
                 providers.create_provider_admin_a2a_bot_with_ownership(record(&bot), capabilities(&bot),
                     "alice", &format!("token-{bot}"), init, card(&bot)).await.unwrap();
             } else {
-                providers.create_provider_bot(record(&bot), capabilities(&bot), "alice", &format!("token-{bot}")).await.unwrap();
-                repo.initialize_provider_authority(&bot, init).await.unwrap();
+                providers.create_provider_admin_bot_with_ownership(record(&bot), capabilities(&bot),
+                    "alice", &format!("token-{bot}"), init).await.unwrap();
             }
             for user in &users {
                 assert_eq!(authority.role(&format!("human_{user}"), &bot).await.unwrap(), Some(BotAccessRelation::Manager));
@@ -66,6 +66,11 @@ pub(super) async fn verify(db: Arc<dyn DbPlugin>, env: &str) {
         "SELECT COUNT(*) AS n FROM permission_profiles WHERE bot_id='a2a-failure'"] {
         assert_eq!(scalar(db.as_ref(), sql).await, 0);
     }
+    // Multi-user ordinary admission now uses the SAME all-or-nothing boundary.
+    assert!(providers.create_provider_admin_bot_with_ownership(record("a2a-failure"), capabilities("a2a-failure"),
+        "alice", "ordinary-atomic-token", make_a2a_init()).await.is_err());
+    assert_eq!(scalar(db.as_ref(), "SELECT COUNT(*) AS n FROM bcs_bots WHERE bot_uuid IN ('a2a-failure','human_Atomic','human_atomic')").await, 0);
+    assert_eq!(scalar(db.as_ref(), "SELECT COUNT(*) AS n FROM bcs_provider_bot_bindings WHERE bot_uuid='a2a-failure'").await, 0);
     db.execute(DbStatement::new("ALTER TABLE edge_grants DROP CHECK fail_registration_manager")).await.unwrap();
     repo.initialize_provider_authority("ordinary-failure", init(vec!["Partial".into(), "partial".into()], "ordinary-init")).await.unwrap();
     providers.create_provider_admin_a2a_bot_with_ownership(record("a2a-failure"), capabilities("a2a-failure"),
@@ -79,6 +84,10 @@ pub(super) async fn verify(db: Arc<dyn DbPlugin>, env: &str) {
 pub(super) async fn retained_upgrade(db: &dyn DbPlugin) {
     db.execute(DbStatement::new("ALTER TABLE bcs_bots MODIFY bot_uuid VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL")).await.unwrap();
     db.execute(DbStatement::new("ALTER TABLE edge_grants MODIFY from_id VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL, MODIFY to_id VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL")).await.unwrap();
+    // NO PAD legacy databases can contain both rows. Neither may be trimmed
+    // or merged by the collation repair, including the identity-reference keys.
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_retained','First','dev','human'),('human_retained ','Second','dev','human')")).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO edge_grants (env,from_id,to_id,grant_kind,grant_ref_id) VALUES ('dev','human_retained','batch-bot','manager',0),('dev','human_retained ','batch-bot','manager',0)")).await.unwrap();
     let before_bots = scalar(db, "SELECT COUNT(*) AS n FROM bcs_bots").await;
     let before_edges = scalar(db, "SELECT COUNT(*) AS n FROM edge_grants").await;
     for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/mysql/043_actor_identity_collation.sql")) {
@@ -88,7 +97,7 @@ pub(super) async fn retained_upgrade(db: &dyn DbPlugin) {
     assert_eq!(scalar(db, "SELECT COUNT(*) AS n FROM edge_grants").await, before_edges);
     let rows = db.query(DbStatement::new("SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='bcs_bots' AND COLUMN_NAME='bot_uuid') OR (TABLE_NAME='edge_grants' AND COLUMN_NAME IN ('from_id','to_id')))")).await.unwrap();
     assert_eq!(rows.len(), 3);
-    for row in rows { assert_eq!(row.get_string("COLLATION_NAME").unwrap().as_deref(), Some("utf8mb4_bin")); }
+    for row in rows { assert_eq!(row.get_string("COLLATION_NAME").unwrap().as_deref(), Some("utf8mb4_0900_bin")); }
 }
 
 pub(super) async fn distinct_runtime_profiles_and_memberships(db: Arc<dyn DbPlugin>, env: &str) {

@@ -1,5 +1,9 @@
 # Validation — Provider initial managers
 
+> Historical implementation/validation record. The 2026-11-09 fixes and current
+> transaction/migration contract are in [carolynli-followup.md](carolynli-followup.md).
+
+
 The results below describe the original implementation. For the subsequent code
 review fixes, MySQL migration 043 and full Singlebox run, see `review-followup.md`.
 

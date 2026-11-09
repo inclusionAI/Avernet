@@ -101,3 +101,31 @@ async fn sqlite_case_and_accent_distinct_identities_match_mysql_and_memory() {
     }
     assert_eq!(c.authority_store.role("human_bob", "bot").await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn sqlite_ordinary_provider_snapshot_is_atomic_with_identity_and_binding() {
+    use bcs_service_api::{BotCapabilities, bot_provider::{BotProviderRecord, BotConnectionMode},
+        port::repo::bot_provider::BotProviderRepoPort};
+    for mode in [BotConnectionMode::Gateway, BotConnectionMode::Plugin] {
+        let c = registration_chain().await;
+        let record = BotProviderRecord {bot_uuid: "fresh".into(), provider_id: "provider-a".into(),
+            provider_bot_ref: "fresh-ref".into(), connection_mode: mode, webhook_url: None, is_deleted: false};
+        c.db.execute(DbStatement::new("CREATE TRIGGER reject_manager BEFORE INSERT ON edge_grants WHEN NEW.grant_kind='manager' BEGIN SELECT RAISE(ABORT, 'manager failure'); END")).await.unwrap();
+        let create = || c.provider_repo.create_provider_admin_bot_with_ownership(record.clone(),
+            BotCapabilities::default(), "alice", "fresh-token", initialization(&["bob"]));
+        assert!(create().await.is_err());
+        for sql in ["SELECT COUNT(*) AS n FROM bcs_bots", "SELECT COUNT(*) AS n FROM edge_grants",
+            "SELECT COUNT(*) AS n FROM bot_authority_changes", "SELECT COUNT(*) AS n FROM permission_profiles",
+            "SELECT COUNT(*) AS n FROM bcs_provider_bot_bindings"] {
+            assert_eq!(count(&c, sql).await, 0);
+        }
+        // The same query used by mine observes no partial owner-only candidate.
+        assert!(c.bot_repo.list_uninitialized_bots_by_creator("alice", 100).await.unwrap().is_empty());
+        c.db.execute(DbStatement::new("DROP TRIGGER reject_manager")).await.unwrap();
+        create().await.unwrap();
+        assert!(c.bot_repo.list_uninitialized_bots_by_creator("alice", 100).await.unwrap().is_empty());
+        assert_eq!(c.authority_store.role("human_bob", "fresh").await.unwrap(), Some(BotAccessRelation::Manager));
+        assert_eq!(count(&c, "SELECT COUNT(*) AS n FROM bcs_provider_bot_bindings").await,
+            if mode == BotConnectionMode::Gateway { 1 } else { 0 });
+    }
+}

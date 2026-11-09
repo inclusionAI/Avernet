@@ -337,8 +337,10 @@ impl BotRepoPort for MemoryBotRepo {
     ) -> ServiceResult<Vec<RegisteredBot>> {
         let current_env = resolve_env();
         let owner_actor = format!("human_{created_by}");
-        let bots = self.bots.read().await;
+        // Match registration/retirement: authority before bots. Never wait for
+        // authority while pinning bots against an initializer's write lock.
         let authority = self.authority.read().await;
+        let bots = self.bots.read().await;
         let mut candidates: Vec<RegisteredBot> = bots
             .values()
             .filter(|b| !b.is_expired())

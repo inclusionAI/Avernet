@@ -66,9 +66,25 @@ impl MemoryBotRepo {
         token: &str,
         initialization: &OwnershipInitialization,
     ) -> ServiceResult<bool> {
+        self.create_registration_with_authority(bot_id, capabilities, created_by, token, initialization, None).await
+    }
+
+    pub(crate) async fn create_registration_with_authority(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+        initialization: &OwnershipInitialization, provider_id: Option<&str>,
+    ) -> ServiceResult<bool> {
         let env = resolve_env();
-        let (owner, owner_actor) =
-            ownership_composition::verified_initialization(initialization)?;
+        let (owner, owner_actor) = if let Some(provider_id) = provider_id {
+            crate::ownership_managers::validate_provider_initialization(initialization)?;
+            if initialization.mutation.actor.actor_id() != format!("provider_{provider_id}") {
+                return Err(registration_conflict("Provider registration actor does not match the verified Provider"));
+            }
+            let owner = initialization.owner_user_id.clone();
+            (owner.clone(), ownership_composition::owner_actor_id(&owner))
+        } else { ownership_composition::verified_initialization(initialization)? };
+        if bot_id == owner_actor {
+            return Err(registration_conflict("physical Bot ID must differ from its owner Human ID"));
+        }
         let mutation_id = initialization.mutation.mutation_id.clone();
         // The first created_by IS the trusted owner.
         if created_by.trim() != owner {
@@ -189,18 +205,17 @@ impl MemoryBotRepo {
         staged_authority
             .ownership_versions
             .insert((env.clone(), bot_id.clone()), 1);
-        let after_state = ownership_composition::initialize_audit_state(
-            &owner_actor,
-            1,
-        );
+        let new_humans = stage_initial_managers(&bots, &deleted, &mut staged_authority,
+            &env, &bot_id, &initialization.initial_manager_user_ids)?;
+        let after_state = crate::ownership_managers::audit_state(&owner_actor, &initialization.initial_manager_user_ids);
         mem_append_audit(
             &mut staged_authority,
             &env,
             &bot_id,
             "initialize",
             &mutation_id,
-            "human",
-            &owner_actor,
+            initialization.mutation.actor.kind().as_str(),
+            &initialization.mutation.actor.actor_id(),
             &owner_actor,
             None,
             &after_state,
@@ -294,7 +309,7 @@ impl MemoryBotRepo {
                         ..Default::default()
                     },
                     ws_connection: None,
-                    session_token: None,
+                    session_token: provider_id.map(|_| uuid::Uuid::new_v4().to_string()),
                     env: Some(env.clone()),
                     status: bcs_service_api::ActorStatus::Online,
                     actor_kind: bcs_service_api::ActorKind::Human,
@@ -306,6 +321,10 @@ impl MemoryBotRepo {
                 },
             );
             control_plane_audit.insert(human_id, (now, now));
+        }
+        for (id, human) in new_humans {
+            control_plane_audit.insert(id.clone(), (now, now));
+            bots.insert(id, human);
         }
         *authority_guard = staged_authority;
         *profiles_guard = staged_profiles;
@@ -403,27 +422,8 @@ impl MemoryBotRepo {
         // Keep Human staging and authority publication under the same lock span.
         let mut bots = self.bots.write().await;
         let deleted = self.deleted_bot_ids.read().await;
-        let mut new_humans = Vec::new();
-        for user in initial_managers {
-            let id = ownership_composition::owner_actor_id(user);
-            if deleted.contains(&id) || bots.get(&id).is_some_and(|row|
-                row.actor_kind != bcs_service_api::ActorKind::Human || row.env.as_deref() != Some(ctx.env.as_str())) {
-                return Err(registration_conflict("initial manager must be a live Human in this environment"));
-            }
-            if !bots.contains_key(&id) {
-                new_humans.push((id.clone(), RegisteredBotInner {
-                    bot_id: id.clone(), last_heartbeat: std::time::Instant::now(),
-                    capabilities: BotCapabilities { name: Some(user.clone()), visibility: "protected".into(), ..Default::default() },
-                    // Match ensure_human_actor: persistent identities do not expire on heartbeat cleanup.
-                    ws_connection: None, session_token: Some(uuid::Uuid::new_v4().to_string()), env: Some(ctx.env.clone()),
-                    status: bcs_service_api::ActorStatus::Online, actor_kind: bcs_service_api::ActorKind::Human,
-                    created_by: Some(user.clone()), protocol_version: 1, user_visibility: Default::default(),
-                    friend_ext: Default::default(), friend_check_in_strategy: Default::default(),
-                }));
-            }
-            staged.edges.insert((ctx.env.clone(), ctx.bot_id.clone(), id, MemoryAuthorityEdgeKind::Manager),
-                (MemoryAuthorityEdgeStatus::Approved, 0));
-        }
+        let new_humans = stage_initial_managers(&bots, &deleted, &mut staged,
+            &ctx.env, &ctx.bot_id, initial_managers)?;
 
         let owner_edge_key = (
             ctx.env.clone(),
@@ -725,4 +725,37 @@ mod initial_manager_tests {
         repo.cleanup_expired().await;
         assert!(repo.get("human_bob").await.is_some());
     }
+}
+
+#[cfg(test)]
+#[path = "memory_registration_concurrency_tests.rs"]
+mod concurrency_tests;
+
+fn stage_initial_managers(
+    bots: &std::collections::BTreeMap<String, RegisteredBotInner>,
+    deleted: &std::collections::HashSet<String>, state: &mut MemoryAuthorityState,
+    env: &str, bot_id: &str, initial_managers: &[String],
+) -> ServiceResult<Vec<(String, RegisteredBotInner)>> {
+    let mut new_humans = Vec::new();
+    for user in initial_managers {
+        let id = ownership_composition::owner_actor_id(user);
+        if id == bot_id || deleted.contains(&id) || bots.get(&id).is_some_and(|row|
+            row.actor_kind != bcs_service_api::ActorKind::Human || row.env.as_deref() != Some(env)) {
+            return Err(registration_conflict("initial manager must be a live Human in this environment"));
+        }
+        if !bots.contains_key(&id) {
+            new_humans.push((id.clone(), RegisteredBotInner {
+                bot_id: id.clone(), last_heartbeat: std::time::Instant::now(),
+                capabilities: BotCapabilities { name: Some(user.clone()), visibility: "protected".into(), ..Default::default() },
+                // Match ensure_human_actor: persistent identities do not expire on heartbeat cleanup.
+                ws_connection: None, session_token: Some(uuid::Uuid::new_v4().to_string()), env: Some(env.to_string()),
+                status: bcs_service_api::ActorStatus::Online, actor_kind: bcs_service_api::ActorKind::Human,
+                created_by: Some(user.clone()), protocol_version: 1, user_visibility: Default::default(),
+                friend_ext: Default::default(), friend_check_in_strategy: Default::default(),
+            }));
+        }
+        state.edges.insert((env.to_string(), bot_id.to_string(), id, MemoryAuthorityEdgeKind::Manager),
+            (MemoryAuthorityEdgeStatus::Approved, 0));
+    }
+    Ok(new_humans)
 }

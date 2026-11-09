@@ -415,7 +415,7 @@ impl ProviderManagementService for ProviderManagement {
             .is_some();
         let (binding, bot_runtime_token) = self
             .provider_bot_core
-            .register_provider_bot_with_bot_uuid(
+            .register_provider_bot_with_initial_managers(
                 &command.provider_id,
                 &command.provider_admin_token,
                 RegisterProviderBotParams {
@@ -431,6 +431,7 @@ impl ProviderManagementService for ProviderManagement {
                     connection_mode: command.connection_mode,
                     initial_caller: None,
                 },
+                initial_managers.clone(),
             )
             .await?;
         // A binding is not an authority-completion marker (Plugin Bots have no
@@ -441,6 +442,8 @@ impl ProviderManagementService for ProviderManagement {
             .await?
             .map(|state| state.ownership_version == 0)
             .unwrap_or(true);
+        // Atomic multi-user admission already committed the Human/authority
+        // lifecycle, like A2A. Do not append retired creator-relation writes.
         if complete_ownership {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
             self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id, initial_managers)
