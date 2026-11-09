@@ -14,15 +14,15 @@ for profile in Path(sys.argv[1]).glob("oauth-*.profraw"):
 PYTHON
 # Never allow a prior successful artifact to survive a build/startup failure.
 printf '%s\n' '{"status":"failed","scenarios":[],"checks":[]}' > "$bcs_dir/target/cov-e2e/oauth_e2e.json"
-(
-  cd "$bcs_dir"
-  export RUSTFLAGS="-Cinstrument-coverage -Clink-dead-code"
-  export CARGO_INCREMENTAL=0
-  export CARGO_PROFILE_DEV_DEBUG=line-tables-only
-  export CARGO_TARGET_DIR="$cov_runtime"
-  export LLVM_PROFILE_FILE="$bcs_dir/target/tmp/oauth-build-%m-%p.profraw"
-  cargo build -p bcs --features test-utils --bin bcs-oauth-e2e
-)
+case "${1:-}" in
+  "") bash "$bcs_dir/scripts/build_e2e_companions.sh" oauth ;;
+  --run-only) ;; # Supervisor already built both targets from this checkout.
+  *) echo "usage: $0 [--run-only]" >&2; exit 2 ;;
+esac
+if [[ ! -x "$cov_runtime/debug/bcs-oauth-e2e" ]]; then
+  echo "missing instrumented oauth companion executable" >&2
+  exit 1
+fi
 LLVM_PROFILE_FILE="$cov_runtime/oauth-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/oauth/story.py" \
     --binary "$cov_runtime/debug/bcs-oauth-e2e" \

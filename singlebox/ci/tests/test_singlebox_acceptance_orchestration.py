@@ -76,3 +76,54 @@ run_acceptance_smoke
         )
         assert result.returncode == 1, result.stdout + result.stderr
         assert (reports / "acceptance-junit.xml").is_file()
+
+
+def test_owner_worker_default_and_bounds_are_applied_to_actual_pytest_argv(tmp_path):
+    import json
+    import os
+    import shlex
+    import subprocess
+    import sys
+
+    (tmp_path / 'apps/backend').mkdir(parents=True)
+    reports = tmp_path / 'reports'
+    reports.mkdir()
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    uv = bin_dir / 'uv'
+    uv.write_text(
+        f'#!{sys.executable}\n'
+        'import json, os, sys\nfrom pathlib import Path\n'
+        'Path(os.environ["ARGS_FILE"]).write_text(json.dumps(sys.argv[1:]))\n'
+        'Path(sys.argv[sys.argv.index("--junitxml")+1]).write_text("<testsuites><testsuite tests=\\"1\\"/></testsuites>")\n'
+    )
+    uv.chmod(0o755)
+    function = RUNNER.read_text().split('run_acceptance_smoke() {', 1)[1].split('\nrun_bcs_e2e() {', 1)[0]
+    q = shlex.quote
+    script = f'''set -euo pipefail
+repo_root={q(str(tmp_path))}
+report_dir={q(str(reports))}
+script_dir={q(str(REPO_ROOT / 'singlebox/ci'))}
+bcs_coverage_dir={q(str(tmp_path / 'bcs'))}
+coverage_standalone_runtime={q(str(tmp_path / 'runtime'))}
+repair_provider_fixture={q(str(tmp_path / 'provider.json'))}
+reporter_command=({q(sys.executable)})
+acceptance_targets=(tests/community/acceptance/bot_ownership_sync)
+run_acceptance_smoke() {{{function}
+run_acceptance_smoke
+'''
+    args_file = tmp_path / 'args.json'
+    env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'ARGS_FILE': str(args_file)}
+    env.pop('SINGLEBOX_ACCEPTANCE_OWNER_WORKERS', None)
+    for setting in (None, '1', '2', '3', '0', '4', '-1', 'invalid'):
+        args_file.unlink(missing_ok=True)
+        overrides = {} if setting is None else {'SINGLEBOX_ACCEPTANCE_OWNER_WORKERS': setting}
+        result = subprocess.run(['bash', '-c', script], env={**env, **overrides}, capture_output=True, text=True)
+        if setting in (None, '1', '2', '3'):
+            assert result.returncode == 0, result.stdout + result.stderr
+            args = json.loads(args_file.read_text())
+            assert args[args.index('-n') + 1] == (setting or '3')
+            assert '--dist=load' in args
+        else:
+            assert result.returncode == 2
+            assert not args_file.exists()

@@ -77,6 +77,7 @@ class OAuthE2eTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             runner = scripts / 'oauth_e2e_coverage.sh'
             shutil.copyfile(ROOT / 'apps/bcs/scripts/oauth_e2e_coverage.sh', runner)
+            shutil.copyfile(ROOT / 'apps/bcs/scripts/build_e2e_companions.sh', scripts / 'build_e2e_companions.sh')
             runtime = root / 'bcs/target/cov-e2e/llvm-cov-target'
             runtime.mkdir(parents=True)
             (runtime / 'oauth-old.profraw').write_bytes(b'old')

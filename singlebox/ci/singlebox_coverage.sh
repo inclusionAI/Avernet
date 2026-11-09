@@ -28,6 +28,7 @@ explicit_acceptance_targets=()
 coverage_modules=()
 reporter_command=()
 phase_timing_file=""
+bcs_companion_pid=""
 source "$repo_root/apps/bcs/scripts/e2e-test/mock_services.sh"
 
 record_phase_timing() {
@@ -41,10 +42,47 @@ timed_phase() {
   local phase="$1"; shift
   local start_epoch end_epoch status=0
   start_epoch="$(date +%s)"
+  echo "[phase] $phase: start"
   "$@" || status=$?
   end_epoch="$(date +%s)"
   record_phase_timing "$phase" "$start_epoch" "$end_epoch" "$status"
+  echo "[phase] $phase: exit=$status elapsed=$((end_epoch - start_epoch))s"
   return "$status"
+}
+
+start_bcs_companions() {
+  mkdir -p "$report_dir/bcs"
+  # Production build/start and repair restart have finished; this is the only
+  # background Cargo producer. Reporting will not run until it is joined.
+  python3 "$repo_root/apps/bcs/scripts/ci/companion_coverage.py" \
+    --bcs-dir "$repo_root/apps/bcs" --report-dir "$report_dir/bcs" \
+    > "$report_dir/bcs/companions.log" 2>&1 &
+  bcs_companion_pid=$!
+  echo "[phase] bcs_companions: started (overlapping acceptance/shared stories)"
+}
+
+wait_bcs_companions() {
+  local status=0
+  wait "$bcs_companion_pid" || status=$?
+  bcs_companion_pid=""
+  cat "$report_dir/bcs/companions.log"
+  if [[ "$status" -ne 0 ]]; then
+    local log
+    for log in companion-build caller oauth; do
+      [[ ! -f "$report_dir/bcs/$log.log" ]] || tail -n 100 "$report_dir/bcs/$log.log"
+    done
+  fi
+  return "$status"
+}
+
+stop_bcs_companions() {
+  if [[ -n "$bcs_companion_pid" ]]; then
+    # The Python supervisor owns process-group termination/reaping, including
+    # any Rust test servers. Wait for it before touching shared profile files.
+    kill -TERM "$bcs_companion_pid" 2>/dev/null || true
+    wait "$bcs_companion_pid" 2>/dev/null || true
+    bcs_companion_pid=""
+  fi
 }
 
 if [[ -n "${SINGLEBOX_COVERAGE_MODULE:-}" ]]; then
@@ -231,6 +269,7 @@ run_real_singlebox() {
   echo "acceptance_targets: ${acceptance_targets[*]}"
   echo "model_config_mode: $model_config_mode"
   cleanup_real_singlebox() {
+    stop_bcs_companions
     flush_coverage_processes || true
     env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
       STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
@@ -242,6 +281,8 @@ run_real_singlebox() {
     rm -f "$repair_provider_fixture"
   }
   trap cleanup_real_singlebox EXIT
+  trap 'exit 143' TERM
+  trap 'exit 130' INT
   bcs_e2e_mock_start "$coverage_root/mock-services"
   # BCS_SKIP_DEBUG_BUILD=1: `setup all` would otherwise compile the
   # non-instrumented bcs/bcs-cli/bcs-admin into src/bcs/target/debug, a full
@@ -288,14 +329,26 @@ run_real_singlebox() {
   local summary_status=0
   local module_status=0
   local artifact_status=0
+  start_bcs_companions
   timed_phase "backend_acceptance" run_acceptance_smoke || acceptance_status=$?
-  timed_phase "bcs_e2e" run_bcs_e2e || bcs_e2e_status=$?
+  timed_phase "bcs_shared_stories" run_bcs_e2e --shared-tests-only || bcs_e2e_status=$?
+  local companion_status=0 aggregate_status=0
+  timed_phase "bcs_companion_join" wait_bcs_companions || companion_status=$?
+  # Both producer branches have exited. Only now stop the shared service,
+  # flush/merge profiles, and execute the unchanged coverage/endpoint gates.
+  timed_phase "bcs_coverage_report" run_bcs_e2e --aggregate-only || aggregate_status=$?
+  if [[ "$bcs_e2e_status" -eq 0 ]]; then
+    bcs_e2e_status="$companion_status"
+  fi
+  if [[ "$bcs_e2e_status" -eq 0 ]]; then
+    bcs_e2e_status="$aggregate_status"
+  fi
   coverage_flush_and_cleanup() {
     flush_coverage_processes
     cleanup_real_singlebox
   }
   timed_phase "coverage_flush_and_cleanup" coverage_flush_and_cleanup || true
-  trap - EXIT
+  trap - EXIT TERM INT
   # Backend and BaaS coverage are independent (separate project dirs, data
   # files, and report paths), so render them concurrently. Each writes to its
   # own log that is replayed afterwards so the output stays readable.
@@ -364,7 +417,7 @@ run_acceptance_smoke() {
   local junit_report="$report_dir/acceptance-junit.xml"
   local owner_target="tests/community/acceptance/bot_ownership_sync"
   local owner_selected=0
-  local owner_workers="${SINGLEBOX_ACCEPTANCE_OWNER_WORKERS:-2}"
+  local owner_workers="${SINGLEBOX_ACCEPTANCE_OWNER_WORKERS:-3}"
   local serial_status=0
   local owner_status=0
   local target
@@ -380,9 +433,11 @@ run_acceptance_smoke() {
       serial_targets+=("$target")
     fi
   done
-  if [ "$owner_selected" -eq 1 ] && { ! [[ "$owner_workers" =~ ^[0-9]+$ ]] || [ "$owner_workers" -lt 1 ] || [ "$owner_workers" -gt 2 ]; }; then
-    echo "SINGLEBOX_ACCEPTANCE_OWNER_WORKERS must be an integer in [1, 2]" >&2
-    return 2
+  if [ "$owner_selected" -eq 1 ]; then
+    case "$owner_workers" in
+      1|2|3) ;;
+      *) echo "SINGLEBOX_ACCEPTANCE_OWNER_WORKERS must be 1, 2 or 3" >&2; return 2 ;;
+    esac
   fi
 
   (
@@ -441,12 +496,18 @@ run_acceptance_smoke() {
 run_bcs_e2e() {
   local bcs_report_dir="$report_dir/bcs"
   local bcs_log="$bcs_report_dir/e2e.log"
+  local phase="full"
+  case "${1:-}" in
+    --shared-tests-only) phase="shared-stories" ;;
+    --aggregate-only) phase="aggregate" ;;
+  esac
+  local phase_log="$bcs_report_dir/$phase.log"
   local rc=0
   local artifact
   mkdir -p "$bcs_report_dir"
   printf '%s\n' \
     "BCS e2e: --skip-start --bcs-line-min $bcs_line_min --bcs-method-min $bcs_method_min" \
-    > "$bcs_log"
+    > "$phase_log"
   env \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
@@ -455,11 +516,13 @@ run_bcs_e2e() {
     BCS_E2E_CHANGED_BASE_REF="${BCS_E2E_CHANGED_BASE_REF:-${SINGLEBOX_BASE_REF:-origin/dev}}" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     bash "$repo_root/apps/bcs/scripts/e2e_coverage.sh" \
-      --skip-start \
+      --skip-start "$@" \
       --bcs-line-min "$bcs_line_min" \
       --bcs-method-min "$bcs_method_min" \
-      >> "$bcs_log" 2>&1 || rc=$?
-  cat "$bcs_log"
+      >> "$phase_log" 2>&1 || rc=$?
+  cat "$phase_log" >> "$bcs_log"
+  cat "$phase_log"
+  [[ "$phase" != shared-stories ]] || return "$rc"
 
   for artifact in \
     cobertura.xml \
@@ -731,6 +794,7 @@ verify_required_artifacts() {
     "$report_dir/baas-coverage.json"
     "$report_dir/baas-coverage.txt"
     "$report_dir/html/baas/index.html"
+    "$report_dir/bcs/companion-timings.json"
     "$report_dir/bcs/e2e.log"
     "$report_dir/bcs/oauth_e2e.json"
     "$report_dir/bcs/cobertura.xml"
