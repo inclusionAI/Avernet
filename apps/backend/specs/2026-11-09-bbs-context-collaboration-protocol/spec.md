@@ -9,7 +9,7 @@
 
 ## 0. 一句话方案
 
-> 在单 Bot 和 BCN 协作群之外，新增一种以持久、可投影、可演进的 **Collaboration Context** 为中心的自主协作模式：上下文拥有目标、可见范围、材料和业务状态；一个可版本化、可扩展、但不能执行任意代码的状态机决定下一步；由事件驱动公开讨论、任务接力、代办清单等不同协作方式推进同一目标。
+> 在单 Bot 和 BCN 协作群之外，新增一种以持久、可投影、可演进的 **Collaboration Context** 为中心的自主协作模式：上下文拥有目标、可见范围、材料和业务状态；一个可版本化、可扩展、但不能执行任意代码的状态机决定下一步；由事件驱动公开讨论、任务接力、直接指派三种同一维度的协作模式推进同一目标。
 
 该模式与现有单 Bot 和 BCN 协作群并存，不是将二者升级或替换；也不是新建第二套执行调度系统。Collaboration Context 是这类新模式自己的协作中心，现有会话、群聊、任务图和帖子是它在不同阶段可绑定的协作表面或执行通道。
 
@@ -21,7 +21,7 @@
 | --- | --- | --- | --- |
 | 单 Bot 会话 | 一个 Bot 对目标、材料和当前任务的理解 | 适合边界清晰、所需能力集中、协作方很少的任务；启动直接、链路短，Bot 可以基于自己看到的材料推理、调用工具并连续自主推进，编排成本最低 | 上下文主要是模型在当前会话中的工作记忆，而不是显式领域对象；目标、验收、当前阶段、下一步和执行证据缺少独立权威模型，推进高度依赖 Bot 每轮推理，难以用统一事件和状态机解释“为什么允许下一步” |
 | BCN 协作群 | 一组 Bot 的群消息、路由和运行过程 | 适合多角色协商和分工；消息、成员、路由、Manager / Worker、StateMachine 等机制能支持多 Bot 自治互动；协作过程对群内参与者可见 | 自主性主要体现在“群内如何互动”；目标、材料、责任边界和业务阶段仍内嵌在群消息或某次 Run 的上下文中，不是一等 Context；讨论、执行、代办和验收容易退化为群内的片段性行为，缺少贯穿全过程的显式状态和事件事实 |
-| Context 自主协作模式 | 持久 `CollaborationContext` | 把目标、材料、参与者、状态、事件和证据提升为协作中心；状态机决定当前业务阶段、下一步和允许的 Driver；单 Bot、BCN 群、Relay、Todo 等都变成可插拔协作方式，并由统一状态和事件治理推进 | 抽象层级更高，需要协议建模、状态机校验、事件幂等、权限投影和适配器测试；它不直接提升 Bot 的模型能力或工具能力，而是提供更稳定、更可治理、可跨协作方式解释的自主协作载体 |
+| Context 自主协作模式 | 持久 `CollaborationContext` | 把目标、材料、参与者、状态、事件和证据提升为协作中心；状态机决定当前业务阶段、下一步和允许的 `CollaborationMode`；单 Bot、BCN 群、Relay、Todo 等只是执行通道，由统一状态和事件治理推进 | 抽象层级更高，需要协议建模、状态机校验、事件幂等、权限投影和适配器测试；它不直接提升 Bot 的模型能力或工具能力，而是提供更稳定、更可治理、可跨协作方式解释的自主协作载体 |
 
 因此，Context 模式不是否定单 Bot 会话或 BCN 协作群；在合适的任务中，它们仍然是最直接的执行方式。Context 模式的增量价值是让自主行为不只依赖一次推理或一次群内协商，而是受持久目标、显式状态和可审计事件约束。
 
@@ -29,8 +29,8 @@
 
 ```text
 Collaboration Context 承载目标、材料、参与者和业务状态；
-State Machine 决定当前阶段、下一步和允许的 Driver；
-Driver / Adapter 负责实际沟通、执行或待办处理；
+State Machine 决定当前阶段、下一步和允许的协作模式；
+协作模式和执行通道负责实际沟通、执行或待办处理；
 ContextEvent 记录被接受的协作事实并驱动状态迁移。
 ```
 
@@ -76,8 +76,8 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 - **G1** 新增基于 Context 的自主协作模式，并与单 Bot、BCN 协作群和 BBS 帖子并行，而不是把其中任何一种升级成 Context 模式。
 - **G2** Context 具备可持久、可观察、可调试的业务状态。
 - **G3** 状态机可自定义扩展，但校验、授权、边界和审计由服务端治理。
-- **G4** Context 状态作为驱动层，可按阶段选择协作方式，而不是提前把业务固化成一种运行时。
-- **G5** 统一支持 BBS 公开讨论、Task / Relay 任务接力、以及人类与 Bot 都可参与的代办清单；必要时可按阶段挂接单 Bot、BCN 群或 BCS 自定义协作。
+- **G4** Context 状态作为模式选择层，可按阶段在“公开讨论 / 任务接力 / 直接指派”之间切换，而不是提前把业务固化成一种运行时。
+- **G5** 把协作模式收敛为“公开讨论 / 任务接力 / 直接指派”三类；单 Bot、BCN 群、BCS Run 只是执行通道，不是协作模式。
 - **G6** BBS、任务图、Bot 和公开 API consumers 读取同一 Context 投影，避免同一 Context 对外出现多套业务进度。
 - **G7** 状态推进幂等、可恢复、可审计，可回放事实重建状态。
 
@@ -109,7 +109,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
 | `CollaborationSurfaceBinding` | 子实体 | `context_id + binding_id` / 目标引用唯一 | 绑定协作入口，不拥有入口状态 | 显式绑定、停用、重绑 |
-| `ContextDriverBinding` | 子实体 | `context_id + binding_id` | 绑定当前协作驱动方式 | 状态机允许时激活 |
+| `ContextModeBinding` | 子实体 | `context_id + binding_id` | 绑定当前协作模式 | 状态机允许时激活 |
 | `ContextWorkBinding` | 子实体 | `context_id + binding_id` | 绑定正式 Work，不复制执行图 | `work.requested` 创建或复用 |
 | `ContextTodo` | 子实体 | `context_id + todo_id` | Context 内轻量代办事实 | 创建、完成、阻塞或取消事件 |
 | `ContextOutcome` | 子实体 | `context_id + outcome_id` | 终态前的验收裁决事实 | 责任人显式裁决 |
@@ -144,7 +144,7 @@ CollaborationContext
   ├─ event_cursor               # 事件序号 / 增量读取游标
   ├─ version                    # 聚合乐观锁版本
   ├─ state_fencing_token        # 状态迁移 fencing token
-  ├─ current_driver             # 当前主要协作驱动方式
+  ├─ current_mode             # 当前协作模式，取值只有三类
   ├─ created_by / created_from  # 创建者和来源
   └─ created_at / updated_at / closed_at
 ```
@@ -152,7 +152,7 @@ CollaborationContext
 聚合根不变量：
 
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 参与者、Todo、Outcome、Surface、Driver 等事实不能直接改状态，必须形成合法 `ContextEvent`。
+- 参与者、Todo、Outcome、Surface、Mode 等事实不能直接改状态，必须形成合法 `ContextEvent`。
 - 外部对象不能通过引用成为 Context 的一部分；只能被 Adapter 转换为事件事实。
 - 所有子实体和值对象都遵守 Context 的 `scope` 与 `visibility`，不能跨 Context 隐式共享。
 - 终态之后再追加公开评论或来源同步事件时，不能自动改变终态。
@@ -160,7 +160,7 @@ CollaborationContext
 
 ### 4.3 值对象：ContextEnvelope
 
-`ContextEnvelope` 是业务意图、边界和验收口径的值对象，不是发给模型的 prompt，也不是现有任务规格里的 `TaskSpec.Context`。它的作用是为所有 Driver 提供同一份权威问题陈述。
+`ContextEnvelope` 是业务意图、边界和验收口径的值对象，不是发给模型的 prompt，也不是现有任务规格里的 `TaskSpec.Context`。它的作用是为所有协作模式提供同一份权威问题陈述。
 
 ```text
 ContextEnvelope
@@ -185,7 +185,7 @@ ContextEnvelope
 
 ### 4.4 值对象：ContextMaterialReference
 
-`ContextMaterialReference` 是稳定的材料引用，负责告诉各 Driver“协作输入在哪里、哪个版本、谁有权读”，本身不保存材料字节。
+`ContextMaterialReference` 是稳定的材料引用，负责告诉各协作模式“协作输入在哪里、哪个版本、谁有权读”，本身不保存材料字节。
 
 ```text
 ContextMaterialReference
@@ -269,11 +269,11 @@ ContextStateMachineDefinition
   ├─ schema_version            # context-state-machine/1
   ├─ content_digest            # 冻结内容摘要
   ├─ initial                   # 唯一起点
-  ├─ states{}                  # state id、governance kind、allowed drivers、roles
+  ├─ states{}                  # state id、governance kind、allowed modes、roles
   ├─ transitions[]             # from、on、guard、effects、to、rule id
   ├─ declared_guards[]         # 引用已注册谓词
   ├─ declared_effects[]        # 引用已注册动作
-  ├─ declared_drivers[]        # 引用允许的 Driver kind
+  ├─ declared_modes[]         # 引用允许的协作模式 kind
   ├─ compatibility_policy      # revision 迁移策略
   ├─ published_at              # 发布时间
   └─ published_by              # 发布者
@@ -283,7 +283,7 @@ ContextStateMachineDefinition
 
 - `definition_id + revision + content_digest` 是不可变合同引用。
 - 新 revision 不能让已绑定 Context 静默改变解释；必须使用显式迁移命令。
-- guard、effect 和 driver 均来自注册清单，不允许任意脚本或内联网络调用。
+- guard、effect 和 mode 均来自注册清单，不允许任意脚本或内联网络调用。
 - 校验规则见第 5.4 节。
 - 平台内置 template 与用户自定义 template 只在授权和审批流程上不同，在协议执行上相同。
 
@@ -300,7 +300,7 @@ ContextStateMachineBinding
   ├─ content_digest             # 冻结合同摘要
   ├─ current_state               # 唯一聚合级业务状态
   ├─ governance_kind             # 由 definition state 推导的治理类别
-  ├─ allowed_drivers              # 当前状态允许的 Driver
+  ├─ allowed_modes              # 当前状态允许的协作模式
   ├─ transition_cursor            # 最近一次迁移位置
   ├─ state_fencing_token          # 防旧命令影响新状态
   ├─ revision_migration_refs[]    # 显式迁移到新 revision 的事实引用
@@ -368,6 +368,7 @@ ContextTransition
 | --- | --- | --- | --- |
 | 生命周期 | `context.created` / `context.info_updated` / `context.cancelled` | Context 建立、Envelope 或输入材料更新、主动取消 | Web、BBS、系统导入 |
 | 参与者 | `participant.role_granted` / `participant.role_revoked` | 参与者或角色变化 | 人类操作 / 授权适配器 |
+| 协作模式 | `context.mode_switched` | Context 从一种协作模式切换到另一种协作模式 | 人类、授权策略或状态机效果 |
 | 公开讨论 | `discussion.posted` / `decision.recorded` | 讨论事实、决定事实 | Topic、人类责任人 |
 | 代办 | `todo.created` / `todo.completed` / `todo.blocked` | 单条代办事实 | 人类 / Bot / 系统 |
 | 执行 | `work.started` / `work.completed` / `work.failed` | 上游执行事实被接纳 | Task、Relay、BCS |
@@ -402,21 +403,21 @@ CollaborationSurfaceBinding
 - 允许多个 Surface 同时存在，但它们只能提交标准 Command 或读取被过滤的投影。
 - 公开 Surface 上的可见字段必须由服务端重新投影，不能直接复制内部行。
 
-### 4.11 子实体：ContextDriverBinding 与 ContextWorkBinding
+### 4.11 子实体：ContextModeBinding 与 ContextWorkBinding
 
-`ContextDriverBinding` 描述当前阶段授权使用哪种协作驱动方式。`ContextWorkBinding` 是其中用于正式 Work 的特殊绑定，指向 Task / Relay / BCS 等已有执行载体。
+`ContextModeBinding` 描述当前阶段采用哪种协作模式。协议中的三种协作模式处于同一维度：公开讨论、任务接力、直接指派。`ContextWorkBinding` 是执行层绑定，用于把任务接力或特殊直接指派落到 Task / Relay / BCS 等既有执行载体。
 
 ```text
-ContextDriverBinding
+ContextModeBinding
   ├─ context_id
   ├─ binding_id
-  ├─ driver_kind               # public_discussion、todo_board、relay_work、single_bot、bcs_group 等
-  ├─ driver_policy_ref          # 说明该 Driver 配置的稳定引用
-  ├─ allowed_by_state_rule       # 当时允许该 Driver 的状态依据
+  ├─ mode_kind               # public_discussion / task_relay / direct_assignment
+  ├─ mode_policy_ref          # 说明该协作模式配置的稳定引用
+  ├─ allowed_by_state_rule       # 当时允许该协作模式的状态依据
   ├─ active / activated_at / deactivated_at
   ├─ activation_request_id       # 激活幂等键
   ├─ activated_by
-  └─ surface_binding_refs[]       # 本 Driver 可使用的协作入口
+  └─ surface_binding_refs[]       # 本协作模式可使用的执行通道入口
 
 ContextWorkBinding
   ├─ context_id
@@ -434,7 +435,7 @@ ContextWorkBinding
 
 设计约束：
 
-- `allowed_drivers` 由当前状态声明；越状态激活必须失败。
+- `allowed_modes` 由当前状态声明，取值空间只包含 `public_discussion`、`task_relay`、`direct_assignment`；越状态激活必须失败。
 - `ensure_work_binding` 只能创建、复用或关闭协议绑定，不能直接调用外部执行入口。
 - 一个 Context 至多一个 active `ContextWorkBinding`；并发启动由作用域唯一约束或 CAS 裁决。
 - 外部执行必须先在原系统接纳事实，再由 Adapter 投影为 `work.started`、`work.progressed`、`work.completed`、`work.failed`。
@@ -513,7 +514,7 @@ ContextSnapshot
   ├─ input_material_view[]           # 按目标重新过滤后的协作输入引用
   ├─ deliverable_view[]               # 可见交付物及结果引用
   ├─ timeline_cursor / summary_ref
-  ├─ driver_binding_view[]
+  ├─ mode_binding_view[]
   ├─ action_view[]                 # 可提议或可提交的命令摘要
   ├─ generated_at
   └─ snapshot_digest
@@ -567,17 +568,17 @@ states:
   draft:
     kind: waiting
     display_name: 待完善
-    allowed_drivers: [public_discussion]
+    allowed_modes: [public_discussion]
     required_roles:
       info_editor: [owner, responsible_user]
   ready:
     kind: active
     display_name: 待启动
-    allowed_drivers: [discussion, relay, todo, bcs_group, single_bot]
+    allowed_modes: [public_discussion, task_relay, direct_assignment]
   handoff_running:
     kind: active
     display_name: 接力执行中
-    allowed_drivers: [relay, bcs_group]
+    allowed_modes: [task_relay, direct_assignment]
     entry_actions:
       - ensure_work_binding
   reviewing:
@@ -632,7 +633,7 @@ transitions:
 | --- | --- | --- |
 | `initial` | 起点 | 只能有一个 |
 | `waiting` | 等待人类补充、外部输入或选择 | 会进入待办通知与 blockers |
-| `active` | 协作或执行进行中 | 必须声明 `allowed_drivers` |
+| `active` | 协作或执行进行中 | 必须声明 `allowed_modes` |
 | `review` | 等待人验收或审批 | 默认只有明确责任人可裁决 |
 | `blocked` | 被显式阻塞 | 必须携带 blocker |
 | `terminal_success` | 目标完成 | 后续只能派生只读投影 |
@@ -652,7 +653,7 @@ transitions:
 - 效果按声明执行一次，且有幂等标识；外部效果使用 outbox 恢复。
 - 自定义状态机可以引用外部模型或规则结果，但必须把结果和证明记录在事件 payload 中，不能重复调用外部系统。
 
-禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 ContextDriverBinding 关联。
+禁止出现任意脚本、内联 SQL、网络调用、文件访问或框架 import。BCS StateMachine YAML 是执行层合同，Context 状态机合同只定义业务阶段；两者通过 ContextModeBinding 关联。
 
 ### 5.4 定义校验
 
@@ -664,50 +665,58 @@ transitions:
 4. 每个 `terminal_*` 状态不能有出边。
 5. `transitions.from`、`to`、`on` 必须都已定义。
 6. 每条迁移必须有唯一 ID。
-7. 所有所引用的 guard、effect、driver、权限谓词必须已注册。
+7. 所有所引用的 guard、effect、mode、权限谓词必须已注册。
 8. 没有未知字段。
 9. schema、最大节点数、字符串和扩展 payload 有明确上限。
 10. Content digest 和 revision 一起保存，已发布版本被 Context 绑定后不可原位修改。
 11. 升级状态机定义必须显式声明兼容策略；不声明时只能影响之后创建的新 Context。
 
-## 6. 协作 Surface 与 Driver
+## 6. 协作模式与执行通道
 
-### 6.1 Surface
+### 6.1 协作模式
 
-`ContextSurface` 表示协作中可读写投影的入口，描述“在什么入口交流和共享事实”，不规定入口自身的交互实现。
+`CollaborationMode` 只描述“这个 Context 当前采用哪种协作形态”，不描述入口、运行时、Bot 数量或底层执行工具。三种协作模式处于同一维度：
 
-| Surface | 协议职责 |
+| 模式 | 语义 | 协议产物 | 典型实现 |
+| --- | --- | --- | --- |
+| `public_discussion`（公开讨论） | 通过公开讨论收敛共识、结论或共同认知 | `discussion.posted` / `decision.recorded` | BBS Topic、Context portal |
+| `task_relay`（任务接力） | 把明确工作交给既有 Task / Relay / TaskGraph 或相关执行系统 | `work.requested` / `work.*` / `ContextWorkBinding` | Task / Relay、相关执行适配器 |
+| `direct_assignment`（直接指派） | 把明确工作直接指派给一个或多个特定执行者 | `ContextModeBinding` + `ContextTodo` + `todo.*` / `work.*` 事件 | 单 Bot、BCN 群、直接代理执行者 |
+
+设计不变量：
+- 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 都不是新的协作模式；它们是执行通道或载体。
+- `public_discussion` 只表示公开讨论协作形态，BBS Topic 只是它的一种入口。
+- `task_relay` 表示把外部执行事实接纳进 Context，而不要求一定使用 Relay。
+- `direct_assignment` 表示“直接指定执行者”，不要求一定有多 Bot，也不要求一定有群；具体任务可由 `ContextTodo`、单条 Work 或参与者直接执行来承载。
+- 一个 Context 可在状态迁移中在三种模式之间切换，但同一时刻只有一个主模式。
+
+### 6.2 执行通道
+
+执行通道解决“协作事实发生在哪个入口或系统里”，不改变协作模式本身。
+
+| 通道 | 职责 |
 | --- | --- |
-| BBS Topic | 公开讨论、系统事件摘要、公开材料引用 |
-| Context portal / API | Context 快照、增量分页阅读、Command 提交 |
-| BCS session / group | 群消息、协作邀请、运行摘要、执行事件回投 |
-| External source surface | 来源阅读、修订同步、回写通道 |
+| BBS Topic | 承载公开讨论、材料同步、结果 summaries |
+| Context portal / API | 提供快照、命令提交、状态查看 |
+| Task / Relay / TaskGraph | 承接任务接力，回传 Work 事实 |
+| BCS session / group | 承载 Bot 或群内互动、运行摘要、事件回投 |
+| Direct assignee | 承载直接指派给具体 Human / Bot / 代理的执行通道 |
+| External source surface | 承载外部来源阅读、修订同步、回写通道 |
 
-Surface 绑定必须稳定记录来源类型、来源 ID、作用域和可见性。Context 不拥有这些入口的内部状态，也不通过绑定提升任何入口权限。
+通道只提交标准 Command 和 ContextEvent，不直接修改 Context 状态，也不提升权限。
 
-### 6.2 Driver
+### 6.3 模式选择规则
 
-`ContextDriver` 表示当前状态依赖的能力，描述“当前阶段由什么机制推进任务”。
+1. 每个 State 必须声明 `allowed_modes`，取值只来自 `public_discussion`、`task_relay`、`direct_assignment`。
+2. 模式切换只能通过 ContextCommand 和对应 Transition 完成。
+3. `ContextModeBinding` 记录当前模式、激活人、激活幂等键和可用执行通道。
+4. 模式切换必须留下 `context.mode_switched` 事实，禁止只更新表字段而不写事件。
+5. 执行通道可以并存，但不能替代协作模式；例如 BBS Topic 和 BCS group 同时存在时，仍需要明确当前是公开讨论、任务接力还是直接指派。
+6. `task_relay` 和 `direct_assignment` 可以依据需要创建 `ContextWorkBinding`、`ContextTodo` 或直接执行项。
+7. `ensure_work_binding` 只负责建立、复用或关闭协议绑定，不直接调用底层执行系统。
+8. 外部系统接纳的执行事实必须经 Adapter 转换为标准 `ContextEvent`。
+9. 模式本身不代表权限，执行前仍须独立校验身份、作用域、材料授权和主体归属。
 
-| Driver | 主要语义 | 协议产物 |
-| --- | --- | --- |
-| `public_discussion` | 讨论与共识形成 | Discussion / Decision 事件 |
-| `relay_work` | 通过现有 Task / Relay 多棒执行正式 Work | `WorkBinding` 与 Work 事件 |
-| `todo_board` | 维护轻量待办清单 | `ContextTodo` 与 Todo 事件 |
-| `single_bot` | 单一 Bot 承接当前能力 | Work / Progress 事件 |
-| `bcs_group` | 挂接 BCS 群或自定义协作运行 | WorkBinding / Run 绑定 |
-
-协议只治理 Driver 的选择、事件、守卫和绑定。Driver 自己的执行语义按其原系统协议处理，不能由 Context 状态机重定义。
-
-### 6.3 Driver 选择规则
-
-1. 每个 State 必须声明 `allowed_drivers`。
-2. Driver 只能通过 ContextCommand 触发，不能单靠消费者展示态切换。
-3. Driver 变化必须通过 Context 状态机 `Transition` 记录。
-4. `ensure_work_binding` 等 Entry Effects 只能创建、复用或释放协议绑定，不直接调用底层执行入口。
-5. 换 Driver 不默认断开已绑定 Surface，也不覆盖历史事件。
-6. 外部系统内的已接纳事实必须经 Adapter 转换后才能驱动 Context 状态。
-7. Driver 本身不代表权限；执行前仍须独立校验执行许可、材料授权和主体归属。
 ## 7. Service API 与协议边界
 
 ### 7.1 Backend 域位置
@@ -744,12 +753,12 @@ Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin imp
 | 能力 | 输入 | 输出 |
 | --- | --- | --- |
 | Create Context | 作用域、来源、目标、可见性、profile ID、幂等键 | Context 快照 |
-| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Driver、可执行 Actions 摘要 |
+| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、可执行 Actions 摘要 |
 | Get Timeline | context ID、游标、分页 | 事件分页与完成证据引用 |
 | Update Envelope | 目标、背景、约束、输入材料、交付物规格、验收，expected version | 新 Context version |
 | Apply Context Command | actor、Command、request ID、expected version | 接纳结果、状态变化、错误原因 |
 | List Context Actions | 当前 actor、状态 | 当前 allowed Commands |
-| Bind Surface / Driver | surface 或 driver 类型、目标、expected version | SurfaceBinding / DriverBinding |
+| Bind Surface / Mode | surface 或 mode 类型、目标、expected version | SurfaceBinding / ModeBinding |
 | Create / Update Todo | title、instruction、assignee、required、expected version | Todo |
 | Complete / Block / Cancel Todo | todo ID、证据引用、expected version | Todo 事实与 Context state |
 | Publish Snapshot | target actor / group、输入材料与交付物可见范围 | Snapshot revision |
@@ -799,7 +808,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | --- | --- |
 | Context root + state binding | `context_id` 唯一；每 Context 一个 active binding；`context_id + current_state` 由事务写入 |
 | Event / Transition | `event_id` 唯一；`context_id + source_event_id` / request 幂等键唯一；Transition 与触发事件一对一 |
-| Surface / Driver / Work bindings | 绑定 ID 唯一；目标绑定可达性唯一；每个 Context 至多一个 active WorkBinding |
+| Surface / Mode / Work bindings | 绑定 ID 唯一；目标绑定可达性唯一；每个 Context 至多一个 active WorkBinding |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
 | Snapshot / Outbox | Snapshot 可重建；`outbox_id` 与投递 dedupe key 唯一；失败状态不可丢失 |
 
@@ -810,7 +819,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 - 初次创建 Context 时，来源绑定与 `context.created` 事件在同一事务中闭环；数据库失败必须向调用方返回错误，不产生假成功。
 - `work.requested` 抢占成功后在同一上下文中保存幂等意图，再通过 outbox 触发外部启动；进程恢复后先读取外部状态，再决定继续、等待还是标记 blocked。
 - 相同 `request_id` / `source_event_id` 重放必须返回原结果；不同内容同 ID 返回冲突。
-- ContextWorkBinding 通过作用域内唯一活跃约束或等价 CAS 保证一个 Context 只有不多于一个活跃 Work；Surface 与 Driver Binding 激活仍按各自 activation request 幂等。
+- ContextWorkBinding 通过作用域内唯一活跃约束或等价 CAS 保证一个 Context 只有不多于一个活跃 Work；Surface 与 Mode Binding 激活仍按各自 activation request 幂等。
 - 验收、取消、启动等命令使用 expected version 或状态 fencing token 串行裁决；输方收到冲突而不是覆盖赢家事实。
 - 外部投影失败不回滚本地事实；系统使用 outbox 有界重试、人工重试和明确的同步状态。
 - 到达 `terminal_*` 状态后，仍可写入公开评论、来源同步或审计事实，但它们不能把 Context 拉出终态。
@@ -833,7 +842,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ## 10. 当前协议如何支持公开讨论、任务代办
 
-本节说明当前协议对两个基础场景的一等支持方式；其他 Driver 的接入只作为协议提供的能力，不在本节展开为具体场景。
+本节说明当前协议对两个基础场景的一等支持方式；其他协作模式和执行通道只作为协议能力，不在本节展开为具体场景。
 
 ### 10.1 公开讨论
 
@@ -849,9 +858,9 @@ Context 可以由 BBS Topic 创建，或把已授权 Topic 作为 Surface 绑定
 
 ### 10.2 任务代办
 
-Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
+Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直接指派给具体参与者；不需要升级为正式 TaskGraph。
 
-1. Context 选择 `todo_board` 后，责任人或授权参与者可创建、指派和更新 Todo。
+1. Context 进入 `direct_assignment` 后，责任人或授权参与者可创建、指派和更新 Todo。
 2. 每个 Todo 保存标题、指令、assignee、required、due、完成证据和版本。
 3. 人类和 Bot 都可以认领；Bot 提交完成时必须通过主体归属、能力、材料和权限校验。
 4. `todo.completed` 只证明该单条代办完成，不直接证明业务目标完成。
@@ -865,9 +874,9 @@ Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
 | 阶段 | 范围 | 准入条件 |
 | --- | --- | --- |
 | P1 | Context 聚合、基础 profile、事件日志、BBS surface 绑定、公开讨论状态和 timeline 只读 | 状态机 schema、事件幂等和权限测试通过 |
-| P2 | Relay / Task Driver、WorkBinding、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
-| P3 | Todo Driver、required guard、Todo 升级 Work | Todo 并发、证据引用、终态守卫测试通过 |
-| P4 | BCS group / single bot / custom state machine Driver | BCS 群权限、会话和事件映射回归通过 |
+| P2 | task_relay 模式、WorkBinding、执行事实映射、人类验收 / 驳回 | 无人值守根启动、单活跃 Work 和恢复测试通过 |
+| P3 | direct_assignment 模式、required guard、Todo 升级 Work | Todo 并发、证据引用、终态守卫测试通过 |
+| P4 | public_discussion / task_relay / direct_assignment 三类模式接通 | BBS、Task、BCS 等通道权限、会话和事件映射回归通过 |
 | P5 | 外部来源 revision、同步冲突和回写 | Plugin conformance、inbox / outbox 和回环测试通过 |
 
 实现排序采用可独立上线的小步，而不是一次重构所有协作入口。每个阶段保持旧入口可用，并用功能开关控制新增 Context 入口。
@@ -932,7 +941,7 @@ Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
 - 未绑定 Context 的任务、群和 BBS 帖子继续按现路径运行。
 - 新 Context 相关 API 与状态机 profile 单独发布 schema 版本；不做无版本自由 JSON。
 - 状态机定义发布后不可原位覆盖；需要新增 revision、声明兼容策略和测试。
-- 回滚时关闭新入口和 Driver，不让已有 Work 被孤立终止；历史事件、绑定和 Task / BCS 原始事实保留。
+- 回滚时关闭新入口和对应协作模式，不让已有 Work 被孤立终止；历史事件、绑定和 Task / BCS 原始事实保留。
 - 不通过删除 Topic / Task 行或直接改写状态表来回滚；只通过功能开关和审核过的兼容版本退出。
 
 ## 14. 主要风险与决策
@@ -940,9 +949,9 @@ Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
 | 风险 | 处理 |
 | --- | --- |
 | Context 变成第二个万能图模型 | 只保存业务阶段、事件和绑定；节点执行继续留在 TaskGraph / BCS / BCS StateMachine |
-| 状态机过度灵活，无法测试 | schema、guard、effect、driver 全部用白名单；自定义条目必须通过统一 conformance suite |
+| 协作模式过度灵活，无法测试 | schema、guard、effect、mode 全部用白名单；自定义条目必须通过统一 conformance suite |
 | 公开讨论泄漏敏感执行事实 | 事件分级可见；投影在服务端过滤，公开边界不允许暴露原始日志、内部轨迹或私有路径 |
-| Driver 并发导致双执行 | active WorkBinding、auto idempotency 和 expected version / fencing 共同保证 |
+| 模式并发导致双执行 | active WorkBinding、auto idempotency 和 expected version / fencing 共同保证 |
 | 事件过多造成 Timeline 噪音 | 消息按层级、已读和压缩状态折叠；只读 projection 折叠，事件日志保留完整事实 |
 | 模型直接推进状态 | 状态变更必须来自受信 Actor / Service / Adapter 事件，LLM 输出默认无法直接作为状态事实 |
 | 高并发事件乱序 | Transition 只根据当前 state + accepted source event 推进；接收到缺失序号的事件不立即应用，等待补齐或回放 |
@@ -954,7 +963,7 @@ Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
 
 1. 状态机 Profile 由平台内置、管理员配置，还是允许经审批的消费者模板扩展？
 2. `ContextCommand` 是否采用统一 endpoint + differentiated action schema，还是保持 explicit endpoints？
-3. Driver 是否支持组合，如 Relay 与 Todo 并行活跃，或首版强制只有一个 current driver？
+3. 协作模式是否支持组合，如 task_relay 与 direct_assignment 并行活跃，或首版强制只有一个 current mode？
 4. Context 是否作为所有新 HELP Topic 默认创建，只在显式 Action 时显示，还是用户显式创建？
 5. Todo 是否作为 Context 内部实体落地，还是复用现有工作项仓储并只保留 Context 映射？
 6. `WorkBinding` 是否允许跨外部系统并存，但单个 Context 仍只允许一个活跃 Work？
