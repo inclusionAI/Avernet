@@ -347,6 +347,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcn-session-runner"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcs-domain",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bcn-storage-memory"
 version = "0.1.4-beta.3"
 dependencies = [

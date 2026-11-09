@@ -57,7 +57,14 @@ pub enum NormalizedNodeKind {
     Judge { prompt: String, branches: BTreeMap<String, Vec<String>> },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QueuedTask { pub task_id: TaskId, pub message: Message, pub admitted_at_ms: u64 }
+pub struct QueuedTask {
+    pub task_id: TaskId,
+    pub message: Message,
+    pub admitted_at_ms: u64,
+    /// Cancel bypasses dispatch, but remains bounded in the queue until saved.
+    #[serde(default)]
+    pub terminal_intent: Option<ResultIntent>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskExecution {
     pub task_id: TaskId,
@@ -107,8 +114,10 @@ pub struct Transition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EffectIntent {
-    SendAgent { request: AgentSendRequest },
-    CancelAgent { request: AgentCancelRequest },
+    /// Frozen outbox correlation survives task switches and checkpoint recovery.
+    SendAgent { task_id: TaskId, node_id: Option<String>, request: AgentSendRequest },
+    /// Cancellation owns a separate dispatch, operation and frozen target binding.
+    CancelAgent { task_id: TaskId, node_id: Option<String>, dispatch_id: DispatchId, binding: FrozenTargetBinding, request: AgentCancelRequest },
     Judge { request: JudgeRequest },
     SaveResult { intent: ResultIntent },
 }

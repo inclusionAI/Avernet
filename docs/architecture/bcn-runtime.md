@@ -196,3 +196,48 @@ update consumer compatibility tests and these docs before reducers, repositories
 applications or adapters depend on new fields. Checkpoint schema upgrades must
 be explicitly supported before new writers are enabled. No production adapter
 or runtime entrypoint is implemented by the contract crates.
+
+## Reducer implementation and outbox correlation
+
+`services/bcn-session-runner` implements the pure core contract. It normalizes
+an attached Judge into an internal `@judge:<source-id>` node after the source
+result-save barrier. Source IDs starting with `@` are reserved; synthetic Judge
+nodes do not count against the 32 source-node limit or 5 distinct bound agents.
+Judge selection is persisted as a separate immutable node result before
+selected successors can run; its output never replaces original Bot output.
+Task/node/attempt/purpose identities use length-delimited SHA-256 (64 lowercase
+hex characters) so arbitrary source names cannot overflow storage keys.
+
+Every `EffectIntent::SendAgent` carries frozen `task_id` and `node_id` in addition
+to its request. Every `EffectIntent::CancelAgent` carries frozen `task_id`,
+`node_id`, an independent `dispatch_id`, `binding` and request. Direct effects
+use `node_id: null`; structured effects use their normalized node ID. Workers
+must preserve these correlations in outbox/receipt routing, rather than infer
+them from the current task (which may have advanced by delivery/recovery time).
+Cancellation operation IDs derive per task/node/attempt; caller CancelCommand
+identity is a separate application deduplication concern. Cancellation inputs
+must match both that operation and its independent cancel dispatch identity.
+
+This is a pre-release correction of the new v1 effect shape. Request-only
+send/cancel outbox payloads cannot supply durable correlation and fail decoding
+rather than guess it from mutable session state. They require offline discard
+or explicit migration before enabling new writers; the runner does not migrate
+them. Current effect/checkpoint serialization round trips are pinned by tests.
+Existing legacy runtime formats and in-flight sessions are unaffected.
+
+Reducers ignore Delta; Connector's projection and terminal Snapshot must carry
+complete/partial output. `ResultIntent` remains immutable and is created only
+at terminal evidence, never used for token accumulation. A failed terminal
+Snapshot saves its partial output, and no successor starts before authoritative
+ResultSaved. Structured tasks save their final task result after all required
+node results; successful task output is the terminal node's output. HumanReply
+checks tenant scope and exact interaction in core; Gateway retains principal/
+target authorization. Concrete production admission remains disabled.
+
+`QueuedTask.terminal_intent` is an additive `#[serde(default)] Option<ResultIntent>`.
+Old queued-task checkpoint payloads decode with None. Queue cancellation freezes
+a Cancelled intent and emits SaveResult without dispatch. The item remains in
+the bounded queue until matching ResultSaved, then publishes Cancelled and is
+removed. Duplicate cancellation is idempotent, and scheduling skips these items.
+Unknown Direct execution freezes Failed/ContextBlocked intents for already
+queued tasks through the same barrier; newly submitted tasks fail immediately.

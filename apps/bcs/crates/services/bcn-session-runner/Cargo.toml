@@ -1,0 +1,18 @@
+[package]
+name = "bcn-session-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bcn-runtime-model.workspace = true
+bcn-runtime-api.workspace = true
+bcs-domain.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
