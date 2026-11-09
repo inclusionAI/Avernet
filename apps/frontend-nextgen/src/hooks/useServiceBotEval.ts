@@ -1,8 +1,9 @@
-import type {
-  ServiceBotEvalHistoryDto,
-  ServiceBotEvalSubmissionDto,
-} from '@/services/backendApi/bots/serviceBotEvalController';
-import { serviceBotEvalService, type ServiceBotEvalTriggerSource } from '@/services/botWorkshop/serviceBotEvalService';
+import {
+  serviceBotEvalService,
+  type ServiceBotEvalHistoryDto,
+  type ServiceBotEvalSubmissionDto,
+  type ServiceBotEvalTriggerSource,
+} from '@/services/botWorkshop/serviceBotEvalService';
 import { useCallback, useEffect, useState } from 'react';
 
 const ACTIVE_TASK_STATUSES = new Set(['INIT', 'RUNNING', 'PENDING']);

@@ -9,11 +9,11 @@ import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInsta
 import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
+import { ServiceBotEvalGateBlockedModal } from '@/components/BotWorkshop/ServiceBotEvaluation/ServiceBotEvalGateBlockedModal';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
-import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
@@ -259,35 +259,14 @@ const BotWorkshopPage: React.FC = () => {
           onEditorRequestPolicyChange={workshop.updateEditorRequestPolicy}
           onRequestAccess={workshop.requestAccess}
         />
-        <Modal
+        <ServiceBotEvalGateBlockedModal
           open={Boolean(evalGateModalBot)}
-          onOpenChange={(open) => {
-            if (!open) setEvalGateModalBot(undefined);
+          onClose={() => setEvalGateModalBot(undefined)}
+          onGoEvaluation={() => {
+            if (evalGateModalBot) openEvaluation(evalGateModalBot);
+            setEvalGateModalBot(undefined);
           }}
-        >
-          <ModalContent size="sm" showClose={false}>
-            <ModalHeader>
-              <ModalTitle>无法推进发布</ModalTitle>
-              <ModalDescription>评测未通过，无法推进发布</ModalDescription>
-            </ModalHeader>
-            <p className="m-0 text-sm leading-6 text-muted-foreground">
-              请完成评测数据上报认证，或重新发起评测后再推进发布。
-            </p>
-            <ModalFooter>
-              <Button variant="secondary" onClick={() => setEvalGateModalBot(undefined)}>
-                稍后处理
-              </Button>
-              <Button
-                onClick={() => {
-                  if (evalGateModalBot) openEvaluation(evalGateModalBot);
-                  setEvalGateModalBot(undefined);
-                }}
-              >
-                去评测认证
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+        />
         <ServicePublicationDrawer
           bot={publicationBot}
           onClose={() => {

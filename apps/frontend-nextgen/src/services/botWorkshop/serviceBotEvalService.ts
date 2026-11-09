@@ -6,6 +6,8 @@ import {
   type ServiceBotEvalSubmissionDto,
 } from '@/services/backendApi/bots/serviceBotEvalController';
 
+export type { ServiceBotEvalHistoryDto, ServiceBotEvalSubmissionDto } from '@/services/backendApi/bots/serviceBotEvalController';
+
 function assertSuccess<T>(response: { success: boolean; message?: string; data?: T }) {
   if (!response.success) throw new Error(response.message || '评测服务返回失败');
   return response.data;

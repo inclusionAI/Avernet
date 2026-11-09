@@ -1,14 +1,14 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
 import { Empty } from '@/components/ui/Empty';
 import { Segmented } from '@/components/ui/Segmented';
 import { Spin } from '@/components/ui/Spin';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
 import { History, RefreshCw } from 'lucide-react';
 import { history, useParams, useSearchParams } from '@umijs/max';
-import type { ChangeEvent } from 'react';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 type EvalTab = 'simple_cert_submit' | 'restart_eval' | 'eval_history';
 
@@ -17,30 +17,6 @@ const resolveEvalTab = (value: string | null): EvalTab => {
   return 'simple_cert_submit';
 };
 type GoalType = 'json' | 'semantic';
-
-interface EvalFileInputProps {
-  label: string;
-  accept?: string;
-  file?: File;
-  onSelect: (file?: File) => void;
-}
-
-function EvalFileInput({ label, accept, file, onSelect }: EvalFileInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  return (
-    <label className="flex h-20 cursor-pointer flex-col justify-center rounded-lg border border-dashed border-border bg-muted/30 px-4 text-center transition hover:border-primary/50 hover:bg-primary/5">
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      <span className="mt-1 truncate text-xs text-muted-foreground">{file?.name ?? '未选择文件'}</span>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        className="sr-only"
-        onChange={(event: ChangeEvent<HTMLInputElement>) => onSelect(event.target.files?.[0])}
-      />
-    </label>
-  );
-}
 
 const statusTone = (status?: string) => {
   if (!status) return 'neutral' as const;
@@ -114,13 +90,9 @@ const EvaluationPage: React.FC = () => {
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full max-w-7xl p-5 sm:p-6">
-        <button
-          type="button"
-          className="text-sm text-primary hover:underline"
-          onClick={() => history.push('/bot-workshop')}
-        >
+        <Button variant="link" onClick={() => history.push('/bot-workshop')}>
           ← 返回 Bot 管理
-        </button>
+        </Button>
         <Card className="mt-4">
           <CardHeader>
             <div>
