@@ -408,6 +408,7 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
+            session_key=session_id,
             token_minter=self._token_minter_for(binding_info, session_id, context),
         )
 
@@ -510,6 +511,7 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
+            session_key=session_id,
             token_minter=self._token_minter_for(binding_info, session_id, context),
         )
 
@@ -600,6 +602,7 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
+            session_key=session_id,
             token_minter=self._token_minter_for(binding_info, session_id, context),
         )
 

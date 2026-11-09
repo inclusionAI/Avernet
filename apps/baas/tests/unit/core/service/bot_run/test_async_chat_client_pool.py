@@ -14,6 +14,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.core.service.bot_run._async_chat_client_pool import _ConnEntry
+
 
 @pytest.fixture
 def mock_chat_client():
@@ -266,7 +268,6 @@ class TestSessionRoutedGet:
         出第二条无记录的连接——session_routed get 必须直落持有者，零新建。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -286,7 +287,6 @@ class TestSessionRoutedGet:
         属查找不校验连接模式快照。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -319,7 +319,6 @@ class TestSessionRoutedGet:
         """单条连接 tracks_session 抛错不传染——继续查其它连接。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -1008,7 +1007,6 @@ class TestOutboundAuthRefresh:
     ):
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -1040,7 +1038,6 @@ class TestOutboundAuthRefresh:
         """v3 BotWebSocketClient 无该转发方法（duck-typed）——复用不动 cookie。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=1)
@@ -1094,3 +1091,49 @@ class TestOutboundAuthRefresh:
         assert mock_cls.call_count == 1, "复用路径不得重建连接"
         assert mock_client.proxypass_token_minter is not None
         await pool.close_all()
+
+
+class TestSessionRouting:
+    @pytest.mark.asyncio
+    async def test_same_session_reuses_owner_with_multiple_connections(self):
+        """同一 session 即使池有多个连接也必须回到原 owner。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        first = MagicMock()
+        first.is_connected = True
+        first.is_reconnecting = False
+        first.has_active_sessions = True
+        first.active_session_count = 1
+        first.tracks_session = MagicMock(return_value=False)
+        first.refresh_outbound_auth = MagicMock()
+        first.connect = AsyncMock()
+        first.close = AsyncMock()
+
+        second = MagicMock()
+        second.is_connected = True
+        second.is_reconnecting = False
+        second.has_active_sessions = False
+        second.active_session_count = 0
+        second.tracks_session = MagicMock(return_value=False)
+        second.refresh_outbound_auth = MagicMock()
+        second.connect = AsyncMock()
+        second.close = AsyncMock()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_pool.AsyncChatClient",
+            side_effect=[first, second],
+        ):
+            pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+            owner = await pool.get("sandbox-1", "ws://host/ws", session_key="s1")
+            assert owner is first
+
+            # 另一个 session 触发第二条连接，模拟默认多连接池。
+            await pool.get("sandbox-1", "ws://host/ws", session_key="s2")
+            assert len(pool._clients["sandbox-1"]) == 2
+
+            first.tracks_session.return_value = True
+            routed = await pool.get("sandbox-1", "ws://host/ws", session_key="s1")
+            assert routed is first
+            await pool.close_all()

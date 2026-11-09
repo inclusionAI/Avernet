@@ -239,7 +239,11 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            session_key=session_id,
+            token_minter=self._token_minter_for(sandbox_id),
         )
 
         try:
@@ -307,7 +311,11 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            session_key=session_id,
+            token_minter=self._token_minter_for(sandbox_id),
         )
 
         auth_token = context.build_auth_token() if context else None
@@ -372,7 +380,11 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            session_key=session_id,
+            token_minter=self._token_minter_for(sandbox_id),
         )
 
         try:

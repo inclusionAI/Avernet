@@ -1599,7 +1599,7 @@ class TestInjectMessageSemaphore:
         await asyncio.sleep(0.01)
 
         await client.close()
-        with pytest.raises(NotConnectedError, match="Connection lost"):
+        with pytest.raises(NotConnectedError, match="Connection changed"):
             await waiter
 
         first.cancel()
@@ -1678,6 +1678,70 @@ class TestInjectMessageSemaphore:
             client.inject_message("m3", session_key="s3"),
         )
         assert call_count == 3
+
+
+    @pytest.mark.asyncio
+    async def test_close_reconnect_does_not_let_old_inject_clear_new_marker(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """旧连接的取消收口不能删除重连后同 session 的新占位。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "old"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        await client.connect()
+
+        old_started = asyncio.Event()
+        old_release = asyncio.Event()
+
+        async def old_inject(*args, **kwargs):
+            old_started.set()
+            await old_release.wait()
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_inject.side_effect = old_inject
+        old_task = asyncio.create_task(
+            client.inject_message("old", session_key="same-session")
+        )
+        await old_started.wait()
+        await client.close()
+
+        new_client = MagicMock()
+        new_client.connect = AsyncMock(
+            return_value={"server": {"host": "new"}, "features": {}}
+        )
+        new_client.close = AsyncMock()
+        new_client.connected = True
+        new_started = asyncio.Event()
+        new_release = asyncio.Event()
+
+        async def new_inject(*args, **kwargs):
+            new_started.set()
+            await new_release.wait()
+            return {"ok": True}
+
+        new_client.chat_inject = AsyncMock(side_effect=new_inject)
+        mock_bot_ws.side_effect = [new_client]
+        await client.connect()
+        new_task = asyncio.create_task(
+            client.inject_message("new", session_key="same-session")
+        )
+        await new_started.wait()
+
+        old_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await old_task
+        assert client._active_inject_sessions == {"same-session"}
+
+        new_release.set()
+        await new_task
+        assert client._active_inject_sessions == set()
+        await client.close()
 
 
 # ==================== ChatRequestError propagation tests ====================

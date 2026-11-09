@@ -282,7 +282,7 @@ class AsyncChatClient:
 
         self._client: BotWebSocketClient | None = None
 
-        # Condition 保护 _sessions 和 _active_sessions 的并发访问，
+        # Condition 保护 session state/active sets 的并发访问，
         # 同时用于同一 sessionKey 排队等待（wait/notify 机制）
         self._condition = asyncio.Condition()
 
@@ -310,6 +310,9 @@ class AsyncChatClient:
         self._reconnect_monitor: asyncio.Task[None] | None = None
         # 断连事件：BotWebSocketClient 断连时 set，_reconnect_loop 等待此事件
         self._disconnect_event: asyncio.Event = asyncio.Event()
+        # 连接代次：使 close/reconnect 后旧的 inject waiter/RPC 不能
+        # 使用新连接，也不能在 finally 中清理新代次的 session 占位。
+        self._connection_generation = 0
 
     @property
     def is_connected(self) -> bool:
@@ -341,11 +344,12 @@ class AsyncChatClient:
     def tracks_session(self, session_key: str) -> bool:
         """该连接是否持有此 session 的在途运行——R4-1/R6-1/R7-F2 归属查询。
 
-        三信号：①编排层 _sessions（调用方**等待期间**——等待中取消
-        落在等待者上永远正确）；②底层 A2A run 在途（**run 执行期**——
+        四信号：①编排层 _sessions（调用方**等待期间**——等待中取消
+        落在等待者上永远正确）；②inject 写入占位（**注入 RPC 期间**——
+        多连接池仍须把同 session 的后续请求定向到同一连接）；③底层 A2A run 在途（**run 执行期**——
         wait_result=False 的 ACK 返回后 _sessions 即被 pop，但 body
         task 仍在消费流，CancelTask 的 engine_task_id 记录还活着）；
-        ③v3 fallback 归属标记（**附件 run 执行期**——B3 reroute 的 run
+        ④v3 fallback 归属标记（**附件 run 执行期**——B3 reroute 的 run
         建在 v3 专用连接上，标记由后台终态帧释放，不随等待方收口）。
         只看①会把"非等待发送后取消"退回普通负载分配，命中无记录的
         连接 → RUN_NOT_TRACKED 永不发 CancelTask。
@@ -446,6 +450,7 @@ class AsyncChatClient:
         except Exception as e:
             logger.error(f"Connect failed: {e}")
             raise e
+        self._connection_generation += 1
         self._client = _client
         # 启动后台重连监控（仅在 max_retries > 0 时）
         if self._max_retries > 0 and self._reconnect_monitor is None:
@@ -790,6 +795,7 @@ class AsyncChatClient:
                 "Not connected. Call connect() first or wait for reconnection."
             )
 
+        connection_generation = self._connection_generation
         session_registered = False
         semaphore_acquired = False
         try:
@@ -808,9 +814,12 @@ class AsyncChatClient:
                             f"Timed out waiting for session_key={session_key} "
                             f"(timeout={self._session_key_timeout}s)"
                         )
-                if not self.is_connected:
+                if (
+                    connection_generation != self._connection_generation
+                    or not self.is_connected
+                ):
                     raise NotConnectedError(
-                        "Connection lost while waiting to inject message."
+                        "Connection changed while waiting to inject message."
                     )
                 self._active_inject_sessions.add(session_key)
                 session_registered = True
@@ -821,8 +830,11 @@ class AsyncChatClient:
                 await self._concurrency_sem.acquire()
                 semaphore_acquired = True
 
-            if not self.is_connected:
-                raise NotConnectedError("Connection lost before injecting message.")
+            if (
+                connection_generation != self._connection_generation
+                or not self.is_connected
+            ):
+                raise NotConnectedError("Connection changed before injecting message.")
 
             # 发送消息（不等待响应）
             logger.info("[inject] Injecting message: session_key=%s", session_key)
@@ -863,7 +875,7 @@ class AsyncChatClient:
                 "[inject] injected message not wait, return as soon as possible"
             )
         finally:
-            if session_registered:
+            if session_registered and connection_generation == self._connection_generation:
                 async with self._condition:
                     self._active_inject_sessions.discard(session_key)
                     self._condition.notify_all()
@@ -981,6 +993,7 @@ class AsyncChatClient:
     async def close(self) -> None:
         """关闭连接并清理所有 session state。"""
         self._closed_intentionally = True
+        self._connection_generation += 1
 
         # 取消重连监控任务
         if self._reconnect_monitor and not self._reconnect_monitor.done():
@@ -1805,6 +1818,9 @@ class AsyncChatClient:
             payload,
             self.uri,
         )
+        self._connection_generation += 1
+        if self._active_inject_sessions:
+            asyncio.create_task(self._clear_active_inject_sessions())
         for session_key, state in self._sessions.items():
             if state.chat_complete.is_set():
                 continue
@@ -1812,6 +1828,12 @@ class AsyncChatClient:
                 state, session_key, "connection lost", "disconnect"
             )
         self._notify_disconnect()
+
+    async def _clear_active_inject_sessions(self) -> None:
+        """断连时释放旧连接的 inject 占位并唤醒同 session waiters。"""
+        async with self._condition:
+            self._active_inject_sessions.clear()
+            self._condition.notify_all()
 
     def _notify_disconnect(self) -> None:
         """通知连接断开（由 _reconnect_loop 或外部调用）。

@@ -1950,6 +1950,7 @@ class TestSendMessageExtended:
                 conn_info.target,
                 conn_info.ws_url,
                 {"x-proxypass-token": conn_info.token},
+                session_key=SESSION_ID,
                 token_minter=_MOCK_ANY,
             )
 
