@@ -9,7 +9,9 @@ export const flowRunLinkMysqlUpgradeDdl = `ALTER TABLE flow_run_links
   MODIFY COLUMN parent_node_id VARCHAR(255) NOT NULL,
   MODIFY COLUMN child_workflow_id VARCHAR(255) NOT NULL`;
 
-/** Fail closed when a managed or externally provisioned schema is too narrow. */
+/** Fail closed when a managed or externally provisioned schema is too narrow.
+ * Additional database-managed columns, such as gmt_modify, are not required.
+ */
 export async function assertFlowRunLinkMysqlSchema(db: IDatabase): Promise<void> {
   // Some servers may silently shorten an index. Verify the actual schema
   // before recording the migration; failure must keep writes unavailable.
