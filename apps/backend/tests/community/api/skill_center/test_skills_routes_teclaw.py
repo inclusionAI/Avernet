@@ -1,10 +1,11 @@
-from tests.community.bot_address_fakes import support_legacy_locator
 """Endpoint coverage for the teclaw branches of the readme / delete / parameters
 routes — they resolve the provider and build the skill service with the teclaw
 path adapter. A teclaw-provider resolver drives those branches end-to-end."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+from tests.community.bot_address_fakes import support_legacy_locator
 
 import pytest
 from fastapi import FastAPI
@@ -567,7 +568,8 @@ def test_readme_route_handles_target_bot_repository_failure(caplog):
 
 
 @pytest.mark.parametrize("method", ["get", "post"])
-def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
+@pytest.mark.parametrize("engine,expected_locator", [("openclaw", "owner-u"), ("deepseek_harness", "team-entity")])
+def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method, engine, expected_locator):
     """协作者上传并操作参数时，设备解析必须使用 Bot owner 而非 author。"""
 
     lookup_svc = MagicMock()
@@ -580,6 +582,7 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         "user_id": "collaborator-author",
     }
     lookup_svc.parse_local_skill_config = AsyncMock(return_value=None)
+    lookup_svc._parse_skill_from_git.return_value = None
     client, _, _ = _app(lookup_svc)
     injector = client.app.state.injector
 
@@ -594,7 +597,7 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         "bot_id": "b1",
         "owner_id": "owner-u",
         "entity_id": "team-entity",
-        "active_engine": "openclaw",
+        "active_engine": engine,
         "bot_type": "personal",
         "status": "ACTIVE",
     }
@@ -614,9 +617,9 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
     assert response.status_code == 200, response.text
     parameter_factory.create.assert_awaited_once_with(
         bot_id="b1",
-        user_id="owner-u",
+        user_id=expected_locator,
     )
-    if method == "post":
+    if method == "post" and engine == "openclaw":
         lookup_svc.parse_local_skill_config.assert_awaited_once_with(
             "local://skills-local/x",
             "b1",

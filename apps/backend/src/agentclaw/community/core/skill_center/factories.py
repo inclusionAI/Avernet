@@ -21,6 +21,7 @@ from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
 from injector import inject
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.config_compose.teclaw_paths import (
@@ -66,6 +67,7 @@ from agentclaw.community.core.skill_center.skill_set_service_factory_protocol im
 from agentclaw.community.core.workspace.skill_layout import (
     legacy_local_locator_roots,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:
     # Runtime-keyed device dispatchers and the workspace path factory are
@@ -834,9 +836,47 @@ class SkillParameterServiceFactory(SkillParameterServiceFactoryProtocol):
         self,
         resolver: "DeviceContextResolver",
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
+        bot_repo: BotRepository | None = None,
     ) -> None:
         self._resolver = resolver
         self._device_fs_dispatcher = device_fs_dispatcher
+        self._parameter_bot_repo = bot_repo
+
+    def _parameter_bot(self, bot_id: str, user_id: str):
+        if self._parameter_bot_repo is None:
+            return None
+        return BotAddressResolver(self._parameter_bot_repo).resolve(
+            bot_id=bot_id, legacy_owner_id=user_id,
+        ).bot
+
+    def _parameter_file_path(self, bot_id: str, bot, provider: str) -> str | None:
+        """Use a DSH workspace locator for ARCA; retain the default for other engines."""
+        if provider != "arca" or bot is None:
+            return None
+        if bot.get("active_engine") != "deepseek_harness":
+            return None
+        entity_id, entity_type = bot.get("entity_id"), bot.get("entity_type")
+        if any(
+            not isinstance(value, str) or not value or value in {".", ".."}
+            or "/" in value or "\\" in value
+            for value in (entity_id, entity_type, bot_id)
+        ):
+            raise ValueError("Invalid Bot identity for Skill parameter workspace")
+        # This is the existing Engine API locator, not the Backend's physical
+        # aidesktop root. DSH maps its suffix into its configured workspace.
+        return str(Path("/aidesktop") / f"aidesktop_{get_current_env()}" / "bolt_data"
+                   / f"{entity_type}_{entity_id}" / bot_id / "deepseek_harness"
+                   / "workspace" / "skills" / "skill_parameters.json")
+
+    def _parameter_device_context(self, bot_id: str, user_id: str):
+        bot = self._parameter_bot(bot_id, user_id)
+        # Resource locators can be entity IDs; ARCA connection authorization
+        # expects the current owner after the caller has been authorized.
+        if bot and bot.get("active_engine") == "deepseek_harness":
+            return self._resolver.resolve_for_bot(
+                bot_id, user_id, connection_user_id=bot["owner_id"],
+            ), bot
+        return self._resolver.resolve_for_bot(bot_id, user_id), bot
 
     async def create(
         self,
@@ -844,15 +884,16 @@ class SkillParameterServiceFactory(SkillParameterServiceFactoryProtocol):
         user_id: str,
         load_on_init: bool = True,
     ) -> SkillParameterService:
-        ctx = self._resolver.resolve_for_bot(bot_id, user_id)
+        ctx, bot = self._parameter_device_context(bot_id, user_id)
         device_fs = self._device_fs_dispatcher.dispatch(ctx)
         # teclaw does not use skill_parameters.json (the engine neither owns nor
         # consumes it), so disable engine read/write for it — load/save become
-        # no-ops. arca/baas/local keep reading/writing the engine-absolute default.
+        # no-ops. DSH on ARCA uses its workspace; other engines keep the default.
         engine_io_enabled = ctx.provider != "teclaw"
         service = SkillParameterService(
             storage=DeviceFileSystemParameterStorage(device_fs),
             engine_io_enabled=engine_io_enabled,
+            file_path=self._parameter_file_path(bot_id, bot, ctx.provider),
         )
         if load_on_init:
             await service.async_load()

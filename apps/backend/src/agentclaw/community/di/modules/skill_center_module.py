@@ -881,10 +881,12 @@ class SkillCenterModule(
         self,
         resolver: DeviceContextResolver,
         device_fs_dispatcher: DeviceFilesystemDispatcher,
+        bot_repo: BotRepository,
     ) -> SkillParameterServiceFactory:
         return SkillParameterServiceFactory(
             resolver=resolver,
             device_fs_dispatcher=device_fs_dispatcher,
+            bot_repo=bot_repo,
         )
 
     # Legacy callers still use a lazy scan-service factory; G4 exact-version

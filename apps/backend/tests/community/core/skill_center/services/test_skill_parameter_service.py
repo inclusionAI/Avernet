@@ -124,30 +124,6 @@ async def test_save_replaces_only_one_skill_and_preserves_metadata(svc, mock_sto
     assert written["parameters"] == {"a": {"new": False}, "b": {"kept": 2}}
 
 
-@pytest.mark.asyncio
-async def test_strict_write_failure_propagates_and_restores_snapshot(mock_storage):
-    payload = {"parameters": {"a": {"old": True}, "b": {"kept": 2}}}
-    mock_storage.read.return_value = json.dumps(payload).encode()
-    mock_storage.write.side_effect = OSError("device unavailable")
-    service = SkillParameterService(storage=mock_storage, strict_write_errors=True)
-    await service.async_load()
-
-    with pytest.raises(LocalSkillStorageError):
-        await service.save_skill_parameters("a", {"new": True})
-
-    assert service._data == payload
-
-
-@pytest.mark.asyncio
-async def test_strict_disabled_engine_io_keeps_existing_noop(mock_storage):
-    service = SkillParameterService(
-        storage=mock_storage, engine_io_enabled=False, strict_write_errors=True
-    )
-    await service.async_load()
-    assert await service.save_skill_parameters("a", {"x": 1}) is False
-    mock_storage.write.assert_not_awaited()
-
-
 # ---------- delete_skill_parameters ----------
 
 

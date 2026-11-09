@@ -81,7 +81,10 @@ async def get_skill_parameters(
     parameter_service = await _create_skill_parameter_service(
         parameter_service_factory=parameter_service_factory,
         bot_id=str(bot["bot_id"]),
-        owner_id=str(bot["owner_id"]),
+        owner_id=str(
+            (bot.get("entity_id") if bot.get("active_engine") == "deepseek_harness" else None)
+            or bot["owner_id"]
+        ),
     )
     parameters = parameter_service.get_skill_parameters(skill_name)
 
@@ -132,10 +135,13 @@ async def save_skill_parameters(
     trusted_owner_id = str(bot["owner_id"])
     trusted_entity_id = str(bot.get("entity_id") or trusted_owner_id)
     trusted_engine_type = str(bot.get("active_engine") or engine_type)
-    trusted_runtime_engine_type = resolve_runtime_engine_for_bot(
-        bot_id=trusted_bot_id,
-        owner_id=trusted_owner_id,
-        bot_repo=bot_repo,
+    trusted_runtime_engine_type = (
+        trusted_engine_type if trusted_engine_type == "deepseek_harness" else
+        resolve_runtime_engine_for_bot(
+            bot_id=trusted_bot_id,
+            owner_id=trusted_owner_id,
+            bot_repo=bot_repo,
+        )
     )
     trusted_entity_type = str(bot.get("entity_type") or "staff")
     skill_name = skill.get("link_name") or skill.get("name")
@@ -145,11 +151,14 @@ async def save_skill_parameters(
 
     # teclaw owns its local-skill files: parse SKILL.md from the container via
     # device_fs; non-teclaw keeps the host-FS read (byte-identical).
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
-        resolver,
-        trusted_bot_id,
-        trusted_owner_id,
-    )
+    if trusted_engine_type == "deepseek_harness":
+        is_teclaw, local_skill_adapter = False, None
+    else:
+        is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
+            resolver,
+            trusted_bot_id,
+            trusted_owner_id,
+        )
 
     # 从 SKILL.md 实时解析 parameters 定义
     parameter_schema = []
@@ -204,7 +213,7 @@ async def save_skill_parameters(
     parameter_service = await _create_skill_parameter_service(
         parameter_service_factory=parameter_service_factory,
         bot_id=trusted_bot_id,
-        owner_id=trusted_owner_id,
+        owner_id=trusted_entity_id if trusted_engine_type == "deepseek_harness" else trusted_owner_id,
     )
     await parameter_service.save_skill_parameters(skill_name, request.parameters)
 

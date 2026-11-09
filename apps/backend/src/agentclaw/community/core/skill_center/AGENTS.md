@@ -297,7 +297,7 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 - `SkillQueryService` 已支持 Bot-facing Center 详情、内容、参数前置解析与 Direct 操作，并支持无 Bot 的共享 README。Center 内容只读最新 PUBLISHED 数据库 Version 对应的 Canonical 精确版本；读取不调用 Engine、不下载，也不证明 Runtime 已应用该版本。
 - Center 的 PUBLIC/Space/offline 事实由 `CenterSkillAccessRepositoryProtocol` 提供；Bot owner/member 与 Space member 分别校验。返回值可投影为当前 Bot 的只读视图，但不得修改共享 `ac_skill.user_id/bolt_id`。PRIVATE 且没有唯一 Space binding、PUBLIC 同时绑定 Space 等矛盾状态必须 fail closed。
 - 参数仍保存在 Bot Engine 的历史 name-keyed `skill_parameters.json`；它不是新数据库、原生注入或 observed-runtime 接口。只有明确缺失才能初始化为空，读取拒绝、损坏或异常必须零写；替换一个 Skill 时保留其它 Skill 与根元信息。
-- 参数服务可由设备工厂显式启用严格写失败传播；写入失败抛出领域错误并回退本次内存修改。默认和禁用 Engine IO 的既有语义保持不变。
+- ARCA 上的 DSH 参数文件使用该 Bot 的 `deepseek_harness/workspace/skills/skill_parameters.json` 逻辑路径，由 Engine 映射到实际 workspace；其他引擎保留原默认路径。
 - Local shared README 从 Skill 行的 `owner_id + bot_id` 精确定位，不使用全局唯一 bot_id 假设。Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在；上述实现不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
 
 ## 默认来源撤销与共享软链收敛

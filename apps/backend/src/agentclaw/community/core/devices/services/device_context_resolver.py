@@ -5,7 +5,7 @@ caller 用 (bot_id, user_id) 入参,resolver 查 binding.device_provider 拿 pro
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -26,7 +26,6 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 
 
 _BINDING_ROUTED_PROVIDERS = frozenset({"baas", "teclaw"})
@@ -61,13 +60,15 @@ class DeviceContextResolver:
 
     def resolve_for_bot(
         self, bot_id: str, user_id: str, *, device_uuid: str | None = None,
-        expected_arca_bot: Callable[[], dict[str, Any] | None] | None = None,
+        connection_user_id: str | None = None,
     ) -> DeviceContext:
         """resolve bot → DeviceContext。
 
         Args:
             bot_id: 业务 bot ID
             user_id: 操作者身份(用于权限/审计,内部用作 device_affinity)
+            connection_user_id: 调用方完成授权后提供的当前 Owner，仅用于建立连接；
+                binding 仍按 user_id 定位，避免把资源 entity 和 owner 混用。
             device_uuid: 可选设备 UUID,用于多实例场景锁定特定实例;不传则由
                 provider 自动选活跃实例(单实例 provider 忽略)。命不中时底层 builder
                 抛 ``ConnInfoBuildError`` — **不静默回落**到其它实例。
@@ -84,34 +85,15 @@ class DeviceContextResolver:
             )
 
         provider = binding.device_provider
-        bot = expected_arca_bot() if provider == "arca" and expected_arca_bot is not None else None
-        if bot is not None:
-            if (
-                binding.id != bot.get("binding_id")
-                or binding.entity_id != bot.get("entity_id")
-                or binding.entity_type != bot.get("entity_type")
-                or (binding.device_props or {}).get("bolt_id") != bot_id
-                or not isinstance(bot.get("owner_id"), str)
-                or not bot["owner_id"]
-                or binding.status != "ACTIVE"
-                or binding.env != get_current_env()
-            ):
-                raise DeviceNotBoundError("DeviceContextResolver: invalid Arca binding identity")
         if provider not in self._builders:
             raise UnknownProviderError(
                 f"DeviceContextResolver: unknown provider={provider!r} for bot={bot_id}"
             )
 
         builder = self._builders[provider]
-        # DSH skill parameters use the resource entity as locator after the
-        # caller was authorized; the device service needs the current owner.
-        connection_user = bot["owner_id"] if bot is not None else user_id
-        raw_conn_info = builder.build(binding, connection_user, device_uuid=device_uuid)
+        builder_user_id = connection_user_id if provider == "arca" and connection_user_id else user_id
+        raw_conn_info = builder.build(binding, builder_user_id, device_uuid=device_uuid)
         conn_info = self._normalize_schema(raw_conn_info, provider)
-        if bot is not None:
-            sandbox_id = (binding.device_props or {}).get("sandbox_id")
-            if not sandbox_id or conn_info.get("sandbox_id") != sandbox_id:
-                raise DeviceNotBoundError("DeviceContextResolver: Arca sandbox identity changed")
 
         bot = self._bot_repository.get_by_id_and_owner(bot_id, user_id)
         if bot is None:
