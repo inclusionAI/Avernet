@@ -1,7 +1,7 @@
 # BCSFuse 文档入口
 
 通用能力和 TC 的文档由 Avernet 维护。支付宝业务、TR、内部平台、发布配置和内部压测由 OCB 维护。
-同一契约只维护一份正文；其他文档引用它。**TC 当前未接入新的 Card 运维接口。**
+同一契约只维护一份正文；其他文档引用它。TC V2 提供 Card 管理与单张 Card 的索引状态查询。
 
 ## 先按用途找文档
 
@@ -15,7 +15,7 @@
 | 调用 TC 现有产品接口 | [外部产品 API](api/api-external.md) |
 | 调用 TC 管理和管理员接口 | [管理 API](api/api-reference.md) |
 | TC 应用组装、日志与兼容规则 | [应用组装契约](architecture/composition-contract.md) |
-| TC 向 Card/Doc 迁移的后续计划 | [迁移计划（待实施）](architecture/tc-card-migration.md) |
+| TC Card/Doc 迁移 | [迁移边界](architecture/tc-card-migration.md)、[部署与导入](deploy/tc-card-migration.md) |
 | 向量持久化与同步 | [存储契约](architecture/vector-persistence-contract-v1.md)、[Qdrant 模式](qdrant-modes.md) |
 
 ## 安装与运行
