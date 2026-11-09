@@ -40,3 +40,20 @@ export function MenuSection({ children }: { children: ReactNode }) {
   if (items.length === 0) return null;
   return <>{items}</>;
 }
+
+/** 禁用按钮自身不接收鼠标事件，由外层承接整行的悬停和键盘焦点。 */
+export function DisabledActionHint({ children, description }: { children: ReactNode; description?: string }) {
+  if (!description) return <>{children}</>;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} aria-label="删除说明" className="flex w-full cursor-not-allowed [&>button]:pointer-events-none">
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72">{description}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
