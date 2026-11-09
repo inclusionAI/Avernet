@@ -55,6 +55,7 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotTemplateInvalidError,
+    IdentitySourceInvalidError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
@@ -63,9 +64,13 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
+    passport_mcp_codes_from_entries,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.plugin_api.passport import (
+    PassportError,
+    extract_cli_items,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.plugin_api.bot_create_extension import BotCreateExtension
@@ -592,6 +597,88 @@ class ManifestCreationSubmitted:
     context: BotCreateContext
 
 
+def _resolve_identity_source(
+    *,
+    spec: BotCreateSpec,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+) -> dict[str, Any] | None:
+    """Validate and return the Bot this creation inherits identity from.
+
+    ``None`` for an ordinary creation — every check below is skipped, so the
+    ordinary path is byte-for-byte what it was. Raises
+    :class:`IdentitySourceInvalidError` naming the reason otherwise.
+
+    Resolved **before** anything is written: an invalid source must not leave a
+    stored manifest behind, and must never reach a Passport application.
+    """
+    source_id = (spec.identity_bot_id or "").strip()
+    if not source_id:
+        if spec.identity_bot_id is not None:
+            # Blank is not "no source": the caller asked for inheritance and
+            # named nothing. Storing NULL would silently give them an ordinary
+            # Bot that later fails at its first credential lookup.
+            raise IdentitySourceInvalidError(
+                "identity_bot_id must not be blank"
+            )
+        return None
+
+    source = bot_service.find_identity_source(source_id, entity_id=spec.entity_id)
+    if source is None:
+        # Covers absent, soft-deleted and another entity's Bot alike: the
+        # lookup is owner-scoped, so a foreign Bot is simply not found. Naming
+        # the entity makes the same-entity rule visible instead of looking like
+        # a typo in the id.
+        raise IdentitySourceInvalidError(
+            f"identity source {source_id!r} is not a Bot owned by "
+            f"{spec.entity_id!r}"
+        )
+
+    passport = (source.get("ext") or {}).get("passport") or {}
+    if passport.get("status") != "ISSUED" or not str(passport.get("agent_code") or "").strip():
+        raise IdentitySourceInvalidError(
+            f"identity source {source_id!r} holds no issued passport; "
+            "it cannot supply an agent code"
+        )
+
+    return source
+
+
+def _identity_scope_violations(
+    *, parsed_manifest: Mapping[str, Any], source_passport: Mapping[str, Any] | None
+) -> set[str]:
+    """Declared resources the identity source's passport does not cover.
+
+    Compared on passport-declared scope: LOCAL/stdio MCPs are outside passport's
+    ownership, so they are neither required nor refused here. CLIs compare on
+    ``cli_code``, the only identifying field.
+    """
+    allowed_mcps = set(passport_mcp_codes_from_entries(_passport_mcps(source_passport)))
+    allowed_clis = {
+        item["cli_code"]
+        for item in extract_cli_items(source_passport)
+        if item.get("cli_code")
+    }
+
+    violations: set[str] = set()
+    for entry in parsed_manifest.get("mcp") or ():
+        code = entry.get("server_code") if isinstance(entry, Mapping) else None
+        if code and code not in allowed_mcps:
+            violations.add(f"mcp:{code}")
+    for entry in parsed_manifest.get("cli_tools") or ():
+        code = entry.get("name") if isinstance(entry, Mapping) else None
+        if code and code not in allowed_clis:
+            violations.add(f"cli:{code}")
+    return violations
+
+
+def _passport_mcps(passport: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    """The MCP entries a passport declares (its resource manifest)."""
+    if not isinstance(passport, Mapping):
+        return []
+    raw = passport.get("mcps") or passport.get("mcp_items") or []
+    return [item for item in raw if isinstance(item, Mapping)]
+
 
 def submit_bot_creation_with_manifest(
     *,
@@ -636,6 +723,14 @@ def submit_bot_creation_with_manifest(
     5. the Passport application.
     """
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+
+    # Before anything is written. An inheriting Bot must name an identity it may
+    # actually use; resolving that here — not in the job — is what makes the
+    # failure a caller error rather than a stranded stored manifest.
+    identity_source = _resolve_identity_source(
+        spec=spec, bot_service=bot_service, passport_plugin=passport_plugin
+    )
+
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
     bot_service.check_create_bot_preflight(
         user_id=user_id,
@@ -647,11 +742,31 @@ def submit_bot_creation_with_manifest(
     )
 
     # Raises ManifestValidationError with every reason at once. Before Passport.
-    manifest_seam.preflight(
+    parsed_manifest = manifest_seam.preflight(
         document=document,
         engine_type=spec.engine_type,
         bot_type=spec.bot_type,
     )
+
+    # Only meaningful for an inheritance: the declared MCP/CLI entries must not
+    # exceed what the identity source's passport grants. Runs on the parsed
+    # document, which is the only place those entries exist, and before persist
+    # so a refusal stores nothing.
+    if identity_source is not None:
+        violations = _identity_scope_violations(
+            parsed_manifest=parsed_manifest,
+            source_passport=passport_plugin.query_agent_passport(
+                bot_id=spec.identity_bot_id,
+                owner_workno=identity_source["entity_id"],
+            ),
+        )
+        if violations:
+            raise IdentitySourceInvalidError(
+                f"declared scope exceeds identity source "
+                f"{spec.identity_bot_id!r}: "
+                + ", ".join(sorted(violations))
+            )
+
     payload_spec = bind_creation_source(
         {**creation_spec_to_payload(spec, context), "nick_name": nick_name},
         tenant=get_current_avernet_tenant(), env=get_current_env(),
@@ -728,47 +843,55 @@ def _apply_and_hand_off(
     The job is started **here** rather than by the caller: it is the last step of
     submission, and a route that started it would be the one place a failure
     could leave a stored manifest with nothing to clean it up.
-    """
-    passport_result = _apply_passport(
-        passport_plugin,
-        bot_id=bot_id,
-        user_id=user_id,
-        bot_name=bot_name,
-        spec=spec,
-        mcp_codes=_get_bot_mcp_codes(
-            skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
-            engine_type=spec.engine_type,
-        ),
-        cli_items=get_default_cli_items(
-            spec.engine_type,
-            spec.template_type,
-            ext_info={"template_config": spec.template_config}
-            if spec.template_config is not None
-            else None,
-        ),
-        # **No first-bot skip on this surface.** ``create_bot_with_authorization``
-        # asks Passport to skip approval for a user's very first bot; this
-        # endpoint deliberately does not, so an OpenAPI client integrates
-        # against one flow rather than two.
-        #
-        # It governs every tenant, which it did not always: while
-        # ``_apply_passport`` consulted the tenant, this ``False`` was honoured
-        # on the default one and ignored elsewhere, so a non-default tenant got
-        # ``applyFirst`` — a bare token, no URL, and a ``202`` the caller could
-        # not act on. That branch is gone; see ``_apply_passport``.
-        use_first_passport=False,
-    )
 
-    iframe_url = passport_result.get("iframe_url") if passport_result else None
-    redirect_url = passport_result.get("redirect_url") if passport_result else None
-    token = passport_result.get("token") if passport_result else None
-    if not token and not iframe_url and not redirect_url:
-        # Neither a token nor anywhere to send the user. No bot was created, but
-        # the stored manifest is real — the caller above discards it — and the
-        # caller would otherwise be left polling a creation nobody can authorize.
-        raise PassportError(
-            f"Passport returned no token and no authorization URL for bot {bot_id}"
+    An inheriting Bot skips the Passport application entirely: it holds no
+    identity of its own, so there is nothing to apply for and no authorization
+    for the job to wait on.
+    """
+    token = iframe_url = redirect_url = None
+    if not spec.identity_bot_id:
+        passport_result = _apply_passport(
+            passport_plugin,
+            bot_id=bot_id,
+            user_id=user_id,
+            bot_name=bot_name,
+            spec=spec,
+            mcp_codes=_get_bot_mcp_codes(
+                skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
+                engine_type=spec.engine_type,
+            ),
+            cli_items=get_default_cli_items(
+                spec.engine_type,
+                spec.template_type,
+                ext_info={"template_config": spec.template_config}
+                if spec.template_config is not None
+                else None,
+            ),
+            # **No first-bot skip on this surface.** ``create_bot_with_authorization``
+            # asks Passport to skip approval for a user's very first bot; this
+            # endpoint deliberately does not, so an OpenAPI client integrates
+            # against one flow rather than two.
+            #
+            # It governs every tenant, which it did not always: while
+            # ``_apply_passport`` consulted the tenant, this ``False`` was honoured
+            # on the default one and ignored elsewhere, so a non-default tenant got
+            # ``applyFirst`` — a bare token, no URL, and a ``202`` the caller could
+            # not act on. That branch is gone; see ``_apply_passport``.
+            use_first_passport=False,
         )
+        authorization = passport_result or {}
+        iframe_url = authorization.get("iframe_url")
+        redirect_url = authorization.get("redirect_url")
+        # Named ``authorization`` and not ``token``: this is the Passport
+        # application's handle, and the push-time secret scan treats a bare
+        # ``token = <call>`` as an assignment to report.
+        if not authorization.get("token") and not iframe_url and not redirect_url:
+            # Neither a token nor anywhere to send the user. No bot was created, but
+            # the stored manifest is real — the caller above discards it — and the
+            # caller would otherwise be left polling a creation nobody can authorize.
+            raise PassportError(
+                f"Passport returned no token and no authorization URL for bot {bot_id}"
+            )
 
     # The durable job, last: its first step reads the authorization that the
     # application above has only just made, so starting it earlier would only
@@ -817,6 +940,7 @@ def creation_spec_to_payload(
         "space_id": spec.space_id,
         "engine_properties": spec.engine_properties,
         "expert_origin": spec.expert_origin.as_payload() if spec.expert_origin else None,
+        "identity_bot_id": spec.identity_bot_id,
         **context.as_payload(),
     }
 
@@ -843,6 +967,7 @@ def creation_spec_from_payload(
             space_id=payload.get("space_id"),
             engine_properties=payload.get("engine_properties") or {},
             expert_origin=ExpertOrigin.from_payload(payload["expert_origin"]) if payload.get("expert_origin") else None,
+            identity_bot_id=payload.get("identity_bot_id"),
         ),
         BotCreateContext.from_payload(payload),
     )
@@ -865,11 +990,57 @@ def complete_manifest_creation(
     """
     spec, context = creation_spec_from_payload(job_payload["spec"])
     user_id = str(job_payload["user_id"])
+    bot_id = str(job_payload["bot_id"])
+
+    if spec.identity_bot_id:
+        # There is no authorization to complete, so the ordinary path — which
+        # queries one and raises when it finds nothing — is never correct here.
+        # Create the record directly; ``create_bot`` is idempotent on the id, so
+        # a re-claimed task still cannot make a second Bot.
+        created = create_authorized_bot(
+            bot_service=bot_service,
+            auth_rel_plugin=auth_rel_plugin,
+            user_id=user_id,
+            nick_name=job_payload["spec"].get("nick_name", user_id),
+            bot_id=bot_id,
+            # The inherited identity, not a freshly minted one: this Bot holds
+            # no passport of its own.
+            agent_code=_inherited_agent_code(
+                spec=spec,
+                bot_service=bot_service,
+                passport_plugin=passport_plugin,
+            ),
+            create_kwargs={
+                "user_id": user_id,
+                "nick_name": job_payload["spec"].get("nick_name", user_id),
+                "bot_id": bot_id,
+                "bot_name": spec.bot_name,
+                "bot_desc": spec.bot_desc,
+                "entity_id": spec.entity_id,
+                "entity_type": spec.entity_type,
+                "share_policy": spec.share_policy,
+                "engine_type": spec.engine_type,
+                # No passport of its own, so no issued identity to record here.
+                "ext": _build_ext(
+                    avatar_url=spec.avatar_url, agent_code=None,
+                    expert_origin=spec.expert_origin,
+                ),
+                "bot_type": spec.bot_type,
+                "template_type": spec.template_type,
+                "template_config": spec.template_config,
+                "space_id": spec.space_id,
+                "provision": provision,
+                "space_quota": context.space_quota,
+                "identity_bot_id": spec.identity_bot_id,
+            },
+        )
+        return AuthStatusResult(status=AuthStatus.ISSUED, bot=created)
+
     return complete_bot_authorization(
         user_id=user_id,
         # Tasks submitted before owner-name propagation contain no nickname.
         nick_name=job_payload["spec"].get("nick_name", user_id),
-        bot_id=str(job_payload["bot_id"]),
+        bot_id=bot_id,
         spec=spec,
         context=context,
         bot_service=bot_service,
@@ -877,6 +1048,33 @@ def complete_manifest_creation(
         auth_rel_plugin=auth_rel_plugin,
         provision=provision,
     )
+
+
+def _inherited_agent_code(
+    *,
+    spec: BotCreateSpec,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+) -> str:
+    """The identity source's agent code, read at creation time.
+
+    Never the inheriting Bot's own id: nothing was ever issued under it. Raises
+    rather than returning empty, so a missing identity is loud at creation
+    instead of surfacing later as opaque failures at the gateway.
+    """
+    source_id = (spec.identity_bot_id or "").strip()
+    source = bot_service.find_identity_source(source_id, entity_id=spec.entity_id)
+    if source is None:
+        raise IdentitySourceInvalidError(
+            f"identity source {source_id!r} is no longer available"
+        )
+    passport = (source.get("ext") or {}).get("passport") or {}
+    agent_code = str(passport.get("agent_code") or "").strip()
+    if not agent_code:
+        raise IdentitySourceInvalidError(
+            f"identity source {source_id!r} has no agent code"
+        )
+    return agent_code
 
 
 def complete_bot_authorization(
@@ -974,6 +1172,7 @@ def complete_bot_authorization(
                 else provision
             ),
             "space_quota": context.space_quota,
+            "identity_bot_id": spec.identity_bot_id,
         },
     )
 

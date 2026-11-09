@@ -1182,7 +1182,10 @@ class BotService(BotServiceProtocol):
             return
         try:
             current_raw = self._repository.count_by_owner(
-                owner_id, exclude_bot_type="desktop", exclude_active_engine="teclaw"
+                owner_id,
+                exclude_bot_type="desktop",
+                exclude_active_engine="teclaw",
+                exclude_identity_inheriting=True,
             )
             current = int(current_raw)
         except (TypeError, ValueError):
@@ -1458,6 +1461,7 @@ class BotService(BotServiceProtocol):
         space_id: Optional[int] = None,
         provision: bool = True,
         space_quota: bool = False,
+        identity_bot_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1643,6 +1647,7 @@ class BotService(BotServiceProtocol):
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
+                "identity_bot_id": identity_bot_id,
             }
             initial_layout = self._skills_pool_native_creation_policy.select(
                 env=get_current_env(),
@@ -2823,6 +2828,18 @@ class BotService(BotServiceProtocol):
         page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
         items = (page or {}).get("items") or []
         return items[0] if items else None
+
+    def find_identity_source(
+        self, bot_id: str, *, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The Bot that supplies an inheriting Bot's AgentPass identity.
+
+        Same-entity only: an inheriting Bot must run under an identity owned by
+        the entity that owns it, so a Bot from another entity is not a candidate
+        even when it exists. Soft-deleted Bots are not returned.
+        """
+        bot = self._repository.get_by_id_and_owner(bot_id, entity_id)
+        return bot or None
 
     def get_bot_classification(
         self, bot_id: str, entity_id: Optional[str] = None
@@ -4072,6 +4089,22 @@ class BotService(BotServiceProtocol):
         if (bot.get("ext") or {}).get("digital_employee"):
             raise BotOperationNotAllowedError("已绑定数字员工的 Bot 不支持删除")
 
+        # An identity Bot is the authority every inheriting Bot runs under.
+        # Deleting it would strangle them: they hold no passport of their own and
+        # cannot be re-pointed, and a destroyed passport has no undo. Refuse
+        # while any live inheriting Bot still references it.
+        raw_inheriting = self._repository.count_identity_bot_children(
+            bot_id, owner_id=user_id
+        )
+        # Only a genuine count blocks deletion. The protocol returns ``int``;
+        # anything else means the repository could not answer, and treating that
+        # as "has dependents" would make every Bot undeletable.
+        inheriting = raw_inheriting if isinstance(raw_inheriting, int) else 0
+        if inheriting:
+            raise BotOperationNotAllowedError(
+                f"该 Bot 仍是 {inheriting} 个继承 Bot 的身份来源，请先删除这些 Bot"
+            )
+
         # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
         # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
         # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
@@ -4205,12 +4238,22 @@ class BotService(BotServiceProtocol):
                         raise BotServiceError(f"设备释放失败，无法删除 Bot: {e}")
 
             # Step 2: 通知 Passport 服务销毁 Passport（阻塞流程）
-            try:
-                self._passport_plugin.destroy_passport(bot_id, resource_owner_id)
-                logger.info(f"[bot_service.delete_bot] destroyPassport success: bot_id={bot_id}, owner_workno={user_id}")
-            except PassportError as e:
-                logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
-                raise BotServiceError(f"销毁 Passport 失败: {e}")
+            # An identity-inheriting Bot never minted a passport, so there is
+            # nothing to destroy: skipping is structural, not a swallowed error.
+            # The identity Bot's passport is untouched by its inheriting Bots.
+            if bot.get("identity_bot_id"):
+                logger.info(
+                    f"[bot_service.delete_bot] skip destroyPassport for "
+                    f"identity-inheriting bot: bot_id={bot_id}, "
+                    f"source={bot.get('identity_bot_id')!r}"
+                )
+            else:
+                try:
+                    self._passport_plugin.destroy_passport(bot_id, resource_owner_id)
+                    logger.info(f"[bot_service.delete_bot] destroyPassport success: bot_id={bot_id}, owner_workno={user_id}")
+                except PassportError as e:
+                    logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
+                    raise BotServiceError(f"销毁 Passport 失败: {e}")
 
             # Soft delete the bot (use soft_delete_by_owner to ensure we only delete the owner's bot)
             result = self._repository.soft_delete_by_owner(bot_id, user_id)
@@ -5996,8 +6039,15 @@ class BotService(BotServiceProtocol):
         )
 
         # 提取 agent_code
-        from agentclaw.community.core.bot_management.utils import resolve_agent_code
-        agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
+        from agentclaw.community.core.bot_management.utils import (
+            identity_source_bot,
+            resolve_agent_code,
+        )
+        agent_code = resolve_agent_code(
+            bot=bot,
+            passport_plugin=self._passport_plugin,
+            source_bot=identity_source_bot(bot, self._repository),
+        )
 
         # 3. 热更新设备 header
         try:

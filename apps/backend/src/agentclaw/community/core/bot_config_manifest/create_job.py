@@ -371,6 +371,13 @@ class BotCreateWithManifestHandler:
             return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
+            # An identity-inheriting Bot has no authorization of its own, so the
+            # waiting path — which polls for one and eventually discards the
+            # payload — is never correct for it. Completion creates it directly,
+            # and it is idempotent on the id, so re-claiming stays safe.
+            if payload["spec"].get("identity_bot_id"):
+                self._create_the_bot(payload)
+                return Reschedule(POLL_DELAY_SECONDS)
             return self._before_the_bot_exists(payload)
         if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             return self._after_the_record_exists(payload, bot)

@@ -385,6 +385,7 @@ class BotRepository(Protocol):
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         """Count bots by owner_id.
 
@@ -397,6 +398,9 @@ class BotRepository(Protocol):
                 Used to exclude desktop bots from cloud bot limits.
             exclude_active_engine: Optional case-insensitive engine exclusion for
                 quota checks. NULL engines still count. Default counts all engines.
+            exclude_identity_inheriting: If provided, exclude bots that inherit
+                another bot's identity. Those hold no passport of their own, so
+                they consume no identity slot.
         """
         ...
 
@@ -438,6 +442,15 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Guards deletion of an identity Bot: while any live Bot depends on its
+        passport, deleting the source would strand them with no identity and no
+        way to be re-pointed. Soft-deleted Bots are not counted.
+        """
+        ...
+
     def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         """Check if the owner has a live Bot of the requested type."""
         ...

@@ -706,9 +706,29 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         )
 
         # ========== 步骤 3: 取 agent_code ==========
-        from agentclaw.community.core.bot_management.utils import resolve_agent_code
+        from agentclaw.community.core.bot_management.utils import (
+            IdentityResolutionError,
+            resolve_agent_code,
+        )
 
-        agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
+        # An identity-inheriting Bot resolves through its source Bot: nothing was
+        # ever issued under its own id, so the ordinary lookup finds nothing.
+        identity_source_id = bot.get("identity_bot_id")
+        source_bot = (
+            self._bot_query.get_by_id_and_owner(identity_source_id, resource_owner_id)
+            if identity_source_id
+            else None
+        )
+        try:
+            agent_code = resolve_agent_code(
+                bot=bot, passport_plugin=self._passport_plugin, source_bot=source_bot
+            )
+        except IdentityResolutionError as exc:
+            logger.error(
+                f"[bootstrap_device_auth] Identity unresolved: device_id={device_id}, "
+                f"bot_id={bot_id}, source={identity_source_id!r}, error={exc}"
+            )
+            raise DeviceServiceError(str(exc)) from exc
         if agent_code:
             logger.info(
                 "bootstrap_device_auth_agent_code_resolved device_id=%s bot_id=%s owner_id=%s",
@@ -726,8 +746,11 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         try:
             if self._passport_plugin is None:
                 raise DeviceServiceError("passport_plugin not injected into DeviceServiceRouter")
+            # The token belongs to whoever holds the identity: the source Bot for
+            # an inheriting one, this Bot otherwise.
+            token_bot_id = identity_source_id or bot_id
             agent_pass_token = (
-                self._passport_plugin.query_token(bot_id, resource_owner_id) or ""
+                self._passport_plugin.query_token(token_bot_id, resource_owner_id) or ""
             )
             logger.info(
                 f"[bootstrap_device_auth] Token queried: device_id={device_id}, "

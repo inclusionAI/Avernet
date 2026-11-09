@@ -65,6 +65,29 @@ def build_baas_restart_ext(
     return ext
 
 
+class IdentityResolutionError(RuntimeError):
+    """An identity-inheriting Bot's agent code could not be resolved.
+
+    Raised instead of returning an empty string: an inheriting Bot with no agent
+    code is a provisioning fault, and an empty value would let it start and then
+    fail opaquely at the gateway.
+    """
+
+
+def identity_source_bot(bot: dict[str, Any], repo: Any) -> dict[str, Any] | None:
+    """The Bot whose identity ``bot`` inherits, or ``None`` for an ordinary one.
+
+    Every agent-code lookup goes through here: an inheriting Bot has nothing
+    issued under its own id, so resolving it any other way finds nothing.
+    Callers pass the result to :func:`resolve_agent_code`; ``None`` means
+    "ordinary path", which is what every non-inheriting Bot gets.
+    """
+    source_id = bot.get("identity_bot_id")
+    if not source_id:
+        return None
+    return repo.get_by_id_and_owner(str(source_id), bot.get("owner_id") or "")
+
+
 def extract_agent_code_from_ext(bot: dict[str, Any]) -> str | None:
     """从 bot dict 的 ext 字段提取 agent_code。
 
@@ -126,22 +149,52 @@ def resolve_agent_code(
     bot_id: str = "",
     owner_id: str = "",
     passport_plugin: "PassportPlugin | None" = None,
+    source_bot: dict[str, Any] | None = None,
 ) -> str:
     """统一获取 agent_code。
 
     优先级：
-    1. 传入 bot dict -> 从 bot.ext.passport.agent_code 提取
-    2. 以上取不到 -> fallback 调用 passport 接口 (使用 bot_id + owner_id)
+    1. ``source_bot``（继承 Bot 的身份来源）-> 从其 ``ext.passport`` 提取
+    2. 传入 bot dict -> 从 bot.ext.passport.agent_code 提取
+    3. 以上取不到 -> fallback 调用 passport 接口 (使用 bot_id + owner_id)
+
+    继承 Bot（``identity_bot_id`` 非空）没有自己的护照，用它自己的 bot_id
+    查询只会得到空值，因此调用方必须传入 ``source_bot``；缺失时抛错而不是返回空串，
+    否则会退化成"看起来成功、实际无身份"的 Bot。
 
     Args:
         bot: Bot 信息字典（可选）
         bot_id: Bot ID（fallback 接口用）
         owner_id: 所有者 ID（fallback 接口用）
         passport_plugin: PassportPlugin (required only for fallback path).
+        source_bot: 继承 Bot 的身份来源 Bot 行；识别到继承 Bot 但未提供时抛错。
 
     Returns:
-        agent_code，获取失败返回空字符串
+        agent_code；普通 Bot 获取失败时返回空字符串。
+
+    Raises:
+        IdentityResolutionError: 继承 Bot 的 agent_code 无法解析。
     """
+    inherits = bool(bot and bot.get("identity_bot_id"))
+
+    if source_bot is not None:
+        agent_code = extract_agent_code_from_ext(source_bot)
+        if agent_code:
+            return agent_code
+        source_id = source_bot.get("bot_id", "") or ""
+        source_owner = source_bot.get("owner_id", "") or source_bot.get("entity_id", "")
+        if source_id and source_owner and passport_plugin is not None:
+            agent_code = query_agent_code_from_passport(
+                source_id, source_owner, passport_plugin
+            )
+            if agent_code:
+                return agent_code
+    elif inherits:
+        raise IdentityResolutionError(
+            "identity-inheriting bot requires its source bot's row; "
+            "resolving against its own id returns nothing"
+        )
+
     # 1. 优先从 bot.ext 提取
     if bot is not None:
         agent_code = extract_agent_code_from_ext(bot)
@@ -157,6 +210,10 @@ def resolve_agent_code(
         if agent_code:
             return agent_code
 
+    if inherits:
+        raise IdentityResolutionError(
+            "identity-inheriting bot has no agent code from its source bot"
+        )
     return ""
 
 

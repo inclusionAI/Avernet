@@ -299,10 +299,14 @@ class FriendCatalogActions:
             logger.info(f"[_create_auth_relationship_for_approval] Skipped (OPEN mode): bot_id={bot_id}, operator_id={operator_id}")
             return
 
-        from agentclaw.community.core.bot_management.utils import resolve_agent_code
+        from agentclaw.community.core.bot_management.utils import (
+            identity_source_bot,
+            resolve_agent_code,
+        )
         agent_code = resolve_agent_code(
             bot=bot,
             passport_plugin=self._passport_plugin,
+            source_bot=identity_source_bot(bot, self._bot_repository),
         ) or None
         if not agent_code:
             raise BotPublicServiceError(

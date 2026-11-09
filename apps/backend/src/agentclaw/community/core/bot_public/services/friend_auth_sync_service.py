@@ -31,7 +31,10 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.utils import resolve_agent_code
+from agentclaw.community.core.bot_management.utils import (
+    identity_source_bot,
+    resolve_agent_code,
+)
 from agentclaw.community.core.repository.protocols.bot.bot import BotRepository
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -73,7 +76,11 @@ class FriendAuthSyncService:
         if not bot:
             raise BotNotFoundError(bot_id)
 
-        agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
+        agent_code = resolve_agent_code(
+            bot=bot,
+            passport_plugin=self._passport_plugin,
+            source_bot=identity_source_bot(bot, self._bot_repo),
+        )
         if not agent_code:
             raise AgentCodeUnavailableError(bot_id)
 
