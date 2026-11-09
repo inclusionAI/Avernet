@@ -104,10 +104,15 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     ApplyStep(Category.IDENTITY, 1),
     ApplyStep(Category.RESOURCES, 2),
     ApplyStep(Section.BOT_FILE_SYNC, 3),
-    ApplyStep(Category.SKILLS, 4),
-    ApplyStep(Category.MCP, 5),
-    ApplyStep(Category.ENGINE_CONFIG, 6),
-    ApplyStep(Category.CLI_TOOLS, 7),
+    # bot_config runs once the dst bot row exists: the render-screen handler
+    # writes dst rows through RenderScreenService, whose bot-existence check
+    # needs the row _create_the_bot wrote — so this is on_container, after the
+    # resource/file constructs that touch the live mount.
+    ApplyStep(Category.BOT_CONFIG, 4),
+    ApplyStep(Category.SKILLS, 5),
+    ApplyStep(Category.MCP, 6),
+    ApplyStep(Category.ENGINE_CONFIG, 7),
+    ApplyStep(Category.CLI_TOOLS, 8),
 )
 
 __all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]
