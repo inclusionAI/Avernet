@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/bot_management/services/test_restart_authorization_refresh.py
+  s_e095b743b596b9::t_19c8fd5cb52211 152-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "13e17334b651549ac2ce170eb8a893b4f177cb30",
+  "prompts": {},
+  "sessions": {
+    "s_e095b743b596b9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19b43-31a2-7ed0-9a4f-dc0566d9eec6",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

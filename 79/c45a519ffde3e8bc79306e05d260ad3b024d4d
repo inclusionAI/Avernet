@@ -1,0 +1,2900 @@
+apps/backend/tests/community/adapters/http/openapi_v1/test_runtime_list_timing.py
+  s_099b525d116ac6::t_49e9865f0688a6 38-39
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  s_099b525d116ac6::t_e8365afc9b90ac 87-96
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineDetail.tsx
+  s_099b525d116ac6::t_53b10c081afdba 38,157-159,162
+apps/backend/src/agentclaw/community/adapters/http/task/task_read_routes.py
+  s_099b525d116ac6::t_f65a70718baf6c 9-11,18,73-75,77-79,81,108,161-163,165-166
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_099b525d116ac6::t_5cf3ce40ab0b00 20-21,309-310,515,564
+apps/backend/tests/community/core/bot_knowledge/test_selection_diagnostics.py
+  s_099b525d116ac6::t_1fea177664edd4 34-37
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskRoutineDrawer.tsx
+  s_099b525d116ac6::t_53b10c081afdba 56,67,175
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/access_log.py
+  s_099b525d116ac6::t_49e9865f0688a6 82
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskRoutineHistoryDrawer.tsx
+  s_099b525d116ac6::t_53b10c081afdba 39,49,126
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineRunConversation.test.tsx
+  s_099b525d116ac6::t_e8365afc9b90ac 68-115
+apps/frontend-nextgen/src/components/ScheduledTasks/RoutineRunConversation.tsx
+  s_099b525d116ac6::t_53b10c081afdba 2,6-9,12-14,20,22,30-40,45-47,58-61
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/router.py
+  s_099b525d116ac6::t_69af850be8639b 15-17,25,166-168,170-172,174,203,305-307,309-310
+apps/backend/tests/community/endpoints/test_openapi_routine_targets.py
+  s_099b525d116ac6::t_1fea177664edd4 357-359
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebarSection.tsx
+  s_099b525d116ac6::t_53b10c081afdba 15-16,39,93
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  s_099b525d116ac6::t_40bb062dded931 75-86
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  s_099b525d116ac6::t_9c5e5308437279 128
+  s_099b525d116ac6::t_c78feabcdfd281 133
+  s_099b525d116ac6::t_12c2515b6eebbe 223
+  s_099b525d116ac6::t_d3f6042b4a64ec 138
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  s_099b525d116ac6::t_13e2fd741b7c41 739
+.github/workflows/singlebox-coverage.yml
+  s_099b525d116ac6::t_b882ed795a4108 40-41,49,52,242-243
+.github/workflows/unit-tests.yml
+  s_099b525d116ac6::t_5ade0e8bcfbbbe 106-120,276-281,316-318
+AGENTS.md
+  s_099b525d116ac6::t_69c70e82d70481 234,236,245-250
+apps/baas/docs/adr/0005-gated-publish-pipeline.md
+  s_099b525d116ac6::t_3b0fc43eb63e2f 47-55
+apps/baas/src/secbaas/community/api/device_manage/_protocols.py
+  s_099b525d116ac6::t_5c6e9c1300b01d 106,108-116
+apps/baas/src/secbaas/community/core/service/device_manage/_device_service.py
+  s_099b525d116ac6::t_c4af856b6043c3 131-172,2160,2201-2217,2303-2307,2312-2321,2474-2479
+apps/baas/src/secbaas/community/core/service/device_manage/_device_service_arca_ttl.py
+  s_099b525d116ac6::t_25b91247dbdc01 214-219,225
+apps/baas/src/secbaas/community/core/service/publish_manage/_publish_service.py
+  s_099b525d116ac6::t_8b939d0054fe9b 133-158,664,1207,1410,1414-1415,1422,1426-1427,1467-1477,1483-1484,3738
+apps/baas/tests/e2e/asgi/mock_paas_failure/test_destroy_device_failure.py
+  s_099b525d116ac6::t_c5922d90184548 27-35,37,57-58,70,92
+apps/baas/tests/unit/core/service/device_manage/test_device_manage.py
+  s_099b525d116ac6::t_f0d8f0123fa80d 21,26-27,611,620-1082
+apps/baas/tests/unit/core/service/publish_manage/test_publish_service.py
+  s_099b525d116ac6::t_bd2e7e6088bf3c 31-55,9476-9482,9485-9490,9494-9495,9497-9575,9577-9591
+apps/backend/docs/session-lock-api.md
+  s_099b525d116ac6::t_3fdfd8fcfd9a71 1-13
+apps/backend/specs/2026-11-06-runtime-read-budget/spec.md
+  s_099b525d116ac6::t_620c137d6cf8af 1-55
+apps/backend/specs/caller-asc-owner-refresh/001-spec-output.md
+  s_099b525d116ac6::t_7e2d5160fc6c8b 1-22
+apps/backend/specs/caller-asc-owner-refresh/002-code-report.md
+  s_099b525d116ac6::t_3deb1210c49213 1-65
+apps/backend/src/agentclaw/community/adapters/http/bot_collaborator/converter_lock.py
+  s_099b525d116ac6::t_982e7ba419a9ff 1-23
+apps/backend/src/agentclaw/community/adapters/http/bot_collaborator/router.py
+  s_099b525d116ac6::t_b7c80953fff662 10-12,863
+apps/backend/src/agentclaw/community/adapters/http/bot_collaborator/session_lock_router.py
+  s_099b525d116ac6::t_4df9193b44bb7f 1-142
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_099b525d116ac6::t_a684cf469d46e2 47,49-55,269-276,278-293,367,410-420,422-437,479,491,515,522,530,536-537,539-540
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router_listings.py
+  s_099b525d116ac6::t_5cf3178802e133 79-87,379-382,403-419
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas.py
+  s_099b525d116ac6::t_ba2f13c44eae64 915-918
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/connection/router.py
+  s_099b525d116ac6::t_d7c958001cf7cb 65,232-233
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/converter_creation.py
+  s_099b525d116ac6::t_1eb73722688362 1,17,47-52,55-74,89-92,94-95
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/dependencies_session_files.py
+  s_099b525d116ac6::t_f57781e084f517 5,7,10-14,24,29-42,52,57,69,87-88,111-128
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_099b525d116ac6::t_b588b12b3a0479 53,82,268-272,295,627,646,760,766-769,771,776,806,812-815,817,821-822,862-865
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/schemas.py
+  s_099b525d116ac6::t_d677c018b22e8d 5,252-260
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/schemas_helpers.py
+  s_099b525d116ac6::t_9eae1171045b5c 4,283-287,292-294
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_099b525d116ac6::t_be865f80f542d3 756
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/skill_sets/router.py
+  s_099b525d116ac6::t_f6efb3b0da626b 8,93-94,137-139,169-170,236-237,346-347,371-372
+apps/backend/src/agentclaw/community/adapters/http/session_resources/router.py
+  s_099b525d116ac6::t_d42501f1e06cdf 39,99
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  s_099b525d116ac6::t_8767bb5d2680f1 11,784-786,788
+apps/backend/src/agentclaw/community/api/README.md
+  s_099b525d116ac6::t_3b423c977f79db 133,138-140
+apps/backend/src/agentclaw/community/api/engine_session_files.py
+  s_099b525d116ac6::t_b85233fdfc9665 1-29
+apps/backend/src/agentclaw/community/api/scheduled_caller_refresh.py
+  s_099b525d116ac6::t_2666d7a54ffa38 1-4
+apps/backend/src/agentclaw/community/core/bot_copy/status_derive.py
+  s_099b525d116ac6::t_13c8911ef553fc 35-42,66-74,90-91
+apps/backend/src/agentclaw/community/core/bot_dormant/baas_client.py
+  s_099b525d116ac6::t_454448cc2a5889 97,195-196,198,200,203
+apps/backend/src/agentclaw/community/core/bot_dormant/service.py
+  s_099b525d116ac6::t_94050c128d1fdd 882-884,893
+apps/backend/src/agentclaw/community/core/bot_knowledge/agents_md_sync.py
+  s_099b525d116ac6::t_8ceab09f4dc170 183-186,192-199
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_099b525d116ac6::t_060738dee783a7 75
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/hosted_workspace_mixin.py
+  s_099b525d116ac6::t_0cd7456d228cbb 10,13-15,17-19,25,44,86,131-134
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_request.py
+  s_099b525d116ac6::t_127423c65783f7 181
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_099b525d116ac6::t_67b290e3772b67 19,121-122,147-149,397,400,581,606-607,1804-1805,1823-1824,2047,2320,3275-3282,4912-4914,5278,6042-6063
+apps/backend/src/agentclaw/community/core/bot_management/services/template_service.py
+  s_099b525d116ac6::t_26b29550f16035 157
+apps/backend/src/agentclaw/community/core/bot_overview/README.md
+  s_099b525d116ac6::t_c0f87ec0807649 17,21-24,46-59
+apps/backend/src/agentclaw/community/core/bot_overview/engines/aicoding.py
+  s_099b525d116ac6::t_7b162f54a6984e 3-11,16-33,35,38-147,152-154,156-161,163-176
+apps/backend/src/agentclaw/community/core/bot_overview/payloads.py
+  s_099b525d116ac6::t_d06e336368e7b4 26-43,45,47-52,59-99,109-113
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_099b525d116ac6::t_948a17aa4aa7e8 11-12,102-114
+apps/backend/src/agentclaw/community/core/caller_identity/scheduled_refresh.py
+  s_099b525d116ac6::t_c16efb985f1fd5 1-28
+apps/backend/src/agentclaw/community/core/devices/services/sandbox_overrides.py
+  s_099b525d116ac6::t_1cdb5719d16a08 142,145-147
+apps/backend/src/agentclaw/community/core/engine_runtime/README.md
+  s_099b525d116ac6::t_d1f1c02c7550e5 20,80-90
+apps/backend/src/agentclaw/community/core/engine_runtime/bot_lookup.py
+  s_099b525d116ac6::t_174ffe257ba8b0 1-47
+apps/backend/src/agentclaw/community/core/engine_runtime/connection.py
+  s_099b525d116ac6::t_c68da590d28b30 26-27,180,238,244
+apps/backend/src/agentclaw/community/core/engine_runtime/relay.py
+  s_099b525d116ac6::t_0cb6627a915a72 32,93,112,122-124,149-150,336-337
+apps/backend/src/agentclaw/community/core/repository/implementations/devices/device.py
+  s_099b525d116ac6::t_901f750efd0cfe 385-417
+apps/backend/src/agentclaw/community/core/repository/protocols/devices.py
+  s_099b525d116ac6::t_7ef82b278c6358 237-247
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/service_publish_env.py
+  s_099b525d116ac6::t_dc9c8a985229bb 48-50
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_099b525d116ac6::t_4bd3587be5b72c 17-19,414-417,425-428
+apps/backend/src/agentclaw/community/core/session_resources/README.md
+  s_099b525d116ac6::t_53fa289ba1cac1 17-18,25-28,39-43
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_099b525d116ac6::t_d77725ac37afb1 1-215
+apps/backend/src/agentclaw/community/core/session_resources/materialization.py
+  s_099b525d116ac6::t_e3d4b97fc7d811 104
+apps/backend/src/agentclaw/community/core/session_resources/repository/models.py
+  s_099b525d116ac6::t_74c7faef6f0129 34,80
+apps/backend/src/agentclaw/community/core/session_resources/service.py
+  s_099b525d116ac6::t_f8b080e0dec246 5,32,40,60,71,82-83,169,184-211
+apps/backend/src/agentclaw/community/core/session_resources/sql/2026_10_30_session_file_creator_name.sql
+  s_099b525d116ac6::t_22e9d3e9c15e57 1-4
+apps/backend/src/agentclaw/community/core/session_resources/sql/ac_session_resource.sql
+  s_099b525d116ac6::t_b69749d4eb27a4 18
+apps/backend/src/agentclaw/community/core/session_resources/types.py
+  s_099b525d116ac6::t_0fd827cf5b8915 14-21,66
+apps/backend/src/agentclaw/community/core/task/task_runner/modal_executor/task_executor.py
+  s_099b525d116ac6::t_76383849e3778f 12-13,34-36,68-75,293-297,564-594,926-931,933,947
+apps/backend/src/agentclaw/community/di/modules/bot_overview_module.py
+  s_099b525d116ac6::t_17010f2e4f4c3e 17-20,28-31,33
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_099b525d116ac6::t_cd09ab405cb541 7-10,130-135
+apps/backend/src/agentclaw/community/di/modules/engine_runtime_module.py
+  s_099b525d116ac6::t_a40f350cbe07e6 3,53,79
+apps/backend/src/agentclaw/community/di/modules/session_resources_module.py
+  s_099b525d116ac6::t_007235171f3071 11-12,30,43,83,95
+apps/backend/tests/community/adapters/http/bot_chat/test_otel_router.py
+  s_099b525d116ac6::t_3f640ec981cf93 154,204
+apps/backend/tests/community/adapters/http/bot_management/test_refresh_token_callback.py
+  s_099b525d116ac6::t_294e1a446df604 20
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_handoff_sessions.py
+  s_099b525d116ac6::t_448c302616f527 118-124
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_operator_access.py
+  s_099b525d116ac6::t_8831e844344382 88-90
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_creation_compat.py
+  s_099b525d116ac6::t_821851921e40e1 1-296
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_099b525d116ac6::t_e4d813303f6ac1 7-8,26,96,99,162-188,226,257-258,264-265,277-379,472-474,489,495,502-575,688-689,697,709,731-760
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_sessions.py
+  s_099b525d116ac6::t_70faaa2364da65 7,37-46,198,203,208-212,215-216,218,220-226,233,236-239,241-254,256-258,262,271-272,275-280,282,284-289,311,817-818,887-888
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  s_099b525d116ac6::t_2aca91f80c8c81 21-23,32-34,136-144
+apps/backend/tests/community/adapters/http/openapi_v1/test_app_only_listings.py
+  s_099b525d116ac6::t_178cf5d60801da 88-90,98-100,308-318,613-620
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_overview.py
+  s_099b525d116ac6::t_a7be7810831762 79-89,129-141
+apps/backend/tests/community/adapters/http/openapi_v1/test_skill_set_resources_concurrency.py
+  s_099b525d116ac6::t_6fa93f5580dcc7 1-46
+apps/backend/tests/community/adapters/http/openapi_v1/test_skill_set_routes_concurrency.py
+  s_099b525d116ac6::t_245b198eb54792 1-53
+apps/backend/tests/community/adapters/http/session_resources/test_router.py
+  s_099b525d116ac6::t_e0ed1f4b3971a2 169,391-407
+apps/backend/tests/community/adapters/http/task/test_read_event_loop.py
+  s_099b525d116ac6::t_a1f8c1cf26318e 1-183
+apps/backend/tests/community/api/bot_management/test_template_write_rejection_envelopes.py
+  s_099b525d116ac6::t_a3c00803d98ae7 1-63
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  s_099b525d116ac6::t_9307d731e07177 64-65,387
+apps/backend/tests/community/bot_copy/test_status_derive.py
+  s_099b525d116ac6::t_39ca3aac57c520 89-101
+apps/backend/tests/community/core/bot_collaborator/test_session_lock_router_errors.py
+  s_099b525d116ac6::t_72a3ba6953cbcd 1-38
+apps/backend/tests/community/core/bot_dormant/test_baas_client.py
+  s_099b525d116ac6::t_b7f87f81451828 200
+apps/backend/tests/community/core/bot_knowledge/test_agents_md_sync.py
+  s_099b525d116ac6::t_7a2952bfb072ce 4-6,9-10,352-357,360,367-480
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_service.py
+  s_099b525d116ac6::t_58712320053273 437-453
+apps/backend/tests/community/core/bot_management/engines/aicoding/test_hosted_workspace_rethrow.py
+  s_099b525d116ac6::t_e47c071e277fd4 1-66
+apps/backend/tests/community/core/bot_management/services/test_bot_service_restart_baas_envs.py
+  s_099b525d116ac6::t_39937510914202 379,425,583,588,605,625,639,652,668
+apps/backend/tests/community/core/bot_management/services/test_bot_service_template_write_extension.py
+  s_099b525d116ac6::t_fe3823dcf89248 1-169
+apps/backend/tests/community/core/bot_management/services/test_restart_template_refresh.py
+  s_099b525d116ac6::t_ffc62a6760fec3 187-189
+apps/backend/tests/community/core/bot_management/services/test_scheduled_caller_refresh.py
+  s_099b525d116ac6::t_b193bd061da96f 1-108
+apps/backend/tests/community/core/bot_management/services/test_session_file_creator_env.py
+  s_099b525d116ac6::t_f8cd741668ccb1 1-40
+apps/backend/tests/community/core/bot_management/test_bot_template_write_extension_seam.py
+  s_099b525d116ac6::t_0226dd8128f042 11,176-190
+apps/backend/tests/community/core/bot_overview/test_bot_overview_service.py
+  s_099b525d116ac6::t_21582035708273 22-25,51-57,123,125,129-134,142-249
+apps/backend/tests/community/core/engine_runtime/test_bot_lookup.py
+  s_099b525d116ac6::t_b8cd59ffda1183 1-81
+apps/backend/tests/community/core/engine_runtime/test_handoff_addressing.py
+  s_099b525d116ac6::t_15d0368655df2a 12,68-69
+apps/backend/tests/community/core/resources/test_resource_file_service.py
+  s_099b525d116ac6::t_835ad3396a2c86 83-149
+apps/backend/tests/community/core/service_bot/services/test_publish_owner_handoff_lifecycle.py
+  s_099b525d116ac6::t_694c218432e371 45
+apps/backend/tests/community/core/session_resources/test_creator_name.py
+  s_099b525d116ac6::t_21c5dee0e58e87 1-164
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_099b525d116ac6::t_b0592cf77d829d 1-248
+apps/backend/tests/community/core/session_resources/test_materialization.py
+  s_099b525d116ac6::t_ad03a08a3c919e 75,114,168,176
+apps/backend/tests/community/core/session_resources/test_repository.py
+  s_099b525d116ac6::t_53631be16f0e7c 3-4,179-197
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_099b525d116ac6::t_528ac5f4c0d41e 235,249
+apps/backend/tests/community/core/task/task_runner/integration/test_dispatch_single_bot.py
+  s_099b525d116ac6::t_2927a3092e249b 2,31,33,35,577-603,704-773
+apps/backend/tests/community/di/test_scheduled_caller_refresh.py
+  s_099b525d116ac6::t_d5ec2b67a0aad9 1-11
+apps/backend/tests/community/endpoints/test_openapi_create_with_manifest.py
+  s_099b525d116ac6::t_1e0b79f2d23a0e 27,536-541,549-551,556-557,984-991,1020,1026-1030
+apps/backend/tests/community/endpoints/test_openapi_session_files.py
+  s_099b525d116ac6::t_677287418c3fcd 12,199-212
+apps/backend/tests/community/endpoints/test_public_bots_overview.py
+  s_099b525d116ac6::t_66ef888399e040 105
+apps/backend/tests/community/endpoints/test_session_lock_router.py
+  s_099b525d116ac6::t_383abebe76918c 16,18,472-548
+apps/backend/tests/community/http/test_copy_retry.py
+  s_099b525d116ac6::t_79de0dd5d0c75f 67-72,76,84,91,122,140,153
+apps/backend/tests/community/http/test_copy_route.py
+  s_099b525d116ac6::t_f0ba66914157cb 12,17,21-22,53-55,183-261
+apps/backend/tests/community/repository/devices/test_device_repository_unified.py
+  s_099b525d116ac6::t_16fb8a029f8801 2568-2617
+apps/bcs/Cargo.lock
+  s_099b525d116ac6::t_adc25f6137b19f 324,330,334,374,403,429,451-452,476-486,495,504,509,537,563,565,608-621,683,781,896-897,899,932,938,970,1289,1319,1409-1420,1448,1502,1584,1621,1668,1713,1716,1727,1787,1939,1953,1961-1962,1964,1973,1984,1998,2014-2027,2063,2090,2237,2335,2374,2377,2437,2449,2466-2472,2486,2489,2492-2493,2495
+apps/bcs/Cargo.toml
+  s_099b525d116ac6::t_1592e05568a442 3-5,23,70,147-149,335,354
+apps/bcs/api-contracts/v1/authentication/contract.md
+  s_099b525d116ac6::t_9e17a6f46a070c 1-313
+apps/bcs/api-contracts/v1/domain-models.yaml
+  s_099b525d116ac6::t_5c68550e2f633f 147,170-173,242,261-264
+apps/bcs/api-contracts/v1/gateway-principal/contract.md
+  s_099b525d116ac6::t_e2c1490dc65129 29-45
+apps/bcs/api-contracts/v1/internal.yaml
+  s_099b525d116ac6::t_0e525f4d46acf6 5-14,16-17
+apps/bcs/api-contracts/v1/internal/invite-codes.yaml
+  s_099b525d116ac6::t_5959e9cc41118b 1-75
+apps/bcs/api-contracts/v1/openapi/auth.yaml
+  s_099b525d116ac6::t_018fef1208ca0a 125-148,160-161,179-211,213-219,222,229-247,252-262,274-288,294,300-312,324-342,348-353,359-377,389-409,414-432
+apps/bcs/api-contracts/v1/openapi/bots.yaml
+  s_099b525d116ac6::t_0809f5bf9fbdac 549-554
+apps/bcs/api-contracts/v1/openapi/channel-bindings.yaml
+  s_099b525d116ac6::t_f0a1e3fd44dabf 38-40,69-71,153-155
+apps/bcs/api-contracts/v1/shared.yaml
+  s_099b525d116ac6::t_683949d026959b 45-53
+apps/bcs/configs/bcs-config-example.toml
+  s_099b525d116ac6::t_5ac6b9ce6c467b 307-408,511-513
+apps/bcs/configs/bcs-config-local.toml
+  s_099b525d116ac6::t_a688bb1d2d8013 216-237,296-298
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_099b525d116ac6::t_55eedb1deaf4dd 135-160
+apps/bcs/crates/adapters/http/bcs-api-http/Cargo.toml
+  s_099b525d116ac6::t_31028cc832a554 37-39
+apps/bcs/crates/adapters/http/bcs-api-http/src/lib.rs
+  s_099b525d116ac6::t_e9ce701115b40b 5-9
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/auth_cookies.rs
+  s_099b525d116ac6::t_aede87b848b9f2 1-136
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/authentication.rs
+  s_099b525d116ac6::t_d42d037f0407c8 1-124
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/composite_principal.rs
+  s_099b525d116ac6::t_2bca97f20d2ca6 1-85
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/csrf.rs
+  s_099b525d116ac6::t_b04f43a43b6757 1-170
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/error.rs
+  s_099b525d116ac6::t_4167add39075cf 26-39,69-73,116-122,275-284
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/invite_code_gate.rs
+  s_099b525d116ac6::t_2f08601592624b 66-68,132-137,252
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/mod.rs
+  s_099b525d116ac6::t_dfd2661437c6ae 1-4,13-18,20
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/principal.rs
+  s_099b525d116ac6::t_99a2ab0c75862c 3,6,9-12,14-21,27-28,31-34,37-40,42-43,49-141,153-162,168-169,174-185,187-189,194,198,201-208,210-211,215-220
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  s_099b525d116ac6::t_f43740db7d848d 14,18-26,35-38,67-71,88,113,117-123,274-277
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/tests.rs
+  s_099b525d116ac6::t_13814e2836bb96 14,332,335,342-348
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/verifier.rs
+  s_099b525d116ac6::t_a536a91da21d0c 18,254,272,274-282,286-289
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/group_session_connection.rs
+  s_099b525d116ac6::t_11ccf06b20fa23 17,24,31-34,43-46,50,55
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/internal/routes/invite_code.rs
+  s_099b525d116ac6::t_b81ea7fcd9563a 24,32
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/auth.rs
+  s_099b525d116ac6::t_bbab084fa7fc23 1-24,27,32,34-36,42-43,46-61,78-126,135,137-144,155-174,181,183-195,203-209,211-226,228-231,241-268,278-307,310-312,325-447,455-461
+apps/bcs/crates/adapters/http/bcs-api-http/tests/api_auth_boundary.rs
+  s_099b525d116ac6::t_1d5e23bfbe20fd 1-939
+apps/bcs/crates/adapters/http/bcs-api-http/tests/avatar_response_contract.rs
+  s_099b525d116ac6::t_fca1a692383822 28-31,124,130-134
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_authority_routes.rs
+  s_099b525d116ac6::t_e86916dd9af085 29-30,113,118-119,121-128
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes.rs
+  s_099b525d116ac6::t_300d76f8c99643 1-5,11-18
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/avatars.rs
+  s_099b525d116ac6::t_07660f29f41fdc 1-44
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/fixtures.rs
+  s_099b525d116ac6::t_ce1eead5ced83c 1-621
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/read.rs
+  s_099b525d116ac6::t_b03d6a1d0deba6 1-411
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/write.rs
+  s_099b525d116ac6::t_2c72af515c2bca 1-320
+apps/bcs/crates/adapters/http/bcs-api-http/tests/channel_routes.rs
+  s_099b525d116ac6::t_bfb363c09ef0d9 6,43,49
+apps/bcs/crates/adapters/http/bcs-api-http/tests/collaboration_definition_routes.rs
+  s_099b525d116ac6::t_b710ee52b64beb 11,27,33,44
+apps/bcs/crates/adapters/http/bcs-api-http/tests/collaboration_run_routes.rs
+  s_099b525d116ac6::t_c4e2d48bda39f4 11,32,38,49
+apps/bcs/crates/adapters/http/bcs-api-http/tests/collaboration_template_routes.rs
+  s_099b525d116ac6::t_1543196cdf944f 12,29,35,46
+apps/bcs/crates/adapters/http/bcs-api-http/tests/event_subscription_routes.rs
+  s_099b525d116ac6::t_2d92ddfcf29627 11,23,29
+apps/bcs/crates/adapters/http/bcs-api-http/tests/friendship_routes.rs
+  s_099b525d116ac6::t_83eadc4af3c1fa 1-11
+apps/bcs/crates/adapters/http/bcs-api-http/tests/friendship_routes/fixtures.rs
+  s_099b525d116ac6::t_4376c3cf622c08 1-602
+apps/bcs/crates/adapters/http/bcs-api-http/tests/friendship_routes/read.rs
+  s_099b525d116ac6::t_304a8573eb4985 1-290
+apps/bcs/crates/adapters/http/bcs-api-http/tests/friendship_routes/write.rs
+  s_099b525d116ac6::t_8da667ac5b7319 1-477
+apps/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs
+  s_099b525d116ac6::t_eb7c4ef25030b4 7,47,53
+apps/bcs/crates/adapters/http/bcs-api-http/tests/group_session_connection_routes.rs
+  s_099b525d116ac6::t_dd3166afcb1d0f 7-8,29,34,158
+apps/bcs/crates/adapters/http/bcs-api-http/tests/invitation_routes.rs
+  s_099b525d116ac6::t_4672e4d71e2e81 6,40,46
+apps/bcs/crates/adapters/http/bcs-api-http/tests/manifest_routes.rs
+  s_099b525d116ac6::t_6ea9c48ef8e138 8,21
+apps/bcs/crates/adapters/http/bcs-api-http/tests/oauth_browser_binding.rs
+  s_099b525d116ac6::t_dc1bfde37941e6 1-995
+apps/bcs/crates/adapters/http/bcs-api-http/tests/oauth_browser_binding/noops.rs
+  s_099b525d116ac6::t_55162f7309ad17 1-193
+apps/bcs/crates/adapters/http/bcs-api-http/tests/register_support/mod.rs
+  s_099b525d116ac6::t_938c11ba686374 5,29,35
+apps/bcs/crates/adapters/http/bcs-api-http/tests/session_routes.rs
+  s_099b525d116ac6::t_c1ec1950e4807e 8,194,200
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_099b525d116ac6::t_c627b0cfa67a4b 147-155
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_099b525d116ac6::t_9689ee67b33406 14,56-58
+apps/bcs/crates/adapters/http/bcs-http/src/gateway_trace.rs
+  s_099b525d116ac6::t_a38d3cb00aaafa 78-81
+apps/bcs/crates/adapters/http/bcs-http/src/oauth/diagnostics_test.rs
+  s_099b525d116ac6::t_f1f4f1bae5f48b 1-12,14-18,22,24,28-29,31-34,36-37,39-43,47-74,78-83,85,88,90-91,93-94,98-102,105-119,123-131,134-150,153-155,157-164,167-168,171-186,188,191-210,215-230,233-243,245-251,256-279,283-302
+apps/bcs/crates/adapters/http/bcs-http/src/oauth/mod.rs
+  s_099b525d116ac6::t_5930deb132e0dc 1,3-29,31,33-36,38-41,44,46-60,62-67,70-72,77,80-81,84-85,88,92-95,98,101-102,105,109-112,115-117,121-132
+apps/bcs/crates/adapters/http/bcs-http/src/oauth/routes.rs
+  s_099b525d116ac6::t_baff6ebde9446e 1-528
+apps/bcs/crates/adapters/http/bcs-http/src/oauth/tests.rs
+  s_099b525d116ac6::t_59560b5c08e1d8 1-780
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  s_099b525d116ac6::t_0c77bde78980dd 71-77
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_bots.rs
+  s_099b525d116ac6::t_60139263faedfe 19,33-34
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_management.rs
+  s_099b525d116ac6::t_24ab22f090cdb0 1-339
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_099b525d116ac6::t_0191d1be9d2481 1-132
+apps/bcs/crates/adapters/http/bcs-http/src/routes/bot_chat.rs
+  s_099b525d116ac6::t_4970ea4645739a 445
+apps/bcs/crates/adapters/http/bcs-http/src/routes/group_messages.rs
+  s_099b525d116ac6::t_071ef07f6abe93 163-178
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation.rs
+  s_099b525d116ac6::t_9ef0b37bb32dea 42-46
+apps/bcs/crates/adapters/http/bcs-http/src/routes/mod.rs
+  s_099b525d116ac6::t_232d4a8e340053 32-33
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers.rs
+  s_099b525d116ac6::t_08ded450c54df1 590-593,651
+apps/bcs/crates/adapters/http/bcs-http/src/routes/register/scoped.rs
+  s_099b525d116ac6::t_bd8ddb1ff11422 109
+apps/bcs/crates/adapters/http/bcs-http/src/routes/services.rs
+  s_099b525d116ac6::t_6616d9bdebc928 142,158
+apps/bcs/crates/adapters/http/bcs-http/src/routes/session_files.rs
+  s_099b525d116ac6::t_c9d527e0a29d10 270
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions.rs
+  s_099b525d116ac6::t_0e475766779ff8 1438-1440,1600-1616
+apps/bcs/crates/adapters/http/bcs-http/src/state.rs
+  s_099b525d116ac6::t_86ea7995a185a2 689,691
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_099b525d116ac6::t_ffc0946ef19662 6,22-50,78,197-255
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_discovery_routes.rs
+  s_099b525d116ac6::t_e456f146fcfd03 1
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_099b525d116ac6::t_e70e25a267d31c 1-774
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract.rs
+  s_099b525d116ac6::t_0a80c08517ecf9 1-703
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/agent_events.rs
+  s_099b525d116ac6::t_a928d53b8b2b35 1-329
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/authentication.rs
+  s_099b525d116ac6::t_783fb55e2e35b6 1,190-193,202-205,207-226
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/coordination.rs
+  s_099b525d116ac6::t_ddbcbd474ae0ff 1-186
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/redaction.rs
+  s_099b525d116ac6::t_2b974a85184ff3 1-398
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/task_events.rs
+  s_099b525d116ac6::t_73cfce3564cae6 1-262
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bots_contract.rs
+  s_099b525d116ac6::t_1c21bb138aa690 7
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/caller_e2e_route_contract.rs
+  s_099b525d116ac6::t_4b5c845e86694e 46,48,89-109,250-255,272,286,303-309,311-316,322,420-458
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/collaboration_drafts_contract.rs
+  s_099b525d116ac6::t_235a9782fea291 38,42,93,170
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/discover_contract.rs
+  s_099b525d116ac6::t_72e207c723a761 1
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/friends_actor_auth_contract.rs
+  s_099b525d116ac6::t_0db8b20cf3d751 5
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/group_messages_contract.rs
+  s_099b525d116ac6::t_029de6e2247b69 889-894
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/group_messages_contract/access.rs
+  s_099b525d116ac6::t_50cd1f0f952a2a 1-343
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/group_messages_contract/history.rs
+  s_099b525d116ac6::t_c0e66a1c94e8a5 1-395
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/group_messages_contract/sending.rs
+  s_099b525d116ac6::t_e607099dcac315 1-605
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract.rs
+  s_099b525d116ac6::t_0fe7c4f110da59 1-893
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/creation_failure.rs
+  s_099b525d116ac6::t_7113fa4f6307a6 1-484
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/creation_success.rs
+  s_099b525d116ac6::t_e6096d85b45f78 1,667,671-672,921
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/membership.rs
+  s_099b525d116ac6::t_0714a8129ea999 1-86
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/metadata.rs
+  s_099b525d116ac6::t_cb76592d06806b 1-298
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/visibility.rs
+  s_099b525d116ac6::t_718f08d890f010 1-352
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract.rs
+  s_099b525d116ac6::t_eecef7ccae2dab 1-607
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract/attributes.rs
+  s_099b525d116ac6::t_3ca5e2be9a2f4f 1-358
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract/bot_lifecycle.rs
+  s_099b525d116ac6::t_aa264ec0539190 1-931
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract/caller_caps.rs
+  s_099b525d116ac6::t_37d972130fb4c5 1-151
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract/management.rs
+  s_099b525d116ac6::t_b725f653d840a0 1-512
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_routes_contract/registration.rs
+  s_099b525d116ac6::t_2a32c527097f09 1,447-449,455-456,458-472,477-480,485-486,488,494-501,505,507-508,510,515,519-532,540-543,545,549,557-571,574-576,578-581,591,593,602-605,609,645-652,658,660,663-666,674,676-683,685-696,699,711-712,721,730-739,742,750,753-756,765-770
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_slug_contract.rs
+  s_099b525d116ac6::t_b9e50899723367 105,114,224-235
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract.rs
+  s_099b525d116ac6::t_f63555da1c5fc8 1-183
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/bots_failure.rs
+  s_099b525d116ac6::t_0ec32918add444 1-98
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/bots_success.rs
+  s_099b525d116ac6::t_03cae1b9d61330 1-910
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/chat_runs.rs
+  s_099b525d116ac6::t_c672dccbc852cb 1-303
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/groups.rs
+  s_099b525d116ac6::t_da9b67027a2404 1
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/health.rs
+  s_099b525d116ac6::t_5577403da68010 1-18
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/route_contract/identity.rs
+  s_099b525d116ac6::t_d3a5dd2402b2a1 1-297
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/service_routes_contract.rs
+  s_099b525d116ac6::t_32ce03f2248f76 1-165
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/service_routes_contract/access.rs
+  s_099b525d116ac6::t_287fcf8da5f4ad 1-278
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/service_routes_contract/invocation.rs
+  s_099b525d116ac6::t_579d5dc00f1626 1
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/service_routes_contract/state_machine.rs
+  s_099b525d116ac6::t_9b17665ba1256a 1-169
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_collection_contract.rs
+  s_099b525d116ac6::t_cb788bdcad45c9 530-536
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_collection_contract/authorization.rs
+  s_099b525d116ac6::t_273d84e5392d91 1-371
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_collection_contract/collection.rs
+  s_099b525d116ac6::t_9515107726672f 1-416
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_collection_contract/ordering.rs
+  s_099b525d116ac6::t_033640ffdd2956 1-82
+apps/bcs/crates/adapters/http/bcs-http/tests/network_tracing_otel.rs
+  s_099b525d116ac6::t_cb2f01a9638c6c 1-445
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_auth.rs
+  s_099b525d116ac6::t_281e5d0222837d 1-13
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_bots.rs
+  s_099b525d116ac6::t_9027d858ee0d6b 1-19
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_cli.rs
+  s_099b525d116ac6::t_2ffb2aee6ab6aa 1-4
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_collaboration.rs
+  s_099b525d116ac6::t_16ec008dce9909 1-12
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_groups.rs
+  s_099b525d116ac6::t_ebdefa853863a3 1-14
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_providers.rs
+  s_099b525d116ac6::t_2adc9cbea59089 1-19
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_routes.rs
+  s_099b525d116ac6::t_d1fa9eac3546d5 1-14
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_sessions.rs
+  s_099b525d116ac6::t_0f72d307407956 1-16
+apps/bcs/crates/adapters/http/bcs-http/tests/support/bot_use_cases.rs
+  s_099b525d116ac6::t_c6f92f55ea6382 252
+apps/bcs/crates/adapters/http/bcs-provider-http/Cargo.toml
+  s_099b525d116ac6::t_3c8af63fd64e2a 14
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_container.rs
+  s_099b525d116ac6::t_91329bd24b04f6 1,133,137-144
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_history.rs
+  s_099b525d116ac6::t_5d0e2bf8ed11d6 4,9,11,109,113-120
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_observe.rs
+  s_099b525d116ac6::t_5d635c0ee105e9 2,6,9,125,129-136
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
+  s_099b525d116ac6::t_7f096ef0c4663d 3,9,14-16,23-24,30,182,184,186,191,204,209-216,226-229,270,273-290,303-306,332,408
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send/reception.rs
+  s_099b525d116ac6::t_879ba2160de30f 1-132
+apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
+  s_099b525d116ac6::t_7158f90418b518 1,4-17,207,211-212,232
+apps/bcs/crates/adapters/http/bcs-provider-http/src/transport.rs
+  s_099b525d116ac6::t_f7e69f3a155a86 354,364
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_execution_send_contract.rs
+  s_099b525d116ac6::t_305a220540b516 541-543
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/provider_headers_contract.rs
+  s_099b525d116ac6::t_6fc13d55a9ff23 1-216
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/support/caller_sse_contract.rs
+  s_099b525d116ac6::t_7564e297e61713 1-319
+apps/bcs/crates/adapters/ws/bcs-ws/CONTEXT.md
+  s_099b525d116ac6::t_f3ffe4534af3dd 196-206
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher/tasks.rs
+  s_099b525d116ac6::t_ab8ffcd2285e09 119
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher.rs
+  s_099b525d116ac6::t_653036c098c1d8 470-482
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_099b525d116ac6::t_8e30bf357787a7 6,21-23,35-48,53-69
+apps/bcs/crates/application/bcs-app-a2a-bot/Cargo.toml
+  s_099b525d116ac6::t_37acbe358cb069 18
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_099b525d116ac6::t_780d7fcef2cde3 9-10,35-42,49-50,76-119,127-133
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_099b525d116ac6::t_f20be92dcb8105 1-228
+apps/bcs/crates/application/bcs-app-a2a-bot/src/names.rs
+  s_099b525d116ac6::t_b37452789de04b 1-39
+apps/bcs/crates/application/bcs-app-a2a-bot/src/registration.rs
+  s_099b525d116ac6::t_62a49b74cb868f 12,22-35,37
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_configuration.rs
+  s_099b525d116ac6::t_3175eb99745645 63,66,69,77,165,212,216-251
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_099b525d116ac6::t_6489192b47a85f 20,29,40,52-53,61-64,146-147,149,217,221,308-368
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_099b525d116ac6::t_80f7cfee53fe49 1-263
+apps/bcs/crates/application/v1/bcs-app-auth/CONTEXT.md
+  s_099b525d116ac6::t_582732722a3cb5 1-101
+apps/bcs/crates/application/v1/bcs-app-auth/Cargo.toml
+  s_099b525d116ac6::t_3a621620c27d4c 2-3,10-15,17-19,22-25,28-29
+apps/bcs/crates/application/v1/bcs-app-auth/src/lib.rs
+  s_099b525d116ac6::t_74a1221c7545b0 1-118
+apps/bcs/crates/application/v1/bcs-app-auth/src/login.rs
+  s_099b525d116ac6::t_198e225f3b86e1 1-239
+apps/bcs/crates/application/v1/bcs-app-auth/src/session.rs
+  s_099b525d116ac6::t_97f2643c6ce329 1-94
+apps/bcs/crates/application/v1/bcs-app-auth/tests/conformance.rs
+  s_099b525d116ac6::t_739ad20cae3262 1-132
+apps/bcs/crates/application/v1/bcs-app-auth/tests/conformance_auth_service.rs
+  s_099b525d116ac6::t_3cf42552fddc3d 1-24
+apps/bcs/crates/application/v1/bcs-app-auth/tests/log_redaction.rs
+  s_099b525d116ac6::t_cbb3f0e0937788 1-194
+apps/bcs/crates/application/v1/bcs-app-auth/tests/login_flow.rs
+  s_099b525d116ac6::t_cddabd800fa733 1-294
+apps/bcs/crates/application/v1/bcs-app-auth/tests/session_flow.rs
+  s_099b525d116ac6::t_23b0395a44a098 1-170
+apps/bcs/crates/application/v1/bcs-app-auth/tests/support/fake_ports.rs
+  s_099b525d116ac6::t_3eb37f966c43cd 1-378
+apps/bcs/crates/application/v1/bcs-app-auth/tests/support/log_capture.rs
+  s_099b525d116ac6::t_6f5bfac2fa556f 1-68
+apps/bcs/crates/application/v1/bcs-app-auth/tests/support/mod.rs
+  s_099b525d116ac6::t_77c9decc0af95e 1-62
+apps/bcs/crates/application/v1/bcs-app-bot/CONTEXT.md
+  s_099b525d116ac6::t_b47d9a64b60608 15-24
+apps/bcs/crates/application/v1/bcs-app-bot/src/lib.rs
+  s_099b525d116ac6::t_6a6256be1c894f 307,314,318-325,336,338-347,359,390
+apps/bcs/crates/application/v1/bcs-app-bot/src/mine.rs
+  s_099b525d116ac6::t_bd8aa43b45dc74 35,48,131,170,173,175-195,199,203,205-207,412-414
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine.rs
+  s_099b525d116ac6::t_5b128fad5f84a0 82,92,105-112,858-859,861-862
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine/avatar_drift.rs
+  s_099b525d116ac6::t_ea919964fed0b9 1-68
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine/cases.rs
+  s_099b525d116ac6::t_c0bccf61948ee3 1-487
+apps/bcs/crates/application/v1/bcs-app-bot/tests/v1_bot_service.rs
+  s_099b525d116ac6::t_e3553e111753a1 468-470
+apps/bcs/crates/application/v1/bcs-app-bot/tests/v1_bot_service/avatars.rs
+  s_099b525d116ac6::t_9d552baac52fae 1-124
+apps/bcs/crates/application/v1/bcs-app-group/Cargo.toml
+  s_099b525d116ac6::t_7db1059807c248 22
+apps/bcs/crates/application/v1/bcs-app-group/tests/authorization_snapshot.rs
+  s_099b525d116ac6::t_7e6fa0dece81ea 50
+apps/bcs/crates/application/v1/bcs-app-invite-code/src/lib.rs
+  s_099b525d116ac6::t_1ea7fd1f45099d 29,44,59-65,164-168,171,503-504,512-575
+apps/bcs/crates/application/v1/bcs-app-register/src/lib.rs
+  s_099b525d116ac6::t_71f73acb3b7388 146-147,152,199-207
+apps/bcs/crates/application/v1/bcs-app-register/tests/a2a_registration.rs
+  s_099b525d116ac6::t_85a70fe0fcae69 33,42,77
+apps/bcs/crates/application/v1/bcs-app-session/Cargo.toml
+  s_099b525d116ac6::t_4c448d0d05f8a9 21
+apps/bcs/crates/application/v1/bcs-app-session/tests/authorization_snapshot.rs
+  s_099b525d116ac6::t_783a2a87562119 53
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_099b525d116ac6::t_054a8105847285 1-101
+apps/bcs/crates/auxiliary/bcs-network-tracing/Cargo.toml
+  s_099b525d116ac6::t_4cc89209dd6457 1-24
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/blocking.rs
+  s_099b525d116ac6::t_aa5df9f692ec27 1-60
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/default_headers.rs
+  s_099b525d116ac6::t_55b6155a549e8d 1-52
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  s_099b525d116ac6::t_beb4825f0101bb 1-120
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/lib.rs
+  s_099b525d116ac6::t_2a6e9ae2f21589 1-70
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/conformance.rs
+  s_099b525d116ac6::t_95d19678e53cab 1-139
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/http_clients.rs
+  s_099b525d116ac6::t_88d89ad1978a41 1-251
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/propagation.rs
+  s_099b525d116ac6::t_0b5091eea2111d 1-187
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/routes.rs
+  s_099b525d116ac6::t_8f05118d344f85 1-39
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_099b525d116ac6::t_37c1c6a8bf0a60 16-19,172-174,253-281
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_099b525d116ac6::t_7b020c92f8d300 19-23,28,31-35,120,126,222,226
+apps/bcs/crates/bootstrap/bcs/src/api_auth_config_values.rs
+  s_099b525d116ac6::t_544666edeed910 1-104
+apps/bcs/crates/bootstrap/bcs/src/api_auth_ports.rs
+  s_099b525d116ac6::t_550c215f0870a0 1-537
+apps/bcs/crates/bootstrap/bcs/src/api_auth_provider_configs.rs
+  s_099b525d116ac6::t_310b54950a9957 1-414
+apps/bcs/crates/bootstrap/bcs/src/api_auth_registry.rs
+  s_099b525d116ac6::t_97be37568e107e 1-411
+apps/bcs/crates/bootstrap/bcs/src/api_auth_wiring.rs
+  s_099b525d116ac6::t_c1981d8f01ec9c 1-622
+apps/bcs/crates/bootstrap/bcs/src/api_auth_wiring/tests.rs
+  s_099b525d116ac6::t_c29eec7afbaebe 1-468
+apps/bcs/crates/bootstrap/bcs/src/auth_wiring.rs
+  s_099b525d116ac6::t_c72847248c04e4 141,154-160,162-170,174,188,197,276,283,300,302-308,466,479,493
+apps/bcs/crates/bootstrap/bcs/src/browser_principal.rs
+  s_099b525d116ac6::t_b766183c85a82e 6,10-13,18,34,36-44
+apps/bcs/crates/bootstrap/bcs/src/compat_auth_principal.rs
+  s_099b525d116ac6::t_2c959890b73628 1-4,6-10,12,14-29,31-35,38,42-43,45-47,50-65,69-87
+apps/bcs/crates/bootstrap/bcs/src/config/invite.rs
+  s_099b525d116ac6::t_ed4edabf89cb31 24-28,50
+apps/bcs/crates/bootstrap/bcs/src/config/loading.rs
+  s_099b525d116ac6::t_61ebd5ca5f799b 319-322,332-333
+apps/bcs/crates/bootstrap/bcs/src/config/mod.rs
+  s_099b525d116ac6::t_13b7039d77e751 51
+apps/bcs/crates/bootstrap/bcs/src/config/root.rs
+  s_099b525d116ac6::t_bba6f85e0046c7 10-13,139-142,258-265,486,511
+apps/bcs/crates/bootstrap/bcs/src/config/tests_infrastructure.rs
+  s_099b525d116ac6::t_c1dc0112f176bd 586,596,603
+apps/bcs/crates/bootstrap/bcs/src/config/validation.rs
+  s_099b525d116ac6::t_a8d4f65070f9ca 108-117
+apps/bcs/crates/bootstrap/bcs/src/config_loader.rs
+  s_099b525d116ac6::t_8776c610b8ae86 178-183,190-196,201-202,465-471
+apps/bcs/crates/bootstrap/bcs/src/config_loader/tests.rs
+  s_099b525d116ac6::t_357ada61d07d6e 596-836
+apps/bcs/crates/bootstrap/bcs/src/friend_auth_sync.rs
+  s_099b525d116ac6::t_75d730ad83ec4f 6,176
+apps/bcs/crates/bootstrap/bcs/src/friend_connect_notification.rs
+  s_099b525d116ac6::t_268dc128cf1017 4,326
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_099b525d116ac6::t_1bc939206bcc0c 786,794
+apps/bcs/crates/bootstrap/bcs/src/identity_session_wiring.rs
+  s_099b525d116ac6::t_66c6009cdfd860 1-195
+apps/bcs/crates/bootstrap/bcs/src/identity_wiring.rs
+  s_099b525d116ac6::t_17c82d365b8011 10,13,17,98-99,101-137,140-151
+apps/bcs/crates/bootstrap/bcs/src/lib.rs
+  s_099b525d116ac6::t_ae5352649be686 124-126,130-131,144-145,157
+apps/bcs/crates/bootstrap/bcs/src/message_delivery_wiring.rs
+  s_099b525d116ac6::t_41fdeb6057b477 262-266
+apps/bcs/crates/bootstrap/bcs/src/message_flow_metrics.rs
+  s_099b525d116ac6::t_e4443ba409fcbc 177-190
+apps/bcs/crates/bootstrap/bcs/src/metrics.rs
+  s_099b525d116ac6::t_1a286d29504d00 568-569,571,850-853,856-857
+apps/bcs/crates/bootstrap/bcs/src/metrics/labels.rs
+  s_099b525d116ac6::t_4e649346ac4ba4 1-377
+apps/bcs/crates/bootstrap/bcs/src/metrics/tests.rs
+  s_099b525d116ac6::t_b164d4c43cde90 1-197
+apps/bcs/crates/bootstrap/bcs/src/metrics/wrappers.rs
+  s_099b525d116ac6::t_26357b0736a0d3 1-481
+apps/bcs/crates/bootstrap/bcs/src/migrations.rs
+  s_099b525d116ac6::t_ed79ee458a843b 1-6
+apps/bcs/crates/bootstrap/bcs/src/principal_state.rs
+  s_099b525d116ac6::t_97410556c8809b 5,8-12,20-27,34-156
+apps/bcs/crates/bootstrap/bcs/src/server.rs
+  s_099b525d116ac6::t_bf49b997f53a7a 180,195,310
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_099b525d116ac6::t_114135e9ece601 15,18,73-84
+apps/bcs/crates/bootstrap/bcs/src/server/auth_resources.rs
+  s_099b525d116ac6::t_1def951cb9dd1f 1-236
+apps/bcs/crates/bootstrap/bcs/src/server/resource_builders.rs
+  s_099b525d116ac6::t_1182c5743908a6 140,160,405-406,543
+apps/bcs/crates/bootstrap/bcs/src/server/server_construct.rs
+  s_099b525d116ac6::t_abf99ad4e7af03 11-29,31-33,54,66,117,492-521,546,592-597,700,708
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_099b525d116ac6::t_ef1a8238b389a7 23-27,78-79,151,163,781-792,817,869-871,963-965,972-973
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_099b525d116ac6::t_91da81bd0175d3 4-14,16-40,51-52,62,71-155,158,161,163-170,198-199,248-272,287,290-302,322-323,325,342-356,394-395
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_099b525d116ac6::t_96a0e0f5f32958 91-97,113-118,164,235,775-777,781-782,812,818
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_compatibility.rs
+  s_099b525d116ac6::t_8376da5277b23f 1-739
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_config.rs
+  s_099b525d116ac6::t_c45327e82bca34 1-865
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_http.rs
+  s_099b525d116ac6::t_3798579797a7cf 1-349
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_inventory.rs
+  s_099b525d116ac6::t_eab120b75dc389 1-196
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_inventory_duplicate.rs
+  s_099b525d116ac6::t_473fb3564ceaa4 1-71
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_races.rs
+  s_099b525d116ac6::t_e1ac34d925e8e8 1-385
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_registration.rs
+  s_099b525d116ac6::t_41bde917352b01 1-453
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_session_keys.rs
+  s_099b525d116ac6::t_605c5bd6a45698 1-70
+apps/bcs/crates/bootstrap/bcs/tests/auth_log_redaction.rs
+  s_099b525d116ac6::t_96348c384d5151 1-888
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_099b525d116ac6::t_b818b6aa92c8d4 1-6
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_099b525d116ac6::t_0a5e8a0af75ba0 263-265
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/custom_binding.rs
+  s_099b525d116ac6::t_e1aeba22de45c4 1-51
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_099b525d116ac6::t_fb0745707ba821 1-58
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_099b525d116ac6::t_2261822b4a6894 4-5,15-18,29,31-34
+apps/bcs/crates/bootstrap/bcs/tests/conformance_api_auth_ports.rs
+  s_099b525d116ac6::t_04201dbf63f3b8 1-66
+apps/bcs/crates/bootstrap/bcs/tests/conformance_auth_session_identity.rs
+  s_099b525d116ac6::t_af2809b463d580 1-25
+apps/bcs/crates/bootstrap/bcs/tests/e2e_bot_authority.rs
+  s_099b525d116ac6::t_1669954756f6d4 73
+apps/bcs/crates/bootstrap/bcs/tests/e2e_chat.rs
+  s_099b525d116ac6::t_48d335f290eb94 47
+apps/bcs/crates/bootstrap/bcs/tests/e2e_onboarding.rs
+  s_099b525d116ac6::t_e98a3bee880b28 21
+apps/bcs/crates/bootstrap/bcs/tests/e2e_workbench.rs
+  s_099b525d116ac6::t_afeb2f34906144 43,46-54
+apps/bcs/crates/bootstrap/bcs/tests/e2e_workbench/authorization.rs
+  s_099b525d116ac6::t_7e7ea9c6518e97 1-150
+apps/bcs/crates/bootstrap/bcs/tests/e2e_workbench/broadcast.rs
+  s_099b525d116ac6::t_57b5cb0a727a42 1-181
+apps/bcs/crates/bootstrap/bcs/tests/e2e_workbench/group_chat.rs
+  s_099b525d116ac6::t_c064b6d2e3e50d 1-223
+apps/bcs/crates/bootstrap/bcs/tests/e2e_workbench/protocol.rs
+  s_099b525d116ac6::t_bef8da54e581c4 1-204
+apps/bcs/crates/bootstrap/bcs/tests/helpers/mod.rs
+  s_099b525d116ac6::t_1f15134ce64d7f 90
+apps/bcs/crates/bootstrap/bcs/tests/integration_auth_user.rs
+  s_099b525d116ac6::t_90cc508d661e44 250-269,274-283,285-286
+apps/bcs/crates/bootstrap/bcs/tests/integration_cli.rs
+  s_099b525d116ac6::t_449087f1cdaf9c 11
+apps/bcs/crates/bootstrap/bcs/tests/integration_http_api.rs
+  s_099b525d116ac6::t_575c8d7fe1bac2 11
+apps/bcs/crates/bootstrap/bcs/tests/integration_oauth_routes.rs
+  s_099b525d116ac6::t_f756bc1105edf6 1,3-10,18,56-63,81,93-114,118-129,132-141,146-155,157-188,198-204,213,218,222,242,274,306,325-326,328-334,347,366-367,375-377,379,384,396,401-403,405-406,414,419,421,426-427,429,431,436-437,439,442,447-448,452-467,471-474,476,478,483-484,487-488,492-493,495-498,503-589,598,618-632,651-676,704-705,712,732-735,757-795,861,897,938
+apps/bcs/crates/bootstrap/bcs/tests/integration_oauth_routes/compat_origins.rs
+  s_099b525d116ac6::t_bc1dc6bf34ec20 1-209
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  s_099b525d116ac6::t_f439aaa8b0c6ab 187-227,460-487
+apps/bcs/crates/bootstrap/bcs/tests/oauth_e2e/runner.rs
+  s_099b525d116ac6::t_60c2ad4149cf8a 1-30
+apps/bcs/crates/bootstrap/bcs/tests/provider_slug_migration.rs
+  s_099b525d116ac6::t_3d58e67c160d2c 26
+apps/bcs/crates/bootstrap/bcs/tests/state_machine_history_read.rs
+  s_099b525d116ac6::t_831dd0c0f55a47 5,58-59,61-62
+apps/bcs/crates/bootstrap/bcs/tests/support/api_chain.rs
+  s_099b525d116ac6::t_6a44d4ead4de5b 1-638
+apps/bcs/crates/bootstrap/bcs/tests/support/api_fakes.rs
+  s_099b525d116ac6::t_61bcea64c0d577 1-564
+apps/bcs/crates/bootstrap/bcs/tests/support/auth_db.rs
+  s_099b525d116ac6::t_9c0c935bd7170b 1-463
+apps/bcs/crates/contracts/bcs-domain/CONTEXT.md
+  s_099b525d116ac6::t_0a08e2868d0bde 10-19
+apps/bcs/crates/contracts/bcs-domain/Cargo.toml
+  s_099b525d116ac6::t_9a0a002ae14401 24
+apps/bcs/crates/contracts/bcs-domain/src/a2a.rs
+  s_099b525d116ac6::t_79c0ee48defdea 6,10,43,49,54-63
+apps/bcs/crates/contracts/bcs-domain/src/a2a_auth.rs
+  s_099b525d116ac6::t_a4058a6a5227d0 1-56
+apps/bcs/crates/contracts/bcs-domain/src/a2a_json.rs
+  s_099b525d116ac6::t_06a567afdc299a 1-59
+apps/bcs/crates/contracts/bcs-domain/src/a2a_management.rs
+  s_099b525d116ac6::t_d31d660966b5de 1-391
+apps/bcs/crates/contracts/bcs-domain/src/a2a_names.rs
+  s_099b525d116ac6::t_e355a40905e92f 1-13
+apps/bcs/crates/contracts/bcs-domain/src/lib.rs
+  s_099b525d116ac6::t_f7a6cba181b554 133-136
+apps/bcs/crates/contracts/bcs-domain/tests/a2a_auth.rs
+  s_099b525d116ac6::t_a4362bf5924e66 1-62
+apps/bcs/crates/contracts/bcs-domain/tests/a2a_management_card.rs
+  s_099b525d116ac6::t_287fd48869fc03 1-228
+apps/bcs/crates/contracts/bcs-domain/tests/a2a_source_agent.rs
+  s_099b525d116ac6::t_f633b5b37a3723 1-116
+apps/bcs/crates/contracts/bcs-domain/tests/a2a_update_mode.rs
+  s_099b525d116ac6::t_aa9538be0db4a9 1-14
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_099b525d116ac6::t_97bf6fa445a879 25-32,180-209
+apps/bcs/crates/external-clients/bcs-a2a-http/Cargo.toml
+  s_099b525d116ac6::t_87b05f5f725ea0 14-16,22
+apps/bcs/crates/external-clients/bcs-a2a-http/examples/harness_text.rs
+  s_099b525d116ac6::t_c9eaa73bb7c5f4 22,25-26
+apps/bcs/crates/external-clients/bcs-a2a-http/src/binding_client.rs
+  s_099b525d116ac6::t_225298913e8c70 6,9,13,16,19,23
+apps/bcs/crates/external-clients/bcs-a2a-http/src/card.rs
+  s_099b525d116ac6::t_a8284ae39d5d94 40-42,46,56-58
+apps/bcs/crates/external-clients/bcs-a2a-http/src/card_fetch.rs
+  s_099b525d116ac6::t_d1b09601e06b0e 8-9,21-29,45,49-51,54,59-60,69,71,83,91,93-95,97-107,110-112,116
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs
+  s_099b525d116ac6::t_f11e3586c30a50 1,7,10,21,41,48,62-63,66,70
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client_json.rs
+  s_099b525d116ac6::t_349f95861e8ab1 2,11,15,17
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_099b525d116ac6::t_5bb80cf5b46d6c 20-21,92-95,102-107,110-117,123,127-130,136-138,208-209,259-264,295-297,304-311,337,339-342,345
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_driver.rs
+  s_099b525d116ac6::t_048af55704c547 43
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_poll.rs
+  s_099b525d116ac6::t_922c96b9565330 1-33
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_099b525d116ac6::t_39220b910105fc 36-65,70,79,86,93,101
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_mesh.rs
+  s_099b525d116ac6::t_7746ca54215c5d 63-66,71-75
+apps/bcs/crates/external-clients/bcs-a2a-http/src/jsonrpc.rs
+  s_099b525d116ac6::t_8dd554c5a8f104 1-124
+apps/bcs/crates/external-clients/bcs-a2a-http/src/lib.rs
+  s_099b525d116ac6::t_3d8d7f43c6c9e9 4
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  s_099b525d116ac6::t_536b1943965e38 2,14,40-42,53-59,62-63,78-82,88-100,102
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/card_contract.rs
+  s_099b525d116ac6::t_190083f0b74460 44,49-53,88-99
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs
+  s_099b525d116ac6::t_19c284e73d767b 26-27,30,101-102,104,160,507-509
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_card_fetch.rs
+  s_099b525d116ac6::t_0cee633141b21f 41,91-103
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/jsonrpc_binding.rs
+  s_099b525d116ac6::t_8255c285dbd2c5 1-193
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/support/custom_binding.rs
+  s_099b525d116ac6::t_1df450c16b4802 1-72
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/support/poll_delivery.rs
+  s_099b525d116ac6::t_475674e2a0e5d4 1-127
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/text_contract.rs
+  s_099b525d116ac6::t_701c3898ffea6a 13-21
+apps/bcs/crates/external-clients/bcs-fuse-client/Cargo.toml
+  s_099b525d116ac6::t_36a31dd88cacbc 13
+apps/bcs/crates/external-clients/bcs-fuse-client/src/client.rs
+  s_099b525d116ac6::t_5d762974529e79 3,19,21,53-54,117-118,134-135,156-157,168,188-189,225,272
+apps/bcs/crates/plugin-api/bcs-a2a-binding-api/CONTEXT.md
+  s_099b525d116ac6::t_2a253ae7faf92f 1-55
+apps/bcs/crates/plugin-api/bcs-a2a-binding-api/Cargo.toml
+  s_099b525d116ac6::t_4a1fa7efeea9a7 1-17
+apps/bcs/crates/plugin-api/bcs-a2a-binding-api/src/lib.rs
+  s_099b525d116ac6::t_b5b5fe88f2d8c3 1-101
+apps/bcs/crates/plugin-api/bcs-a2a-binding-api/src/tests.rs
+  s_099b525d116ac6::t_c8ffab19e02637 1-59
+apps/bcs/crates/plugin-api/bcs-auth-api/README.md
+  s_099b525d116ac6::t_8f9c931f9c5731 27-33
+apps/bcs/crates/plugin-api/bcs-auth-api/src/lib.rs
+  s_099b525d116ac6::t_e5f4016d76d228 10,20,23-25,33-36
+apps/bcs/crates/plugin-api/bcs-auth-api/src/login_state.rs
+  s_099b525d116ac6::t_c07dfad32f42ed 1-112
+apps/bcs/crates/plugin-api/bcs-auth-api/src/session.rs
+  s_099b525d116ac6::t_63a9e2b2172c4c 1-219
+apps/bcs/crates/plugin-api/bcs-auth-api/tests/login_state_redaction.rs
+  s_099b525d116ac6::t_b70a110cd6b475 1-19
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_099b525d116ac6::t_beb487d5beb018 1-116
+apps/bcs/crates/plugin-api/bcs-tracing-api/Cargo.toml
+  s_099b525d116ac6::t_7900559b918a15 1-11
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_099b525d116ac6::t_6b7eebf3726fe0 1-143
+apps/bcs/crates/plugins/bcs-auth-google/tests/google_oauth_flow.rs
+  s_099b525d116ac6::t_1e40082ad3b3e1 1-34,55-57,59-62,64-66,68-69,71-72,74-76
+apps/bcs/crates/plugins/bcs-auth-oauth/Cargo.toml
+  s_099b525d116ac6::t_fad691dbfa4a3a 15-16,20
+apps/bcs/crates/plugins/bcs-auth-oauth/README.md
+  s_099b525d116ac6::t_73ce4d743886d1 6-8,13,15-18,21-23,32-79
+apps/bcs/crates/plugins/bcs-auth-oauth/src/lib.rs
+  s_099b525d116ac6::t_2c013c9e0c01c7 7-13,16-18,21,23
+apps/bcs/crates/plugins/bcs-auth-oauth/src/login_state.rs
+  s_099b525d116ac6::t_84d40319879ed6 1-338
+apps/bcs/crates/plugins/bcs-auth-oauth/src/login_state/cleanup_tests.rs
+  s_099b525d116ac6::t_a9ff75716b15fe 1-316
+apps/bcs/crates/plugins/bcs-auth-oauth/src/plugin.rs
+  s_099b525d116ac6::t_ade5f425b2c3f8 3-14,21,23,30,38-44,46,68
+apps/bcs/crates/plugins/bcs-auth-oauth/src/session_lifecycle.rs
+  s_099b525d116ac6::t_28392bc92b0842 1-225
+apps/bcs/crates/plugins/bcs-auth-oauth/src/strict.rs
+  s_099b525d116ac6::t_0b5fcb87fa2091 1-185
+apps/bcs/crates/plugins/bcs-auth-oauth/src/verify.rs
+  s_099b525d116ac6::t_355eb191fbe9bc 1,3-10,12-14,18-19,21-23,26-33,35,38-40,43-56,58-68,72-85,89-98
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/conformance_pending_oauth_login.rs
+  s_099b525d116ac6::t_4b8d1174fd1789 1-19
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/session_lifecycle.rs
+  s_099b525d116ac6::t_e9cff906c244a5 1-509
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/strict_session.rs
+  s_099b525d116ac6::t_efba0b693ce99f 1-421
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/support/mod.rs
+  s_099b525d116ac6::t_ebf4a4c8f91e98 1-8
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/support/session_identity.rs
+  s_099b525d116ac6::t_18b5dcafdba5f6 1-419
+apps/bcs/crates/plugins/bcs-auth-oauth/tests/verify_session_expiry_contract.rs
+  s_099b525d116ac6::t_d5a65b2bccd1f3 2,4-10,12,14,16,18-21,23-25,27-34,36-55,62,67-71,76-86,91-93,100-108,116-127,131
+apps/bcs/crates/plugins/bcs-human-notify-work-order/Cargo.toml
+  s_099b525d116ac6::t_d394ab54c48218 14
+apps/bcs/crates/plugins/bcs-human-notify-work-order/README.md
+  s_099b525d116ac6::t_257c7e59bd4dfa 36
+apps/bcs/crates/plugins/bcs-human-notify-work-order/src/lib.rs
+  s_099b525d116ac6::t_a7195b041cff20 9,260
+apps/bcs/crates/plugins/bcs-storage-baas/Cargo.toml
+  s_099b525d116ac6::t_87a4dbfeab6547 9,23,25
+apps/bcs/crates/plugins/bcs-storage-baas/src/lib.rs
+  s_099b525d116ac6::t_64f8d0043da9dd 6-7,231,297,310,336,353
+apps/bcs/crates/plugins/bcs-storage-baas/tests/tracing_scope.rs
+  s_099b525d116ac6::t_3847684f0fe401 1-54
+apps/bcs/crates/plugins/openclaw-channel-bcn/test/native-task-ordering.test.ts
+  s_099b525d116ac6::t_0fc2b95999bdf9 1-80
+apps/bcs/crates/service-api/bcs-config-api/CONTEXT.md
+  s_099b525d116ac6::t_eff580f18ff745 90-113
+apps/bcs/crates/service-api/bcs-config-api/src/api_auth.rs
+  s_099b525d116ac6::t_9f4c5a87ab7387 1-150
+apps/bcs/crates/service-api/bcs-config-api/src/auth.rs
+  s_099b525d116ac6::t_fed0366c948849 1-237
+apps/bcs/crates/service-api/bcs-config-api/src/lib.rs
+  s_099b525d116ac6::t_c17bd8cfb79ef0 40-48
+apps/bcs/crates/service-api/bcs-config-api/tests/api_auth.rs
+  s_099b525d116ac6::t_8688dd7a097e3b 1-152
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_099b525d116ac6::t_786dc35d2b7a8f 3-13,716-802
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  s_099b525d116ac6::t_b0fee84ecfbdce 4
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_bot.rs
+  s_099b525d116ac6::t_8cfe1cb4e4d41d 10-11,15-45,48-81
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_flow.rs
+  s_099b525d116ac6::t_26f1a1ba8398b1 566-576
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/auth.rs
+  s_099b525d116ac6::t_301190d31e167f 1-2,6,9-110,120,126,131-136,139-144,155-176,178-181,184-186,188-189,192-193,195,197-216,219-221,225,227-229,232-233,235-239,241-251,253-276
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/bot.rs
+  s_099b525d116ac6::t_b9894c75dfdf7d 73-75,111-113
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/error.rs
+  s_099b525d116ac6::t_5f2f8d3f85bd3f 1-21
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/invite_code.rs
+  s_099b525d116ac6::t_6e23f9df1772c9 6-9,11
+apps/bcs/crates/service-api/bcs-service-api/src/core/a2a_bot.rs
+  s_099b525d116ac6::t_e7f3091b615823 31,33,35-38
+apps/bcs/crates/service-api/bcs-service-api/src/core/provider.rs
+  s_099b525d116ac6::t_e042ac4865a6c7 86-92,161-165
+apps/bcs/crates/service-api/bcs-service-api/src/port/caller_send.rs
+  s_099b525d116ac6::t_12639ed0b7dc11 18-19,21-25
+apps/bcs/crates/service-api/bcs-service-api/src/port/mod.rs
+  s_099b525d116ac6::t_fd21bf15c58209 29,142-146
+apps/bcs/crates/service-api/bcs-service-api/src/port/oauth.rs
+  s_099b525d116ac6::t_0920e94365e219 1-152
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/a2a_bot.rs
+  s_099b525d116ac6::t_9db71352cd405d 24-27,29-31,34
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/auth_session.rs
+  s_099b525d116ac6::t_943716b44e834d 1-160
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/bot_provider.rs
+  s_099b525d116ac6::t_583454a7145643 8-10,40-42
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/mod.rs
+  s_099b525d116ac6::t_52c3c061da018a 10,45-49
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/provider.rs
+  s_099b525d116ac6::t_b2923676378c95 39-44
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs
+  s_099b525d116ac6::t_e96e20bfb55dfc 4-5,24,34-47,51,57-58
+apps/bcs/crates/service-api/bcs-service-api/src/types/error.rs
+  s_099b525d116ac6::t_62760dc35dcbb7 7-8,172,240-446
+apps/bcs/crates/service-api/bcs-service-api/tests/auth_redaction.rs
+  s_099b525d116ac6::t_7e8edea2c91c0e 1-143
+apps/bcs/crates/service-api/bcs-service-api/tests/auth_session_contract.rs
+  s_099b525d116ac6::t_18e8d5aa0888af 1-74
+apps/bcs/crates/services/bcs-bot-store/CONTEXT.md
+  s_099b525d116ac6::t_71089e8b2b3863 225-227,231,236,240,242-243,256-257,274-336
+apps/bcs/crates/services/bcs-bot-store/Cargo.toml
+  s_099b525d116ac6::t_9d9ee11ce6bb68 26
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_099b525d116ac6::t_11a17f1229636e 8,21-25,80-82,86-87,89,96-117,135-144,146-210
+apps/bcs/crates/services/bcs-bot-store/src/a2a_source.rs
+  s_099b525d116ac6::t_b3ae7e2aa60901 1-95
+apps/bcs/crates/services/bcs-bot-store/src/bot_provider_storage.rs
+  s_099b525d116ac6::t_846a621f0931d4 126-127,131-137,147-153,160,184-185,196,474-476,582-583
+apps/bcs/crates/services/bcs-bot-store/src/lib.rs
+  s_099b525d116ac6::t_e86e56b391cb2d 47
+apps/bcs/crates/services/bcs-bot-store/src/memory_bot_provider_storage.rs
+  s_099b525d116ac6::t_23e1e96b8b4670 30-40,145-152,204-211
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/bot_repo_port.rs
+  s_099b525d116ac6::t_54f40deb2bbecb 185,229,281
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/control_plane.rs
+  s_099b525d116ac6::t_6b488aa55d0adb 628-642
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/mod.rs
+  s_099b525d116ac6::t_45ebe0082abf8d 77-79,116,126-133
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/profile.rs
+  s_099b525d116ac6::t_f62bdd7bcc0a26 56
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/registry_storage.rs
+  s_099b525d116ac6::t_e0aeff31aabee6 173,187
+apps/bcs/crates/services/bcs-bot-store/src/provider.rs
+  s_099b525d116ac6::t_a652046b3b274b 112-122,171-175,195-199
+apps/bcs/crates/services/bcs-bot-store/src/provider_db.rs
+  s_099b525d116ac6::t_d2c43936a94503 75-94,187-193,218-221,223,229-233,453-460,468,470-471
+apps/bcs/crates/services/bcs-bot-store/tests/affiliation_scope.rs
+  s_099b525d116ac6::t_3ded99d95fa8d7 292
+apps/bcs/crates/services/bcs-bot-store/tests/authority_mine_store.rs
+  s_099b525d116ac6::t_62e568f6f0127b 44
+apps/bcs/crates/services/bcs-bot-store/tests/bot_avatar_queries.rs
+  s_099b525d116ac6::t_fa3e244c93eee2 12
+apps/bcs/crates/services/bcs-bot-store/tests/bot_info_kv.rs
+  s_099b525d116ac6::t_51af4aef520397 12
+apps/bcs/crates/services/bcs-bot-store/tests/bot_provider_storage.rs
+  s_099b525d116ac6::t_e0b8dd34e67467 140,153-171
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle.rs
+  s_099b525d116ac6::t_1b14d6ef7f171c 53,461-473
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle_registration.rs
+  s_099b525d116ac6::t_ae240f2faecb51 1-862
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle_retirement.rs
+  s_099b525d116ac6::t_2c85b4fb806064 1-649
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle_retirement_races.rs
+  s_099b525d116ac6::t_596dcd63794f09 1-381
+apps/bcs/crates/services/bcs-bot-store/tests/common/bot_provider.rs
+  s_099b525d116ac6::t_f8a30f9db929e1 9
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_099b525d116ac6::t_6498694843ed8e 11,13,200-282
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_bot_control_plane_repo.rs
+  s_099b525d116ac6::t_9c49fc15fd0809 241-256
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_bot_profile.rs
+  s_099b525d116ac6::t_d5185ee0f19aaa 11,483-506
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_bot_repo.rs
+  s_099b525d116ac6::t_ac7b8430228d7b 725,747-764
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_caller_configuration.rs
+  s_099b525d116ac6::t_1580acc404ff9e 40
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_provider_slug.rs
+  s_099b525d116ac6::t_76449c51c44e47 110-137
+apps/bcs/crates/services/bcs-bot-store/tests/registration_create.rs
+  s_099b525d116ac6::t_f41733e1494c97 32
+apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs
+  s_099b525d116ac6::t_4c101b1b1ba0c9 36,43-44,75,79-98
+apps/bcs/crates/services/bcs-bot-store/tests/unit/heartbeat.rs
+  s_099b525d116ac6::t_61fa2e7ed90a7b 7
+apps/bcs/crates/services/bcs-bot/CONTEXT.md
+  s_099b525d116ac6::t_8e8e21d43c1e8e 95-101,181-182
+apps/bcs/crates/services/bcs-bot/Cargo.toml
+  s_099b525d116ac6::t_d0d0e986119b41 11,37
+apps/bcs/crates/services/bcs-bot/src/application/bot_cards.rs
+  s_099b525d116ac6::t_fe0a431db65a57 17-20,33
+apps/bcs/crates/services/bcs-bot/src/application/bot_query.rs
+  s_099b525d116ac6::t_c5d3c5646094fe 47
+apps/bcs/crates/services/bcs-bot/src/core/a2a_bot.rs
+  s_099b525d116ac6::t_5a977d7e30208d 46-47,52-65
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_099b525d116ac6::t_54c08c89a77f5b 37-39,63
+apps/bcs/crates/services/bcs-bot/src/core/agent_identity.rs
+  s_099b525d116ac6::t_39b46ac4fb5a8a 9-18
+apps/bcs/crates/services/bcs-bot/src/core/bot_core.rs
+  s_099b525d116ac6::t_39df62113184bf 54,103-105
+apps/bcs/crates/services/bcs-bot/src/core/bot_delivery.rs
+  s_099b525d116ac6::t_55c0b9df834008 70-83,85-86,212-216,325-329,337-342
+apps/bcs/crates/services/bcs-bot/src/core/provider_core.rs
+  s_099b525d116ac6::t_f10f3a67811b1e 41-43,284-285,559-560,823-824
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/bots.rs
+  s_099b525d116ac6::t_74213aa7aca5d8 1-470
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/management.rs
+  s_099b525d116ac6::t_320fe138f854b2 1-407
+apps/bcs/crates/services/bcs-bot/src/core/provider_registration.rs
+  s_099b525d116ac6::t_f56f2026117c93 33,59,63-64,193,241-245
+apps/bcs/crates/services/bcs-bot/tests/a2a_discovery.rs
+  s_099b525d116ac6::t_f2671563793ee0 29,41,47,49,53,89,91,131-148
+apps/bcs/crates/services/bcs-bot/tests/bot_profile.rs
+  s_099b525d116ac6::t_2535eae577b149 13
+apps/bcs/crates/services/bcs-bot/tests/provider_bot_storage.rs
+  s_099b525d116ac6::t_fb160518de50d3 142-165
+apps/bcs/crates/services/bcs-bot/tests/provider_registration.rs
+  s_099b525d116ac6::t_a96b9a18096be4 549,664,751,759-761
+apps/bcs/crates/services/bcs-bot/tests/provider_registration/subbots.rs
+  s_099b525d116ac6::t_117fa4a8641fc9 11,21
+apps/bcs/crates/services/bcs-bot/tests/provider_webhook_parts/a2a_abort.rs
+  s_099b525d116ac6::t_00db3038c76e1e 12-13,20,44-45,49
+apps/bcs/crates/services/bcs-channel/src/lib.rs
+  s_099b525d116ac6::t_d03ab95ccb2b0c 61-62
+apps/bcs/crates/services/bcs-channel/src/tests/sessions.rs
+  s_099b525d116ac6::t_869470abd321fe 92-129
+apps/bcs/crates/services/bcs-chat-run-store/src/a2a.rs
+  s_099b525d116ac6::t_0f372f85e5a001 108
+apps/bcs/crates/services/bcs-chat-run-store/src/a2a_codec.rs
+  s_099b525d116ac6::t_e17faa91ba5e1e 44-45,52-53,65
+apps/bcs/crates/services/bcs-chat-run-store/tests/conformance_a2a_run.rs
+  s_099b525d116ac6::t_370df609ce6961 203-232
+apps/bcs/crates/services/bcs-collaboration-runtime/Cargo.toml
+  s_099b525d116ac6::t_45433bad0f3e3b 30
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/runtime_progression/history_persistence.rs
+  s_099b525d116ac6::t_da0863f9d040ba 478
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/runtime_progression/recovery_sqlite.rs
+  s_099b525d116ac6::t_dfa0f502762571 8
+apps/bcs/crates/services/bcs-collaboration-store/Cargo.toml
+  s_099b525d116ac6::t_aa7f2d68d40df6 27
+apps/bcs/crates/services/bcs-collaboration-store/tests/mysql_store.rs
+  s_099b525d116ac6::t_2d64bf35553877 36-46
+apps/bcs/crates/services/bcs-collaboration-store/tests/mysql_store/definitions.rs
+  s_099b525d116ac6::t_b4eb70acdd9ccb 1-304
+apps/bcs/crates/services/bcs-collaboration-store/tests/mysql_store/failure_paths.rs
+  s_099b525d116ac6::t_2f79d454449139 1-504
+apps/bcs/crates/services/bcs-collaboration-store/tests/mysql_store/run_lifecycle.rs
+  s_099b525d116ac6::t_2950ba2a2ca530 1-440
+apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
+  s_099b525d116ac6::t_9995fe5b5f87a4 1-63
+apps/bcs/crates/services/bcs-db-migrations/Cargo.toml
+  s_099b525d116ac6::t_052b096029464a 1-21
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_099b525d116ac6::t_20c5388fa3a318 1-695
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_099b525d116ac6::t_74afa9427829eb 1-233
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/group_card_tests.rs
+  s_099b525d116ac6::t_eac48620eb9596 1-37
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/schema.rs
+  s_099b525d116ac6::t_45a5552a32fc07 848-899
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_099b525d116ac6::t_bc42bb4c14274c 267-269,280,735-737
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_099b525d116ac6::t_bbf14f8def24f3 9,48,62-63,92,123
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/group_human_mention_notify_mode.rs
+  s_099b525d116ac6::t_844575443f914d 66
+apps/bcs/crates/services/bcs-event-store/Cargo.toml
+  s_099b525d116ac6::t_d409a7fe065f39 22
+apps/bcs/crates/services/bcs-event-store/tests/conformance_event_delivery_store.rs
+  s_099b525d116ac6::t_d2f92458848f31 12
+apps/bcs/crates/services/bcs-event-store/tests/conformance_event_store.rs
+  s_099b525d116ac6::t_bc756711d53d01 13
+apps/bcs/crates/services/bcs-event-store/tests/idle_claims.rs
+  s_099b525d116ac6::t_53a81b6a78eda7 15
+apps/bcs/crates/services/bcs-group-store/Cargo.toml
+  s_099b525d116ac6::t_f49e19f575b13c 23
+apps/bcs/crates/services/bcs-group-store/src/card_template.rs
+  s_099b525d116ac6::t_dc321a87af10d8 1-169
+apps/bcs/crates/services/bcs-group-store/src/lib.rs
+  s_099b525d116ac6::t_bbe1240425e552 45
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_099b525d116ac6::t_2683c80b9dd9df 29-30,163,211-215,221-222,237,240,424,426,450-451,718-721
+apps/bcs/crates/services/bcs-group-store/src/memory_card_tests.rs
+  s_099b525d116ac6::t_50b6377d42b14d 1-56
+apps/bcs/crates/services/bcs-group-store/src/store_eventful.rs
+  s_099b525d116ac6::t_339018719bdb57 216-218,459,462
+apps/bcs/crates/services/bcs-group-store/src/store_tests.rs
+  s_099b525d116ac6::t_6ccdf74c892328 123-124,576-578
+apps/bcs/crates/services/bcs-group-store/src/store_writes.rs
+  s_099b525d116ac6::t_9e694a2fc19165 22,128,187,243,305-327,662-667,669-676
+apps/bcs/crates/services/bcs-group-store/tests/authorization_snapshot.rs
+  s_099b525d116ac6::t_24d62c25f94746 28
+apps/bcs/crates/services/bcs-group-store/tests/conformance_eventful_mutations.rs
+  s_099b525d116ac6::t_51a7425431895c 32
+apps/bcs/crates/services/bcs-group-store/tests/conformance_group_repo.rs
+  s_099b525d116ac6::t_05f5c74ff88b86 26-33
+apps/bcs/crates/services/bcs-group-store/tests/conformance_group_repo/atomic_mutations.rs
+  s_099b525d116ac6::t_b614dd28ec882f 1-441
+apps/bcs/crates/services/bcs-group-store/tests/conformance_group_repo/configuration.rs
+  s_099b525d116ac6::t_b8e25d5a0e8507 1-357
+apps/bcs/crates/services/bcs-group-store/tests/conformance_human_notify_policy.rs
+  s_099b525d116ac6::t_fed2510ca33d70 20
+apps/bcs/crates/services/bcs-group-store/tests/fixtures/manager-worker-card-template.json
+  s_099b525d116ac6::t_3cce66026221da 1-39
+apps/bcs/crates/services/bcs-group-store/tests/fixtures/state-machine-card-template.json
+  s_099b525d116ac6::t_ef5799e1ec5b88 1-39
+apps/bcs/crates/services/bcs-group-store/tests/group_card_templates.rs
+  s_099b525d116ac6::t_2ec82c96fccefd 1-327
+apps/bcs/crates/services/bcs-group-store/tests/provider_scope.rs
+  s_099b525d116ac6::t_246cf3a824644d 10
+apps/bcs/crates/services/bcs-group/Cargo.toml
+  s_099b525d116ac6::t_e808f7a4a34841 38
+apps/bcs/crates/services/bcs-group/tests/management.rs
+  s_099b525d116ac6::t_8dd1c5d53729e5 32-54,58-85
+apps/bcs/crates/services/bcs-group/tests/management/creation.rs
+  s_099b525d116ac6::t_df378e44676e0f 1-377
+apps/bcs/crates/services/bcs-group/tests/management/deletion.rs
+  s_099b525d116ac6::t_6d0d8f4a6492c6 1-185
+apps/bcs/crates/services/bcs-group/tests/management/dm.rs
+  s_099b525d116ac6::t_72c4e93fb3a927 1-192
+apps/bcs/crates/services/bcs-group/tests/management/human_authority.rs
+  s_099b525d116ac6::t_45df51a6a7f3f5 1-431
+apps/bcs/crates/services/bcs-group/tests/management/initial_session.rs
+  s_099b525d116ac6::t_2c2b9ff2837406 1-288
+apps/bcs/crates/services/bcs-group/tests/management/interaction.rs
+  s_099b525d116ac6::t_0ca655c0b28015 1-92
+apps/bcs/crates/services/bcs-group/tests/management/members.rs
+  s_099b525d116ac6::t_376ad16452fbdc 1-516
+apps/bcs/crates/services/bcs-group/tests/management/mutations.rs
+  s_099b525d116ac6::t_662cb730a2633b 1-109
+apps/bcs/crates/services/bcs-group/tests/management/query_lists.rs
+  s_099b525d116ac6::t_83a9280c0626e3 1-352
+apps/bcs/crates/services/bcs-group/tests/management/query_projections.rs
+  s_099b525d116ac6::t_839cb2d33fbda2 1-192
+apps/bcs/crates/services/bcs-group/tests/management/support/builders.rs
+  s_099b525d116ac6::t_54a4a45861db81 1-66
+apps/bcs/crates/services/bcs-group/tests/management/support/fixture.rs
+  s_099b525d116ac6::t_addf947df9b5eb 1-149
+apps/bcs/crates/services/bcs-group/tests/management/support/friend.rs
+  s_099b525d116ac6::t_783b8ce9859ae5 1-73
+apps/bcs/crates/services/bcs-group/tests/management/support/registry.rs
+  s_099b525d116ac6::t_18a48c43ace584 1-164
+apps/bcs/crates/services/bcs-group/tests/management/support/relation.rs
+  s_099b525d116ac6::t_fd0070a2bd0d6e 1-113
+apps/bcs/crates/services/bcs-group/tests/management/support/runtime.rs
+  s_099b525d116ac6::t_01fc46d3d1f0ce 1-43
+apps/bcs/crates/services/bcs-group/tests/management/support/session.rs
+  s_099b525d116ac6::t_e449dfd57ee0da 1-189
+apps/bcs/crates/services/bcs-group/tests/management/visibility.rs
+  s_099b525d116ac6::t_5eb0716a95e722 1-267
+apps/bcs/crates/services/bcs-group/tests/management/workbench_abort.rs
+  s_099b525d116ac6::t_3e8af7a1bbe3b5 1-104
+apps/bcs/crates/services/bcs-group/tests/management/workbench_chat.rs
+  s_099b525d116ac6::t_815f95b3fa3732 1-227
+apps/bcs/crates/services/bcs-group/tests/management/workbench_connect.rs
+  s_099b525d116ac6::t_9e8c95f88c2696 1-283
+apps/bcs/crates/services/bcs-group/tests/workbench_target_membership.rs
+  s_099b525d116ac6::t_399d8e928e0f40 38
+apps/bcs/crates/services/bcs-jwt/src/lib.rs
+  s_099b525d116ac6::t_6ca127f75cef52 8,11,15-35,150-151,166
+apps/bcs/crates/services/bcs-jwt/src/oauth_session.rs
+  s_099b525d116ac6::t_6b05f4986c98d7 1-158
+apps/bcs/crates/services/bcs-jwt/tests/oauth_session.rs
+  s_099b525d116ac6::t_413a2c23f9fe30 1-144
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_099b525d116ac6::t_4ac8c8c3716418 50-59,466-479
+apps/bcs/crates/services/bcs-message-flow/Cargo.toml
+  s_099b525d116ac6::t_c194982e13b129 18,43-48
+apps/bcs/crates/services/bcs-message-flow/src/bot_event.rs
+  s_099b525d116ac6::t_7c04b6236d1a33 315
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/persistence.rs
+  s_099b525d116ac6::t_95cdb4ea4c8889 383-384
+apps/bcs/crates/services/bcs-message-flow/src/caller_delegation.rs
+  s_099b525d116ac6::t_d7b5b9de352892 88-150
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_099b525d116ac6::t_3fd4a984c6b1a5 29-33,211-215,260,333-340,539-545,549-552,592-597,603-607,612,650,655,657-659,666-669,676-682,685,715-717,726,778-787,844-848,863-872,984-985,988-989
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+  s_099b525d116ac6::t_0e74ba8b3a1423 76-82,215-216,221-222,323-325,334,378-382,400-401,403-407,514-520
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/errors.rs
+  s_099b525d116ac6::t_0a3c32cb7ade0e 1-46
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/orchestration.rs
+  s_099b525d116ac6::t_1d211ab6aaaa59 359-363,439-444
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/stage.rs
+  s_099b525d116ac6::t_dea22a1ebe11e7 1-30
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime.rs
+  s_099b525d116ac6::t_0454ed05de5f43 61,505-513,516,537,602
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  s_099b525d116ac6::t_1b85ab4fea1149 268-280
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_dispatch.rs
+  s_099b525d116ac6::t_6e690e62cef966 21-38,211-233
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_099b525d116ac6::t_06d628c209b8ec 69,167,654,659,770-775
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_099b525d116ac6::t_465a3048041f11 464-482,484-495,497-500,502-505,508-519
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_hook.rs
+  s_099b525d116ac6::t_bd745cb83158bb 125,144
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_hook_tests.rs
+  s_099b525d116ac6::t_3161bfbebe66bd 6-8
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_tracing_tests.rs
+  s_099b525d116ac6::t_67365be6eed94a 1-160
+apps/bcs/crates/services/bcs-message-flow/src/lib.rs
+  s_099b525d116ac6::t_a568951e8e5057 12
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery.rs
+  s_099b525d116ac6::t_918c719e17d018 310-312,314-350,355-363,370-374,708,722-735,739-745,750-756
+apps/bcs/crates/services/bcs-message-flow/src/native_task.rs
+  s_099b525d116ac6::t_aa9eae5a0150a3 1-155
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/projection.rs
+  s_099b525d116ac6::t_e50395c5bf1129 30,36-37,58-73
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/tests.rs
+  s_099b525d116ac6::t_d0f0a596fc246c 122,167,195-238
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal.rs
+  s_099b525d116ac6::t_e9456ca12e35db 25-32,54-61,70-90,92-95,101-103,107,199-343
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal/result_leg_identity_tests.rs
+  s_099b525d116ac6::t_4f5d8eacf0d729 1-438
+apps/bcs/crates/services/bcs-message-flow/src/task_failure.rs
+  s_099b525d116ac6::t_867fcf65794f2e 42,90-91,101-254,259-260,262,280,282-283
+apps/bcs/crates/services/bcs-message-flow/src/task_flow.rs
+  s_099b525d116ac6::t_1fde351af54137 10
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_099b525d116ac6::t_2cf2aebb6be3af 7-14,96-110,172,176,180,239
+apps/bcs/crates/services/bcs-message-flow/tests/cases/authority_cutover.rs
+  s_099b525d116ac6::t_fe0098923e917c 29
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_dispatch_access_revalidation.rs
+  s_099b525d116ac6::t_cf1a43cd9c7be5 25-26
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_dispatch_stage_timeout_contract.rs
+  s_099b525d116ac6::t_1347f29339727f 1-594
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_dm_web_send_contract.rs
+  s_099b525d116ac6::t_f0c04c9f00c23f 33-34,265
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_execution.rs
+  s_099b525d116ac6::t_8679aecab6670e 6-8
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_existing_events_contract.rs
+  s_099b525d116ac6::t_862d0b22d7bc3c 6-7
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_observe_fanout_wiring_contract.rs
+  s_099b525d116ac6::t_bd4a677c4924a9 606
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_owner_relay_contract.rs
+  s_099b525d116ac6::t_07f684ceaa4d97 44-45,94,151,211,240,418-420
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_protected_dispatch_runtime_contract/watchdog.rs
+  s_099b525d116ac6::t_2bbb0b2894f941 28-37,47-48,55,138-141
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_099b525d116ac6::t_965b544f87dbf8 14-16
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_queued_group.rs
+  s_099b525d116ac6::t_b0728c1b682562 10-11
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_queued_system.rs
+  s_099b525d116ac6::t_acd4919bd38b17 15-16,36-39,41-50,284-318
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_queued_task.rs
+  s_099b525d116ac6::t_5880c4337852b0 16-19,21,23,623
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_run_deadline.rs
+  s_099b525d116ac6::t_af87fe4494b983 6
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat.rs
+  s_099b525d116ac6::t_2aa8127b9d2ea0 23,828-837
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/access.rs
+  s_099b525d116ac6::t_6d0848c1566d8b 1-135
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/event_parser.rs
+  s_099b525d116ac6::t_d3adf2303671e2 1-382
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/organization.rs
+  s_099b525d116ac6::t_10517d7ec4665a 1-101
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/run_start.rs
+  s_099b525d116ac6::t_63fa9cd38ffd56 1-445
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/run_terminal.rs
+  s_099b525d116ac6::t_8197b874eb69fe 1-397
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_bot_event.rs
+  s_099b525d116ac6::t_f4171d857dd364 1,39
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_coordination_chat_final.rs
+  s_099b525d116ac6::t_a939685d872f7b 32
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_coordination_tool_identity.rs
+  s_099b525d116ac6::t_5598112f2dcc23 1,21
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_group_fusion.rs
+  s_099b525d116ac6::t_49cba0c2aa4e6b 13
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_human_notify_context.rs
+  s_099b525d116ac6::t_fbc29c89bc8da6 11-12
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow.rs
+  s_099b525d116ac6::t_6b2a65643bd7ae 1-72
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/abort.rs
+  s_099b525d116ac6::t_46a8762e53a33d 1-423
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/attachments.rs
+  s_099b525d116ac6::t_d9d2cb9f83d4b4 1-187
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/bot_event_callback.rs
+  s_099b525d116ac6::t_67a5d1dc4cde08 1-271
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/group_chat.rs
+  s_099b525d116ac6::t_5862d689db0b4b 1-306
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/group_history.rs
+  s_099b525d116ac6::t_ea87238ce4893f 1-529
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/human_mentions.rs
+  s_099b525d116ac6::t_2ea1e64e50247a 1-403
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/persistent_send.rs
+  s_099b525d116ac6::t_803b981f309d1d 1-291
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/session_history.rs
+  s_099b525d116ac6::t_01449aea1b5e1a 1-521
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/authority.rs
+  s_099b525d116ac6::t_5a1d25499dd7e3 1-22
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/group_setup.rs
+  s_099b525d116ac6::t_51a27231ba2565 1-31
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/history.rs
+  s_099b525d116ac6::t_8c63bae6110a71 1-38
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/message_repo.rs
+  s_099b525d116ac6::t_0361b266e805ce 1-81
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/policy.rs
+  s_099b525d116ac6::t_35d4ede90453d7 1-15
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/support/runs.rs
+  s_099b525d116ac6::t_f5fbdad45c41e2 1-58
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/web_send_projection.rs
+  s_099b525d116ac6::t_0bb8cb4aee6dcf 1,4,6-15,23,25-28,34-45,50-57,60-67,69,71-75,81-92,97-99,103-105,115,118,120-123,129-139,144,146-147,149-155,157-166,168-172,174-180,182-183,187-197,199,208,211-213,220-245,249,251,260-287,289-293,295-309,313,323-346,349,351-370,374,376-393,400-401,403-425,427-450,454,456-463,472-495,497-509,511-514
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/web_send_provider.rs
+  s_099b525d116ac6::t_55364bbd1b9ada 1-443
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/web_send_routing.rs
+  s_099b525d116ac6::t_81d3982fbda8da 1-410
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/web_send_sessions.rs
+  s_099b525d116ac6::t_ffe6b7f984bc11 1-309
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_failure_notifications.rs
+  s_099b525d116ac6::t_17b5418a442295 11-12
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_history_query.rs
+  s_099b525d116ac6::t_64cc73c4daeb5a 14-15,17,20
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_query_visibility.rs
+  s_099b525d116ac6::t_c43edc6c11ed56 27-28
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime.rs
+  s_099b525d116ac6::t_5c5cdf61a89fd8 1-349
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime/lifecycle.rs
+  s_099b525d116ac6::t_be4592cc1554e1 1
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime/queue.rs
+  s_099b525d116ac6::t_822cd55952ce13 1-304
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_session_access.rs
+  s_099b525d116ac6::t_572f074a2d3175 26-27
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_through_bot_bounds.rs
+  s_099b525d116ac6::t_17b7ffd791291b 23-24
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_via_controlled_bot.rs
+  s_099b525d116ac6::t_8ef93d04518f7b 34
+apps/bcs/crates/services/bcs-message-flow/tests/cases/operation_output_admission.rs
+  s_099b525d116ac6::t_c8770fa909c3fd 36,38,331
+apps/bcs/crates/services/bcs-message-flow/tests/cases/operation_output_lifecycle.rs
+  s_099b525d116ac6::t_98beba2d0617ca 10,12,16
+apps/bcs/crates/services/bcs-message-flow/tests/cases/operation_output_uncertainty.rs
+  s_099b525d116ac6::t_d1b38b03d0780d 9-10,12,14
+apps/bcs/crates/services/bcs-message-flow/tests/cases/queued_provider_headers.rs
+  s_099b525d116ac6::t_b81cffd11074dc 6-7
+apps/bcs/crates/services/bcs-message-flow/tests/cases/routed_reply_derivation_contract.rs
+  s_099b525d116ac6::t_a1e46a9240c056 31-32
+apps/bcs/crates/services/bcs-message-flow/tests/cases/run_reply.rs
+  s_099b525d116ac6::t_03ebf0f70dc36a 17-18,20
+apps/bcs/crates/services/bcs-message-flow/tests/cases/speaking_lease_web_send_contract.rs
+  s_099b525d116ac6::t_e1e34a4597c8d2 42-43
+apps/bcs/crates/services/bcs-message-flow/tests/cases/web_send_session_membership.rs
+  s_099b525d116ac6::t_c3604914e57040 20-21
+apps/bcs/crates/services/bcs-message-flow/tests/protected_result_leg_contract.rs
+  s_099b525d116ac6::t_4093095921f1cc 1-349
+apps/bcs/crates/services/bcs-message-flow/tests/relay_capture_diagnostics_contract.rs
+  s_099b525d116ac6::t_ccc6f25da85cf0 1-378
+apps/bcs/crates/services/bcs-message-flow/tests/suite_caller_admission.rs
+  s_099b525d116ac6::t_a899e2b7fd4a5a 1-15
+apps/bcs/crates/services/bcs-message-flow/tests/suite_caller_execution.rs
+  s_099b525d116ac6::t_7df26aa920c9a8 1-27
+apps/bcs/crates/services/bcs-message-flow/tests/suite_coordination.rs
+  s_099b525d116ac6::t_6b34ebd50139a3 1-25
+apps/bcs/crates/services/bcs-message-flow/tests/suite_delivery.rs
+  s_099b525d116ac6::t_6d6bafe6e6c15a 1-37
+apps/bcs/crates/services/bcs-message-flow/tests/suite_routing.rs
+  s_099b525d116ac6::t_f79bc27d75ef36 1-27
+apps/bcs/crates/services/bcs-message-flow/tests/suite_run_state.rs
+  s_099b525d116ac6::t_5d1764e2f26902 1-8
+apps/bcs/crates/services/bcs-message-flow/tests/support/native_owner_task.rs
+  s_099b525d116ac6::t_e91275a3dce6ec 1-327
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_099b525d116ac6::t_79f0c788fb013b 1-232
+apps/bcs/crates/services/bcs-message-store/Cargo.toml
+  s_099b525d116ac6::t_621234cee63088 25
+apps/bcs/crates/services/bcs-message-store/tests/conformance_delivery_repo.rs
+  s_099b525d116ac6::t_fb13f08c08b093 209
+apps/bcs/crates/services/bcs-message-store/tests/conformance_message_repo.rs
+  s_099b525d116ac6::t_761623ec35e63a 9
+apps/bcs/crates/services/bcs-organization-store/Cargo.toml
+  s_099b525d116ac6::t_206d795327e88b 19
+apps/bcs/crates/services/bcs-organization-store/tests/conformance_organization_repo.rs
+  s_099b525d116ac6::t_99202d5f35dcc4 7
+apps/bcs/crates/services/bcs-session-store/Cargo.toml
+  s_099b525d116ac6::t_5f12eba7c5c1f4 23
+apps/bcs/crates/services/bcs-session-store/tests/authorization_snapshot.rs
+  s_099b525d116ac6::t_27bc41a521a929 29
+apps/bcs/crates/services/bcs-session-store/tests/conformance_session_repo.rs
+  s_099b525d116ac6::t_b2849a7c149a28 23
+apps/bcs/crates/services/bcs-session-store/tests/group_session_membership.rs
+  s_099b525d116ac6::t_abe9e47232cd6a 13
+apps/bcs/crates/services/bcs-system-message/CONTEXT.md
+  s_099b525d116ac6::t_858fc5ef84395c 6-8
+apps/bcs/crates/services/bcs-system-message/src/producers/session_context.rs
+  s_099b525d116ac6::t_6e33e9a27a68c0 7,75,380,448,452-453,457
+apps/bcs/crates/services/bcs-system-message/src/producers/session_context_test.rs
+  s_099b525d116ac6::t_197cae24bd037c 697,706-744
+apps/bcs/crates/services/bcs-user-identity/Cargo.toml
+  s_099b525d116ac6::t_38e4c25a2725c9 19,21,23-25
+apps/bcs/crates/services/bcs-user-identity/README.md
+  s_099b525d116ac6::t_c57ede953d5653 29-58
+apps/bcs/crates/services/bcs-user-identity/src/lib.rs
+  s_099b525d116ac6::t_ee6bdc32766d7c 16-18
+apps/bcs/crates/services/bcs-user-identity/src/memory.rs
+  s_099b525d116ac6::t_43e6534b494de9 1-7,9,14-17,20-21,34-80,84,99-104,118-119,127,134-139,165,168,178-180,187-189,196-198,204-211,213-249,281-290,293-296,298
+apps/bcs/crates/services/bcs-user-identity/src/session_db.rs
+  s_099b525d116ac6::t_7f67478a44960d 1-410
+apps/bcs/crates/services/bcs-user-identity/src/session_memory.rs
+  s_099b525d116ac6::t_4a0d528b6750f4 1-293
+apps/bcs/crates/services/bcs-user-identity/tests/auth_session_db_errors.rs
+  s_099b525d116ac6::t_336c5c10864582 1-559
+apps/bcs/crates/services/bcs-user-identity/tests/conformance_auth_session_memory.rs
+  s_099b525d116ac6::t_8f11696694150e 1-569
+apps/bcs/crates/services/bcs-user-identity/tests/conformance_auth_session_mysql.rs
+  s_099b525d116ac6::t_468ae2d0bed681 1-209
+apps/bcs/crates/services/bcs-user-identity/tests/conformance_auth_session_sqlite.rs
+  s_099b525d116ac6::t_07db0abafabf4a 1-456
+apps/bcs/crates/services/bcs-user-identity/tests/conformance_user_identity.rs
+  s_099b525d116ac6::t_f3ea962ffe743d 36-47,55-57,79-82
+apps/bcs/crates/test-support/bcs-test-support/Cargo.toml
+  s_099b525d116ac6::t_ecb6f749c26ed8 32-33
+apps/bcs/crates/test-support/bcs-test-support/src/bot_authority_sqlite.rs
+  s_099b525d116ac6::t_d33aac954e1d4b 344
+apps/bcs/crates/test-support/bcs-test-support/src/contract/application/auth_service.rs
+  s_099b525d116ac6::t_056d8fc6cda95a 1-174
+apps/bcs/crates/test-support/bcs-test-support/src/contract/application/mod.rs
+  s_099b525d116ac6::t_6a86d9cd69b598 3,8-9
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_provider.rs
+  s_099b525d116ac6::t_326096f9afbb72 12-13,18,21-28,30,43,61-62,64,69
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_registration_chain.rs
+  s_099b525d116ac6::t_2db4bf22845b3b 251-256
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/auth_session_identity.rs
+  s_099b525d116ac6::t_8f8968c313708e 1-439
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/mod.rs
+  s_099b525d116ac6::t_c0001bd18eee76 89-125
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/oauth_session_engine.rs
+  s_099b525d116ac6::t_ec842965f66d83 1-160
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/pending_oauth_login.rs
+  s_099b525d116ac6::t_84e272a80a88e5 1-333
+apps/bcs/crates/test-support/bcs-test-support/src/contract/port/mod.rs
+  s_099b525d116ac6::t_a1c8cbde86a739 9-14
+apps/bcs/crates/test-support/bcs-test-support/src/contract/port/oauth.rs
+  s_099b525d116ac6::t_0ec4c3079ca895 1-311
+apps/bcs/crates/test-support/bcs-test-support/src/contract/provider_registration_core.rs
+  s_099b525d116ac6::t_ec206fde445088 47-48
+apps/bcs/crates/test-support/bcs-test-support/src/contract/repo/auth_session.rs
+  s_099b525d116ac6::t_b578f8d4497797 1-140
+apps/bcs/crates/test-support/bcs-test-support/src/contract/repo/mod.rs
+  s_099b525d116ac6::t_f8c2e220e9b9d7 6,12
+apps/bcs/crates/tools/bcs-admin/Cargo.toml
+  s_099b525d116ac6::t_cfec09b6a99d07 31
+apps/bcs/crates/tools/bcs-admin/src/migrate.rs
+  s_099b525d116ac6::t_492589f1c46793 761
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_099b525d116ac6::t_1fe33d5098acae 40
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_099b525d116ac6::t_1f60f0f46387f7 10,35-60,172,174,236,238,294,308,310-312,353
+apps/bcs/crates/tools/bcs-bridge/app/src/config.rs
+  s_099b525d116ac6::t_98f04cf4954869 26-43,57-60,117-121
+apps/bcs/crates/tools/bcs-bridge/app/src/multi_config.rs
+  s_099b525d116ac6::t_a967b4a893d804 7,12,19,31,36,38,43-44,74-80,83,98-100,137-143,155,158-162
+apps/bcs/crates/tools/bcs-bridge/app/src/multi_config_tests.rs
+  s_099b525d116ac6::t_c9bbd8a47287ce 17,40,52,68,109-207
+apps/bcs/crates/tools/bcs-bridge/cli/MULTI_PROVIDER.md
+  s_099b525d116ac6::t_ca6391834cbab6 67-71,109-115
+apps/bcs/crates/tools/bcs-bridge/cli/README.md
+  s_099b525d116ac6::t_8b950f1f7c04ea 130-145
+apps/bcs/crates/tools/bcs-bridge/core/src/config.rs
+  s_099b525d116ac6::t_bc4871bc90d992 66-69,104-106,110-115
+apps/bcs/crates/tools/bcs-bridge/core/src/engine/cli.rs
+  s_099b525d116ac6::t_31b91e2c9c4fec 64-69
+apps/bcs/crates/tools/bcs-bridge/core/tests/caller_environment.rs
+  s_099b525d116ac6::t_535e117e4d5558 5,27,36-77
+apps/bcs/crates/tools/bcs-bridge/core/tests/engine_caller_environment.rs
+  s_099b525d116ac6::t_6317e51ae27a31 66-113
+apps/bcs/crates/tools/bcs-bridge/core/tests/plugin_websocket.rs
+  s_099b525d116ac6::t_47655455d2ab79 545
+apps/bcs/crates/tools/bcs-cli/src/cli/chat_commands.rs
+  s_099b525d116ac6::t_802aa6ff9847cf 56
+apps/bcs/crates/tools/bcs-cli/src/client.rs
+  s_099b525d116ac6::t_4322c4a7c48e10 12-23,27,29,132,466,468-472,474,477
+apps/bcs/crates/tools/bcs-cli/src/client/bots.rs
+  s_099b525d116ac6::t_eb7fe96824923c 1-601
+apps/bcs/crates/tools/bcs-cli/src/client/bots/tests.rs
+  s_099b525d116ac6::t_0598d4ebaa0d8e 1,3-7,9-12,14-20,22-30,32-43,45-52
+apps/bcs/crates/tools/bcs-cli/src/client/channels.rs
+  s_099b525d116ac6::t_5428f8a78f304f 1-133
+apps/bcs/crates/tools/bcs-cli/src/client/channels/tests.rs
+  s_099b525d116ac6::t_8eac085b570306 1-27
+apps/bcs/crates/tools/bcs-cli/src/client/chat.rs
+  s_099b525d116ac6::t_721392bfd0b558 1-422
+apps/bcs/crates/tools/bcs-cli/src/client/chat/tests.rs
+  s_099b525d116ac6::t_be91971b0653c6 1-24
+apps/bcs/crates/tools/bcs-cli/src/client/chat/tests/polling.rs
+  s_099b525d116ac6::t_e71f088ac87c6a 1-533
+apps/bcs/crates/tools/bcs-cli/src/client/chat/tests/submission.rs
+  s_099b525d116ac6::t_194e391abc3f44 1-193
+apps/bcs/crates/tools/bcs-cli/src/client/collaboration.rs
+  s_099b525d116ac6::t_25afdc32d6264a 1-241
+apps/bcs/crates/tools/bcs-cli/src/client/files.rs
+  s_099b525d116ac6::t_cc627f6e00c648 1-441
+apps/bcs/crates/tools/bcs-cli/src/client/files/tests.rs
+  s_099b525d116ac6::t_7ab30572365050 1-331
+apps/bcs/crates/tools/bcs-cli/src/client/fusion.rs
+  s_099b525d116ac6::t_ce02ee80178996 1-56
+apps/bcs/crates/tools/bcs-cli/src/client/groups.rs
+  s_099b525d116ac6::t_e812cae8936929 1-386
+apps/bcs/crates/tools/bcs-cli/src/client/relations.rs
+  s_099b525d116ac6::t_c29821c84dc455 1-187
+apps/bcs/crates/tools/bcs-cli/src/client/services.rs
+  s_099b525d116ac6::t_fceba371c9683e 1-106
+apps/bcs/crates/tools/bcs-cli/src/client/sessions.rs
+  s_099b525d116ac6::t_31bbd0e6e84af8 1-449
+apps/bcs/crates/tools/bcs-cli/src/client/sessions/tests.rs
+  s_099b525d116ac6::t_4c8a0d32059907 1-30
+apps/bcs/crates/tools/bcs-cli/src/client/tests.rs
+  s_099b525d116ac6::t_3565dd823749c8 1
+apps/bcs/crates/tools/bcs-cli/src/client/tests/headers.rs
+  s_099b525d116ac6::t_c434269a70b52d 1-279
+apps/bcs/crates/tools/bcs-cli/tests/command_contracts/chat.rs
+  s_099b525d116ac6::t_62af27e349d85f 44-76
+apps/bcs/docs/bot-provider-integration.zh-CN.md
+  s_099b525d116ac6::t_9ecc407cd7bc04 52-53,60,63
+apps/bcs/docs/caller-container-gateway.md
+  s_099b525d116ac6::t_7c664c6f62b116 209-232,250-251
+apps/bcs/docs/native-task-caller.md
+  s_099b525d116ac6::t_9bd9e9226b0762 1-199
+apps/bcs/docs/plans/2026-08-18-v1-legacy-session-launch-parity-design.md
+  s_099b525d116ac6::t_d95506341f6d52 321
+apps/bcs/docs/provider-downlink-protocol.md
+  s_099b525d116ac6::t_0c49ea678058a4 62,67-72
+apps/bcs/docs/superpowers/specs/2026-08-28-openapi-auth-facade.md
+  s_099b525d116ac6::t_23c98e60baf824 3-11,20-35,56-60,63,67-77,79-86,92,94-95,101-112,117-128,132-135,137-144,156-216
+apps/bcs/docs/waivers/agentpass-subbots-client-source-size.md
+  s_099b525d116ac6::t_739375d1175063 3
+apps/bcs/migrations/README.md
+  s_099b525d116ac6::t_bf554a9306e696 590-690
+apps/bcs/migrations/mysql/041_group_agent_cards.sql
+  s_099b525d116ac6::t_5985f7c8ee3bfb 1-11
+apps/bcs/migrations/mysql/042_auth_session_version.sql
+  s_099b525d116ac6::t_555301a50607f0 1-15
+apps/bcs/migrations/sqlite/041_group_agent_cards.sql
+  s_099b525d116ac6::t_56b2a0323af24b 1-11
+apps/bcs/migrations/sqlite/042_auth_session_version.sql
+  s_099b525d116ac6::t_9f4c3346821b40 1-14
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_099b525d116ac6::t_298bdd773f80bc 24-27
+apps/bcs/scripts/ci/README.md
+  s_099b525d116ac6::t_6cf12538f5490c 108-120
+apps/bcs/scripts/ci/check-config-validation.sh
+  s_099b525d116ac6::t_26cf465b6bc768 24-34
+apps/bcs/scripts/ci/check-deps.sh
+  s_099b525d116ac6::t_f1c60bd92046c1 76-89
+apps/bcs/scripts/ci/check-import-rules.sh
+  s_099b525d116ac6::t_a2f85cdfaa9fc4 40-45
+apps/bcs/scripts/ci/check-r25-conformance.sh
+  s_099b525d116ac6::t_b298ba4e009da4 51,74
+apps/bcs/scripts/ci/tests/conformance_layout_regression.sh
+  s_099b525d116ac6::t_fc53ec90805a6f 1-22
+apps/bcs/scripts/ci/tests/import_scope_regression.sh
+  s_099b525d116ac6::t_f9043e2dcbaffe 1-55
+apps/bcs/scripts/cov_gate.py
+  s_099b525d116ac6::t_7a8038e7bf55e5 7-9,48-51,196-201,205
+apps/bcs/scripts/e2e-test/a2a_management_cases.py
+  s_099b525d116ac6::t_50656d4532112b 1-93
+apps/bcs/scripts/e2e-test/a2a_rpc_peer.py
+  s_099b525d116ac6::t_a84f296a00cde7 1-63
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_099b525d116ac6::t_e6c86cdb345101 16,20-21,27-29,33-35,52,60,75-81,87-88,105,120,139-152,210,235-237,272-273,280-286,292-296,302-304,314-316,318-319,327-328,425-429,431-528,597-600,602-608,610-613
+apps/bcs/scripts/e2e-test/a2a_workbench.py
+  s_099b525d116ac6::t_f747c2a2bb66ad 50-53
+apps/bcs/scripts/e2e-test/caller_delegation_chain_story.py
+  s_099b525d116ac6::t_dc3b14834c5dae 1-416
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_099b525d116ac6::t_65ad1dd9ef9ade 21,27-29,42,70-71,131-133,136,196-224,232,257-259,286-287
+apps/bcs/scripts/e2e-test/caller_identity_story.py
+  s_099b525d116ac6::t_099fbe27e8b90f 441,456-494
+apps/bcs/scripts/e2e-test/caller_identity_story.sh
+  s_099b525d116ac6::t_88a99b736f5dea 42-83
+apps/bcs/scripts/e2e-test/custom_binding_story.py
+  s_099b525d116ac6::t_bca23f146d8c14 1-83
+apps/bcs/scripts/e2e-test/e2e.sh
+  s_099b525d116ac6::t_0042740c9f5909 99
+apps/bcs/scripts/e2e-test/group_card_story.py
+  s_099b525d116ac6::t_62322bf9250750 1-211
+apps/bcs/scripts/e2e-test/group_card_story.sh
+  s_099b525d116ac6::t_a571f16c3c4e6a 1-11
+apps/bcs/scripts/e2e-test/http_provider_judge_mock.py
+  s_099b525d116ac6::t_298182baa5879b 19,33,99-108,163-181
+apps/bcs/scripts/e2e-test/native_task_caller_story.py
+  s_099b525d116ac6::t_e5dc2214d0e757 1-320
+apps/bcs/scripts/e2e-test/oauth/README.md
+  s_099b525d116ac6::t_fdf26246757aab 1-73
+apps/bcs/scripts/e2e-test/oauth/config_cases.py
+  s_099b525d116ac6::t_f70850a72d4fec 1-124
+apps/bcs/scripts/e2e-test/oauth/flows.py
+  s_099b525d116ac6::t_d6f9244d92d4af 1-258
+apps/bcs/scripts/e2e-test/oauth/harness.py
+  s_099b525d116ac6::t_b727833e393ad8 1-204
+apps/bcs/scripts/e2e-test/oauth/provider_stub.py
+  s_099b525d116ac6::t_992ad9bd01c824 1-223
+apps/bcs/scripts/e2e-test/oauth/regressions.py
+  s_099b525d116ac6::t_c5c1b16c43732d 1-131
+apps/bcs/scripts/e2e-test/oauth/story.py
+  s_099b525d116ac6::t_63e3fc3a821851 1-65
+apps/bcs/scripts/e2e-test/protected_result_leg_story.py
+  s_099b525d116ac6::t_bb23510ece2814 1-375
+apps/bcs/scripts/e2e_coverage.sh
+  s_099b525d116ac6::t_dce874ec453e1a 27-28,30,246-247,340-341,398-400
+apps/bcs/scripts/oauth_e2e_coverage.sh
+  s_099b525d116ac6::t_3c388dff40c3b7 1-29
+apps/bcs/scripts/pre_push.sh
+  s_099b525d116ac6::t_b56ba42442b8d8 7-9,130,137,206,224,234-236,239,270
+apps/bcs/scripts/test_a2a_poll_cancel_readiness.py
+  s_099b525d116ac6::t_1e738ef7b370f4 1-51
+apps/bcs/scripts/test_api_auth_contract.py
+  s_099b525d116ac6::t_81b01d4a16b6d8 1-357
+apps/bcs/scripts/test_changed_line_cov.py
+  s_099b525d116ac6::t_8d81b18afe0b9c 5-6,184-188,200-202,204-216,325-339
+apps/bcs/scripts/test_group_card_story.py
+  s_099b525d116ac6::t_39767fc6d41120 1-56
+apps/bcs/scripts/test_provider_downlink.sh
+  s_099b525d116ac6::t_2b7901ac784a33 140,144,166,170,178,182
+apps/bcs/specs/2026-10-22-collaboration-draft-group-launch/spec.md
+  s_099b525d116ac6::t_ed47235a732692 9-10,58,63,146,148,150-156,158,160,167-177,189,200,210
+apps/bcs/specs/2026-10-22-collaboration-draft-group-launch/tasks.md
+  s_099b525d116ac6::t_3a005ae93f2e1f 66-79
+apps/bcs/specs/2026-11-05-split-large-rust-files/plan-1-message-flow-contract-tests.md
+  s_099b525d116ac6::t_c8c529ba79949a 1-680
+apps/bcs/specs/2026-11-05-split-large-rust-files/plan-2-cli-client.md
+  s_099b525d116ac6::t_0200d9d095a251 1-750
+apps/bcs/specs/2026-11-05-split-large-rust-files/plan-3-group-management-tests.md
+  s_099b525d116ac6::t_5a3091dd95189c 1-705
+apps/bcs/specs/2026-11-05-split-large-rust-files/spec.md
+  s_099b525d116ac6::t_8eb345c99bda63 1-335
+apps/bcs/tests/openapi/test_bot_v1_contract.py
+  s_099b525d116ac6::t_38ec2d43637036 85,100-104
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-hardening/scripts/report.py
+  s_099b525d116ac6::t_d165d08c262cdc 9-10,14-17,75-78,80
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/clawevolve_runtime/runtime.py
+  s_099b525d116ac6::t_baaa3b73682ab2 8-9,18-19,159,162,192-200,202-251
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/tests/test_core.py
+  s_099b525d116ac6::t_e4824524fedd63 18-20,83-84
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/tests/test_execution.py
+  s_099b525d116ac6::t_a53f8898b5c369 180,187-188,190-192,224,228
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/tests/test_report_retry.py
+  s_099b525d116ac6::t_ba029c1146f2b9 1-106
+apps/evolverun/clawweb/docs/repair-pack-layout.md
+  s_099b525d116ac6::t_cec20998cfab0b 1-75
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/clawflows-git-client-fixture.ts
+  s_099b525d116ac6::t_4587f409da687b 1-43
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/internal-engine-auth.test.ts
+  s_099b525d116ac6::t_089eb44bd29ed6 1-111
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-internal-engine.test.ts
+  s_099b525d116ac6::t_200183f14c2066 1-102
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-pack-security.test.ts
+  s_099b525d116ac6::t_93849ed583dc44 62-94,114,133-134,138-143,146-231
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-run-subworkflows.test.ts
+  s_099b525d116ac6::t_508e7651ae086c 1-83
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-unified-save-host.test.ts
+  s_099b525d116ac6::t_47e944b189b3de 1-199
+apps/evolverun/clawweb/public/app/clawweb/server/internal-engine-auth.ts
+  s_099b525d116ac6::t_b4b33b6d7d78c6 1-82
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  s_099b525d116ac6::t_bc7485073b9968 10-11,18,22-28,43-44,54-55,68,87-105,132-159,270-277,301-307,311,350,352,355
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/evolve-repository.ts
+  s_099b525d116ac6::t_18aa88e81d5786 1,259,263,2376-2384,2396
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/step-report-repository.ts
+  s_099b525d116ac6::t_838d95cb594fbc 1-69
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/__tests__/stage-handler-replace.test.ts
+  s_099b525d116ac6::t_88d68f3795c08c 22,68,70-75,119,122,270-276,311-316,322-415
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/evolve.ts
+  s_099b525d116ac6::t_22150a6cf12f8b 1,4320,5307,6314
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/step-report-delivery.ts
+  s_099b525d116ac6::t_92c407b722e223 1-43
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/Evolve.tsx
+  s_099b525d116ac6::t_150a87fa329b05 343,451-454,588,593-595,618,714-716,949-962,966,968-969,971,1153,1156,3261
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/__tests__/admin-evolution-owner.test.tsx
+  s_099b525d116ac6::t_63389833fb8e5f 1-148
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_099b525d116ac6::t_ecb7043bb94174 171-175,281-285,287-292,295,297-298,300,306-342,373-381
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_099b525d116ac6::t_82026248eab62d 18-19,248-256
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-team-handbooks-spec.md
+  s_099b525d116ac6::t_2c3f6d7c082f1e 119-124
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_099b525d116ac6::t_ec0fb09de40bee 43,185,189,191,237-238,242
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery.ts
+  s_099b525d116ac6::t_9ab71300be1050 83-88
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/insight-runtime.ts
+  s_099b525d116ac6::t_17c8d6efde4e7a 27
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_099b525d116ac6::t_9e35edbefcedf3 1-32
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/dingtalk-sender.ts
+  s_099b525d116ac6::t_542c35c925b013 77-109
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook-persistence.test.ts
+  s_099b525d116ac6::t_59356768371e35 38,45
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook-team.test.ts
+  s_099b525d116ac6::t_fd89a5fa5625c4 20,23,28,49,53,55,60,69
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook.test.ts
+  s_099b525d116ac6::t_041733b408e649 11-13,17,21,23,25-27,29,37
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/intervention-result.test.ts
+  s_099b525d116ac6::t_d5b3a66466c613 151-269
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/notification.test.ts
+  s_099b525d116ac6::t_79e38e56b2fa24 343-344,346,373-375,377,379-380,389,393-394,399,401-402,404,410-411,428,430,433,443,447-448,467-476,480-488
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_099b525d116ac6::t_2d6811f9991596 1-132
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-cooperation.test.ts
+  s_099b525d116ac6::t_d2a648e858f7e1 1-58
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_099b525d116ac6::t_cf35ef3047f0bf 16,39,44-140,151,480-513
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-state.test.ts
+  s_099b525d116ac6::t_c5e0deee9df532 147-185
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_099b525d116ac6::t_4a9f4b49d28287 15,38-80,248,264,271,278,325,403-404,438-591
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_099b525d116ac6::t_676712ccd333ae 21,271,273-277,281-282,285,305,450-455,458-459,490-491,530,558-568,572,638-641,645
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_099b525d116ac6::t_a0813784923f41 3,39-41,49
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/handbook.ts
+  s_099b525d116ac6::t_5aada287d394ad 66-69
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_099b525d116ac6::t_6095aa0eb0ffc0 20,25,46
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_099b525d116ac6::t_fc4ad4a6f5f703 12-27,34,38,57-68,70-102,121-136,138
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_099b525d116ac6::t_46bf8b9573a585 1-37
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result.ts
+  s_099b525d116ac6::t_ffd8a466985e74 4-16,19-24
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_099b525d116ac6::t_cd8ac869859c9c 13-29,87-90
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_099b525d116ac6::t_9a35b3eb1c4e70 9-10,15,27-28,31,144,148,158-160,163-164,204-213,253-281,357,377-378,382,386-388,396,398,401,462,480,490-492,505,511,524-572,592,605
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-state.ts
+  s_099b525d116ac6::t_e51f4b04bc9b7b 1,27,30,35-39
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/validation.ts
+  s_099b525d116ac6::t_6637cd6c490494 5,18-26
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/__tests__/session-recovery.test.ts
+  s_099b525d116ac6::t_bfb9785d2a37c7 1-11
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/session-recovery.ts
+  s_099b525d116ac6::t_130818ed7cd6c5 17-19
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/OwnerCooperation.tsx
+  s_099b525d116ac6::t_c64e0976aa39a7 1-65
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/PlanMarkdown.tsx
+  s_099b525d116ac6::t_1d45c9fe302027 1-9
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_099b525d116ac6::t_0c8ff515f1e7d8 7-8,34,157,445,447,465,493,545,547,554-555,564,574,577,579-580,589,598,656,724-729
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/__tests__/OwnerCooperation.test.tsx
+  s_099b525d116ac6::t_49e1346ab1d4fd 1-204
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/session-recovery.ts
+  s_099b525d116ac6::t_690faa011f414a 2-13,25
+apps/evolverun/clawweb/public/modules/workflow/docs/cct-drill-evaluation-minimal-fanout.yaml
+  s_099b525d116ac6::t_e7a087d5598523 1-85
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  s_099b525d116ac6::t_55ba9f1badfa27 1-255
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-scripts-read.md
+  s_099b525d116ac6::t_6e310de8c4cce5 9,30-36,40,53,57
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  s_099b525d116ac6::t_86950d91d25c62 3-8,10-15
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  s_099b525d116ac6::t_2ab78019c2dd1d 1,3-8,31-33,44-65,73-156,159-161,167-177,192-197,204-215,226-251,264-266,281-288,291-298,445-604
+apps/evolverun/clawweb/public/modules/workflow/docs/run-list-contract.md
+  s_099b525d116ac6::t_0eec1c476dd238 82-298
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-wf-save-tag-deploy.md
+  s_099b525d116ac6::t_b726f2388b385f 1-160
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/run-subworkflows.ts
+  s_099b525d116ac6::t_e07834e6afbc92 1-68
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-admission-deadline.test.ts
+  s_099b525d116ac6::t_8331b8961aaa7a 1-158
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-claim-cas.test.ts
+  s_099b525d116ac6::t_23880f9a7717dc 1-251
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-cross-group-cas.test.ts
+  s_099b525d116ac6::t_64551eea4749c1 1-98
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-mirror.test.ts
+  s_099b525d116ac6::t_2842503ac3c0db 1-33
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  s_099b525d116ac6::t_05e5b2450c88c1 1-54
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  s_099b525d116ac6::t_855a58179e5bba 1-996
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-request-schema.test.ts
+  s_099b525d116ac6::t_036c6530b17923 1-171
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-run-request-migration.integration.test.ts
+  s_099b525d116ac6::t_bb0fcc0fd27614 1-80
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/pack-operation-migration.test.ts
+  s_099b525d116ac6::t_f69ba91a29e982 46-68,75-76
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  s_099b525d116ac6::t_00da687ebe7265 1-594
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  s_099b525d116ac6::t_e1fe8b12956c64 1,10,134-142,194-199,567
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/ordinary-run-request-repository.ts
+  s_099b525d116ac6::t_85b7512f70c418 1-87
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  s_099b525d116ac6::t_ccaaff1fea7f82 1-168
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-git-settings.test.ts
+  s_099b525d116ac6::t_76d380672c73f8 7,46,49-54,58-60,90,103-105,113-161,165,169,176,184-185,195-196,202-203,205-209,211,216,218,235,237-238,246-250,261,263-264,267,271-272,278,281,299,314-316,319,324,328-331,337,342,347-364,366-368,377,383-390,392-393
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-local-compatibility.test.ts
+  s_099b525d116ac6::t_aa05e6cb421cd7 1-272
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-save-first-draft.test.ts
+  s_099b525d116ac6::t_e364f75d9b8def 11,14-15,22,26,28,60,65-68,72-73,80-135,137-145,183-256,308-318
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-unified-deploy-real.test.ts
+  s_099b525d116ac6::t_cb2c9818e5bc6e 1-138
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-wf-settings.test.ts
+  s_099b525d116ac6::t_06e59ca5e46ffc 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/editor-draft-cas-route.test.ts
+  s_099b525d116ac6::t_680e89acd3d4e9 1-68
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-operations.test.ts
+  s_099b525d116ac6::t_75e40c6b211662 1-127
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-writes.test.ts
+  s_099b525d116ac6::t_8a7d19ac2f136d 1-106
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-scripts-integration.test.ts
+  s_099b525d116ac6::t_d4f09820051d4d 15-16,38,78,84,88,97,103-104,109,115,118-119,129,131,133,135,144,150-151,154-155,159,168,173,219,223,230
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-scripts.test.ts
+  s_099b525d116ac6::t_4b3339479333cc 69-73,81-82,91,103
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-active-baseline.test.ts
+  s_099b525d116ac6::t_f06230cab0edd3 1-345
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-git.test.ts
+  s_099b525d116ac6::t_fff2b8ef4721f5 43,86,102,104,112-113,138,140,142,167,178,183-184,189-190,210,212-220,222-229,231-236,240-249,251,253-263,276,278-279
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-identity.test.ts
+  s_099b525d116ac6::t_9af4cded9e4a3e 56,80-81,84,94,126
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version.test.ts
+  s_099b525d116ac6::t_2fe61aece5c4b8 14-15,65,67,109,115
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-history.test.ts
+  s_099b525d116ac6::t_c8b15fc5c3c66b 13,15,17-18,132,136-137,167-300,319-320,344,352
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-unified-save.test.ts
+  s_099b525d116ac6::t_b360eb92d46c96 1-413
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal.ts
+  s_099b525d116ac6::t_4a8d15ec3a98c9 6-7,9,24-25,31-34,62-75,80,82,104-108,114-115,121-122,130,141-212,214,218-220,223-225,233-236
+apps/evolverun/clawweb/public/modules/workflow/server/routes/editor-draft-cas.ts
+  s_099b525d116ac6::t_0b144ed656a427 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-legacy-registration.integration.test.ts
+  s_099b525d116ac6::t_2370ee0baed86f 1-103
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-state-roundtrip.test.ts
+  s_099b525d116ac6::t_f796a06c374b7c 1-70
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanouts.test.ts
+  s_099b525d116ac6::t_bced2c0b1d2ad0 1-117
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/initial-state-insert.test.ts
+  s_099b525d116ac6::t_a277e76274ca00 52-65
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-association.test.ts
+  s_099b525d116ac6::t_66fc3674c675e8 1-361
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-reuse.test.ts
+  s_099b525d116ac6::t_19d8430ffb597c 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-unavailable.test.ts
+  s_099b525d116ac6::t_407aa835c88b0e 1-114
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/run-snapshot-registration.test.ts
+  s_099b525d116ac6::t_772567e08d87e5 8,29,82-102
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/version-contract.test.ts
+  s_099b525d116ac6::t_551e8d24e23fee 66-94
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/fanouts.ts
+  s_099b525d116ac6::t_7ad12686cba794 1-79
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  s_099b525d116ac6::t_4b8f0cd8f1a188 1,8-9,16-28,46,48,51,53-105,113-132,143,157,162-166,175-178,206,218-222,234,240-242,655-658
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-scripts.ts
+  s_099b525d116ac6::t_397289f9455e03 66,91-96
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  s_099b525d116ac6::t_13b277a7eff202 11,61-63,68-69,71-78,140-145
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  s_099b525d116ac6::t_44b0a0c50c407e 1-3,121-122,125-127,675
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-history-list.ts
+  s_099b525d116ac6::t_41bd3ab40a5dd1 7,54-62
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-unified-save.ts
+  s_099b525d116ac6::t_82d56f83b6df80 1-180
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/active-deployment-git.test.ts
+  s_099b525d116ac6::t_3d6fe030b8e40f 1-66
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-active-token-concurrency.test.ts
+  s_099b525d116ac6::t_19a8ba2472a4c2 1-71
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-create-safe.test.ts
+  s_099b525d116ac6::t_882cffdce7db50 31,39-40,43-44,47-48,62,64,66-185,197-198,202-207,212-213,215,220,225-227,236
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-deploy-candidate.test.ts
+  s_099b525d116ac6::t_98146b3e06e719 3,8,12,14,16,24-25,27-31,34,38-39,42,46-48,58,61-64,67-71,73,75-90,93-106,109-129,131-132,134-141,143-144,148-155,157-158,161-167,169-172,175-178,181-182,186-189,191-193,196-207,210-218,220-230,233-241,244-250,253-262,264-276,279-280,282-284,286-289,292-299
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-deploy-no-journal.test.ts
+  s_099b525d116ac6::t_bacaa988d4384b 3-4,8,14,17-19,23-31,33-34,40-44,49,53-80,82-85,88-90,92,94-122,124,126-141,144-161,164-169,171-176,179-181,183-188,190-193,195,198-201,204-228
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-legacy-projection.test.ts
+  s_099b525d116ac6::t_1d9a039e5f3637 1-149
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-pack-binding.test.ts
+  s_099b525d116ac6::t_fad907bf4c57a3 1-75
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-prepared-save-fixture.ts
+  s_099b525d116ac6::t_5bde1a5bef7e81 1-31
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db-first-draft.test.ts
+  s_099b525d116ac6::t_f7192840aa5d10 13-14,16-17,29,32,56,61-64,69,81-118,122,267,275,299-312,324-459,483,486,500,551
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db.test.ts
+  s_099b525d116ac6::t_9cf6547c1080b8 13,23,25,38-41,48,54-55,89,123,138
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-deploy.test.ts
+  s_099b525d116ac6::t_090a33651077b2 54,70,79,97,104-107,109-112,157-163,170-171,173,185,188,195-196,198,206,215,221,224,234-236,240,284,301,320-323,326,329-333,335
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-snapshot.test.ts
+  s_099b525d116ac6::t_6035bd47ddb688 1-216
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-unified-save-adapter.test.ts
+  s_099b525d116ac6::t_a4353316a72264 1-166
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-wf-save.test.ts
+  s_099b525d116ac6::t_7b32d8f0e9bad0 1-231
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-git-client.test.ts
+  s_099b525d116ac6::t_c3d6b612a00d6e 192-193,196,231,288,299,384,390-394
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-manifest-git.test.ts
+  s_099b525d116ac6::t_c3c22ff39988e9 9-11,29-44,65,69,72,74,118-125,176,208,211,213,220,226-227,271,348,351,353,445,448,450,459,475,478-479,481-482,603,609-623,631,640-651,659,669-679,681,689,691-692,696
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/editor-active-deployment-token.test.ts
+  s_099b525d116ac6::t_b43089ebd4d211 1-71
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/editor-draft-cas-service.test.ts
+  s_099b525d116ac6::t_f788a51b36cc18 1-217
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/editor-draft-cas-worker.ts
+  s_099b525d116ac6::t_c86a1f46dcf042 1-22
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-save.test.ts
+  s_099b525d116ac6::t_787337f2be2b2b 8,11,49,53-54,65,72,83,90-116,118-149,209,224,236,251,264,273,275,277-278,315,323-326,328,455
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-snapshot.test.ts
+  s_099b525d116ac6::t_c80182ed3d1e60 1-106
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-workflow.test.ts
+  s_099b525d116ac6::t_239ad0f9ded493 1-161
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-git-prepared.test.ts
+  s_099b525d116ac6::t_4c6a3f73ceff48 4-5,13-16,24,37,50-52,56,71-83,89-90,100-101,128-129,151,153,155-186,188-207,210-225,227,229-273,284-285,299,301-302,307,309,313,325-326,334,339,342,345,347-353,356,361,388,391,404,417,420,422,425,429,433,438,443,448,450-458,466-473,514,520,565-566
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-operation-projection.test.ts
+  s_099b525d116ac6::t_31d9eeef3815f6 3,17,42-205
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-read-service.test.ts
+  s_099b525d116ac6::t_e1247d3772a2e0 11,13,29-30,34,37-42,50-51,56-57,62-63,65,72,75,77,83,90-92,94-100,102
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-snapshot.test.ts
+  s_099b525d116ac6::t_945b7db8857fef 5,9,14-21,23,35-36,39,98-108,277,286,301,305-313
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-write.test.ts
+  s_099b525d116ac6::t_479a0135b73f15 201-215
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-spec-save.test.ts
+  s_099b525d116ac6::t_84eff19f2774ba 37-38,40,43,48,50,56,62,65-66,68,79-80,83-104,106,109-112,117,119-120,124,135,137,146,156,169,171-172
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-git-read.test.ts
+  s_099b525d116ac6::t_927f2b4696c24b 65,67,69-70,76,84-85,98,101,104,119,129,142,182,220,296,335
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-lifecycle.test.ts
+  s_099b525d116ac6::t_7ec09fa773c2ff 10,36-37,41,61-62,70,76-78,80-83,88-89,102,117,124,127-128,135,138,148,159-160,163,171,177
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-no-journal.test.ts
+  s_099b525d116ac6::t_0ced234ededce4 12-13,16,18-19,21
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-structural-move.test.ts
+  s_099b525d116ac6::t_88c54f5f66986b 41-42,63-64,91
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-wf-tag.test.ts
+  s_099b525d116ac6::t_8362112604068f 1-99
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-association.test.ts
+  s_099b525d116ac6::t_1cc0f233f72a6f 1-249
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-authority.test.ts
+  s_099b525d116ac6::t_f58ac1a5cf7197 1-83
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-engine-auth.test.ts
+  s_099b525d116ac6::t_3941db57e1956c 1-80
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-fanout-origin.test.ts
+  s_099b525d116ac6::t_8d9c77dd718c56 1-146
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows.test.ts
+  s_099b525d116ac6::t_779ac590194264 1-576
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/tag-only-deploy.test.ts
+  s_099b525d116ac6::t_eda1e6ac7ba49c 1-269
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-active-history-recovery.test.ts
+  s_099b525d116ac6::t_bc8e42ac95cdc2 1-115
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-save-object-format.test.ts
+  s_099b525d116ac6::t_e45e3d462da7c3 1-236
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-saved-ref.test.ts
+  s_099b525d116ac6::t_e49ed010746ed5 1-56
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-snapshot-projection.test.ts
+  s_099b525d116ac6::t_8d872321bbc228 1-348
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-snapshot-release-git.test.ts
+  s_099b525d116ac6::t_98a718d1dcace8 1-125
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-snapshot-save-request.test.ts
+  s_099b525d116ac6::t_9eb5b98c79c0c0 1-213
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-save-authorization.test.ts
+  s_099b525d116ac6::t_0043014533777c 1-16
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-save-service.test.ts
+  s_099b525d116ac6::t_56e89fab3631c6 1-707
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-wf-save.test.ts
+  s_099b525d116ac6::t_7681951498cc77 1-119
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-wf-only.test.ts
+  s_099b525d116ac6::t_b43cfe6643ef2b 1-64
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-wf-save-contract.test.ts
+  s_099b525d116ac6::t_84e06f4fb5df3d 1-173
+apps/evolverun/clawweb/public/modules/workflow/server/services/active-deployment-git.ts
+  s_099b525d116ac6::t_20f73b42faf805 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-deploy-git.ts
+  s_099b525d116ac6::t_aa7529f293c604 1,7,11-12,17,41-43,47,49,62,68-70,78,95-96,107-115,117-118,123-126,134-141,144,156
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-deploy-service.ts
+  s_099b525d116ac6::t_74b9797e5bdfb0 1,4,6,13,17,19-23,27-33,35,40,52-87,100-137,140-147,149-153,158-163,165-169,171-173,181-226,230,232-248,255-256,262,272-286
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-save-service.ts
+  s_099b525d116ac6::t_e508a1ebbc814b 1,7,13,15-17,19,21-44,47-82,84,89-131,133-147,153-154,177-178,182,188-203,205,207-215,220,222-223,226-229,235,244-245,247-250,252,275-289,293-345,360-361,364-409,412-419
+apps/evolverun/clawweb/public/modules/workflow/server/services/clawflows-git-client.ts
+  s_099b525d116ac6::t_03100159be5ffa 5-7,9,487-490,492-495,499-514,593,863,865,867
+apps/evolverun/clawweb/public/modules/workflow/server/services/deploy-tree-guard.ts
+  s_099b525d116ac6::t_c872b04ed45317 1-41
+apps/evolverun/clawweb/public/modules/workflow/server/services/editor-active-deployment-token.ts
+  s_099b525d116ac6::t_fc86f393c6bebc 1-60
+apps/evolverun/clawweb/public/modules/workflow/server/services/editor-draft-cas-service.ts
+  s_099b525d116ac6::t_8aabe7624168ca 1-115
+apps/evolverun/clawweb/public/modules/workflow/server/services/editor-draft-token.ts
+  s_099b525d116ac6::t_0306141a81367a 1-13
+apps/evolverun/clawweb/public/modules/workflow/server/services/fanout-state-reader.ts
+  s_099b525d116ac6::t_26a61c7e8569d7 1-90
+apps/evolverun/clawweb/public/modules/workflow/server/services/lossless-json-validation.ts
+  s_099b525d116ac6::t_084e5cee70e520 1-103
+apps/evolverun/clawweb/public/modules/workflow/server/services/ordinary-run-request.ts
+  s_099b525d116ac6::t_a3ae1077314ab0 1-218
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-candidate-save.ts
+  s_099b525d116ac6::t_b0cbb81b9cf60a 3,9-10,19,40,56,62-67,94-138,142-143,147-193,196-197,221,227,232-253,261-263,266-269,271-278,280-284,294-302,308,310-314,318-319,321-322,326-327,368-395,414,464,487-489,493,530,533,536,543,547-548,552-554,557-558,574,581-582,586-589,594
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-git-prepared.ts
+  s_099b525d116ac6::t_6b098a21976943 78-91,93,104
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-operation-service.ts
+  s_099b525d116ac6::t_8f53abe4a1c53f 3,7,9-10,38-168,182-186
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-read-service.ts
+  s_099b525d116ac6::t_fc7b68143c0716 1,5-6,30,35-41
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  s_099b525d116ac6::t_2e1b57414bfe3b 31,39,47,60-64,66,69-72,115-117,120-123,191,196-213,215-217,247-255,264-269,288
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-write.ts
+  s_099b525d116ac6::t_b08d602c170472 1,45,76-77,182-183
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-spec-save.ts
+  s_099b525d116ac6::t_8844116bd472e2 5,7,11,15,18-23,30,32,34,51-53,55-60,71,80-82,88-93,95,113-115,117,122
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-git-read.ts
+  s_099b525d116ac6::t_5a090c1caa771b 19-20,22-25,29,33,39-45,56,66-67,73,76
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  s_099b525d116ac6::t_a8013acb8fde4a 2,12-15,22-26,35,37-54,62-141
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-fields.ts
+  s_099b525d116ac6::t_912dbc55197396 1-63
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-http.ts
+  s_099b525d116ac6::t_447221cddbb1d0 1-634
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-http.ts
+  s_099b525d116ac6::t_245ec6a36f587e 1-81
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-service.ts
+  s_099b525d116ac6::t_ad7b359317affd 1-212
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-active-history-recovery.ts
+  s_099b525d116ac6::t_ce39631000d2f3 1-94
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-saved-ref.ts
+  s_099b525d116ac6::t_709cb116b7080e 1-139
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-snapshot-projection.ts
+  s_099b525d116ac6::t_7e37d832599b07 1-235
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-snapshot-release-git.ts
+  s_099b525d116ac6::t_6b4c85cbda7683 1-70
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-snapshot-save-request.ts
+  s_099b525d116ac6::t_5355b311615003 1-175
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-unified-save-service.ts
+  s_099b525d116ac6::t_ef7478134ddd2a 1-246
+apps/evolverun/clawweb/public/modules/workflow/server/validators/__tests__/subworkflow-fanout.test.ts
+  s_099b525d116ac6::t_bbd5f45e3a5ba8 1-261
+apps/evolverun/clawweb/public/modules/workflow/server/validators/subworkflow-fanout.ts
+  s_099b525d116ac6::t_d03ce60e6e4c59 1-150
+apps/evolverun/clawweb/public/modules/workflow/server/validators/workflow-validator.ts
+  s_099b525d116ac6::t_abb0d17e6b9e76 12,46
+apps/evolverun/clawweb/public/modules/workflow/server/workflow.ts
+  s_099b525d116ac6::t_9d757391931f1e 1-2
+apps/evolverun/clawweb/public/modules/workflow/shared/workflow.ts
+  s_099b525d116ac6::t_f32fbb733049aa 1-196
+apps/evolverun/clawweb/public/modules/workflow/web/SNAPSHOT_CONTRACT.md
+  s_099b525d116ac6::t_006c19fe5e44b9 1-35
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealCapability.test.ts
+  s_099b525d116ac6::t_e18b4a735ebe7b 1-18
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealCapability.transport.test.ts
+  s_099b525d116ac6::t_101f789b002538 1-78
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealLegacyTimeout.test.tsx
+  s_099b525d116ac6::t_bd0642250274fd 1-67
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealUnifiedSave.test.tsx
+  s_099b525d116ac6::t_02c50dcb45fcec 1-292
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealWrites.guard.test.tsx
+  s_099b525d116ac6::t_72ba934e4ef869 1-330
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/autoHealWrites.test.tsx
+  s_099b525d116ac6::t_de417abe7b18d9 7-9,18,30,63-123,132-145,162,165-254
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorDraftCas.conflict.test.ts
+  s_099b525d116ac6::t_e33d6a7b9c157c 1-58
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.archiveSafety.test.ts
+  s_099b525d116ac6::t_948423f50a5261 1-163
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.cas.test.ts
+  s_099b525d116ac6::t_733394649554d3 1-232
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.gitDirect.integration.test.ts
+  s_099b525d116ac6::t_dba80cce333f87 1-79
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.gitDirect.test.ts
+  s_099b525d116ac6::t_74479fd27cd22b 1-105
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.packVersionBoundary.test.ts
+  s_099b525d116ac6::t_0c3896f9c29d4d 1-117
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.projectionCollision.test.ts
+  s_099b525d116ac6::t_4650815f9c0a46 1-77
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.provenance.test.ts
+  s_099b525d116ac6::t_eb5bbdbf1ebfe0 1-50
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.recovery.test.ts
+  s_099b525d116ac6::t_05938e00fd532d 1-75
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.scalarContent.test.ts
+  s_099b525d116ac6::t_ca5603440da034 1-42
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.test.tsx
+  s_099b525d116ac6::t_4e4efe4074e622 22,36,39,41-43,45,54,56,59,64-87,104,106-107,115-116
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.trustedRecovery.test.ts
+  s_099b525d116ac6::t_61b2fa0b0db2d1 1-137
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/historyPackFixture.ts
+  s_099b525d116ac6::t_af5638919f9e20 1-9
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/useFlowRun.test.tsx
+  s_099b525d116ac6::t_dc3a5cddc97d91 1-96
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/validateWorkflowSnapshotRequest.test.ts
+  s_099b525d116ac6::t_70db76fed9260c 1-49
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowDocument.test.tsx
+  s_099b525d116ac6::t_2d426d7de9b254 7,9,29,47-48,51,55-80,96-98,106-107,110,114-120,123,126-133,135,137-140,144-186,267
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowSnapshotReconciliation.test.ts
+  s_099b525d116ac6::t_6bd2805120df2b 1-176
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowUnifiedSave.client.test.ts
+  s_099b525d116ac6::t_f97fa3e21614ed 1-39
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowUnifiedSave.hook.test.tsx
+  s_099b525d116ac6::t_9e56378c9ee68c 1-198
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealDeploySnapshot.ts
+  s_099b525d116ac6::t_86e995cd27d12e 1-46
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealLegacyTransport.ts
+  s_099b525d116ac6::t_3e78050bd495bb 1-21
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealUnifiedBaseline.ts
+  s_099b525d116ac6::t_68f52db9804478 1-111
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealWrites.ts
+  s_099b525d116ac6::t_db071e8ff42693 1-6,13,18-24,28-31,35-391,396-397,406,409,411-412,421-422
+apps/evolverun/clawweb/public/modules/workflow/web/api/editorDraftCas.ts
+  s_099b525d116ac6::t_7d3696020d1b0b 1-86
+apps/evolverun/clawweb/public/modules/workflow/web/api/editorFirstDraft.ts
+  s_099b525d116ac6::t_ddbdc31d2b88be 1-37
+apps/evolverun/clawweb/public/modules/workflow/web/api/editorWorkflowSource.ts
+  s_099b525d116ac6::t_99c6a6963726d3 1,3-9,13-58,76-77,79-83,96-121,123-127,130-138,140-241,246,261-339
+apps/evolverun/clawweb/public/modules/workflow/web/api/run-subworkflows.ts
+  s_099b525d116ac6::t_1690bda2e3dab3 1-24
+apps/evolverun/clawweb/public/modules/workflow/web/api/useEditorWorkflowDocument.ts
+  s_099b525d116ac6::t_377350632415f7 1,4,6-17
+apps/evolverun/clawweb/public/modules/workflow/web/api/validateWorkflowSnapshotRequest.ts
+  s_099b525d116ac6::t_14126e48b18032 1-73
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflowReconciliationFiles.ts
+  s_099b525d116ac6::t_994633c6ef90fc 1-71
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflowSnapshotReconciliation.ts
+  s_099b525d116ac6::t_0c480e902bf0f8 1-123
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflowUnifiedSave.ts
+  s_099b525d116ac6::t_9e5ccadd18dec3 1-93
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealDeployConfirm.tsx
+  s_099b525d116ac6::t_2321f614466982 1-40
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealPanel.tsx
+  s_099b525d116ac6::t_167274df3401bc 1-10,14,38,41-49,62-65,72,81-97,123,161-184,186,190-223,226-227,230-231,236-237,272,274-277,281-282,292-297,301-302,304,309,311,317-318,320-345,347,350-352,357,362,368,378,380-381,384,392-395,435-444,450,460-462,476,487,497-498,512,521,528,532-533,898,904,909
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealReviewDiff.tsx
+  s_099b525d116ac6::t_ee1cd1332b5788 1-74
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealSaveReview.tsx
+  s_099b525d116ac6::t_abdb05d1b1b630 1-22
+apps/evolverun/clawweb/public/modules/workflow/web/components/DeploySnapshotReview.tsx
+  s_099b525d116ac6::t_b31ea48d38ff3a 1-31
+apps/evolverun/clawweb/public/modules/workflow/web/components/InterventionPanel.tsx
+  s_099b525d116ac6::t_6913045f76fb09 41,51-61
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodeExecutionList.tsx
+  s_099b525d116ac6::t_b1ffb128f01fff 13-14,72-73,85,136-137,158,171,306,417,425,429,463-468
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackReconciliationNotice.tsx
+  s_099b525d116ac6::t_a9ce1c6451b2d3 38
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  s_099b525d116ac6::t_dc10bba6136b48 321
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  s_099b525d116ac6::t_926aa10488da8a 10-11,13,15,24-25,44-47,50-61,64-65,76,79-80,83-87,99-100,113
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  s_099b525d116ac6::t_b047eb6a5eccf9 1-151
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowHistoryPanel.tsx
+  s_099b525d116ac6::t_8911a2e21047ad 7,163,229,236
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowSnapshotReconciliation.tsx
+  s_099b525d116ac6::t_3531c1cf603f50 1-234
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowVersionDiff.tsx
+  s_099b525d116ac6::t_3ecd27e454dfe7 5-7,112-114,117-121,127,129,148-149,156-168,223-228,230-235,238-243
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlCodeViewer.tsx
+  s_099b525d116ac6::t_e4dc12f3d846e4 1-192
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealPanel.postSaveLock.test.tsx
+  s_099b525d116ac6::t_27ac72975383a2 1-129
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealPanel.test.tsx
+  s_099b525d116ac6::t_67b8debe47f4aa 1,7-9,73,78,84-89,91-95,98,103,123-257,261,263,278,282,317,319,323,325,337,340,347-361,366,376,384,395,397,418-420,424,440,445,451,453,455,462,466,473,477,513-802
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealSaveReview.test.tsx
+  s_099b525d116ac6::t_7ab761bd47f9f0 1-166
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/InterventionPanelChild.test.tsx
+  s_099b525d116ac6::t_05a609a3052eca 1-52
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  s_099b525d116ac6::t_201532a836834b 40,45-46
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesReconciliationUI.test.tsx
+  s_099b525d116ac6::t_1cbd5eef7e0ff5 18,20,84
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.candidateRecovery.test.tsx
+  s_099b525d116ac6::t_639276a42fad86 1-59
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.defaultDraft.test.tsx
+  s_099b525d116ac6::t_ec8d60f202ae30 1-84
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.readErrors.test.tsx
+  s_099b525d116ac6::t_a4f48c4930de5b 1-169
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.test.tsx
+  s_099b525d116ac6::t_93be7344e5f235 7-8,16-21,29,46-47,69,72-73,93,95,109,119-121,128-129,135-136,140-143,146,158-175,177,183,190-191,196-197,202,209,212,215,221,225,230-232,242,253,256,267,278-279,283,297-298,313-314,324,330,334-337,339,347-348,360-361,375,400,413,416,447,450,470,472,497,517,523,539
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTabWriteDisabled.test.tsx
+  s_099b525d116ac6::t_30c7e3fbdf58d8 8
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowBaselineComparison.test.tsx
+  s_099b525d116ac6::t_ca4ec2294e9aa5 1-101
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowHistorySideBySide.test.tsx
+  s_099b525d116ac6::t_368413eaeb305b 1-102
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowSnapshotReconciliation.test.tsx
+  s_099b525d116ac6::t_e29cba2515cfbf 1-188
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowVersionDiff.test.ts
+  s_099b525d116ac6::t_139fcbed571871 2,20,40-51,53-54
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowVersionDiffView.test.tsx
+  s_099b525d116ac6::t_0d1ff2700f7549 1-195
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlCodeViewer.test.tsx
+  s_099b525d116ac6::t_0285742cfed3a6 1-74
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/autoHealReviewDiffModel.test.ts
+  s_099b525d116ac6::t_c2d8945faa06be 1-126
+apps/evolverun/clawweb/public/modules/workflow/web/components/autoHealReviewDiffModel.ts
+  s_099b525d116ac6::t_2c5ab708169119 1-81
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/ChildRunDrawer.tsx
+  s_099b525d116ac6::t_17265023fc909e 1-47
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/SubworkflowPanel.tsx
+  s_099b525d116ac6::t_3787c867d4e840 1-45
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/ChildRunCurrentStatus.test.tsx
+  s_099b525d116ac6::t_c3c36d155fe0e6 1-17
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/SubworkflowPanel.test.tsx
+  s_099b525d116ac6::t_54810a59623928 1-111
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/SubworkflowSnapshotNotice.test.tsx
+  s_099b525d116ac6::t_b71a655d9841bf 1-20
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/SideBySideView.tsx
+  s_099b525d116ac6::t_6e25c6a4c8bba7 1-147
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/__tests__/sideBySide.test.ts
+  s_099b525d116ac6::t_e1827209a4d93e 1-105
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/sideBySide.ts
+  s_099b525d116ac6::t_aeec6ea1c25da2 1-87
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  s_099b525d116ac6::t_2d5c3eb5ee5666 36,61,72-74
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/EvolutionIssueFlow.test.tsx
+  s_099b525d116ac6::t_9ee98a84e2db96 558-567
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/repair-batch/__tests__/IssueNavigation.test.tsx
+  s_099b525d116ac6::t_680958fc0bf8c4 385-391,428
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/repair-batch/__tests__/RepairItems.test.tsx
+  s_099b525d116ac6::t_e25d16e1c4a9a1 54,63
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/canvasNavigationGuard.test.tsx
+  s_099b525d116ac6::t_a14194a9d8a32f 106
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/createThenSaveBinding.test.ts
+  s_099b525d116ac6::t_2f1ab44f9ae580 1-77
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/deploymentGuard.test.ts
+  s_099b525d116ac6::t_9ff1a237f6c86e 2,8-9,21,30-31,57-92
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/firstDraftActiveBinding.test.tsx
+  s_099b525d116ac6::t_bc19b8b8d33d4a 1-305
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/firstDraftUnifiedSave.test.tsx
+  s_099b525d116ac6::t_e7b930c6c9579a 1-177
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/losslessNumbers.test.ts
+  s_099b525d116ac6::t_fac096c7942254 1-21
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/newWorkflowSave.test.ts
+  s_099b525d116ac6::t_c16c46dedcc480 4,9,15,17,21,23,46-86,99,106,115,117,123,146,153-154,159-161,169,177,183,190,195,197,199,210-247
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packBindingBaseline.test.tsx
+  s_099b525d116ac6::t_96c3623598bfd6 1-180
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packCanvas.test.ts
+  s_099b525d116ac6::t_597cc9fbdb3cc1 12
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packRenameSessionSafety.test.tsx
+  s_099b525d116ac6::t_3e3e38b0799345 53,57,59,68-69,71,83,91,94-106,109,126,143,159,174,189,191,198-206,210-221,224,242-248,258-272,274-308
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionOperations.test.ts
+  s_099b525d116ac6::t_0248d8187274e8 18,21,46
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionOriginRejection.test.ts
+  s_099b525d116ac6::t_c3735e1be72204 30,51,53,98,101,162,164,233
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionRefContract.test.ts
+  s_099b525d116ac6::t_86cc20b58c3ef3 1-75
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionSession.test.ts
+  s_099b525d116ac6::t_f1655fdcb3b61a 1-30
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionTransport.test.ts
+  s_099b525d116ac6::t_23ec08b0826dfc 14,42,62
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packWorkflowBaseline.lossless.test.ts
+  s_099b525d116ac6::t_1bc13369e2077e 1-13
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/postSaveBinding.test.tsx
+  s_099b525d116ac6::t_4998305251c475 1-249
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.enabled.test.tsx
+  s_099b525d116ac6::t_fa201638116a24 8,10,16,25,27
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.fileYamlSave.test.tsx
+  s_099b525d116ac6::t_69abd88682b7df 1-164
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.moves.test.tsx
+  s_099b525d116ac6::t_62d23f283a86db 10,13-14,19,23,28-29,31,33,35,45,47,49-50,52,56-58,60,62-63,67-69,71,74,77,80-82,84,87,89,95-96,98,103-105,107,109-110,112,115,117,119-120,124-140,142-144,146-154,158-159,161-162,164-181,184-185,187-188,192,197-202,204-205,216-236
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.noJournal.test.tsx
+  s_099b525d116ac6::t_5fbe05fd939b1c 1,6,8-11,14,16-19,24,28,30-31,35-50,52-53,55,57,66-74,76-82,85-102,104-107,109,112-116,118,121-140,153-154,159-160,163-173,175-179,181,183-187,192-193,203,207,209-214,217-227,229-231,233-243,245,253,263-264,268,272-280,285,290-291,295-302,304,306-311,318,324-325,329-894
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.cas.test.ts
+  s_099b525d116ac6::t_305a54bd39c1dd 1-183
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.test.ts
+  s_099b525d116ac6::t_cfc7e65321c634 1,7-12,14-17,21-32,34-37,39-40,43-54,64-71,74,76,78-79,81-87,90-91,94,97,99,107-108,113,119-120,125-127,129-130,132-135,137,139,141-142,144,146,153,155-162,164-170,172,174-176,182,185-187,189-195,198-201,207,210-211,218,221-222
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.trustedRecovery.test.ts
+  s_099b525d116ac6::t_6051a973a0e5f8 1-117
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowTransition.database.test.ts
+  s_099b525d116ac6::t_6e91fdb6afa93a 59,76-77
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowWriteGuard.failclosed.test.ts
+  s_099b525d116ac6::t_90f316d4bca860 1-84
+apps/evolverun/clawweb/public/modules/workflow/web/editor/deploymentGuard.ts
+  s_099b525d116ac6::t_f95ba5a329fd67 5-6,19,27-38,41-44,50-58,61,72,76-77,84-144
+apps/evolverun/clawweb/public/modules/workflow/web/editor/losslessNumbers.ts
+  s_099b525d116ac6::t_83f7878ae7db00 1-57
+apps/evolverun/clawweb/public/modules/workflow/web/editor/newWorkflowSave.ts
+  s_099b525d116ac6::t_bee154b54fd61a 6,10,17,39-40,49,51-68,75-77,115-117,119-120,126,136,139-140
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packCanvas.ts
+  s_099b525d116ac6::t_ea418844de8e60 5,57-79
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSave.ts
+  s_099b525d116ac6::t_c69bf676014777 7-8,12-38,40,50-58,61-65,82-89,107,134-135,137,144-146,151,165-169,174,192-203
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  s_099b525d116ac6::t_67c374305c7b7f 6,8,11,31-32,35-38,47,100,136,162,189-218,222,224-225,242,245-247,251-252,257,266,268-271
+apps/evolverun/clawweb/public/modules/workflow/web/editor/store.ts
+  s_099b525d116ac6::t_85ddfe14d5efdd 2,49,60-62,100,128,182,186,197,199,328,338-355,364
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  s_099b525d116ac6::t_d1aeaf8aaf6504 1-3,5-12,14,16-19,21-50,53-54,57-59,62-63,66-138,140-143,149-162,164-229,232,234-293,295-324,326-340,342-382,386-393,395-412,414,416-420,422-446,448-454,456-463,465-519,521-525,528,530-534
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowBaselineComparison.ts
+  s_099b525d116ac6::t_19afc7ede131f7 1-21
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowDocumentSave.ts
+  s_099b525d116ac6::t_3a9ba1645f2451 2-4,6-7,11,13,16-30,32,34-57,60-67,70-71,74,78-80,84,86-112,114-121,123,125-131,133-146,148,154,165,170,178-179,183
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowTransition.ts
+  s_099b525d116ac6::t_e17afd221d5293 1,25-27,32
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowWriteGuard.ts
+  s_099b525d116ac6::t_a7335a9d300e78 1-99
+apps/evolverun/clawweb/public/modules/workflow/web/editor/yamlDraft.ts
+  s_099b525d116ac6::t_9d62237d2e1e44 2,10
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useSubworkflows.ts
+  s_099b525d116ac6::t_5cc8fb8512dce7 1-65
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  s_099b525d116ac6::t_c07762b2e2eb42 1-12,31,34-37,39,45-46,50-52,77,84,96-97,100,107,110-111,118,120-121,127-136,138,155,173,184,247-248,255-256,265,275,277,280-281,290-295,302-308,313,315-336,347-367,433,436,438,441-444,449-453,455-456,460-464,466,471-474,476-477,481,486-503,506-511,514-516,518-532,535-536,539-543,545,547-550,554,556,561,564,566,568,570-588,590-603,606-609,613,618,626,628,631,695-699,755,763,776,781,783,785,788,795-796,798,800,802-804,807,816-818,825-836,838,840,885,968,978,983-988,991
+apps/evolverun/clawweb/public/modules/workflow/web/pages/RunDetail.tsx
+  s_099b525d116ac6::t_e1ee5af6478120 26,307-308
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  s_099b525d116ac6::t_400bb034393b9c 2,314
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  s_099b525d116ac6::t_9da2beab5d042f 1-269
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceSaveDeploy.test.tsx
+  s_099b525d116ac6::t_c30b497b76ec70 1-324
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorHistoryComparison.test.tsx
+  s_099b525d116ac6::t_6b18e5c219a6b6 1-79
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNewWorkflow.test.tsx
+  s_099b525d116ac6::t_b938310f37ac93 5,12,21,45-48,52,79
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  s_099b525d116ac6::t_1fa54ac9843acd 1-4,9-13,15-17,26,30,34,37,40-42,48,51,54-58,61-63,65-67,70-71,73,75-119,121-237,239-250,252,254,261-262,264,268-270,279,283,288,294,298-299,305,309,312-313,318,325,328-329,333-334,354-371,374,381,385-386,392,395-396,398,404,406,416-520,522,524,538,554-555,558-559,566,579,582-583,592-593,595,597,601-606,608-610,614,617-618,625,629,634-650,652,658-659,662-663
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPackSafety.test.tsx
+  s_099b525d116ac6::t_c1822667168e63 2,7,9,14-18,27,29,34,38-43,45-50,57,61-64,66,70-88,91,93-97,125-133,135-137,147-149,151,153-154,160-207,231-232,234-236,239-240,248
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPartialSaveCache.test.tsx
+  s_099b525d116ac6::t_f12d854ff6c970 1-268
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorReconciliationBridge.test.tsx
+  s_099b525d116ac6::t_74e1e619e066b5 1-240
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  s_099b525d116ac6::t_edac3ee44f53ae 6,8-9,22,25,27,29,33,39-45,47,52-53,57,60-64,66-88,103,107-109,111-128,130-361,363-366,368,370-371,376,379-386,388,392-396,398,401-402,404-405,407,410-411,413-414,416-436,438-445,447-461,464-467,469-470,474-482,484-491,494-506,508-513,515-542,544,546-547,550-551,554-561,569-585,587,589-604,607,610,613-615,617-635,646,649,653-660,662-665,668-671,674,677-687,691-747,750-764,768-835
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorUnknownWriteReentry.test.tsx
+  s_099b525d116ac6::t_b104bfe1f82e2b 1-238
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowIsolation.test.tsx
+  s_099b525d116ac6::t_79c454c7ea8673 6-7,11,16,24,28,31,33,35,37,40,45-46,56,60,67-73,75-80,84-100,102-103,109,112-115,117,120-124,126-128,130-131,133,139,141-147,153-154,158,160,162-171,173,175,177-185,195,198-204,207,217,221-223,225-226,229-230,233,235-236,240-241,247-248,254-256,258,266-267,269,271,273-276,283-285,288,290-296,300,302-308,311,313-319,323,328,330,332,334-345,348-349,358-363,368-371,375,379,382,384,386-397,400,413-421,432,434,437-438,445-453,455
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowTransition.test.tsx
+  s_099b525d116ac6::t_94aa6c0232503b 7,12-19,49,199
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  s_099b525d116ac6::t_3f640ba333bbb2 7,15,56-67,127-157,282
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  s_099b525d116ac6::t_4863abd2b587d7 27-35,119
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  s_099b525d116ac6::t_c89480eb710c68 7,15,60-70,113,173
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceWriteGuardPop.test.tsx
+  s_099b525d116ac6::t_24cb7a4348d79b 1-70
+apps/evolverun/clawweb/public/modules/workflow/web/pages/editorErrorMessage.ts
+  s_099b525d116ac6::t_249a6430c67ce0 1-12
+apps/evolverun/clawweb/public/modules/workflow/web/pages/editorReconciliationContract.ts
+  s_099b525d116ac6::t_bd0eeaa86dda97 1-25
+apps/evolverun/clawweb/public/modules/workflow/web/pages/revalidateGitComparison.ts
+  s_099b525d116ac6::t_a55374b80545fd 1-24
+apps/evolverun/clawweb/public/modules/workflow/web/pages/useEditorMergeReview.ts
+  s_099b525d116ac6::t_55eadebefaa4be 1-96
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  s_099b525d116ac6::t_436f489a09f6cd 28
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  s_099b525d116ac6::t_cb938207bf7417 22-23,41,63,76
+apps/evolverun/clawweb/public/shared/server/__tests__/managed-migrations.test.ts
+  s_099b525d116ac6::t_69ecd4fdee4bbc 7,66-69,86-95,156,163-165,209-401
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-concurrent-defer.test.ts
+  s_099b525d116ac6::t_d6591293681cb1 1-149
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-run-request-migration.test.ts
+  s_099b525d116ac6::t_1adf1d1e1cd662 1-797
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-incompatible-init.test.ts
+  s_099b525d116ac6::t_158522bc0a5f92 1-44
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-trigger-lock.test.ts
+  s_099b525d116ac6::t_f2dec14fdede37 1-211
+apps/evolverun/clawweb/public/shared/server/db.ts
+  s_099b525d116ac6::t_59cb1a2d13d699 14-15,17,199-216,227,230,236-251,281-284,286-287,290,292-294,332-333,341-342,344-347,356
+apps/evolverun/clawweb/public/shared/server/db/sqlite-triggers.ts
+  s_099b525d116ac6::t_0dc86100c689c9 1-51
+apps/evolverun/clawweb/public/shared/server/schema-ordinary-run-request.ts
+  s_099b525d116ac6::t_fa823cec8d2006 1-219
+apps/evolverun/clawweb/public/shared/vitest.config.ts
+  s_099b525d116ac6::t_66d7f88bdaadfa 1-7
+apps/evolverun/clawweb/public/shared/web/api/hooks.ts
+  s_099b525d116ac6::t_edaed6ca7c011c 2,268-277,283-289
+apps/evolverun/clawweb/public/shared/web/types-workflow-support.ts
+  s_099b525d116ac6::t_d8d25036637640 117-118,122
+apps/evolverun/clawweb/public/shared/web/types.ts
+  s_099b525d116ac6::t_1c52e4b33bf91a 528-531
+apps/evolverun/clawweb/scripts/__tests__/repair-pack-layout.test.mjs
+  s_099b525d116ac6::t_a8279e7eebb860 1-494
+apps/evolverun/clawweb/scripts/ci/run-tests.mjs
+  s_099b525d116ac6::t_950ab9297f5620 129-131
+apps/evolverun/clawweb/scripts/repair-pack-layout.mjs
+  s_099b525d116ac6::t_bf8d0dbd200735 1-257
+apps/evolverun/docs/clawweb/specs/clawevolve-report-delivery.md
+  s_099b525d116ac6::t_1e192290965e43 1-33
+apps/evolverun/docs/research/agent-improvement/README.md
+  s_099b525d116ac6::t_c05971489eceb8 1-42
+apps/evolverun/docs/research/agent-improvement/benchmark-question-meta.md
+  s_099b525d116ac6::t_d3852117b0c3db 1-273
+apps/evolverun/docs/research/agent-improvement/benchmark/environment-reproducibility.md
+  s_099b525d116ac6::t_ba9e162c857cb1 1-170
+apps/evolverun/docs/research/agent-improvement/rsi/candidate-version-binding.md
+  s_099b525d116ac6::t_d4391a13faf992 1-153
+apps/evolverun/docs/research/agent-improvement/rsi/evaluation-data-boundaries.md
+  s_099b525d116ac6::t_2b041974fc5666 1-162
+apps/evolverun/docs/research/agent-improvement/rsi/outer-loop-integration.md
+  s_099b525d116ac6::t_b92d2b25bfd20d 1-134
+apps/evolverun/specs/2026-11-04-recovery-owner-feedback/plan.md
+  s_099b525d116ac6::t_58558e0fba10f1 1-31
+apps/evolverun/taskguard/README.md
+  s_099b525d116ac6::t_714550d2321bc2 17-20
+apps/evolverun/taskguard/docs/subworkflow-fanout.md
+  s_099b525d116ac6::t_aa6411b99f273e 1-176
+apps/evolverun/taskguard/integration-tests/subworkflow-fanout-e2e.test.ts
+  s_099b525d116ac6::t_bafacc64517187 1-96
+apps/evolverun/taskguard/package.json
+  s_099b525d116ac6::t_89bdc277f889a5 74-75
+apps/evolverun/taskguard/src/command-runner.ts
+  s_099b525d116ac6::t_08a56e60df625e 12-13
+apps/evolverun/taskguard/src/controller.ts
+  s_099b525d116ac6::t_c956c9e5585b40 121-122,1019-1020,3975,3978-3987,3989,4006,4009-4025,4091-4094,5049-5050
+apps/evolverun/taskguard/src/controller/subworkflow-dependencies.ts
+  s_099b525d116ac6::t_76f8ce79685f38 1-73
+apps/evolverun/taskguard/src/controller/version-commands.ts
+  s_099b525d116ac6::t_dccd12e4f15a96 44-45,771-772,1264-1265,1522-1528,1615,1817,1823-1826,1829
+apps/evolverun/taskguard/src/db/api-client.ts
+  s_099b525d116ac6::t_5a5fe87f0f613e 61
+apps/evolverun/taskguard/src/executors/embedded-context.ts
+  s_099b525d116ac6::t_09d08560de030f 15-26
+apps/evolverun/taskguard/src/executors/subworkflow-fanout-state.ts
+  s_099b525d116ac6::t_6c164fb1f7c356 1-180
+apps/evolverun/taskguard/src/executors/subworkflow-fanout-types.ts
+  s_099b525d116ac6::t_49d4d822f336fb 1-186
+apps/evolverun/taskguard/src/executors/subworkflow-fanout.ts
+  s_099b525d116ac6::t_18d1c70544e9d6 1-294
+apps/evolverun/taskguard/src/executors/subworkflow.ts
+  s_099b525d116ac6::t_bb9601f0c86157 15-17,20-22,99-109,117-124,273-280
+apps/evolverun/taskguard/src/index.ts
+  s_099b525d116ac6::t_6b93934b6cebe2 74,194,1096-1101,1124,2065-2074
+apps/evolverun/taskguard/src/platform/controller-fanout-runtime.ts
+  s_099b525d116ac6::t_d5863057567e60 1-305
+apps/evolverun/taskguard/src/platform/default-executor.ts
+  s_099b525d116ac6::t_e9a3e9b06bf38f 34,48,205-207,340-341,347,518
+apps/evolverun/taskguard/src/platform/fanout-host.ts
+  s_099b525d116ac6::t_16f3b5f4fd3c8b 1-25
+apps/evolverun/taskguard/src/platform/fanout-persistence.ts
+  s_099b525d116ac6::t_b4e804072eb25a 1-94
+apps/evolverun/taskguard/src/platform/fanout-taskflow.ts
+  s_099b525d116ac6::t_5ce59583fdfc95 1-133
+apps/evolverun/taskguard/src/platform/mcp-tools.ts
+  s_099b525d116ac6::t_f3968a7473eb62 14-16,569,576,601,634-647
+apps/evolverun/taskguard/src/runner.ts
+  s_099b525d116ac6::t_8d171b01d51112 617-624
+apps/evolverun/taskguard/src/types.ts
+  s_099b525d116ac6::t_f1f85dd7dd426a 1-2,468-469,1178-1186,1188,1558,1589-1592
+apps/evolverun/taskguard/src/validation/subworkflow-fanout.ts
+  s_099b525d116ac6::t_7e67815a7669cc 1-73
+apps/evolverun/taskguard/src/validation/workflow.ts
+  s_099b525d116ac6::t_2287f77f4839d5 2-3,1145,1166-1167,2374,2377-2382,2516-2517
+apps/evolverun/taskguard/src/workflow-dependencies.ts
+  s_099b525d116ac6::t_0d8805dc625131 1-136
+apps/evolverun/taskguard/tests/controller-fanout-runtime.test.ts
+  s_099b525d116ac6::t_749a3cd4bdb9ca 1-111
+apps/evolverun/taskguard/tests/fanout-cli-dispatch.test.ts
+  s_099b525d116ac6::t_0f53d8eb79ce3c 1-20
+apps/evolverun/taskguard/tests/fanout-host.test.ts
+  s_099b525d116ac6::t_34778312947138 1-22
+apps/evolverun/taskguard/tests/fanout-persistence.test.ts
+  s_099b525d116ac6::t_6ea02f56b5c95c 1-62
+apps/evolverun/taskguard/tests/fanout-runtime-safety.test.ts
+  s_099b525d116ac6::t_42d1bcfa7c2ed0 1-454
+apps/evolverun/taskguard/tests/fanout-taskflow.test.ts
+  s_099b525d116ac6::t_733c83f8386066 1-60
+apps/evolverun/taskguard/tests/fanout-template-context.test.ts
+  s_099b525d116ac6::t_c7aaf69e43c798 1-21
+apps/evolverun/taskguard/tests/subworkflow-fanout-dispatch.test.ts
+  s_099b525d116ac6::t_390154c3b0eb0b 1-45
+apps/evolverun/taskguard/tests/subworkflow-fanout-validation.test.ts
+  s_099b525d116ac6::t_ded463e2e19759 1-102
+apps/evolverun/taskguard/tests/subworkflow-fanout.test.ts
+  s_099b525d116ac6::t_b13740620ca3a9 1-412
+apps/evolverun/taskguard/tests/workflow-dependencies.test.ts
+  s_099b525d116ac6::t_1d0396e419c52d 1-259
+apps/frontend-nextgen/specs/2026-11-06-conversation-favorite-loading.md
+  s_099b525d116ac6::t_7cd0c6508011fe 1-18
+apps/frontend-nextgen/specs/2026-11-06-conversation-loading.md
+  s_099b525d116ac6::t_a4d3ea0b984cda 1-23
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  s_099b525d116ac6::t_fbb9904f03519f 16,20,159-163,184-185
+apps/frontend-nextgen/src/capabilities/index.ts
+  s_099b525d116ac6::t_cf0cd8db595f53 10-11,39,79-80,108
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_099b525d116ac6::t_09687036f0bfae 129-139,487-500,532,556-561
+apps/frontend-nextgen/src/components/Admin/NotificationBell/index.tsx
+  s_099b525d116ac6::t_441576e190c1b0 71
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyRetryAction.tsx
+  s_099b525d116ac6::t_ddf434bc4d64e3 1-29
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusCell.tsx
+  s_099b525d116ac6::t_783b4449e9c69c 3-4,17-23,52-67
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotTable.tsx
+  s_099b525d116ac6::t_58192c5e626f38 42,95
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/botTableTypes.ts
+  s_099b525d116ac6::t_711abc07b2c318 42-43,73
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/index.tsx
+  s_099b525d116ac6::t_4b9c2107851b21 9-14,28-31,89-90
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/AuthorizationPanel.tsx
+  s_099b525d116ac6::t_abc434149b2f5d 7-16
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/index.tsx
+  s_099b525d116ac6::t_e60983b9ec5b1c 144-159
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  s_099b525d116ac6::t_68796d0d6852b1 144
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  s_099b525d116ac6::t_87b77caa2896dc 144
+apps/frontend-nextgen/src/components/CollaborationSquare/SquareNavigation/index.tsx
+  s_099b525d116ac6::t_b9082d61eaed26 7-8
+apps/frontend-nextgen/src/components/GroupContextDeliveryField.tsx
+  s_099b525d116ac6::t_8111b57867bf7a 1-71
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/BotModelSelector.tsx
+  s_099b525d116ac6::t_ebedf3c5c86ddc 15,19,28,77-81,84-104,134,142
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/chatPanelContracts.ts
+  s_099b525d116ac6::t_f6a422ee491196 23-24,76
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/index.tsx
+  s_099b525d116ac6::t_c08a1256e9517b 39,86,207,214
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  s_099b525d116ac6::t_df15295b0cc0c9 68-96,230-243
+apps/frontend-nextgen/src/domain/collaboration/types.ts
+  s_099b525d116ac6::t_b0f6ce626752de 25-27
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  s_099b525d116ac6::t_9da6d747fbdffe 2,12,51,145-150,240
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyFlow.ts
+  s_099b525d116ac6::t_0b77d5d4ee1612 2-4,9,16-25,45-98,106,109-113,115,120
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyHost.ts
+  s_099b525d116ac6::t_979b58c5c5d15f 2,4,8,15-17,19,22,47-68,75,77
+apps/frontend-nextgen/src/hooks/useTaskSwitcherTasks.ts
+  s_099b525d116ac6::t_f390bca3b27242 194-200,203
+apps/frontend-nextgen/src/pages/BotWorkshop/index.tsx
+  s_099b525d116ac6::t_269081145145b7 164
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/index.tsx
+  s_099b525d116ac6::t_6d436b143562e4 183
+apps/frontend-nextgen/src/pages/MyTask/MyTaskPage.tsx
+  s_099b525d116ac6::t_aa5fabec242b95 229
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskDrawers.tsx
+  s_099b525d116ac6::t_941ab7ca588e4c 36,58,138,149
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationInteractiveStage.tsx
+  s_099b525d116ac6::t_ec481c44057f2b 52-56,101
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  s_099b525d116ac6::t_0c1435bc607492 59,65,111
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebar.tsx
+  s_099b525d116ac6::t_f5424c3e8b7422 179
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationFavoriteHydration.ts
+  s_099b525d116ac6::t_594a0b509a5517 1-38
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationSessionPageRequest.ts
+  s_099b525d116ac6::t_13735db7ea17b1 16,169-179,182,185-188
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_099b525d116ac6::t_94d920042381d6 64-65,136,214
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationFavorites.ts
+  s_099b525d116ac6::t_363b09b044b84f 94,100
+apps/frontend-nextgen/src/pages/Workspace/components/GroupSidebar/CreateSessionMenu.tsx
+  s_099b525d116ac6::t_3898a7fb4246ae 1-56
+apps/frontend-nextgen/src/pages/Workspace/components/GroupSidebar/GroupItem.tsx
+  s_099b525d116ac6::t_640476c2f6d59d 16,20,168-171
+apps/frontend-nextgen/src/pages/Workspace/components/GroupSidebar/GroupItem.types.ts
+  s_099b525d116ac6::t_b80f6ffcee81ad 1-7,26-27
+apps/frontend-nextgen/src/pages/Workspace/components/GroupSidebar/index.tsx
+  s_099b525d116ac6::t_9a5d0fc91f2ed4 2-8,65
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/DingTalkConfigPanel.tsx
+  s_099b525d116ac6::t_d5ecfc8a9f9f9d 1,39,165-173
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/DingTalkReadonlyList.tsx
+  s_099b525d116ac6::t_d6e03de2059703 45-50
+apps/frontend-nextgen/src/pages/Workspace/hooks/botSessionCommandItems.tsx
+  s_099b525d116ac6::t_447ce50f935716 9,22,43
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_099b525d116ac6::t_515b4126c3ecff 36,38,50-52,54,68,138,149,206,212,215,223,228,230,240
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotModels.ts
+  s_099b525d116ac6::t_e76aa503096db7 1,4-5,12,16-24,34,36-45,48-49,51,55-56,59-63,68,87
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_099b525d116ac6::t_b9c3d6c510cbb3 62,151-154,160-161,168-169,176
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSkills.ts
+  s_099b525d116ac6::t_8e23658cc83035 11,14,18-27,30-34,36,39-50,52-58,63-64,73-74
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupSessions.ts
+  s_099b525d116ac6::t_c25e3ce860a92c 2,138,140
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupSessions.types.ts
+  s_099b525d116ac6::t_385f1c8ae5962d 2,34
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupSidebarProps.ts
+  s_099b525d116ac6::t_14303de338d25b 38-39
+apps/frontend-nextgen/src/pages/Workspace/hooks/useMessageAreaSkeleton.ts
+  s_099b525d116ac6::t_35aa08a1ce23be 12,21,31-32,52
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_099b525d116ac6::t_747e5c8229d634 16-50,151,198-201,208-215
+apps/frontend-nextgen/src/services/backendApi/collaboration/channelBindingController.ts
+  s_099b525d116ac6::t_f1eb93b8c9974e 1,29,74
+apps/frontend-nextgen/src/services/backendApi/collaboration/sessionController.ts
+  s_099b525d116ac6::t_a3a3751896e0ac 1,187
+apps/frontend-nextgen/src/services/botWorkshop/botMapper.ts
+  s_099b525d116ac6::t_f68c647d798427 5,15-46,252
+apps/frontend-nextgen/src/services/botWorkshop/botWorkshopService.ts
+  s_099b525d116ac6::t_226f925e83de22 16,20,268-275,283-284,289,292-300,303,316-334,336
+apps/frontend-nextgen/src/services/botWorkshop/index.ts
+  s_099b525d116ac6::t_52c9633a511f2b 8-13
+apps/frontend-nextgen/src/services/botWorkshop/types.ts
+  s_099b525d116ac6::t_30e85c97889584 12-13
+apps/frontend-nextgen/src/services/workspace/botModelCache.ts
+  s_099b525d116ac6::t_658af9f99ab5ab 1-43
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_099b525d116ac6::t_02f238c08267bd 3,98-99
+apps/frontend-nextgen/src/services/workspace/channelBindingService.ts
+  s_099b525d116ac6::t_761a93d1e76cb9 1,19,61,108
+apps/frontend-nextgen/src/services/workspace/conversationFavoriteCache.ts
+  s_099b525d116ac6::t_dfe85177f577bf 1-71
+apps/frontend-nextgen/src/services/workspace/conversationFavoriteService.ts
+  s_099b525d116ac6::t_d74609e63e5732 4-5,11-14,17-18,21-22,44-49
+apps/frontend-nextgen/src/services/workspace/conversationService.ts
+  s_099b525d116ac6::t_82d992488fc927 113,157,184
+apps/frontend-nextgen/src/services/workspace/sessionService.ts
+  s_099b525d116ac6::t_2c322da8c7d258 2,66,75
+apps/frontend-nextgen/src/shell/AppShell.tsx
+  s_099b525d116ac6::t_f6a67c5a589885 4,34-36,114
+apps/frontend-nextgen/src/shell/AppSidebar.tsx
+  s_099b525d116ac6::t_49a711e0a606b0 46-49,112,121
+apps/frontend-nextgen/src/shell/SidebarNavList.tsx
+  s_099b525d116ac6::t_c5b3dbc8e7ef0e 17-31,59,96
+apps/frontend-nextgen/src/shell/SpaceSwitcher.tsx
+  s_099b525d116ac6::t_4e9e990a72c718 166
+apps/frontend-nextgen/src/shell/navigation.tsx
+  s_099b525d116ac6::t_5c0af64b6adc76 74
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  s_099b525d116ac6::t_01118b70fc0fe1 87,145
+apps/frontend-nextgen/test/botCopyContract.test.ts
+  s_099b525d116ac6::t_542373f1b3e8d3 1-179
+apps/frontend-nextgen/test/components/BotWorkshop/AuthorizationPanel.test.tsx
+  s_099b525d116ac6::t_8194537189645e 4,9-21,24
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_099b525d116ac6::t_ae82642f82dd8a 8,40
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  s_099b525d116ac6::t_1887954f12a55f 11,13-14,30,32,35
+apps/frontend-nextgen/test/components/CollaborationSquare/SquarePageShellDispatch.test.tsx
+  s_099b525d116ac6::t_fb1b34f6959f06 150,175,177,188
+apps/frontend-nextgen/test/components/Workspace/ChatPanel/BotModelSelector.test.tsx
+  s_099b525d116ac6::t_099a58d94595b1 1-77
+apps/frontend-nextgen/test/components/Workspace/ChatPanel/ChatPanel.test.tsx
+  s_099b525d116ac6::t_a503dcdaf98d11 145-151
+apps/frontend-nextgen/test/hooks/useTaskSwitcherTasks.test.tsx
+  s_099b525d116ac6::t_35d613e2c0bf1c 63-78
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/conversationFavoriteLoading.test.tsx
+  s_099b525d116ac6::t_42e55561d25ea6 1-116
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationFavorites.test.tsx
+  s_099b525d116ac6::t_4d6c096c878943 12
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupItem.createSessionScope.test.tsx
+  s_099b525d116ac6::t_8f02e1d73c60a7 3,34,67-72,79-81,84,89-92,95-136
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupSidebar.groupListAndView.test.tsx
+  s_099b525d116ac6::t_7b625099bf39a5 166-171
+apps/frontend-nextgen/test/pages/Workspace/components/ManagePanel/ManagePanel.test.tsx
+  s_099b525d116ac6::t_bba179caef2c17 19,459-505
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotChat.test.ts
+  s_099b525d116ac6::t_a7d02e550210f6 102-147
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotModels.test.tsx
+  s_099b525d116ac6::t_1424c44f13b692 2,5,10,37-41,48-77,109-135
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSkills.test.tsx
+  s_099b525d116ac6::t_879ed06da3cb55 6,38-67
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupSessions.multiGroup.test.ts
+  s_099b525d116ac6::t_c08ce157e440f4 172-175
+apps/frontend-nextgen/test/pages/Workspace/hooks/useMessageAreaSkeleton.test.tsx
+  s_099b525d116ac6::t_89fab08d1b89dc 124-150
+apps/frontend-nextgen/test/pages/expertMarket.test.tsx
+  s_099b525d116ac6::t_a0365b1a74bc3e 37
+apps/frontend-nextgen/test/services/workspace/botModelCache.test.ts
+  s_099b525d116ac6::t_bb6d0c6126892a 1-53
+apps/frontend-nextgen/test/services/workspace/channelBindingService.test.ts
+  s_099b525d116ac6::t_f5d6aa86540a7d 20,30,88,112,206,210-230
+apps/frontend-nextgen/test/services/workspace/conversationFavoriteService.test.ts
+  s_099b525d116ac6::t_65a1cd52e6d051 3,26,67-120
+apps/frontend-nextgen/test/services/workspace/conversationService.test.ts
+  s_099b525d116ac6::t_7a07a5be4128ca 241
+apps/frontend-nextgen/test/services/workspace/conversationSessionFilters.test.ts
+  s_099b525d116ac6::t_689e99f9d0f133 51,103,112-113,153
+apps/frontend-nextgen/test/services/workspace/sessionService.test.ts
+  s_099b525d116ac6::t_e0ab2ca1d5bf21 414-437
+apps/frontend-nextgen/test/shell/AppSidebar.test.tsx
+  s_099b525d116ac6::t_f1853791a454d8 99,110,117,121,137,188,206
+apps/frontend-nextgen/test/shell/navigation.test.tsx
+  s_099b525d116ac6::t_d838b5a8f0a581 35,38
+apps/frontend-nextgen/test/shell/routeMeta.test.ts
+  s_099b525d116ac6::t_b0a47ba8044685 78,81
+devops/hook/pre_push.sh
+  s_099b525d116ac6::t_6fb01884758c39 108-109
+devops/hook/test_check_secrets.py
+  s_099b525d116ac6::t_e7c1069c2aa51f 110-131
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_099b525d116ac6::t_0d8dbd1c8c9a3e 1-905
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_099b525d116ac6::t_7aa1d55f5e0021 1-405
+docs/bcn-provider-agent-card-api-v0.1.zh-CN.md
+  s_099b525d116ac6::t_acb89268496e4a 1-399
+docs/session-files.md
+  s_099b525d116ac6::t_2e07fe994617ab 1-131
+docs/specs/a2a/extensions/source-agent/v1.md
+  s_099b525d116ac6::t_1eca1b5381082a 1-64
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_099b525d116ac6::t_efdbe56709e415 3,22-27,30,33,59-60,62,70-71,82,95,104-121,127,142,146,149-179
+docs/specs/a2a/todo.zh-CN.md
+  s_099b525d116ac6::t_ef019d8553779a 1-375
+docs/superpowers/plans/2026-11-03-caller-dispatch-stage-timeouts.md
+  s_099b525d116ac6::t_e24dfe9fa008ff 1-960
+docs/superpowers/specs/2026-11-03-caller-dispatch-stage-timeouts-design.md
+  s_099b525d116ac6::t_fe8790821c02e5 1-135
+engine/adapter/scripts/session-files/README.md
+  s_099b525d116ac6::t_3ddc599588597b 1-158
+engine/adapter/scripts/session-files/session-file-publish/SKILL.md
+  s_099b525d116ac6::t_fd4bd7f4dd86ae 1-67
+engine/adapter/scripts/session-files/session-file-publish/scripts/teamclaw-session-file
+  s_099b525d116ac6::t_af60df4ae3dbfd 1-170
+engine/adapter/scripts/session-files/tests/skill-cases.json
+  s_099b525d116ac6::t_4378b188bf7566 1-171
+engine/adapter/scripts/session-files/tests/test_cli.py
+  s_099b525d116ac6::t_4b07290b2c9017 1-202
+engine/adapter/scripts/session-files/tests/test_engine_integration.py
+  s_099b525d116ac6::t_e232bb83fdf0b4 1-198
+engine/adapter/specs/2026-10-25-openclaw-subagent-final-state/plan.md
+  s_099b525d116ac6::t_f08d30f90a15cf 1-11
+engine/adapter/specs/2026-10-25-openclaw-subagent-final-state/spec.md
+  s_099b525d116ac6::t_a8f4a9e13d3d61 1-44
+engine/adapter/specs/2026-10-25-openclaw-subagent-final-state/tasks.md
+  s_099b525d116ac6::t_985a6c884ce156 1-9
+engine/adapter/specs/2026-11-01-openclaw-child-run-completion/plan.md
+  s_099b525d116ac6::t_1ff530b442b1cb 1-14
+engine/adapter/specs/2026-11-01-openclaw-child-run-completion/spec.md
+  s_099b525d116ac6::t_b72b7fd8432c2a 1-64
+engine/adapter/specs/2026-11-01-openclaw-child-run-completion/tasks.md
+  s_099b525d116ac6::t_816f601e51fd6b 1-11
+engine/adapter/src/engine/community/api/resource_materialization/tests/test_router.py
+  s_099b525d116ac6::t_527c8dda04c6a0 104-142
+engine/adapter/src/engine/community/api/session_files/content_diagnostics.py
+  s_099b525d116ac6::t_04252215f622d6 1-74
+engine/adapter/src/engine/community/api/session_files/router.py
+  s_099b525d116ac6::t_e087e9637d0e0e 7,12-13,15,20,26-32,37-38,43,48-90,116-128,131-132,138-148,196-199,201-202,206,216,220
+engine/adapter/src/engine/community/api/session_files/tests/test_registration.py
+  s_099b525d116ac6::t_e16d17ce5a9500 1-385
+engine/adapter/src/engine/community/api/session_files/tests/test_router.py
+  s_099b525d116ac6::t_48a367469894ea 136-138
+engine/adapter/src/engine/community/core/adapters/openclaw/session.py
+  s_099b525d116ac6::t_625ad463a0fb54 364-367
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_099b525d116ac6::t_3686eb0fe8db86 122-123,414-418,431-439
+engine/adapter/src/engine/community/core/resource_materialization/models.py
+  s_099b525d116ac6::t_2d0488b1f79651 9,40,115,118-120,135-139,146
+engine/adapter/src/engine/community/core/resource_materialization/service.py
+  s_099b525d116ac6::t_b7cc154f639802 17,193-196,257-261,583-585,606-608
+engine/adapter/src/engine/community/core/resource_materialization/tests/test_service.py
+  s_099b525d116ac6::t_76085debb05680 91-92,445,461-489,850-867
+engine/adapter/src/engine/community/core/session_files/README.md
+  s_099b525d116ac6::t_aa45d671fa880d 1-81
+engine/adapter/src/engine/community/core/session_files/export_service.py
+  s_099b525d116ac6::t_f01fa25758d6f2 68-74
+engine/adapter/src/engine/community/core/session_files/models.py
+  s_099b525d116ac6::t_7874e925b41353 7-10,24-26,35-37
+engine/adapter/src/engine/community/core/session_files/registration.py
+  s_099b525d116ac6::t_a18203fdbd1cf0 1-258
+engine/adapter/src/engine/community/core/session_files/service.py
+  s_099b525d116ac6::t_144d1fce8e7413 5,9-10,23,28-30,32,45-46,50-103,112-121,124-125,127-130,157-178,190,197-198,206-207,214-225,240,288-290,295-299,303-321,325,340-348,445-452
+engine/adapter/src/engine/community/core/session_files/tests/test_export_service.py
+  s_099b525d116ac6::t_c2a3372c564c7f 164-195,330-440
+engine/adapter/src/engine/community/core/session_files/tests/test_registration.py
+  s_099b525d116ac6::t_0f04d87f4d5014 1-506
+engine/adapter/src/engine/community/local/openclaw/plugin_impl.py
+  s_099b525d116ac6::t_bfed9a8fa905a8 186-187,189-193
+engine/adapter/src/engine/community/openclaw/client/README.md
+  s_099b525d116ac6::t_c3e6873a6c63dc 21-41
+engine/adapter/src/engine/community/openclaw/client/child_runs.py
+  s_099b525d116ac6::t_1602664d1432ef 1-179
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_099b525d116ac6::t_7105302a716475 35,244,266-269,287,307,327,332,334,341-356,370-395,397,399,405-406,414,424-426,461-463,480-482,487-489,491-496,498-509,513,536-540,559-572,596-599,607,609-610,615-617,619,785-786,808
+engine/adapter/src/engine/community/openclaw/client/tests/test_child_run_completion.py
+  s_099b525d116ac6::t_527f395f27b410 1-741
+engine/adapter/src/engine/community/openclaw/client/tests/test_gateway_client.py
+  s_099b525d116ac6::t_e58d00dd351233 110-124,1025,1048-1356,1366,1374,1421,1429,1461,1469,1540,1548,1588,1596,1619-1676,1714,1724,1729,1737,1741
+engine/adapter/src/engine/community/plugin_api/openclaw/README.md
+  s_099b525d116ac6::t_0431624cc15050 45-69
+engine/adapter/src/engine/community/plugin_api/openclaw/session.py
+  s_099b525d116ac6::t_2c67353c6ca5da 66,68-75
+engine/adapter/src/engine/community/plugin_api/runtime_identity.py
+  s_099b525d116ac6::t_ab58a10a935726 1-13
+engine/adapter/src/engine/community/plugins/openclaw/_session.py
+  s_099b525d116ac6::t_52cb8c4529f692 346,368-385,387-391
+engine/adapter/src/engine/community/plugins/openclaw/tests/test_session_port.py
+  s_099b525d116ac6::t_bea8e3d2f60dbb 666-674,676,684,691,697-729
+engine/adapter/src/engine/community/tests/contracts/test_openclaw_local_plugin.py
+  s_099b525d116ac6::t_5d766dd7af2436 18-22
+engine/adapter/src/engine/community/tests/contracts/test_openclaw_session_create.py
+  s_099b525d116ac6::t_d13d1ea10d2ad9 1-79
+singlebox/agents/README.md
+  s_099b525d116ac6::t_d8feb17d3176e6 1-37
+singlebox/agents/avernet-help/README.md
+  s_099b525d116ac6::t_cc923e759f8c8b 1-26
+singlebox/agents/avernet-help/bots.json
+  s_099b525d116ac6::t_fab9730c5e3137 1-17
+singlebox/agents/avernet-help/collaboration/AGENTS.md
+  s_099b525d116ac6::t_15f50604811353 1-15
+singlebox/agents/avernet-help/collaboration/IDENTITY.md
+  s_099b525d116ac6::t_e30af8c114c28c 1-12
+singlebox/agents/avernet-help/collaboration/KNOWLEDGE.md
+  s_099b525d116ac6::t_ed6c4ff434cc31 1-13
+singlebox/agents/avernet-help/collaboration/TOOLS.md
+  s_099b525d116ac6::t_4056a6f48eec12 1-12
+singlebox/agents/avernet-help/collaboration/skills/avernet-collaboration-help/SKILL.md
+  s_099b525d116ac6::t_d0cf2acb27850d 1-51
+singlebox/agents/avernet-help/collaboration/skills/avernet-collaboration-help/references/authoring-workflow.md
+  s_099b525d116ac6::t_365f370df8d31c 1-19
+singlebox/agents/avernet-help/collaboration/skills/avernet-collaboration-help/references/examples.md
+  s_099b525d116ac6::t_63de1c0e40bd1c 1-27
+singlebox/ci/singlebox_coverage.sh
+  s_099b525d116ac6::t_2feec2ea620d21 20-21,364,381-382,541,645
+singlebox/ci/tests/test_bcs_auth_session_mysql_gate.py
+  s_099b525d116ac6::t_e55c8325f4d356 1-41
+singlebox/ci/tests/test_bcs_ci_build_reuse.py
+  s_099b525d116ac6::t_2386ac1c323760 158,177,182-183
+singlebox/ci/tests/test_bcs_cov_gate.py
+  s_099b525d116ac6::t_dd739834301b09 1,31,42-44,46-47,49-51,53,59-109,111-121,134
+singlebox/ci/tests/test_bcs_oauth_e2e.py
+  s_099b525d116ac6::t_bacfab3542c123 1-111
+singlebox/ci/tests/test_verify_singlebox_coverage_artifacts.py
+  s_099b525d116ac6::t_c5418dfe0bc134 5,28-33,92-132
+singlebox/ci/verify_singlebox_coverage_artifacts.py
+  s_099b525d116ac6::t_a99e944942a59e 34,58-59,187-210,216
+singlebox/modules/bcs_runtime_config.sh
+  s_099b525d116ac6::t_fd30d1554791a5 238-239
+singlebox/verity/test_singlebox_bcs_runtime_config.sh
+  s_099b525d116ac6::t_5ba72c70b22019 39-42,92,181-182
+singlebox/verity/test_singlebox_coverage_gate.sh
+  s_099b525d116ac6::t_b6689b5711b4c9 163-166,178-180,294,304
+singlebox/verity/test_singlebox_profile_skills.sh
+  s_099b525d116ac6::t_f1e15eba78aad9 228-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "79c45a519ffde3e8bc79306e05d260ad3b024d4d",
+  "prompts": {},
+  "sessions": {
+    "s_099b525d116ac6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0faa0679-867e-4a88-88ee-47432c0214b4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 48-128,130,132-141,145,147-150,154
+apps/frontend-nextgen/test/components/Community/CommunityPagePersonalCenterNavigation.test.tsx
+  h_059e888e5e4e82 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd6d7243ea53999e6e9b15a3ef9d19176543e584",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

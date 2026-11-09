@@ -1,0 +1,84 @@
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-incompatible-init.test.ts
+  h_43af82e14600e4 1-44
+apps/evolverun/clawweb/public/shared/server/db.ts
+  h_43af82e14600e4 14-15,17,199-216,227,230,236-251,281-284,286-287,290,292-294,332-333,341-342,344-347,356
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-cross-group-cas.test.ts
+  h_43af82e14600e4 1-98
+apps/evolverun/clawweb/public/modules/workflow/server/services/fanout-state-reader.ts
+  h_43af82e14600e4 4,55,70-81
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  h_43af82e14600e4 28
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  h_43af82e14600e4 1-229
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-unavailable.test.ts
+  h_43af82e14600e4 1-114
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/SubworkflowPanel.tsx
+  h_43af82e14600e4 19
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-request-schema.test.ts
+  h_43af82e14600e4 1-171
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_43af82e14600e4 1,135,139-141,194-199
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/ChildRunDrawer.tsx
+  h_43af82e14600e4 37
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/SubworkflowSnapshotNotice.test.tsx
+  h_43af82e14600e4 1-20
+apps/evolverun/clawweb/public/shared/server/db/sqlite-triggers.ts
+  h_43af82e14600e4 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-association.test.ts
+  h_43af82e14600e4 1-346
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/run-subworkflows.ts
+  h_43af82e14600e4 13-17,22,33
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-association.test.ts
+  h_43af82e14600e4 1-249
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  h_43af82e14600e4 144-145,325,358-809
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/ChildRunCurrentStatus.test.tsx
+  h_43af82e14600e4 1-17
+apps/evolverun/clawweb/public/shared/server/schema-ordinary-run-request.ts
+  h_43af82e14600e4 1-219
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  h_43af82e14600e4 14-15,19,66-75,84-128,156-158,162-179,183,188-190,193-196,231-269,330-331,341,355,362,398,406,431,499
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-authority.test.ts
+  h_43af82e14600e4 1-83
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-service.ts
+  h_43af82e14600e4 16-32,84-98,101,106,109-111,123,145
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  h_43af82e14600e4 3,10-11,13-23,84,100-137
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-fields.ts
+  h_43af82e14600e4 53,57-58
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/initial-state-insert.test.ts
+  h_43af82e14600e4 52-65
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-run-request-migration.test.ts
+  h_43af82e14600e4 1-872
+apps/evolverun/clawweb/public/shared/vitest.config.ts
+  h_43af82e14600e4 1-7
+apps/evolverun/clawweb/public/modules/workflow/server/services/ordinary-run-request.ts
+  h_43af82e14600e4 1-218
+apps/evolverun/clawweb/public/shared/server/__tests__/managed-migrations.test.ts
+  h_43af82e14600e4 7,66-69,86-95,156,163-165,209-401
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  h_43af82e14600e4 22-23,41,63,76
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows.test.ts
+  h_43af82e14600e4 5,15,37-38,51-52,65-67,85-96,106,110-112,119,139-214,223,234,255-335,352,356,358,386-387,397,439-486,488
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-trigger-lock.test.ts
+  h_43af82e14600e4 1-211
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/ordinary-run-request-repository.ts
+  h_43af82e14600e4 1-87
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_43af82e14600e4 1,35,40-92,100-119,130,144,149-153,189,201-205,217,223-225
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-reuse.test.ts
+  h_43af82e14600e4 1-51
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-concurrent-defer.test.ts
+  h_43af82e14600e4 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "329a54dbfd279efa917aa3946cf1f15ddaa8f3c7",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

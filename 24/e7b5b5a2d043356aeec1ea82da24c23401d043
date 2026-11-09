@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_15de3d79242bf3::t_86e54293d95fc1 170,172,595-604
+apps/backend/tests/community/adapters/http/openapi_v1/test_responses.py
+  s_15de3d79242bf3::t_36c45274d2387c 27-31,120-170
+apps/backend/tests/community/endpoints/test_openapi_skill_asset.py
+  s_15de3d79242bf3::t_ca9c72ddfe5386 11,34,36,54-55,88,96,132-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24e7b5b5a2d043356aeec1ea82da24c23401d043",
+  "prompts": {},
+  "sessions": {
+    "s_15de3d79242bf3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a12a-1ab9-7030-99ca-10c78faf2171",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
