@@ -42,21 +42,22 @@ impl HttpA2aCardFetcher {
 
 /// Re-resolve and pin policy-approved addresses on each outbound attempt.
 /// Credentials and URLs are never interpolated into externally visible errors.
-pub async fn guarded_client(guard: &OutboundUrlGuard, url: &str) -> ServiceResult<reqwest::Client> {
+pub async fn guarded_client(guard: &OutboundUrlGuard, url: &str) -> ServiceResult<bcs_network_tracing::ClientWithDefaults<reqwest::Client>> {
     guarded_client_with_headers(guard, url, reqwest::header::HeaderMap::new()).await
 }
 
-pub(super) async fn guarded_client_with_headers(guard: &OutboundUrlGuard, url: &str, headers: reqwest::header::HeaderMap) -> ServiceResult<reqwest::Client> {
+pub(super) async fn guarded_client_with_headers(guard: &OutboundUrlGuard, url: &str, headers: reqwest::header::HeaderMap) -> ServiceResult<bcs_network_tracing::ClientWithDefaults<reqwest::Client>> {
     if !bcs_service_api::types::a2a_bot::http_interface_address_allowed(url) {
         return Err(rejected("address rejected"));
     }
     let checked = guard.resolve_request_http_url(url).await.map_err(|_| rejected("address rejected"))?;
-    let mut builder = reqwest::Client::builder().default_headers(headers).no_proxy()
+    let mut builder = reqwest::Client::builder().no_proxy()
         .redirect(reqwest::redirect::Policy::none()).connect_timeout(Duration::from_secs(5));
     if let Some((host, addresses)) = checked.dns_override() {
         builder = builder.resolve_to_addrs(host, addresses);
     }
-    builder.build().map_err(|_| rejected("HTTP client unavailable"))
+    builder.build().map(|client| bcs_network_tracing::ClientWithDefaults::new(client, headers))
+        .map_err(|_| rejected("HTTP client unavailable"))
 }
 
 #[async_trait]
@@ -65,7 +66,7 @@ impl A2aCardPort for HttpA2aCardFetcher {
         // Covers DNS resolution, response headers and the complete bounded body.
         tokio::time::timeout(Duration::from_secs(10), async {
             let client = guarded_client(&self.guard, url).await?;
-            let mut response = client.get(url).header("Accept", "application/json").send().await
+            let mut response = client.request(|http| http.get(url).header("Accept", "application/json")).send().await
                 .map_err(|_| rejected("fetch failed"))?;
             if response.status()!=reqwest::StatusCode::OK { return Err(rejected("HTTP response rejected")); }
             let media_type = response.headers().get(CONTENT_TYPE).and_then(|v|v.to_str().ok())
@@ -87,9 +88,11 @@ impl A2aCardPort for HttpA2aCardFetcher {
         if serde_json::to_vec(&raw).map_err(|_|rejected("invalid JSON"))?.len()>MAX_CARD_BYTES {return Err(rejected("size limit exceeded"));}
         tokio::time::timeout(Duration::from_secs(10),async {
             let extensions = self.supported_extensions.iter().map(String::as_str).collect::<Vec<_>>();
-            let bindings: &[&str] = if self.grpc.is_some() { &["GRPC", "HTTP+JSON", "JSONRPC"] } else { &["HTTP+JSON", "JSONRPC"] };
+            let bindings: &[&str] = if self.grpc.is_some() { &["GRPC", "HTTP+JSON", "JSONRPC", "CUSTOM"] } else { &["HTTP+JSON", "JSONRPC", "CUSTOM"] };
             let card = select_card_with_bindings(raw, &extensions, bearer_configured, bindings,
-                |target| if target.protocol_binding == "GRPC" {
+                |target| if target.protocol_binding == "CUSTOM" {
+                    bcs_a2a_binding_api::registry().fingerprint(&target.url).is_ok()
+                } else if target.protocol_binding == "GRPC" {
                     self.grpc.as_ref().is_some_and(|mesh|mesh.supports(&target.url))
                 } else {bcs_service_api::types::a2a_bot::http_interface_address_allowed(&target.url)
                     && self.guard.validate_configured_http_url(&target.url).is_ok()})
@@ -104,7 +107,7 @@ impl A2aCardPort for HttpA2aCardFetcher {
                 })?;
             // Includes DNS and TLS checks for the selected interface, without
             // submitting a task or forwarding credentials to the Card host.
-            let binding = if card.interface.protocol_binding == "GRPC" { A2aBinding::Grpc }
+            let binding = if card.interface.protocol_binding == "CUSTOM" { A2aBinding::Custom } else if card.interface.protocol_binding == "GRPC" { A2aBinding::Grpc }
                 else { guarded_client(&self.guard, &card.interface.url).await?; if card.interface.protocol_binding=="JSONRPC" {A2aBinding::JsonRpc} else {A2aBinding::HttpJson} };
             let update_mode=if card.raw.pointer("/capabilities/streaming").and_then(serde_json::Value::as_bool)==Some(true) {A2aUpdateMode::Stream} else {A2aUpdateMode::Poll};
             Ok(ValidatedA2aCard { raw: card.raw, interface: A2aInterface {

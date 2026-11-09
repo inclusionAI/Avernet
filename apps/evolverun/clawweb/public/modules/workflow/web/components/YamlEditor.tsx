@@ -5,6 +5,7 @@ import type { WorkflowSpec, WorkflowValidationIssue } from '@avernet/clawweb-sha
 import { useEditorStore } from '../editor/store'
 import { clearDraft, readDraft, writeDraft } from '../editor/draftCache'
 import { normalizationChanges, parseWorkflowYaml } from '../editor/yamlDraft'
+import PackFileCodeEditor from './PackFileCodeEditor'
 
 interface YamlEditorProps {
   spec: WorkflowSpec | null
@@ -219,7 +220,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
         if (revision.current === review.revision) applySpec(review.spec)
       }} className="rounded-md border border-input bg-card px-2 py-1">确认采用规范化结果</button>
     </div>}
-    <textarea aria-label="工作流 YAML" value={text} onChange={event => changeText(event.target.value)} spellCheck={false}
+    <PackFileCodeEditor path="workflow.yaml" ariaLabel="工作流 YAML" layout="fill" value={text} onChange={changeText}
       disabled={!spec}
       onKeyDown={event => {
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void apply() }
@@ -231,7 +232,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
           requestAnimationFrame(() => { if (input.isConnected) input.setSelectionRange(start + 2, start + 2) })
         }
       }}
-      className="min-h-0 flex-1 resize-none bg-muted/30 p-4 font-mono text-xs leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" />
+    />
     <footer className="border-t border-border px-4 py-2 text-[10px] text-muted-foreground">先应用到编辑器，再保存到服务器。数据库 JSON 无法恢复原始 YAML 注释和排版。</footer>
   </section>
 }

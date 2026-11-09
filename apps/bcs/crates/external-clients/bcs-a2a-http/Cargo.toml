@@ -11,13 +11,15 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-a2a-binding-api.workspace = true
+bcs-tracing-api.workspace = true
+bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
 a2a = { package = "a2a-lf", version = "=0.4.2" }
-a2a-client = { package = "a2a-client-lf", version = "=0.2.9", default-features = false, features = ["rustls-tls"] }
 a2a-pb = "=0.3.2"
 tonic = { version = "0.14", features = ["transport"] }
 prost = "0.14"
 prost-types = "0.14"
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "charset", "http2", "system-proxy", "query"] }
 percent-encoding = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

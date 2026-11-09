@@ -26,6 +26,17 @@ export interface BotRuntimeDomain extends BotRuntime {
   visibleInOpenCore: boolean;
 }
 
+export interface BotRestartTracking {
+  /** Coding 重启 journal 的 operation_id；仅前端追踪使用，不来自库存接口。 */
+  operationId: string;
+  startedAt: number;
+  deadlineAt: number;
+  /** 库存已读到过渡态（PENDING 等）后置位；此后再读到 ACTIVE 视为重启完成。 */
+  sawProgress?: boolean;
+  /** 超时后经详情接口确认仍在执行时的延长次数；当前最多延长一次。 */
+  extensions?: number;
+}
+
 export interface BotDomain {
   id: string;
   cardId?: string;
@@ -57,10 +68,16 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
+  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
+  evalGateVisible?: boolean;
+  /** 当前用户是否有该服务 Bot 的编辑权限；控制历史评测记录入口。 */
+  canOpenEvalHistory?: boolean;
   /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
   needsEditLock?: boolean;
   /** Bot 级协作关系；运行态不要求编辑锁，但仍允许管理已有协作锁。 */
   hasCollaborators?: boolean;
+  /** 客户端重启追踪标记：coding 重启为异步 journal，在库存读到过渡态前保持「重启中」展示。 */
+  pendingRestart?: BotRestartTracking;
   completeness: BotCompleteness;
   warnings: string[];
   actions: string[];
@@ -324,3 +341,23 @@ export interface BotActionAvailability {
 }
 
 export type { BotHarnessContext } from './botHealthCheck';
+
+/**
+ * 公开设置菜单项可用性（collab-permission-entry-migration AC-02/AC-03）：
+ * 仅 Bot Owner 可变更公开设置；他人持编辑锁时同样禁用。
+ * 服务 Bot 在发布到线上（lifecycle==='running'）之前不可变更公开设置：未发布的服务 Bot
+ * 尚不可被其他对象使用，开放公开设置会暴露一个不可用的 Bot。个人 Bot / 桌面 Bot 不受此约束。
+ * TODO：团队空间下「Owner 非当前用户但已获操作权限」的 Bot 是否放开，待对应模块决策后修订（Spec 2026-09-24 AC-02 登记）。
+ */
+export function getGeneralConfigAvailability(
+  bot: BotDomain,
+  isOwner: boolean,
+  lockedByOther: boolean,
+): { enabled: boolean; disabledReason?: string } {
+  if (!isOwner) return { enabled: false, disabledReason: '仅 Bot Owner 可变更公开设置' };
+  if (bot.serviceMode === 'service' && bot.lifecycle !== 'running') {
+    return { enabled: false, disabledReason: '服务 Bot 未发布前暂不可变更公开设置' };
+  }
+  if (lockedByOther) return { enabled: false, disabledReason: '该 Bot 正被他人编辑，请先抢锁' };
+  return { enabled: true };
+}

@@ -17,10 +17,10 @@ export interface BotSkillView {
 }
 
 /** 对话「任务」入口依赖的意图识别 Skill。 */
-export const TASK_INTENT_SKILL_NAME = 'task-intent-recognition';
+export const TASK_INTENT_SKILL_NAME = 'task-intake';
 
 /**
- * task_config 中维护「装了 task-intent-recognition 的 bot_uuid 集合」的配置名（spec 2026-11-02）。
+ * task_config 中维护「装了 task-intake 的 bot_uuid 集合」的配置名（spec 2026-11-02）。
  * 维护方（属主/外部服务）通过 POST /collaboration/tasks/config/set 写入 set 类型配置；
  * 非属主调用方无权列他人 Bot 的技能列表，改走 match 探针只回 matched: bool。
  */
@@ -83,7 +83,7 @@ export const botSkillService = {
     return hasSkill(skills, TASK_INTENT_SKILL_NAME);
   },
   /**
-   * 判定当前 Bot / 协作群 Driver Bot 是否安装可用的 task-intent-recognition。
+   * 判定当前 Bot / 协作群 Driver Bot 是否安装可用的 task-intake。
    *
    * - Bot 属当前用户 → 走属主可见的 `/openapi/v1/bots/{bot_id}/skills` 列表再判 `hasTaskIntentSkill`
    *   （自有 bot，可列技能）。

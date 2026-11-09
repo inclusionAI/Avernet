@@ -95,11 +95,15 @@ impl A2aBotRepoPort for DbA2aBotStore {
     }
     async fn compare_and_set(&self,record:&A2aBotRecord,expected_revision:u64)->ServiceResult<bool> {
         if expected_revision.checked_add(1)!=Some(record.revision) {return Err(error("invalid revision"));}
-        Ok(self.write_card(record,Some(expected_revision)).await?.is_some())
+        Ok(self.write_card(record,Some(expected_revision),None).await?.is_some())
+    }
+    async fn compare_and_set_with_visibility(&self,record:&A2aBotRecord,expected:u64,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bool> {
+        if expected.checked_add(1)!=Some(record.revision) {return Err(error("invalid revision"));}
+        Ok(self.write_card(record,Some(expected),visibility).await?.is_some())
     }
     async fn replace(&self,record:&A2aBotRecord)->ServiceResult<A2aBotRecord> {
         for _ in 0..3 {
-            if let Some(record)=self.write_card(record,None).await? {return Ok(record);}
+            if let Some(record)=self.write_card(record,None,None).await? {return Ok(record);}
         }
         Err(ServiceError::Conflict("A2A Bot binding unavailable or revision exhausted".into()))
     }
@@ -111,6 +115,14 @@ impl A2aBotRepoPort for DbA2aBotStore {
         if rows.len()>1 { return Err(ServiceError::Conflict("Multiple active Bots use this name in the Provider".into())); }
         if rows.first().is_some_and(|row| matches!(row.get_string("agent_card"), Ok(None))) { return Ok(None); }
         Ok(rows.first().map(decode).transpose()?.filter(|record|record.agent_card.get("name").and_then(serde_json::Value::as_str)==Some(name)))
+    }
+    async fn get_by_provider_ref(&self, provider_id:&str, provider_bot_ref:&str)->ServiceResult<Option<A2aBotRecord>> {
+        let ref_column=match self.flavor {DbSqlFlavor::Mysql=>"CAST(provider_bot_ref AS BINARY)=CAST(? AS BINARY)",DbSqlFlavor::Sqlite=>"provider_bot_ref=? COLLATE BINARY"};
+        let rows=self.db.query(DbStatement::with_params(format!(
+            "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND provider_id=? AND {ref_column} AND is_deleted=0 AND connection_mode='gateway' AND agent_card IS NOT NULL LIMIT 2"),
+            vec![self.env.clone().into(),provider_id.into(),provider_bot_ref.into()])).await.map_err(error)?;
+        if rows.len()>1 {return Err(error("multiple Bots use the same Provider reference"));}
+        rows.first().map(decode).transpose()
     }
     async fn refreshable(&self, after:Option<&str>, limit:u32)->ServiceResult<Vec<A2aBotRecord>> {
         let rows=self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND is_deleted=0 AND agent_card_url IS NOT NULL AND agent_card IS NOT NULL AND bot_uuid>? ORDER BY bot_uuid LIMIT ?",
@@ -141,35 +153,23 @@ pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResul
 }
 
 impl DbA2aBotStore {
-    async fn write_card(&self,record:&A2aBotRecord,expected:Option<u64>)->ServiceResult<Option<A2aBotRecord>> {
+    async fn write_card(&self,record:&A2aBotRecord,expected:Option<u64>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<Option<A2aBotRecord>> {
         use bcs_db_api::{DbTransactionStep,DbTransactionStepResult};
         let name=bcs_service_api::types::a2a_names::card_bot_name(&record.agent_card).map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
-        ensure_provider_name_available(self.db.as_ref(),self.flavor,&self.env,&record.provider_id,name,Some(&record.bot_uuid)).await.map_err(|error|match error {
-            ServiceError::Conflict(_)=>bcs_service_api::types::a2a_bot::a2a_management::ManagementError::new(
-                bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::BotNameConflict,"agent_card.name","ALREADY_EXISTS").into(),
-            other=>other,
-        })?;
         let previous=self.get(&record.bot_uuid).await?;
         if expected.is_some_and(|revision|revision!=previous.as_ref().map_or(0,|value|value.revision)) {return Ok(None);}
-        if let Some(previous)=&previous {
-            bcs_service_api::types::a2a_bot::a2a_management::validate_source_transition(&previous.agent_card,&record.agent_card)?;
-        }
-        crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&self.env,record).await?;
-        // Fence even an unconditional replacement against an ID first assigned
-        // since the immutable-source check. Caller retries the local CAS only.
+        // Validate every incoming Card, including the first attachment to a legacy Bot.
+        bcs_service_api::types::a2a_bot::a2a_management::source_agent(&record.agent_card)?;
+        // Fence even an unconditional replacement against a concurrent Card write.
+        // Caller retries the local CAS only.
         let expected=Some(expected.unwrap_or_else(||previous.as_ref().map_or(0,|v|v.revision)));
+        let visibility_assignment=if let Some(value)=visibility {format!("visibility='{}',",value.as_str())} else {String::new()};
         let mut params=vec![name.into(),name.into(),serde_json::to_string(&record.agent_card).map_err(error)?.into(),record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),
             self.env.clone().into(),record.bot_uuid.clone().into(),record.provider_id.clone().into(),record.provider_bot_ref.clone().into()];
         let predicate=if let Some(expected)=expected {params.push(i64::try_from(expected).map_err(error)?.into());" AND agent_card_revision=?"} else {""};
-        let mut params=crate::a2a_source::bound_params(params);
-        params.push(crate::a2a_source::conflict_param(1));
         let results=self.db.transaction(vec![
-            if bcs_service_api::types::a2a_bot::a2a_management::source_agent(&record.agent_card)?.is_some() {
-                crate::a2a_source::provider_lock(self.flavor,&self.env,&record.provider_id)
-            } else {DbTransactionStep::Query(DbStatement::new("SELECT 1"))},
-            DbTransactionStep::Query(crate::a2a_source::conflict_query(self.flavor,&self.env,record)?),
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(format!(
-                "UPDATE bcs_bots SET name=?,bot_info=JSON_SET(COALESCE(bot_info,'{{}}'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate} AND ?=0"),params).with_transaction_stop_on_no_rows()),
+            DbTransactionStep::Execute(DbStatement::with_params(format!(
+                "UPDATE bcs_bots SET {visibility_assignment}name=?,bot_info=JSON_SET(COALESCE(bot_info,'{{}}'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate}"),params).with_transaction_stop_on_no_rows()),
             DbTransactionStep::Query(DbStatement::with_params(
                 "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
         ]).await.map_err(|failure|if failure.is_duplicate_key() {ServiceError::Conflict("Bot name is already in use in this Provider".into())} else {error(failure)})?;
@@ -182,7 +182,6 @@ impl DbA2aBotStore {
                 Ok(Some(committed))
             },
             Some(DbTransactionStepResult::Executed(value)) if value.affected_rows==0=>{
-                crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&self.env,record).await?;
                 Ok(None)
             },
             _=>Err(error("invalid Card write result")),

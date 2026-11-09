@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from injector import inject
+
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import (
     CliItem,
@@ -28,6 +30,8 @@ from agentclaw.community.plugin_api.passport import (
     validate_passport_target_env,
 )
 
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+
 
 logger = get_logger()
 
@@ -38,6 +42,29 @@ def _token_for(bot_id: str) -> str:
 
 class SelfIssuedPassportPlugin(PassportPlugin):
     """Self-issuing passport broker: always ISSUED, allow-all, deterministic."""
+
+    @inject
+    def __init__(self, bots: "BotRepository | None" = None) -> None:
+        # Optional so a bare plugin still works in tests and in compositions
+        # with no repository; without it an inheriting Bot cannot be told
+        # apart from an ordinary one.
+        self._bots = bots
+
+    def _subject_id(self, bot_id: str, owner_workno: str) -> str:
+        """The id whose passport this Bot presents.
+
+        An identity-inheriting Bot presents a copy of its source's passport;
+        nothing was issued under its own id, so returning that id would
+        fabricate an identity. Resolution lives here, at the plugin boundary,
+        so no caller has to know about inheritance.
+        """
+        if self._bots is None:
+            return bot_id
+        try:
+            bot = self._bots.get_by_id_and_owner(bot_id, owner_workno)
+        except Exception:  # noqa: BLE001 — a lookup failure is not a passport answer
+            return bot_id
+        return str((bot or {}).get("identity_bot_id") or bot_id)
 
     def update_passport(
         self,
@@ -50,6 +77,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         access_mode: Optional[str] = None,
         admins: Optional[list[str]] = None,
         resource_scope: Optional[PassportResourceScope] = None,
+        bot_type: Optional[str] = None,
     ) -> None:
         # No external registry to notify — scope/admin changes are a no-op.
         # ``unpack_resource_scope`` is still called so a malformed scope raises
@@ -81,6 +109,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         cli_items: Optional[list[CliItem]] = None,
         *,
         target_env: Optional[str] = None,
+        bot_type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         return self._issue(bot_id)
@@ -99,6 +128,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         workspace_path: Optional[str] = None,
         admins: Optional[list[str]] = None,
         cli_items: Optional[list[CliItem]] = None,
+        bot_type: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         return self._issue(bot_id)
 
@@ -115,6 +145,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         target_env: Optional[str] = None,
         handoff_operation_id: str | None = None,
         expected_credential_id: str | None = None,
+        bot_type: str | None = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         if handoff_operation_id is not None or expected_credential_id is not None:
@@ -130,6 +161,12 @@ class SelfIssuedPassportPlugin(PassportPlugin):
             execution_workno=execution_workno,
         )
         return result
+
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        # Self-issued credentials have no persisted historical handoff snapshot.
+        return None
 
     def owner_handoff_supported(
         self, *, bot_id: str, owner_workno: str, entity_id: str
@@ -186,9 +223,10 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         entity_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
+        subject_id = self._subject_id(bot_id, owner_workno)
         return {
-            "agent_id": bot_id,
-            "agent_code": bot_id,
+            "agent_id": subject_id,
+            "agent_code": subject_id,
             "status": "ISSUED",
             "access_mode": None,
             "mcps": [],

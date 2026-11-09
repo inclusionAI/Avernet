@@ -1,4 +1,5 @@
-import { Avatar, Button } from '@/components/ui';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
+import { Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { SERVICE_BOT_STAGE_OPTIONS } from '@/domain/collaboration/serviceBotRouting';
 import type { ServiceBotRoutingModel } from '@/extensions/contracts/groupRouting';
@@ -33,7 +34,7 @@ export function SelectedParticipantChip({
       className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-xl border border-primary/20 bg-primary/10 py-1 pl-1.5 pr-1"
     >
       <span aria-hidden>
-        <Avatar name={bot.name} src={bot.avatarUrl} size={16} />
+        <BotDisplayAvatar botId={bot.id} name={bot.name} avatarUrl={bot.avatarUrl} size={16} />
       </span>
       <TooltipProvider delayDuration={300}>
         <Tooltip>

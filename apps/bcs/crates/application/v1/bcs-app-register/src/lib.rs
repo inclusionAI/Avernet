@@ -80,6 +80,7 @@ impl RegisterServiceImpl {
     /// idempotence key, never client data.
     fn ownership_initialization(staff_no: &str) -> OwnershipInitialization {
         OwnershipInitialization {
+            initial_manager_user_ids: Vec::new(),
             owner_user_id: staff_no.to_string(),
             mutation: AuthorityMutation {
                 mutation_id: uuid::Uuid::new_v4().to_string(),
@@ -149,6 +150,7 @@ impl RegisterServiceImpl {
                 .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
                 .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
             let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                visibility: Default::default(),
                 agent_card_url:url,
                 agent_card:fetched.raw,interface:fetched.interface,
                 registered_at_ms:now_ms,};
@@ -198,7 +200,7 @@ fn provider_registration_error(error: ServiceError) -> ApplicationError {
         ServiceError::A2aManagement(error) => {
             use bcs_service_api::types::a2a_bot::a2a_management::ManagementCode as Code;
             match error.code {
-                Code::BotNameConflict|Code::SourceAgentConflict|Code::SourceAgentChangeNotAllowed =>
+                Code::ProviderBotRefConflict|Code::BotNameConflict|Code::SourceAgentConflict|Code::SourceAgentChangeNotAllowed =>
                     ApplicationError::conflict("registration_conflict", "A2A registration conflicts with an existing registration"),
                 Code::InternalError|Code::ServiceUnavailable => ApplicationError::internal("A2A registration unavailable"),
                 _ => ApplicationError::invalid("invalid_request", "A2A Card or source is not supported"),

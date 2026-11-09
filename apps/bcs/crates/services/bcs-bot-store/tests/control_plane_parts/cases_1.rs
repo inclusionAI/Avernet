@@ -72,6 +72,7 @@ async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamp
             acting_bot_id: "acting-memory".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Collaboration,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::from(["friend-memory".to_string()]),
             name: None,
             offset: 0,
@@ -368,6 +369,7 @@ async fn persistent_control_plane_candidates_apply_purpose_and_stable_ordering()
             acting_bot_id: "acting".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::from(["private-friend".to_string()]),
             name: None,
             offset: 0,
@@ -390,6 +392,7 @@ async fn persistent_control_plane_candidates_apply_purpose_and_stable_ordering()
             acting_bot_id: "acting".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Collaboration,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::new(),
             name: None,
             offset: 0,
@@ -411,6 +414,7 @@ async fn persistent_control_plane_candidates_apply_purpose_and_stable_ordering()
             acting_bot_id: "acting".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Collaboration,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::from(["private-friend".to_string()]),
             name: Some("  ".to_string()),
             offset: 0,
@@ -458,6 +462,7 @@ async fn persistent_control_plane_name_filters_treat_sql_wildcards_as_literals()
             acting_bot_id: "acting".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::new(),
             name: Some("%".to_string()),
             offset: 0,
@@ -703,6 +708,37 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         cleared.friend_check_in_strategy,
         FriendCheckInStrategy::DeptFree
     );
+}
+
+/// Candidate visibility is a viewer decision made in the store BEFORE the
+/// total is counted and before `offset`/`limit` are applied. The Human
+/// perspective uses `user_visibility`; the Bot perspective uses `visibility`;
+/// a friend is visible to collaboration in the matching dimension only.
+///
+/// The same verification body runs against the Memory store and the real
+/// SQLite store, so both implementations are checked against identical
+/// semantics.
+#[tokio::test]
+async fn candidate_visibility_filters_by_viewer_before_pagination() {
+    let env = bcs_config::resolve_env_str();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let memory = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    candidate_friend_set_contract::verify_viewer_visibility(
+        &memory,
+        &memory,
+        &env,
+        "memory",
+    )
+    .await;
+
+    let (persistent, _db) = fixture().await;
+    candidate_friend_set_contract::verify_viewer_visibility(
+        &persistent,
+        &persistent,
+        &env,
+        "sqlite",
+    )
+    .await;
 }
 
 #[tokio::test]

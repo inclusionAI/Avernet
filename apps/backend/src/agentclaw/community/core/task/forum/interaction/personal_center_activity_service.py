@@ -5,6 +5,7 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.errors import ValidationError
+from agentclaw.community.core.task.domain.identity import compose_interaction_bot_identity
 from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
     ForumPersonalCenterActivityRepositoryProtocol,
 )
@@ -58,7 +59,7 @@ class ForumPersonalCenterActivityService(ForumPersonalCenterActivityServiceProto
             actors.append(ForumActorRef(type=ForumActorType.HUMAN, id=owner_user_id))
         if actor_scope is not PersonalCenterActorScope.HUMAN:
             actors.extend(
-                ForumActorRef(type=ForumActorType.BOT, id=bot_id)
+                self._subscription_bot_actor(bot_id, owner_user_id)
                 for bot_id in self._subscription_bot_ids(owner_user_id)
             )
 
@@ -72,6 +73,17 @@ class ForumPersonalCenterActivityService(ForumPersonalCenterActivityServiceProto
             target_type=target_type,
             page=query.page,
             page_size=query.page_size,
+        )
+
+    @staticmethod
+    def _subscription_bot_actor(bot_id: str, owner_user_id: str) -> ForumActorRef:
+        """Return the canonical interaction Bot actor and its legacy bare alias."""
+        canonical_bot_id = compose_interaction_bot_identity(bot_id, owner_user_id)
+        bare_bot_id = bot_id.partition(":")[0]
+        return ForumActorRef(
+            type=ForumActorType.BOT,
+            id=canonical_bot_id,
+            id_alias=None if bare_bot_id == "default" else bare_bot_id,
         )
 
     def _subscription_bot_ids(self, owner_user_id: str) -> tuple[str, ...]:

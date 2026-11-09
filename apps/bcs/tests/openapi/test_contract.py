@@ -185,6 +185,35 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     assert not any(path.startswith("/openapi/v1/internal/") for _, path in actual)
 
 
+def test_candidate_deprecation_preserves_inventory_and_identity_requirement() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    candidates = contract["paths"][
+        "/openapi/v1/collaboration/bots/{bot_id}/candidates"
+    ]
+    alias = contract["paths"][
+        "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+    ]
+
+    assert set(candidates) & HTTP_METHODS == {"get"}
+    assert set(alias) & HTTP_METHODS == {"get"}
+    # Intentional tripwire: this exact set must change only when the inventory
+    # changes deliberately. Do not loosen it to admit a new deprecation.
+    deprecated = {
+        (method, path)
+        for path, path_item in contract["paths"].items()
+        for method, operation in path_item.items()
+        if method.lower() in HTTP_METHODS and operation.get("deprecated") is True
+    }
+    assert deprecated == {
+        ("get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates")
+    }
+    for operation in (candidates["get"], alias["get"]):
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
+
+
 def test_friend_connections_filter_and_pagination_contract() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"]["/openapi/v1/collaboration/friend-connections"]["get"]

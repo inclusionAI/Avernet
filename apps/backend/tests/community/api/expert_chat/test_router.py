@@ -174,6 +174,19 @@ class TestCallerConnection:
             },
         )
 
+    @pytest.mark.parametrize("offline", [True, False])
+    def test_connection_failure_logging(self, caller_connection_client, offline):
+        client, service, _ = caller_connection_client
+        service.get_authorized_caller_connection.side_effect = ConnectionError(
+            "connection failed", error_code="5001", caller_device_unavailable=offline,
+        )
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log, patch(
+            "agentclaw.community.adapters.http.expert_chat.router.super_admin", return_value=frozenset(),
+        ):
+            response = self._post(client)
+        assert response.json()["error_code"] == 5999
+        assert (log.warning.call_count, log.error.call_count) == ((1, 0) if offline else (0, 1))
+
     def test_passes_actor_role_and_logs_safe_success(
         self, caller_connection_client, caplog
     ):
@@ -398,6 +411,17 @@ class TestGetChatSession:
         data = response.json()
         assert data["success"] is False
         assert data["error_code"] == 5001
+
+    @pytest.mark.parametrize("offline", [True, False])
+    def test_get_chat_session_connection_log_level(self, client_with_mock, offline):
+        client, service = client_with_mock
+        service.get_chat_session.side_effect = ConnectionError(
+            "connection failed", error_code="5001", caller_device_unavailable=offline,
+        )
+        with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log:
+            response = client.post("/api/v1/expert-chats/test_bot/test_owner/session")
+        assert response.json()["error_code"] == 5001
+        assert (log.warning.call_count, log.error.call_count) == ((1, 0) if offline else (0, 1))
 
     def test_get_chat_session_permission_denied(self, client_with_mock):
         client, mock_service = client_with_mock
@@ -667,3 +691,51 @@ class TestMultiChatSessions:
 
         assert response.status_code == 200
         assert response.json()["error_code"] == expected_code
+
+
+def test_teclaw_session_http_uses_real_service_without_provisioning(client_with_mock):
+    """Exercise the HTTP adapter and real session orchestration together."""
+    from types import SimpleNamespace
+
+    client, api_service = client_with_mock
+    repository = MagicMock()
+    repository.list_chat_bots.return_value = [{"bot_id": "test_bot", "owner_id": "test_owner"}]
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {
+        "id": 42, "bot_id": "test_bot", "owner_id": "test_owner", "status": "ACTIVE",
+        "binding_id": 123, "bot_type": "service", "call_type": "caller",
+        "active_engine": "teclaw", "public": "1",
+    }
+    bots.get_by_id_and_owner.return_value["entity_id"] = "test_owner"
+    bots.list_matches_by_legacy_locator.return_value = [bots.get_by_id_and_owner.return_value]
+    publishes = MagicMock()
+    publishes.list_by_source_bot.return_value = [
+        SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})
+    ]
+    resolver = MagicMock()
+    resolver.resolve_for_binding.return_value = SimpleNamespace(
+        provider="teclaw", conn_info={"engine_type": "teclaw", "use_proxy": True}
+    )
+    instances = MagicMock()
+    instances.get_caller_connection = AsyncMock(side_effect=AssertionError("must not provision"))
+    transport = MagicMock()
+    transport.invoke = AsyncMock(side_effect=[
+        {"data": {"id": "session-new"}}, {"data": [{"id": "agent:main:session-new"}]},
+    ])
+    real_service = ExpertChatService(
+        repository=repository, bot_repo=bots, device_provider=MagicMock(),
+        baas_service=MagicMock(), resolver=resolver, collaborator_service=MagicMock(),
+        transport=transport, instance_service=instances, publish_repository=publishes,
+    )
+    api_service.create_chat_session = real_service.create_chat_session
+    response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["session_key"] == "agent:main:session-new"
+    assert not payload["data"].get("need_poll", False)
+    instances.get_caller_connection.assert_not_awaited()
+    resolver.resolve_for_binding.assert_called_once_with(987, "test_user", bot_id="test_bot")
+    repository.add_owned_session.assert_called_once_with(
+        "test_user", "test_bot", "test_owner", "agent:main:session-new"
+    )

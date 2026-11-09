@@ -99,7 +99,7 @@ it.each(['/ticket-center', '/work/my-task', '/bot-workshop'])(
     renderSidebar({ activePath, collapsed: true });
     expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
     expect(screen.getByTestId('account-badge-collapsed')).toHaveTextContent('真实用户');
-    expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bot 管理' })).toBeInTheDocument();
   },
 );
 
@@ -110,18 +110,18 @@ it('产品侧栏只展示协作 / Bot 双分组（不随路由整体换组）', 
   expect(view.queryByRole('region', { name: '老功能' })).not.toBeInTheDocument();
 });
 
-it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」', () => {
+it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot 管理」', () => {
   const view = renderSidebar();
   const collab = view.getByRole('region', { name: '协作' });
   const bot = view.getByRole('region', { name: '管理' });
   expect(view.getByRole('button', { name: /对话/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /协作群/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /发现/ })).toBeInTheDocument();
-  expect(view.getByRole('button', { name: /Bot管理/ })).toBeInTheDocument();
+  expect(view.getByRole('button', { name: /Bot 管理/ })).toBeInTheDocument();
   expect(collab.textContent).toContain('对话');
   expect(collab.textContent).toContain('协作群');
   expect(collab.textContent).toContain('发现');
-  expect(bot.textContent).toContain('Bot管理');
+  expect(bot.textContent).toContain('Bot 管理');
 });
 
 it('任务列表、协作权限与管理后台入口均不占产品导航位', () => {
@@ -137,7 +137,7 @@ it('折叠态：不展示身份切换入口，账号行仍可见，任务列表�
   expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
   expect(screen.getByTestId('account-badge-collapsed')).toBeInTheDocument();
   expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Bot 管理' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /任务列表/ })).not.toBeInTheDocument();
 });
 
@@ -177,9 +177,9 @@ it('折叠态：顶部图标列同样提供搜索入口', () => {
   expect(screen.getByRole('button', { name: '搜索' })).toBeInTheDocument();
 });
 
-// 折叠态工具簇（搜索/通知/展开）与导航项同列且同 32px 同 hover 样式时无法区分（用户报混淆）。
-// 区分走「主次层级」而非分隔线（延续 SidebarNavList 纯留白过渡的设计语言）：工具钮收 28px(sm)
-// + 静态 muted 色阶（hover 恢复全对比度），导航项保持 32px 全对比度。本用例锁区分信号本身，
+// 折叠态工具簇与导航项同列时需可区分：主次层级（工具钮收 28px(sm) + 静态 muted 色阶，
+// hover 恢复全对比度；导航项保持 32px 全对比度）+ 2026-11 收起态规范补充分隔线
+// （三钮簇与导航区之间、实验(室)与 Bot 管理之间各一条发丝线）。本用例锁区分信号本身，
 // 防后续改动把工具簇悄悄改回与导航同规格；展开态品牌行（52px 行内 96px 图标组）不在此例。
 it('折叠态：工具簇图标以 sm 规格 + muted 色阶与导航项区分，导航项维持 32px 全对比度', () => {
   const view = renderSidebar({ collapsed: true });
@@ -188,7 +188,7 @@ it('折叠态：工具簇图标以 sm 规格 + muted 色阶与导航项区分，
   for (const btn of [search, expand]) {
     expect(btn).toHaveClass('h-7', 'w-7', 'text-muted-foreground');
   }
-  const nav = view.getByRole('button', { name: 'Bot管理' });
+  const nav = view.getByRole('button', { name: 'Bot 管理' });
   expect(nav).not.toHaveClass('h-7');
   expect(nav).not.toHaveClass('text-muted-foreground');
 });
@@ -206,7 +206,32 @@ it('internal overlay：空间切换器以 compact 形态挂在 Bot 分组标题�
   expect(view.getByTestId('space-switcher-compact')).toBeInTheDocument();
   expect(view.queryByTestId('space-switcher')).not.toBeInTheDocument();
   // compact 切换器位于 Bot 分组标题行内（先于组内导航项出现）
-  expect(bot.textContent?.indexOf('选择空间')).toBeLessThan(bot.textContent?.indexOf('Bot管理') ?? -1);
+  expect(bot.textContent?.indexOf('选择空间')).toBeLessThan(bot.textContent?.indexOf('Bot 管理') ?? -1);
+});
+
+// 折叠态收起规范（2026-11）：置顶品牌 mark 与展开态同源（brand.Logo compact）；三钮纵向次序
+// 展开 → 搜索 → 通知；两条发丝分割线（三钮簇与导航区之间、实验(室)与 Bot 管理之间）。
+// 本用例承接上例 spaceSwitcher=true、notificationBell=true 的合并形态。
+it('折叠态：品牌 mark 置顶，三钮次序 展开 → 搜索 → 通知，工具簇与导航区之间有分割线', () => {
+  const view = renderSidebar({ collapsed: true });
+  const logo = view.container.querySelector('img[alt="Avernet"]');
+  const expand = view.getByRole('button', { name: '展开导航' });
+  const search = view.getByRole('button', { name: '搜索' });
+  const bell = view.getByTestId('notification-bell');
+  expect(logo).toBeInTheDocument();
+  // logo 非空已由上方 toBeInTheDocument 保证；写法沿用品牌行单行用例的逻辑收窄 + 保语义模式
+  expect(logo && logo.compareDocumentPosition(expand) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(expand.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(search.compareDocumentPosition(bell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // 两条发丝分割线：三钮簇与导航区之间（AppSidebar）+ 实验(室)与 Bot 管理之间（SidebarNavList）
+  expect(view.container.querySelectorAll('.h-px.bg-divider')).toHaveLength(2);
+});
+
+// 收起态空间切换（2026-11 收起态规范）：导航收起时切换器隐藏，仅展开态可切换（上例已验展开态挂载）。
+it('折叠态：空间切换器隐藏，不占收起态图标列', () => {
+  const view = renderSidebar({ collapsed: true });
+  expect(view.queryByTestId('space-switcher-compact')).not.toBeInTheDocument();
+  expect(view.queryByTestId('space-switcher')).not.toBeInTheDocument();
 });
 
 it('notificationBell=false 形态：通知中心入口不渲染', () => {

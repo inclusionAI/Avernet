@@ -42,14 +42,17 @@ export function useCollaborationPrivacy({
     [activeIdentityId, identityViews],
   );
   const load = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, options?: { silent?: boolean }) => {
       const loadId = ++latestLoadId.current;
+      const silent = options?.silent ?? false;
       if (!userId) {
         store.setLoading(false);
         store.setError(identityError ?? '当前用户身份未就绪，无法加载协作权限');
         return;
       }
-      store.setLoading(true);
+      // silent（修复后自动刷新）只在开始时不切入整面板 loading；失败仍写 error 供行内提示，
+      // finally 不跳过——否则它会使更早的非静默读取代次失效后，loading 卡死在 true。
+      if (!silent) store.setLoading(true);
       store.setError(null);
       try {
         const loadScope = fixedBotId
@@ -79,6 +82,9 @@ export function useCollaborationPrivacy({
     const controller = new AbortController();
     if (identityStatus !== 'loading') void load(controller.signal);
     return () => {
+      // 先失效所有在途读取（含无 signal 的手动/修复后刷新），再 abort/reset：
+      // 否则迟到的成功/失败/finally 会改写已 reset 的共享 Store（切 Bot 时覆盖新 Bot 状态）。
+      latestLoadId.current += 1;
       controller.abort();
       useCollaborationPrivacyStore.getState().reset();
     };
@@ -131,6 +137,21 @@ export function useCollaborationPrivacy({
     // 打开弹窗/编辑器时恢复在途申请状态（spec「通用配置行在途状态」）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riskEnabled, riskBotId, userId]);
+  // 检测进入审批（APPROVING）边沿静默刷新一次协作数据：审批工单（puid + approval_url）
+  // 已由后端写入 BCS friend_ext，刷新让 RelationCard 的 pending 分支以审批外链接管
+  // 「查看审批进度」入口（risk 轮询只更新检测记录，不更新 friend_ext 视图）。
+  const riskApprovingRef = useRef(false);
+  useEffect(() => {
+    if (risk.uiState.kind !== 'approving') {
+      riskApprovingRef.current = false;
+      return;
+    }
+    if (riskApprovingRef.current) return;
+    riskApprovingRef.current = true;
+    void load(undefined, { silent: true });
+    // 仅在进入 approving 的边沿触发一次；重复触发无额外收益（load 引用随身份/范围重建）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risk.uiState.kind]);
   const submitPublication = useCallback(
     async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
       if (!publicationEditor) return;

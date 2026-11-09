@@ -5,9 +5,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_message_store::MySqlMessageStore;
 use bcs_session_store::MySqlSessionStore;
 
-#[path = "../../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[path = "session_recovery.rs"]
 mod session_recovery_tests;

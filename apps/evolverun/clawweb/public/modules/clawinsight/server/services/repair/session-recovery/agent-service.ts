@@ -18,14 +18,16 @@ import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnapshot, AgentPlanAction } from "../common/agent-tools/contracts.js";
 import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
+import { parseOwnerHandoffContent } from "./validation.js";
 import { RecoverySessionReader } from "./session-reader.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
+import { hasAssessmentDelivery, ownerContinuationState } from "./owner-cooperation.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
+import { RECOVERY_OWNER_REQUEST_REASONS, type RecoveryAssessment, type RecoveryStoredTask, type RecoveryTaskStore, type RecoveryJudgment, type RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
@@ -281,7 +283,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerCooperationReasons: RECOVERY_OWNER_REQUEST_REASONS, ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -301,7 +303,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         ...(task.simulation ? { cutoff: { messageId: task.simulation.cutoffNode.messageId!, atMs: task.simulation.cutoffAtMs } } : {}),
         deliveryKey: this.latestDeliveryKey(task), expectedSessionId: this.originalSessionId(task),
         ...(body.from_line === undefined ? {} : { fromLine: body.from_line as number }), ...(body.offset === undefined ? {} : { offset: body.offset as number }), ...(body.limit === undefined ? {} : { limit: body.limit as number }) });
-      if (!task.simulation && task.requiresFreshObservation && (!task.ownerRequest || !body.nas_evidence)) {
+      if (!task.simulation && task.requiresFreshObservation) {
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
@@ -449,15 +451,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const ownerRequest = task.ownerRequest?.status === "confirmed" && task.phase === "assess" ? task.ownerRequest : undefined;
     if (ownerRequest) {
       if (task.requiresFreshObservation) fail(409, "Owner 反馈后先读取原会话最新进展并核验条件，再决定是否续接");
-      // Agent retries and replacement executions share one delivery identity per feedback.
-      body = { ...body, clientRequestId: `owner-${ownerRequest.requestId}`, owner_request_id: ownerRequest.requestId };
+      body = { ...body, owner_request_id: ownerRequest.requestId };
     }
     const prior = task.timeline.find(event => event.kind === "operation" && (event.payload.request as Record<string, unknown>)?.clientRequestId === body.clientRequestId
       && (event.payload.result as Record<string, unknown>)?.initial_message === true);
     const initial = !ownerRequest && (task.phase === "assess" || !!prior);
     if (!prior && (task.status !== "running" || (!ownerRequest && (initial ? !!task.plan : task.phase !== "apply" || !task.plan?.approvedAt)))) fail(409, "消息只能在初始判断、Owner 反馈核验或获批方案执行阶段由 Agent 决定");
     if (typeof body.message !== "string" || !body.message.trim() || body.message.length > 8000) fail(422, "重试消息格式无效");
-    const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${String(body.clientRequestId)}`).digest("hex").slice(0, 48)}`;
+    // Keep the same provider delivery identity across separate audited attempts.
+    const deliveryId = ownerRequest ? `owner-${ownerRequest.requestId}` : String(body.clientRequestId);
+    const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${deliveryId}`).digest("hex").slice(0, 48)}`;
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
@@ -526,6 +529,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     // Compatibility for packages deployed before the generic handoff result.
     if (body.kind === "blocked" && body.reason === "mcp_permission_required") body = { ...body, kind: "owner_handoff", effect: "not_recovered" };
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
+    if (body.handoff !== undefined && body.kind !== "owner_handoff") fail(422, "handoff 交接说明仅用于 Owner 转交");
     if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
       await this.release(task, true);
@@ -553,17 +557,21 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "owner_handoff") {
+      if (typeof body.summary !== "string" || !body.summary.trim()) fail(422, "Owner 转交需要保留完整调查说明");
+      const handoff = body.handoff === undefined ? undefined : parseOwnerHandoffContent(body.handoff);
       if (body.owner_request !== undefined) {
+        if (body.effect === "recovered") fail(422, "原任务已恢复，请按正常效果流程回报；优化建议不属于 Owner 转交");
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
-        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission" | "materials", instructions: request.instructions as string,
-          summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+        if (handoff && request.instructions !== undefined && request.instructions !== handoff.instructions) fail(422, "Owner 处理事项有冲突，请统一使用 handoff.instructions");
+        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as typeof RECOVERY_OWNER_REQUEST_REASONS[number], instructions: handoff?.instructions ?? request.instructions as string,
+          summary: handoff?.summary ?? body.summary as string, ...(handoff ? { reportSummary: body.summary as string } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
         return { ok: true };
       }
       const hasJudgment = body.delivery !== undefined || body.response !== undefined;
       if (hasJudgment) this.validateDeliveryResponse(task, body.delivery, body.response);
       await this.deps.business().finishForOwnerHandoff(task.taskId, task.version,
-        { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
+        { summary: body.summary as string, ...(handoff ? { handoff } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
           ...(hasJudgment ? { delivery: body.delivery as RecoveryJudgment["delivery"], response: body.response as RecoveryJudgment["response"] } : {}),
           effect: body.effect as Exclude<RecoveryJudgment["effect"], "not_intervened"> | undefined }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
@@ -576,7 +584,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。符合手册转交条件时使用 kind=owner_handoff，并提供处理指引和现场 evidence_ids。");
       else {
         if (!task.simulation && task.level !== "debug") {
-          if (task.phase === "assess" && task.delivery && task.delivery.delivery.status !== "failed") fail(422, "已有初始消息投递记录，不能用普通 blocked 跳过效果回收。请回报 kind=assessment、decision=message 进入 observe；保留实际投递和执行事实，不重复发送。投递结果未知不代表已触达，随后按读取证据判断。");
+          if (task.phase === "assess" && hasAssessmentDelivery(task)) fail(422, "已有本轮消息投递记录，不能用普通 blocked 跳过效果回收。请回报 kind=assessment、decision=message 进入 observe；保留实际投递和执行事实，不重复发送。投递结果未知不代表已触达，随后按读取证据判断。");
           if (task.phase === "observe" || task.phase === "verify") fail(422, "当前阶段需要 kind=observation，分别回报触达、响应及 recovered / not_recovered / unknown 效果；原任务未恢复不等于自愈执行失败，不能用普通 blocked 代替效果判断。证据不足用 unknown，不能补造恢复或未恢复。observe 中确认未恢复将进入完整方案；verify 中确认未恢复将结束处理。");
         }
         await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
@@ -614,10 +622,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   };
   private async tool(task: RecoveryStoredTask, body: Record<string, unknown>, name: string, write: boolean, run: (markDispatched: () => void) => Promise<unknown>) {
     if (task.simulation && (write || !simulationReadTools.has(name))) fail(403, "仿真只允许受控只读调查，不允许真实干预");
-    if (typeof body.clientRequestId !== "string" || !body.clientRequestId.trim() || typeof body.purpose !== "string" || !body.purpose.trim()) fail(422, "工具调用需要稳定 clientRequestId 与 purpose");
+    if (typeof body.clientRequestId !== "string" || !body.clientRequestId.trim() || body.clientRequestId.length > 128
+      || typeof body.purpose !== "string" || !body.purpose.trim()) fail(422, "工具调用需要稳定 clientRequestId 与 purpose");
     const scope = task.authorizationScopeDigest!, execution = task.execution!;
+    const ownerRequestId = name === "retry_message" && typeof body.owner_request_id === "string" ? body.owner_request_id : undefined;
+    const clientRequestId = ownerRequestId
+      ? `owner-attempt-${createHash("sha256").update(JSON.stringify([ownerRequestId, execution.executionId, body.clientRequestId])).digest("hex")}`
+      : body.clientRequestId;
     const { call, created } = await this.deps.audit.createToolCall({ callId: `tc-${randomUUID()}`, taskId: task.taskId, stepId: task.current!.stepId,
-      executionId: execution.executionId, authorizationScopeDigest: scope, clientRequestId: body.clientRequestId,
+      executionId: execution.executionId, authorizationScopeDigest: scope, clientRequestId,
       toolName: name, operation: String(body.operation ?? name), actionId: typeof body.actionId === "string" ? body.actionId : null,
       request: recoveryToolRequest(body), isWrite: write, toolCallLedgerGuard: (calls, locked) => {
         const config = locked.taskConfig as RecoveryStoredTask | undefined;
@@ -628,15 +641,21 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           && (item.result as Record<string, unknown>)?.sourceToolCallId === body.sourceToolCallId
           && (item.result as Record<string, unknown>)?.outcome !== body.outcome)) fail(409, "已核实的写入结果不能被相反结论覆盖");
         if (write && (config.level === "debug" || config.status !== "running")) fail(403, "当前不能执行实际干预");
+        const ownerResume = ownerRequestId !== undefined && config.phase === "assess"
+          && config.ownerRequest?.status === "confirmed" && config.ownerRequest.requestId === ownerRequestId;
+        if (ownerRequestId !== undefined && !ownerResume) fail(409, "Owner 处理事项已变化，不能继续旧指引");
         if (name === "retry_message" && config.phase === "assess") {
-          const ownerResume = config.ownerRequest?.status === "confirmed" && config.ownerRequest.requestId === body.owner_request_id;
-          if (body.owner_request_id !== undefined && !ownerResume || config.ownerRequest?.status === "confirmed" && !ownerResume) fail(409, "Owner 处理事项已变化，不能继续旧指引");
-          if (ownerResume && config.requiresFreshObservation) fail(409, "Owner 反馈后需先核验最新原会话");
-          if (!ownerResume && (config.plan || calls.some(item => item.toolName === "retry_message"
+          if (ownerResume) {
+            if (config.requiresFreshObservation) fail(409, "Owner 反馈后需先核验最新原会话");
+            const prior = calls.find(item => item.toolName === "retry_message" && ownerContinuationState(ownerRequestId, item));
+            if (prior) return prior;
+          } else if (config.ownerRequest?.status === "confirmed") {
+            fail(409, "Owner 处理事项已变化，不能继续旧指引");
+          } else if (config.plan || calls.some(item => item.toolName === "retry_message"
             && item.status !== "canceled" && !(item.status === "failed" && (item.result as Record<string, unknown>)?.dispatched === false)
             && !calls.some(check => check.toolName === "reconcile_write" && check.status === "succeeded"
               && (check.result as Record<string, unknown>)?.sourceToolCallId === item.callId
-              && (check.result as Record<string, unknown>)?.outcome === "not_applied")))) fail(409, "初始消息已领取，不能再次发送");
+              && (check.result as Record<string, unknown>)?.outcome === "not_applied"))) fail(409, "初始消息已领取，不能再次发送");
         } else if (write && (config.phase !== "apply" || !config.plan?.approvedAt)) fail(403, "当前没有方案操作授权");
         if (write && name === "apply_action" && (config.plan?.digest !== task.plan?.digest
           || !config.plan?.actions.some(action => action.actionId === body.actionId))) fail(403, "当前操作不属于有效获批方案");

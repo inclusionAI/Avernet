@@ -195,8 +195,8 @@ POST /openapi/v1/bots/{bot_id}/collaboration/repair
 - 复用 OpenAPI 当前认证、App grant、Bot admission 与 owner-scoped 授权链，只有 Backend 当前 Owner 可执行。
 - Backend 授权、租户及存活状态校验在任何 BCS 请求之前完成；不能依赖可能已漂移的 BCS owner 判断调用人是否有权修复。
 - 由 `BotAddressResolver` 解析唯一 Bot，携带稳定 `bot_pk`、`entity_id`、租户与环境。
-- BCS 地址复用既有 resolver/reference helper；owner/managers 的稳定身份为 `bot_id:entity_id`。当前 Owner 只是要同步的人员事实，不能代替 entity 后缀。
-- 复用既有下游鉴权：Owner/managers 使用受 scope 限制的 Backend trusted App principal，资料和 caller 配置使用各自已有认证链。不要求 BCS 漂移后的旧 Owner 授权，也不放宽 BCS 的 trusted-App/Provider scope。
+- BCS 地址复用既有 `bcn_bot_reference`：原生 service Bot 使用 `bot_id:entity_id`，转换后的 service Bot 保留 `ext.bcn_provider_bot_ref`，personal/default Bot 沿用既有 Owner 后缀规则。三个分项使用同一已注册地址；service Bot handoff 不得用当前 Owner 重新拼接地址。
+- 复用既有下游鉴权：Owner/managers 使用受 scope 限制的 Backend trusted App principal，资料使用既有认证链。不要求 BCS 漂移后的旧 Owner 授权，也不放宽 BCS 的 trusted-App/Provider scope。
 - 只发单 Bot 操作，不启动/重启 Bot，不签发或轮换凭证，不写 Backend 的 Owner/协作者业务事实。
 
 ### 7.2 修复字段清单与权威边界
@@ -208,9 +208,17 @@ POST /openapi/v1/bots/{bot_id}/collaboration/repair
 | `profile` | 当前 Backend 名称、描述、头像，经现有资料更新通道覆盖 | 空头像清空；不用默认空值掩盖读失败 |
 | `ownership` | 当前已提交 `owner_id`，复用 ownership reader/projector 和单次发送 Plugin | 不是 handoff；不走转交申请/接受，不初始化 version-0 ownership |
 | `managers` | 当前有效 admin/member 协作者，复用 managers reader/projector 和全量替换接口 | 保留 Space 资格规则、排除 Owner、去重排序及 1,000 人限制；移除已撤销成员 |
-| `caller_config` | 对既有 caller 同步适用的 Bot，重放当前 `bot_call_type` 派生开关及已保存的 `caller_config_revision` | 保留既有 `minimum_isolation` 和 CAS；不 bump revision，不修改 call type，不下发身份材料 |
 
-Caller 修复必须复用现有领域映射，不能简单调用会修改 call type、凭证或运行时的业务更新方法。若旧 transport 参数名仍为 `owner_workno`，需保证实际定位遵守 resolver 得到的稳定地址；必要时在 Backend 适配层接受已解析 reference，不能把当前 Owner 当地址。没有适用的已建立 caller 配置时显式标记 `not_applicable`；有效的 disabled 配置仍须同步，不能误判为不适用。
+现有 onboard 协议将空串/纯空白简介解释为保留原值，响应也不回传简介。
+2026-11-05 更新：收到有效 onboard 成功确认后，这类 `profile` 返回
+`succeeded`，不再因简介为空而返回 `unknown`。成功表示既有资料更新操作
+已确认，不承诺清空 BCS 简介；BCS 原有 Keep 语义不变。实际异常、缺失目标
+及无效确认仍按既有失败/未知规则处理。
+
+修复范围仅为 `ownership`、`profile`、`managers`，响应固定为该顺序的三项。
+`caller_config` 不再作为修复分项，不读取或验证 call type/revision，也不发送
+caller 配置。MCP/CLI 调用身份模式更新时的正常 caller 同步链路保持不变。
+这是四项到三项的有意响应契约调整，前端不得再要求第四项。
 
 以下不是可从 Backend 直接重放的 Bot 基础资料，禁止盲目覆盖：
 
@@ -226,7 +234,7 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 2. 使用现有 Provider-scoped Bot 查询能力确认目标存在且未删除。不能仅相信 `bcn_registered` 标记或 registry 过期缓存。无法确认存在时不得尝试注册。
 3. 若不存在/已删除，返回明确 not-found 错误，所有修复分项均不发送。
 4. 先执行一次 `ownership`；必须确认响应属于目标 Bot 且 Owner 与本次事实一致。
-5. Owner 确认后执行 `profile`，再重新读取当前协作者事实并执行 `managers`，最后处理适用的 `caller_config`。这让依赖 Owner 身份的资料更新不先被旧 BCS Owner 阻断。
+5. Owner 确认后执行 `profile`，再重新读取当前协作者事实并执行 `managers`。这让依赖 Owner 身份的资料更新不先被旧 BCS Owner 阻断。
 6. Owner 失败、未知或 drift 时停止后续修复；managers 标记 `skipped_dependency`。其他独立分项失败可继续后续独立项；任何步骤发现目标已消失则停止余下步骤。
 7. 汇总已执行项与未执行原因，返回本次报告。没有分布式事务，不回滚已经完成的远端写入。
 
@@ -237,7 +245,6 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 - admin onboard 的 `onboarded=false`：缺失/未成功，不是修复成功。
 - ownership 的 missing-Bot no-op / `BOT_MISSING_NOOP`：缺失，不算确认。
 - managers 的 missing/no-op：同样不能计为成功，保留接口已有不存在信号。
-- caller 的 stale/conflict：失败，不能靠增加 revision 强制覆盖。
 - 环境跳过、禁用、队列准入：不能计为远端完成。
 
 不增加跨副本锁、版本栅栏或长期修复状态。并发编辑可能使本次快照随后过期，返回成功只表示本次发送得到确认，不承诺永久一致；用户可再次手动修复。
@@ -247,6 +254,7 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 修复不调用只返回入队结果的 `request_bot()`，也不直接复用默认会重试的 `sync_once()`。复用已有纯 projector 与单次发送 Plugin；必要时抽取有限的一次投递能力，不复制角色映射或实现通用任务框架。
 
 - 每分项最多一次下游写入，沿用经 DI 注入的超时；整体请求有明确截止时间，时间不足的项不再启动。
+- 事实读取的 await 同样受剩余预算约束；超时后丢弃线程返回值，不等待它完成后才返回，也不启动后续写入。读取超时发生在 exists 前时返回 504；执行分项读取超时时，该项为 failed/delivery_timeout。
 - 不进行内部自动重试，不把失败重新塞回后台队列。已有后台同步完全保留。
 - 不跨网络调用持有数据库事务或锁。
 - Owner/managers 的生产 Plugin 当前由后台 loop 管理；不能把同一个 AsyncClient 借给 HTTP 请求所在的不同 loop。composition root 为请求侧配置同契约、独立且正确关闭的 client/Plugin，或采用已有安全的同 loop 调用机制；不得新增修复 worker/队列来掩盖生命周期问题。
@@ -261,7 +269,9 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 
 **已经进入修复执行的请求**返回 HTTP 200 的 `Envelope<CollaborationRepairReport>`。HTTP 200 只代表成功取得执行报告，不代表修复全部成功；前端必须依据 `data.status`，不能只按 HTTP 状态弹出“修复成功”。这样保留全局错误 envelope 的 `data: null` 约束，同时提供部分失败明细，不修改所有接口的错误结构。
 
-报告的整体状态为 `succeeded | partial_failed | failed`。只有所有适用项确认后才是 `succeeded`；存在 unknown/失败/依赖跳过时不得成功。分项状态为 `succeeded | failed | unknown | skipped_dependency | not_applicable`；字段为 `component`、`status`、nullable `error_code`。unknown 表示结果未确认，不表示远端没有修改。
+ownership/profile 执行后，重新读取或投影 managers 的已分类事实错误必须保留此前结果：managers 为 failed，携带既有 RepairFactsErrorCode。禁止将此时的失败转换为 data:null 的前置错误。未分类程序异常及请求取消仍向上传播。
+
+报告的整体状态为 `succeeded | partial_failed | failed`。只有所有适用项确认后才是 `succeeded`；存在 unknown/失败/依赖跳过时不得成功。分项状态为 `succeeded | failed | unknown | skipped_dependency`；字段为 `component`、`status`、nullable `error_code`。unknown 表示结果未确认，不表示远端没有修改。
 
 示例仅为 `data` 部分：
 
@@ -272,13 +282,12 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
   "items": [
     {"component": "ownership", "status": "succeeded", "error_code": null},
     {"component": "profile", "status": "succeeded", "error_code": null},
-    {"component": "managers", "status": "unknown", "error_code": "delivery_timeout"},
-    {"component": "caller_config", "status": "not_applicable", "error_code": null}
+    {"component": "managers", "status": "unknown", "error_code": "delivery_timeout"}
   ]
 }
 ```
 
-整体状态计算：有失败/未知/依赖跳过且至少一个分项确认成功为 `partial_failed`，否则为 `failed`；`not_applicable` 不计为失败，也不是成功投递。前置或执行阶段发现缺失都给出稳定的 `collaboration_bot_not_found` 原因，不因 HTTP 200 报告而隐藏缺失。
+整体状态计算：有失败/未知/依赖跳过且至少一个分项确认成功为 `partial_failed`，否则为 `failed`。前置或执行阶段发现缺失都给出稳定的 `collaboration_bot_not_found` 原因，不因 HTTP 200 报告而隐藏缺失。
 
 Backend 持久化读/写失败保留明确错误，不捕获成成功或空成员集合。需要返回报告的分项领域错误必须显式建模；未分类异常仍由现有 500 处理，不用宽泛 catch 把程序错误当成功结果。
 
@@ -287,8 +296,8 @@ Backend 持久化读/写失败保留明确错误，不捕获成成功或空成�
 | 边界 | 契约与实现要求 |
 | --- | --- |
 | Backend HTTP → Service API | 独立 `CollaborationRepairServiceProtocol`（名称可按本地风格调整），请求/结果为 transport-free 类型；adapter 只做授权上下文转换和 envelope 映射 |
-| Backend Core → 外部 Plugin API | 复用 Owner/managers Plugin；资料与 caller 同步通过声明的端口使用既有 transport，不在新 Core 直接导入 HTTP client 或具体 Plugin |
-| Backend repository | 复用 Bot、ownership、manager、caller 事实读取，租户/env/稳定地址明确；不新增同步状态写入 |
+| Backend Core → 外部 Plugin API | 复用 Owner/managers Plugin；资料同步通过声明的端口使用既有 transport，不在新 Core 直接导入 HTTP client 或具体 Plugin |
+| Backend repository | 复用 Bot、ownership、manager 事实读取，租户/env/稳定地址明确；不新增同步状态写入 |
 | BCS HTTP → application | 现有写入请求字段、V1 查询响应；legacy 输出明确隔离 |
 | BCS application → core → repo | 展示资料批量读取和头像更新契约；SQL、memory/file 与缓存实现同语义 |
 | 文档和测试 | BCS OpenAPI/shared models、Backend 路由授权/admission/错误文档、Context Boundary、Service/Plugin conformance |
@@ -325,7 +334,7 @@ Backend 持久化读/写失败保留明确错误，不捕获成成功或空成�
 5. 单次修复允许部分成功，Owner/managers 变更会影响授权，不能以“UI 信息修复”为由放松权限。
 6. 既有异步同步可能与手动修复交错，不增加排序承诺；如果字段仍漂移，用户重新触发，不引入隐藏补偿。
 7. 新列表成员摘要增加响应大小及披露面，必须测试既有资源/成员可见性，不只检查头像能显示。
-8. 阅读基线中 `bot_service.py` 为 6,355 行、`bcn_service.py` 为 981 行、`bcs-app-session/src/lib.rs` 为 1,068 行。实施 plan 必须正视源码 1,000 行限制，按涉及的责任拆分并更新调用/测试，不继续堆入修复编排或新增尺寸豁免；不借机做无关重构。
+8. 阅读基线中 `bot_service.py` 为 6,355 行、`bcn_service.py` 为 981 行、`bcs-app-session/src/lib.rs` 为 1,068 行。PR #3569 经维护者明确批准，BotService 沿用已有尺寸豁免，仅新增必要调用点；头像投影和修复编排留在独立模块，完整生命周期拆分另行重构。其他新增/修改源码仍遵守 1,000 行限制，不新增尺寸豁免。
 
 ## 11. 验收矩阵（实施时执行）
 
@@ -346,7 +355,7 @@ Backend 持久化读/写失败保留明确错误，不捕获成成功或空成�
 - 正常创建/启动已有注册入口携带头像；名称/描述/仅头像/清空头像的更新触发与不相关 ext 更新。
 - 修复路由严格匹配确认路径；owner、非 owner、跨租户、App grant、地址歧义和 handoff 后稳定身份。
 - BCS 缺失、软删除、读失败、配置禁用分别正确分类；缺失时注册/ensure/create 调用次数为零。
-- HTTP 200 + `onboarded=false`、ownership missing-no-op、caller stale/conflict 不算修复成功。
+- HTTP 200 + `onboarded=false`、ownership missing-no-op 不算修复成功。
 - managers 全量替换、撤销删除、Owner 排除、Space 资格、上限，以及事实读取失败不发送空名单。
 - Owner 失败后依赖项不执行；部分失败、结果未知、独立项继续、总截止时间和无自动重试。
 - 不生成/增加 caller revision，不修改 Backend 业务事实、凭证或运行时，不重放审批。

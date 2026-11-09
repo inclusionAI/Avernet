@@ -69,6 +69,7 @@ def _gate_config(*, grace: float = 0.2, slice_seconds: float = 2.0,
 def _submit_request(tenant: str = TENANT, *, goal: str = "gate goal",
                     idem: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=tenant, goal=goal,
         agents=(dm.AgentSpec(name="a1", role="worker"),),
         provider=dm.ProviderKind.STUB, idempotency_key=idem,
@@ -93,6 +94,23 @@ class _StoryLLM:
             text = self._script[0]
         return dm.CompletionResponse(
             text=text, model=dm.ModelId("story"),
+            token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
+        )
+
+
+class _BacklogLLM:
+    """Decide from each run's prompt, independent of slice interleaving."""
+
+    async def complete(self, request):
+        state = request.user_prompt.splitlines()
+        if "agents_spawned=0" in state:
+            text = _spawn_decision("a1", "work")
+        elif "routed_results=0" in state:
+            text = _wait_decision("a1")
+        else:
+            text = _finish_decision("loaded")
+        return dm.CompletionResponse(
+            text=text, model=dm.ModelId("backlog"),
             token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
         )
 
@@ -146,7 +164,9 @@ class TestChaosFencing:
         db = _gate_db()
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
-            config=_gate_config(),
+            # Expiry is forced below; this gate tests fencing, not the slice
+            # budget. Allow the production turn cadence and threaded DB work.
+            config=_gate_config(slice_seconds=30.0),
             llm=_StoryLLM([
                 _spawn_decision("a1", "work"),
                 _wait_decision("a1"),
@@ -192,19 +212,15 @@ class TestChaosFencing:
 
 class TestLoadQueueSaturation:
 
-    def test_saturation_rejects_without_side_effects_then_backlog_drains(self):
+    @pytest.mark.parametrize("slice_seconds", [2.0, 0.02])
+    def test_saturation_rejects_without_side_effects_then_backlog_drains(
+        self, slice_seconds,
+    ):
         db = _gate_db()
-        story = []
-        for i in range(5):
-            story.extend([
-                _spawn_decision("a1", "work"),
-                _wait_decision("a1"),
-                _finish_decision("loaded"),
-            ])
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
-            config=_gate_config(),
-            llm=_StoryLLM(story),
+            config=_gate_config(slice_seconds=slice_seconds),
+            llm=_BacklogLLM(),
         )
         svc = AgentSwarmService(
             run_repo=env.run_repo, dispatch_repo=env.dispatch_repo,
@@ -521,3 +537,9 @@ class TestUpstreamDegradation:
         assert result["agent_id"] == agent_id
         assert result["status"] is dm.AgentStatus.FAILED
         assert result["error"] == "upstream_breaker_open"
+
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

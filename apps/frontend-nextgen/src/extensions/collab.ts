@@ -63,12 +63,13 @@ export function registerSidePanelWiring(): void {
   registerUmdPanelHandler();
 }
 
-// 槽位显式置空：任务栈/TC 选路/任务会话观察者/任务副屏 bootstrap 不进 collab 产物。
+// 槽位显式置空：任务栈/TC 选路/任务会话观察者/任务副屏 bootstrap/任务页签快照不进 collab 产物。
 registerExtensionSlots({
   groupTasks: null,
   groupServiceBotRouting: null,
   taskSessionNavigationObserver: null,
   taskPanelBootstrap: null,
+  sessionTaskPanelTab: null,
 });
 
 export const appExtension: AppExtension = {

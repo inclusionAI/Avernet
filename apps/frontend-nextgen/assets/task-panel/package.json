@@ -1,0 +1,63 @@
+{
+  "name": "@avernet-assets/task-panel",
+  "version": "0.1.1",
+  "description": "Shared task side-panel asset and conversation recovery runtime",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.umd.js",
+  "types": "./dist/public-api.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md",
+    "LICENSE",
+    "scripts/serve-assets.mjs"
+  ],
+  "scripts": {
+    "build": "vite build && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:umd": "node test/umd-contract.mjs",
+    "scan:public": "node scripts/check-boundaries.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run test:umd && npm run test:delivery && npm run scan:public",
+    "serve": "node scripts/serve-assets.mjs",
+    "test:delivery": "node test/asset-delivery.mjs",
+    "prepack": "npm run verify"
+  },
+  "peerDependencies": {
+    "react": ">=18 <19",
+    "react-dom": ">=18 <19"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "markdown-it": "15.0.3",
+    "styled-components": "6.6.0",
+    "zustand": "5.0.11"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.0",
+    "@types/markdown-it": "14.1.2",
+    "@types/node": "22.15.30",
+    "typescript": "5.6.3",
+    "vite": "6.4.6",
+    "vitest": "4.1.12",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "jsdom": "26.0.0",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/jest-dom": "6.6.3"
+  },
+  "browser": "./dist/index.umd.js",
+  "unpkg": "./dist/index.umd.js",
+  "jsdelivr": "./dist/index.umd.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inclusionAI/Avernet.git",
+    "directory": "apps/frontend-nextgen/assets/task-panel"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

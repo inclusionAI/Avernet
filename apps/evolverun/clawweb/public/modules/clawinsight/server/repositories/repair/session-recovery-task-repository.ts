@@ -235,11 +235,11 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
         task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
           tool_call_id: call.callId, request, result: { status: result.status, delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
-            message: result.message, initial_message: result.initial_message, owner_request_id: result.owner_request_id, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
+            message: result.message, initial_message: result.initial_message, finished_at_ms: result.finished_at_ms, owner_request_id: result.owner_request_id, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
       }
       if (calls.length < 500) break;
     }
-    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery, task.timeline);
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {

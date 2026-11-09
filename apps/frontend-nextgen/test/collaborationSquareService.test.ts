@@ -19,15 +19,16 @@ const publicBot = (id: string, name = '项目助手'): PublicBot => ({
 
 function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): CollaborationSquareGateway {
   return {
-    listBotPage: jest.fn(async () => ({ items: [], total: 0 })),
+    listBotPage: jest.fn(async () => ({ items: [], nextOffset: 0, hasMore: false })),
     listBots: jest.fn(async () => []),
-    discoverBots: jest.fn(async () => []),
-    getBotProfile: jest.fn(async () => ({
-      id: 'b1',
+    discoverBots: jest.fn(async () => ({ items: [], searchMode: 'empty_query' as const })),
+    getBotProfile: jest.fn(async (bot: PublicBot) => ({
+      id: bot.id,
       name: '助手',
       ownerName: 'Owner',
       description: '',
       capabilities: [],
+      skills: [],
     })),
     requestBotFriendship: jest.fn(async () => ({ status: 'applying' as const })),
     openBotConversation: jest.fn(async () => ({ sessionId: 'bot-session' })),
@@ -196,19 +197,20 @@ describe('collaboration square service', () => {
     const service = new CollaborationSquareService(createGateway({ listBots }));
     const signal = new AbortController().signal;
 
-    await service.listBots({ search: 'workflow', page: 2, pageSize: 10 }, humanContext, signal);
+    await service.listBots({ search: 'workflow', offset: 24, pageSize: 10 }, humanContext, signal);
 
-    expect(listBots).toHaveBeenCalledWith({ search: 'workflow', page: 2, pageSize: 10 }, humanContext, signal);
+    expect(listBots).toHaveBeenCalledWith({ search: 'workflow', offset: 24, pageSize: 10 }, humanContext, signal);
   });
 
-  test('分页查询保留 Gateway 返回的 total', async () => {
-    const listBotPage = jest.fn(async () => ({ items: [], total: 48 }));
+  test('分页查询保留 Gateway 返回的 BCS 原始游标（nextOffset/hasMore）', async () => {
+    const listBotPage = jest.fn(async () => ({ items: [], nextOffset: 48, hasMore: true }));
     const listGroupPage = jest.fn(async () => ({ items: [], total: 36 }));
     const service = new CollaborationSquareService(createGateway({ listBotPage, listGroupPage }));
 
-    await expect(service.listBotPage({ page: 1, pageSize: 24 }, humanContext)).resolves.toEqual({
+    await expect(service.listBotPage({ offset: 24, pageSize: 24 }, humanContext)).resolves.toEqual({
       items: [],
-      total: 48,
+      nextOffset: 48,
+      hasMore: true,
     });
     await expect(service.listGroupPage({ offset: 0, limit: 24 })).resolves.toEqual({ items: [], total: 36 });
   });
@@ -216,7 +218,8 @@ describe('collaboration square service', () => {
   test('分享 Bot 用公开名称检索，并以 canonical ID 精确匹配同名结果', async () => {
     const listBotPage = jest.fn(async () => ({
       items: [publicBot('same-name-other'), publicBot('bot:target')],
-      total: 2,
+      nextOffset: 2,
+      hasMore: false,
     }));
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
     const signal = new AbortController().signal;
@@ -233,7 +236,7 @@ describe('collaboration square service', () => {
     expect(listBotPage).toHaveBeenCalledWith(
       {
         search: '项目助手',
-        page: 1,
+        offset: 0,
         pageSize: 100,
         viewerActorType: 'human',
         viewerActorId: '900003',
@@ -243,11 +246,16 @@ describe('collaboration square service', () => {
     );
   });
 
-  test('分享 Bot 首页未命中时继续搜索后续页，最终仍只接受 ID 精确匹配', async () => {
+  test('分享 Bot 首页（过滤后）未命中时按 nextOffset 续读第二页并命中目标', async () => {
+    // 首页 24 条不含目标但 hasMore=true：续读从 BCS 原始 nextOffset（30）开始，命中第二页目标。
     const listBotPage = jest
       .fn()
-      .mockResolvedValueOnce({ items: [publicBot('same-name-other')], total: 101 })
-      .mockResolvedValueOnce({ items: [publicBot('bot:target')], total: 101 });
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 24 }, (_, index) => publicBot(`bot:dup-${index}`)),
+        nextOffset: 30,
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({ items: [publicBot('bot:target')], nextOffset: 31, hasMore: false });
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
 
     await expect(service.resolveSharedBot('bot:target', '项目助手', humanContext)).resolves.toEqual(
@@ -255,7 +263,7 @@ describe('collaboration square service', () => {
     );
     expect(listBotPage).toHaveBeenNthCalledWith(
       2,
-      { search: '项目助手', page: 2, pageSize: 100 },
+      { search: '项目助手', offset: 30, pageSize: 100 },
       humanContext,
       undefined,
     );
@@ -263,7 +271,9 @@ describe('collaboration square service', () => {
 
   test('分享 Bot 名称搜索只有同名不同 ID 时返回未命中', async () => {
     const service = new CollaborationSquareService(
-      createGateway({ listBotPage: jest.fn(async () => ({ items: [publicBot('other')], total: 1 })) }),
+      createGateway({
+        listBotPage: jest.fn(async () => ({ items: [publicBot('other')], nextOffset: 1, hasMore: false })),
+      }),
     );
 
     await expect(service.resolveSharedBot('target', '项目助手', humanContext)).resolves.toBeNull();
@@ -272,18 +282,23 @@ describe('collaboration square service', () => {
   test('老版分享链接按 canonical 复合 ID 反查公开 Bot，无名称提示亦可命中', async () => {
     const listBotPage = jest.fn(async () => ({
       items: [publicBot('other'), { ...publicBot('uuid-a'), friendRequestBotId: '20260407_jmg31orw:152819' }],
-      total: 2,
+      nextOffset: 2,
+      hasMore: false,
     }));
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
 
     await expect(service.resolvePublicBotById('20260407_jmg31orw:152819', humanContext)).resolves.toEqual(
       expect.objectContaining({ friendRequestBotId: '20260407_jmg31orw:152819' }),
     );
-    expect(listBotPage).toHaveBeenCalledWith({ page: 1, pageSize: 100 }, humanContext, undefined);
+    expect(listBotPage).toHaveBeenCalledWith({ offset: 0, pageSize: 100 }, humanContext, undefined);
   });
 
   test('老版分享链接反查兼容 bot_uuid 直接命中形态', async () => {
-    const listBotPage = jest.fn(async () => ({ items: [publicBot('20260407_jmg31orw:152819')], total: 1 }));
+    const listBotPage = jest.fn(async () => ({
+      items: [publicBot('20260407_jmg31orw:152819')],
+      nextOffset: 1,
+      hasMore: false,
+    }));
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
 
     await expect(service.resolvePublicBotById('20260407_jmg31orw:152819', humanContext)).resolves.toEqual(
@@ -291,11 +306,31 @@ describe('collaboration square service', () => {
     );
   });
 
-  test('老版分享链接反查首页未命中时翻页直至列表耗尽', async () => {
+  test('老版分享链接反查在过滤后第二页命中目标（hasMore 游标续读）', async () => {
+    // 首页经 metadata 过滤只剩 24 条且不含目标，但游标仍有下一页；目标在第二页。
     const listBotPage = jest
       .fn()
-      .mockResolvedValueOnce({ items: [publicBot('a')], total: 150 })
-      .mockResolvedValueOnce({ items: [publicBot('b')], total: 150 });
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 24 }, (_, index) => publicBot(`bot:hidden-${index}`)),
+        nextOffset: 100,
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({ items: [publicBot('20260407_jmg31orw:152819')], nextOffset: 101, hasMore: false });
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolvePublicBotById('20260407_jmg31orw:152819', humanContext)).resolves.toEqual(
+      expect.objectContaining({ id: '20260407_jmg31orw:152819' }),
+    );
+    expect(listBotPage).toHaveBeenNthCalledWith(2, { offset: 100, pageSize: 100 }, humanContext, undefined);
+  });
+
+  test('老版分享链接反查首页未命中时按 hasMore 翻页直至耗尽', async () => {
+    // total 远大于首页条数（模拟上游按 metadata 过滤后的展示页）：停止条件是 hasMore=false，
+    // 不再按 page*pageSize>=total 计算。
+    const listBotPage = jest
+      .fn()
+      .mockResolvedValueOnce({ items: [publicBot('a')], nextOffset: 100, hasMore: true })
+      .mockResolvedValueOnce({ items: [publicBot('b')], nextOffset: 101, hasMore: false });
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
 
     await expect(service.resolvePublicBotById('missing:9', humanContext)).resolves.toBeNull();
@@ -303,7 +338,7 @@ describe('collaboration square service', () => {
   });
 
   test('老版分享链接反查拒绝非复合 ID，不发起请求', async () => {
-    const listBotPage = jest.fn(async () => ({ items: [], total: 0 }));
+    const listBotPage = jest.fn(async () => ({ items: [], nextOffset: 0, hasMore: false }));
     const service = new CollaborationSquareService(createGateway({ listBotPage }));
 
     await expect(service.resolvePublicBotById('not-composite', humanContext)).resolves.toBeNull();
@@ -311,24 +346,33 @@ describe('collaboration square service', () => {
   });
 
   test('Bot Discovery 与公开群查询原样交给 Gateway', async () => {
-    const discoverBots = jest.fn(async () => []);
+    const discoverBots = jest.fn(async () => ({ items: [publicBot('sem')], searchMode: 'semantic' as const }));
     const listGroups = jest.fn(async () => []);
     const service = new CollaborationSquareService(createGateway({ discoverBots, listGroups }));
     const signal = new AbortController().signal;
 
-    await service.discoverBots(
-      { keyword: '会议纪要', topK: 20, minScore: 0.1, runtimeState: 'online' },
-      humanContext,
-      signal,
+    await expect(service.discoverBots({ keyword: '会议纪要', viewerActorType: 'human', viewerActorId: '900003' }, humanContext, signal)).resolves.toEqual(
+      { items: [expect.objectContaining({ id: 'sem' })], searchMode: 'semantic' },
     );
     await service.listGroups({ search: '公开', offset: 0, limit: 20 }, signal);
 
     expect(discoverBots).toHaveBeenCalledWith(
-      { keyword: '会议纪要', topK: 20, minScore: 0.1, runtimeState: 'online' },
+      { keyword: '会议纪要', viewerActorType: 'human', viewerActorId: '900003' },
       humanContext,
       signal,
     );
     expect(listGroups).toHaveBeenCalledWith({ search: '公开', offset: 0, limit: 20 }, signal);
+  });
+
+  test('画像查询以所点 PublicBot 原样交给 Gateway', async () => {
+    const getBotProfile = createGateway().getBotProfile;
+    const service = new CollaborationSquareService(createGateway({ getBotProfile }));
+    const target = publicBot('20260413_uhup5rb8:246864');
+    const signal = new AbortController().signal;
+
+    await service.getBotProfile(target, signal);
+
+    expect(getBotProfile).toHaveBeenCalledWith(target, signal);
   });
 
   test('任务广场查询与取消信号原样交给 Gateway', async () => {
@@ -411,6 +455,21 @@ describe('Mock Adapter 任务方法（留作 dev/测试兜底，不再被 wired 
       published_at: '2026-08-20T10:00:00Z',
     },
   ];
+
+  it('discoverBots 本地子串过滤返回 name_fallback（不伪装成语义搜索）', async () => {
+    global.fetch = () =>
+      Promise.resolve(
+        jsonResponse([
+          { bot_id: 'bot-1', bot_name: '规划助手', owner_name: 'Owner' },
+          { bot_id: 'bot-2', bot_name: '研究助手', owner_name: 'Owner' },
+        ]),
+      );
+
+    const result = await mockService.discoverBots({ keyword: '规划' });
+
+    expect(result.searchMode).toBe('name_fallback');
+    expect(result.items.map((bot) => bot.id)).toEqual(['bot-1']);
+  });
 
   it('listPublicTasks 经 Mock Adapter 返回过滤后页', async () => {
     global.fetch = () => Promise.resolve(jsonResponse(taskDtos));

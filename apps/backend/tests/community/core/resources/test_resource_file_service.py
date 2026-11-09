@@ -81,6 +81,73 @@ async def test_list_addresses_workspace_namespace_and_builds_rel_path():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["arca", "local", "baas", "teclaw"])
+@pytest.mark.parametrize("request_path", ["", "sub"])
+async def test_absolute_path_prefers_explicit_provider_path(provider, request_path):
+    entry = {
+        "name": "a.txt", "is_dir": False, "size": 3,
+        "size_human": "3 B", "modified_at": "2026-11-08T00:00:00Z",
+        "path": "/workspace/a.txt", "absolute_path": "/data/bot/workspace/a.txt",
+    }
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[entry])
+    svc, _ = _svc(provider=provider, device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path=request_path)
+
+    assert items == [{
+        "name": "a.txt", "path": f"{request_path}/a.txt" if request_path else "a.txt",
+        "absolute_path": "/data/bot/workspace/a.txt", "is_dir": False,
+        "readonly": False, "size": 3, "size_human": "3 B",
+        "modified_at": "2026-11-08T00:00:00Z",
+    }]
+    device_fs.list_dir.assert_awaited_once_with(
+        f"workspace/{request_path}" if request_path else "workspace"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit", [{}, {"absolute_path": None}, {"absolute_path": ""}])
+@pytest.mark.parametrize("legacy", [
+    {"path": "/workspace/sub/a.txt"}, {}, {"path": None}, {"path": ""},
+])
+@pytest.mark.parametrize("request_path", ["", "sub"])
+async def test_absolute_path_preserves_fallbacks(explicit, legacy, request_path):
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": "a.txt", "is_dir": False, **explicit, **legacy},
+    ])
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path=request_path)
+
+    relative = f"{request_path}/a.txt" if request_path else "a.txt"
+    assert items[0]["absolute_path"] == (legacy.get("path") or f"workspace/{relative}")
+    assert items[0]["path"] == relative
+
+
+@pytest.mark.asyncio
+async def test_list_logs_projection_context_without_provider_payload(monkeypatch):
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[{
+        "name": "a.txt", "absolute_path": "/data/bot/workspace/a.txt",
+        "token": "provider-secret-must-not-be-logged",
+    }])
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    logger = MagicMock()
+    monkeypatch.setattr(resource_file_service, "logger", logger)
+
+    items = await svc.list_dir(**_COORDS, path="sub")
+
+    assert items[0]["absolute_path"] == "/data/bot/workspace/a.txt"
+    logger.debug.assert_called_once_with(
+        "[ResourceFileService.list_dir] bot_id=%s path=%s item_count=%d",
+        "bot-1", "sub", 1,
+    )
+    assert "provider-secret-must-not-be-logged" not in str(logger.mock_calls)
+
+
+@pytest.mark.asyncio
 async def test_absolute_path_uses_engine_path():
     # absolute_path is the device's own absolute path (the engine's ``path`` field) —
     # container path for arca/openclaw/aicoding/claude_code, host path for local.

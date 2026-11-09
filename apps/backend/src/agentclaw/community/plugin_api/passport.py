@@ -235,6 +235,7 @@ class PassportPlugin(Plugin, Protocol):
         access_mode: str | None = None,
         admins: list[str] | None = None,
         resource_scope: PassportResourceScope | None = None,
+        bot_type: str | None = None,
     ) -> None:
         """Notify passport of metadata/admin updates or a complete MCP+CLI resource scope.
 
@@ -269,6 +270,7 @@ class PassportPlugin(Plugin, Protocol):
         cli_items: list[CliItem] | None = None,
         *,
         target_env: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Apply for an agent passport (first time)."""
         ...
@@ -287,6 +289,7 @@ class PassportPlugin(Plugin, Protocol):
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Apply for an agent passport (non-first time)."""
         ...
@@ -304,6 +307,7 @@ class PassportPlugin(Plugin, Protocol):
         target_env: str | None = None,
         handoff_operation_id: str | None = None,
         expected_credential_id: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Mint a parallel ALC/AAC/AEC set for a different executor.
 
@@ -311,6 +315,16 @@ class PassportPlugin(Plugin, Protocol):
         ``entity_id`` keeps the existing AgentPass record address stable; only
         ``execution_workno`` changes the principal that executes the Bot.
         Implementations must preserve the current Passport resource manifest.
+        """
+        ...
+
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        """Handoff-only metadata, permitting expired but not deleted history.
+
+        Never a usable credential or an authentication result. None means no
+        recoverable history or no remote capability; ordinary queries stay strict.
         """
         ...
 
@@ -374,7 +388,14 @@ class PassportPlugin(Plugin, Protocol):
         target_env: str | None = None,
         entity_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Query the full agent passport details."""
+        """Query the full agent passport details.
+
+        Optional ``handoff_ancestor_credential_ids`` is provider-verified normal
+        renewal provenance, newest ancestor first (at most 64). Every link must
+        preserve the Agent, entity, Owner, executor and handoff operation. Missing
+        or invalid history yields no proof; matching personnel alone is never
+        sufficient. Old providers may omit this additive field.
+        """
         ...
 
     def freeze_agent_passport(

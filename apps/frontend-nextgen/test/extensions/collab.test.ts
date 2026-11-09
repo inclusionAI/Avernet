@@ -36,6 +36,7 @@ describe('collab 装配', () => {
       groupServiceBotRouting: null,
       taskSessionNavigationObserver: null,
       taskPanelBootstrap: null,
+      sessionTaskPanelTab: null,
     });
     expect(appExtension.avatarEditor).toBeNull();
   });

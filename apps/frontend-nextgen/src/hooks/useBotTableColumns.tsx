@@ -1,5 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
-import BotCopyRetryAction from '@/components/BotWorkshop/BotCard/BotCopyRetryAction';
+import { BotCopyActionsCell } from '@/components/BotWorkshop/BotCard/BotCopyActionsCell';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
@@ -31,15 +31,12 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onOpenLogs,
     onOpenTaskInstances,
     canOpenTaskInstances,
-    onOpenContainers,
-    canViewContainers,
+    onOpenContainers, canViewContainers,
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onManagePublication,
-    onAction,
-    onClaimLock,
-    onReleaseLock,
+    onPublicationChanged, onPublicationGateBlocked, onOpenEvaluation, onOpenEvalHistory,
+    onAction, onClaimLock, onReleaseLock,
     getInventoryActions,
     getHealthCheckAvailability,
     getLogAction,
@@ -84,7 +81,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
-            onManagePublication={onAction ? onManagePublication : undefined}
+            onPublicationChanged={onAction ? onPublicationChanged : undefined}
+            onPublicationGateBlocked={onPublicationGateBlocked}
           />
         ),
       },
@@ -137,17 +135,14 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       {
         id: 'actions',
         header: '操作',
-        width: 'w-[284px]',
+        // 240px：最宽按钮行（对话/查看/编辑/日志 + 管理菜单）实测内容约 224px，留 16px 余量。
+        width: 'w-[240px]',
         align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (bot) => {
-          // 复制失败(gated):仅 copy_state.status === FAILED 时,操作列折叠为重试入口。
-          // 中间态(复制中)不再占用操作列 —— dst bot 未收敛,但用户仍可走正常 actions 查看进度,
-          // 不强行塞重试按钮(避免对 RUNNING/FILE_SYNCED 的 bot 误导「可重试」)。
-          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
-          if (copyState?.status === 'FAILED' && onRetryCopy)
-            return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,见 BotCopyActionsCell
+          if (copyState)
+            return <BotCopyActionsCell bot={bot} copyState={copyState} onRetryCopy={onRetryCopy} onAction={onAction} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
@@ -156,6 +151,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
               onView={onView}
               onEdit={onEdit}
               onConversation={onConversation}
+              onRequestAccess={onAuthorize}
+              collaborationMode={getCollaborationMode?.(bot)}
               conversationAllowed={collaborationAllowsConversation && entry.enabled}
               conversationDisabledReason={
                 entry.enabled
@@ -196,6 +193,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                onOpenEvaluation={onOpenEvaluation}
+                onOpenEvalHistory={onOpenEvalHistory}
                 copyAvailability={copyAvailability}
                 onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
@@ -222,7 +221,10 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
-      onManagePublication,
+      onPublicationChanged,
+      onPublicationGateBlocked,
+      onOpenEvaluation,
+      onOpenEvalHistory,
       onAction,
       onClaimLock,
       onReleaseLock,

@@ -103,7 +103,7 @@ it('loads the user-owned bots tab when showMineTab is enabled', async () => {
   expect(result.current.mineHasMore).toBe(false);
 });
 
-it('runs profile-mode recommendation with the loaded candidates as intersection input', async () => {
+it('runs profile-mode discovery with loaded candidates only as metadata input', async () => {
   cs.listFriends.mockResolvedValue(page([], 0, 0, false));
   cs.listCandidates.mockResolvedValue(page([{ id: 'b1', name: 'Alpha' }], 1, 0, false));
   cs.recommendCandidates.mockResolvedValue(
@@ -112,6 +112,7 @@ it('runs profile-mode recommendation with the loaded candidates as intersection 
 
   const { result } = renderHook(() => useGroupCollaborationPicker('actor-1', true, false, 'bot'));
   act(() => result.current.setTab('candidates'));
+  await waitFor(() => expect(result.current.candidates).toHaveLength(1));
   act(() => result.current.setFilterMode('profile'));
   act(() => result.current.setSearch('值班'));
   await waitFor(() => expect(result.current.recommendations).toHaveLength(1));
@@ -228,6 +229,7 @@ it('exposes recommend error without breaking the original list', async () => {
 
   const { result } = renderHook(() => useGroupCollaborationPicker('actor-1', true, false, 'bot'));
   act(() => result.current.setTab('candidates'));
+  await waitFor(() => expect(result.current.candidates).toHaveLength(1));
   act(() => result.current.setFilterMode('profile'));
   act(() => result.current.setSearch('值班'));
   await waitFor(() => expect(result.current.recommendError).toBe('推荐可协作 Bot 失败，请稍后重试。'));
@@ -261,4 +263,19 @@ it('resets filter mode and recommendations after the dialog closes and reopens',
   expect(result.current.recommendations).toHaveLength(0);
   expect(result.current.recommendError).toBeUndefined();
   expect(result.current.recommendSource).toBeNull();
+});
+
+it('runs discovery without requiring an ordinary candidates request to succeed', async () => {
+  cs.listFriends.mockResolvedValue(page([], 0, 0, false));
+  cs.listCandidates.mockResolvedValue({ ok: false, error: { friendlyMessage: '普通候选请求失败' } });
+  cs.recommendCandidates.mockResolvedValue(recommendResult([{ id: 'new:owner', name: '发现的 Bot', recommendScore: 0.9 }]));
+  const { result } = renderHook(() => useGroupCollaborationPicker('actor-1', true, false, 'bot'));
+  act(() => {
+    result.current.setTab('candidates');
+    result.current.setFilterMode('profile');
+    result.current.setSearch('数据分析');
+  });
+  await waitFor(() => expect(result.current.recommendations).toHaveLength(1));
+  expect(result.current.recommendError).toBeUndefined();
+  expect(cs.listCandidates).not.toHaveBeenCalled();
 });

@@ -7,6 +7,7 @@ let slots: AppExtensionSlots = {
   groupServiceBotRouting: null,
   taskSessionNavigationObserver: null,
   taskPanelBootstrap: null,
+  sessionTaskPanelTab: null,
 };
 
 export function registerExtensionSlots(next: AppExtensionSlots): void {

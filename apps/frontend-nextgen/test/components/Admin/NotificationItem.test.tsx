@@ -3,7 +3,7 @@
 import { NotificationItem } from '@/components/Admin/NotificationItem';
 import type { NotificationSummary } from '@/domain/admin/models';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const item: NotificationSummary = {
   itemId: 'NOTIFICATION_1',
@@ -18,6 +18,23 @@ const item: NotificationSummary = {
 };
 
 describe('NotificationItem', () => {
+  it('使用红色未读点，已读后不展示圆点', () => {
+    const { rerender } = render(<NotificationItem item={item} />);
+    expect(screen.getByLabelText('未读')).toHaveClass('bg-destructive');
+    rerender(<NotificationItem item={{ ...item, isRead: true }} />);
+    expect(screen.queryByLabelText('未读')).not.toBeInTheDocument();
+  });
+
+  it('时间与标题同排，并保留条目点击数据', () => {
+    const onClick = jest.fn();
+    const { container } = render(<NotificationItem item={item} onClick={onClick} />);
+    const time = container.querySelector('time');
+    expect(time).toHaveAttribute('dateTime', item.gmtModified);
+    expect(time?.parentElement).toContainElement(screen.getByText(item.title));
+    fireEvent.click(screen.getByRole('button'));
+    expect(onClick).toHaveBeenCalledWith(item);
+  });
+
   it('预览保留正文换行语义，同时继续限制为两行', () => {
     render(<NotificationItem item={item} />);
 

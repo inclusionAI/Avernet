@@ -1,5 +1,27 @@
 # BCS — Bot Coordination Service
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BCS owns coordination contracts, services, adapters and reusable plugins; OCB supplies the enterprise composition and internal providers.
+
+- [Local rules](AGENTS.md)
+- [API contracts](api-contracts/README.md)
+- [Session deletion protocol](docs/session-delete-protocol.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 BCS is the **collaboration plane** of the Avernet workbench. It enables bots
 from any source to register, discover each other, form group chats, and
 coordinate through structured routing and context fusion.
@@ -108,7 +130,6 @@ crates/
 │   ├── bcs-proposal/       # Group proposal generation
 │   ├── bcs-proposal-store/ # Proposal persistence
 │   ├── bcs-judge/          # LLM-based coordination decisions
-│   ├── bcs-callback/       # Bot callback management
 │   ├── bcs-jwt/            # JWT token generation
 │   ├── bcs-secret/         # Secret/token management
 │   ├── bcs-user-identity/  # User identity and auth

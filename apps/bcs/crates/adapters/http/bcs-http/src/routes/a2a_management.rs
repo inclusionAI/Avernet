@@ -2,7 +2,7 @@
 use crate::state::HttpAppState;
 use axum::{
     Json,
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -14,18 +14,21 @@ use bcs_service_api::{
         a2a_management::{ManagementCode as Code, ManagementError},
     },
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Name {
-    agent_name: String,
+pub struct Target {
+    bot_id: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registration {
-    owners: Vec<String>,
+    provider_bot_ref: String,
+    #[serde(default)]
+    visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
+    owners: Option<Vec<String>>,
     summary: Option<String>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
@@ -33,9 +36,23 @@ struct Registration {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
-    agent_name: String,
+    visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceQuery { provider_bot_ref: String }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Refresh {}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ManagementView {
+    Card(ManagedA2aCard),
+    Collection { items: Vec<ManagedA2aCard> },
 }
 
 fn error(code: Code, field: &str, reason: &'static str) -> ServiceError {
@@ -49,6 +66,7 @@ fn message(code: Code) -> &'static str {
         Code::BotNotFound => "当前 Provider 下未找到该 Agent",
         Code::MethodNotAllowed => "此接口不支持该 HTTP 方法",
         Code::NotAcceptable => "此接口仅返回 JSON",
+        Code::ProviderBotRefConflict => "同一 Provider 下已存在该平台 Agent 标识",
         Code::BotNameConflict => "同一 Provider 下已存在该 Agent 名称",
         Code::SourceAgentConflict => "同一 Provider 下已存在该来源 Agent ID",
         Code::SourceAgentChangeNotAllowed => "已登记的来源 Agent ID 不可修改或删除",
@@ -81,7 +99,8 @@ pub(super) fn status(code: Code) -> StatusCode {
         Code::BotNotFound => StatusCode::NOT_FOUND,
         Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         Code::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
-        Code::BotNameConflict
+        Code::ProviderBotRefConflict
+        | Code::BotNameConflict
         | Code::SourceAgentConflict
         | Code::SourceAgentChangeNotAllowed
         | Code::TargetChanged
@@ -107,10 +126,10 @@ fn failure(failure: ServiceError, id: &str) -> Response {
             ManagementError::new(Code::PermissionDenied, "", "ACCESS_DENIED")
         }
         ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_) => {
-            ManagementError::new(Code::BotNotFound, "agent_name", "NOT_FOUND")
+            ManagementError::new(Code::BotNotFound, "bot_id", "NOT_FOUND")
         }
         ServiceError::Conflict(_) => {
-            ManagementError::new(Code::BotNameConflict, "agent_card.name", "ALREADY_EXISTS")
+            ManagementError::new(Code::ProviderBotRefConflict, "provider_bot_ref", "ALREADY_EXISTS")
         }
         ServiceError::InvalidOperation { .. } => {
             ManagementError::new(Code::InvalidRequest, "", "INVALID_REQUEST")
@@ -211,40 +230,35 @@ fn body<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ServiceError>
 async fn execute(
     state: &HttpAppState,
     request: Request,
-) -> Result<(StatusCode, ManagedA2aCard), ServiceError> {
+    bot_id: Option<String>,
+) -> Result<(StatusCode, ManagementView), ServiceError> {
     let (parts, request_body) = request.into_parts();
     let token = crate::headers::extract_bearer_token(&parts.headers)
         .ok_or_else(|| error(Code::Unauthenticated, "", "AUTHENTICATION_REQUIRED"))?;
-    let service = state
-        .services
-        .a2a_bot_management
-        .as_ref()
+    let service = state.services.a2a_bot_management.as_ref()
         .ok_or_else(|| error(Code::ServiceUnavailable, "", "MANAGEMENT_UNAVAILABLE"))?;
-    let bytes = axum::body::to_bytes(request_body, 2 * 1024 * 1024)
-        .await
+    let bytes = axum::body::to_bytes(request_body, 2 * 1024 * 1024).await
         .map_err(|_| error(Code::RequestTooLarge, "", "BODY_LIMIT_EXCEEDED"))?;
     if parts.method == axum::http::Method::GET {
-        if !bytes.is_empty() {
-            return Err(error(Code::InvalidRequest, "", "GET_BODY_NOT_ALLOWED"));
+        if !bytes.is_empty() {return Err(error(Code::InvalidRequest,"","GET_BODY_NOT_ALLOWED"));}
+        if let Some(bot_id) = bot_id.as_deref() {
+            if parts.uri.query().is_some() {return Err(error(Code::InvalidRequest,"","QUERY_NOT_ALLOWED"));}
+            return Ok((StatusCode::OK,ManagementView::Card(service.get_agent_by_id(&token,bot_id).await?)));
         }
-        let Query(name) = Query::<Name>::try_from_uri(&parts.uri)
-            .map_err(|_| error(Code::InvalidRequest, "agent_name", "INVALID_QUERY"))?;
-        return Ok((
-            StatusCode::OK,
-            service.get_agent(&token, &name.agent_name).await?,
-        ));
+        let Query(query) = Query::<SourceQuery>::try_from_uri(&parts.uri)
+            .map_err(|_|error(Code::InvalidRequest,"provider_bot_ref","INVALID_QUERY"))?;
+        let items = service.find_agents_by_provider_ref(&token,&query.provider_bot_ref).await?;
+        return Ok((StatusCode::OK,ManagementView::Collection {items}));
     }
-    if parts.uri.query().is_some() {
-        return Err(error(Code::InvalidRequest, "", "QUERY_NOT_ALLOWED"));
+    if parts.uri.query().is_some() {return Err(error(Code::InvalidRequest,"","QUERY_NOT_ALLOWED"));}
+    if parts.method == axum::http::Method::POST && bytes.is_empty() {
+        if let Some(bot_id) = bot_id.as_deref() {
+            return Ok((StatusCode::OK,ManagementView::Card(service.refresh_agent_by_id(&token,bot_id).await?)));
+        }
     }
-    if !parts
-        .headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(';').next())
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"))
-    {
-        return Err(error(Code::UnsupportedMediaType, "", "JSON_REQUIRED"));
+    if !parts.headers.get("content-type").and_then(|v|v.to_str().ok())
+        .and_then(|v|v.split(';').next()).is_some_and(|v|v.trim().eq_ignore_ascii_case("application/json")) {
+        return Err(error(Code::UnsupportedMediaType,"","JSON_REQUIRED"));
     }
     if parts.uri.path() == "/a2a/agents" {
         let input: Registration = body(&bytes)?;
@@ -254,6 +268,8 @@ async fn execute(
             .unwrap_or(0);
         let card = service
             .register_agent(RegisterAgentCommand {
+                provider_bot_ref: input.provider_bot_ref,
+                visibility: input.visibility,
                 provider_admin_token: token,
                 owners: input.owners,
                 summary: input.summary,
@@ -261,36 +277,37 @@ async fn execute(
                 now_ms,
             })
             .await?;
-        Ok((StatusCode::CREATED, card))
+        Ok((StatusCode::CREATED, ManagementView::Card(card)))
     } else if parts.method == axum::http::Method::PUT {
         let input: Update = body(&bytes)?;
-        Ok((
-            StatusCode::OK,
-            service
-                .update_agent(
-                    &token,
-                    &input.agent_name,
-                    source(input.agent_card_url, input.agent_card)?,
-                )
-                .await?,
-        ))
+        let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;
+        if input.visibility.is_none() && input.agent_card_url.is_none() && input.agent_card.is_none() {
+            return Err(error(Code::InvalidRequest,"","UPDATE_REQUIRED"));
+        }
+        let source = if input.agent_card_url.is_none() && input.agent_card.is_none() {None}
+            else {Some(source(input.agent_card_url,input.agent_card)?)};
+        Ok((StatusCode::OK,ManagementView::Card(service.update_agent_by_id_with_visibility(&token,bot_id,source,input.visibility).await?)))
     } else {
-        let input: Name = body(&bytes)?;
-        Ok((
-            StatusCode::OK,
-            service.refresh_agent(&token, &input.agent_name).await?,
-        ))
+        let _: Refresh = body(&bytes)?;
+        let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;
+        Ok((StatusCode::OK,ManagementView::Card(service.refresh_agent_by_id(&token,bot_id).await?)))
     }
 }
 
-pub async fn handle(State(state): State<HttpAppState>, request: Request) -> Response {
+pub async fn handle(State(state): State<HttpAppState>, target: Result<Path<Target>, axum::extract::rejection::PathRejection>, request: Request) -> Response {
     let id = uuid::Uuid::new_v4().to_string();
-    let allowed = if request.uri().path() == "/a2a/agent-card" {
-        "GET, PUT"
-    } else {
+    let collection = request.uri().path() == "/a2a/agents";
+    let target = if collection { Ok(None) } else { target.map(|Path(target)|Some(target.bot_id)) };
+    let allowed = if collection {
+        "GET, POST"
+    } else if request.uri().path().ends_with("/agent-card:refresh") {
         "POST"
+    } else {
+        "GET, PUT"
     };
-    let mut response = if !allowed.split(", ").any(|v| v == request.method().as_str()) {
+    let mut response = if target.is_err() {
+        failure(error(Code::InvalidRequest, "bot_id", "INVALID_PATH"), &id)
+    } else if !allowed.split(", ").any(|v| v == request.method().as_str()) {
         let mut response = failure(error(Code::MethodNotAllowed, "", "METHOD_NOT_ALLOWED"), &id);
         response
             .headers_mut()
@@ -299,12 +316,12 @@ pub async fn handle(State(state): State<HttpAppState>, request: Request) -> Resp
     } else if !accepts_json(request.headers()) {
         failure(error(Code::NotAcceptable, "", "JSON_NOT_ACCEPTED"), &id)
     } else {
-        match execute(&state, request).await {
+        match execute(&state, request, target.unwrap()).await {
             Ok((status, card)) => {
-                let location = if status == StatusCode::CREATED {
+                let location = if let (StatusCode::CREATED, ManagementView::Card(card)) = (status, &card) {
                     Some(format!(
-                        "/a2a/agent-card?agent_name={}",
-                        url::form_urlencoded::byte_serialize(card.agent_name.as_bytes())
+                        "/a2a/agents/{}/agent-card",
+                        url::form_urlencoded::byte_serialize(card.bot_id.as_bytes())
                             .collect::<String>()
                     ))
                 } else {

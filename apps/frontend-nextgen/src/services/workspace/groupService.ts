@@ -5,7 +5,6 @@ import type {
   GroupUpdatePatch,
   GroupView,
   IdentityView,
-  ParticipantRole,
   ParticipantView,
 } from '@/domain/collaboration';
 import { getExtensionSlots } from '@/extensions/slots';
@@ -24,7 +23,13 @@ import {
 } from './groupBcsReadService';
 import { buildCreateGroupBody, type CreateGroupInput } from './groupCreateRequest';
 import type { DomainError, DomainResult } from './identityService';
-import { isHumanMentionNotifyMode, mapGroupListItem, mapSessionListItem } from './mappers';
+import {
+  isHumanMentionNotifyMode,
+  mapGroupListItem,
+  mapParticipant,
+  mapSessionListItem,
+  toParticipantSummary,
+} from './mappers';
 
 export interface PolicyResult {
   allowed: boolean;
@@ -43,14 +48,6 @@ export interface SessionPageOpts {
 }
 
 const GROUP_SESSION_PAGE_SIZE = 10;
-
-const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
-  driver: 'driver',
-  manager: 'manager',
-  consultant: 'member',
-  worker: 'worker',
-  observer: 'member',
-};
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
   return { code, friendlyMessage, canRetry: false };
@@ -75,7 +72,7 @@ export const groupService = {
       const resp = await listGroups(params as never);
       const items = (resp.data?.items ?? [])
         .filter((g) => g.kind === 'normal')
-        .map((g) => mapGroupListItem(g as never));
+        .map((g) => mapGroupListItem(g));
       return { ok: true, data: items };
     } catch {
       return {
@@ -135,6 +132,7 @@ export const groupService = {
       }
       const deliveryPolicy: DeliveryPolicy =
         d.collaboration.strategy === 'chat' ? d.collaboration.delivery_policy.bot_final_delivery : 'send_to_driver';
+      const participants = d.participants.map(mapParticipant);
       const group: GroupView = {
         groupId: d.group_id,
         name: d.name ?? '未命名群',
@@ -145,14 +143,9 @@ export const groupService = {
             ? 'task_dag'
             : 'free_chat',
         status: d.status === 'dissolved' ? 'dissolved' : 'active',
-        participants: d.participants.map((p) => ({
-          actorId: p.actor_id,
-          kind: p.actor_kind,
-          name: p.name ?? p.actor_id,
-          role: ROLE_NATIVE_TO_DOMAIN[p.role] ?? 'member',
-          mode: p.mode,
-          ...(p.message_view_scope ? { messageViewScope: p.message_view_scope } : {}),
-        })),
+        participants,
+        participantSummaries: participants.map(toParticipantSummary),
+        participantDetailsLoaded: true,
         sessions: (sessions.data?.items ?? []).map((s) => mapSessionListItem(s)),
         lastMessageAt: d.updated_at,
         createdAt: d.created_at,

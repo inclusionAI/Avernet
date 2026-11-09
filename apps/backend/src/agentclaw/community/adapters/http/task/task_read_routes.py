@@ -1,4 +1,4 @@
-"""内部面读侧镜像路由:GET /dashboard 与 /list。
+"""内部面读侧镜像路由:GET /dashboard、/list 与 /by_session。
 
 ``adapters/http/task/router.py``(/api/v1/collaboration/tasks)经 ``include_router``
 挂载;与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol``
@@ -6,12 +6,16 @@
 ``get_current_user``,公开面经 gateway spanner 走 ``require_principal``。
 独立小模块的原因:task/router.py 已在 Rule 9 体积帽沿(1000 行),读侧属
 新的内聚关注点,按 relay/bbs/intake 子路由的既有先例拆出。
+
+Read services are synchronous and may call database or staff-directory plugins;
+offload them so a slow dependency cannot block this worker's event loop.
 """
 from __future__ import annotations
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -29,6 +33,10 @@ from agentclaw.community.adapters.http.task.schemas import (
 )
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
+)
+from agentclaw.community.adapters.http.task.schemas_task_session import (
+    BySessionDTO,
+    by_session_refs_to_dto,
 )
 from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
@@ -62,11 +70,15 @@ async def get_task_dashboard_internal(
     任务/节点不存在 → TaskNotFoundError/NodeNotFoundError → 404。"""
     del user
     if include_action_log:
-        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id, include_action_log=True
+        )
     else:
-        graph = service.get_task_dashboard(task_id, node_id)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id
+        )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
-    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
@@ -75,6 +87,26 @@ async def get_task_dashboard_internal(
         ),
         request,
     )
+
+
+@router.get("/by_session", response_model=Envelope[BySessionDTO])
+@envelope_errors
+async def get_task_by_session_internal(
+    session_id: Annotated[
+        str,
+        Query(description="The chat session id to resolve; sessions without visible tasks return an empty list"),
+    ],
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[BySessionDTO]:
+    """Resolve a chat session to its relay task nodes (internal mirror).
+
+    Empty result semantics deliberately match the public ``by_session`` route.
+    """
+    del user
+    refs = await run_in_threadpool(service.get_task_nodes_by_session, session_id)
+    return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
 def _validate_task_status_filter(status: str | None) -> None:
@@ -126,9 +158,12 @@ async def list_tasks_internal(
             detail="page and page_size must be both provided or both omitted",
         )
     if page_size is None:
-        items = service.list_tasks(status, owner_user_id=user_id)
+        items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.list_tasks, status, owner_user_id=user_id
+        )
         return envelope([task_info_record_to_dto(item) for item in items], request)
-    items, total = service.list_tasks_page(
+    items, total = await run_in_threadpool(
+        service.list_tasks_page,
         status, owner_user_id=user_id, page=page or 1, page_size=page_size
     )
     return page_envelope(

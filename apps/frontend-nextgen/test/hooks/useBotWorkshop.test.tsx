@@ -198,20 +198,56 @@ it('刷新页面时等待空间初始化完成，只加载一次 Bot 列表', as
   expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ spaceId: '10001' }));
 });
 
+it('首次加载后不追加 3 秒兜底读取，仅保留 30 秒常规同步', async () => {
+  jest.useFakeTimers();
+  try {
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+
+    const { unmount } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+    mockedList.mockClear();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(3_000);
+    });
+    expect(mockedList).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
+    unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('列表每 30 秒静默同步状态，不受微前端容器的 visibilityState 影响', async () => {
   jest.useFakeTimers();
-  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
-  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  try {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
 
-  const { unmount } = renderHook(() => useBotWorkshop());
-  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+    const { unmount } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
 
-  act(() => jest.advanceTimersByTime(30_000));
-  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
-  unmount();
-  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
-  jest.useRealTimers();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(2);
+
+    mockedList.mockClear();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
+    unmount();
+  } finally {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    jest.useRealTimers();
+  }
 });
 
 it('按全局当前空间加载 Bot，切换空间后自动重新加载', async () => {

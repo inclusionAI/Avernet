@@ -3,12 +3,12 @@ import type { AutoHealDeployRequest, WorkflowSpec } from '@avernet/clawweb-share
 import type { PackVersionFile } from '../components/PackVersionEditor'
 
 export type Version = 'current' | 'draft'
-export type Snapshot = { workflowId: string; packId: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[] }
+export type Snapshot = { workflowId: string; packId: string; packPath?: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[]; activeHistoryMismatch?: true }
 export type Change = { path: string; operation: 'delete' } | ({ operation: 'create' | 'replace' } & PackVersionFile)
-type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; blocked: boolean; notice: string | null }
+type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; readFailure?: string; blocked: boolean; notice: string | null }
 export type SaveInput = { sourceVersion: Version; sourceCommit: string; expectedSavedHead: string | null; changes: Change[]; requestId?: string }
 export type SaveResult = { branch: string; commit: string; requestId: string; version: number; packId: string }
-export type SaveAttempt = { requestId: string; expectedPackId: string; snapshot: Snapshot; input: SaveInput; files: PackVersionFile[]; onSaved?: (result: SaveResult) => void }
+export type SaveAttempt = { requestId: string; expectedPackId: string; snapshot: Snapshot; input: SaveInput; files: PackVersionFile[]; onSaved?: (result: SaveResult) => void; verifySaved?: (result: SaveResult) => Promise<void> }
 type Reconciliation = {
   attempt: SaveAttempt
   token: object
@@ -28,10 +28,14 @@ export type CreateInput = { workflowId: string; packId: string; spec: WorkflowSp
 export type CreateAttempt = { input: CreateInput; pending: boolean; phase: 'unknown' | 'failed' | 'conflict' | 'saved' | 'completed'; result?: SaveResult; error: string | null }
 // null means no unfinished Pack identity write is known in this page session.
 // A message survives snapshot reloads; clean Git files do not reconcile DB identity.
-type State = { uncertainRename: string | null; creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
-export type Session = { state: State; listeners: Set<() => void>; requests: Partial<Record<Version, AbortController>>; saveRequest?: object; deployRequest?: object; createRequest?: object; canvasDirty?: boolean; canvasInitialized?: boolean; reconciliationRequest?: { controller: AbortController; timeout: ReturnType<typeof setTimeout> } }
+type State = { uncertainRename: string | null; postSaveVerificationError?: string | null; creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
+export type Session = { state: State; listeners: Set<() => void>; requests: Partial<Record<Version, AbortController>>; saveRequest?: object; deployRequest?: object; createRequest?: object; canvasDirty?: boolean; reconciliationRequest?: { controller: AbortController; timeout: ReturnType<typeof setTimeout> } }
 
 const sessions = new Map<string, Session>()
+/** Observation only: never create a session or affect its release lifecycle. */
+export function hasPostSaveVerificationError(id: string): boolean {
+  return !!sessions.get(id)?.state.postSaveVerificationError
+}
 let unloadGuardInstalled = false
 let revision = 0
 const observers = new Set<() => void>()
@@ -40,7 +44,7 @@ export const packVersionsRevision = () => revision
 function notify() { revision++; observers.forEach(listener => listener()) }
 export function hasPackVersionEditRisk(id: string | null): boolean {
   const session = id ? sessions.get(id) : undefined
-  return !!session && (session.state.uncertainRename !== null || session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
+  return !!session && (session.state.uncertainRename !== null || !!session.state.postSaveVerificationError || session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
 }
 export function hasPackVersionRisk(id: string | null): boolean {
   const state = id ? sessions.get(id)?.state : undefined
@@ -93,7 +97,7 @@ export function classifySaveFailure(error: unknown, id: string, requestId?: stri
     return { conflict: false, preOperationConflict: false, originRejected: true, reason: 'server', identity: null }
   }
   if (value?.status === 409 && body?.code === 'VERSION_CONFLICT') return { conflict: true, preOperationConflict: false, originRejected: false, reason: 'server', identity: null }
-  if (value?.status === 503 && body?.code === 'SAVE_OUTCOME_UNKNOWN' && body.branch === `saved/${id}` && typeof body.commit === 'string' && oid.test(body.commit)) {
+  if (value?.status === 503 && body?.code === 'SAVE_OUTCOME_UNKNOWN' && body.branch === `wf/${id}` && typeof body.commit === 'string' && oid.test(body.commit)) {
     return { conflict: false, preOperationConflict: false, originRejected: false, reason: 'server', identity: { branch: body.branch, commit: body.commit } }
   }
   return { conflict: false, preOperationConflict: false, originRejected: false, reason: typeof value?.status === 'number' ? 'unverified' : 'no-response', identity: null }
@@ -129,7 +133,7 @@ export async function observeReconciliationHead(session: Session, id: string) {
     const snapshot = validateSnapshot(result, id, 'draft')
     const latest = session.state.reconciliation
     if (session.reconciliationRequest !== request || !latest || latest.token !== attempt.token) return
-    publish(session, { ...session.state, reconciliation: { ...latest, checking: false, observation: { kind: 'head', commit: snapshot.baseCommit }, checkError: false } })
+    publish(session, { ...session.state, reconciliation: { ...latest, checking: false, observation: snapshot.draftHead === null ? { kind: 'snapshot-not-found' } : { kind: 'head', commit: snapshot.draftHead }, checkError: false } })
   } catch (error) {
     const latest = session.state.reconciliation
     if (session.reconciliationRequest !== request || !latest || latest.token !== attempt.token) return
@@ -155,7 +159,7 @@ export function sessionFor(id: string): Session {
   }
   let session = sessions.get(id)
   if (!session) {
-    session = { state: { uncertainRename: null, version: 'current', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
+    session = { state: { uncertainRename: null, version: 'draft', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
     sessions.set(id, session)
   }
   return session
@@ -182,11 +186,43 @@ export function diff(original: PackVersionFile[], files: PackVersionFile[]): Cha
 export function dirty(state: VersionState): boolean {
   return !!state.snapshot && diff(state.snapshot.versionFiles, state.files).length > 0
 }
+/** current is DB-active production; draft is only the writable wf tip. */
+export function canonicalPackPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  if (value === '') return ''
+  const normalized = value.replace(/\/+$/, '')
+  if (!normalized || normalized.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) return null
+  return normalized
+}
+
+/**
+ * A root Pack may contain a historical nested `packs/<packId>` tree as an
+ * ordinary resource. Treat that explicit root/nested transition as the same
+ * workflow Pack scope for review; the server still validates the immutable
+ * candidate tree before publishing it.
+ */
+export function compatiblePackScope(left: Pick<Snapshot, 'packId' | 'packPath'>, right: Pick<Snapshot, 'packId' | 'packPath'>): boolean {
+  if (left.packId !== right.packId || left.packPath === right.packPath) return left.packId === right.packId
+  if (typeof left.packPath !== 'string' || typeof right.packPath !== 'string') return false
+  return (left.packPath === '' && right.packPath === `packs/${left.packId}`)
+    || (right.packPath === '' && left.packPath === `packs/${right.packId}`)
+}
+
+function validSnapshotRef(ref: unknown, id: string, version: Version): boolean {
+  if (typeof ref !== 'string') return false
+  if (version === 'draft') return ref === `origin/wf/${id}`
+  const prefix = `refs/tags/deploy/${id}/#`
+  if (!ref.startsWith(prefix)) return false
+  const number = ref.slice(prefix.length), value = Number(number)
+  return Number.isSafeInteger(value) && value > 0 && String(value) === number
+}
 export function validateSnapshot(value: unknown, id: string, version: Version): Snapshot {
   if (!value || typeof value !== 'object') throw new Error('Invalid response')
   const data = value as Snapshot
+  const packPath = data.packPath === undefined ? undefined : canonicalPackPath(data.packPath)
   if (data.workflowId !== id || typeof data.packId !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(data.packId) || data.packId.includes('..') || data.packId.endsWith('.') || data.packId.endsWith('.lock') ||
-      data.baseRef !== `origin/${version === 'current' ? 'wf' : 'saved'}/${id}` ||
+      (data.packPath !== undefined && packPath === null) ||
+      !validSnapshotRef(data.baseRef, id, version) ||
       typeof data.baseCommit !== 'string' || !oid.test(data.baseCommit) ||
       !(data.draftHead === null || (typeof data.draftHead === 'string' && oid.test(data.draftHead))) ||
       (version === 'draft' && data.baseCommit !== data.draftHead) || !Array.isArray(data.versionFiles)) throw new Error('Invalid response')
@@ -203,19 +239,25 @@ export function validateSnapshot(value: unknown, id: string, version: Version): 
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) if (paths.has(parts.slice(0, i).join('/'))) throw new Error('Conflicting paths')
   }
-  return { ...data, versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) }
+  const activeHistoryMismatch = version === 'current' && data.activeHistoryMismatch === true ? { activeHistoryMismatch: true as const } : {};
+  const result: Snapshot = { ...data, ...(packPath === undefined ? {} : { packPath }), ...activeHistoryMismatch, versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) };
+  if (!(version === 'current' && data.activeHistoryMismatch === true)) delete result.activeHistoryMismatch;
+  return result
 }
 function readError(error: unknown): string {
-  const status = (error as { status?: number } | null)?.status
+  const value = error as { status?: unknown; body?: unknown } | null
+  const status = value?.status
+  const body = parseErrorBody(value?.body)
   if (status === 401) return '请先登录，再查看版本文件。'
   if (status === 403) return '没有权限或请求来源不被允许，无法查看版本文件。'
   if (status === 404) return '版本或接口不可用，请检查服务版本和对应快照。'
-  if (status === 409) return '版本快照存在冲突，暂无法安全读取。'
+  if (status === 409 && body?.code === 'SNAPSHOT_CONFLICT') return '同一工作流匹配到多个 Pack，或 Pack 布局存在冲突；暂无法安全读取，请先整理重复的 Pack 或冲突的目录布局，再重新读取。'
+  if (status === 409 && body?.code === 'VERSION_CONFLICT') return '版本已发生变化，请刷新或重新读取后再继续。'
   if (status === 503) return '版本服务暂不可用，请稍后重试。'
   return '无法读取完整版本文件，服务响应可能不兼容，请稍后重试。'
 }
 export function load(session: Session, id: string, version: Version) {
-  if (session.state.saving || session.state.uploading || session.state.reconciliation?.version === version) return
+  if (session.state.saving || session.state.uploading || session.state.postSaveVerificationError || session.state.reconciliation?.version === version) return
   session.requests[version]?.abort()
   const controller = new AbortController()
   session.requests[version] = controller
@@ -224,9 +266,12 @@ export function load(session: Session, id: string, version: Version) {
     .then(value => {
       if (controller.signal.aborted) return
       const snapshot = validateSnapshot(value, id, version)
-      updateVersion(session, version, { snapshot, files: snapshot.versionFiles.map(file => ({ ...file })), loading: false, error: null, blocked: false, notice: null })
+      updateVersion(session, version, { snapshot, files: snapshot.versionFiles.map(file => ({ ...file })), loading: false, error: null, readFailure: undefined, blocked: false, notice: null })
     }).catch(error => {
-      if (!controller.signal.aborted) updateVersion(session, version, { loading: false, error: readError(error) })
+      if (!controller.signal.aborted) {
+        const message = readError(error)
+        updateVersion(session, version, { loading: false, error: message, readFailure: message })
+      }
     }).finally(() => { if (session.requests[version] === controller) delete session.requests[version] })
 }
 

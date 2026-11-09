@@ -25,9 +25,14 @@ required-features = ["test-utils"]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-test-utils = []
+test-utils = ["dep:bcs-tracing-api", "dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e"]
 
 [dependencies]
+bcs-a2a-binding-api = { workspace = true, optional = true }
+a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
+reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"], optional = true }
+bcs-network-tracing.workspace = true
+bcs-tracing-api = { workspace = true, optional = true }
 bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
@@ -67,8 +72,6 @@ reqwest = { workspace = true }
 
 # WebSocket client (for bot communication and DingTalk Stream Mode)
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
-native-tls = "0.2"
-tokio-native-tls = "0.3"
 
 # UUID
 uuid = { workspace = true }
@@ -78,8 +81,6 @@ fastrand = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 
-# Regex
-regex = { workspace = true }
 
 # Time
 time = { workspace = true }
@@ -90,8 +91,6 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 bcs-caller-identity-jwt = { workspace = true }
 
-# Directories (for config file discovery)
-dirs = { workspace = true }
 
 # Metrics (optional)
 metrics = { workspace = true, optional = true }
@@ -124,6 +123,7 @@ bcs-cache-local = { workspace = true }
 bcs-cache-redis = { workspace = true }
 bcs-db-local    = { workspace = true }
 bcs-db-mysql    = { workspace = true }
+bcs-db-migrations = { workspace = true }
 bcs-ws          = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-channel = { workspace = true }
@@ -212,11 +212,6 @@ base64 = "0.22"
 # CLI argument parsing
 clap = { workspace = true }
 
-# Network interface enumeration
-if-addrs = "0.15"
-
-# URL query string parsing (for AxumRequestAdapter)
-form_urlencoded = "1"
 
 [build-dependencies]
 chrono = { workspace = true }

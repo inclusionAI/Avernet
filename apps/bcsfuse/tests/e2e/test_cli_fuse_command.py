@@ -15,8 +15,8 @@ import sys
 from io import StringIO
 from unittest.mock import patch, MagicMock
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.domain.models.fusion_result import Perspective
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 
 
 # =============================================================================
@@ -53,12 +53,12 @@ class TestCLIFuseModule:
         """测试 CLI 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.interfaces.cli.bcs_cli")
+        module = importlib.import_module("app.adapters.cli.bcs_cli")
         assert module is not None
 
     def test_cli_fuse_function_exists(self):
         """测试 fuse 命令函数存在"""
-        from src.interfaces.cli.bcs_cli import fuse_command
+        from app.adapters.cli.bcs_cli import fuse_command
 
         assert fuse_command is not None
 
@@ -72,7 +72,7 @@ class TestCLIFuseArguments:
 
     def test_minimal_arguments(self):
         """测试最小参数"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         args = parse_args([
             "fuse",
@@ -87,7 +87,7 @@ class TestCLIFuseArguments:
 
     def test_full_arguments(self):
         """测试完整参数"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         args = parse_args([
             "fuse",
@@ -105,7 +105,7 @@ class TestCLIFuseArguments:
 
     def test_no_parallel_flag(self):
         """测试 --no-parallel 标志"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         args = parse_args([
             "fuse",
@@ -120,7 +120,7 @@ class TestCLIFuseArguments:
 
     def test_no_strict_participants_flag(self):
         """测试 --no-strict-participants 标志"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         args = parse_args([
             "fuse",
@@ -143,8 +143,8 @@ class TestCLIFuseOutput:
 
     def test_json_output(self, capsys):
         """测试 JSON 输出"""
-        from src.interfaces.cli.bcs_cli import fuse_command
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command
+        from app.application.services.group_fusion_service import GroupFusionService
 
         mock_provider = MockPerspectiveProvider()
         service = GroupFusionService(provider=mock_provider)
@@ -167,8 +167,8 @@ class TestCLIFuseOutput:
 
     def test_pretty_output(self, capsys):
         """测试格式化输出"""
-        from src.interfaces.cli.bcs_cli import fuse_command
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command
+        from app.application.services.group_fusion_service import GroupFusionService
 
         mock_provider = MockPerspectiveProvider()
         service = GroupFusionService(provider=mock_provider)
@@ -188,8 +188,8 @@ class TestCLIFuseOutput:
 
     def test_output_includes_perspectives(self):
         """测试输出包含 perspectives"""
-        from src.interfaces.cli.bcs_cli import fuse_command
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command
+        from app.application.services.group_fusion_service import GroupFusionService
 
         perspectives = {
             "dba": Perspective(
@@ -229,8 +229,8 @@ class TestCLIFuseServiceIntegration:
 
     def test_cli_uses_same_service_as_http(self):
         """测试 CLI 使用与 HTTP 相同的服务"""
-        from src.interfaces.cli.bcs_cli import fuse_command
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # 创建 service
         mock_provider = MockPerspectiveProvider()
@@ -247,7 +247,7 @@ class TestCLIFuseServiceIntegration:
             )
 
         # 验证返回值是 FusionResult
-        from src.domain.models.fusion_result import FusionResult
+        from app.domain.models.fusion_result import FusionResult
         assert isinstance(result, FusionResult)
 
 
@@ -260,8 +260,8 @@ class TestCLIFuseExitCodes:
 
     def test_success_exit_code(self):
         """测试成功退出码"""
-        from src.interfaces.cli.bcs_cli import fuse_command, ExitCode
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command, ExitCode
+        from app.application.services.group_fusion_service import GroupFusionService
 
         mock_provider = MockPerspectiveProvider()
         service = GroupFusionService(provider=mock_provider)
@@ -281,8 +281,8 @@ class TestCLIFuseExitCodes:
 
     def test_partial_success_exit_code(self):
         """测试部分成功退出码"""
-        from src.interfaces.cli.bcs_cli import fuse_command, ExitCode
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command, ExitCode
+        from app.application.services.group_fusion_service import GroupFusionService
 
         perspectives = {
             "dba": Perspective(
@@ -321,14 +321,14 @@ class TestCLIFuseErrorHandling:
 
     def test_missing_required_args_shows_help(self):
         """测试缺少必填参数显示帮助"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         with pytest.raises(SystemExit):
             parse_args(["fuse"])  # 缺少必填参数
 
     def test_invalid_timeout_value(self):
         """测试无效超时值"""
-        from src.interfaces.cli.bcs_cli import parse_args
+        from app.adapters.cli.bcs_cli import parse_args
 
         with pytest.raises(SystemExit):
             parse_args([

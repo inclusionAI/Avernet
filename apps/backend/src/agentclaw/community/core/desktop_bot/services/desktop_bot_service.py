@@ -68,6 +68,9 @@ from agentclaw.community.plugin_api.passport import PassportPlugin, PassportErro
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import DesktopBotServiceProtocol
+from agentclaw.community.core.bot_management.collaboration_repair.profile import (
+    outbound_avatar_from_record,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -221,6 +224,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
                 connection_mode=connection_mode,
+                avatar_url=outbound_avatar_from_record(
+                    bot, log_context="[DesktopBotService]"
+                ),
                 respect_drm=False,
             )
         except Exception as error:
@@ -1536,6 +1542,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
+                bot_type="desktop",
                 access_mode="RESTRICTED",
                 device_token=device_token,
                 workspace_path=workspace_path,

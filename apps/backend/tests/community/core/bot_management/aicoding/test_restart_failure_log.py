@@ -25,19 +25,18 @@ def test_only_physical_ids_are_labeled_as_arca(target, sandbox, expected):
     assert arca_identity(target, sandbox) == expected
 
 
-@pytest.mark.parametrize(('phase', 'responses'), [
-    ('prepare', [response('failed')]),
-    ('verify', [committed(), response('failed')]),
-])
+@pytest.mark.parametrize('responses', [
+    [response('failed')], [response('running'), response('failed')],
+], ids=['start', 'poll'])
 @pytest.mark.parametrize(('target', 'sandbox', 'expected'), [
     ('ARCA-SANDBOX-abc@8', None, 'ARCA-SANDBOX-abc@8'),
     ('old-sandbox@8', 'old-sandbox@8', 'old-sandbox@8'),
 ])
 def test_strict_backup_alarm_includes_exact_container_and_failure_stage(
-    phase, responses, target, sandbox, expected, caplog,
+    responses, target, sandbox, expected, caplog,
 ):
     execute = executor(responses)
-    with pytest.raises(backup.RestartBackupBlocked):
+    with patch.object(backup.time, 'sleep'), pytest.raises(backup.RestartBackupBlocked):
         verify = backup._attempt_backup(
             execute=execute, operation_id=OPERATION, bot_id='b',
             target_id=target, sandbox_id=sandbox, blocking_enabled=lambda: True,
@@ -47,10 +46,10 @@ def test_strict_backup_alarm_includes_exact_container_and_failure_stage(
     assert alarms
     for record in alarms:
         line = record.getMessage()
-        assert record.levelno == logging.ERROR
+        assert record.levelno == logging.WARNING
         assert f'bot_id=b arca_id={expected} target_id={target}' in line
         assert f'operation_id={OPERATION}' in line
-        assert f'phase={phase} ' in line
+        assert 'phase=prepare ' in line
         assert 'reason=backup_failed' in line
         assert 'helper_status=failed' in line
         assert 'restart_backup.py:' in line
@@ -144,6 +143,7 @@ def test_inventory_verification_failure_retains_resolved_arca_owner_and_env(capl
     assert all('owner_id=owner' in line and 'env=pre' in line for line in alarms)
     assert all('private inventory' not in line for line in alarms)
     assert runtime.list_devices_by_bot_uuid.call_count == 2  # Logging adds no lookup.
+    assert all(record.levelno == logging.WARNING for record in caplog.records)
 
 
 @pytest.mark.parametrize(('server_env', 'expected'), [

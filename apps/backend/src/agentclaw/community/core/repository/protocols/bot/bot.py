@@ -102,6 +102,15 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_live_by_bot_id(self, bot_id: str) -> List[Dict[str, Any]]:
+        """List ALL live rows sharing this bot_id in this env (no .first()).
+
+        共享 bot_id(如 ``default``,每用户一行)与启动订正的归属判定
+        都依赖看到全部 live 行。
+        """
+        ...
+
+    @abstractmethod
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -293,6 +302,18 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """Stage-enriched first ``len(pairs)`` matches, without COUNT.
+
+        Same tenant/env/deletion scope and newest-first ordering as
+        list_bots_by_owner_bot_pairs(page=1, page_size=len(pairs)). At most
+        100 input pairs; empty input returns []. This grants no permissions.
+        """
+        ...
+
+    @abstractmethod
     def list_domain_bots(
         self,
         page: int | None = None,
@@ -376,6 +397,7 @@ class BotRepository(Protocol):
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         """Count bots by owner_id.
 
@@ -388,6 +410,9 @@ class BotRepository(Protocol):
                 Used to exclude desktop bots from cloud bot limits.
             exclude_active_engine: Optional case-insensitive engine exclusion for
                 quota checks. NULL engines still count. Default counts all engines.
+            exclude_identity_inheriting: If provided, exclude bots that inherit
+                another bot's identity. Those hold no passport of their own, so
+                they consume no identity slot.
         """
         ...
 
@@ -426,6 +451,16 @@ class BotRepository(Protocol):
     @abstractmethod
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         """Check if a bot with specific bot_id exists for the owner."""
+        ...
+
+    @abstractmethod
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Guards deletion of an identity Bot: while any live Bot depends on its
+        passport, deleting the source would strand them with no identity and no
+        way to be re-pointed. Soft-deleted Bots are not counted.
+        """
         ...
 
     @abstractmethod
@@ -745,4 +780,14 @@ class RenderScreenRepository(Protocol):
     @abstractmethod
     def delete_by_id(self, *, record_id: int) -> None:
         """软删除（is_delete=1）。"""
+        ...
+
+    @abstractmethod
+    def list_all_for_backfill(self) -> list[RenderScreenRecord]:
+        """启动订正专用:当前 env 全量未删除记录,不带 owner 过滤。"""
+        ...
+
+    @abstractmethod
+    def update_owner_by_id(self, *, record_id: int, owner_id: str) -> None:
+        """启动订正专用:按主键归位记录的 owner scope。"""
         ...

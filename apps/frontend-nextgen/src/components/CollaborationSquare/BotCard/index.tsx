@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -14,9 +15,9 @@ import { cn } from '@/utils/cn';
 import { Hash, MessageCircleMore, Plus, Share2, UserRound } from 'lucide-react';
 import type { ReactElement } from 'react';
 
-// dmore 公开Bot 卡片（Bot卡片 362.67×122.5）：白底、16px 圆角、双层软阴影；无描边。
-// 导出供骨架 {@link SquareBotCardSkeleton} 复用，保证 loading→loaded 无阴影 pop。
-export const BOT_CARD_SHADOW = 'shadow-[0_2px_8px_rgba(0,10,26,0.07),0_4px_12px_rgba(0,10,26,0.04)]';
+// 公开Bot 卡片：与公开协作群卡/专家市场卡同一套广场卡语言——白底、16px 圆角、
+// 1px #EEE 描边（border-divider）、无静态阴影，hover 才出 shadow-sm
+// （dmore 原稿的双层常驻软阴影已随描边方案废弃，三个 Tab 卡面统一）。
 
 // 右上角状态 chip（dmore「申请中」55×32）：6px 圆角、警示橙软底。
 const STATUS_CHIP = 'flex h-8 items-center rounded-md px-2 text-xs';
@@ -54,6 +55,8 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
     targetActorId: getPublicBotTargetId(bot),
     relationshipStatus: bot.relationshipStatus,
     isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
+    // BCS-only（Backend 关闭）时 Human 主操作转为「已是好友」展示，不再提供 Backend 私聊入口。
+    backendChatEnabled: getCapabilities().getPublicBotBackendEnabled(),
   });
   const canStartConversation = primaryAction === 'open_human_bot_conversation';
   const primaryDisabled =
@@ -82,13 +85,14 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
       data-bot-id={bot.id}
       aria-current={highlighted ? 'true' : undefined}
       className={cn(
-        'flex h-full min-w-0 flex-col rounded-2xl border-0 bg-card p-4 transition-[box-shadow,background-color] duration-500',
-        highlighted ? `ring-2 ring-primary ${BOT_CARD_SHADOW}` : BOT_CARD_SHADOW,
+        'flex h-full min-w-0 flex-col rounded-2xl border border-divider bg-card p-4 transition-shadow hover:shadow-sm',
+        // 深链定位高亮：蓝环 + 常驻 shadow-sm，目标卡无需 hover 也立得住。
+        highlighted ? 'ring-2 ring-primary shadow-sm' : '',
       )}
     >
-      {/* 头部行：40px 圆角头像 + 名称/身份元信息 + 右侧操作（dmore Container@(17,17)）。 */}
+      {/* 头部行：40px 圆形头像 + 名称/身份元信息 + 右侧操作（dmore Container@(17,17)）。 */}
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Avatar name={bot.name} src={bot.avatarUrl} size={40} />
         </div>
         <div className="min-w-0 flex-1">
@@ -140,6 +144,7 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
               <IconButton
                 label={primaryLabel}
                 loading={busy}
+                data-guide-target="discover-add-friend-button"
                 icon={
                   canStartConversation ? (
                     <MessageCircleMore aria-hidden className="h-4.5 w-4.5" />
@@ -174,15 +179,15 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
 }
 
 /**
- * 公开 Bot 卡加载骨架：逐区镜像真实 Bot 卡（dmore 362.67×122.5）——40px 圆角头像位 +
- * 名称行/元信息灰字行、右上 32px 图标钮位、两行描述与 Profile 行；沿用卡面双层软阴影，
- * loading→loaded 切换时零跳版无阴影 pop。占位块统一走 ui/Skeleton（脉冲叠色）。
+ * 公开 Bot 卡加载骨架：逐区镜像真实 Bot 卡——40px 圆形头像位 +
+ * 名称行/元信息灰字行、右上 32px 图标钮位、两行描述与 Profile 行；卡面描边静止态与
+ * 真实卡一致（无静态阴影），loading→loaded 切换时零跳版。占位块统一走 ui/Skeleton（脉冲叠色）。
  */
 export function SquareBotCardSkeleton() {
   return (
-    <div className={cn('flex h-full min-w-0 flex-col rounded-2xl border-0 bg-card p-4', BOT_CARD_SHADOW)}>
+    <div className="flex h-full min-w-0 flex-col rounded-2xl border border-divider bg-card p-4">
       <div className="flex items-start gap-3">
-        <Skeleton.Block className="h-10 w-10 shrink-0 rounded-xl" />
+        <Skeleton.Block className="h-10 w-10 shrink-0 rounded-full" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <Skeleton.Line className="h-[18px] w-2/5" />
           <Skeleton.Line className="w-3/5" />

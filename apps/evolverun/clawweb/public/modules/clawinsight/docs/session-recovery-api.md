@@ -168,7 +168,11 @@ Owner 等待（包括到期释放容器）、阶段变化、审批、通知和�
 
 服务先保存事实与结果，再异步回报。回报失败重送原版本，不重发建议、不重做操作。同一任务可多次效果等待超时，每次生成独立结果版本；恢复和最终完成不会覆盖尚未送达的旧结果，按版本顺序回传。`completed + not_intervened` 是 Debug 演练结束；执行异常可以是 `failed + unknown`。
 
-`intervention_status` 由控制面按整条任务的工具审计生成，累计所有 AIS 执行和重试，与 `status`、`effect` 独立。恢复消息须由受控原会话或轨迹读取确认本次投递键的实际消息；通道 `accepted` 只证明受理，尚未确认时为 `unknown`。环境操作须有成功执行回执或经现有 `reconcile_write` 核实为 `applied`；通用写入核实不能代替恢复消息的触达证明。超时、回执缺失、执行中的操作以及可能部分执行的失败均保留为 `unknown`；下发前拒绝、未领取操作或核实为 `not_applied` 不计实际干预。只有读取、方案、通知或 Owner 配合也不计干预，Debug 为 `none`。只要已有一次确认干预，后续失败不抹除该事实；`performed` 不代表全部动作成功或原任务恢复。仅新建任务在既有上下文产物中记录完整审计覆盖；历史产物缺少该标记时，即使此前已完成存储迁移，也不能推断 `none`。内部标记不暴露给 Agent，不增加表或数据库字段。回传快照固定生成时的结论，不重写旧版本或补写历史字段。
+`intervention_status` 由控制面按整条任务的工具审计和已保存的 Owner 权限处理回执生成，累计所有 AIS 执行和重试，与 `status`、`effect` 独立。恢复消息须由受控原会话或轨迹读取确认本次投递键的实际消息；通道 `accepted` 只证明受理，尚未确认时为 `unknown`。环境操作须有成功执行回执或经现有 `reconcile_write` 核实为 `applied`；通用写入核实不能代替恢复消息的触达证明。超时、回执缺失、执行中的操作以及可能部分执行的失败均保留为 `unknown`；下发前拒绝、未领取操作或核实为 `not_applied` 不计实际干预。
+
+Owner 权限处理回执须通过身份、控制面环境和当前处理事项校验，并成功持久化为带 `owner_request_id` 的 `owner_decision` 事件，才计为 `performed`。仅发出通知、普通转交、等待 Owner、方案审批或一般配合不计；连通性探测、无效或过期回调、保存失败不计，重复回调不新增干预事实。回执保存后即使 AIS 续接失败或再次等待 Owner，已确认的干预事实仍保留；回执本身不证明权限已生效或原任务已恢复，效果仍须后续核验。配置反馈只触发重新核验，单独的点击回执不计干预，后续干预仍按工具审计判断。Debug 为 `none`。
+
+只要已有一次确认干预，后续失败不抹除该事实；`performed` 不代表全部动作成功或原任务恢复。仅新建任务在既有上下文产物中记录完整审计覆盖；历史产物缺少该标记时，即使此前已完成存储迁移，也不能推断 `none`。内部标记不暴露给 Agent，不增加表或数据库字段。回传快照固定生成时的结论，不重写旧版本或补写历史字段。
 
 结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。发送器每条结果首次发送失败后最多重试 3 次，分别退避 1、5、15 分钟；次数与允许时间持久化，发送前通过任务版本条件更新领取资格，避免多实例同时发送。每轮只读取一页最多 5 个候选任务、串行发送最多 5 条请求，下轮从游标继续。超限后停止自动回传，完整结果仍保留，任务时间线记录停止原因与累计尝试次数；历史已超限记录不再发送。回传失败或停止不改变自愈任务的业务状态、恢复效果或干预事实。
 
@@ -216,9 +220,9 @@ CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一
 
 任务入口：`/insight?module=monitoring&recoveryTaskId=<task_id>`。
 
-页面查询、分享设置、决策和人工标注使用现有用户登录身份。默认仅任务 Owner 或管理员可查看；Owner 或管理员可开启分享，开启后其他登录用户可通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
+页面查询、分享设置、决策和人工标注使用现有用户登录身份。任务 Owner 或管理员可查看。Host 接入 Bot 协作者校验时，当前协作者也可通过链接只读查看对应真实 Bot 的自愈详情及工具证据，按任务的 Bot ID、Owner 和目标环境核对权限。Owner 或管理员可开启分享，让其他登录用户通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
 
-分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
+分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。公开分享或 Bot 协作者权限撤销后，已无其他访问授权的用户读取详情或证据时返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
 
 详情的 `executions` 从现有 `agent_execution` Step 只读生成，按执行次数升序返回 `executionId / attempt / status / jobId / jobUrl`，不包含执行票据或归档上传地址。`jobUrl` 由 Host 的现有 AIS 服务生成；未取得作业编号或 Host 未提供链接时相应字段为 `null`。页面以时间线事件的 `payload.execution_id` 关联具体执行，在该条记录旁展示对应 AIS 作业链接；派发失败未取得编号时明确展示，不指向其他轮次的作业。读取不补写历史事件，也不改变任务状态或回传结果。
 
@@ -274,24 +278,32 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
-### 按手册纯通知转交 Owner 自行处理（省略 owner_request）
+### Owner 业务交接内容
 
-Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
-`{"kind":"owner_handoff","phase":"当前阶段","delivery":"confirmed|unconfirmed","response":"acted|replied|none|unknown","effect":"recovered|not_recovered|unknown","summary":"原任务实际进展、剩余阻塞或优化建议、手册处理依据、具体对象及 Owner 指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
+支持 `bootstrap.ownerHandoffProtocol=session-recovery-handoff/v1` 的服务，在 `kind=owner_handoff` 中接收独立 `handoff={"summary":"具体问题说明","instructions":"Owner处理事项"}`。两项都是非空、无凭据的 Markdown 文本，各最多 1024 个 UTF-8 字节；问题说明简洁呈现仍阻碍原任务的实际问题，处理事项保留全部必要缺项、权限对象和已核实入口。它们由同一次 Agent 判断提供，不增加独立模型调用，不包含通知呈现或互动控制信息。主 `summary` 继续保存完整调查、判断和依据。
+
+普通转交将 `handoff` 保存于终止事件并直接用于 Owner 通知；处理反馈待办复用相同交接内容写入既有 `ownerRequest.summary/instructions`，完整报告保留在 waiting 事件。声明交接内容协议时，`owner_request` 只提供待办的 `reason`。旧结果仍可省略 `handoff`，权限待办仍接受原 `owner_request.instructions`；存在冲突的两份处理事项会被拒绝，避免发送含糊指引。新包只在收到协议声明时输出 `handoff`，先部署后端再更新自愈包。
+
+交接内容不从 `effect` 拼接，不从自由 Markdown 标题中猜取，也不把调查报告的开头当作 Owner 事项。新交接文本完整发送；旧结果超长时明确指向任务详情中的完整说明或清单，不截断材料项、操作或 URL。Bot 和逻辑会话等定位字段沿用原任务身份。没有新增表、业务状态、应用配置或模板变量。
+
+### 普通转交 Owner 自行处理（省略 owner_request）
+
+Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢复方法无法安全解除且需要 Owner 处理，或满足明确的发送前观察到期条件时，回报
+`{"kind":"owner_handoff","phase":"当前阶段","delivery":"confirmed|unconfirmed","response":"acted|replied|none|unknown","effect":"not_recovered|unknown","summary":"原任务实际进展、剩余阻塞、现有恢复路径不可执行的现场依据及具体 Owner 事项（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
 此结果表示处置决定，不使用普通 `blocked` 的错误原因表达；控制面不识别具体故障类别。`assess`、`observe`、`plan`、`verify` 均可提交，不能在 `apply` 执行环境动作中途切换，Debug／仿真禁止真实转交。
 
-服务校验当前任务、执行归属、版本及已保存的现场读取证据，复用现有 Owner 通知发送指引并记录回执。
+服务校验当前任务、执行归属、版本及已保存的现场读取证据，发送不带确认操作的 Owner 卡片并记录回执。必要补料属于普通转交，说明具体缺项及回原会话补充的方法。
 不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
-`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，干预情况仍由实际审计计算，通知不算干预。`delivery`／`response` 成对提交并保存，复用普通效果回报的校验：`confirmed` 必须有受控读取核实当前投递标识的证据，`acted`／`replied` 必须先确认本次触达；未发指引用 `unconfirmed`／`none`，关联证据不足用 `unknown`，不因转交自动推断触达或行动。旧包同时省略这两个字段时保留已有判断，无判断则为 `unconfirmed`／`unknown`；单字段、无效值或无触达证据的确认返回 422，不结束任务或发送通知。新包明确回报三种效果之一；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
-通知失败或禁用时同样结束，但页面不得显示“已通知”；已恢复时展示后续建议及实际通知状态，仍需人工处理时展示 Owner 处理指引。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，干预情况仍由实际审计计算，通知不算干预。`delivery`／`response` 成对提交并保存，复用普通效果回报的校验：`confirmed` 必须有受控读取核实当前投递标识的证据，`acted`／`replied` 必须先确认本次触达；未发指引用 `unconfirmed`／`none`，关联证据不足用 `unknown`，不因转交自动推断触达或行动。旧包同时省略这两个字段时保留已有判断，无判断则为 `unconfirmed`／`unknown`；单字段、无效值或无触达证据的确认返回 422，不结束任务或发送通知。新包明确回报 `not_recovered` 或 `unknown`；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复；已有恢复结论仍须走正常效果流程。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
+通知失败或禁用时同样结束，但页面不得显示“已通知”；展示尚未解除的阻塞、Owner 处理指引及真实通知状态。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
 
-原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。独立权限申请或必要补料按下节等待反馈；环境修复所需动作及方案内配合仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+有现场依据、符合权限的纠正、有限重试或剩余步骤续接路径时必须先执行恢复，不能以优化建议、诊断标签或 Cron 本轮结束代替无法干预的证据。原任务已恢复时按正常效果流程完成，优化建议写入完成总结并随现有结果通知提供，不进入 `owner_handoff`，不等待修改或重跑验证。转交显式回报 `effect=recovered`、省略效果但沿用的已有判断为 `recovered`，或试图直接把已有恢复改成未知／未恢复，均返回 422，任务不结束、不通知、不改变已核实的效果；新的阻塞需先通过正常观察回报实际变化。独立权限申请和符合条件的配置补齐按下节等待反馈；环境修复所需动作及方案内配合仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
 
 兼容与发布顺序：通用转交依赖支持 `owner_handoff` 的结果发送／接收后端和页面。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为通用转交并明确 `effect=not_recovered`，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。
 
 本次新通用 Skill 手册需先随自愈包上传，再部署包含 `TC.SKILL` 新候选路径的后端，避免新任务引用旧包中不存在的手册；效果回报与通知行为在配套后端部署后生效。恢复执行继续使用任务创建时保存的手册引用，不给旧任务补入新候选。后端保持兼容旧包省略效果的输入；若回滚到不含新手册的旧包，应先停止后端产生该新候选引用，避免缺失手册导致执行失败。
 
-### 权限／必要补料：Owner 反馈后续接同一任务
+### Owner 处理反馈后续接同一任务
 
 保持 `kind=owner_handoff`，增加可选 `owner_request` 对象：
 
@@ -299,21 +311,24 @@ Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化�
 {
   "kind": "owner_handoff",
   "phase": "assess",
-  "summary": "评审缺权益规则正文和图1，无法继续核对权益条件",
+  "summary": "原任务所需文档拒绝读取，已核实需 Owner 申请权限",
   "evidence_ids": ["已留存的受控现场读取证据ID"],
-  "owner_request": { "reason": "materials", "instructions": "请在原业务会话补权益规则正文和图1原图；处理后点击已处理，继续核验。" }
+  "handoff": { "summary": "当前任务无法读取所需文档，仍缺少访问权限。", "instructions": "请通过原文档页面为任务执行身份申请读取权限。" },
+  "owner_request": { "reason": "permission" }
 }
 ```
 
-`reason` 仅接受 `permission | materials`。`summary` 与 `instructions` 均为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
+`reason` 接受 `permission` 或 `configuration`。后者适用于已核实的配置缺项，且补齐后可用受控只读方法验证配置与待续接步骤。配置待办在 `assess` 有本轮消息已受理或投递结果未知时先回收效果。补材料和其他非反馈事项使用普通转交，省略 `owner_request`。使用 `handoff` 时待办直接复用它的问题说明和处理事项；旧包的待办 `summary` 与 `instructions` 仍为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
 
 新增 Task 可选 `ownerRequest`：后台生成 `requestId`、递增 `revision`、`status=pending|confirmed`，保存 `reason/summary/instructions/evidence_ids/resumePhase/createdAtMs` 和可选 `feedback={userId,text,atMs}`。复用 waiting_owner，无新业务状态、表、上游结果字段或空环境Plan。当前身份和状态留在Task配置；完整内容及反馈走已有详情对象。初始待办不会向上游发最终结果，不声明恢复，也不要求先干预Bot。
 
 登录态 `POST /monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm` 接受 `{ "feedback": "可省略，最多4,000字符，不含凭据" }`，返回 `{"ok":true}`。Owner或管理员沿现有资源权限确认，服务核对当前待办和CW控制面，先持久化再异步启动。重复确认幂等；旧卡、终止任务和其他环境不可重新激活。此接口不调用方案decide、不授予环境操作、不提交业务确认。
 
-反馈后重新assess，但保留历史计划、动作和原阶段。必须先成功读取最新原会话／轨迹，NAS说明不代替这一读取；否则不允许续接消息、阶段判断或恢复结论。原任务已被用户接手时沿原协议让路。需要续接时每个requestId只有一条固定身份消息；重复请求和新execution复用该身份，原初始delivery保持原样。原阶段为verify时，新评估后的观察回到verify，不开启第二套Plan。缺项未齐时刷新现场后提交剩余事项，递增requestId/revision并更新同一张卡。
+反馈后重新assess，但保留历史计划、动作和原阶段。必须先成功重新读取原会话／轨迹。OC／CC 沿用 NAS 优先、不可用时回退受控读取的路径；两种成功读取均解除重新核验标记，不按读取来源额外限制。读取失败或重放反馈前的旧工具回执不解除标记，仿真历史边界不变。原任务已被用户接手时沿原协议让路。需要续接时每个requestId只有一条固定身份消息；重复请求和新execution复用该身份，原初始delivery保持原样。原阶段为verify时，新评估后的观察回到verify，不开启第二套Plan。缺项未齐时刷新现场后提交剩余事项，递增requestId/revision并更新同一张卡。
 
 等待期间由现有wrapper轮询；临近Base期限仅释放execution并保存上下文。反馈可在活执行继续，也可启动新的execution恢复同一Task。原执行票据、CAS启动互斥和未知写入核实保持有效。CW重启后maintenance恢复已保存、尚未启动的确认任务。
+
+续接消息的投递身份绑定本次 Owner 待办，工具请求号标识单次发送尝试。发送前失败后可用新的工具请求号重试，已有进行中、通道已受理或结果未知的尝试时返回原回执。评估提交 `decision=message` 需有当前待办已受理或结果未知的投递回执；原任务已自行推进时提交 `decision=observe`。
 
 Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
@@ -321,11 +336,11 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 { "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } }, "bot_overrides": [] }
 ```
 
-保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，原markdown方案审批／纯转交通知不变。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试，首次创建后只更新固定outTrackId，不重建未知卡。未知创建之后的成功更新不独立证明Owner已收到卡片。
+保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，处理反馈待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
-内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。卡片按钮按待办类型显示“已获取权限，继续任务”或“已补齐材料，继续任务”；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
+内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限处理显示“已获取权限，继续任务”，配置补齐显示“已补齐配置，继续核验”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。后端通过 bootstrap 声明 `ownerCooperationProtocol=session-recovery-owner/v1`。仅收到该声明时才可输出 `owner_request`。权限保持兼容，配置另需 `ownerCooperationReasons` 包含 `configuration`。runner 拒绝当前服务未声明的反馈类型。旧服务按其声明选择权限反馈或普通转交。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 
-原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`、`config`。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；与正文一样按 UTF-8 字节截短，完整内容保留在任务中。模板只保留一个确认按钮，原生按钮状态绑定 `confirm_status`（`normal`／`disabled`），点击条件同时使用 `confirm_enabled`（`"true"`／`"false"`）；两者仅在任务未结束且当前待办仍为 pending 时启用。`config` 值为 JSON 字符串 `{"autoLayout":true}`，位于参数 Map 内，支持桌面端自适应宽度，手机端仍受容器限制。模板变量将其声明为 object；此参数不是 `ce_app_config` 的新增配置项。
+原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅处理反馈待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 
 ## 任务整体摘要
 
@@ -357,3 +372,12 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 AIS 派发异常可能把完整响应正文放在异常消息中，因此派发日志只保留错误分类、执行关联和耗时；重试及最终技术失败日志不复制原因正文，具体已脱敏执行报告仍从原任务与 Step 查询。
 
 配置监控时使用多值多分组／分钟统计，关闭常用服务指标，将日志 `count` 求和为一个数值列 `failureCount`，按 1 分钟采集，以普通静态阈值 `failureCount >= 1` 告警，并完成订阅。生产与预发分别采集、分别告警；任务、执行和工具 ID 仅用于追查，不作为聚合维度。上线时需用实际部署日志调试时间戳解析和字段提取，不能仅凭本地测试认定监控采集已经生效。
+
+
+### 恢复优先与失败 Cron 续接
+
+Cron 本轮失败、超时、迭代耗尽或退出不代表原会话不能接收恢复消息。即时核实故障、已有业务结果及用户续聊后，存在明确恢复方法时，通过现有 `retry_message` 向冻结的原会话续接剩余步骤；不因 Cron 终态直接转交，不盲目重跑整个业务。运行中的 OpenClaw Cron 仍遵循原有发送前有界等待。
+
+`assess` 已有 accepted／unknown 初始消息时，普通 `owner_handoff` 返回 422，要求先提交 `assessment / decision=message` 进入观察，保留投递与截止时间。用户续聊、目标不可用和独立权限反馈续接仍按各自协议处理。
+
+方案调查中核实已恢复时，可以提交现有 observation 结果形状，`phase=plan`、`judgment.effect=recovered`。服务回到 `observe` 按普通效果条件完成；触达未确认时恢复最后一次消息的原始观察截止时间继续等待，不重发、不重新计时。`plan` 的其他效果仍不可跳过方案流程直接提交观察。无需新增状态、配置或数据字段；先部署校验后端，再更新自愈包，历史转交记录保持可读。

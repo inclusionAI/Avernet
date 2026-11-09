@@ -31,6 +31,9 @@ import { Tracert } from '@/utils/tracert';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const hideNavigation = getRouteMeta(location.pathname)?.navigationVisibility === 'hidden';
+  // 产品引导（新版助手）全局浮层：capability 门控（Open Core null → 不挂载，零渲染）
+  const guideAssistant = getCapabilities().getGuideAssistant();
+  const GuideOverlay = guideAssistant.status === 'available' ? guideAssistant.value?.Overlay : undefined;
   const activeItem = useMemo(() => getNavigationItem(location.pathname), [location.pathname]);
   // 合并 Open Core 基线与 internal overlay 注入的额外导航项（capability 同步返回，无请求）。
   const mergedItems = useMemo(() => getMergedNavigationItems(), []);
@@ -114,6 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <PrimaryNavContext.Provider value={hideNavigation ? null : primaryNavApi}>
       <div className="flex h-full flex-col bg-[var(--color-bg)]">
         <OpenSourceExperienceNotice />
+        {GuideOverlay ? <GuideOverlay /> : null}
         <div className="flex min-h-0 flex-1">
           {!hideNavigation && (
             <AppSidebar

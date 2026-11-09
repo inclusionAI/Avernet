@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { PendingPublication, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
+import { RefreshCw } from 'lucide-react';
 import { visibilityAudience, visibilityScopeLabels } from '../botVisibilityCopy';
 
 const audienceLabels: Record<PublicAudience, string> = {
@@ -19,12 +20,17 @@ export interface RelationCardProps {
    * 公开风险前置检测在途态（bot-public-risk-check，仅「对用户」行使用）：
    * checking/advancing/approving 锁定编辑并展示徽标；approving 附「查看审批进度」，
    * checking/advancing 附「查看检测工单」（detail_url 缺失时不渲染链接）。
-   * 既有 pending（审批中）优先渲染，避免双徽标。
+   * 在途态行级提供「刷新状态」入口：approving 起钩子停自动轮询（审批终态由后端
+   * 工单回调推进），刷新即重读最新记录同步结论。风险动线审批期后端会把同一申请
+   * 投影进 BCS friend_ext（pendingPublications），故刷新入口不因 pending 隐藏。
+   * 既有 pending（审批中）仍优先渲染角标/外链，避免双徽标。
    */
   riskStatus?: {
     kind: 'checking' | 'advancing' | 'approving';
     detailUrl?: string | null;
     onViewApprovalProgress: () => void;
+    onRefreshStatus?: () => void;
+    refreshingStatus?: boolean;
   } | null;
 }
 
@@ -90,6 +96,18 @@ export function RelationCard({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {stateLink}
+        {riskStatus?.onRefreshStatus ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2 text-primary"
+            loading={riskStatus.refreshingStatus ?? false}
+            leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
+            onClick={riskStatus.onRefreshStatus}
+          >
+            刷新状态
+          </Button>
+        ) : null}
         <Button
           variant="secondary"
           size="sm"

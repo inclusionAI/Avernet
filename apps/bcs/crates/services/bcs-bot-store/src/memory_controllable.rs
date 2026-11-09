@@ -85,6 +85,7 @@ fn candidate_of(
         kind: record.kind,
         status: record.status,
         access_relation: relation,
+        created_at: record.created_at,
     }
 }
 

@@ -245,6 +245,12 @@ def test_inventory_openapi_declares_upgrade_action(client):
     assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
 
 
+def test_inventory_openapi_declares_read_only_config_action(client):
+    schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
+
+    assert "view_config" in schema["properties"]["actions"]["items"]["enum"]
+
+
 def _publication(record_id, status, version):
     return BotPublishRecord(
         id=record_id, source_bot_pk=1, source_bot_id="c1",

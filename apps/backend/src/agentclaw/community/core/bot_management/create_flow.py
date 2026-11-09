@@ -55,6 +55,12 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotTemplateInvalidError,
+    IdentitySourceInvalidError,
+)
+from agentclaw.community.core.bot_management.identity_source import (
+    identity_scope_violations,
+    inherited_agent_code,
+    resolve_identity_source,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
@@ -63,9 +69,13 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
+    passport_mcp_codes_from_entries,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.plugin_api.passport import (
+    PassportError,
+    extract_cli_items,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.plugin_api.bot_create_extension import BotCreateExtension
@@ -328,6 +338,7 @@ def _apply_passport(
             bot_name=bot_name,
             bot_desc=spec.bot_desc,
             engine_type=spec.engine_type,
+            bot_type=spec.bot_type,
             access_mode=_ACCESS_MODE,
             workspace_path=_WORKSPACE_PATH,
         )
@@ -384,191 +395,6 @@ def _query_agent_code(
     )
 
 
-def create_bot_with_authorization(
-    *,
-    user_id: str,
-    nick_name: str,
-    bot_id: str,
-    spec: BotCreateSpec,
-    context: BotCreateContext,
-    cookie: str | None = None,  # see the note on cookies below
-    bot_service: BotService,
-    passport_plugin: PassportPlugin,
-    auth_rel_plugin: AuthRelationshipPlugin,
-    skill_set_factory: SkillSetServiceFactory,
-    create_extension: "BotCreateExtension | None" = None,
-    request: Mapping[str, Any] | None = None,
-) -> Created | AuthPending:
-    """Run the create + Passport-authorization flow for an already-allocated id.
-
-    Returns :class:`AuthPending` when Passport has not yet issued a token (the
-    caller guides the user through the iframe, then polls
-    :func:`complete_bot_authorization`), or :class:`Created` when the bot was
-    created inline. Raises the bot/passport domain errors for the caller to map.
-
-    ``cookie`` forwards the browser session down to the service layer, which is
-    **bad practice** — a transport credential has no business below the adapter
-    boundary. Threaded through only for the internal ``/api/bots`` path, whose
-    downstream memoryos call still relies on it; the public ``/openapi/v1``
-    surface does not pass it. Remove once the internal path stops needing it.
-    """
-
-    # A bound lifecycle extension may reinterpret the request first (identity
-    # fields, provisioning split, pre-issued identity). Opaque to this layer;
-    # everything it decides runs here through the flow's OWN contracts.
-    override = None
-    if create_extension is not None:
-        override = create_extension.resolve_create(
-            bot_id=bot_id, user_id=user_id,
-            request=request if request is not None else {},
-        )
-        if override is not None and override.bot_id:
-            # Continue under the id the extension's own arbitration decided;
-            # the caller's id was allocation only, nothing is written yet.
-            bot_id = override.bot_id
-
-        # Creation policy is evaluated here, rather than in either transport, so no
-    # caller can bypass template/combination rules before Passport or writes.
-    if override is not None:
-        spec = replace(
-            spec,
-            template_config=(
-                dict(override.template_config)
-                if override.template_config is not None else spec.template_config
-            ),
-            template_type=override.template_type or spec.template_type,
-            engine_type=override.engine_type or spec.engine_type,
-        )
-    spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
-
-    # Validate the name up front so an invalid one never reaches Passport or
-    # create. An unset name stays unset — create_bot applies default naming.
-    bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    # Preserve the existing first-Bot Passport path for every Bot type. When the
-    # owner already has service Bots, the first live personal Bot also uses that
-    # path; service and soft-deleted personal Bots do not consume this eligibility.
-    is_first_bot = bot_service.is_first_bot(user_id)
-    use_first_passport = is_first_bot or (
-        spec.bot_type == "personal"
-        and bot_service.is_first_personal_bot(user_id)
-    )
-
-    # Pre-flight before Passport, so quota, name, and reserved-bot engine
-    # violations are reported before an external Passport identity is minted.
-    bot_service.check_create_bot_preflight(
-        user_id=user_id,
-        bot_id=bot_id,
-        engine_type=spec.engine_type,
-        bot_name=bot_name,
-        space_id=spec.space_id,
-        space_quota=context.space_quota,
-    )
-
-    agent_code: str | None = None
-    if override is not None and override.preissued is not None:
-        # The identity already exists (minted in a flow the extension ran
-        # earlier); re-applying would mint a second one. Skip straight to the
-        # create step with the agent code the extension hands over — nothing
-        # external is touched on this path.
-        passport_token = ""
-        agent_code = override.preissued["agent_code"]
-    else:
-        passport_result = _apply_passport(
-            passport_plugin,
-            bot_id=bot_id,
-            user_id=user_id,
-            bot_name=bot_name,
-            spec=spec,
-            mcp_codes=_get_bot_mcp_codes(
-                skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
-                engine_type=spec.engine_type,
-            ),
-            cli_items=get_default_cli_items(
-                spec.engine_type,
-                spec.template_type,
-                ext_info={"template_config": spec.template_config}
-                if spec.template_config is not None
-                else None,
-            ),
-            use_first_passport=use_first_passport,
-        )
-
-        passport_token = None
-        if passport_result:
-            passport_token = passport_result.get("token")
-
-        # No token yet → authorization pending; nothing is created.
-        if not passport_token:
-            iframe_url = passport_result.get("iframe_url") if passport_result else None
-            redirect_url = passport_result.get("redirect_url") if passport_result else None
-            # "Pending" is only a real state if the caller has somewhere to go. With
-            # neither a token nor a handle — including the ``None`` result the plugin
-            # contract explicitly permits — the apply did not succeed, and reporting
-            # it as pending hands back a dead end that is indistinguishable from a
-            # genuine wait.
-            if not iframe_url and not redirect_url:
-                raise PassportError(
-                    f"Passport returned no token and no authorization URL for bot {bot_id}"
-                )
-            return AuthPending(
-                bot_id=bot_id,
-                iframe_url=iframe_url,
-                redirect_url=redirect_url,
-            )
-
-        # A completed Passport identity must include the identifier needed for the
-        # owner relationship. Fail before creating the bot rather than silently
-        # acknowledging a bot that its owner cannot reach through that relationship.
-        agent_code = _require_agent_code(
-            passport_result.get("agent_code") if passport_result else None,
-            bot_id=bot_id,
-        )
-
-    # Token present → create the bot inline.
-    result = create_authorized_bot(
-        bot_service=bot_service,
-        auth_rel_plugin=auth_rel_plugin,
-        user_id=user_id,
-        nick_name=nick_name,
-        bot_id=bot_id,
-        agent_code=agent_code,
-        create_kwargs={
-            "user_id": user_id,
-            "nick_name": nick_name,
-            "bot_name": bot_name,
-            "bot_desc": spec.bot_desc,
-            "entity_id": spec.entity_id,
-            "entity_type": spec.entity_type,
-            "share_policy": spec.share_policy,
-            "engine_type": spec.engine_type,
-            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code, expert_origin=spec.expert_origin),
-            "bot_id": bot_id,
-            "bot_type": spec.bot_type,
-            "template_type": spec.template_type,
-            "template_config": spec.template_config,
-            "cookie": cookie,
-            "space_id": spec.space_id,
-            "space_quota": context.space_quota,
-            "provision": (
-                override.provision
-                if override is not None and override.provision is not None
-                else True
-            ),
-        },
-    )
-
-    if override is not None:
-        # Only a request the extension resolved enters its post-registration
-        # bookkeeping; unrecognized requests run the unextended path.
-        create_extension.after_bot_registered(bot_id=bot_id, user_id=user_id)
-
-    return Created(
-        bot=result,
-        is_first_bot=is_first_bot,
-        passport_token=passport_token,
-    )
-
-
 @dataclass(frozen=True)
 class ManifestCreationSubmitted:
     """What submitting a create-from-manifest request answers with.
@@ -590,6 +416,13 @@ class ManifestCreationSubmitted:
     spec: BotCreateSpec
     context: BotCreateContext
 
+
+# The ordinary create path lives in its own module (module-size guard). Re-exported
+# here so callers keep one import site; placed after this module's helpers, which
+# ``create_authorization`` imports, so the cycle resolves in one direction only.
+from agentclaw.community.core.bot_management.create_authorization import (
+    create_bot_with_authorization as create_bot_with_authorization,
+)
 
 
 def submit_bot_creation_with_manifest(
@@ -635,6 +468,10 @@ def submit_bot_creation_with_manifest(
     5. the Passport application.
     """
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+
+    # Before anything is written: an invalid source must not strand a manifest.
+    identity_source = resolve_identity_source(spec=spec, bot_service=bot_service)
+
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
     bot_service.check_create_bot_preflight(
         user_id=user_id,
@@ -646,11 +483,26 @@ def submit_bot_creation_with_manifest(
     )
 
     # Raises ManifestValidationError with every reason at once. Before Passport.
-    manifest_seam.preflight(
+    parsed_manifest = manifest_seam.preflight(
         document=document,
         engine_type=spec.engine_type,
         bot_type=spec.bot_type,
     )
+
+    if identity_source is not None:
+        violations = identity_scope_violations(
+            parsed_manifest=parsed_manifest,
+            source_passport=passport_plugin.query_agent_passport(
+                bot_id=spec.identity_bot_id,
+                owner_workno=identity_source["entity_id"],
+            ),
+        )
+        if violations:
+            raise IdentitySourceInvalidError(
+                f"declared scope exceeds identity source {spec.identity_bot_id!r}: "
+                + ", ".join(sorted(violations))
+            )
+
     payload_spec = bind_creation_source(
         {**creation_spec_to_payload(spec, context), "nick_name": nick_name},
         tenant=get_current_avernet_tenant(), env=get_current_env(),
@@ -727,8 +579,10 @@ def _apply_and_hand_off(
     The job is started **here** rather than by the caller: it is the last step of
     submission, and a route that started it would be the one place a failure
     could leave a stored manifest with nothing to clean it up.
+
     """
-    passport_result = _apply_passport(
+    # An inheriting Bot applies for nothing: it carries the identity it copies.
+    passport_result = None if spec.identity_bot_id else _apply_passport(
         passport_plugin,
         bot_id=bot_id,
         user_id=user_id,
@@ -761,7 +615,7 @@ def _apply_and_hand_off(
     iframe_url = passport_result.get("iframe_url") if passport_result else None
     redirect_url = passport_result.get("redirect_url") if passport_result else None
     token = passport_result.get("token") if passport_result else None
-    if not token and not iframe_url and not redirect_url:
+    if not spec.identity_bot_id and not token and not iframe_url and not redirect_url:
         # Neither a token nor anywhere to send the user. No bot was created, but
         # the stored manifest is real — the caller above discards it — and the
         # caller would otherwise be left polling a creation nobody can authorize.
@@ -769,9 +623,7 @@ def _apply_and_hand_off(
             f"Passport returned no token and no authorization URL for bot {bot_id}"
         )
 
-    # The durable job, last: its first step reads the authorization that the
-    # application above has only just made, so starting it earlier would only
-    # buy a first run that finds nothing.
+    # The durable job, last: its first step reads the authorization just made.
     manifest_seam.start_job(
         bot_id=bot_id,
         entity_id=entity_id,
@@ -816,6 +668,7 @@ def creation_spec_to_payload(
         "space_id": spec.space_id,
         "engine_properties": spec.engine_properties,
         "expert_origin": spec.expert_origin.as_payload() if spec.expert_origin else None,
+        "identity_bot_id": spec.identity_bot_id,
         **context.as_payload(),
     }
 
@@ -842,6 +695,7 @@ def creation_spec_from_payload(
             space_id=payload.get("space_id"),
             engine_properties=payload.get("engine_properties") or {},
             expert_origin=ExpertOrigin.from_payload(payload["expert_origin"]) if payload.get("expert_origin") else None,
+            identity_bot_id=payload.get("identity_bot_id"),
         ),
         BotCreateContext.from_payload(payload),
     )
@@ -864,17 +718,21 @@ def complete_manifest_creation(
     """
     spec, context = creation_spec_from_payload(job_payload["spec"])
     user_id = str(job_payload["user_id"])
+    bot_id = str(job_payload["bot_id"])
+
     return complete_bot_authorization(
         user_id=user_id,
         # Tasks submitted before owner-name propagation contain no nickname.
         nick_name=job_payload["spec"].get("nick_name", user_id),
-        bot_id=str(job_payload["bot_id"]),
+        bot_id=bot_id,
         spec=spec,
         context=context,
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
         provision=provision,
+        # No passport was applied for, so there is no authorization to poll.
+        authorized=bool(spec.identity_bot_id),
     )
 
 
@@ -892,8 +750,12 @@ def complete_bot_authorization(
     provision: bool = True,
     create_extension: "BotCreateExtension | None" = None,
     request: Mapping[str, Any] | None = None,
+    authorized: bool = False,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
+
+    ``authorized=True`` -- an identity-inheriting Bot, which applied for no
+    passport -- skips only the poll.
 
     ``PENDING`` returns immediately; ``ISSUED`` finishes the (idempotent) create
     and records the owner relationship; any other status is returned verbatim for
@@ -930,17 +792,23 @@ def complete_bot_authorization(
     # the creation attributes and must not bypass the original create contract.
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
 
-    auth_status = passport_plugin.query_auth_status(bot_id=bot_id, owner_workno=user_id)
-    if not auth_status:
-        raise AuthStatusUnavailableError("query auth status returned nothing")
+    if not authorized:
+        auth_status = passport_plugin.query_auth_status(bot_id=bot_id, owner_workno=user_id)
+        if not auth_status:
+            raise AuthStatusUnavailableError("query auth status returned nothing")
 
-    status = auth_status.get("status")
-    if status != AuthStatus.ISSUED:
-        # PENDING (still waiting) and any other status (e.g. REJECTED) are
-        # returned verbatim for the surface to map; nothing is created.
-        return AuthStatusResult(status=status)
+        status = auth_status.get("status")
+        if status != AuthStatus.ISSUED:
+            # PENDING (still waiting) and any other status (e.g. REJECTED) are
+            # returned verbatim for the surface to map; nothing is created.
+            return AuthStatusResult(status=status)
 
-    agent_code = _query_agent_code(passport_plugin, bot_id=bot_id, user_id=user_id)
+    # The code comes from the identity source when nothing was applied for.
+    agent_code = (
+        inherited_agent_code(spec=spec, bot_service=bot_service)
+        if authorized
+        else _query_agent_code(passport_plugin, bot_id=bot_id, user_id=user_id)
+    )
 
     result = create_authorized_bot(
         bot_service=bot_service,
@@ -973,6 +841,7 @@ def complete_bot_authorization(
                 else provision
             ),
             "space_quota": context.space_quota,
+            "identity_bot_id": spec.identity_bot_id,
         },
     )
 

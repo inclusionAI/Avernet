@@ -14,6 +14,8 @@ export type PackScriptSnapshot = {
   /** Full version inventory, only on explicit request. Paths are Pack-relative. */
   packPath?: string;
   draftHead?: string | null;
+  /** True only when the active DB history content differs from the active Git workflow. */
+  activeHistoryMismatch?: true;
   versionFiles?: Array<{ path: string; contentBase64: string; mode: '100644' | '100755' }>;
 };
 
@@ -28,6 +30,7 @@ const DISCOVERY_BATCH_SIZE = 128;
 const DISCOVERY_BATCH_BYTES = 16 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 type Entry = { mode: string; type: string; oid: string; name: string };
+class MalformedSnapshotYamlError extends Error {}
 
 function validId(value: string): boolean {
   return /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(value)
@@ -35,7 +38,7 @@ function validId(value: string): boolean {
 }
 
 /** Read an authorized caller's already-cloned repository. Lazy fetching is disabled where Git supports it. */
-export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean }): Promise<PackScriptSnapshot> {
+export async function readPackScriptSnapshot(repoDir: string, workflowId: string, packId: string, version?: PackScriptVersion, options?: { includeVersionFiles?: boolean; activeTag?: string; allowMalformedDraftWorkflow?: boolean }): Promise<PackScriptSnapshot> {
   if (version !== undefined && version !== 'current' && version !== 'draft') throw new Error('Invalid snapshot version');
   if (!validId(workflowId) || !validId(packId)) throw new Error('Invalid workflowId or packId');
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
@@ -43,7 +46,7 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
   const git = (args: string[], maxBuffer = TREE_LIMIT) => executeGit(args, { cwd: repoDir, env, maxBuffer });
   const text = async (args: string[]) => (await git(args)).toString('ascii').trim();
   const resolve = async (shortRef: string): Promise<string | undefined> => {
-    const full = `refs/remotes/${shortRef}`;
+    const full = shortRef.startsWith('refs/') ? shortRef : `refs/remotes/${shortRef}`;
     try { await git(['show-ref', '--verify', '--quiet', full]); }
     catch (error) {
       if ((error as { status?: number }).status === 1) return undefined;
@@ -54,28 +57,21 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     return oid;
   };
   const wfRef = `origin/wf/${workflowId}`;
-  const savedRef = `origin/saved/${workflowId}`;
   let baseCommit: string;
   let baseRef: string;
-  if (version) {
-    baseRef = version === 'current' ? wfRef : savedRef;
-    const selected = await resolve(baseRef);
+  if (version === 'current') {
+    const tag = options?.activeTag;
+    const prefix = `deploy/${workflowId}/#`;
+    if (!tag?.startsWith(prefix) || !/^[1-9][0-9]*$/.test(tag.slice(prefix.length))) throw new Error('Workflow snapshot not found');
+    const selected = await resolve('refs/pack-version/active');
     if (!selected) throw new Error('Workflow snapshot not found');
+    baseRef = `refs/tags/${tag}`;
     baseCommit = selected;
   } else {
-    // Preserve the legacy reconciliation policy only for callers without a version.
-    const [wf, saved] = await Promise.all([resolve(wfRef), resolve(savedRef)]);
-    if (!wf && !saved) throw new Error('Workflow snapshot not found');
-    baseCommit = wf ?? saved!;
-    baseRef = wf ? wfRef : savedRef;
-    if (wf && saved && wf !== saved) {
-      const ancestor = async (a: string, b: string) => {
-        try { await git(['merge-base', '--is-ancestor', a, b]); return true; }
-        catch (error) { if ((error as { status?: number }).status === 1) return false; throw error; }
-      };
-      if (await ancestor(wf, saved)) { baseCommit = saved; baseRef = savedRef; }
-      else if (!await ancestor(saved, wf)) throw new Error('Workflow ref conflict: histories diverged');
-    }
+    baseRef = wfRef;
+    const selected = await resolve(wfRef);
+    if (!selected) throw new Error('Workflow snapshot not found');
+    baseCommit = selected;
   }
   let treeBytes = 0;
   let treeCalls = 0;
@@ -118,10 +114,15 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     const bytes = await git(['cat-file', 'blob', entry.oid], FILE_LIMIT + 1);
     try {
       if (bytes.includes(0)) throw new Error('binary');
-      const value: unknown = parseYaml(decoder.decode(bytes));
+      const text = decoder.decode(bytes);
+      let value: unknown;
+      try { value = parseYaml(text); } catch { throw new MalformedSnapshotYamlError(`Invalid ${label}`); }
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object');
       return value as Record<string, unknown>;
-    } catch { throw new Error(`Invalid ${label}`); }
+    } catch (error) {
+      if (error instanceof MalformedSnapshotYamlError) throw error;
+      throw new Error(`Invalid ${label}`);
+    }
   };
   const root = await list(baseCommit);
   const rootManifest = root.find(e => e.name === 'workflow.pack.yaml');
@@ -189,14 +190,33 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     if (candidates.length > 1) throw new Error('Pack manifest conflict');
   }
   type Match = { candidate: Candidate; value: Record<string, unknown>; matching: unknown[] };
-  const matches: Match[] = [];
-  for (const candidate of candidates) {
+  const inspect = async (candidate: Candidate): Promise<Match> => {
     const value = await readYamlObject(candidate.manifest, 'pack manifest');
     if (!Array.isArray(value.workflows)) throw new Error('Pack manifest identity mismatch');
     const matching = value.workflows.filter(item => typeof item === 'string'
       ? item === workflowId : Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).id === workflowId));
-    if (!version || matching.length) matches.push({ candidate, value, matching });
+    return { candidate, value, matching };
+  };
+  // A repository-root manifest that declares the requested workflow is
+  // authoritative. Candidates under packs/ are ordinary resources and are not
+  // parsed; a matching manifest outside packs/ is still ambiguous.
+  const rootCandidate = candidates.find(candidate => candidate.packPath === '' && !candidate.directoryName);
+  const rootMatch = rootCandidate ? await inspect(rootCandidate) : undefined;
+  const rootActive = Boolean(rootMatch?.matching.length);
+  const selectedCandidates = rootActive
+    ? candidates.filter(candidate => candidate !== rootCandidate
+      && candidate.packPath !== 'packs' && !candidate.packPath.startsWith('packs/'))
+    : candidates.filter(candidate => candidate !== rootCandidate);
+  const inspected: Match[] = [];
+  if (!version && rootMatch) inspected.push(rootMatch);
+  if (rootActive) inspected.push(rootMatch!);
+  for (const candidate of selectedCandidates) {
+    const match = await inspect(candidate);
+    if (!version || match.matching.length) inspected.push(match);
   }
+  const outsidePacksDuplicate = inspected.some(match =>
+    match !== rootMatch && match.matching.length > 0 && match.candidate.packPath !== 'packs' && !match.candidate.packPath.startsWith('packs/'));
+  const matches = rootActive ? (outsidePacksDuplicate ? inspected : [rootMatch!]) : inspected;
   if (matches.length > 1) throw new Error('Pack manifest conflict');
   if (!matches.length) throw new Error('Pack manifest not found');
   const { candidate, value: manifestValue, matching } = matches[0];
@@ -226,8 +246,15 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
   }
   const workflowEntry = workflowEntries.find(entry => entry.name === parts[parts.length - 1]);
   if (!workflowEntry) throw new Error('Workflow file not found');
-  const workflowValue = await readYamlObject(workflowEntry, 'workflow file');
-  if (workflowValue.id !== workflowId) throw new Error('Workflow identity mismatch');
+  try {
+    const workflowValue = await readYamlObject(workflowEntry, 'workflow file');
+    if (workflowValue.id !== workflowId) throw new Error('Workflow identity mismatch');
+  } catch (error) {
+    // Full draft inventory is informational; the manifest and regular file path
+    // remain authoritative only for a later, separately authorized unified save.
+    if (!(version === 'draft' && options?.includeVersionFiles && options.allowMalformedDraftWorkflow
+      && error instanceof MalformedSnapshotYamlError)) throw error;
+  }
   // An inventory is complete or unavailable: never silently omit file modes or
   // binary resources. The legacy scripts-only response remains unchanged.
   if (options?.includeVersionFiles) {
@@ -236,9 +263,12 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
       ? root.find(entry => entry.name === 'packs')?.oid : baseCommit);
     if (!packTree) throw new Error('Invalid pack directory');
     const versionEntries = await list(packTree, true);
-    // A nested manifest marks an overlapping Pack namespace, including deeply
-    // nested layouts outside manifest discovery. Do not expose its contents.
-    if (versionEntries.some(entry => entry.name.endsWith('/workflow.pack.yaml'))) throw new Error('Mixed Pack layout');
+    // A root Pack can contain another Pack manifest as an ordinary resource
+    // under packs/. Only reject nested manifests outside the ordinary packs/
+    // directory, including deeper overlapping layouts under scripts/.
+    if (versionEntries.some(entry => entry.name.endsWith('/workflow.pack.yaml') && !entry.name.startsWith('packs/'))) {
+      throw new Error('Mixed Pack layout');
+    }
     const fileEntries = versionEntries.filter(entry => entry.type !== 'tree');
     if (fileEntries.length > MAX_FILES) throw new Error('Version file count limit exceeded');
     const versionFiles: NonNullable<PackScriptSnapshot['versionFiles']> = [];
@@ -257,7 +287,7 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
       versionFiles.push({ path: entry.name, contentBase64: data.toString('base64'), mode: entry.mode as '100644' | '100755' });
     }
     return { workflowId, packId: actualPackId, baseCommit, baseRef, files: [],
-      packPath: candidate.packPath, draftHead: (await resolve(savedRef)) ?? null, versionFiles };
+      packPath: candidate.packPath, draftHead: (await resolve(wfRef)) ?? null, versionFiles };
   }
   const skippedFiles: NonNullable<PackScriptSnapshot['skippedFiles']> = { count: 0, paths: [], truncated: false };
   const scripts = entries.find(e => e.name === 'scripts');

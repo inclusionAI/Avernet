@@ -161,6 +161,7 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
             if (
                 bot.get("bot_type") == "service"
                 and bot.get("call_type") == "caller"
+                and str(bot.get("active_engine") or "").strip().lower() != "teclaw"
                 and runtime_stage in (None, RUNTIME_STAGE_ONLINE)
                 and str(bot.get("active_engine") or "").strip().lower()
                 not in _CRON_UNSUPPORTED_ENGINES
@@ -198,6 +199,12 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
                 ))
                 continue
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
+            if str(bot.get("active_engine") or "").strip().lower() == "teclaw":
+                logger.info(
+                    "cron.list.teclaw_stage_targets bot_id=%s owner_id=%s targets=%s",
+                    bot["bot_id"], bot.get("owner_id") or user_id,
+                    [(target.runtime_stage, target.binding_id) for target in bot_targets],
+                )
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
 

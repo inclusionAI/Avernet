@@ -7,6 +7,10 @@ const transform = {
 };
 
 const moduleNameMapper = {
+  '^react$': '<rootDir>/node_modules/react',
+  '^react-dom$': '<rootDir>/node_modules/react-dom',
+  '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
+  '^@task-panel-test/(.*)$': '<rootDir>/assets/task-panel/src/$1',
   // 位图资源（品牌 logo 等）jest 桩：必须放在 `^@/` 之前，让 .png import 在路径改写前先行命中，
   // 否则先经 `@/` 解析到真实 png 文件后不会再二次映射，导致 PNG 被当 JS 解析。src/typings.d.ts 只管类型。
   '\\.(png|jpe?g|gif|webp|avif)$': '<rootDir>/test/mocks/fileMock.js',

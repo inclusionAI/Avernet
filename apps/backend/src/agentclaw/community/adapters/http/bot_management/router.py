@@ -2727,6 +2727,7 @@ async def update_bot(
                     bot_name=bot_name,
                     bot_desc=bot_desc,
                     engine_type=passport_engine_type,
+                    bot_type=str(result.get("bot_type") or "personal"),
                 )
                 logger.info(f"[bot_router.update_bot] Updated passport for bot {bot_id}, engine_type={passport_engine_type}")
             except Exception as e:

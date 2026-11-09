@@ -45,6 +45,10 @@ impl A2aBotCoreService for A2aBotCore {
 
     async fn get_by_name(&self,provider_id:&str,name:&str)->ServiceResult<Option<A2aBotRecord>> {self.cards.get_by_name(provider_id,name).await}
 
+    async fn get_by_provider_ref(&self,provider_id:&str,provider_bot_ref:&str)->ServiceResult<Option<A2aBotRecord>> {
+        self.cards.get_by_provider_ref(provider_id,provider_bot_ref).await
+    }
+
     async fn refreshable_cards(&self, after:Option<&str>, limit:u32)->ServiceResult<Vec<A2aBotRecord>> {
         self.cards.refreshable(after,limit).await
     }
@@ -55,6 +59,14 @@ impl A2aBotCoreService for A2aBotCore {
         self.cards.replace(&record).await
     }
 
+    async fn commit_card_with_visibility(&self,record:A2aBotRecord,expected:u64,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<A2aBotRecord> {
+        let binding=self.provider_binding(&record.provider_id,&record.bot_uuid).await?;
+        if binding.provider_bot_ref!=record.provider_bot_ref {return Err(ServiceError::Conflict("A2A Bot binding changed".into()));}
+        if !self.cards.compare_and_set_with_visibility(&record,expected,visibility).await? {
+            return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
+        }
+        Ok(record)
+    }
     async fn commit_card(&self, record: A2aBotRecord, expected_revision: u64) -> ServiceResult<A2aBotRecord> {
         let binding = self.provider_binding(&record.provider_id, &record.bot_uuid).await?;
         if binding.provider_bot_ref != record.provider_bot_ref {

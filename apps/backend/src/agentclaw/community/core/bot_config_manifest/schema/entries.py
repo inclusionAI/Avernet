@@ -44,6 +44,10 @@ from agentclaw.community.core.apply_engine.support_matrix import (
     digest_required,
     refusal_for,
 )
+from agentclaw.community.kernel.build_ignore import (
+    BuildIgnoreError,
+    normalize_build_ignore_path,
+)
 
 #: ``skip`` is gone. Under per-entry diffing it meant "leave this one alone";
 #: under category overwrite (work-items §3.2) it would mean "delete this one" —
@@ -74,7 +78,7 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 #: configured something.
 CATEGORY_ENTRY_KEYS: dict[Category, frozenset[str]] = {
     Category.RESOURCES: _COMMON_SOURCE_KEYS
-    | {"path", "unpack", "strip_components"},
+    | {"path", "unpack", "strip_components", "excludes"},
     Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
     Category.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
     Category.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
@@ -698,7 +702,82 @@ def validate_resource_entry(
             "over 'protocol: git' the tree arrives as a tree and no 'unpack' "
             "is needed",
         )
+    _check_resource_excludes(ctx, location, entry, source=source, is_directory=is_directory)
     return path if usable and isinstance(path, str) else None
+
+
+def _check_resource_excludes(
+    ctx: Context,
+    location: str,
+    entry: dict[str, Any],
+    *,
+    source: SourceDecl | None,
+    is_directory: bool,
+) -> None:
+    """``excludes`` — literal relative paths, valid only on a bot-source tree.
+
+    ``excludes`` is bot copy's file-sync filter: the manifest's single source
+    of truth for which workspace entries the sync skips. It rides the
+    ``protocol: bot`` source because that is the only protocol that moves a
+    workspace tree wholesale; a git/oss/content source addresses one object
+    or tree exactly, so an excludes list there would configure nothing — and a
+    field that looks like it configures something and does nothing is what
+    this whole module exists to remove, so it is refused elsewhere rather than
+    ignored.
+
+    Each rule is a literal relative path (the same vocabulary
+    ``normalize_build_ignore_path`` governs for builds: not a glob, not
+    gitignore syntax, no trailing ``/``) and is reported under the same code
+    the build ignore path uses, so a caller hits one vocabulary across both.
+    """
+    if "excludes" not in entry:
+        return
+    if source is None or source.protocol is not SourceKind.BOT:
+        ctx.add(
+            f"{location}.excludes",
+            "excludes_not_valid_for_source",
+            "'excludes' filters a workspace sync and is valid only on a "
+            "'protocol: bot' resource entry; a git/oss/content source addresses "
+            "its content exactly, so there is nothing to exclude",
+        )
+        return
+    if not is_directory:
+        ctx.add(
+            f"{location}.excludes",
+            "excludes_on_file_entry",
+            "'excludes' applies to a directory entry; a single-file 'protocol: "
+            "bot' entry is its own object and has no members to exclude — declare "
+            "the file's path exactly instead",
+        )
+        return
+    excludes = entry["excludes"]
+    if not isinstance(excludes, list) or not excludes:
+        ctx.add(
+            f"{location}.excludes",
+            "invalid_excludes",
+            "'excludes' must be a non-empty list of relative paths",
+        )
+        return
+    for index, rule in enumerate(excludes):
+        if not isinstance(rule, str):
+            ctx.add(
+                f"{location}.excludes[{index}]",
+                "invalid_excludes",
+                "an excludes rule must be a relative path string",
+            )
+            continue
+        try:
+            normalize_build_ignore_path(rule)
+        except BuildIgnoreError:
+            # Reuse the build-ignore code so a caller sees one vocabulary;
+            # the message names the field as an excludes rule rather than a
+            # build-ignore path, since the user-facing noun is different.
+            ctx.add(
+                f"{location}.excludes[{index}]",
+                "invalid_ignore_path",
+                f"excludes rule {rule!r} is not a literal relative path — no "
+                "globs, no gitignore syntax, no leading '/' or './', no trailing '/'",
+            )
 
 
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:

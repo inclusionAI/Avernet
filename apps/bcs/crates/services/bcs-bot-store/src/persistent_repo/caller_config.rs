@@ -9,6 +9,14 @@
 //! (`crate::caller_config_cache`) bounds repeat scans; the sync path
 //! invalidates on success.
 //!
+//! Bounded compatibility (2026-11-10): a legacy writer double-encoded the
+//! column, leaving `bot_info` as a JSON *string* whose text is the JSON
+//! object. The full-text sync read unwraps that shape exactly once (never
+//! recursively, never into a non-object inner root) and warns; the sync
+//! write then heals the row by replacing the wrapped text with the clean
+//! object. Projected `$.caller` reads keep their existing semantics: a
+//! missing path inside a string root stays "never configured".
+//!
 //! Ported from the `dev_caller_rebase` consolidation line where this storage
 //! was originally written, adapted to the split-repository layout.
 
@@ -166,7 +174,7 @@ impl PersistentBotRepo {
             Some(raw) => raw,
             None => return Ok(None),
         };
-        let current = caller_snapshot_from_bot_info(raw.as_deref())?;
+        let current = caller_snapshot_from_bot_info(bot_id, raw.as_deref())?;
         if let Some(outcome) = caller_sync_decision(&incoming, current.clone()) {
             return Ok(Some(outcome));
         }
@@ -182,7 +190,7 @@ impl PersistentBotRepo {
             Some(raw) => raw,
             None => return Ok(None),
         };
-        let current = caller_snapshot_from_bot_info(raw.as_deref())?;
+        let current = caller_snapshot_from_bot_info(bot_id, raw.as_deref())?;
         Ok(Some(caller_sync_decision(&incoming, current).unwrap_or(
             CallerConfigurationSync::Conflict {
                 source_revision: incoming.source_revision,
@@ -201,16 +209,15 @@ impl PersistentBotRepo {
         incoming: &CallerIdentitySnapshot,
         provider: Option<&str>,
     ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        // `bot_info_object_root` guarantees an object root and unwraps the
+        // legacy double-encoded shape exactly once: serializing THIS root
+        // replaces the wrapped text with the healed object, while the CAS
+        // below still compares the original delivered text. The unwrapped
+        // case already warned on the sync read, so no second log here.
         let mut root: serde_json::Value = match original {
-            Some(text) => serde_json::from_str(text)
-                .map_err(|_| ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string()))?,
+            Some(text) => bot_info_object_root(text)?.0,
             None => serde_json::json!({}),
         };
-        if !root.is_object() {
-            return Err(ServiceError::InternalError(
-                CALLER_CONFIG_STORAGE_ERROR.to_string(),
-            ));
-        }
         root.as_object_mut()
             .expect("checked object root")
             .insert(
@@ -293,23 +300,57 @@ pub(crate) fn caller_sync_decision(
     }
 }
 
+/// Decode one `bot_info` text into its object root. A plain JSON object
+/// returns as-is (`unwrapped = false`). A JSON *string* root whose text is
+/// another valid JSON object — the double-encoded shape a legacy writer
+/// left in the column — unwraps exactly once (`unwrapped = true`) so a
+/// sync can heal the row on write. Every other shape (invalid JSON, a
+/// plain array/scalar root, a string root whose inner text parses into a
+/// non-object) fails closed with the frozen storage error: never
+/// recursive, never a fabricated empty document.
+fn bot_info_object_root(text: &str) -> ServiceResult<(serde_json::Value, bool)> {
+    let root: serde_json::Value = serde_json::from_str(text).map_err(|_| {
+        ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+    })?;
+    match root {
+        serde_json::Value::Object(_) => Ok((root, false)),
+        serde_json::Value::String(inner) => {
+            let inner_root: serde_json::Value = serde_json::from_str(&inner).map_err(|_| {
+                ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+            })?;
+            if !inner_root.is_object() {
+                return Err(ServiceError::InternalError(
+                    CALLER_CONFIG_STORAGE_ERROR.to_string(),
+                ));
+            }
+            Ok((inner_root, true))
+        }
+        _ => Err(ServiceError::InternalError(
+            CALLER_CONFIG_STORAGE_ERROR.to_string(),
+        )),
+    }
+}
+
 /// Parse the authoritative caller snapshot out of a raw `bot_info` value.
 /// A missing `caller` sub-object is `Ok(None)` ("never configured"); a SQL
-/// NULL column is a legal legacy row; `caller: null`, a non-object root, or
-/// a malformed snapshot are explicit errors — never a fabricated disable.
+/// NULL column is a legal legacy row; a double-encoded string root is
+/// unwrapped once (with a warn — the next sync write heals the row);
+/// `caller: null`, any non-object root after the bounded unwrap, or a
+/// malformed snapshot are explicit errors — never a fabricated disable.
 fn caller_snapshot_from_bot_info(
+    bot_id: &str,
     raw: Option<&str>,
 ) -> ServiceResult<Option<CallerIdentitySnapshot>> {
     let Some(text) = raw else {
         return Ok(None);
     };
-    let root: serde_json::Value = serde_json::from_str(text).map_err(|_| {
-        ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
-    })?;
-    if !root.is_object() {
-        return Err(ServiceError::InternalError(
-            CALLER_CONFIG_STORAGE_ERROR.to_string(),
-        ));
+    let (root, unwrapped) = bot_info_object_root(text)?;
+    if unwrapped {
+        tracing::warn!(
+            bot_id = %bot_id,
+            "bot_info is double-encoded (JSON string wrapping an object); \
+             unwrapping once; the sync write heals the row"
+        );
     }
     match root.get("caller") {
         None => Ok(None),

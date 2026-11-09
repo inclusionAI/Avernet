@@ -27,6 +27,29 @@ static QUEUE_TTL_FALLBACK_WARNED: std::sync::atomic::AtomicBool = std::sync::ato
 
 pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
 
+/// Scheduler row isolation: a never-sent Queued row whose processing keeps
+/// failing deterministically is settled by `PreparationFailed` carrying this
+/// marker. The settle skips task-intent parsing and notice construction, the
+/// very steps that may be the deterministic fault.
+pub(crate) const SCHEDULER_QUARANTINED: &str = "scheduler_quarantined";
+
+/// Session deletion cancels the Session's lane rows before the Session row is
+/// removed. Their task notices would be enqueued into a Session that is about
+/// to disappear, so the cancel carries this marker and builds no notice.
+pub(crate) const SESSION_DELETING: &str = "session_deleting";
+
+fn is_session_deleting(command: &DeliveryTransitionCommand) -> bool {
+    command.event == Event::CancelRequested
+        && command.transport_context_json.as_ref()
+            .and_then(|v| v.get(SESSION_DELETING)).and_then(|v| v.as_bool()) == Some(true)
+}
+
+pub(crate) fn is_quarantine(command: &DeliveryTransitionCommand) -> bool {
+    command.event == Event::PreparationFailed
+        && command.transport_context_json.as_ref()
+            .and_then(|v| v.get(SCHEDULER_QUARANTINED)).and_then(|v| v.as_bool()) == Some(true)
+}
+
 // Once persistence starts, cancellation of the caller must not release the Bot
 // guard while an async DB driver is still committing. Return guards on success
 // so the caller also retains its existing notification ordering.
@@ -37,7 +60,12 @@ async fn persist_with_guards<T: Send + 'static>(
     let (result, guards) = tokio::spawn(async move {
         let result = work.await;
         (result, guards)
-    }.in_current_span()).await.map_err(|err| MessageDeliveryRepoError::Storage(format!("delivery persistence task: {err}")))?;
+    }.in_current_span()).await.map_err(|err| if err.is_panic() {
+        // A panic repeats on every attempt; never classify it as retryable.
+        MessageDeliveryRepoError::Invalid("delivery persistence task panicked".into())
+    } else {
+        MessageDeliveryRepoError::Storage(format!("delivery persistence task: {err}"))
+    })?;
     Ok((result?, guards))
 }
 
@@ -139,14 +167,16 @@ impl ManagedMessageDelivery {
     ) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {
         // Only discover immutable ownership before locking. State is reloaded
         // and validated below after all source/reply-target locks are held.
+        let quarantine = is_quarantine(&command);
+        let suppress_notice = quarantine || is_session_deleting(&command);
         let initial = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         let owner = initial.target_bot_id.clone();
         let mut bots = vec![owner.clone()];
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
-        if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
+        if command.reply.is_none() && !suppress_notice && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
             | Event::DefinitelyNotSent { .. } | Event::TransportUnknown | Event::Recover) {
-            if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
+            if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Invalid(format!("task intent: {e}")))? {
                 if task.leg == crate::queued_task::TaskLeg::Dispatch { bots.push(task.manager); }
             }
         }
@@ -307,13 +337,59 @@ impl ManagedMessageDelivery {
             }
             return Ok(original.clone());
         }
-        if command.reply.is_none() && outcome.changed {
-            command.reply = crate::task_failure::fallback(original, outcome.state, command.now_ms,
-                command.actor_id.as_deref(), command.transport_context_json.as_ref())
-                .map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+        // Protected result park carried to the post-commit publish below:
+        // (parked identity, result message id, Manager target).
+        let mut pending_result_park: Option<(crate::queued_task_terminal::ResultLegIdentity, String, String)> = None;
+        if command.reply.is_none() && outcome.changed && !suppress_notice {
+            // Protected result routing (caller-enabled Manager): the §15.4
+            // gate refuses ordinary content dispatch, so the failure notice
+            // must carry its own protected material and park the session
+            // identity BEFORE the queue commit — the same decision and the
+            // same park queued_task_terminal::commit performs for worker
+            // terminal callbacks. Parked material is published against the
+            // committed rows after the transaction lands below.
+            let mut protected_text: Option<String> = None;
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                let task = crate::queued_task::intent(original).ok().flatten()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch);
+                let failure = crate::task_failure::failure_reason(original, outcome.state,
+                    command.actor_id.as_deref(), command.transport_context_json.as_ref());
+                if let (Some(task), Some((cancelled, reason))) = (task, failure) {
+                    let text = crate::task_failure::failure_body(cancelled, &reason, false);
+                    let park = crate::queued_task_terminal::protect_result_leg(
+                        &flow, &task, &original.session_id, &original.group_id, &text, command.now_ms,
+                    ).await.map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+                    if let Some(park) = park {
+                        pending_result_park = Some((park,
+                            crate::queued_task_terminal::result_message_id(&task.task_id), task.manager.clone()));
+                        protected_text = Some(text);
+                    }
+                }
+            }
+            command.reply = match crate::task_failure::fallback(original, outcome.state, command.now_ms,
+                command.actor_id.as_deref(), command.transport_context_json.as_ref(), protected_text.as_deref()) {
+                Ok(reply) => reply,
+                Err(error) => {
+                    if let Some((parked, ..)) = pending_result_park.take() {
+                        if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                            crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                        }
+                    }
+                    return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Invalid(format!("task notice: {error}"))));
+                },
+            };
             if let (Some(policy), Some(reply)) = (&policy, command.reply.as_mut()) {
                 for target in &mut reply.targets { target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued; }
                 reply.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| reply.now_ms.saturating_add(ttl as i64));
+            }
+            if command.reply.is_none() {
+                // No notice was built (not a task leg / already notified):
+                // the reservation never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
             }
         }
         if start_abort
@@ -321,6 +397,11 @@ impl ManagedMessageDelivery {
             && !(event == Event::ScopeAbortRequested
                 && original.state.status == Status::CancelUnknown)
         {
+            if let Some((parked, ..)) = pending_result_park.take() {
+                if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                    crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                }
+            }
             return Err(ManagedDeliveryError::Conflict);
         }
         let mut primary = original.clone();
@@ -346,6 +427,9 @@ impl ManagedMessageDelivery {
         }
         if event == Event::Failed {
             primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
+        }
+        if quarantine {
+            primary.last_error_code = Some(SCHEDULER_QUARANTINED.into());
         }
         if let Some(reply) = &command.reply {
             let marker = if reply.message_id.starts_with("task-unknown:") { Some("task_uncertainty_notified") }
@@ -654,13 +738,23 @@ impl ManagedMessageDelivery {
             .iter()
             .map(|update| update.delivery.clone())
             .collect();
-        let (committed_reply, _guards) = {
+        let commit_outcome = {
             let _timing = crate::reply_timing::Timer::new("delivery.commit_repository");
             let repo = self.repo.clone();
             let cleanup = self.output_cleanup.get().cloned();
             let terminal = primary.clone();
             persist_with_guards(_guards, async move {
-                let result = repo.commit_transition(updates, command.reply).await?;
+                let result = match repo.commit_transition(updates.clone(), command.reply).await {
+                    // The Session was deleted while this row was pending. Its
+                    // reply/notice has no audience any more, but the row must
+                    // still converge or every later scan selects it again.
+                    Err(error) if error.is_session_missing() => {
+                        tracing::warn!(delivery_id = %terminal.delivery_id, session_id = %terminal.session_id,
+                            status = ?terminal.state.status, "session deleted; committing delivery transition without its reply");
+                        repo.commit_transition(updates, None).await?
+                    }
+                    other => other?,
+                };
                 // Persistence has committed and its transaction is closed. Do
                 // local cleanup inside the cancellation-retained task, so an
                 // aborted caller or a lagged notification receiver cannot leak.
@@ -668,12 +762,39 @@ impl ManagedMessageDelivery {
                     flow.release_unsent_output(&terminal).await;
                 }
                 Ok(result)
-            }).await?
+            }).await
+        };
+        let (committed_reply, _guards) = match commit_outcome {
+            Ok(committed) => committed,
+            Err(error) => {
+                // The admission never landed; the reserved result identity
+                // never meets a marked row.
+                if let Some((parked, ..)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
+                    }
+                }
+                return Err(error);
+            }
         };
         if let Some(reply) = committed_reply {
             if !reply.duplicate {
+                if let Some((parked, message_id, manager)) = pending_result_park.take() {
+                    if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                        crate::queued_task_terminal::publish_result_leg_identity(
+                            &flow, &parked, &reply.deliveries, &message_id, &manager, command.now_ms,
+                        ).await;
+                    }
+                }
                 if let Some(hook) = &self.instrumentation { for row in &reply.deliveries { hook.event("admitted", row); } }
                 notifications.extend(reply.deliveries);
+            }
+        }
+        // A duplicate admission leaves the identity's publish to the ORIGINAL
+        // admission — this surplus reservation never meets its marked row.
+        if let Some((parked, ..)) = pending_result_park.take() {
+            if let Some(flow) = self.output_cleanup.get().and_then(Weak::upgrade) {
+                crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
             }
         }
         let _ = self.changes.send(notifications);

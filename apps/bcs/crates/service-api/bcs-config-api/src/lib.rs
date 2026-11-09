@@ -22,7 +22,7 @@ pub mod redis_route_type;
 pub mod uplink;
 pub use uplink::{UplinkConfig, UplinkProfile};
 
-pub use bcsfuse::BcsFuseConfig;
+pub use bcsfuse::{BcsFuseApiVersion, BcsFuseConfig};
 pub use fixed_loop::FixedLoopLimits;
 pub use mysql::{DataSourceConfig, MysqlDbConfig, StatementProtocol};
 pub use redis::{

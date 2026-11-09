@@ -15,6 +15,7 @@ bcs-caller-identity-api = { workspace = true }
 thiserror = { workspace = true }
 
 bcs-observability = { workspace = true }
+bcs-tracing-api = { workspace = true }
 metrics = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
@@ -39,6 +40,12 @@ bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+bcs-network-tracing = { workspace = true }
+bcs-human-notify-api = { workspace = true }
+bcs-human-notify-work-order = { workspace = true }
 bcs-db-local = { workspace = true }
 
 # The integration suite uses the composition root's SQLite migration runner.

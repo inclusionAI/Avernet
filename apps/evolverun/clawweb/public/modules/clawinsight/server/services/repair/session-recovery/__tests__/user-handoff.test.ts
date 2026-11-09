@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, appendFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -12,6 +12,7 @@ import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/serv
 import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/session-recovery-task-repository.js";
 import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
+import { SessionRecoveryNotifier } from "../notification.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
 const exec = promisify(execFile), flush = () => new Promise(resolve => setImmediate(resolve));
@@ -34,26 +35,56 @@ async function create(level = "approval", patch = {}) {
   return current(ack.task_id);
 }
 const inspect = (task: RecoveryStoredTask, key = "read-1") => agent.sessionRead(task, { clientRequestId: key, purpose: "观察原会话实际执行" });
-it.each([false, true])("extends handoff into Owner feedback and sends one fresh continuation (initial delivery: %s)", async hadInitial => {
+it.each([
+  ["permission", false, false, false], ["permission", false, true, false], ["permission", true, false, false], ["permission", true, true, false],
+  ["permission", false, false, true], ["permission", false, true, true], ["permission", true, false, true], ["permission", true, true, true],
+  ["configuration", false, false, true], ["configuration", true, true, false],
+] as const)("extends %s feedback into one fresh continuation (initial delivery: %s, NAS: %s, restart: %s)", async (reason, hadInitial, useNas, restart) => {
   const first = hadInitial ? await toObserve(await create()) : await create();
-  expect((await agent.bootstrap(first)).ownerCooperationProtocol).toBe("session-recovery-owner/v1");
+  expect(await agent.bootstrap(first)).toMatchObject({ ownerCooperationProtocol: "session-recovery-owner/v1",
+    ownerCooperationReasons: ["permission", "configuration"] });
   const oldDelivery = first.delivery;
   const evidence = await inspect(first);
-  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary: "服务权限需Owner申请", evidence_ids: [evidence.evidenceId], owner_request: { reason: "permission", instructions: "请申请服务权限后点击已处理" } });
+  const summary = reason === "configuration" ? "审批路由缺接收目标，本轮跳过分发" : "服务权限需Owner申请";
+  const instructions = reason === "configuration" ? "请在管理平台补齐当前审批路由；回读路由并查分发状态" : "请申请服务权限后点击已处理";
+  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary, evidence_ids: [evidence.evidenceId], owner_request: { reason, instructions } });
   let saved = await current(first.taskId);
   expect(saved.status).toBe("waiting_owner"); expect(saved.pending_results).toEqual([]);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(hadInitial ? 1 : 0);
   const requestId = saved.ownerRequest!.requestId;
-  await agent.report(saved, { phase: saved.phase, kind: "release" });
+  if (restart) await agent.report(saved, { phase: saved.phase, kind: "release" });
   await Promise.all([service.confirmOwner(saved.taskId, requestId, actor), service.confirmOwner(saved.taskId, requestId, actor)]);
   await service.confirmOwner(saved.taskId, requestId, actor);
-  await vi.waitFor(async () => expect((await current(saved.taskId)).executionNo).toBe(2));
+  await vi.waitFor(async () => expect((await current(saved.taskId)).executionNo).toBe(restart ? 2 : 1));
   saved = await current(saved.taskId);
+  expect(saved).toMatchObject({ phase: "assess", requiresFreshObservation: true, ownerRequest: { reason, status: "confirmed" } });
+  if (reason === "configuration" && !hadInitial) expect(saved.interventionStatus).toBe("none");
   await expect(agent.report(saved, { phase: "assess", kind: "owner_handoff", summary: "仅根据Owner反馈宣称恢复", effect: "recovered", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
   await expect(agent.report(saved, { phase: "assess", kind: "blocked", reason: "user_continued", summary: "仅根据旧记录宣称用户续聊", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  const body = { clientRequestId: "continue-1", purpose: "权限反馈后的续接", message: "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
+  const body = { clientRequestId: "continue-1", purpose: "Owner 反馈后的续接", message: reason === "configuration"
+    ? "请核验路由和分发状态，仅继续未分发的步骤。" : "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
+  // Old calls are either replayed in the same execution or rejected across executions.
+  if (restart) await expect(inspect(saved)).rejects.toMatchObject({ name: "AgentToolCallIdempotencyConflictError" });
+  else expect((await inspect(saved)).toolCallId).toBe(evidence.toolCallId);
+  expect((await current(saved.taskId)).requiresFreshObservation).toBe(true);
   await expect(agent.retryMessage(saved, body)).rejects.toMatchObject({ status: 409 });
-  await inspect(saved, "fresh-after-feedback");
+  const readBody = { purpose: "读取反馈后的最新原会话", from_line: 1, ...(useNas ? { nas_evidence: {
+    source: `${directory}/prod/prod_staff_owner_openclaw_default/.openclaw/agents/main/sessions/original.jsonl`,
+    session_id: "original", delivery_key: request.delivery_key,
+    messages: (await readFile(sessionFile, "utf8")).trim().split("\n").map((line, index) => ({ line_no: index + 1, record: JSON.parse(line) })),
+  } } : {}) };
+  if (!useNas) vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("session read unavailable"));
+  expect(await agent.sessionRead(saved, { ...readBody, clientRequestId: "failed-fresh-read",
+    ...(useNas ? { nas_evidence: { ...readBody.nas_evidence!, session_id: "another-session" } } : {}) })).toMatchObject({ status: "failed" });
+  saved = await current(saved.taskId);
+  expect(saved.requiresFreshObservation).toBe(true);
+  await expect(agent.retryMessage(saved, body)).rejects.toMatchObject({ status: 409 });
+  vi.mocked(runtime.executeShell).mockClear();
+  const fresh = await agent.sessionRead(saved, { ...readBody, clientRequestId: "fresh-after-feedback" });
+  expect(fresh).toMatchObject({ status: "succeeded", result: { source: useNas ? readBody.nas_evidence!.source : await realpath(sessionFile),
+    messages: expect.arrayContaining([expect.objectContaining({ record: expect.objectContaining({ id: "failed-operation" }) })]) } });
+  if (useNas) expect(runtime.executeShell).not.toHaveBeenCalled();
+  expect((await current(saved.taskId)).requiresFreshObservation).toBe(false);
   const resumed = await agent.retryMessage(await current(saved.taskId), body);
   await agent.retryMessage(await current(saved.taskId), { ...body, clientRequestId: "different-agent-id" });
   saved = await current(saved.taskId);
@@ -64,6 +95,22 @@ it.each([false, true])("extends handoff into Owner feedback and sends one fresh 
   await agent.report(saved, { kind: "assessment", phase: "assess", decision: "message", summary: "已按反馈续接，继续观察实际执行", evidence_ids: [resumed.evidenceId] });
   expect((await current(saved.taskId)).phase).toBe("observe");
   expect((await current(saved.taskId)).timeline.filter(event => event.kind === "owner_decision" && event.payload.owner_request_id === requestId)).toHaveLength(1);
+});
+
+it("observes an already accepted recovery message before opening a configuration request", async () => {
+  const task = await create();
+  const read = await inspect(task);
+  const sent = await agent.retryMessage(await current(task.taskId), { clientRequestId: "initial-advice",
+    purpose: "核对当前分发配置", message: "请核对分发目标后继续原步骤。" });
+  const handoff = { kind: "owner_handoff", summary: "分发目标尚未配置", evidence_ids: [read.evidenceId],
+    owner_request: { reason: "configuration", instructions: "请补齐分发目标，随后回查路由和分发状态" } };
+  await expect(agent.report(await current(task.taskId), { ...handoff, phase: "assess" })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
+    summary: "已发送指引，观察实际效果", evidence_ids: [sent.evidenceId] });
+  await agent.report(await current(task.taskId), { ...handoff, phase: "observe" });
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", phase: "observe",
+    ownerRequest: { reason: "configuration", status: "pending" } });
 });
 
 it("keeps terminal tasks with unfinished card synchronization in maintenance after a restart", async () => {
@@ -244,7 +291,7 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   expect(task).toMatchObject({ status: "completed", phase, completionReason: "owner_handoff", plan: null,
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
   expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-    taskId: task.taskId, kind: "result", effect: "not_recovered", summary });
+    taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect: "not_recovered", summary });
   expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
   const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
   expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
@@ -260,21 +307,21 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   expect(notifier.notify).toHaveBeenCalledTimes(1);
 });
 
-it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["recovered", "not_recovered", "unknown"].map(effect => ({ phase, effect }))))(
+it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered", "unknown"].map(effect => ({ phase, effect }))))(
   "keeps the current $effect judgment when handing off from $phase without waiting or repeating work", async ({ phase, effect }) => {
     let task = await create();
     await appendFile(sessionFile, JSON.stringify({ type: "message", id: "task-progress", message: { role: "assistant", content: "已修正参数，子任务已完成并汇总。" } }) + "\n");
     const read = await inspect(task, "current-effect"); task = await current(task.taskId);
     task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase: phase as RecoveryStoredTask["phase"], version: value.version + 1,
       judgment: { delivery: "unconfirmed", response: "none", effect: "not_recovered", summary: "旧判断待复核", evidence_ids: [read.evidenceId] } })))!;
-    const summary = "已核对本轮执行；Skill 的参数示例可由 Owner 后续优化，不需要重跑当前任务。";
+    const summary = "已核对本轮执行，原业务资源仍不可用，现有能力不能解除阻塞，请 Owner 处理资源。";
     await agent.report(task, { kind: "owner_handoff", phase, effect, summary, evidence_ids: [read.evidenceId] });
     task = await current(task.taskId);
     expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", phase, plan: null,
       ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" },
       judgment: { effect, summary, delivery: "unconfirmed", response: "none", evidence_ids: [read.evidenceId] } });
     expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, kind: "result", effect, summary });
+      taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect, summary });
     expect(runtime.sendMessage).not.toHaveBeenCalled();
     expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
     await service.reportResults();
@@ -321,7 +368,7 @@ it.each([
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 
-it.each([undefined, "recovered", "not_recovered", "unknown"] as const)("uses saved effect %s for an older handoff, or unknown when no judgment exists", async effect => {
+it.each([undefined, "not_recovered", "unknown"] as const)("uses saved effect %s for an older handoff, or unknown when no judgment exists", async effect => {
   let task = await create(); const read = await inspect(task); task = await current(task.taskId);
   if (effect) task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
     judgment: { delivery: "unconfirmed", response: "none", effect, summary: "已有现场判断", evidence_ids: [read.evidenceId] } })))!;
@@ -399,6 +446,8 @@ it.each(["accepted", "unknown"] as const)("requires phase results after %s messa
   expect(assessed.delivery?.delivery.status).toBe(receiptStatus);
   const blocked = { kind: "blocked", phase: "assess", summary: "已发出指引并重试，原故障仍存在，没有可直接执行的修复动作", evidence_ids: [read.evidenceId] };
   await expect(agent.report(assessed, blocked)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("assessment") });
+  await expect(agent.report(assessed, { ...blocked, kind: "owner_handoff", effect: "not_recovered" }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("assessment") });
   expect(await current(task.taskId)).toMatchObject({ version: assessed.version, status: "running", phase: "assess", judgment: null, execution: assessed.execution });
   expect(actionNotifier.after).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "result" }));
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "已留存消息投递，进入效果回收", evidence_ids: [sent.evidenceId] });
@@ -431,4 +480,227 @@ it("keeps ordinary blocked for a proven failed delivery and an unrepairable plan
   const planning = await toPlan(await create("approval", { event_id: "unrepairable-plan", delivery_key: "unrepairable-plan" }));
   await agent.report(planning, { kind: "blocked", phase: "plan", summary: "已独立调查，当前授权和能力下没有可行修复，保留具体依据" });
   expect(await current(planning.taskId)).toMatchObject({ status: "failed", phase: "plan" });
+});
+
+function useNativeOwnerCards() {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const cards = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+  }, "pre");
+  notifier.notify.mockImplementation(input => cards.notify(input));
+  notifier.notifyOwnerRequest = vi.fn(input => cards.notifyOwnerRequest(input));
+  return sender;
+}
+
+it("delivers all three material requirements while retaining the complete report and ending ordinary handoff", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "materials-brief"); task = await current(task.taskId);
+  const report = "## 调查与核实\n" + "原Bot已核实材料缺失，正确等待用户补充；现场和证据均已检查。\n".repeat(50);
+  const handoff = { summary: "抽奖活动权益评审缺少必要材料，当前等待补充。", instructions: "请回原会话补充：\n1. 活动页面文案；\n2. 权益实际发放规则；\n3. 图1（领取路径截图）。" };
+  await agent.report(task, { kind: "owner_handoff", phase: "assess", effect: "unknown", summary: report, handoff, evidence_ids: [read.evidenceId] });
+  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  expect(saved).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "unknown", summary: report }, execution: { state: "ended" } });
+  expect(saved.ownerRequest).toBeUndefined();
+  expect(saved.timeline.findLast(event => event.kind === "termination")).toMatchObject({ summary: report, payload: { handoff } });
+  expect(card.cardParamMap).toMatchObject({ summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false" });
+  expect(card.cardParamMap.instructions).toContain("3. 图1");
+  expect(card.cardParamMap.summary).not.toContain("恢复情况尚未确认");
+  expect(card).not.toHaveProperty("callbackRouteKey"); expect(card.cardParamMap).not.toHaveProperty("config");
+  expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(sender.sendCard).toHaveBeenCalledOnce();
+});
+
+it("uses the same Owner brief for permission handling and preserves its full investigation in the waiting timeline", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "permission-brief"); task = await current(task.taskId);
+  expect((await agent.bootstrap(task)).ownerHandoffProtocol).toBe("session-recovery-handoff/v1");
+  const report = "## 权限调查\n" + "原会话和配置已核实，实际请求仍明确返回权限不足，详见完整证据。\n".repeat(45);
+  const handoff = { summary: "原资料读取被权限拦截，信息查询尚未完成。", instructions: "请为原资料申请读取权限：https://docs.invalid/access/source 。" };
+  await agent.report(task, { kind: "owner_handoff", phase: "assess", summary: report, handoff, owner_request: { reason: "permission" }, evidence_ids: [read.evidenceId] });
+  await vi.waitFor(() => expect(sender.sendCard).toHaveBeenCalledOnce());
+  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  expect(saved).toMatchObject({ status: "waiting_owner", ownerRequest: { reason: "permission", summary: handoff.summary, instructions: handoff.instructions, status: "pending" } });
+  expect(saved.timeline.find(event => event.kind === "waiting")).toMatchObject({ summary: report });
+  expect(card).toMatchObject({ callbackRouteKey: "route", cardParamMap: { summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "true" } });
+  expect(card.cardParamMap.summary).not.toContain("权限调查"); expect(card.cardParamMap).not.toHaveProperty("config");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it.each([
+  { summary: "问题已明确", instructions: "材".repeat(342) },
+  { summary: "问题已明确" },
+  { summary: "问题已明确", instructions: "请补资料", template_id: "not-a-business-field" },
+])("rejects invalid handoff content before changing workflow or notifying: %j", async handoff => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "invalid-brief"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "完整调查报告", handoff, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled(); expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  { summary: undefined, owner_request: { reason: "permission" } },
+  { summary: "完整调查报告", owner_request: { reason: "permission", instructions: "另一份不一致的处理事项" } },
+])("rejects permission handoff without the full report or with conflicting actions: %j", async fields => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "invalid-permission-brief"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", handoff: { summary: "原资料读取缺少权限", instructions: "请申请原资料读取权限" },
+    evidence_ids: [read.evidenceId], ...fields })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled();
+});
+
+
+it.each(["assess", "observe", "plan", "verify"].flatMap(phase => [false, true].map(saved => ({ phase, saved }))))(
+  "rejects recovered Owner handoff from $phase (saved judgment: $saved) without side effects", async ({ phase, saved }) => {
+    let task = await create(); const read = await inspect(task, "recovered-evidence"); task = await current(task.taskId);
+    task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase: phase as RecoveryStoredTask["phase"], version: value.version + 1,
+      ...(saved ? { judgment: { delivery: "unconfirmed", response: "none", effect: "recovered", summary: "实际任务已恢复", evidence_ids: [read.evidenceId] } as const } : {}) })))!;
+    const input = { summary: "任务已恢复，只剩 Skill 参数示例建议。", evidence_ids: [read.evidenceId], executionId: task.execution!.executionId,
+      ...(saved ? {} : { effect: "recovered" as const }) };
+    await expect(service.finishForOwnerHandoff(task.taskId, task.version, input)).rejects.toMatchObject({ status: 422 });
+    expect(await current(task.taskId)).toMatchObject({ version: task.version, status: "running", phase, judgment: task.judgment, execution: task.execution });
+    expect(notifier.notify).not.toHaveBeenCalled(); expect(actionNotifier.after).not.toHaveBeenCalled();
+    await service.reportResults(); expect(callbacks).toEqual([]); expect(runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+it("does not turn an existing recovered result into another Owner permission wait", async () => {
+  let task = await create(); const read = await inspect(task); task = await current(task.taskId);
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    judgment: { delivery: "unconfirmed", response: "none", effect: "recovered", summary: "原任务已恢复", evidence_ids: [read.evidenceId] } })))!;
+  await expect(service.requestOwner(task.taskId, task.version, { reason: "permission", instructions: "申请仅供优化的权限", summary: "优化建议",
+    evidence_ids: [read.evidenceId], executionId: task.execution!.executionId })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", version: task.version });
+  expect((await current(task.taskId)).ownerRequest).toBeUndefined();
+});
+
+it.each([false, true])("finishes recovery found during planning normally (pending delivery: %s)", async pending => {
+  let task = await toObserve(await create()); const originalDeadline = task.observationDeadlineAt;
+  const read = await inspect(task, "planning-recovery-evidence"); task = await current(task.taskId);
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase: "plan", observationDeadlineAt: null, version: value.version + 1 })))!;
+  now += 120000;
+  const judgment = { delivery: pending ? "unconfirmed" : "confirmed", response: pending ? "unknown" : "acted", effect: "recovered",
+    summary: "原业务已恢复，参数模板可后续优化。", evidence_ids: [read.evidenceId] };
+  await agent.report(task, { kind: "observation", phase: "plan", judgment, final_summary: "故障已解除，优化建议不阻塞恢复。" });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: pending ? "running" : "completed", phase: "observe", judgment, plan: null,
+    observationDeadlineAt: originalDeadline });
+  expect(task.timeline.some(event => event.kind === "termination")).toBe(false);
+  expect(notifier.notify).not.toHaveBeenCalled(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
+  if (pending) {
+    await service.reportResults(); expect(callbacks).toEqual([]);
+    await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "confirmed", response: "acted" } });
+  }
+  expect(await current(task.taskId)).toMatchObject({ status: "completed" });
+  expect((await current(task.taskId)).completionReason).toBeUndefined();
+  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", intervention_status: "performed" });
+  expect(callbacks.at(-1)).not.toHaveProperty("completion_reason");
+});
+
+it("continues an ended failed TE Cron through the original session and completes after verified progress", async () => {
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
+  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: { runs: [{ status: "error", finishedAtMs: now - 60000 }] } } });
+  const trajectory = { read: vi.fn(async (input: { messageMarker?: string }) => ({ source: "aivision_tclog", coverage: "uploaded_records_only",
+    traces: [{ traceId: "original-trace", input: [{ role: "user", content: input.messageMarker ? input.messageMarker + "继续剩余步骤" : "生成原业务结果" }] }],
+    ...(input.messageMarker ? { delivery_confirmed: true } : {}) })) };
+  const teAgent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais,
+    runtime, targets: { resolve: async () => target }, trajectory, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1,
+    nasRoots: [], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now, actionNotifier });
+  let task = await create("approval", { target: { ...request.target, engine: "TE" }, session_key: "agent:main:cron:finished-run:user:owner" });
+  const run = await teAgent.inspect(task, { clientRequestId: "finished-cron", purpose: "核实本轮失败结束", operation: "engine_read",
+    request: { method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs" } });
+  expect(run.status).toBe("succeeded");
+  await teAgent.trajectoryRead(await current(task.taskId), { clientRequestId: "original-failure", purpose: "核实失败位置和用户续聊" });
+  const sent = await teAgent.retryMessage(await current(task.taskId), { clientRequestId: "continue-failed-cron", purpose: "纠正参数并续接剩余业务",
+    message: "请补齐工具必填参数，复用已成功的数据，继续未完成步骤并核验结果。" });
+  await teAgent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "本轮结束仍可按具体指引续接", evidence_ids: [sent.evidenceId] });
+  const observed = await teAgent.trajectoryRead(await current(task.taskId), { clientRequestId: "continued-progress", purpose: "核实本次触达和业务恢复" });
+  await teAgent.report(await current(task.taskId), { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response: "acted", effect: "recovered",
+    summary: "原失败步骤成功，剩余业务已推进；优化建议附在结果中。", evidence_ids: [observed.evidenceId] } });
+  task = await current(task.taskId); expect(task).toMatchObject({ status: "completed", judgment: { effect: "recovered" } });
+  expect(task.completionReason).toBeUndefined();
+  expect(runtime.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionKey: task.request.session_key }));
+  expect(runtime.executeShell).not.toHaveBeenCalled();
+  expect(runtime.request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs" }));
+  expect(notifier.notify).not.toHaveBeenCalled();
+});
+
+
+it.each(["not_recovered", "unknown"] as const)("does not downgrade verified recovery to %s for Owner handoff", async effect => {
+  let task = await toObserve(await create()); const read = await inspect(task); task = await current(task.taskId);
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    judgment: { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务效果已核实，等待触达", evidence_ids: [read.evidenceId] } })))!;
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "observe", effect, summary: "只有优化建议", evidence_ids: [read.evidenceId] }))
+    .rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", version: task.version, judgment: { effect: "recovered" }, observationDeadlineAt: task.observationDeadlineAt });
+  expect(notifier.notify).not.toHaveBeenCalled(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+async function confirmPermissionRequest(task: RecoveryStoredTask) {
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { phase: task.phase, kind: "owner_handoff", summary: "缺服务权限", evidence_ids: [read.evidenceId],
+    owner_request: { reason: "permission", instructions: "开通服务权限" } });
+  const waiting = await current(task.taskId);
+  await service.confirmOwner(task.taskId, waiting.ownerRequest!.requestId, actor);
+  const fresh = await inspect(await current(task.taskId), "fresh-after-permission");
+  expect(fresh.status).toBe("succeeded");
+  return { task: await current(task.taskId), fresh };
+}
+
+const ownerContinuation = { clientRequestId: "owner-continue", purpose: "权限反馈后恢复原任务", message: "请重试已开通权限的原操作。" };
+
+it("allows a new attempt after a pre-dispatch failure, and concurrent attempts share one dispatch", async () => {
+  const { task } = await confirmPermissionRequest(await create());
+  vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("temporary session locator failure"));
+  const failed = await agent.retryMessage(task, ownerContinuation);
+  expect(failed).toMatchObject({ status: "failed", result: { dispatched: false } });
+  expect(await agent.retryMessage(await current(task.taskId), ownerContinuation)).toEqual(failed);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+
+  const fresh = await current(task.taskId);
+  const [retry, concurrent] = await Promise.all([
+    agent.retryMessage(fresh, { ...ownerContinuation, clientRequestId: "owner-continue-2" }),
+    agent.retryMessage(fresh, { ...ownerContinuation, clientRequestId: "owner-continue-3" }),
+  ]);
+  expect(retry.toolCallId).not.toBe(failed.toolCallId);
+  expect(concurrent.toolCallId).toBe(retry.toolCallId);
+  expect(await agent.toolGet(fresh, retry.toolCallId)).toMatchObject({ status: "succeeded", result: { status: "accepted" } });
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it.each(["accepted", "unknown"] as const)("reuses the %s continuation receipt across executions", async status => {
+  const { task } = await confirmPermissionRequest(await create());
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status });
+  const sent = await agent.retryMessage(task, ownerContinuation);
+  await agent.release(await current(task.taskId));
+  await agent.start(await current(task.taskId));
+  const replacement = await current(task.taskId);
+  expect(replacement.execution!.executionId).not.toBe(task.execution!.executionId);
+
+  expect(await agent.retryMessage(replacement, ownerContinuation)).toEqual(sent);
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+  await expect(agent.report(await current(task.taskId), { kind: "blocked", phase: "assess", summary: "续接效果未确认" })).rejects.toMatchObject({ status: 422 });
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
+    summary: "继续观察本次投递结果", evidence_ids: [sent.evidenceId] });
+  expect((await current(task.taskId)).phase).toBe("observe");
+});
+
+it.each(["blocked", "owner_handoff"])("allows %s when Owner reevaluation cannot proceed and only an earlier send exists", async kind => {
+  const { task, fresh } = await confirmPermissionRequest(await toObserve(await create()));
+  await agent.report(task, { kind, phase: "assess", summary: "续接仍受阻，需先处理剩余事项", evidence_ids: [fresh.evidenceId] });
+  expect((await current(task.taskId)).status).toBe(kind === "blocked" ? "failed" : "completed");
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it("rejects a message assessment based on an earlier send or a failed current continuation", async () => {
+  const { task, fresh } = await confirmPermissionRequest(await toObserve(await create()));
+  const assessment = { kind: "assessment", phase: "assess", decision: "message", summary: "报告本轮投递", evidence_ids: [fresh.evidenceId] };
+  await expect(agent.report(task, assessment)).rejects.toMatchObject({ status: 422 });
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status: "failed" });
+  const failed = await agent.retryMessage(task, ownerContinuation);
+  expect(failed).toMatchObject({ status: "failed", result: { status: "failed" } });
+  await expect(agent.report(await current(task.taskId), { ...assessment, evidence_ids: [failed.evidenceId] })).rejects.toMatchObject({ status: 422 });
+  expect((await current(task.taskId)).phase).toBe("assess");
+  await agent.report(await current(task.taskId), { ...assessment, decision: "observe" });
+  expect((await current(task.taskId)).phase).toBe("observe");
 });

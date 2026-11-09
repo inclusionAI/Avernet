@@ -119,6 +119,8 @@ class _FakeSessionPort:
         self._session_create_result = session_create_result or {
             "key": "session:abc:user:default",
             "label": "Test_0601120000",
+            "canonical_session_id": "agent:main:session:abc:user:default",
+            "resolved_model": "provider/default-model",
         }
         self._session_delete_result = session_delete_result
         self._session_clear_raises = session_clear_raises
@@ -409,7 +411,11 @@ async def test_list_tolerates_non_list_raw_messages():
 @pytest.mark.asyncio
 async def test_create_builds_session_dto_and_calls_port():
     port = _FakeSessionPort(
-        session_create_result={"key": "session:fixed:user:u1", "label": "My_0601120000"}
+        session_create_result={
+            "key": "session:fixed:user:u1", "label": "My_0601120000",
+            "canonical_session_id": "agent:custom:session:fixed:user:u1",
+            "resolved_model": "provider/actual-model",
+        }
     )
     adapter = OpenClawSessionAdapter(port)
     request = SessionCreateRequest(title="My", user_id="u1", model="ant/llm")
@@ -422,6 +428,15 @@ async def test_create_builds_session_dto_and_calls_port():
     assert session.key == "session:fixed:user:u1"
     assert session.model == "ant/llm"
     assert session.user_id == "u1"
+    assert session.id == "session:fixed:user:u1"
+    assert session.title == "My_0601120000"
+    assert session.message_count == 0
+    assert session.ext_info == {"openclaw_creation": {
+        "session_id": "agent:custom:session:fixed:user:u1",
+        "model": "provider/actual-model",
+    }}
+    assert port.sessions_list_calls == []
+    assert port.chat_history_calls == []
 
     call = port.session_create_calls[0]
     assert call["key"] == "session:fixed:user:u1"

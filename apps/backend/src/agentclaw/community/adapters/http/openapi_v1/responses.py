@@ -2,13 +2,16 @@
 
 Every public route returns the same :class:`Envelope` shape — on success and on
 the known failure cases alike — so external callers parse one structure
-everywhere. This module owns:
+everywhere. This module owns the domain-error → envelope mapping and the
+:func:`envelope_errors` decorator that turns a raised domain error into an
+enveloped error response with the right HTTP status, leaving unmapped
+exceptions to the app's 500 handler.
 
-- the envelope/page builders that stamp the request's trace id into
-  ``request_id`` (mirroring the ``X-Trace-ID`` response header), and
-- the domain-error → envelope mapping plus the :func:`envelope_errors` decorator
-  that turns a raised domain error into an enveloped error response with the
-  right HTTP status, leaving unmapped exceptions to the app's 500 handler.
+The success builders (``envelope``, ``page``, ``created``, ``accepted``,
+``deleted``) now live in :mod:`~...openapi_v1.response_envelopes` — the plural
+name is the builders module; the singular ``response_envelope`` is the low-level
+envelope/error-response primitive — and are re-exported here so existing
+imports keep working.
 
 Handlers therefore never build an :class:`Envelope` by hand for errors; they call
 a builder on success and let the decorator handle the mapped failures.
@@ -29,13 +32,20 @@ from agentclaw.community.adapters.http.error_logging import (
     log_public_error,
     remember_call_params,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
     CODE_OK,
     Deleted,
-    Envelope,
     Page,
+)
+from agentclaw.community.adapters.http.openapi_v1.response_envelopes import (
+    accepted,
+    created,
+    deleted,
+    envelope,
+    page,
 )
 from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     error_response,
@@ -321,6 +331,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -332,50 +344,28 @@ from agentclaw.community.plugin_api.skill_center_client import (
 )
 
 __all__ = [
+    "accepted",
+    "created",
+    "deleted",
+    "envelope",
     "error_response",
     "error_response_for",
     "is_public_api",
+    "page",
     "trace_id",
     "unmapped_error_response",
 ]
+
+# The envelope-code constants the pre-split module carried in its own
+# namespace; existing importers (e.g. the task-callback orchestration tests)
+# keep importing them from here, so the split must not drop the re-export.
+__all__ += ["CODE_ACCEPTED", "CODE_CREATED", "CODE_OK", "Deleted", "Page"]
+
 T = TypeVar("T")
 
 
 class SkillCenterMarketplaceUnavailableError(RuntimeError):
     """A public Skill Center marketplace read could not be served."""
-
-
-def envelope(
-    data: T,
-    request: Request,
-    *,
-    code: int = CODE_OK,
-    message: str = "OK",
-) -> Envelope[T]:
-    """Wrap ``data`` in the standard success envelope."""
-    return Envelope(
-        code=code, message=message, data=data, request_id=trace_id(request)
-    )
-
-
-def page(total: int, items: list[T], request: Request) -> Envelope[Page[T]]:
-    """Wrap a page of ``items`` in the standard envelope."""
-    return envelope(Page(total=total, items=items), request)
-
-
-def created(data: T, request: Request) -> Envelope[T]:
-    """201 success envelope."""
-    return envelope(data, request, code=CODE_CREATED, message="Created")
-
-
-def accepted(data: T, request: Request) -> Envelope[T]:
-    """202 success envelope (e.g. bot creation pending user authorization)."""
-    return envelope(data, request, code=CODE_ACCEPTED, message="Accepted")
-
-
-def deleted(request: Request) -> Envelope[Deleted]:
-    """Standard delete-success envelope."""
-    return envelope(Deleted(), request)
 
 
 # Domain error → (HTTP status, fixed public message). Only the specific leaf
@@ -575,6 +565,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
+    ServicePublicationGateBlockedError: (
+        403,
+        "评测未通过，无法推进发布",
+    ),
+    ServicePublicationGatePendingError: (
+        409,
+        "评测认证处理中，请稍后再试",
+    ),
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -884,6 +882,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetAccessDeniedError: 403201,
     McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
+    ServicePublicationGateBlockedError: 403210,
+    ServicePublicationGatePendingError: 409210,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {

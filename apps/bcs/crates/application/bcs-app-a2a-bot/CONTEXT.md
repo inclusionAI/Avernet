@@ -51,7 +51,7 @@ stale writes and unchanged route semantics against real Bot core/SQLite storage.
 The injected Card fixture records network-port invocations. Listening HTTP
 fetch behavior is tested independently by the outbound client crate.
 
-Public target resolution validates the current A2A Card/name and Provider Bot binding
+Public target resolution validates the Provider/ref and active A2A Card/Provider Bot binding
 before pinning the Provider slug. Missing or invalid targets never mutate Provider
 metadata. The conditional pin still fences a concurrent Provider rename.
 
@@ -60,8 +60,18 @@ metadata. The conditional pin still fences a concurrent Provider rename.
 `management` derives Provider identity from an authenticated Provider-admin token,
 validates the anonymous-only full Card and delegates commits to core contracts.
 Its five-field result contains the stable BCN bot_id but never runtime credentials.
-Legacy ID and named registration remain separate compatibility entrypoints. Public
-updates bind the original Bot ID and current name across the fetch, retry local
-CAS conflicts at most three times, and cannot retarget a renamed/deleted Bot.
+Provider-ID and Provider-name registration retain their admission policies and expose
+the stable Bot identity. Public get/update/refresh use only bot_id, never Card.name.
+Updates fence the original Bot ID and Provider binding across the fetch, retry local
+CAS conflicts at most three times without refetching, and cannot retarget a renamed/deleted Bot.
+Refresh retains single-CAS protection against newer explicit updates. Unmounted name
+management handlers and their Service API methods are removed. Provider chat resolves
+provider_bot_ref, not mutable names. Public registration requires that ref and returns
+it with bot_id; Card names may repeat. Reference recovery authenticates the Provider,
+queries existing env/Provider/ref columns exactly, rechecks binding and returns zero
+or one management result. Classification v2 contains optional mutable party, no agentId. It is
+not registration upsert or history storage.
 The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
+
+Public Agent registration accepts BCN visibility (protected by default, or public/private). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility. This policy does not alter user_visibility or existing discovery, connection and invocation authorization; private is not an owner-only Human access mode.

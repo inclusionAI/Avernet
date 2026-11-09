@@ -576,7 +576,11 @@ class TestOutputSchemaValidation:
             _finish_decision("never reached"),
         ]
         factory = FakeFactory(scripts={"a1": ["still not an object"]})
-        config = _config(agent_max_attempts=2, slice_max_seconds=0.3)
+        # This case verifies terminal fail-fast after the retry budget is
+        # exhausted.  It does not exercise slice expiry, so keep the normal
+        # slice budget; a 300 ms wall-clock deadline can expire first on a
+        # loaded CI runner and turn the expected failure into a reschedule.
+        config = _config(agent_max_attempts=2)
         env = _build_env(db, script, factory, config=config)
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
@@ -610,8 +614,7 @@ class TestOutputSchemaValidation:
         ]
         factory = FakeFactory(scripts={"a1": [{"anything": 1}]})
         env = _build_env(db, script, factory,
-                         config=_config(agent_max_attempts=3,
-                                        slice_max_seconds=0.3))
+                         config=_config(agent_max_attempts=3))
         run = _mk_run()
         claim = _enqueue_and_claim(env, run)
 

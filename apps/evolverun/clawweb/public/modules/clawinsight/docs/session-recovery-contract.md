@@ -201,6 +201,18 @@ When a real user continues the original conversation after the fault, the worker
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Ordinary blocked reports describe inability to continue the recovery workflow, not an unrecovered business task. For live non-Debug tasks, an accepted or unknown initial delivery in `assess` requires an `assessment` result before observation; `observe` and `verify` require an `observation` result with the actual effect. An ordinary blocked report at these boundaries is rejected with HTTP 422 for correction, without changing state, resending guidance, or synthesizing an effect. Known failed delivery, pre-delivery blockers and an unrepairable outcome after plan analysis retain failure semantics. Explicit user continuation, proven target loss and handbook-directed Owner handoff remain available. Unknown reasons and unsupported read evidence are rejected. Deploy result validation before the updated worker package. No task-status enum or database schema change is required.
 
+### Assessment concludes that recovery is unnecessary
+
+During `assess`, successful controlled reads can establish that the original
+task is in a normal business wait or is subject to an explicit business
+exclusion. Report `kind=assessment`, `decision=no_recovery_needed`, the
+decision summary and its evidence IDs. The service requires a complete audit
+confirming no intervention and no accepted or unknown message delivery. It
+completes the assessment with `status=completed` and
+`completion_reason=no_recovery_needed` and releases the execution. The result
+reports `intervention_status=none` and preserves the available business effect.
+An accepted or unknown delivery continues through observation.
+
 ### Cron delivery identity
 
 A direct OpenClaw Cron execution key can differ from its persisted conversation key.
@@ -245,3 +257,12 @@ Worker stage reports accept optional top-level `final_summary`, an Agent-authore
 The recovery runner normally receives this field with the last result. Missing/invalid optional prose gets at most one tools-disabled correction in the same Agent session before reporting; the original business result cannot be replaced by the correction. Failure leaves the summary absent and retains all primary artifacts. Existing security rejection of credential-bearing primary output remains unchanged. The service ignores malformed, overlong or credential-bearing optional summary metadata without rejecting a valid business result. Legacy tasks, external cancellation and infrastructure exits may have no summary; consumers show an explicit unavailable state and link to full records, never derive it from `judgment.summary`. The upstream callback schema and statistics are unchanged.
 
 Details expand the persisted summary beneath the overview. Result group notices reuse it (with existing safe formatting), retain independently verified delivery/response/effect and a detail link, and preserve all routing and simulation/no-intervention guards. Pending plans use neutral pending-verification presentation; active observation uses blue; a terminal unrecovered business outcome uses amber. `failed + verify + not_recovered` is presented as processing ended with the original task still blocked; actual execution failures retain a separate red alert. Raw status/effect values do not change. See the [design spec](../../../../../docs/clawweb/specs/clawinsight-session-recovery-final-summary.md).
+
+
+## Recovery before Owner handoff
+
+An evidence-backed, authorized correction, bounded retry or continuation must be pursued while the original task remains blocked. A finished or failed Cron run does not make its session unable to receive recovery guidance. Existing user-continuation, authorization, idempotency and running-OpenClaw-Cron waiting boundaries still apply.
+
+Owner handoff requires a remaining blocker that the available recovery methods cannot safely resolve. Verified recovery completes through ordinary observation; optional optimization advice belongs in the completion summary and existing result notice. Explicit or saved `recovered` effects cannot be terminated as `owner_handoff`, nor silently downgraded to enable it: invalid reports return 422 without state changes or notifications. Older task records remain readable. An accepted/uncertain initial message in assessment must transition into observation before a terminal Owner handoff.
+
+Recovery discovered during planning uses the existing observation report with `phase=plan` and `effect=recovered`; it rejoins `observe`. Pending delivery preserves the last message's original observation deadline. No new task state, report field, configuration or Base change is introduced.

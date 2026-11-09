@@ -6,15 +6,15 @@ ProfileQualityScorer 单元测试
 
 import pytest
 
-from src.domain.models.profile_quality_score import (
+from app.domain.models.profile_quality_score import (
     QUALITY_THRESHOLD_ACCEPTABLE,
     ProfileQualityScore,
 )
-from src.domain.models.worker_profile_content import (
+from app.domain.models.worker_profile_content import (
     WorkerProfileContent,
     SkillSet,
 )
-from src.domain.services.profile_quality_scorer import ProfileQualityScorer
+from app.domain.services.profile_quality_scorer import ProfileQualityScorer
 
 
 class TestProfileQualityScore:

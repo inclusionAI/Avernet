@@ -356,7 +356,7 @@ WS 使用类型化 `Protected` 帧（binding、visibility、payload）及明确�
 1. 追加新版本 MySQL/SQLite migration，不改历史编号文件；上线前检查完整迁移链与已有唯一键数据。**本期例外记录（036/037）**：实现期间发现 036(MySQL)/ 037(SQLite)中 `edge_grants` 唯一键的"先 DROP 后 ADD"两步替换留了无约束窗口。两个文件均为**本 PR 首次引入、尚未合入 dev、未在任何共享环境执行过**，不属于冻结规则保护的已合入历史迁移，因此在原文件内修正而不是新增编号掩盖：MySQL 侧把 DROP+ADD 合并为单条原子 ALTER（元数据锁下同一把锁），SQLite 侧改为先 CREATE 加宽键、后 DROP 旧键（任何时刻都有覆盖旧维度的唯一约束在效）。兼容与恢复状态：终态模式（`uk_edge_from_to_env_kind_ref` 在、`uk_edge_from_to_env_ref` 不在）两种写法完全一致，不存在需要识别或补救的中间库态；重新执行由 `IF NOT EXISTS/IF EXISTS` 幂等控制。发布时按第 5 条维护窗口停写旧 writer，与本项的窗口防护彼此独立成立。核对方式：`bcs-admin db migrate --check-files` 双方言 + `bot_authority_migration` 迁移链测试断言终态键存在性。
 2. 显式受信任的 Human 注册：Bot、Human 校验/必要创建、owner、version、默认运行时 profile 及必要 gateway binding 在同一持久化事务提交；不得部分成功后返回成功。
 3. 未携带可信 Human 的 runtime Bot 可保持 version 0。已有初始化 Bot 的重新注册、onboard 与凭证刷新只更新其原有职责字段。
-4. Provider-admin 注册面是身份权威的受信代理（provider admin token 认证 Backend，其声明的单数 owner 即验证身份）：新建 Bot 时同一调用完成 Human actor 必要创建（名称取自用户目录、缺省回落工号）与 owner 初始化（owner 边、version 1、`initialize` 审计），审计 actor 记 `Provider { provider_id}` 而不冒充所声明 Human；已有 Bot 的重注册拒绝不同 owner（既有 `created_by` 守卫），owner 永不重置。
+4. Provider-admin 注册面是身份权威的受信代理（provider admin token 认证 Backend，其声明列表首项为 owner、其余去重后的人员为初始 managers（2026-11-06 扩展））：新建 Bot 时同一调用完成 Human actor 必要创建（名称取自用户目录、缺省回落工号）与权限初始化（owner 边、初始 manager Human/管理边、version 1、`initialize` 审计在同一事务），审计 actor 记 `Provider { provider_id}` 而不冒充所声明 Human；已有 Bot 的重注册拒绝不同 owner（既有 `created_by` 守卫），owner 永不重置。
 5. 在维护窗口冻结旧 writer，通过 `bcs-admin` 先 dry-run。仅创建记录与历史关系不矛盾、指向有效 Human 的 version 0 Bot 可申请回填；缺失或冲突输出人工治理清单。
 6. apply 仅处理显式确认的 Bot ID，每批最多 100；逐 Bot 原子写 owner/version/审计。重复执行已初始化 Bot 返回当前状态，不回写创建者，不重置已转交的 owner。
 7. 所有挂载中的 Human 授权消费者一起切换；Backend 使用已验证的 service 凭证提交初始 manager 快照。禁止先开放转交而让部分入口继续按 created_by 鉴权。

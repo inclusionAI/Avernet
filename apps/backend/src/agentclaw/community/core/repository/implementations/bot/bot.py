@@ -49,6 +49,7 @@ from agentclaw.community.core.repository.implementations.bot.mutations import (
     _JSON_FIELDS as _JSON_FIELDS,
 )
 from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
+from sqlalchemy.orm import Query, Session
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.repository.implementations.bot.device_provider import (
@@ -68,6 +69,7 @@ from agentclaw.community.core.repository.implementations.bot.explicit_env import
 )
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
@@ -146,6 +148,7 @@ class BotRepository(
             bot_type=bot_data.get("bot_type", "personal"),
             template_type=bot_data.get("template_type"),
             space_id=bot_data.get("space_id"),
+            identity_bot_id=bot_data.get("identity_bot_id"),
         )
 
     # ── queries (env-scoped — adopt prod) ───────────────────────
@@ -171,6 +174,7 @@ class BotRepository(
         execution_options: Optional[dict] = None,
         env: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        mark("bot.by_owner")
         with self._db.orm_session() as db:
             q = db.query(self.Model).filter(
                 self.Model.bot_id == bot_id,
@@ -181,6 +185,7 @@ class BotRepository(
             if execution_options:
                 q = q.execution_options(**execution_options)
             bot = q.first()
+            mark("bot.by_owner.fetched")
             return bot.to_dict() if bot else None
 
     def get_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
@@ -201,6 +206,24 @@ class BotRepository(
                 .first()
             )
             return bot.to_dict() if bot else None
+
+    def list_live_by_bot_id(self, bot_id: str) -> list[Dict[str, Any]]:
+        """List ALL live rows sharing this bot_id in the current env.
+
+        打破 get_by_id 的 .first() 单行假设:共享 bot_id(如 ``default``,
+        每用户一行)与启动订正的归属判定都需要看到全部 live 行。
+        """
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .all()
+            )
+            return [row.to_dict() for row in rows]
 
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
@@ -485,19 +508,7 @@ class BotRepository(
         if not pairs:
             return 0, []
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                or_(
-                    *[
-                        and_(
-                            self.Model.bot_id == bot_id,
-                            self.Model.owner_id == owner_id,
-                        )
-                        for bot_id, owner_id in pairs
-                    ]
-                ),
-                self.Model.is_delete == 0,
-                self._env(),
-            )
+            query = self._owner_bot_pairs_query(db, pairs)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
@@ -508,6 +519,29 @@ class BotRepository(
             from .stage_catalog import attach_stage_metadata
 
             return total, attach_stage_metadata(db, bots)
+
+    def _owner_bot_pairs_query(self, db: Session, pairs: List[tuple[str, str]]) -> Query:
+        return db.query(self.Model).filter(
+            or_(*[and_(self.Model.bot_id == bot_id, self.Model.owner_id == owner_id)
+                  for bot_id, owner_id in pairs]),
+            self.Model.is_delete == 0, self._env(),
+        )
+
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """The bounded catalog join does not use the repository's COUNT."""
+        if len(pairs) > 100:
+            raise ValueError("catalog join accepts at most 100 pairs")
+        if not pairs:
+            return []
+        with self._db.orm_session() as db:
+            bots = self._owner_bot_pairs_query(db, pairs).order_by(
+                self.Model.gmt_create.desc(), self.Model.id.desc(),
+            ).limit(len(pairs)).all()
+            from .stage_catalog import attach_stage_metadata
+
+            return attach_stage_metadata(db, bots)
 
     def list_by_search(
         self,
@@ -613,6 +647,7 @@ class BotRepository(
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -620,6 +655,8 @@ class BotRepository(
                 self.Model.owner_id == owner_id,
                 self._env(),
             )
+            if exclude_identity_inheriting:
+                query = query.filter(self.Model.identity_bot_id.is_(None))
             if exclude_bot_type:
                 query = query.filter(self.Model.bot_type != exclude_bot_type)
             if exclude_active_engine:
@@ -631,6 +668,24 @@ class BotRepository(
                     )
                 )
             return query.count()
+
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Owner-scoped like every other Bot query. Soft-deleted rows do not count:
+        they no longer run, so the source's deletion cannot strand them.
+        """
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.Model)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self.Model.identity_bot_id == bot_id,
+                    self._env(),
+                )
+                .count()
+            )
 
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         with self._db.orm_session() as db:
@@ -687,6 +742,7 @@ class BotRepository(
             return bot.to_dict() if bot else None
 
     def get_by_binding_id(self, binding_id: int) -> Optional[Dict[str, Any]]:
+        mark("bot.by_binding")
         with self._db.orm_session() as db:
             bot = (
                 db.query(self.Model)
@@ -697,6 +753,7 @@ class BotRepository(
                 )
                 .first()
             )
+            mark("bot.by_binding.fetched")
             return bot.to_dict() if bot else None
 
     # ── search / active (env-scoped JOIN to bot_publish) ────────

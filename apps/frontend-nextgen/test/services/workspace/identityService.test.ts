@@ -469,6 +469,22 @@ describe('identityService.loadIdentities', () => {
     expect(res.ok).toBe(false);
   });
 
+  it.each([null, undefined, '', '  ', { name: '/wrong.png' }])(
+    'does not reinterpret missing or malformed mine avatar %p',
+    async (avatar_url) => {
+      listMyBots.mockResolvedValue({
+        code: 20000,
+        message: '',
+        request_id: 'avatar',
+        data: { items: [{ kind: 'bot', bot_id: 'b1', name: 'Alpha', avatar_url }], total: 1, offset: 0, limit: 50 },
+      });
+      const result = await identityService.loadIdentities();
+      expect(result.ok).toBe(true);
+      expect((result as SuccessResult).data.identities.find((i) => i.id === 'b1')?.avatarUrl).toBeUndefined();
+      expect(listMyBots).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('并发调用复用同一次 bots/mine 请求(模块级单飞)', async () => {
     let calls = 0;
     listMyBots.mockImplementation(async () => {
@@ -489,5 +505,88 @@ describe('identityService.loadIdentities', () => {
     expect(calls).toBe(1);
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
+  });
+});
+
+describe('BCS-only 可选 Backend 身份增强（bcs-standalone-friend-discovery）', () => {
+  /** bots/mine 返回真实 human_7 与一个受管物理 Bot（engine/botType 由 mine 直接承载）。 */
+  const HUMAN_AND_MANAGED_BOT_MINE = {
+    code: 20000,
+    message: '',
+    request_id: 'r-mine',
+    data: {
+      items: [
+        { kind: 'human', bot_id: 'human_7', name: '验收用户七', avatar_url: null, status: 'online' },
+        {
+          kind: 'bot',
+          bot_id: 'assistant:owner-7',
+          name: '受管机器人',
+          avatar_url: null,
+          status: 'online',
+          engine: 'openclaw',
+        },
+      ],
+      total: 2,
+      offset: 0,
+      limit: 50,
+    },
+  };
+
+  function setRuntimePublicBotBackend(value: boolean): void {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: value },
+      configurable: true,
+    });
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
+  });
+
+  it('Backend 关闭（运行时 PUBLIC_BOT_BACKEND_ENABLED=false）：mine 两类身份均保留，listBots 为 0 次', async () => {
+    listMyBots.mockResolvedValue(HUMAN_AND_MANAGED_BOT_MINE);
+    setRuntimePublicBotBackend(false);
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    const data = (res as SuccessResult).data;
+    // Human + 受管物理 Bot 均保留；engine/botType 维持 mine 结果（openclaw），不做 Backend 补充。
+    expect(data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'user', id: 'human_7', displayName: '验收用户七' }),
+        expect.objectContaining({ kind: 'bot', id: 'assistant:owner-7', engine: 'openclaw' }),
+      ]),
+    );
+    expect(listBots).not.toHaveBeenCalled();
+  });
+
+  it('Backend 开启（运行时 PUBLIC_BOT_BACKEND_ENABLED=true）：仍补充 engine/botType（原全栈行为保留）', async () => {
+    listMyBots.mockResolvedValue(HUMAN_AND_MANAGED_BOT_MINE);
+    setRuntimePublicBotBackend(true);
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [{ bot_id: 'assistant:owner-7', bot_name: '受管机器人', engine: 'claude_code', bot_type: 'service' }],
+        total: 1,
+        offset: 0,
+        limit: 100,
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    const data = (res as SuccessResult).data;
+    expect(data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'user', id: 'human_7' }),
+        expect.objectContaining({ kind: 'bot', id: 'assistant:owner-7', engine: 'claude_code', botType: 'service' }),
+      ]),
+    );
+    // 身份补充以登录 Human 的真实 user_id 为请求 scope。
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '7' });
   });
 });

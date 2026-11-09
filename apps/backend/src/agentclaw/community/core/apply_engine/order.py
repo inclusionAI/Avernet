@@ -80,7 +80,7 @@ class ApplyStep:
 
     #: Which construct this step applies.
     construct: ApplyConstruct
-    #: The sort key, 0-6, unique across the table. Shared by every family: the
+    #: The sort key, 0-7, unique across the table. Shared by every family: the
     #: order is the table's, only the phase is family-specific.
     position: int
 
@@ -103,10 +103,16 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     ApplyStep(Section.SCRIPT, 0),
     ApplyStep(Category.IDENTITY, 1),
     ApplyStep(Category.RESOURCES, 2),
-    ApplyStep(Category.SKILLS, 3),
-    ApplyStep(Category.MCP, 4),
-    ApplyStep(Category.ENGINE_CONFIG, 5),
-    ApplyStep(Category.CLI_TOOLS, 6),
+    ApplyStep(Section.BOT_FILE_SYNC, 3),
+    # bot_config runs once the dst bot row exists: the render-screen handler
+    # writes dst rows through RenderScreenService, whose bot-existence check
+    # needs the row _create_the_bot wrote — so this is on_container, after the
+    # resource/file constructs that touch the live mount.
+    ApplyStep(Category.BOT_CONFIG, 4),
+    ApplyStep(Category.SKILLS, 5),
+    ApplyStep(Category.MCP, 6),
+    ApplyStep(Category.ENGINE_CONFIG, 7),
+    ApplyStep(Category.CLI_TOOLS, 8),
 )
 
 __all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]

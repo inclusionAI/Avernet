@@ -13,4 +13,5 @@ registerExtensionSlots({
   groupServiceBotRouting: null,
   taskSessionNavigationObserver: null,
   taskPanelBootstrap: null,
+  sessionTaskPanelTab: null,
 } satisfies AppExtensionSlots);

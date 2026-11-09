@@ -180,7 +180,7 @@ export default function ExpertMarketPage() {
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
         {/* 与公开 Bot/协作群 Tab 相同的内容区节奏：px-5 / pt-4 / pb-6、区块 16px 间距。 */}
         <div className="flex w-full flex-col px-5 pb-6 pt-4">
-          <section className="space-y-4" aria-label="专家市场">
+          <section className="space-y-4" aria-label="专家">
             {expertId ? <ExpertDetails expertId={expertId} onBack={returnToCatalog} /> : <>
               {categoryError && (
                 <div role="alert" className="m-0 flex items-center gap-2 text-sm text-destructive">

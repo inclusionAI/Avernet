@@ -1,26 +1,25 @@
-import type { ParticipantView } from '@/domain/collaboration/types';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Avatar } from '@/components/ui';
+import type { ParticipantSummaryView } from '@/domain/collaboration/types';
+import { imageAvatarSource } from '@/utils/avatarSource';
 import { cn } from '@/utils/cn';
 
 /** 头像堆最多展示成员数（dmore artboard-010「运营协作」行：2 个 16px 真实头像 + N+ 徽标）。 */
 const AVATAR_STACK_MAX = 2;
 
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//.test(url);
-}
-
 /**
  * 成员头像堆（dmore artboard-010「群目录一级_收起/展开」两级行首 34x16 容器实测）：
  * ≤2 个 16px 真实头像按 9px 步距叠放,与标题净距 4px（行 gap-2 由堆上 -mr-1 抵 4px）;
- * 超出部分以 N+ 徽标（8px 字、E8EAED 底）表达剩余人数。participants 未回填时不渲染行首
- * 标识（2026-10-12 用户反馈：群行不用文件夹图标,列表缺成员时由 hook 层按详情补拉）。
+ * 超出部分以 N+ 徽标（8px 字、E8EAED 底）表达剩余人数。Bot 走稳定默认头像，Human 走
+ * 共享 Avatar（仅接受可展示的图片源）。participants 未回填时不渲染行首标识（2026-10-12
+ * 用户反馈：群行不用文件夹图标,列表缺成员时由 hook 层按详情补拉）。
  */
 export function GroupAvatarStack({
   participants,
   totalCount,
   size = 16,
 }: {
-  participants: ParticipantView[];
+  participants: ParticipantSummaryView[];
   totalCount: number;
   /** 侧栏放大头像；聊天标题等已有调用保持紧凑尺寸。 */
   size?: 16 | 20;
@@ -35,11 +34,16 @@ export function GroupAvatarStack({
           key={participant.actorId ?? participant.name}
           className={cn('rounded-full ring-1 ring-background', index > 0 && (size === 20 ? '-ml-3' : '-ml-[7px]'))}
         >
-          <Avatar
-            name={participant.name}
-            src={participant.avatarUrl && isHttpUrl(participant.avatarUrl) ? participant.avatarUrl : undefined}
-            size={size}
-          />
+          {participant.kind === 'bot' ? (
+            <BotDisplayAvatar
+              botId={participant.actorId}
+              name={participant.name}
+              avatarUrl={participant.avatarUrl}
+              size={size}
+            />
+          ) : (
+            <Avatar name={participant.name} src={imageAvatarSource(participant.avatarUrl)} size={size} />
+          )}
         </span>
       ))}
       {remaining > 0 && (

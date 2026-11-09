@@ -47,6 +47,7 @@ fn unix_millis_now() -> u64 {
 #[derive(Clone)]
 pub struct BotCore {
     pub(super) repo: Arc<dyn BotRepoPort>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
     pub(super) provider_repo: Option<Arc<dyn ProviderRepoPort>>,
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
@@ -57,6 +58,15 @@ pub struct BotCore {
 }
 
 impl BotCore {
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
+    fn catalog_changed(&self, id: &str) {
+        if let Some(port) = &self.catalog_changes { port.agent_changed(id); }
+    }
+
     pub fn new() -> Self {
         Self::memory()
     }
@@ -72,6 +82,7 @@ impl BotCore {
     pub fn with_repo(repo: Arc<dyn BotRepoPort>) -> Self {
         Self {
             repo,
+            catalog_changes: None,
             provider_repo: None,
             provider_credentials: None,
             provider_bindings: None,
@@ -90,6 +101,7 @@ impl BotCore {
     ) -> Self {
         Self {
             repo,
+            catalog_changes: None,
             provider_repo: Some(provider_repo),
             provider_credentials: Some(provider_credentials),
             provider_bindings: Some(provider_bindings),
@@ -257,7 +269,9 @@ impl BotRegistryCoreService for BotCore {
     async fn create_registration_if_absent(
         &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
     ) -> ServiceResult<bool> {
-        self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
+        let result = self.repo.create_registration_if_absent(bot_id.clone(), capabilities, created_by, token).await?;
+        if result { self.catalog_changed(&bot_id); }
+        Ok(result)
     }
 
     /// Trusted human registration (spec §10.2): the core
@@ -303,6 +317,7 @@ impl BotRegistryCoreService for BotCore {
                 "Bot registration identity already exists".into(),
             ));
         }
+        self.catalog_changed(&bot_id);
         Ok(CommittedBotRegistration {
             bot_name: self
                 .repo
@@ -324,6 +339,14 @@ impl BotRegistryCoreService for BotCore {
         self.repo.initialize_ownership(bot_id, owner_user_id, mutation).await
     }
 
+    async fn initialize_provider_authority(
+        &self, bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
+        self.repo.initialize_provider_authority(bot_id, initialization).await
+    }
+
+
     async fn ownership_governance_state(
         &self,
         bot_id: &str,
@@ -341,12 +364,16 @@ impl BotRegistryCoreService for BotCore {
         // The ordinary `retire` is its own command — never
         // chained into a Provider retirement (spec §7.1).
         // The real mutation actor is the audit initiator.
-        self.repo.retire_with_authority(bot_id, mutation).await
+        let retired = self.repo.retire_with_authority(bot_id, mutation).await?;
+        if retired { self.catalog_changed(bot_id); }
+        Ok(retired)
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
-        self.repo.register(bot_id, capabilities).await
+        self.repo.register(bot_id.clone(), capabilities).await?;
+        self.catalog_changed(&bot_id);
+        Ok(())
     }
 
     async fn register_with_owner_and_token(
@@ -358,8 +385,10 @@ impl BotRegistryCoreService for BotCore {
     ) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
         self.repo
-            .register_with_owner_and_token(bot_id, capabilities, created_by, token)
-            .await
+            .register_with_owner_and_token(bot_id.clone(), capabilities, created_by, token)
+            .await?;
+        self.catalog_changed(&bot_id);
+        Ok(())
     }
 
     async fn update_capabilities(
@@ -368,7 +397,9 @@ impl BotRegistryCoreService for BotCore {
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(bot_id, capabilities).await?;
-        self.repo.update_capabilities(bot_id, capabilities).await
+        self.repo.update_capabilities(bot_id, capabilities).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_status(&self, bot_id: &str) -> bool {
@@ -557,7 +588,9 @@ impl BotRegistryCoreService for BotCore {
             }
         }
         // Also clear the registry's runtime/token caches after the durable write.
-        self.repo.soft_delete(bot_id).await || deleted
+        let result = self.repo.soft_delete(bot_id).await || deleted;
+        if result { self.catalog_changed(bot_id); }
+        result
     }
 
     async fn cleanup_expired(&self) {
@@ -570,11 +603,15 @@ impl BotRegistryCoreService for BotCore {
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
         let caps = self.protect_provider_identity(bot_id, caps.clone()).await?;
-        self.repo.save_to_storage(bot_id, &caps).await
+        self.repo.save_to_storage(bot_id, &caps).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
-        self.repo.update_visibility(bot_id, visibility).await
+        self.repo.update_visibility(bot_id, visibility).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_profile_existing(
@@ -582,7 +619,11 @@ impl BotRegistryCoreService for BotCore {
         bot_id: &str,
         update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
     ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
-        self.update_profile_existing_impl(bot_id, update).await
+        let result = self.update_profile_existing_impl(bot_id, update).await?;
+        if result == bcs_service_api::types::bot_profile::ProfileWrite::Updated {
+            self.catalog_changed(bot_id);
+        }
+        Ok(result)
     }
 
     async fn update_avatar_existing(
@@ -602,11 +643,15 @@ impl BotRegistryCoreService for BotCore {
 
     #[allow(deprecated)]
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()> {
-        self.repo.set_hidden(bot_id, hidden).await
+        self.repo.set_hidden(bot_id, hidden).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_actor_status(&self, bot_id: &str, status: ActorStatus) -> ServiceResult<()> {
-        self.repo.update_actor_status(bot_id, status).await
+        self.repo.update_actor_status(bot_id, status).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn ensure_human_actor(

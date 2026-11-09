@@ -328,7 +328,7 @@ BotCandidate:
       $ref: "#/PhysicalBot"
     is_friend:
       type: boolean
-      description: Whether the acting physical Bot has an accepted Friendship.
+      description: Whether the acting Actor has an accepted Friendship with this Bot.
 
 BotCandidateSearchItem:
   type: object

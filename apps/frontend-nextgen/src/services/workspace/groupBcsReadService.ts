@@ -20,7 +20,14 @@ import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { SessionPageOpts } from './groupService';
 import type { DomainError, DomainResult } from './identityService';
-import { isHumanMentionNotifyMode, mapBcsSessionItem, type BcsParticipantRaw, type BcsSessionRaw } from './mappers';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
+import {
+  isHumanMentionNotifyMode,
+  mapBcsSessionItem,
+  toParticipantSummary,
+  type BcsParticipantRaw,
+  type BcsSessionRaw,
+} from './mappers';
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
   return { code, friendlyMessage, canRetry: false };
@@ -152,6 +159,7 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
       actorId: safeString(p.bot_uuid, safeString(p.actor_id, safeString(p.bot_id))),
       kind: p.actor_kind === 'human' ? 'human' : 'bot',
       name: safeString(p.bot_name, safeString(p.name, safeString(p.bot_uuid, safeString(p.actor_id)))),
+      avatarUrl: normalizeAvatarUrl(p.avatar_url),
       role: ROLE_NATIVE_TO_DOMAIN[safeString(p.role, 'worker')] ?? 'member',
       mode: p.mode === 'muted' || p.mode === 'absent' || p.mode === 'present' ? p.mode : 'auto',
     }));
@@ -164,6 +172,8 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
       kind,
       status: g.status === 'dissolved' ? 'dissolved' : 'active',
       participants,
+      participantSummaries: participants.map(toParticipantSummary),
+      participantDetailsLoaded: true,
       sessions,
       lastMessageAt: typeof g.updated_at === 'number' ? g.updated_at : 0,
       createdAt: typeof g.created_at === 'number' ? g.created_at : 0,

@@ -18,6 +18,10 @@ import '@testing-library/jest-dom/jest-globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+// jsdom 未实现 scrollIntoView:Radix Select 打开/选中时滚动选中项会抛 TypeError 中断选择流程,
+// 幂等补齐空实现(项目先例:internal/capability-workshop 各测试同款;创建弹窗目标空间下拉需要)。
+Element.prototype.scrollIntoView ??= () => undefined;
+
 const managedBot: ChatBotView = {
   botId: 'bot-a:1',
   realBotId: 'bot-a',
@@ -263,8 +267,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
   it('ConversationPage uses Human identity and renders no Workspace identity tabs', async () => {
     render(<ConversationPage />);
     expect(screen.queryByRole('tab', { name: '协作群' })).not.toBeInTheDocument();
-    // Human 登录身份用于目录加载(而非旧工作身份);组名按 v2 设计稿固定为「我的 Bot」。
-    await screen.findByText('我的 Bot');
+    // Human 登录身份用于目录加载(而非旧工作身份);管理组 2026-11-05 验收微调更名「我管理的 Bot」。
+    await screen.findByText('我管理的 Bot');
   });
 
   it('Coding Bot 无会话时复用统一空态，并由已挂载的子应用创建首会话', async () => {
@@ -421,7 +425,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
     expect(screen.queryByTestId('coding-bot-stage')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收藏当前会话' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '会话管理' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '历史消息' })).toBeInTheDocument();
+    // 历史消息检索尚不完整（后端检索接口未就绪），入口暂不开放。
+    expect(screen.queryByRole('button', { name: '历史消息' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '资源管理' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '副屏' })).not.toBeInTheDocument();
     expect(mockUseBotChat).toHaveBeenCalledWith(
@@ -431,6 +436,62 @@ describe('ConversationPage(Task 8 组合页)', () => {
       undefined,
       '101',
     );
+  });
+
+  it('managed Coding Bot 未选 Session 时仍挂载 Runtime，并用未选态覆盖在 Stage 上', async () => {
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => <div /> },
+      }),
+    });
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [agentCodingBot], friendBots: [] },
+    });
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { [agentCodingBot.botId]: true },
+      originByManagedBotId: { [agentCodingBot.botId]: 'mine' },
+      selectedBotId: agentCodingBot.botId,
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: null,
+      sessionsByBotId: {
+        [agentCodingBot.botId]: {
+          botId: agentCodingBot.botId,
+          origin: 'mine',
+          scope: 'all',
+          sessions: {
+            ...emptyList,
+            items: [
+              {
+                sessionId: 'coding-s1',
+                botId: agentCodingBot.botId,
+                title: 'Coding 会话 1',
+                messageCount: 0,
+                gmtModified: '',
+                gmtCreate: '',
+              },
+            ],
+          },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+
+    render(<ConversationPage />);
+
+    const stage = await screen.findByTestId('coding-bot-stage');
+    expect(stage).toHaveAttribute('data-bot-id', 'coding-bot');
+    expect(stage).toHaveAttribute('data-session-id', '');
+    expect(screen.getByText('请选择一个会话')).toBeInTheDocument();
+    expect(stage.parentElement).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('识别出 Coding Bot 后，目标 Session 未就绪也先触发 Embedded 宿主预载', async () => {
@@ -774,6 +835,103 @@ describe('ConversationPage(Task 8 组合页)', () => {
     // 只读面板(真实组件)接管:暂无选中可读会话的空态;交互舞台的 ChatPanel 不出现。
     expect(await screen.findByText('请选择一个好友用户会话')).toBeInTheDocument();
     expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
+  });
+
+  it('点击好友 Bot 快捷入口:跳发现页前把协作身份切换为用户身份(好友仅承接用户身份申请)', async () => {
+    const { useWorkspaceStore } = require('@/stores/workspaceStore') as typeof import(
+      '@/stores/workspaceStore'
+    );
+    // seed:当前协作身份为 Bot,另备一个用户身份。好友 Bot 分组仅承接用户身份申请的好友,
+    // 身份不一致时申请的 Bot 不进入对话单聊分组 → 入口跳转前需切到用户身份。
+    useWorkspaceStore.setState({
+      identities: [
+        { id: 'bot-x', kind: 'bot', displayName: '服务 Bot', online: true },
+        { id: 'user-me', kind: 'user', displayName: '张三', online: true },
+      ],
+      activeIdentityId: 'bot-x',
+    });
+    const { history } = require('@umijs/max') as { history: { push: jest.Mock } };
+    const { toast } = require('sonner') as { toast: { info: jest.Mock } };
+    history.push.mockClear();
+    toast.info.mockClear();
+
+    render(<ConversationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加 Bot 好友' }));
+
+    expect(useWorkspaceStore.getState().activeIdentityId).toBe('user-me');
+    expect(history.push).toHaveBeenCalledWith('/collaboration-square/bots');
+    // 切换实际发生 → toast 提示协作身份已切换及好友承接身份,不静默。
+    expect(toast.info).toHaveBeenCalledWith('已切换至用户身份，Bot 好友将添加至该身份');
+    // 恢复 seed,避免身份状态泄漏到其他用例。
+    useWorkspaceStore.setState({ identities: [], activeIdentityId: null });
+  });
+
+  it('协作身份未加载出用户身份时点击发现入口:不强切身份仍正常跳转', async () => {
+    const { useWorkspaceStore } = require('@/stores/workspaceStore') as typeof import(
+      '@/stores/workspaceStore'
+    );
+    useWorkspaceStore.setState({ identities: [], activeIdentityId: null });
+    const { history } = require('@umijs/max') as { history: { push: jest.Mock } };
+    const { toast } = require('sonner') as { toast: { info: jest.Mock } };
+    history.push.mockClear();
+    toast.info.mockClear();
+
+    render(<ConversationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加 Bot 好友' }));
+
+    expect(useWorkspaceStore.getState().activeIdentityId).toBeNull();
+    expect(history.push).toHaveBeenCalledWith('/collaboration-square/bots');
+    // 无切换发生 → 不提示。
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('创建入口确认弹窗选空间后带空间上下文跳 Bot 管理页并默认唤起云端创建(默认勾选当前空间)', async () => {
+    const { useSpaceContextStore } = require('@/stores/spaceContextStore') as typeof import(
+      '@/stores/spaceContextStore'
+    );
+    // 乱序 seed(团队空间在前):守护装配层按侧栏切换序排序,弹窗选项个人空间置顶(2026-11-05 三轮验收对齐)。
+    useSpaceContextStore.getState().setSpaces([
+      {
+        spaceId: 2,
+        spaceCode: 'team-test',
+        spaceName: '测试空间',
+        spaceType: 'TEAM' as const,
+        memberCount: 2,
+        ownerCount: 1,
+        botCount: 3,
+        gmtModified: '2026-11-05 00:00:00',
+      },
+      {
+        spaceId: 1,
+        spaceCode: 'personal',
+        spaceName: '个人空间',
+        spaceType: 'PERSONAL' as const,
+        memberCount: 1,
+        ownerCount: 1,
+        botCount: 0,
+        gmtModified: '2026-11-05 00:00:00',
+      },
+    ]);
+    useSpaceContextStore.getState().setCurrentSpaceId(1);
+    const { history } = require('@umijs/max') as { history: { push: jest.Mock } };
+    history.push.mockClear();
+
+    render(<ConversationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '创建新 Bot' }));
+    // 目标空间下拉:展开后选项与左栏空间切换器同序(个人空间置顶)。
+    fireEvent.click(await screen.findByRole('combobox', { name: '目标空间' }));
+    const options = await screen.findAllByRole('option');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent('个人空间');
+    fireEvent.click(options[1]);
+    fireEvent.click(await screen.findByRole('button', { name: '前往创建' }));
+
+    expect(useSpaceContextStore.getState().currentSpaceId).toBe(2);
+    // ?create=cloud(2026-11-05 二轮微调):Bot 管理页挂载时默认唤起云端创建。
+    expect(history.push).toHaveBeenCalledWith('/bot-workshop?create=cloud');
+    // 恢复 seed,避免空间状态泄漏到其他用例。
+    useSpaceContextStore.getState().setSpaces([]);
+    useSpaceContextStore.getState().setCurrentSpaceId(undefined);
   });
 });
 

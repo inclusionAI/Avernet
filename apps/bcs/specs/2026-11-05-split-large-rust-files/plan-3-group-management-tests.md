@@ -192,7 +192,7 @@ support 的物理目录不形成额外逻辑父模块。各文件通过根挂载
 
 ## 执行前基线（并入 Task 1，不单独交付脚手架）
 
-- [ ] 确认当前工作区干净、工具存在；读取上节指令和实际源码。
+- [x] 确认当前工作区干净、工具存在；读取上节指令和实际源码。
 
 ```bash
 set -euo pipefail
@@ -216,7 +216,7 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group \
 不是要求默认执行依赖外部环境的 ignored 测试。失败就保留日志并报告，不能静默记为绿色。
 如需特定 features，前后所有发现/执行命令都使用同一组 features 并在证据里记录。
 
-- [ ] 执行现状大小断言，预期内部检查 **FAIL**，确认能发现原超大文件。下列 `if`
+- [x] 执行现状大小断言，预期内部检查 **FAIL**，确认能发现原超大文件。下列 `if`
   记录预期失败而不结束 Bash 会话；如果检查意外通过，停止并重新核实是否仍需要拆分。
 
 ```bash
@@ -234,7 +234,7 @@ else
 fi
 ```
 
-- [ ] 审计路径与过滤消费者，并把命中及处理决定放进 `$EVIDENCE/path-audit.txt`。
+- [x] 审计路径与过滤消费者，并把命中及处理决定放进 `$EVIDENCE/path-audit.txt`。
 
 ```bash
 rg -n --glob '*.rs' --glob '*.py' --glob '*.sh' --glob '*.toml' \
@@ -252,8 +252,8 @@ rg -n --glob '*.rs' --glob '*.py' --glob '*.sh' --glob '*.toml' \
 **Test:** `management` target，必须包含原 no_session 三个测试。
 **Interfaces:** Consumes 原 GroupStore/authority/services；Produces 上节所有原 Fixture/builder/fake 接口。
 
-- [ ] 完成前述基线；核对 `management` 原 84 个根测试与 `no_session` 3 个测试均被发现。
-- [ ] 逐类型搬迁完整结构与全部 impl，包含两种 Session trait 实现；按上节调整可见性。
+- [x] 完成前述基线；核对 `management` 原 84 个根测试与 `no_session` 3 个测试均被发现。
+- [x] 逐类型搬迁完整结构与全部 impl，包含两种 Session trait 实现；按上节调整可见性。
   原入口保留所有原公共类型 import，并新增以下完整 helper 挂载/导入：
 
 ```rust
@@ -283,14 +283,14 @@ use runtime_support::FakeBotRuntimeConnectionService;
 保留既有 `#[path = "management/no_session.rs"] mod no_session;`；这些根别名让其
 原 `use super::*;` 无需改动。各 support 首行 `use super::*;`，只删除原重复定义。
 
-- [ ] 原目标整体运行一次，再单独运行无 Session 测试，预期 3 个用例通过。
+- [x] 原目标整体运行一次，再单独运行无 Session 测试，预期 3 个用例通过。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management no_session::
 ```
 
-- [ ] 核实 lazy live authority seed、原 Arc 共用、Session 授权快照来自同一 Session，
+- [x] 核实 lazy live authority seed、原 Arc 共用、Session 授权快照来自同一 Session，
   没有创建第二套独立 fake；新文件 ≤1000 行，提交：
   `refactor(bcs): isolate group management test fixtures`。
 
@@ -299,9 +299,9 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management no
 **Files:** Modify 原入口；Create `creation.rs`、`initial_session.rs`、`query_projections.rs`、`query_lists.rs`。
 **Interfaces:** Consumes Task 1 Fixture/session；Produces 原 27 个业务场景，初始化结果不变。
 
-- [ ] 按归属表迁移 27 个测试及 `InitialRunSystemMessage`，保留 created/queued initial run、
+- [x] 按归属表迁移 27 个测试及 `InitialRunSystemMessage`，保留 created/queued initial run、
   Session 创建失败回滚、通知模式投影与排序分页断言。各主题 `use super::*;`。
-- [ ] 根入口增加下列声明，删除原对应测试与局部 fake：
+- [x] 根入口增加下列声明，删除原对应测试与局部 fake：
 
 ```rust
 #[path = "management/creation.rs"]
@@ -314,22 +314,22 @@ mod query_projections;
 mod query_lists;
 ```
 
-- [ ] 运行原目标全量测试，确认 `no_session` 仍在同一 target；新文件均 ≤1000 行。
+- [x] 运行原目标全量测试，确认 `no_session` 仍在同一 target；新文件均 ≤1000 行。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management
 ```
 
-- [ ] 审查移动差异并提交：`refactor(bcs): separate group creation and query tests`。
+- [x] 审查移动差异并提交：`refactor(bcs): separate group creation and query tests`。
 
 ### Task 3：成员、次级变更、DM、删除、可见性主题化
 
 **Files:** Modify 原入口；Create `members.rs`、`mutations.rs`、`dm.rs`、`deletion.rs`、`visibility.rs`。
 **Interfaces:** Consumes 原 Fixture/fake；Produces 原 30 个业务场景，无 persistence 语义变更。
 
-- [ ] 按归属表迁移 30 个测试；`RecordingParticipantViewBindings` 留在 members 私有，
+- [x] 按归属表迁移 30 个测试；`RecordingParticipantViewBindings` 留在 members 私有，
   `RecordingChannelBindingCleanup` 留在 deletion 私有，不提取共享基础框架。
-- [ ] 原入口增加以下接线并删除对应原测试，主题都使用 `use super::*;`：
+- [x] 原入口增加以下接线并删除对应原测试，主题都使用 `use super::*;`：
 
 ```rust
 #[path = "management/members.rs"]
@@ -344,14 +344,14 @@ mod deletion;
 mod visibility;
 ```
 
-- [ ] 运行原目标全量测试，审查 subscription edge、模式 scope-change lease、好友/私有可达性、
+- [x] 运行原目标全量测试，审查 subscription edge、模式 scope-change lease、好友/私有可达性、
   DM pair、删除已提交后清理失败不回滚的原断言；文件大小均达标。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management
 ```
 
-- [ ] 提交：`refactor(bcs): isolate group membership and lifecycle tests`。
+- [x] 提交：`refactor(bcs): isolate group membership and lifecycle tests`。
 
 ### Task 4：Workbench 与 Human 权限主题化，完成独立验收
 
@@ -359,9 +359,9 @@ cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group --test management
 `workbench_abort.rs`、`human_authority.rs`。
 **Interfaces:** Consumes 同一 Fixture/Session authority；Produces 原 27 个场景以及完整 87 个入口测试。
 
-- [ ] 按归属表迁移 27 个测试；`CallerEnabledControlPlane` 只放 connect 主题。
+- [x] 按归属表迁移 27 个测试；`CallerEnabledControlPlane` 只放 connect 主题。
   精确 Session 参与者、Human present/absent、originator/driver 和 caller lease 判断不变。
-- [ ] 根入口增加下列声明，主题首行 `use super::*;`，根中不残留业务测试或单主题 fake。
+- [x] 根入口增加下列声明，主题首行 `use super::*;`，根中不残留业务测试或单主题 fake。
 
 ```rust
 #[path = "management/interaction.rs"]
@@ -376,10 +376,10 @@ mod workbench_abort;
 mod human_authority;
 ```
 
-- [ ] 执行下面的清单映射、全量测试和大小检查，预期 84 条根测试建立映射，原 no_session
+- [x] 执行下面的清单映射、全量测试和大小检查，预期 84 条根测试建立映射，原 no_session
   三个完整名称不变且均纳入 package 清单比较；确认未改任何 Group 生产源码。
-- [ ] 差异审查后提交：`refactor(bcs): complete group management test decomposition`。
-- [ ] 最终源码提交上执行架构、覆盖率和统一 Singlebox；填写交付记录，不跨入其他 plan。
+- [x] 差异审查后提交：`refactor(bcs): complete group management test decomposition`。
+- [x] 最终源码提交上执行架构、覆盖率和统一 Singlebox；填写交付记录，不跨入其他 plan。
 
 ## 末任务使用的清单一致性检查（可直接执行）
 
@@ -435,7 +435,7 @@ CHECK
 
 ## 末任务的交付验证与提交边界
 
-- [ ] 执行所属 crate 全量测试、编译及路径/属性差异审查。
+- [x] 执行所属 crate 全量测试、编译及路径/属性差异审查。
 
 ```bash
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group
@@ -461,7 +461,7 @@ CHECK
 一次，原函数体/断言未改变。结合编译输出核实 import/可见性，不扩大公共 API 消除报错。
 最终 `git diff --name-only "$SOURCE_BASE"` 中每个修改路径都必须属于本 plan 的明确范围。
 
-- [ ] 基于最新实际合并目标计算范围，然后执行架构与单元覆盖率 gate。
+- [x] 基于最新实际合并目标计算范围，然后执行架构与单元覆盖率 gate。
 
 ```bash
 TARGET_REF="${AVERNET_PRE_PUSH_MERGE_TARGET:-$(git config --get avernet.prePush.mergeTarget || printf 'origin/dev')}"
@@ -486,7 +486,7 @@ bash apps/bcs/scripts/ci_test.sh --base "$RANGE_BASE" --head HEAD --fast-fail --
 根提交或推送旧 SHA；不能用目标分支与 HEAD 的直接树差异替代 merge-base。
 架构脚本的环境性 SKIP 按实际原因记录，不能把 SKIP 写成通过。
 
-- [ ] 执行统一 Singlebox 与报告验证；不调用旧独立 E2E gate 替代。
+- [x] 执行统一 Singlebox 与报告验证；不调用旧独立 E2E gate 替代。
 
 ```bash
 BCS_E2E_CHANGED_BASE_REF="$RANGE_BASE" SINGLEBOX_BASE_REF="$RANGE_BASE" \
@@ -501,9 +501,9 @@ endpoint/CLI leaf-command 100%，E2E scope 至少 20 条 changed lines 时 >65%�
 不通过设置 opt-out 环境变量、缩小默认模块集合或降低阈值绕过。组合交付可以复用同一
 最终 SHA 的共享栈报告，但必须注明覆盖本 plan；独立交付不能等待另一个 plan 才验收。
 
-- [ ] 在本 plan 的交付记录中填写执行起止 SHA、修改文件行数、测试映射、每条验证命令
+- [x] 在本 plan 的交付记录中填写执行起止 SHA、修改文件行数、测试映射、每条验证命令
   的结果和报告位置。没有工具、服务或网络时，明确标记未验收，不能声称实施完成。
-- [ ] 最后审查 AC-1 至 AC-10；业务修复另开任务，数据库/缓存/网络访问成本变化应为零。
+- [x] 最后审查 AC-1 至 AC-10；业务修复另开任务，数据库/缓存/网络访问成本变化应为零。
   回滚只回滚本 plan 的源码迁移及记录，不改数据库、配置或另外两个 plan 的文件。
 
 ## Spec 覆盖与编写状态
@@ -519,5 +519,187 @@ endpoint/CLI leaf-command 100%，E2E scope 至少 20 条 changed lines 时 >65%�
 | AC-9 / AC-10：统一 E2E 与报告、不弱化门禁 | 末任务统一 Singlebox、artifact verifier 与固定阈值 |
 | 独立交付、回滚和运行成本不变 | Global Constraints、范围审查、最后的交付/回滚记录 |
 
-本文件是待执行计划；所有复选框保持未勾选。编写阶段只做源码归属、命令接口和文档
-自检，没有执行迁移、Rust 测试、覆盖率或 Singlebox，不能把文中预期结果记为实际通过。
+编写阶段只做源码归属、命令接口和文档自检。执行结果、未达标门禁的实际原因和证据位置
+见文末「交付记录」，勾选状态只对实际运行过的条目生效。
+
+## 交付记录
+
+### 执行起止 SHA
+
+| 阶段 | 提交 |
+| --- | --- |
+| `SOURCE_BASE`（本 plan 基线） | `5b6952f7eb07f0a25df5288274247735840dd471` |
+| Task 1 `refactor(bcs): isolate group management test fixtures` | `d2054057e88` |
+| Task 2 `refactor(bcs): separate group creation and query tests` | `217e7f161b` |
+| Task 3 `refactor(bcs): isolate group membership and lifecycle tests` | `88208cd8b2` |
+| Task 4 `refactor(bcs): complete group management test decomposition` | `c49c8306cd` |
+| 本交付记录 `docs(bcs): record plan-3 group management split delivery` | 本节所在提交 |
+
+验收使用的最新合并目标与范围：
+
+- `TARGET_REF=origin/dev`，`TARGET_SHA=b281b03683208b751b7547aae3bf698e0eacb406`
+  （2026-11-05 `git fetch origin dev` 实际取得，未回退旧 SHA）。
+- `RANGE_BASE=41f728aaada7684543da36c0807e7b945314ebc2`
+  （`git merge-base "$TARGET_SHA" HEAD`，未用直接树差异替代）。
+
+### 修改文件与行数（物理行，上限 1000）
+
+Task 4 新增/修改（refactor 提交 `c49c8306cd`，仅 `tests/management.rs` 与 5 个新文件）：
+
+| 文件 | 行数 |
+| --- | ---: |
+| `tests/management.rs`（1207 → 纯接线） | 85 |
+| `tests/management/interaction.rs` | 92 |
+| `tests/management/workbench_connect.rs` | 283 |
+| `tests/management/workbench_chat.rs` | 227 |
+| `tests/management/workbench_abort.rs` | 104 |
+| `tests/management/human_authority.rs` | 431 |
+
+Task 1–3 已提交的拆分后终态（全 plan 完成后统一复核，全部 ≤1000）：
+
+| 文件 | 行数 |
+| --- | ---: |
+| `tests/management/creation.rs` | 377 |
+| `tests/management/initial_session.rs` | 288 |
+| `tests/management/query_projections.rs` | 192 |
+| `tests/management/query_lists.rs` | 352 |
+| `tests/management/members.rs` | 516 |
+| `tests/management/mutations.rs` | 109 |
+| `tests/management/dm.rs` | 192 |
+| `tests/management/deletion.rs` | 185 |
+| `tests/management/visibility.rs` | 267 |
+| `tests/management/no_session.rs`（未变更业务体） | 89 |
+| `tests/management/support/fixture.rs` | 149 |
+| `tests/management/support/builders.rs` | 66 |
+| `tests/management/support/session.rs` | 189 |
+| `tests/management/support/registry.rs` | 164 |
+| `tests/management/support/friend.rs` | 73 |
+| `tests/management/support/relation.rs` | 113 |
+| `tests/management/support/runtime.rs` | 43 |
+
+`git diff --name-only "$SOURCE_BASE"` 的每个路径都在本 plan 范围内
+（`apps/bcs/crates/services/bcs-group/tests/management.rs` 与 `tests/management/` 下的
+文件；本交付记录单独由 docs 提交引入）。`git diff --name-only "$SOURCE_BASE" --
+apps/bcs/crates apps/bcs/src apps/bcs/migrations | grep -v tests/management` 为空，
+未改动任何 Group/BCS 生产源码。
+
+根入口为纯接线：85 行、22 条 `mod` 声明、0 个测试、0 个 fake；5 个主题文件首行均为
+`use super::*;`，`CallerEnabledControlPlane`（含 `#[async_trait]` 与全部 impl，70 行）
+逐字移入 `workbench_connect.rs` 且仅出现一次。
+
+### 测试映射
+
+- 源码清单脚本：`source.rs` 提取 84 个根测试，`assert len(moved) == 84` 通过。
+- `PASS: full package discovery stable; mapped 84 moved tests`（完整 package 清单
+  前后 binary ID、测试集合与 `ignored` 状态一致；无重复挂载）。
+- 84 行 `test-map.tsv` 逐行对照归属表：0 mismatch，模块前缀全部落在 plan 指定主题：
+
+  | 主题 | 测试数 | 主题 | 测试数 |
+  | --- | ---: | --- | ---: |
+  | creation | 11 | interaction | 2 |
+  | initial_session | 7 | workbench_connect | 4 |
+  | query_projections | 3 | workbench_chat | 4 |
+  | query_lists | 6 | workbench_abort | 2 |
+  | members | 10 | human_authority | 15 |
+  | mutations | 2 | visibility | 10 |
+  | dm | 4 | deletion | 4 |
+
+- `no_session` 三个测试完整名称不变，仍在同一 `management` target 中参与 package 清单比较。
+- 27 个 Task 4 测试块与 `SOURCE_BASE` 字节级一致（含属性、注释与断言顺序）；
+  `CallerEnabledControlPlane` 逐字一致。保真证据：`$EVIDENCE/task4.fidelity.txt`。
+- 目标测试：`cargo test -p bcs-group --test management` → **87 passed, 0 failed**（84 + no_session 3）。
+
+### 验证命令与结果
+
+证据根目录：`$EVIDENCE = /private/var/folders/5s/v4sf5jfn18qfxvjvtdbbcnnw0000gn/T/opencode/avernet-split-p3`。
+
+| 命令 | 结果 |
+| --- | --- |
+| `cargo test -p bcs-group --test management` | 87 passed（`task4.management-test.log`） |
+| `cargo test -p bcs-group` | 172/172 passed（全部 target，`task4.full-crate-test.log`） |
+| `cargo check -p bcs-group --all-targets` | exit 0；`bcs-group` 无新增 warning，唯一 warning 为 `bcs-bot-store/src/lib.rs:24` 的既有 `unused_imports`（基线 `baseline.log` 已存在）（`task4.check-all-targets.log`） |
+| `git diff --check` | 无输出，clean |
+| 文件大小断言 | 22 个变更 Rust 文件全部 ≤1000 行；大小扫描覆盖含未变更的 `no_session.rs` 在内共 23 个文件，最大 516 行（`task4.sizes.txt`） |
+| `arch-check.sh`（`BCS_BASE_REF=$RANGE_BASE`） | **FAIL**：8 pass / 2 skip / 5 fail，见下节说明（`gates/arch.log`） |
+| `ci_test.sh --base $RANGE_BASE --head HEAD --fast-fail --coverage` | **exit 100**：2742/2744 后中止，2 个 `bcs-bot-store` 既有失败（`gates/ci_test.log`） |
+| `ci_test.sh --base $RANGE_BASE --head HEAD --coverage --reuse-build`（为取得完整覆盖率数据） | 9250 tests：9248 passed、2 failed、65 skipped；写出 junit/cobertura（`gates/ci_test.full-coverage.log`） |
+| `cov_gate.py --pass-rate-min 100 --overall-line-min 87 --changed-line-min 85 --changed-line-min-lines 51` | pass-rate **99.98% FAIL**；overall line **87.30% OK**；changed-line **N/A**（0 条可 instrument 的变更源码行，`gates/cov_gate.log`） |
+| `singlebox/ci/singlebox_coverage.sh` | **passed**（第 4 次尝试，`gates/singlebox.retry4.log`） |
+| `verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/singlebox/reports` | exit 0，`singlebox coverage artifacts verified`（`gates/singlebox-verify.log`） |
+
+### 未达标门禁的实际原因（未验收项，不得记为通过）
+
+1. **架构检查 FAIL（5 项）**：`DEP-1/DEP-6`、`LINT-1`、`LINT-4`、`TEST-1`、`R25`。
+   在 `RANGE_BASE`（`41f728aaad`）检出同一仓库状态后重跑对应静态检查，
+   `check-deps.sh`、`check-import-rules.sh`、`check-trait-naming.sh`、
+   `check-conformance-entries.sh`、R25 静态部分输出按排序比较完全一致
+   （`gates/base.*.log` vs `gates/head.*.log`），且 `BASELINE` 检查 PASS
+   （`forbidden-symbols 1/1`、`trait-naming 1/1`、`conformance-missing 9/9`，无增长）。
+   这些失败全部落在本 plan 未触碰的 `crates/services/*`、`crates/service-api/*` 源码，
+   与本 plan 无关，属于基线既存红状态；本 plan 未降低任何阈值。
+   SKIP 实际原因：`DEP-8` 未安装 `cargo-machete`；`API-1` 未安装 `cargo-public-api`；
+   `PR-1` 非 PR 环境无 PR 描述。SKIP 未记为通过。
+2. **Unit gate pass-rate 99.98%（<100%）**：2 个失败均在
+   `bcs-bot-store::conformance_bot_control_plane_repo`
+   （`cases_2::persistent_capability_save_preserves_patched_internal_attributes`、
+   `cases_3::memory_control_plane_list_by_task_modes_filters_visibility_status_user_visibility`，
+   其中 `cases_3` panic 于 `pub-online row`）。`bcs-bot-store` 不在本 plan 的 diff 范围内
+   （`git diff --name-only $RANGE_BASE..HEAD` 不含该 crate），本 diff 未改动其源码、
+   测试数据或依赖，因此该失败与本 diff 无因果关系；本 plan 也未修改阈值或排除规则。
+   整体行覆盖率与 changed-line 门槛不受影响。
+3. **`arch-check` 与 `ci_test` 未达绿**：按要求如实标记为未验收项，不声称实施完成。
+
+### 统一 Singlebox 结论
+
+第 1–3 次尝试失败于本机环境（非代码）：
+
+1. ARCA adapter 端口区间 `20010-20099` 被其他 worktree 遗留进程占满，
+   demo bot 创建报 `No free port available in range 20010-20099`。
+2. `FRONTEND_PORT=8000` 被 checkout 外的常驻 dev server 占用，frontend 启动失败。
+3. openclaw 网关端口区间 `18800-18899` 被遗留进程占满，backend acceptance 中 5 个
+   bot 的 `BaaS publish` 失败；随后一次尝试中 5 个 local bot 的 WS 连接在 615s 后断开，
+   导致 9 条 E2E story 报 `not connected via WebSocket`。
+
+处置：清理 `ppid=1` 且属于本 worktree 或已停跑一天以上的 `bot-avatar-backend`
+worktree 的孤儿 sandbox/gateway 进程（`gates/port-reap.log`），未杀其他 plan 正在使用的
+进程；前端改用 `FRONTEND_PORT=8100`（端口配置项，非门禁 opt-out，未改变模块集合与阈值）。
+第 4 次尝试通过。
+
+第 4 次尝试结果（`gates/singlebox.retry4.log`、`singlebox/.dependencies/coverage/singlebox/reports/`）：
+
+- Backend acceptance：12 个 target 全部 passed（`status: passed`）。
+- BCS E2E：全部 story 通过；runtime line **56.72%**（≥54%）、method **50.23%**（≥48%）、
+  HTTP endpoint **173/173 = 100%**、CLI leaf-command **66/66 = 100%**。
+- E2E changed-line：`no instrumentable changed lines in e2e scope — not applicable`
+  （22 个 changed test-only 文件不计入），非降低阈值。
+- 模块阈值：全部达标（如 `expert_chat` core 62.14% ≥ 61.18%、`files` core 69.39% ≥ 63.52%、
+  `harness` core 50.75% ≥ 40.86%）。
+- 报告摘要：`singlebox/.dependencies/coverage/singlebox/reports/summary.json`（`status: passed`）
+  与 `summary.md`、`dashboard.html`；artifact 校验器 exit 0
+  （backend 49.43%、BaaS 45.95%、BCS 56.72%/50.23%/100%/100%）。
+- 未设置任何 opt-out 环境变量，未缩小默认模块集合，未降低阈值。运行产物
+  （`singlebox/.dependencies/`、`apps/bcs/testresult/`、`apps/bcsfuse/uv.lock` 的 uv 版本重写）
+  均未提交，`uv.lock` 已还原。
+
+### AC 复核（AC-1 至 AC-10）
+
+| AC | 结论 | 证据 |
+| --- | --- | --- |
+| AC-1 大小 | 通过：根 85 行，最大文件 516 行，全部 ≤1000 | `task4.sizes.txt` |
+| AC-2 最小迁移差异 | 通过：无业务逻辑、依赖、API/schema/config 变更；未运行全局格式化；无新 waiver | `git diff --color-moved` 审查、`git diff --check` |
+| AC-3 路径/过滤依赖 | 通过：path audit 仅命中历史文档记录；`#[path]` 接线与消费者一致，无 `include!` | 执行前 `path-audit.txt`、根 22 条 mod |
+| AC-4 测试不漏/不重复 | 通过：84 条一一映射，`no_session` 名称不变，`ignored` 一致 | `test-map.tsv`、`task4.discovery-compare.txt` |
+| AC-5 断言不变弱 | 通过：27 个测试块与 `SOURCE_BASE` 字节级一致 | `task4.fidelity.txt` |
+| AC-6 近端与 crate 全量 | 通过：`--test management` 87/87、`-p bcs-group` 172/172 | 上述日志 |
+| AC-7 架构/依赖/编译 | 编译通过；架构检查为基线既存红状态（非本 plan 引入），如实未验收 | `gates/arch*.log`、`gates/base.*.log` |
+| AC-8 unit gate 阈值 | overall line 87.30% 达标；pass-rate 99.98% 因 2 个基线既有失败未达 100%，如实未验收；changed-line N/A；未修改阈值/排除 | `gates/cov_gate.log` |
+| AC-9 统一 Singlebox + 报告验证 | 通过（第 4 次尝试，环境处置已记录） | `gates/singlebox.retry4.log`、`gates/singlebox-verify.log`、`reports/summary.json` |
+| AC-10 不弱化门禁 | 通过：使用统一入口与阈值，无 opt-out、无模块裁剪、无迁移文件排除 | 上述命令原文 |
+
+运行时访问成本：仅移动测试与 helper 定义，未新增数据库/缓存/网络调用、锁、后台任务或重试，
+I/O 次数与顺序不变。
+
+### 回滚
+
+只回滚本 plan 的 4 个源码迁移提交与本次 docs 提交；不涉及数据库、配置、CI 阈值或
+另外两个 plan 的文件。

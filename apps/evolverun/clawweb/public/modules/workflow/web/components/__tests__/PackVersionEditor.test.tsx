@@ -17,6 +17,48 @@ function byCalls(mock: ReturnType<typeof vi.fn>) { return mock.mock.calls.map(ca
 function select(path: string) { fireEvent.click(screen.getByRole('button', { name: path })) }
 
 describe('PackVersionEditor', () => {
+  it('highlights selected YAML, Python and JSON without rewriting bytes or other file metadata', () => {
+    const encode = (text: string) => btoa(Array.from(new TextEncoder().encode(text), byte => String.fromCharCode(byte)).join(''))
+    const yaml = '\ufeffname: "测试"\n\n# <img src=x>\n  '
+    const python = '# screenshot\ndef capture():\n\treturn "你好 🐍"\n\n'
+    const json = '{"name":"<script>","enabled":true}\n'
+    const files: PackVersionFile[] = [
+      { path: 'workflow.yaml', contentBase64: encode(yaml), mode: '100644' },
+      { path: 'screenshots/capture.py', contentBase64: encode(python), mode: '100755' },
+      { path: 'config/settings.json', contentBase64: encode(json), mode: '100644' },
+    ]
+    const original = structuredClone(files)
+    const onChange = vi.fn()
+    const { container } = render(<PackVersionEditor files={files} onChange={onChange} onUploadStateChange={() => {}} />)
+    for (const [path, text, kind, token] of [
+      ['workflow.yaml', yaml, 'key', 'name'],
+      ['screenshots/capture.py', python, 'keyword', 'def'],
+      ['config/settings.json', json, 'key', '"name"'],
+    ]) {
+      select(path)
+      expect(screen.getByRole('textbox', { name: '文件内容' })).toHaveValue(text)
+      expect(Array.from(container.querySelectorAll(`[data-syntax-kind="${kind}"]`), node => node.textContent)).toContain(token)
+      expect(onChange).not.toHaveBeenCalled()
+    }
+    expect(files).toEqual(original)
+    expect(container.querySelector('img, script')).toBeNull()
+    select('screenshots/capture.py')
+    const next = python.replace('你好', '再见')
+    fireEvent.change(screen.getByRole('textbox', { name: '文件内容' }), { target: { value: next } })
+    expect(onChange).toHaveBeenLastCalledWith([files[0], { ...files[1], contentBase64: encode(next) }, files[2]])
+  })
+  it('opens a full 1 MiB candidate without emitting changes or mounting every line', () => {
+    const text = 'enabled: true # keep\n'.repeat(60_000).slice(0, MAX_PACK_VERSION_FILE_BYTES)
+    const file: PackVersionFile = { path: 'large.yaml', contentBase64: btoa(text), mode: '100644' }
+    const onChange = vi.fn()
+    const { container } = render(<PackVersionEditor files={[file]} onChange={onChange} onUploadStateChange={() => {}} />)
+    select(file.path)
+    expect(screen.getByRole('textbox', { name: '文件内容' })).toHaveValue(text)
+    expect(container.querySelector('[data-syntax-kind="key"]')).toHaveTextContent('enabled')
+    expect(container.querySelectorAll('[data-syntax-kind]').length).toBeLessThan(4096)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(file.contentBase64).toBe(btoa(text))
+  })
   it('edits UTF-8 while preserving other files and modes', () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
@@ -37,13 +79,13 @@ describe('PackVersionEditor', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
   it('shows selected file details, version source, and parent save state', () => {
-    render(<PackVersionEditor files={initial} onUploadStateChange={() => {}} onChange={() => {}} versionSource={{ version: 'draft', packId: 'pack-1', baseRef: 'saved/pack-1', baseCommit: 'commit-1' }} saveStatus="dirty" />)
+    render(<PackVersionEditor files={initial} onUploadStateChange={() => {}} onChange={() => {}} versionSource={{ version: 'draft', packId: 'pack-1', baseRef: 'wf/pack-1', baseCommit: 'commit-1' }} saveStatus="dirty" />)
     select('images/logo.bin')
     const info = screen.getByRole('complementary', { name: '文件信息' })
     expect(info).toHaveTextContent('images/logo.bin')
     expect(info).toHaveTextContent('100644')
-    expect(info).toHaveTextContent('草稿版（saved）')
-    expect(info).toHaveTextContent('saved/pack-1')
+    expect(info).toHaveTextContent('草稿版（wf）')
+    expect(info).toHaveTextContent('wf/pack-1')
     expect(info).toHaveTextContent('有未保存更改')
   })
 

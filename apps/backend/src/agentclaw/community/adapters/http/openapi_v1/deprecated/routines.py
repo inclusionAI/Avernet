@@ -42,6 +42,7 @@ from ._requery import (
     deprecated_doc,
     pin_owner_to_user,
     with_query_parameter,
+    without_parameter,
 )
 from ._shim import legacy_route, legacy_router
 
@@ -110,16 +111,18 @@ def _bot_to_query(endpoint, method, new_path):
     # the retiring address takes the addressed-owner parameter off the
     # signature and binds it to the validated caller, exactly as the
     # resources retiring addresses do (see ``deprecated/resources.py``).
+    doc = deprecated_doc(endpoint, f"{method} {new_path}", reword=_REWORDED.get(endpoint.__name__))
+    # Freeze the retiring address to its original draft-only target scope.
+    endpoint = with_query_parameter(endpoint, "runtime_stage", str | None,
+                                    replacement_default="draft")
+    for name in ("runtime_stage", "device_uuid", "operator_id"):
+        endpoint = without_parameter(endpoint, name)
     return pin_owner_to_user(
         with_query_parameter(
             endpoint,
             "bot_id",
             LegacyBotIdQuery,
-            doc=deprecated_doc(
-                endpoint,
-                f"{method} {new_path}",
-                reword=_REWORDED.get(endpoint.__name__),
-            ),
+            doc=doc,
         )
     )
 

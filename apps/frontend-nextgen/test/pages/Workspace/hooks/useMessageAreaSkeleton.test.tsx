@@ -121,3 +121,30 @@ it('空态确认后掉线：重新进入等待空态确认，再次上线且仍�
   });
   expect(result.current).toBe(false);
 });
+
+it.each(['connecting', 'reconnecting', 'error', 'disconnected'] as const)(
+  '单聊 HTTP 历史已就绪时 %s 不再遮挡消息', (status) => {
+    const { result } = renderHook(() => useMessageAreaSkeleton({
+      messages: [message(1)], status, historyReady: true,
+    }));
+    expect(result.current).toBe(false);
+  },
+);
+
+it('HTTP 确认空会话后立即展示空态，不再等待握手和一秒宽限', () => {
+  const { result, rerender } = renderHook(({ ready }) => useMessageAreaSkeleton({
+    messages: [], status: 'connecting', historyReady: ready,
+  }), { initialProps: { ready: false } });
+  expect(result.current).toBe(true);
+  rerender({ ready: true });
+  expect(result.current).toBe(false);
+  rerender({ ready: false });
+  expect(result.current).toBe(true);
+});
+
+it('切阶段后当前历史未就绪时，不展示 SDK 短暂残留的旧消息', () => {
+  const { result } = renderHook(() => useMessageAreaSkeleton({
+    messages: [message(1)], status: 'connected', historyReady: false,
+  }));
+  expect(result.current).toBe(true);
+});

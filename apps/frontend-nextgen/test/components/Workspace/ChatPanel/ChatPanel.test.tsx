@@ -142,6 +142,13 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  it.each(['connecting', 'error'] as const)('HTTP 历史就绪后 %s 仍展示消息，不被 SDK loading 遮挡', (status) => {
+    render(<ChatPanel {...baseProps} target={botModeTarget as any} mode="bot" interactive
+      connectionStatus={status} historyReady messages={[{ id: 'm', role: 'assistant', content: '历史', status: 'history' } as never]}
+      isRequesting={false} isLoadingMessages retryCount={0} supportState={{ phase: 'idle', error: null }}
+      onSend={jest.fn()} onStop={jest.fn()} onReconnect={jest.fn()} />);
+    expect(screen.getByTestId('bubble')).toBeInTheDocument();
+  });
   beforeEach(() => {
     useTaskSidePanelStore.getState().resetAll();
     mockPanelRenders.length = 0;

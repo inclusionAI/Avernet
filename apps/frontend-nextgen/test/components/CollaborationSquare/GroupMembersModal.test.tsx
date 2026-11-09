@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { GroupMembersModal } from '@/components/CollaborationSquare/GroupMembersModal';
 import type { PublicGroup, PublicGroupMember } from '@/domain/collaborationSquare/types';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -31,10 +32,12 @@ function renderMembers(members: PublicGroupMember[], typeLabel = '自由聊天')
 }
 
 describe('GroupMembersModal（成员卡片对齐「对话协作」成员管理 card 样式）', () => {
-  it('成员卡片：首字母圆标头像 + 名称 + 第二行类型/角色徽章（无移除等操作按钮）', () => {
+  it('成员卡片：Bot 默认圆形头像 + 名称 + 类型/角色徽章（无移除等操作按钮）', () => {
     renderMembers([member({ id: 'b1', displayName: '驱动Bot', type: 'bot', role: 'driver' })]);
-    // bot 头像：主色软底圆标（与 MemberList 一致）。
-    expect(screen.getByText('驱')).toHaveClass('bg-primary/10', 'text-primary', 'rounded-full');
+    // 缺省头像与 Bot 管理一致，使用 Bot ID 而非名称生成。
+    const avatar = screen.getByRole('img', { name: '驱动Bot' });
+    expect(avatar).toHaveClass('rounded-full');
+    expect(avatar).toHaveAttribute('src', generateBotAvatar('b1'));
     // 类型徽章默认蓝；自由聊天群 driver → 「群主」紫色。
     expect(screen.getByText('Bot')).toHaveClass('bg-primary/10', 'text-primary');
     expect(screen.getByText('群主')).toHaveClass('bg-purple/10', 'text-purple');

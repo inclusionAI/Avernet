@@ -651,12 +651,12 @@ impl MessageFlowService for BcsMessageFlow {
             // of spawning an unbounded terminal retry queue.
             let permit = self.terminal_slots.clone().acquire_owned().await
                 .map_err(|_| ServiceError::InternalError("terminal processing unavailable".into()))?;
-            return tokio::spawn(async move {
+            return tokio::spawn(bcs_tracing_api::in_current_context(async move {
                 let _permit = permit;
                 let result = crate::bot_event::handle_bot_event(&owner, cmd).await;
                 if result.is_err() { tracing::warn!("retained terminal processing failed; delivery state remains authoritative"); }
                 result
-            }.in_current_span()).await.map_err(|error| ServiceError::InternalError(format!("terminal processing task failed: {error}")))?;
+            }.in_current_span())).await.map_err(|error| ServiceError::InternalError(format!("terminal processing task failed: {error}")))?;
         }
         crate::bot_event::handle_bot_event(self, cmd).await
     }
@@ -677,6 +677,14 @@ impl MessageFlowService for BcsMessageFlow {
         cmd: CancelLatestQueuedMessageCommand,
     ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
         crate::delivery_control::cancel_latest_queued(self, cmd).await
+    }
+
+    async fn cancel_session_deliveries(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> ServiceResult<()> {
+        crate::session_delivery_cleanup::cancel(self, session_id, reason).await
     }
 
     async fn resolve_chat_abort_scope(

@@ -8,6 +8,8 @@ provides:
   - CallerIdentityService
   - CallerIamTokenService
   - CallerSessionValidator
+  - ScheduledCallerRefreshProtocol
+  - NoopScheduledCallerRefresh
 consumes:
   - CallerTokenProviderProtocol
   - CallerRuntimeUpdaterProtocol
@@ -37,9 +39,13 @@ credential installation there. The optional internal friend argument is not an
 authorization flag clients can supply directly to the application service.
 See `specs/2026-10-26-online-conversation-stage/spec.md` for the additive contract.
 
-IAM refresh accepts an optional `sessionKey` query parameter. The application
-passes its original value as `session_key` through the Caller contracts and
-runtime updater. Existing non-TeClaw callers need no session parameter.
+IAM refresh accepts `session_key` as the canonical optional query parameter and
+retains `sessionKey` as a compatibility alias. The Bot-scoped OpenAPI also
+retains its original `session_id` spelling. Friend IAM preparation always uses
+the server-verified owned `session_id`; an untrusted session-key alias cannot
+replace it. The application passes the selected value as `session_key` through
+the Caller contracts and runtime updater. Existing non-TeClaw callers need no
+session parameter.
 
 TeClaw uses the existing `service` Bot eligibility and the trusted binding's
 `device_provider`. `CallerSessionValidator` requires nonempty session context
@@ -97,3 +103,22 @@ the Owner for permission and runtime requests. No browser request or response
 schema changes. Consumers constructing this internal context must supply entity;
 the in-repository producer and tests are updated together. A missing entity must
 not silently bypass another user's lock by querying a new Owner-qualified key.
+
+`ScheduledCallerRefreshProtocol` v1 is an additive Service API invoked after a
+service Bot's Owner Passport runtime update succeeds and
+`bot_service.SCHEDULED_CALLER_REFRESH_ENABLED` is enabled. This code-level rollout
+gate ships `True`; explicitly disabled callbacks
+keep the original Owner result without invoking Caller refresh. It does not gate
+interactive ASC provisioning. The composition root binds
+a no-op in public profiles and an enterprise service when ASC is supported.
+The explicit Bot entity is stable across Owner handoff; implementations resolve
+each actual Caller and sandbox independently. Caller refresh is best effort:
+preparation or refresh errors log safe metadata and preserve the successful Owner
+callback result. Original Owner update errors still propagate. Caller failures
+do not trigger Owner notification retries. This contract adds no scheduler
+and makes no continuous-validity guarantee between Owner renewal callbacks.
+
+For direct legacy `BotService` construction, omission of the optional refresh
+port means no scheduled-credential capability is installed. Production DI always
+provides an explicit no-op or enterprise implementation; errors from an installed
+implementation are never treated as an unconfigured capability.

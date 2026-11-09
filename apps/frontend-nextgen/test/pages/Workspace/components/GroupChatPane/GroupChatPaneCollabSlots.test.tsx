@@ -154,6 +154,7 @@ describe('GroupChatPane — collab 空槽位（任务栈整体缺席，基础会
       groupServiceBotRouting: null,
       taskSessionNavigationObserver: null,
       taskPanelBootstrap: null,
+      sessionTaskPanelTab: null,
     });
   });
 

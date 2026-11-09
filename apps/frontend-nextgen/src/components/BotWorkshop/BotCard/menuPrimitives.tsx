@@ -14,7 +14,11 @@ export function ActionHelp({ children, description }: { children: string; descri
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span tabIndex={0} aria-label={`${children}说明`} className="inline-flex shrink-0 text-muted-foreground">
+            {/* 不可聚焦：菜单打开时 Radix Popover 会把焦点落到首个可聚焦元素，
+              若 `?` 带 tabIndex 会被自动聚焦继而触发 Tooltip（focus 也开），
+              导致禁用项（如未发布服务 Bot 的「公开设置」）一打开菜单就弹出说明。
+              去掉 tabIndex 让 Tooltip 仅 hover 触发。 */}
+            <span aria-label={`${children}说明`} className="inline-flex shrink-0 text-muted-foreground">
               <CircleHelp className="size-3.5" />
             </span>
           </TooltipTrigger>
@@ -35,4 +39,21 @@ export function MenuSection({ children }: { children: ReactNode }) {
   const items = Children.toArray(children).filter(Boolean);
   if (items.length === 0) return null;
   return <>{items}</>;
+}
+
+/** 禁用按钮自身不接收鼠标事件，由外层承接整行的悬停和键盘焦点。 */
+export function DisabledActionHint({ children, description }: { children: ReactNode; description?: string }) {
+  if (!description) return <>{children}</>;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} aria-label="删除说明" className="flex w-full cursor-not-allowed [&>button]:pointer-events-none">
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72">{description}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }

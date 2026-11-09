@@ -573,6 +573,18 @@ impl MemoryBotRepo {
     }
 
     /// Fixture surface (same role as [`Self::authority_state`]):
+    /// the control-plane audit entries (`created_at`,
+    /// `updated_at` per row) so ordering-sensitive list
+    /// tests pin deterministic timestamps. Production
+    /// facets keep owning every write; fixtures only tune
+    /// what they seeded.
+    pub fn control_plane_audit_state(
+        &self,
+    ) -> &RwLock<HashMap<String, (u64, u64)>> {
+        &self.control_plane_audit
+    }
+
+    /// Fixture surface (same role as [`Self::authority_state`]):
     /// seed one live Human ACTOR row on the shared bots
     /// registry, in the explicitly given env. The
     /// human-existence guards read THIS registry (spec

@@ -15,3 +15,5 @@ Caller subject reference tags are runtime-only Rust types, not serialized wire o
 They use serde and the URL parser only, without SDKs, HTTP or persistence. The
 Service API re-exports the policy; HTTP adapters and application orchestration
 consume it, and repositories enforce immutable source identities at writes.
+
+Custom interface addresses are deferred to deployment binding admission; standard bindings still require URLs. The internal `Custom` binding is a selected-route representation, not an accepted wire declaration.

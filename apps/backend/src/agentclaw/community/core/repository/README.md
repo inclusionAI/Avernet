@@ -18,6 +18,10 @@ core/repository/
 ```
 
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
+read without COUNT, equivalent to the existing exact-pair first page including
+newest-first duplicate handling and stage metadata. It does not grant access;
+tenant, environment and deletion predicates remain identical to the paged read.
 `BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
 row. Its `steal` operation atomically inserts or replaces that row's holder and
 acquisition timestamps in one transaction. Both Bot and Session force-acquire
@@ -140,6 +144,8 @@ purpose: "Every repository contract (protocols/) and implementation (implementat
 provides:
   - OwnershipSyncReadRepository
   - SqlOwnershipSyncReadRepository
+  - CollaborationRepairReadRepository
+  - SqlCollaborationRepairReadRepository
   - SpacePersistenceEffects
   - SpaceKnowledgeSyncRepository
   - SpaceKnowledgeSyncRepositoryProtocol
@@ -374,6 +380,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.space_membership
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.collaboration_repair   # RepairFacts/RepairFactsError typed in the collaboration repair fact reader
   - agentclaw.community.kernel.bot_manager_sync   # SyncKey / SyncFacts / SpaceChange typed in ManagerSyncReadRepositoryProtocol
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
@@ -419,6 +426,7 @@ internal_dependencies:
   - agentclaw.community.utils.app_utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.runtime_list_timing
 ```
 
 ### Change impact

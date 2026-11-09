@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -80,7 +81,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
-    avatarUrl: dto.avatar_url?.trim() || undefined,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
@@ -119,7 +120,7 @@ export const teamBotConversationService = {
           !Number.isFinite(data.total) ||
           data.total < 0
         ) {
-          throw new Error(response.message || '团队 Bot 接口返回格式异常');
+          throw new Error(response.message || '团队空间 Bot 接口返回格式异常');
         }
         for (const dto of data.items) {
           if (typeof dto.bot_id !== 'string' || !dto.bot_id.trim()) continue;
@@ -133,7 +134,7 @@ export const teamBotConversationService = {
     } catch {
       return {
         ok: false,
-        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队 Bot 失败，请稍后重试。', canRetry: true },
+        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队空间 Bot 失败，请稍后重试。', canRetry: true },
       };
     }
   },

@@ -17,7 +17,7 @@ import re
 
 import pytest
 
-from src.infra.trace_context import generate_trace_id, get_trace_id, set_trace_id, install_trace_record_factory
+from app.infra.trace_context import generate_trace_id, get_trace_id, set_trace_id, install_trace_record_factory
 
 
 class TestGenerateTraceId:

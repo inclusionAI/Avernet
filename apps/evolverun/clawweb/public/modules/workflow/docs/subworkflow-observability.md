@@ -27,10 +27,40 @@ writes must propagate errors so failure rolls both back. The host is responsible
 for authenticating the caller, authorizing the parent/child binding, validating
 that runs and workflow identities match, and designing conflict/retry semantics.
 The repository is not an authorization boundary; ordinary clients must not be
-given table-write access. There is no new HTTP write API. In particular,
-`POST /api/internal/runs` has not been changed to create links, and its existing
-ordinary and trial registration paths cannot be assumed to atomically do so.
-No current trusted runtime writer is connected by this change.
+given table-write access. There is no public or generic link-registration HTTP API.
+The trusted engine `POST /api/internal/runs` path accepts an optional
+`parent_relation` only when covered by the existing engine signature. The server
+locks and validates the parent run, its currently-running node execution, its
+persisted immutable workflow snapshot, and—when present—the durable fanout
+<<<<<<< HEAD
+group/item dispatch claim. On an externally provisioned database that predates
+migration v145, `flow_runs.workflow_snapshot_json` may be absent; in that
+compatibility mode only a deployment-bound run (with valid `workflow_version`
+and `workflow_deploy_number`) may resolve its immutable snapshot through
+`workflow_deploy_history`. Saved/draft runs cannot use this fallback because
+their mutable `state_json` is not a trusted registration receipt.
+
+It verifies the persisted parent bot/owner/session identity and child workflow
+before inserting the child run and `flow_run_links` in one transaction. A fanout
+`item_id` comes from the durable dispatch claim and may contain literal `/` as
+ClawMind's composite-item separator, as well as percent escapes; the two forms
+are compared case-sensitively and are not normalized into each other. The
+response includes the validated snake-case
+`parent_relation` receipt; it is not stored in or exposed as the public run row.
+Exact retries return the same receipt and relation; changed registration
+metadata, relation, authority, or an existing conflicting child/link is
+rejected. Current `state_json` and `current_phase` are mutable child run state:
+they may advance after registration, but that alone does not make a delayed exact
+retry a conflict. Link, child, or parent claim persistence failure rolls back the
+transaction.
+
+The parent remains `running` while the child owns `waiting` or `blocked` state;
+no parent waiting/propagation protocol is implied. A single subworkflow may use
+the durable fanout collector with a synthesized one-item group and an immutable
+`invocation` object (`schemaVersion: subworkflow.single.v1`, `parentAttempt`,
+`parentExecutionId`, optional `onFailure: skip`). The ordinary
+request-association route and trial registration path do not accept
+`parent_relation`; trial plus relation is fail-closed.
 
 Default `initDatabase` migration mode creates the table at v147 and applies v148
 to expand all four ID columns to `VARCHAR(255)` on MySQL/ZDAS. The generic DDL
@@ -55,6 +85,16 @@ The schema must not be concurrently modified by another operator during writes.
 In externally provisioned mode no migration is run; the operator must provision
 the equivalent full-width table and indexes. The existing managed-DB path skips
 ordinary migrations if DDL is denied, so it also requires external provisioning.
+An externally provisioned MySQL/OceanBase table may additionally define
+`gmt_modify TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`.
+It is optional: the repository neither reads nor writes it, so its value and
+update behavior are controlled by the database. Existing managed and SQLite
+tables need not have the column; published migrations and their ledger entries
+are unchanged and no backfill is performed. If an operator adds an extra column,
+it must allow inserts that omit it (for example, through a database default).
+SQLite does not support the MySQL `ON UPDATE` column clause; an equivalent
+SQLite table can omit the column altogether.
+
 If the table is missing or unreadable, the read endpoint returns a generic 503.
 A schema ledger at or above v148 without the correct table requires operator
 repair. SQLite migration and SQL rendering/metadata paths for MySQL/ZDAS are
@@ -107,3 +147,36 @@ The engine may have resolved a different version before registration. The UI
 labels the result accordingly and does not include runtime-injected nodes.
 A cross-component execution digest contract and integration test are required
 before claiming this is the exact executed DAG.
+
+## Fanout group save conflict diagnostics
+
+`PUT /api/internal/runs/:flowId/fanouts/:nodeId` records every storage 409 in
+`run_logs` after the save transaction finishes or rolls back. Entries use
+`source = 'fanout-server'`, `level = 'warn'`, and a JSON `message` with
+`event = 'fanout.save.conflict'`. The payload includes an event ID, stage,
+diagnostic code, original HTTP status, parent/node IDs, expected/submitted/observed
+revisions, parent status, safe child-state summaries, error message, possible
+cause, recovery action and recovery outcome. Observed state is read **after**
+the conflict, not an atomic snapshot of the rejected write. A failed reload is
+explicitly marked. Filter by `flow_id`/`node_id` and order by `timestamp, id`;
+server diagnostics use `seq = 0`, independently of engine log sequence numbers.
+
+For a revision conflict, the server reloads current state. If the normalized
+payloads are canonically equal except for revision, the current revision is at
+least the submitted revision, the parent is running, the group is non-terminal
+and its deadline has not expired, an ordinary save returns the current group
+without another mutation (`reloaded_equivalent_state`). Groups containing a
+dispatch claim are excluded. Non-equivalent state, one-shot claims and other
+conflicts keep 409; stale state is never blindly written with a refreshed revision.
+`httpStatus` describes the original storage conflict even when recovery returns 200.
+
+Diagnostics allowlist IDs/statuses and claim-presence booleans, never raw group
+bodies, parameters, workflow snapshots, child results/errors or claim tokens.
+Strings are capped at 256 UTF-16 code units; at most 20 children per summary are
+included, further reduced as needed to keep valid JSON below 60,000 UTF-8 bytes.
+`childCount` and `childrenOmitted` make sampling explicit. Log insertion is tried
+once and a positive affected-row count confirms success. If it fails, a safe
+structured server log is emitted without raw database errors; no ambiguous
+insert is retried and the original save/recovery outcome is preserved. Database
+unavailability therefore cannot guarantee a `run_logs` row; use the server log's
+event ID to reconcile that case. This covers group saves, not unrelated APIs.

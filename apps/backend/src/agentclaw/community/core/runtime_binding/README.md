@@ -25,7 +25,9 @@ internal_dependencies:
 `RuntimeBindingTarget.CALLER_SERVICE` explicitly resolves a service Bot's draft,
 verify, or online runtime even when the Bot also has a caller instance.
 `RuntimeBindingTarget.CALLER_INSTANCE` resolves the authenticated user's active
-Expert Chat instance. `AUTO` preserves the existing Session Files behavior.
+Expert Chat instance. `AUTO` selects service stage bindings for Teclaw, including
+Bots with call_type=caller; other Caller service Bots select the authenticated
+user's independent instance. Explicit `CALLER_INSTANCE` selection is unchanged.
 
 It does not select a device, retain session affinity, mutate state, or call the
 Session Resource state machine. The OpenAPI adapter resolves once for upload

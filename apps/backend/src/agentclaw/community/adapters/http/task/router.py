@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -29,12 +30,14 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
+    TaskStopRequestDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
     graph_to_dto, op_result_to_dto,
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.manifest_routes import router as manifest_api_router
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
     router as artifact_object_file_router,
@@ -62,8 +65,8 @@ from agentclaw.community.adapters.http.task.callback_routes import (
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
-    CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
+from agentclaw.community.core.task.task_dispatch.task_settings import (
+    HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_artifact_service import TaskArtifactApiServiceProtocol
@@ -96,6 +99,7 @@ router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
+router.include_router(manifest_api_router)
 router.include_router(task_read_api_router)
 router.include_router(task_config_router)
 router.include_router(artifact_api_router)
@@ -245,7 +249,7 @@ async def get_task_settings(
 ) -> Envelope[list[TaskSettingStateDTO]]:
     """读取全部已支持的任务开关状态。"""
     env = get_current_env()
-    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT, RELAY_EXECUTION)
+    setting_types = (HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT, RELAY_EXECUTION)
     states = [
         TaskSettingStateDTO(
             setting_type=setting_type,
@@ -414,6 +418,34 @@ async def report_callback(
         return envelope(report_result_to_dto(result).model_dump(), request)
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
+
+@router.post(
+    "/{task_id}/stop",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def stop_task(
+    task_id: str,
+    request: Request,
+    body: TaskStopRequestDTO = Body(default=None),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """Manual stop one task graph into CANCELLED."""
+    result = await service.stop_task(
+        task_id,
+        reason=body.reason if body is not None else "manual_stop",
+        operator=body.operator if body is not None else "manual_stop",
+    )
+    return envelope(
+        {
+            "task_id": result.task_id,
+            "status": result.status.value,
+            "stopped_nodes": result.stopped_nodes,
+            "reason": result.reason,
+            "operator": result.operator,
+        },
+        request,
+    )
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
 @envelope_errors
@@ -780,9 +812,11 @@ async def get_task_internal(
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
-    graph = service.get_task_dashboard(task_id)
+    graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+        service.get_task_dashboard, task_id
+    )
     # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
-    artifact_rows = artifact_service.list_artifacts(graph.task_id)
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,

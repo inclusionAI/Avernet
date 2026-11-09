@@ -2,50 +2,34 @@
  * GroupHistorySidebar —— 协作群历史消息右缘面板容器（入口=头部「历史消息」图标）。
  *
  * 复用 chat 页的 SessionHistorySearchPanel 作面板本体（组件无 chat 会话耦合，仅
- * search 模型 + onLocate 两个 prop）；容器与 ChatHeaderRightPanel 同构
- * （WorkspaceOverlayPanel，48px 头行：标题 + 关闭）。
+ * search 模型 + onLocate 两个 prop）；容器复用 ChatHeaderRightPanel——对话区内联
+ * 副屏呈现（对话区随面板让宽、无蒙层抽屉，与 chat 页历史消息同形）。
  * 默认宽度、拖宽范围和宽度记忆与其余聊天右侧面板共用。
  */
-import { IconButton } from '@/components/ui';
-import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
+import { ChatHeaderRightPanel } from '@/pages/Workspace/components/WorkspaceHeaderRightPanel';
 import { SessionHistorySearchPanel } from '@/pages/Workspace/Chat/components/SessionHistorySearchPanel';
-// 历史搜索模型改经 conversationSearchService 的纯模型 re-export 供给（collab-form Task 17 源切片类型完备）：
-// chat 侧 header hook 属 pages/Workspace/Chat 裁剪面，本保留链（collab）不得 type-only 依赖它。
 import type { UseSessionHistorySearchModel } from '@/services/workspace/conversationSearchService';
-import { X } from 'lucide-react';
-import { WorkspaceOverlayPanel } from '../WorkspaceOverlayPanel';
 
 export interface GroupHistorySidebarProps {
+  /** 展开态；false → 宽度收 0 + 内容退出可交互，容器保持挂载形成展开/收起过渡。 */
+  open?: boolean;
   search: UseSessionHistorySearchModel;
   /** 点击搜索结果：上层定位滚动 + 高亮（locateMessage）。 */
   onLocate: (messageId: string) => void;
   onClose: () => void;
 }
 
-export function GroupHistorySidebar({ search, onLocate, onClose }: GroupHistorySidebarProps) {
+export function GroupHistorySidebar({ open = true, search, onLocate, onClose }: GroupHistorySidebarProps) {
   return (
-    <WorkspaceOverlayPanel
-      ariaLabel="历史消息面板"
-      onDismiss={onClose}
-      {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-      className="z-30 border-l border-divider bg-card"
-    >
-      <div className="flex h-full min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-divider px-4">
-          <h3 className="m-0 text-sm font-medium text-foreground">历史消息</h3>
-          <IconButton label="关闭面板" icon={<X className="size-4" />} variant="ghost" size="sm" onClick={onClose} />
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-          <SessionHistorySearchPanel
-            search={search}
-            onLocate={(messageId) => {
-              onLocate(messageId);
-              onClose();
-            }}
-          />
-        </div>
-      </div>
-    </WorkspaceOverlayPanel>
+    <ChatHeaderRightPanel title="历史消息" open={open} onClose={onClose}>
+      <SessionHistorySearchPanel
+        search={search}
+        onLocate={(messageId) => {
+          onLocate(messageId);
+          onClose();
+        }}
+      />
+    </ChatHeaderRightPanel>
   );
 }
 

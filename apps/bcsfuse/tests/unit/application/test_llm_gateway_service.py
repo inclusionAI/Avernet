@@ -6,13 +6,13 @@ LLMGatewayService 测试
 
 import pytest
 
-from src.application.services.llm_gateway_service import LLMGatewayService
-from src.infra.llm.providers.fake_provider import FakeLLMProvider
-from src.infra.llm.routing.static_llm_router import StaticLLMRouter
-from src.infra.llm.config.llm_settings import LLMSettings
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
-from src.domain.models.llm_response import FinishReason
+from app.application.services.llm_gateway_service import LLMGatewayService
+from app.infra.llm.providers.fake_provider import FakeLLMProvider
+from app.infra.llm.routing.static_llm_router import StaticLLMRouter
+from app.infra.llm.config.llm_settings import LLMSettings
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.models.llm_response import FinishReason
 
 
 class TestLLMGatewayService:

@@ -14,7 +14,7 @@ fn unknown_versions_mixed_envelopes_and_duplicate_provider_ids_fail_closed() {
 #[test]
 fn promotion_keeps_effective_legacy_database_and_does_not_invent_identity_policy() {
     let mut legacy=group("legacy"); legacy.remove("state_path");
-    let edit=Edit {source:Document {groups:vec![legacy],v2:false},target:None,bot:None};
+    let edit=Edit {source:Document {groups:vec![legacy],v2:false,cli:CliSettings::default()},target:None,bot:None};
     let merged=edit.finish(group("new")).unwrap();
     let text=toml::to_string(&merged).unwrap(); let doc=Document::parse(&text).unwrap();
     assert_eq!(doc.groups[0]["state_path"].as_str(),Some("~/.bcn-bridge/bridge-state.sqlite3"));
@@ -37,7 +37,7 @@ fn per_bot_resolver_metadata_is_separate_from_provider_runtime_auth() {
     provider.insert("api_url".into(),"http://localhost".into());
     let bot=provider.get_mut("bot").unwrap().as_array_mut().unwrap()[0].as_table_mut().unwrap();
     bot.insert("registration".into(),toml::Value::Table(toml::from_str("provider_auth='static-bearer'").unwrap()));
-    let doc=Document {groups:vec![provider],v2:true};
+    let doc=Document {groups:vec![provider],v2:true,cli:CliSettings::default()};
     let loaded=load_document(&doc,Path::new("/tmp/config.toml"),&crate::credentials::EnvCredentials).unwrap();
     assert_eq!(loaded[0].config.provider_auth.as_deref(),Some("agentpass"));
     assert_eq!(loaded[0].registrations[0].provider_auth.as_deref(),Some("static-bearer"));
@@ -49,7 +49,7 @@ fn replacement_splices_only_selected_bot_and_keeps_other_groups() {
     second.as_table_mut().unwrap().insert("bot_id".into(),"bot-second".into());
     first.get_mut("bot").unwrap().as_array_mut().unwrap().push(second.clone());
     let unrelated=group("b");
-    let edit=Edit {source:Document {groups:vec![first.clone(),unrelated.clone()],v2:true},target:Some(0),bot:Some(1)};
+    let edit=Edit {source:Document {groups:vec![first.clone(),unrelated.clone()],v2:true,cli:CliSettings::default()},target:Some(0),bot:Some(1)};
     second.as_table_mut().unwrap().insert("model".into(),"replacement-model".into());
     let mut replacement=first.clone();replacement.insert("bot".into(),toml::Value::Array(vec![second.clone()]));
     let merged=edit.finish(replacement).unwrap();
@@ -65,7 +65,7 @@ fn replacing_an_overridden_resolver_never_changes_sibling_defaults() {
     let mut selected=first["bot"][0].clone();
     selected.as_table_mut().unwrap().insert("registration".into(),toml::Value::Table(toml::from_str("provider_auth='agentpass-local'").unwrap()));
     first.get_mut("bot").unwrap().as_array_mut().unwrap().push(selected.clone());
-    let edit=Edit {source:Document {groups:vec![first.clone()],v2:false},target:Some(0),bot:Some(1)};
+    let edit=Edit {source:Document {groups:vec![first.clone()],v2:false,cli:CliSettings::default()},target:Some(0),bot:Some(1)};
     let mut replacement=first.clone();replacement.insert("registration".into(),selected["registration"].clone());
     replacement.insert("bot".into(),toml::Value::Array(vec![selected.clone()]));
     let merged=edit.finish(replacement).unwrap();
@@ -105,4 +105,103 @@ fn replacement_api_resolution_matches_runtime_loading() {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         }
     }
+}
+
+
+#[test]
+fn global_cli_endpoint_is_loaded_for_every_provider_but_legacy_api_url_is_not_runtime_endpoint() {
+    let mut first = group("first");
+    first.insert("api_url".into(), "http://registration.example".into());
+    let second = group("second");
+    let root = toml::Table::from_iter([
+        ("schema_version".into(), 2.into()),
+        ("cli".into(), toml::Value::Table(toml::Table::from_iter([
+            ("api_base_url".into(), "http://runtime.example".into()),
+        ]))),
+        ("provider".into(), toml::Value::Array(vec![first.into(), second.into()])),
+    ]);
+    let document = Document::parse(&toml::to_string(&root).unwrap()).unwrap();
+    assert_eq!(document.cli.api_base_url.as_deref(), Some("http://runtime.example"));
+    let loaded = load_document(&document, Path::new("/tmp/config.toml"), &crate::credentials::EnvCredentials).unwrap();
+    assert_eq!(loaded.len(), 2);
+    for provider in loaded {
+        assert_eq!(provider.config.cli_api_base_url.as_deref(), Some("http://runtime.example"));
+        assert!(provider.config.execution_env(&provider.config.bots[0]).contains(
+            &("BCS_API_BASE_URL".into(), "http://runtime.example".into())
+        ));
+        assert!(!provider.config.execution_env(&provider.config.bots[0]).iter()
+            .any(|(key, _)| key == "MOLTIS_BCS_URL"));
+    }
+}
+
+#[test]
+fn compiled_cli_endpoint_is_used_when_document_has_no_override() {
+    let document = Document::parse(&toml::to_string(&toml::Table::from_iter([
+        ("provider_id".into(), "compiled".into()),
+        ("mode".into(), "plugin".into()),
+        ("state_path".into(), "/tmp/compiled.db".into()),
+        ("plugin".into(), toml::Value::Table(toml::Table::from_iter([
+            ("url".into(), "ws://localhost/ws/bot".into()),
+        ]))),
+        ("bot".into(), toml::Value::Array(vec![toml::Value::Table(toml::Table::from_iter([
+            ("provider_bot_ref".into(), "worker".into()),
+            ("bot_id".into(), "compiled-bot".into()),
+            ("engine".into(), "codex".into()),
+            ("cwd".into(), "/tmp".into()),
+        ]))])),
+    ])).unwrap()).unwrap();
+    let loaded = load_document(&document, Path::new("/tmp/config.toml"), &crate::credentials::EnvCredentials).unwrap();
+    let expected = option_env!("BCS_CLI_API_URL").filter(|value| !value.trim().is_empty());
+    assert_eq!(loaded[0].config.cli_api_base_url.as_deref(), expected);
+}
+
+#[test]
+fn legacy_document_accepts_global_cli_endpoint_and_legacy_registration_api_url() {
+    let mut provider = group("legacy");
+    provider.insert("api_url".into(), "http://registration.example".into());
+    provider.insert("cli".into(), toml::Value::Table(toml::Table::from_iter([
+        ("api_base_url".into(), "http://runtime.example".into()),
+    ])));
+    let document = Document::parse(&toml::to_string(&provider).unwrap()).unwrap();
+    let loaded = load_document(&document, Path::new("/tmp/config.toml"), &crate::credentials::EnvCredentials).unwrap();
+    assert_eq!(loaded[0].config.cli_api_base_url.as_deref(), Some("http://runtime.example"));
+    assert_eq!(loaded[0].registrations[0].api_url.as_deref(), Some("http://registration.example"));
+    assert!(!loaded[0].config.execution_env(&loaded[0].config.bots[0]).iter()
+        .any(|(key, value)| key == "BCS_API_BASE_URL" && value == "http://registration.example"));
+}
+
+#[test]
+fn cli_endpoint_resolution_prefers_configuration_then_compiled_default() {
+    let configured = CliSettings { api_base_url: Some("http://configured.example".into()) };
+    assert_eq!(resolve_cli_api_base_url(&configured, Some("http://compiled.example")), Some("http://configured.example".into()));
+    assert_eq!(resolve_cli_api_base_url(&CliSettings::default(), Some("http://compiled.example")), Some("http://compiled.example".into()));
+    assert_eq!(resolve_cli_api_base_url(&CliSettings { api_base_url: Some("  ".into()) }, Some("http://compiled.example")), Some("http://compiled.example".into()));
+    assert_eq!(resolve_cli_api_base_url(&CliSettings::default(), None), None);
+}
+
+#[test]
+fn cli_endpoint_is_preserved_when_registration_edits_v1_or_v2_documents() {
+    let mut source = group("first");
+    let cli = CliSettings { api_base_url: Some("http://runtime.example".into()) };
+    let edit = Edit { source: Document { groups: vec![], v2: false, cli: cli.clone() }, target: None, bot: None };
+    let v1 = edit.finish(source.clone()).unwrap();
+    assert_eq!(Document::parse(&toml::to_string(&v1).unwrap()).unwrap().cli, cli);
+
+    source.insert("provider_id".into(), "second".into());
+    let edit = Edit { source: Document { groups: vec![group("first")], v2: true, cli: cli.clone() }, target: Some(0), bot: None };
+    let v2 = edit.finish(source).unwrap();
+    assert_eq!(Document::parse(&toml::to_string(&v2).unwrap()).unwrap().cli, cli);
+}
+
+#[test]
+fn provider_level_cli_endpoint_is_rejected() {
+    let mut provider = group("first");
+    provider.insert("cli".into(), toml::Value::Table(toml::Table::from_iter([
+        ("api_base_url".into(), "http://runtime.example".into()),
+    ])));
+    let root = toml::Table::from_iter([
+        ("schema_version".into(), 2.into()),
+        ("provider".into(), toml::Value::Array(vec![provider.into()])),
+    ]);
+    assert!(Document::parse(&toml::to_string(&root).unwrap()).is_err());
 }

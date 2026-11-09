@@ -2,6 +2,7 @@ import type { BotDomain } from '@/domain/botWorkshop';
 import { listMyBots, type CollaborationBotDto } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
 import { mapBotDto } from '@/services/bots/botMapper';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
 
 export interface ExternalBotDomain {
   id: string;
@@ -40,7 +41,7 @@ function mapExternalBot(dto: CollaborationBotDto): ExternalBotDomain {
     id: dto.bot_id,
     name: dto.name?.trim() || dto.bot_id,
     description: dto.descriptor?.summary,
-    avatarUrl: dto.avatar_url,
+    avatarUrl: normalizeAvatarUrl(dto.avatar_url),
     status: dto.status,
     reachability: dto.reachability,
     engine: dto.engine,

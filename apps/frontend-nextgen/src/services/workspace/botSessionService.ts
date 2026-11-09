@@ -1,4 +1,6 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import type { BotModelBadge } from '@/capabilities';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
@@ -54,11 +56,13 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
+  /** 归属空间类型（后端 space.kind）；缺失时由 spaceId 与个人空间比对兜底。 */
+  spaceKind?: 'personal' | 'team';
   /** 会话运行阶段；对话页目录中的服务 Bot 使用 online，个人 Bot 使用 draft；调试页可显式选择阶段。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
-  /** 团队 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
+  /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
 }
 
@@ -91,6 +95,8 @@ export interface BotModelView {
   modelId: string;
   name: string;
   provider: string;
+  /** 运营展示徽标（capability 注入，如「推荐」）；缺省不渲染。 */
+  badge?: BotModelBadge;
 }
 
 const COMPOUND_ID_RE = /^.+:.+$/;
@@ -142,7 +148,7 @@ export function listChatBots(identityViews: IdentityView[]): ChatBotView[] {
         realBotId,
         ownerId,
         displayName: i.displayName,
-        avatarUrl: i.avatarUrl,
+        avatarUrl: resolveBotAvatarUrl(i.avatarUrl, realBotId),
         online: i.online,
         reachability: i.reachability,
         chatable: COMPOUND_ID_RE.test(i.id),
@@ -232,6 +238,12 @@ function readTemplateName(dto: OwnedBotDto, templateType?: string): string | und
   return undefined;
 }
 
+/** 归一后端 space.kind（大小写/命名差异）到前端空间类型；缺失返回 undefined 由调用侧兜底。 */
+function normalizeSpaceKind(kind: string | undefined): 'personal' | 'team' | undefined {
+  if (!kind) return undefined;
+  return kind.toUpperCase() === 'TEAM' ? 'team' : 'personal';
+}
+
 function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   const botId = dto.bcn_bot_id || (dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`);
   const { realBotId, ownerId: legacyLocator } = splitBotId(botId);
@@ -252,7 +264,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     ownerId,
     engineOwnerId: dto.owner_entity_id,
     displayName: dto.bot_name || dto.bot_id,
-    avatarUrl: dto.avatar_url?.trim() || undefined,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: dto.status,
     reachability: 'reachable',
@@ -266,6 +278,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     templateName: runtime.templateName,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
+    spaceKind: normalizeSpaceKind(dto.space?.kind),
   };
 }
 

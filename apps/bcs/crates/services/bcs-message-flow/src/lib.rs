@@ -34,6 +34,7 @@ mod delivery_failure_notice;
 mod delivery_control;
 pub use delivery_control::CallerExecutionControl;
 mod delivery_abort;
+mod session_delivery_cleanup;
 pub(crate) mod human_notify_hook;
 mod pending_message;
 pub(crate) mod protocol_context;

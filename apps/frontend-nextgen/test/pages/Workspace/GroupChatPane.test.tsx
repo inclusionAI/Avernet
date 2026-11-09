@@ -930,7 +930,7 @@ describe('resolveSender', () => {
         extra: { senderId: 'human_123123', senderAvatarUrl: 'avatar-echo' },
       } as never,
       group,
-      [{ actorId: '123123', kind: 'human' as const, name: '李四', role: 'member' as const, mode: 'present' as const }],
+      [{ actorId: '123123', kind: 'human' as const, name: '李四' }],
       undefined,
       '999999',
     );

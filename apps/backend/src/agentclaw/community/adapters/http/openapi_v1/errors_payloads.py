@@ -16,6 +16,10 @@ from agentclaw.community.core.bot_management.bot_quota import (
 from agentclaw.community.core.bot_management.errors import (
     BotCreationRetainedError,
 )
+from agentclaw.community.core.service_bot.errors import (
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
+)
 from agentclaw.community.core.skill_center.errors import (
     SkillAssetInUseError,
     SkillOfflineBlockedError,
@@ -36,6 +40,8 @@ def error_data(exc: Exception) -> object | None:
         return {"bot_id": exc.bot_id, "retryable": True}
     if isinstance(exc, AcliContainerError):
         return {"code": exc.code, "reason": exc.detail}
+    if isinstance(exc, ServicePublicationGateBlockedError | ServicePublicationGatePendingError):
+        return gate_error_data(exc)
     if isinstance(exc, AcliCliNameMismatchError):
         return {"market_name": exc.market_name}
     if isinstance(exc, AcliOperationInProgressError):
@@ -57,3 +63,10 @@ def acli_operation_payload(op: AcliOperation) -> dict[str, object]:
         "error_code": op.error_code,
         "error_message": op.error_message,
     }
+
+
+def gate_error_data(
+    exc: ServicePublicationGateBlockedError | ServicePublicationGatePendingError,
+) -> dict[str, object]:
+    """Expose only the stable, UI-actionable gate projection."""
+    return dict(exc.gate_result)

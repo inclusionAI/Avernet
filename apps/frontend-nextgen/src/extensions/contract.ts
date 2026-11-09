@@ -18,7 +18,7 @@ import type {
   ServiceBotRoutingControlComponent,
   ServiceBotRoutingHook,
 } from './contracts/groupRouting';
-import type { TaskPanelBootstrapHook } from './contracts/taskPanelBootstrap';
+import type { SessionTaskPanelTabHook, TaskPanelBootstrapHook } from './contracts/taskPanelBootstrap';
 
 /** 群任务栈槽位（collab 形态 null：不渲染任务 UI、不发任务引擎请求、相关代码不进产物）。 */
 export interface GroupTasksExtension {
@@ -50,6 +50,8 @@ export interface AppExtensionSlots {
   taskSessionNavigationObserver: ComponentType | null;
   /** 任务副屏会话 bootstrap（群/单聊头部 hook 消费；collab 形态 null：不重放任务面板页签、不拉取任务栈，见 Task 8）。 */
   taskPanelBootstrap: TaskPanelBootstrapHook | null;
+  /** 当前会话可重开的 TaskPanel 快照（Monitor 判空/重建；collab 形态 null：无任务栈恒无快照）。 */
+  sessionTaskPanelTab: SessionTaskPanelTabHook | null;
 }
 
 /** appExtension 本体（capabilities + 组件装配），三形态各自在装配文件内注解满足。 */

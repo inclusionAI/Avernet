@@ -479,6 +479,127 @@ describe('loadGroupDetail', () => {
   });
 });
 
+describe('participant summaries wiring', () => {
+  const groupDetail = (participants: unknown[]) => ({
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: {
+      group_id: 'g1',
+      version: 1,
+      kind: 'normal' as const,
+      name: 'X',
+      status: 'active' as const,
+      visibility: 'private' as const,
+      strategy: 'chat' as const,
+      collaboration: { strategy: 'chat' as const, delivery_policy: { bot_final_delivery: 'send_to_driver' as const } },
+      participants,
+      originator_actor_id: 'bot-1',
+      driver_bot_uuid: 'bot-1',
+      updated_at: 1,
+      created_at: 1,
+    },
+  });
+  const emptySessions = {
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: { items: [], offset: 0, limit: 50, total: 0 },
+  };
+
+  it('loadGroups consumes list summaries with a count fallback and no fabricated control fields', async () => {
+    gc.listGroups.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          {
+            group_id: 'g1',
+            kind: 'normal',
+            status: 'active',
+            visibility: 'private',
+            originator_actor_id: 'bot-1',
+            driver_bot_uuid: 'bot-1',
+            strategy: 'chat',
+            name: '群A',
+            created_at: 1,
+            updated_at: 5,
+            participants: [
+              { actor_id: 'b1', actor_kind: 'bot', name: 'Bot 1', avatar_url: '/b1.png' },
+              { actor_id: 'b2', actor_kind: 'bot', name: 'Bot 2', avatar_url: null },
+              { actor_id: 'h1', actor_kind: 'human', name: null, avatar_url: '/h1.png' },
+              { actor_id: 'h2', actor_kind: 'human', name: '人二', avatar_url: null },
+            ],
+          },
+        ],
+        total: 1,
+        offset: 0,
+        limit: 50,
+      },
+    });
+
+    const res = await groupService.loadGroups(identity);
+
+    expect(res.ok).toBe(true);
+    const group = res.ok ? res.data[0] : null;
+    expect(group?.participantDetailsLoaded).toBe(false);
+    expect(group?.participantCount).toBe(4);
+    expect(group?.participants).toEqual([]);
+    expect(group?.participantSummaries).toEqual([
+      { actorId: 'b1', kind: 'bot', name: 'Bot 1', avatarUrl: '/b1.png' },
+      { actorId: 'b2', kind: 'bot', name: 'Bot 2', avatarUrl: undefined },
+      { actorId: 'h1', kind: 'human', name: 'h1', avatarUrl: '/h1.png' },
+      { actorId: 'h2', kind: 'human', name: '人二', avatarUrl: undefined },
+    ]);
+    expect(group?.participantSummaries?.[0]).not.toHaveProperty('role');
+    expect(group?.participantSummaries?.[0]).not.toHaveProperty('mode');
+  });
+
+  it('loadGroupDetail derives summaries from the full participants and marks details loaded', async () => {
+    gc.getGroup.mockResolvedValue(
+      groupDetail([
+        {
+          actor_id: 'b1',
+          actor_kind: 'bot',
+          name: 'Alpha',
+          role: 'driver',
+          mode: 'muted',
+          avatar_url: ' /b1.png ',
+        },
+        { actor_id: 'human_1', actor_kind: 'human', name: '章梧', role: 'consultant', mode: 'present', avatar_url: null },
+      ]),
+    );
+    sc.listGroupSessions.mockResolvedValue(emptySessions);
+
+    const res = await groupService.loadGroupDetail('g1');
+
+    expect(res.ok).toBe(true);
+    const group = res.ok ? res.data : null;
+    expect(group?.participantDetailsLoaded).toBe(true);
+    expect(group?.participantCount).toBe(2);
+    expect(group?.participants).toEqual([
+      expect.objectContaining({ actorId: 'b1', role: 'driver', mode: 'muted', avatarUrl: '/b1.png' }),
+      expect.objectContaining({ actorId: 'human_1', role: 'member', mode: 'present', avatarUrl: undefined }),
+    ]);
+    expect(group?.participantSummaries).toEqual([
+      { actorId: 'b1', kind: 'bot', name: 'Alpha', avatarUrl: '/b1.png' },
+      { actorId: 'human_1', kind: 'human', name: '章梧', avatarUrl: undefined },
+    ]);
+  });
+
+  it('loadGroupDetail marks explicitly empty participant details as loaded', async () => {
+    gc.getGroup.mockResolvedValue(groupDetail([]));
+    sc.listGroupSessions.mockResolvedValue(emptySessions);
+
+    const res = await groupService.loadGroupDetail('g1');
+
+    expect(res.ok && res.data.participantDetailsLoaded).toBe(true);
+    expect(res.ok && res.data.participantSummaries).toEqual([]);
+    expect(res.ok && res.data.participantCount).toBe(0);
+  });
+});
+
 describe('policy', () => {
   const group = {
     groupId: 'g1',
@@ -713,7 +834,7 @@ describe('createGroupViaExecute 经 groupTasks 扩展槽位委派（2026-11 coll
   // 保证槽位改写不外泄（覆盖通道见 test/setup/registerExtensionSlots.ts 头注释）。
   const baseline = getExtensionSlots();
   const resetToCollabNull = () => {
-    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null });
+    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null, sessionTaskPanelTab: null });
   };
   const smInput = {
     name: '我的群',

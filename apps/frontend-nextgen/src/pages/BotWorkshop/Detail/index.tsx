@@ -24,7 +24,7 @@ import { moreTabs } from './detailTabs';
 import { useHostingTabs } from './useHostingTabs';
 import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
-  const { id, ownerId, requestedEditable, runtimeStage } = useBotEditorAddress();
+  const { id, ownerId, requestedEditable, runtimeStage, requestedTab } = useBotEditorAddress();
   const openDesktopFolder = useDesktopFolder(id);
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
@@ -34,6 +34,13 @@ const BotWorkshopDetailPage: React.FC = () => {
     detail.bot.serviceMode === 'service' &&
     (runtimeStage === 'verify' || isServiceVerification(detail.bot));
   const editable = requestedEditable && !verifying;
+  // Editing a service Bot must execute against its draft configuration. Keep
+  // explicit verification and ordinary online views on their requested stages.
+  const debugRuntimeStage = verifying
+    ? 'verify'
+    : requestedEditable
+    ? 'draft'
+    : runtimeStage ?? (detail.bot ? resolveBotRuntimeStage(detail.bot.lifecycle) : undefined);
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
   const isOwner = isSameHumanIdentity(addressedOwnerId, requestIdentity.userId);
   const editor = useBotEditor(
@@ -61,9 +68,10 @@ const BotWorkshopDetailPage: React.FC = () => {
     requestIdentity.userId,
     detail.bot,
     isOwner,
-    desktopPolicy.routines,
+    false,
     additionalTabs,
     JSON.stringify([addressedOwnerId, runtimeStage, currentSpaceId]),
+    requestedTab,
   );
   const ExtensionPanel = panels.find((panel) => `extension:${panel.id}` === tab)?.Panel;
   const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
@@ -169,6 +177,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               className={cn('h-full min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}
             >
               <DetailPanelContent
+                authenticatedUserId={requestIdentity.ready ? requestIdentity.userId : undefined}
                 bot={bot}
                 editor={editor}
                 advanced={advanced}
@@ -192,9 +201,9 @@ const BotWorkshopDetailPage: React.FC = () => {
       {debugOpen ? (
         <DetailDebugChat
           authenticatedUserId={requestIdentity.ready ? requestIdentity.userId ?? null : null}
-          key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
+          key={`${bot.id}:${debugRuntimeStage ?? bot.lifecycle}`}
           bot={bot}
-          runtimeStage={verifying ? 'verify' : runtimeStage}
+          runtimeStage={debugRuntimeStage}
           ownerId={addressedOwnerId}
           fullscreen={debugFullscreen}
           onClose={() => {

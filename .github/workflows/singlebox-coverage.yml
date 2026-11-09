@@ -43,12 +43,12 @@ jobs:
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
       # PR: compare against the checked-out merge commit's exact base tree.
-      # push/dispatch: compare against dev (repo default branch) instead.
-      SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+      # push compares the pushed range; manual dispatch compares against dev.
+      SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.event_name == 'push' && github.event.before || 'origin/dev') }}
       # Same base for BCS E2E changed-line coverage, which e2e_coverage.sh
       # reads from these variables: > 65% once a change has >= 20
       # instrumentable lines in the e2e scope.
-      BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+      BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.event_name == 'push' && github.event.before || 'origin/dev') }}
       BCS_E2E_CHANGED_LINE_MIN: "65"
 
     defaults:
@@ -72,27 +72,44 @@ jobs:
             echo "Manual dispatch; running singlebox coverage regardless of changed files."
             exit 0
           fi
-          # Ensure the base ref is present locally (shallow clones may not have it).
-          git fetch --no-tags --depth=1 origin "${SINGLEBOX_BASE_REF#origin/}" 2>/dev/null || true
-          # Diff base against the working tree. PR checkouts are merge commits,
-          # so diffing the tree (not HEAD) against the base captures all PR-introduced
-          # changes regardless of the merge-commit structure.
-          mapfile -t files < <(git diff --name-only "${SINGLEBOX_BASE_REF}" -- \
+          # Resolve the exact event range. Pushes must compare the pushed range
+          # against github.event.before, not against the already-updated origin/dev.
+          base_ref="${SINGLEBOX_BASE_REF}"
+          if [[ "$base_ref" =~ ^0+$ ]]; then
+            base_ref="$(printf '' | git hash-object -w -t tree --stdin)"
+          elif ! git rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
+            if [[ "$base_ref" == origin/* ]]; then
+              git fetch --no-tags --depth=1 origin "${base_ref#origin/}"
+            fi
+            git rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1 || {
+              echo "Unable to resolve singlebox change-detection base: ${base_ref}" >&2
+              exit 1
+            }
+          fi
+          # Normalize the base for downstream BCS changed-line coverage too.
+          echo "SINGLEBOX_BASE_REF=${base_ref}" >> "$GITHUB_ENV"
+          echo "BCS_E2E_CHANGED_BASE_REF=${base_ref}" >> "$GITHUB_ENV"
+          changed_file_list="$(mktemp)"
+          trap 'rm -f "$changed_file_list"' EXIT
+          if ! git diff --name-only -z "${base_ref}" "${GITHUB_SHA}" -- \
             singlebox \
             apps/backend \
             apps/baas \
             apps/bcs \
             engine/adapter \
             apps/frontend \
-            .github/workflows/singlebox-coverage.yml \
-            || true)
+            .github/workflows/singlebox-coverage.yml > "$changed_file_list"; then
+            echo "Unable to diff singlebox change range ${base_ref}..${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          mapfile -d '' -t files < "$changed_file_list"
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No singlebox-relevant changes vs ${SINGLEBOX_BASE_REF}; skipping."
+            echo "No singlebox-relevant changes vs ${base_ref}; skipping."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} singlebox-relevant changed file(s) vs ${SINGLEBOX_BASE_REF}:"
+            echo "Detected ${n} singlebox-relevant changed file(s) vs ${base_ref}:"
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -145,15 +162,18 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         run: cargo llvm-cov --version
 
-      - name: Install system dependencies
+      - name: Install protoc
         if: steps.changes.outputs.skip != 'true'
-        # ubuntu-latest already ships gcc/make, curl, git, jq, libsqlite3-dev,
-        # libssl-dev, lsof, pkg-config, and procps; listing them here only
-        # pulled in package upgrades. protobuf-compiler (protoc, needed by
-        # the BCS build) is the one package the image lacks.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+        # BCS needs protoc. Install the same version previously supplied by
+        # Ubuntu without depending on the runner's apt mirror or DNS path.
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "21.12"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show protoc version
+        if: steps.changes.outputs.skip != 'true'
+        run: protoc --version
 
       - name: Install uv
         if: steps.changes.outputs.skip != 'true'
@@ -198,6 +218,17 @@ jobs:
             ${{ runner.os }}-cargo-e2e-
             ${{ runner.os }}-cargo-
 
+      - name: Cache instrumented BCS target
+        if: steps.changes.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/bcs -> target/cov-e2e/llvm-cov-target
+          shared-key: singlebox-instrumented-v1
+          cache-workspace-crates: false
+          cache-bin: false
+          env-vars: RUSTFLAGS CARGO_PROFILE_ CARGO_INCREMENTAL
+          save-if: ${{ github.event_name == 'push' }}
+
       - name: Cache built BCN plugin
         if: steps.changes.outputs.skip != 'true'
         uses: actions/cache@v4
@@ -227,6 +258,16 @@ jobs:
           bash -n singlebox/singlebox.sh
           bash -n singlebox/ci/singlebox_coverage.sh
           find singlebox/modules -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Verify parallel coverage orchestration
+        if: steps.changes.outputs.skip != 'true'
+        run: |
+          uv run --project apps/backend python -m pytest -q \
+            singlebox/ci/tests/test_singlebox_companion_coverage.py \
+            singlebox/ci/tests/test_singlebox_e2e_phases.py \
+            singlebox/ci/tests/test_singlebox_parallel_pipeline.py \
+            singlebox/ci/tests/test_singlebox_acceptance_orchestration.py \
+            singlebox/ci/tests/test_merge_junit_reports.py
 
       - name: Run singlebox coverage
         if: steps.changes.outputs.skip != 'true'
@@ -266,6 +307,8 @@ jobs:
           path: |
             singlebox/.dependencies/logs/**
             singlebox/.dependencies/coverage/singlebox/**
+            !singlebox/.dependencies/coverage/**/collaboration-repair-provider.json
+            !singlebox/.dependencies/coverage/**/.repair-provider-*
             singlebox/.dependencies/standalone/**
             .standalone-openclaw/logs/**
             apps/bcs/target/cov-e2e/cobertura.xml
@@ -274,4 +317,5 @@ jobs:
             apps/bcs/target/cov-e2e/endpoint_coverage.xml
             apps/bcs/target/cov-e2e/endpoint_coverage.txt
             apps/bcs/target/cov-e2e/cli_command_coverage.txt
+            singlebox/.dependencies/coverage/singlebox/reports/phase-timings.tsv
           if-no-files-found: ignore

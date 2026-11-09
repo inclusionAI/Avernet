@@ -46,12 +46,13 @@ from agentclaw.community.api.agentswarm_service import (
     AgentSwarmServiceProtocol, SubmitRunRequest,
 )
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentSpec, ProviderKind, RunStatus,
+    AgentKind, AgentSpec, ProviderKind, RunStatus,
 )
 from agentclaw.community.core.agentswarm.domain.models import RunOptions
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentAuthorizationState, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
-    GlobalRunLimitExceeded, QueueDepthExceeded, TenantRunLimitExceeded,
+    GlobalRunLimitExceeded, IdentitySourceInvalid, IdentitySourceRequired,
+    QueueDepthExceeded, TenantRunLimitExceeded,
 )
 from agentclaw.community.core.agentswarm.repository.audit.impl import AgentSwarmAuditWriter, AuditAction
 from agentclaw.community.di import Injected
@@ -91,6 +92,21 @@ TenantQuery = Annotated[
     str,
     Query(min_length=1, max_length=64, description="tenant scope for the run"),
 ]
+
+
+def _owned_or_404(run, owner_id: str) -> None:
+    """Refuse a run the caller does not own, exactly as if it did not exist.
+
+    Same 404 as an unknown run on purpose: a distinct "forbidden" would tell a
+    caller that a run id exists in their tenant, which is precisely what
+    ownership scoping is meant to withhold. Runs predating ``owner_id`` carry an
+    empty value and stay readable rather than disappearing.
+    """
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    run_owner = (getattr(run, "owner_id", "") or "").strip()
+    if run_owner and run_owner != owner_id:
+        raise HTTPException(status_code=404, detail="run not found")
 
 
 def _audit(
@@ -208,6 +224,18 @@ async def submit_run(
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="config_missing")
         raise
+    except IdentitySourceRequired:
+        # No approval-gated path exists, so this is a caller error, not a
+        # transient condition: 400 and the message names the missing field.
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.SUBMIT_REJECTED, reason="identity_source_missing")
+        raise
+    except IdentitySourceInvalid:
+        # Well-formed request naming a source it may not use: 422, matching
+        # what create-with-manifest answers for the same condition.
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.SUBMIT_REJECTED, reason="identity_source_invalid")
+        raise
     _audit(audit_writer, tenant=tenant, actor=user.staffId,
            action=AuditAction.SUBMIT_ACCEPTED, run_id=run_id)
     return summary
@@ -221,6 +249,16 @@ async def cancel_run(
     user: CurrentUserDep,
     audit_writer: AgentSwarmAuditWriterDep,
 ) -> CancelResponseDTO:
+    # Ownership is checked before the mutation: a run outside the caller's set
+    # must not be stoppable even though its id is known. A refused attempt is
+    # still audited -- a caller probing ids they cannot see is exactly what the
+    # trail exists to record.
+    try:
+        _owned_or_404(svc.get_run(run_id, tenant), user.staffId)
+    except HTTPException:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.CANCEL_REQUESTED, reason="not_found")
+        raise
     status = await svc.cancel(run_id, tenant)
     if status == "not_found":
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
@@ -236,11 +274,10 @@ async def get_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
 ) -> RunSummaryDTO:
     run = svc.get_run(run_id, tenant)
-    if run is None:
-        raise HTTPException(status_code=404, detail="run not found")
+    _owned_or_404(run, user.staffId)
     return _to_summary(run)
 
 
@@ -248,12 +285,15 @@ async def get_run(
 async def list_runs(
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
 ):
-    rp = svc.list_runs(tenant, status, page=page, page_size=page_size)
+    # Scoped to the caller: a tenant is a group, not a person, so a tenant-wide
+    # list would show one member another's prompts.
+    rp = svc.list_runs(tenant, status, page=page, page_size=page_size,
+                       owner_id=user.staffId)
     return RunListDTO(
         items=[_to_summary(r) for r in rp.items],
         total=rp.total,
@@ -267,13 +307,12 @@ async def run_detail(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
 ) -> RunDetailDTO:
     from agentclaw.community.core.agentswarm.service.protocols import RunDetail
 
     detail: RunDetail | None = svc.get_run_detail(run_id, tenant)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="run not found")
+    _owned_or_404(detail, user.staffId)
     return _to_detail_dto(detail)
 
 
@@ -374,11 +413,28 @@ async def ready() -> dict[str, bool]:
     return {"ready": True}
 
 
+def _identity_source_required_handler(
+    request: Request, exc: IdentitySourceRequired
+) -> JSONResponse:
+    # This surface answers every refusal as ``{"error": ...}``; routing these
+    # through HTTPException would answer ``{"detail": ...}`` instead, giving a
+    # caller two shapes to parse for the same class of failure.
+    return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+def _identity_source_invalid_handler(
+    request: Request, exc: IdentitySourceInvalid
+) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
 def register_exception_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(TenantRunLimitExceeded, _tenant_limit_handler)
     app.add_exception_handler(GlobalRunLimitExceeded, _global_limit_handler)
     app.add_exception_handler(QueueDepthExceeded, _queue_depth_handler)
     app.add_exception_handler(AgentSwarmConfigError, _config_error_handler)
+    app.add_exception_handler(IdentitySourceRequired, _identity_source_required_handler)
+    app.add_exception_handler(IdentitySourceInvalid, _identity_source_invalid_handler)
     return app
 
 
@@ -435,6 +491,13 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
                 identity_file=a.identity_file or "SOUL.md",
                 metadata=a.metadata,
                 config_manifest=a.config_manifest,
+                # Only a bot-kind agent provisions a Bot, so only it carries
+                # the run's identity source; an llm agent never holds a
+                # passport and must not look as though it does.
+                identity_bot_id=(
+                    (dto.identity_bot_id or "").strip()
+                    if a.kind is AgentKind.BOT else ""
+                ),
             )
             for a in dto.agents
         ),
@@ -442,7 +505,29 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
         idempotency_key=dto.idempotency_key,
         owner_id=owner_id,
         run_options=opts,
+        identity_bot_id=dto.identity_bot_id,
     )
+
+
+_GOAL_EXCERPT_CHARS = 160
+"""How much of the goal a list row carries.
+
+Long enough to identify a run at a glance; the full goal is one detail read
+away. Chosen rather than computed from the row width, so the API contract does
+not change with the frontend's layout.
+"""
+
+
+def _goal_excerpt(goal: str) -> str:
+    """A goal shortened for listing, cut on a word boundary where one is near.
+
+    Whitespace — newlines in particular — collapses to single spaces: a goal is
+    free text and a list row must stay one line.
+    """
+    collapsed = " ".join((goal or "").split())
+    if len(collapsed) <= _GOAL_EXCERPT_CHARS:
+        return collapsed
+    return collapsed[:_GOAL_EXCERPT_CHARS].rstrip() + "…"
 
 
 def _to_summary(run) -> RunSummaryDTO:
@@ -454,6 +539,7 @@ def _to_summary(run) -> RunSummaryDTO:
         error=run.error,
         started_at=run.started_at,
         ended_at=run.ended_at,
+        goal_excerpt=_goal_excerpt(run.goal),
     )
 
 
@@ -471,6 +557,9 @@ def _to_detail_dto(detail) -> RunDetailDTO:
         ended_at=detail.ended_at,
         tenant=detail.tenant,
         goal=detail.goal,
+        # Inherited from RunSummaryDTO; the detail carries the full goal, so the
+        # excerpt here only keeps the field populated for shared consumers.
+        goal_excerpt=_goal_excerpt(detail.goal),
         provider=detail.provider,
         agent_catalog=[
             AgentCatalogSpecDTO(

@@ -75,6 +75,20 @@ def test_apply_agent_passport_returns_local_mock_envelope(world) -> None:
     assert result["token"] == "mock_token_nonfirst_bot_y"
 
 
+def test_passport_lifecycle_accepts_optional_bot_type(world) -> None:
+    plugin = world.get(PassportPlugin)
+    result = plugin.apply_first_agent_passport(
+        bot_id="bot_typed",
+        owner_workno="alice",
+        mcp_codes=[],
+        bot_type="service",
+    )
+    plugin.update_passport("bot_typed", "alice", bot_type="service")
+
+    assert result is not None
+    assert result["agent_code"] == "local_bot_typed"
+
+
 # ── community impl (B4) — self-issued, deterministic, consent-free ──
 
 
@@ -146,15 +160,18 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
 
     monkeypatch.setattr(plugin, "owner_handoff_supported", capability)
     bots, repository, staff = Mock(), Mock(), Mock()
+    repository.find_by_request.return_value = None
     bots.get_by_pk.return_value = {
         "id": 1,
         "bot_id": "service",
         "owner_id": "A",
         "entity_id": "A",
+        "bot_type": "service",
     }
     staff.get_user_by_work_no.return_value = SimpleNamespace(
         work_no="B", display_name="B", full_name=None, username=None
     )
+    from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
     consumer = OwnerHandoffService(
         repository,
         plugin,
@@ -167,8 +184,15 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         Mock(),
         Mock(),
         ownership_sync=DisabledBotOwnershipSync(),
+        preflight=OwnerHandoffPreflight(plugin, Mock(), Mock()),
     )
     with pytest.raises(HandoffError, match="UNSUPPORTED"):
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")
     assert called == [{"bot_id": "service", "owner_workno": "A", "entity_id": "A"}]
     repository.begin.assert_not_called()
+
+
+@pytest.mark.parametrize("fixture", ["world", "community_world"])
+def test_passport_without_history_does_not_invent_handoff_snapshot(request, fixture):
+    plugin = request.getfixturevalue(fixture).get(PassportPlugin)
+    assert plugin.query_handoff_passport(bot_id="bot", owner_workno="owner", entity_id="entity") is None

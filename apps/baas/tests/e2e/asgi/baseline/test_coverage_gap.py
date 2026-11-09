@@ -212,7 +212,7 @@ class TestQPMConfig:
 
 
 class TestPublishAdmin:
-    """POST /api/v1/admin/force-success, /api/v1/admin/devices/{id}/status."""
+    """POST /api/v1/admin/force-success, /api/v1/admin/devices/{id}/repair."""
 
     @pytest.mark.asyncio
     async def test_force_success_missing_params(self, api: APITestHelper) -> None:
@@ -228,7 +228,7 @@ class TestPublishAdmin:
     @pytest.mark.asyncio
     async def test_update_device_status_invalid(self, api: APITestHelper) -> None:
         response = await api.client.post(
-            "/api/v1/admin/devices/nonexistent-uuid/status",
+            "/api/v1/admin/devices/nonexistent-uuid/repair",
             params=api.params(),
             json={"status": "ONLINE"},
         )

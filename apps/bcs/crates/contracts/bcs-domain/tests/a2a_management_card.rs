@@ -214,3 +214,15 @@ fn card_root_must_be_an_object_and_interface_tenant_is_preserved() {
     validate_management_card(&raw).unwrap();
     assert_eq!(raw, original);
 }
+
+#[test]
+fn standard_bindings_still_require_url_and_custom_addresses_are_deferred_to_admission() {
+    for binding in ["HTTP+JSON", "JSONRPC", "GRPC"] {
+        let mut raw = card();
+        raw["supportedInterfaces"] = json!([{"protocolBinding":binding,"protocolVersion":"1.0"}]);
+        assert!(validate_management_card(&raw).is_err());
+    }
+    let mut raw = card();
+    raw["supportedInterfaces"] = json!([{"protocolBinding":"EXAMPLE_INTERNAL","protocolVersion":"1.0","target":"service"}]);
+    validate_management_card(&raw).unwrap();
+}

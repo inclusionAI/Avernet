@@ -22,13 +22,13 @@ class TestFileContextLoader:
 
     def test_load_context_files_success(self):
         """测试成功加载上下文文件"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         # 创建临时目录和文件
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -70,10 +70,10 @@ class TestFileContextLoader:
 
     def test_load_context_files_missing_directory(self):
         """测试目录不存在的处理"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -89,10 +89,10 @@ class TestFileContextLoader:
 
     def test_load_context_files_empty_directory(self):
         """测试空目录的处理"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -108,13 +108,13 @@ class TestFileContextLoader:
 
     def test_load_context_files_empty_file(self):
         """测试空文件的处理"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         with tempfile.TemporaryDirectory() as tmpdir:
             openclaw_path = os.path.join(tmpdir, "openclaw")
@@ -136,13 +136,13 @@ class TestFileContextLoader:
 
     def test_load_context_files_unrecognized_md(self):
         """测试未识别的 md 文件处理"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         with tempfile.TemporaryDirectory() as tmpdir:
             openclaw_path = os.path.join(tmpdir, "openclaw")
@@ -168,10 +168,10 @@ class TestFileContextLoader:
 
     def test_load_context_files_non_md_ignored(self):
         """测试非 md 文件被忽略"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -203,10 +203,10 @@ class TestFileContextLoader:
 
     def test_load_context_files_preserves_source_path(self):
         """测试保留源文件路径"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -232,13 +232,13 @@ class TestFileContextLoaderCustomMapping:
 
     def test_custom_mapping_applied(self):
         """测试自定义映射生效"""
-        from src.infra.worker_profiles.loaders.file_context_loader import (
+        from app.infra.worker_profiles.loaders.file_context_loader import (
             FileContextLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         with tempfile.TemporaryDirectory() as tmpdir:
             openclaw_path = os.path.join(tmpdir, "openclaw")

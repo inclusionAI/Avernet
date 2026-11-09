@@ -319,6 +319,10 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                               else bot_desc_label)[:1024],
                     template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
                     engine_properties={},
+                    # The run's identity source, populated on bot-kind agents
+                    # only: the Bot inherits that passport and skips the human
+                    # authorization gate.
+                    identity_bot_id=spec.identity_bot_id or None,
                 ),
                 context=BotCreateContext(
                     deployment_mode=BotCreateDeploymentMode.CLOUD,
@@ -438,6 +442,10 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             # READY/APPLY_FAILED are answerable from the report even then
             # (a later explicit apply — "how is the bot configured now" —
             # is not read here).
+            if report.status is ApplyStatus.RUNNING:
+                # An active container can precede its post-container apply.
+                # Keep polling instead of killing a still-provisioning bot.
+                return BotState.PROVISIONING.value
             if report.status is ApplyStatus.SUCCEEDED:
                 if bot_status_ in _BOT_UP:
                     return BotState.READY.value

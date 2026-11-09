@@ -187,6 +187,7 @@ def _req(*, idempotency_key: str | None = None,
         dm.AgentSpec(name=f"a{i}", role="research") for i in range(1, 16)
     )
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal=goal,
         agents=agents,
@@ -467,3 +468,8 @@ class TestSubmitterDetach:
         assert old.status is dm.RunStatus.COMPLETED
         assert old.active_idempotency_key is None
         assert old.final_answer == "detach done"
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

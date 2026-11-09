@@ -11,7 +11,7 @@ describe('extension slots registry', () => {
   });
 
   it('可整体覆盖为 null（collab 形态），组件解析到空槽位', () => {
-    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null });
+    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null, sessionTaskPanelTab: null });
     expect(getExtensionSlots().groupTasks).toBeNull();
   });
 });

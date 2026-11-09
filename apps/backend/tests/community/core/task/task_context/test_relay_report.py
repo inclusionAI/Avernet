@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 import pytest
@@ -33,6 +34,25 @@ from agentclaw.community.core.task.task_context.task_graph_service import (
 )
 
 
+def _record_search_candidates(service, candidates=("bot-2", "bot-manager", "bot-worker")):
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "test relay candidates",
+            "relay_token_fingerprint": hashlib.sha256(b"attempt-1").hexdigest(),
+            "candidate_count": len(candidates),
+            "candidates": [
+                {"bot_id": candidate, "name": candidate, "score": 0.9}
+                for candidate in candidates
+            ],
+        },
+    )
+
+
 def _graph_service() -> TaskGraphService:
     graph = TaskExecutionGraph(
         task_id="task-1",
@@ -59,6 +79,7 @@ def _graph_service() -> TaskGraphService:
     graph.tasks.append(root)
     service = TaskGraphService()
     service._graphs[graph.task_id] = graph
+    _record_search_candidates(service)
     return service
 
 
@@ -145,11 +166,113 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     assert next_context.used_executor_ids == ["bot-1", "bot-2"]
     actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
     assert [event.action for event in actions] == [
+        NodeAction.DISPATCH,
         NodeAction.EXECUTE,
         NodeAction.VERIFY,
         NodeAction.PLAN,
         NodeAction.TRANSITION,
     ]
+
+
+
+def _record_relay_search(service, *, bot_ids, relay_token="attempt-1"):
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "relay candidates",
+            "relay_token_fingerprint": hashlib.sha256(relay_token.encode()).hexdigest(),
+            "candidate_count": len(bot_ids),
+            "candidates": [
+                {"bot_id": bot_id, "name": bot_id, "score": 1.0}
+                for bot_id in bot_ids
+            ],
+        },
+    )
+
+
+def test_successor_plan_requires_a_current_generation_search() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    service.query_task_dashboard("task-1").tasks[0].run_info.action_log.clear()
+
+    with pytest.raises(
+        TaskStateError, match="current-generation candidate search"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(event_id="plan-no-search", assignee="bot-2")
+        )
+
+
+def test_successor_assignee_must_come_from_searched_candidates() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.action_log.clear()
+    _record_relay_search(service, bot_ids=["bot-1"])
+
+    with pytest.raises(
+        TaskStateError, match="must come from searched candidates"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(event_id="plan-fake-bot", assignee="bot-2")
+        )
+
+
+def test_successor_plan_rejects_an_empty_search_receipt() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.action_log.clear()
+    _record_relay_search(service, bot_ids=[])
+
+    with pytest.raises(
+        TaskStateError, match="at least one searched candidate"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(event_id="plan-empty-search", assignee="bot-2")
+        )
+
+
+def test_successor_accepts_composite_candidate_after_runtime_split() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.action_log.clear()
+    _record_relay_search(service, bot_ids=["bot-2:owner-2"])
+
+    result = service.apply_relay_report(
+        _planned_single_bot_command(
+            event_id="plan-composite-search",
+            assignee="bot-2:owner-2",
+        )
+    )
+
+    assert result.target_node_id is not None
+    successor = service.query_task_dashboard("task-1").tasks[1]
+    assert successor.run_info.assignee == "bot-2"
+    assert successor.run_info.extend_props["assignee_owner_id"] == "owner-2"
+
+
+def test_successor_assignee_scope_must_match_searched_candidate() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.action_log.clear()
+    _record_relay_search(service, bot_ids=["bot-2:146836"])
+
+    with pytest.raises(
+        TaskStateError, match="must come from searched candidates"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(
+                event_id="plan-owner-scope",
+                assignee="bot-2:35983",
+            )
+        )
 
 
 def _planned_single_bot_command(
@@ -516,6 +639,7 @@ def test_report_completion_is_idempotent_and_does_not_create_node() -> None:
     assert graph.status == Status.DONE
     assert len(graph.tasks) == 1
     assert [event.action for event in graph.tasks[0].run_info.action_log] == [
+        NodeAction.DISPATCH,
         NodeAction.EXECUTE,
         NodeAction.VERIFY,
         NodeAction.PLAN,
@@ -554,3 +678,26 @@ def test_event_id_conflict_is_rejected_after_accepted_report() -> None:
     changed.event.output_patch["result"] = "changed"
     with pytest.raises(TaskStateError, match="event_id conflicts"):
         service.apply_relay_report(changed)
+
+
+def test_plan_splits_composite_single_bot_identity_for_node_projection() -> None:
+    """Runtime state stores split identity while S5D candidates stay composite."""
+    service = _graph_service()
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.action_log.clear()
+    _record_relay_search(service, bot_ids=["bot-2:owner-2"])
+
+    command = _planned_single_bot_command(
+        event_id="plan-composite", assignee="bot-2:owner-2"
+    )
+    result = service.apply_relay_report(command)
+
+    assert result.target_node_id is not None
+    successor = service.query_task_dashboard("task-1").tasks[1]
+    assert successor.run_info.assignee == "bot-2"
+    assert successor.run_info.extend_props["assignee_owner_id"] == "owner-2"
+    context = service.get_node_context("task-1", result.target_node_id)
+    assert context.used_executor_ids == ["bot-1", "bot-2:owner-2"]

@@ -26,6 +26,8 @@ export const routes = [
       { path: '/workspace/collaboration/group', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/workspace/collaboration/session', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
+      // Agent Compute：面向 agentswarm 网关的计算任务配置与运行观察页。
+      { path: '/agent-compute', component: '@/pages/AgentCompute' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
@@ -52,8 +54,11 @@ export const routes = [
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/task-instances', component: '@/pages/BotWorkshop/TaskInstances' },
+      { path: '/bot-workshop/scheduled-tasks', component: '@/pages/BotWorkshop/ScheduledTasks' },
+      { path: '/bot-workshop/scheduled-tasks/detail', component: '@/pages/BotWorkshop/ScheduledTasks' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },
       { path: '/bot-workshop/health-check', component: '@/pages/BotWorkshop/HealthCheck' },
+      { path: '/bot-workshop/evaluation/:botId/versions/:botVersion', component: '@/pages/BotWorkshop/Evaluation' },
       // split-admin-space-ticket-pages：管理后台单页拆分，空间管理/通知中心为独立路由，均不占导航位
       //（入口 = 空间切换弹层设置 icon / 通知弹层「查看全部」）。
       { path: '/space-admin', component: '@/pages/SpaceAdmin' },

@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from src.domain.models.fusion_result import FusionResult, FusionTiming, Perspective
-from src.interfaces.api import fusion_routes
+from app.domain.models.fusion_result import FusionResult, FusionTiming, Perspective
+from app.adapters.http import fusion_routes
 
 
 @pytest.mark.parametrize("metadata", [{}, {"diagnostics": {"private_detail": "not-for-http"}}])

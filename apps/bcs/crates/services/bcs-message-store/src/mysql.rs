@@ -59,6 +59,7 @@ pub struct MySqlMessageStore {
     pub(crate) env: String,
     pub(crate) flavor: DbSqlFlavor,
     pub(crate) delivery_writer: Arc<super::delivery::DeliveryWriterLocks>,
+    pub(crate) corrupt_rows: Arc<super::delivery::CorruptRows>,
 }
 
 impl MySqlMessageStore {
@@ -242,11 +243,11 @@ impl MySqlMessageStore {
     }
 
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Mysql, delivery_writer: Default::default() }
+        Self { db, env, flavor: DbSqlFlavor::Mysql, delivery_writer: Default::default(), corrupt_rows: Default::default() }
     }
 
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Sqlite, delivery_writer: Default::default() }
+        Self { db, env, flavor: DbSqlFlavor::Sqlite, delivery_writer: Default::default(), corrupt_rows: Default::default() }
     }
 
     /// Backend label for logs ("mysql" / "sqlite"), so persistence logs reflect

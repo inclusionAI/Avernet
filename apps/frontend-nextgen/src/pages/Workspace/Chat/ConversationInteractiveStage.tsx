@@ -5,6 +5,8 @@
 // 未选中会话由 ConversationSessionPlaceholder 承接；Agent Coding 已由页边界互斥地
 // 交给 CodingBotStageBoundary，本组件只负责普通 OpenClaw Runtime。
 import { ConversationComposerHost } from '@/components/Workspace/ConversationComposerHost';
+import { AgentComputePanel } from '@/components/agentswarm/AgentComputePanel';
+import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
@@ -49,11 +51,35 @@ export function ConversationInteractiveStage(props: {
     : null;
   const composerSession = presentation.composerExtensions ? model.selectedSession : null;
   return (
-    <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+    <div
+      className="relative isolate flex min-h-0 min-w-0 flex-1"
+      data-workspace-conversation="true"
+      data-guide-target="chat-input"
+    >
       <ConversationComposerHost
         bot={composerBot}
         session={composerSession}
         command={presentation.fileFeatures ? fileFeature.command : undefined}
+        onInvokeCommand={
+          presentation.fileFeatures
+            ? (command) => {
+                // 往草稿插入命令 token 并聚焦输入框，唤起 Sender 命令面板（capability 注入的
+                // 平台入口使用，如 /knowledge；token 前按草稿现状补空格分隔保证可解析）。
+                // 尾部不补空格：面板触发正则要求光标紧邻 /token（/(\S*)$），尾空格会断开
+                // 匹配导致面板不唤起（2026-11-04 实测反馈修正）。
+                const sender = fileFeature.senderRef.current;
+                if (!sender) return;
+                const current = sender.getValue();
+                const separator = current && !/\s$/.test(current) ? ' ' : '';
+                sender.insert(`${separator}${command}`);
+                sender.focus();
+                // 命令面板唤起即止（2026-11-04 拍板）：tc-chat Sender 无命令子面板的程序直达
+                // API（navPath 为 SDK 内部状态），模拟键盘实测不可靠已移除——入口等效
+                // "手输 /knowledge"的面板形态（过滤出 knowledge 指令项），用户再点一项
+                // 进入知识库列表；SDK 侧支持直达 API 后可回归完全等效。
+              }
+            : undefined
+        }
         onSend={model.handleSend}
       >
         {(composer) => (
@@ -74,6 +100,7 @@ export function ConversationInteractiveStage(props: {
             sidePaneEnabled={presentation.sidePane}
             isRequesting={botChat.chat.isRequesting}
             isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
+            historyReady={botChat.historyReady}
             connectionStatus={botChat.connectionStatus}
             retryCount={botChat.chat.retryCount}
             supportState={botChat.supportState}
@@ -115,8 +142,15 @@ export function ConversationInteractiveStage(props: {
                   onWorkflowSelected={taskExecution.selectWorkflow}
                   onDynamicSelected={taskExecution.selectDynamic}
                   onRemoveSelection={taskExecution.removeSelection}
-                  /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
+                  /* 能力集只读查看：我的/团队空间 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
                   capabilitySets={fileFeature.capabilitySets}
+                  /* 平台注入的额外菜单行（capability 覆盖式插槽），如知识库引用入口。 */
+                  extraMenuRows={composer.extraMenuRows}
+                  onAgentCompute={
+                    composerSession?.sessionId
+                      ? () => useAgentComputePanelStore.getState().open(composerSession.sessionId)
+                      : undefined
+                  }
                 />
               ) : undefined
             }
@@ -125,7 +159,7 @@ export function ConversationInteractiveStage(props: {
             }
             command={presentation.fileFeatures ? composer.command : undefined}
             fileToolbar={presentation.fileFeatures ? fileFeature.fileToolbar : undefined}
-            composerPlaceholder={presentation.composerPlaceholder}
+            composerPlaceholder={composer.placeholder ?? presentation.composerPlaceholder}
             senderRef={fileFeature.senderRef}
             mode="bot"
             interactive
@@ -133,6 +167,13 @@ export function ConversationInteractiveStage(props: {
           />
         )}
       </ConversationComposerHost>
+      {/* 计算任务副屏：与对话并排（xl+ 占宽，窄屏覆盖），按会话隔离。 */}
+      <AgentComputePanel
+        sessionId={composerSession?.sessionId ?? ''}
+        userId={model.requesterIdentityId}
+        defaultIdentityBotId={composerBot?.realBotId ?? composerBot?.botId ?? null}
+        enabled={Boolean(composerSession?.sessionId)}
+      />
       {presentation.fileFeatures ? fileFeature.featureNode : null}
       {headerRightPanels}
     </div>

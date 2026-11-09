@@ -7,6 +7,10 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 
+// 历史消息入口由 HISTORY_SEARCH_ENABLED 控制(默认 false 隐藏,后端检索就绪后置 true 恢复):
+// 本套件按「开关开」态覆盖图标顺序/面板开合行为,开关默认值由 featureFlags 单测守护。
+jest.mock('@/domain/conversation/featureFlags', () => ({ HISTORY_SEARCH_ENABLED: true }));
+
 const group: GroupView = {
   groupId: 'g1',
   name: '主站群',
@@ -129,6 +133,46 @@ it('participants 缺失时计数回退 participantCount 单计数', () => {
   render(<GroupHeader {...buildProps({ selectedGroup: { ...group, participants: [] } })} />);
   expect(screen.getByLabelText('3 用户')).toBeInTheDocument();
   expect(screen.queryByLabelText(/ Bot$/)).not.toBeInTheDocument();
+});
+
+const summaryGroup: GroupView = {
+  ...group,
+  participants: [],
+  participantSummaries: [
+    { actorId: 'me', kind: 'human', name: '我', avatarUrl: '/me.png' },
+    { actorId: 'user2', kind: 'human', name: '同事' },
+    { actorId: 'bot1', kind: 'bot', name: '协作 Bot' },
+  ],
+};
+
+it('摘要驱动成员头像与 Humans/Bots 计数，选中会话加入状态仍看会话完整 participants', () => {
+  const { rerender } = render(
+    <GroupHeader
+      {...buildProps({
+        selectedGroup: summaryGroup,
+        selectedSession: { ...session, participants: [] },
+        historyOnly: true,
+      })}
+    />,
+  );
+
+  expect(screen.getByLabelText('成员 3 人')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: '我' })).toHaveAttribute('src', '/me.png');
+  expect(screen.getByLabelText('2 用户')).toBeInTheDocument();
+  expect(screen.getByLabelText('1 Bot')).toBeInTheDocument();
+  // 会话加入状态只读 selectedSession.participants（此处为空 → 加载中），不被群摘要顶替。
+  expect(screen.getByRole('status')).toHaveTextContent('正在加载成员信息');
+
+  rerender(
+    <GroupHeader
+      {...buildProps({
+        selectedGroup: summaryGroup,
+        selectedSession: { ...session, participants: group.participants },
+        historyOnly: true,
+      })}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('未加入当前会话');
 });
 
 it('右侧六枚图标钮按 artboard-003 顺序：收藏/分享/会话管理/历史消息/资源管理/副屏', () => {

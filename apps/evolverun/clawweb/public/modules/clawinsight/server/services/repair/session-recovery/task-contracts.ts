@@ -9,10 +9,15 @@ export type RecoveryLevel = "debug" | "approval" | "automatic";
 export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" | "completed" | "failed" | "canceled";
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
+export const RECOVERY_COMPLETION_REASONS = ["user_continued", "target_unavailable", "owner_handoff", "mcp_permission_required", "no_recovery_needed"] as const;
+export type RecoveryCompletionReason = typeof RECOVERY_COMPLETION_REASONS[number];
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
+/** Owner-facing business handoff, separate from the full investigation report. */
+export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
+export const RECOVERY_OWNER_REQUEST_REASONS = ["permission", "configuration"] as const;
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
-  reason: "permission" | "materials";
+  reason: typeof RECOVERY_OWNER_REQUEST_REASONS[number];
   summary: string;
   instructions: string;
   evidence_ids: string[];
@@ -26,7 +31,7 @@ export type RecoveryOwnerRequest = RecoveryOwnerRequestInput & {
   feedback?: { userId: string; text: string; atMs: number };
 };
 export type RecoveryAssessment = {
-  decision: "message" | "environment" | "observe" | "wait_cron";
+  decision: "message" | "environment" | "observe" | "wait_cron" | "no_recovery_needed";
   summary: string;
   evidence_ids: string[];
 };
@@ -70,8 +75,8 @@ export type RecoveryTaskState = {
   request: RecoveryRequest;
   level: RecoveryLevel;
   status: RecoveryTaskStatus;
-  /** Normal completion after user continuation, Owner handoff, or confirmed target loss. The MCP reason is read-only legacy compatibility. */
-  completionReason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required";
+  /** Why assessment or recovery ended normally. The MCP reason is read-only legacy compatibility. */
+  completionReason?: RecoveryCompletionReason;
   phase: RecoveryPhase;
   version: number;
   /** Absent on legacy tasks; never inferred from the target Bot environment. */
@@ -109,7 +114,7 @@ export type RecoveryTaskResult = {
   status: "waiting_effect" | "completed" | "failed" | "canceled";
   phase: RecoveryPhase;
   waiting_reason: "effect" | null;
-  completion_reason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required";
+  completion_reason?: RecoveryCompletionReason;
   effect: RecoveryEffect;
   /** Whether any intervention is confirmed; independent of business recovery. Omitted by legacy senders. */
   intervention_status?: RecoveryInterventionStatus;

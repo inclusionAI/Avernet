@@ -1,6 +1,7 @@
 import type {
   BotCapabilitySet,
   BotEditorMcp,
+  BotEditorRoutine,
   BotEditorRoutineInput,
   BotEditorSkill,
   BotEngineConfig,
@@ -9,15 +10,7 @@ import type {
 import { botEditorController, type SkillDto, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
-import {
-  dataOr,
-  mapPublication,
-  mapResource,
-  mapRoutine,
-  mapScreen,
-  mapSkill,
-  toRoutineWrite,
-} from './botEditorMappers';
+import { dataOr, mapPublication, mapResource, mapScreen, mapSkill, toRoutineWrite } from './botEditorMappers';
 import { desktopCapabilityPolicy } from './desktopCapabilityPolicy';
 import { isImageResourcePath } from './resourcePreview';
 
@@ -83,12 +76,11 @@ export const botEditorService = {
   },
   async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '') {
     const policy = desktopCapabilityPolicy(deployment, engine);
-    const [skills, skillSetResources, resources, screens, routines, engineStatus, mcps] = await Promise.allSettled([
+    const [skills, skillSetResources, resources, screens, engineStatus, mcps] = await Promise.allSettled([
       listAllLocalBotSkills(botId, ownerId),
       botEditorController.listSkillSetResources(botId, ownerId),
       botEditorService.listResources(botId, '', ownerId),
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
-      policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
       botEditorController.listBotMcps(botId, ownerId),
     ]);
@@ -129,21 +121,32 @@ export const botEditorService = {
       sets.push(...details);
     }
     const capabilityFailures = [
-      ...(skills.status === 'rejected' ? [`本地 Skill：${skills.reason instanceof Error ? skills.reason.message : '加载失败'}`] : []),
-      ...(mcps.status === 'rejected' ? [`MCP：${mcps.reason instanceof Error ? mcps.reason.message : '加载失败'}`] : []),
+      ...(skills.status === 'rejected'
+        ? [`本地 Skill：${skills.reason instanceof Error ? skills.reason.message : '加载失败'}`]
+        : []),
+      ...(mcps.status === 'rejected'
+        ? [`MCP：${mcps.reason instanceof Error ? mcps.reason.message : '加载失败'}`]
+        : []),
     ];
     return {
       skills: skills.status === 'fulfilled' ? skills.value.map(mapSkill) : [],
       skillSets: sets,
-      mcps: mcps.status === 'fulfilled' ? (mcps.value.data ?? []).map((item): BotEditorMcp => ({
-        serverCode: item.server_code, name: item.server_code, active: item.active,
-      })) : [],
+      mcps:
+        mcps.status === 'fulfilled'
+          ? (mcps.value.data ?? []).map(
+              (item): BotEditorMcp => ({
+                serverCode: item.server_code,
+                name: item.server_code,
+                active: item.active,
+              }),
+            )
+          : [],
       availableMcps: [],
       marketSkills: [],
       workshopSkills: [],
       resources: resources.status === 'fulfilled' ? resources.value : [],
       screens: screens.status === 'fulfilled' ? dataOr(screens.value.data?.items, []).map(mapScreen) : [],
-      routines: routines.status === 'fulfilled' ? dataOr(routines.value.data?.items, []).map(mapRoutine) : [],
+      routines: [] as BotEditorRoutine[],
       engineStatus:
         engineStatus.status === 'fulfilled'
           ? {
@@ -154,9 +157,8 @@ export const botEditorService = {
           : undefined,
       ...(capabilityFailures.length ? { capabilityLoadError: capabilityFailures.join('；') } : {}),
       errors:
-        [skills, skillSetResources, resources, screens, routines, engineStatus, mcps].filter(
-          (item) => item.status === 'rejected',
-        ).length + skillSetDetailErrors,
+        [skills, skillSetResources, resources, screens, engineStatus, mcps].filter((item) => item.status === 'rejected')
+          .length + skillSetDetailErrors,
     };
   },
   async searchSkillCenterSkills(keyword: string, page: number, pageSize = 20) {
@@ -190,10 +192,11 @@ export const botEditorService = {
     spaceId: string | undefined,
     kind: 'skill' | 'mcp',
     mcpQuery?: { source: 'internal' | 'open-platform'; keyword?: string },
+    ownerId?: string,
   ) {
     if (kind === 'mcp') {
       const [boundMcps, mcpServers] = await Promise.all([
-        botEditorController.listBotMcps(botId),
+        botEditorController.listBotMcps(botId, ownerId),
         botEditorController.searchMarketMcpServers({
           keyword: mcpQuery?.keyword || undefined,
           tenants: mcpQuery?.source === 'open-platform' ? ['THIRD_PARTNER'] : undefined,
@@ -242,30 +245,31 @@ export const botEditorService = {
       ),
     };
   },
-  toggleSkill: (botId: string, skill: BotEditorSkill) =>
-    botEditorController.setSkillActive(botId, skill.id, !skill.active),
-  deleteSkill: (botId: string, skillId: string) => botEditorController.deleteSkill(botId, skillId),
-  uploadSkill: (botId: string, file: File) =>
-    file.arrayBuffer().then((body) => botEditorController.uploadSkill(botId, body)),
-  async uploadSkillFolder(botId: string, files: File[]) {
-    const response = await botEditorController.uploadSkillFolder(botId, files);
+  toggleSkill: (botId: string, skill: BotEditorSkill, ownerId?: string) =>
+    botEditorController.setSkillActive(botId, skill.id, !skill.active, ownerId),
+  deleteSkill: (botId: string, skillId: string, ownerId?: string) =>
+    botEditorController.deleteSkill(botId, skillId, ownerId),
+  uploadSkill: (botId: string, file: File, ownerId?: string) =>
+    file.arrayBuffer().then((body) => botEditorController.uploadSkill(botId, body, ownerId)),
+  async uploadSkillFolder(botId: string, files: File[], ownerId?: string) {
+    const response = await botEditorController.uploadSkillFolder(botId, files, ownerId);
     const skill = response.data?.skill;
     if (!skill?.skill_id) throw new Error('目录上传成功，但响应中缺少 skill_id');
     return { ...mapSkill(skill), source: 'local' as const };
   },
-  setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean) =>
-    botEditorController.setMcpActive(botId, mcp.serverCode, active),
-  async createSkillSet(botId: string, name: string) {
-    const created = await botEditorController.createSkillSet(botId, { name });
+  setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean, ownerId?: string) =>
+    botEditorController.setMcpActive(botId, mcp.serverCode, active, ownerId),
+  async createSkillSet(botId: string, name: string, ownerId?: string) {
+    const created = await botEditorController.createSkillSet(botId, { name }, ownerId);
     const setId = created.data?.id;
     if (!setId) throw new Error('能力集已创建，但响应缺少能力集标识，无法自动启用');
-    await botEditorController.setSkillSetActive(botId, setId, true);
+    await botEditorController.setSkillSetActive(botId, setId, true, ownerId);
     return created;
   },
-  updateSkillSet: (botId: string, id: string, name: string) => botEditorController.updateSkillSet(botId, id, { name }),
-  deleteSkillSet: (botId: string, id: string) => botEditorController.deleteSkillSet(botId, id),
-  async setSkillSetActive(botId: string, set: BotCapabilitySet, active: boolean) {
-    const response = await botEditorController.setSkillSetActive(botId, set.id, active);
+  updateSkillSet: (botId: string, id: string, name: string, ownerId?: string) => botEditorController.updateSkillSet(botId, id, { name }, ownerId),
+  deleteSkillSet: (botId: string, id: string, ownerId?: string) => botEditorController.deleteSkillSet(botId, id, ownerId),
+  async setSkillSetActive(botId: string, set: BotCapabilitySet, active: boolean, ownerId?: string) {
+    const response = await botEditorController.setSkillSetActive(botId, set.id, active, ownerId);
     if (
       isEnvelopeFailure(response) ||
       !response.data ||
@@ -276,16 +280,16 @@ export const botEditorService = {
     }
     return { id: response.data.id, active: response.data.is_active };
   },
-  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
-    botEditorController.setSkillSetSkill(botId, setId, skillId, active),
-  async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[]) {
+  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean, ownerId?: string) =>
+    botEditorController.setSkillSetSkill(botId, setId, skillId, active, ownerId),
+  async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[], ownerId?: string) {
     const distinct = [...new Set(skillCodes)];
     if (distinct.length > 20) throw new Error('一次最多添加 20 个 Skill');
-    const created = await botEditorController.createSkillCenterReferences(botId, setId, distinct);
+    const created = await botEditorController.createSkillCenterReferences(botId, setId, distinct, ownerId);
     const requestId = created.data?.request_id;
     if (!requestId) throw new Error('SkillCenter 引用已提交，但响应缺少轮询标识');
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      const result = await botEditorController.listSkillCenterReferences(botId, setId, requestId);
+      const result = await botEditorController.listSkillCenterReferences(botId, setId, requestId, ownerId);
       const items = result.data?.items ?? [];
       const failed = items.find((item) => item.status === 'FAILED');
       if (failed) throw new Error(failed.error_message || 'SkillCenter Skill 添加失败');
@@ -296,14 +300,14 @@ export const botEditorService = {
     }
     throw new Error('SkillCenter Skill 仍在添加中，请稍后刷新查看');
   },
-  async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean) {
+  async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean, ownerId?: string) {
     if (active) {
       const permission = await botEditorController.getMcpPermission(serverCode);
       if (!permission.data?.has_access) {
         throw new Error('无法添加，请去 MCP 详情页申请权限后重试');
       }
     }
-    return botEditorController.setSkillSetMcp(botId, setId, serverCode, active);
+    return botEditorController.setSkillSetMcp(botId, setId, serverCode, active, ownerId);
   },
   createDirectory: (botId: string, path: string, ownerId?: string) =>
     botEditorController.createDirectory(botId, path, ownerId),

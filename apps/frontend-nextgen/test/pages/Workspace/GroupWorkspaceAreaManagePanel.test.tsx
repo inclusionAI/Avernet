@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { GroupView } from '@/domain/collaboration';
 
 const baseGroup = {
   groupId: 'g1',
@@ -28,7 +29,12 @@ const baseGroup = {
 };
 
 // 可变 mock 状态：测试内切换 selectedGroupId 后 rerender，模拟侧栏切群。
-const mockState: { selectedGroupId: string | null; hideGroup?: boolean; expandedGroupIds?: Record<string, true> } = { selectedGroupId: 'g1' };
+const mockState: {
+  selectedGroupId: string | null;
+  selectedGroup: GroupView;
+  hideGroup?: boolean;
+  expandedGroupIds?: Record<string, true>;
+} = { selectedGroupId: 'g1', selectedGroup: baseGroup };
 const mockSessionLoad = jest.fn();
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
@@ -59,7 +65,7 @@ jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
     groups: mockState.hideGroup ? [] : [baseGroup],
     expandedGroupIds: mockState.expandedGroupIds ?? {},
     selectedGroupId: mockState.selectedGroupId,
-    selectedGroup: baseGroup,
+    selectedGroup: mockState.selectedGroup,
     canManageGroup: { allowed: true },
     isLoadingGroups: false,
     groupSearchText: '',
@@ -146,9 +152,10 @@ jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
     </div>
   ),
 }));
-// SessionFilesSidebar 桩件渲染标记元素：守护 resources 面板接线（接线断裂时标记不出现）。
+// SessionFilesSidebar 桩件按 open 渲染标记元素（内联副屏常挂、open 开合）：
+// 守护 resources 面板接线（接线断裂时标记不出现；未激活时 open=false 不出现）。
 jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesSidebar', () => ({
-  SessionFilesSidebar: () => <div data-testid="session-files-sidebar" />,
+  SessionFilesSidebar: ({ open }: { open?: boolean }) => (open ? <div data-testid="session-files-sidebar" /> : null),
 }));
 jest.mock('@/pages/Workspace/components/GroupMembersPanelSlot', () => ({
   GroupMembersPanelSlot: () => null,
@@ -191,6 +198,7 @@ function renderArea() {
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
+    mockState.selectedGroup = baseGroup;
     mockState.hideGroup = false;
     mockState.expandedGroupIds = {};
     mockSessionLoad.mockClear();
@@ -225,7 +233,7 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
   });
 
-  it('本地覆盖层通过 Portal 定位，不再抬高整个会话遮挡持久副屏', () => {
+  it('右缘面板内联于对话区流内（无蒙层抽屉），不再抬高整个会话遮挡持久副屏', () => {
     sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
     renderArea();
     const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
@@ -234,6 +242,8 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     fireEvent.click(screen.getByRole('button', { name: '打开会话管理面板' }));
     expect(conversation).toHaveClass('isolate');
     expect(conversation).not.toHaveClass('z-20');
+    // 内联副屏：面板容器（桩件）渲染在对话区流内，非 portal 悬浮蒙层抽屉。
+    expect(conversation).toContainElement(screen.getByRole('button', { name: '生成群分享链接' }));
     fireEvent.click(screen.getByRole('button', { name: '关闭临时面板' }));
     expect(conversation).not.toHaveClass('z-20');
   });
@@ -292,6 +302,32 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
 
     expect(mockReloadSelectedGroup).toHaveBeenCalledWith('g2');
+  });
+
+  it('面板打开时同群被新列表对象替换（详情未加载）会再次拉取，详情回填后停止', () => {
+    const view = renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '打开管理面板' }));
+    expect(mockReloadSelectedGroup).toHaveBeenCalledTimes(1);
+    mockReloadSelectedGroup.mockClear();
+
+    // 列表刷新把同群替换为新的列表对象：摘要存在但完整详情未加载。
+    mockState.selectedGroup = {
+      ...baseGroup,
+      participantSummaries: [{ actorId: 'b1', kind: 'bot', name: '摘要成员' }],
+      participantDetailsLoaded: false,
+    };
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockReloadSelectedGroup).toHaveBeenCalledWith('g1');
+
+    // 完整详情回填（participantDetailsLoaded=true）后同一群不再重复请求。
+    mockReloadSelectedGroup.mockClear();
+    mockState.selectedGroup = {
+      ...baseGroup,
+      participants: [{ actorId: 'b1', kind: 'bot', name: '完整成员', role: 'owner', mode: 'auto' }],
+      participantDetailsLoaded: true,
+    };
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockReloadSelectedGroup).not.toHaveBeenCalled();
   });
 
   it('面板未打开时切换选中群不拉取详情（保持按需拉取约定）', () => {

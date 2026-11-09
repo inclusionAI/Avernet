@@ -30,6 +30,9 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 65]
 #                                                    # changed-line coverage (gated when min > 0)
 #
+# Split flow (parent must join independent companions before aggregation):
+#   --skip-start --shared-tests-only  # stories only; no shutdown/cleanup
+#   --skip-start --aggregate-only     # stop + report existing evidence only
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -56,9 +59,13 @@ source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 skip_start=0
 no_stop=0
 force_rebuild=0
+shared_tests_only=0
+aggregate_only=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --skip-start)   skip_start=1; shift ;;
+    --shared-tests-only) shared_tests_only=1; shift ;;
+    --aggregate-only) aggregate_only=1; shift ;;
     --no-stop)      no_stop=1;    shift ;;
     --bcs-min)
       if [[ "$#" -lt 2 ]]; then
@@ -96,6 +103,15 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# Split phases are internal orchestration building blocks. The parent owns the
+# companion results and must join every producer before requesting aggregation.
+if (( shared_tests_only || aggregate_only )); then
+  if (( !skip_start || no_stop || (shared_tests_only && aggregate_only) )); then
+    echo "split phases require --skip-start and cannot combine with --no-stop or each other" >&2
+    exit 2
+  fi
+fi
+
 # With --force-rebuild, rebuild the instrumented bcs even when a cached binary
 # exists. The pre-push gate uses this so an up-to-date binary reflecting the
 # pushed source is exercised; cargo build is incremental so a no-op rebuild
@@ -116,7 +132,7 @@ cleanup_e2e() {
   cleanup_bcs
   bcs_e2e_mock_stop
 }
-if [[ "$no_stop" -eq 0 ]]; then
+if [[ "$no_stop" -eq 0 && "$shared_tests_only" -eq 0 ]]; then
   trap cleanup_e2e EXIT
 fi
 
@@ -196,7 +212,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   # Use bcsfuse dev mode (SQLite) so e2e does not need an external MySQL.
   export BCSFUSE_PROVIDER_MODE=dev
   "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start bcsfuse bcs_bots
-elif [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+elif [[ "$aggregate_only" -eq 0 && -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
   bcs_e2e_mock_start "$cov_dir/mock-services"
 fi
 
@@ -234,17 +250,27 @@ cli_gate_status=0
 # the next line lands at the new EOF). Skipped under --skip-start only if the
 # caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
 bcs_log="${bcs_log:-${BCS_LOG:-$repo_root/singlebox/.dependencies/logs/bcs.log}}"
-: > "$bcs_log" 2>/dev/null || true
 cli_coverage_log="$cov_dir/cli_commands.log"
-mkdir -p "$cov_dir"
-: > "$cli_coverage_log"
-export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
-bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
-# Exercise channel plugins through a separate real server without enabling a
-# test ingress on the shared production-composition Singlebox instance.
-bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
-# Real OAuth login/session journeys against isolated local HTTPS provider stubs.
-bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
+if [[ "$aggregate_only" -eq 0 ]]; then
+  : > "$bcs_log" 2>/dev/null || true
+  mkdir -p "$cov_dir"
+  : > "$cli_coverage_log"
+  export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
+  bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
+  if [[ "$shared_tests_only" -eq 1 ]]; then
+    # The parent still has independent producers running. Do not stop the
+    # shared stack, merge profiles, or delete any evidence in this phase.
+    exit "$e2e_status"
+  fi
+  # Standalone invocation retains the complete historical test inventory.
+  bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
+  bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
+else
+  if [[ ! -f "$bcs_log" || ! -f "$cli_coverage_log" ]]; then
+    echo "aggregate-only requires existing shared-story HTTP and CLI logs" >&2
+    exit 1
+  fi
+fi
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi

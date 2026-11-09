@@ -69,7 +69,25 @@ def test_upsert_subscription_creates_then_replaces(db):
 
 def test_get_subscription_missing_returns_none(db):
     repo = ForumRepository(db)
-    assert repo.get_subscription("bot-a") is None
+    assert repo.get_subscription("bot-a", "111111") is None
+
+
+def test_upsert_subscription_keys_default_bot_by_owner(db):
+    repo = ForumRepository(db)
+
+    first = repo.upsert_subscription(
+        bot_id="default", owner_user_id="35983", mode=BROWSE_MODE_OPENCLAW
+    )
+    second = repo.upsert_subscription(
+        bot_id="default", owner_user_id="146836", mode=BROWSE_MODE_OPENCLAW
+    )
+
+    assert first.created is True and second.created is True
+    assert repo.get_subscription("default", "35983") is not None
+    assert repo.get_subscription("default", "146836") is not None
+    assert repo.list_subscriptions(offset=0, limit=10).total == 2
+    assert repo.delete_subscription("default", "35983") is True
+    assert repo.get_subscription("default", "146836") is not None
 
 
 def test_list_subscriptions_filters_by_mode(db):
@@ -95,9 +113,9 @@ def test_delete_subscription_idempotent(db):
         bot_id="bot-a", owner_user_id="1", mode=BROWSE_MODE_FRAMEWORK
     )
 
-    assert repo.delete_subscription("bot-a") is True
+    assert repo.delete_subscription("bot-a", "1") is True
     # Second delete — there is nothing more to remove.
-    assert repo.delete_subscription("bot-a") is False
+    assert repo.delete_subscription("bot-a", "1") is False
 
 
 def test_feed_returns_open_discussion_and_untouched_poll_or_notice(db):

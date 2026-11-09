@@ -35,7 +35,7 @@ describe('GroupChatPane 任务槽位接线', () => {
   });
 
   it('collab 空槽位下组件解析为 null（菜单/下钻不渲染）', () => {
-    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null });
+    registerExtensionSlots({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null, sessionTaskPanelTab: null });
     const slots = getExtensionSlots();
     expect(slots.groupTasks?.ComposerCapabilitiesMenu ?? null).toBeNull();
     expect(slots.groupTasks?.ManagerWorkerTasks ?? null).toBeNull();
@@ -51,7 +51,7 @@ describe('GroupChatPane 任务槽位接线', () => {
     const { registerExtensionSlots: registerOnFreshRegistry } = require('@/extensions/slots') as {
       registerExtensionSlots: (next: AppExtensionSlots) => void;
     };
-    registerOnFreshRegistry({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null });
+    registerOnFreshRegistry({ groupTasks: null, groupServiceBotRouting: null, taskSessionNavigationObserver: null, taskPanelBootstrap: null, sessionTaskPanelTab: null });
     const paneSlots = require('@/pages/Workspace/components/GroupChatPane/paneTaskSlots') as {
       GroupTaskLinkedSession: unknown;
       useResolvedGroupTaskExecution: () => unknown;

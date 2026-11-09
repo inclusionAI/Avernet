@@ -19,6 +19,8 @@ purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-
 provides:
   - BotOwnershipSyncService
   - OwnershipSyncRepairService
+  - CollaborationRepairServiceProtocol
+  - CollaborationRepairService
   - notify_bot_ownership_sync
   - bcn_bot_reference
   - provider_address_kwargs
@@ -45,6 +47,10 @@ consumes:
   - BotOwnershipSyncProtocol
   - OwnershipSyncReadRepository
   - BcsOwnershipPlugin
+  - "CollaborationRepairReadRepository"
+  - "ManagerSyncReadRepository"
+  - "BcsCollaborationMetadataPlugin"
+  - "BcsManagersPlugin"
   - "DeviceAccessor"
   - "PassportPlugin"
   - "CallerIdentityRepositoryProtocol"
@@ -66,9 +72,12 @@ consumes:
   - "CapabilityDesiredStateRepositoryProtocol"
   - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.core.caller_identity.scheduled_refresh
   - agentclaw.community.api.bot_ownership_sync
   - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.plugin_api.bcs_ownership
+  - agentclaw.community.plugin_api.bcs_managers    # managers full-replace delivery port of the one-shot repair
+  - agentclaw.community.plugin_api.bcs_collaboration_metadata    # profile/caller/exists delivery port of the one-shot repair
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.plugin_api.staff_dept
@@ -113,6 +122,7 @@ internal_dependencies:
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
   - agentclaw.community.kernel.bot_manager_sync    # SyncReason for the manager-set side-channel submits
+  - agentclaw.community.kernel.collaboration_repair    # repair command/report DTOs and error vocabulary for the collaboration repair contracts
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm

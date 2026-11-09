@@ -59,11 +59,17 @@ Content-Type: application/json; charset=utf-8
 Accept: application/json            ; chat.send 2.0 SSE-first 时:
                                    ; Accept: text/event-stream, application/json
 X-BCN-Protocol-Version: 1.0 | 2.0
-X-BCN-Message-Id: <每次请求新生成的 UUID>
+X-BCN-Message-Id: <每次请求新生成的 UUID v4>
 X-BCN-Timestamp: <毫秒时间戳>
 X-BCN-Transport: sse | callback     ; 仅 protocol 2.0 携带
 ```
 
+- `X-BCN-Protocol-Version`、`X-BCN-Message-Id`、`X-BCN-Timestamp`
+  在非 Caller 与 Caller 下行中保持一致,包括受保护 `chat.send`、
+  `caller.container.ensure`、observe/history `chat.inject` 及 history complete。
+  协议版本取目标 Provider 配置;时间戳取本次发送时的 Unix 毫秒时间。
+  `Message-Id` 是每次 HTTP 请求独立生成的 UUID v4,重发同一业务请求也生成新值;
+  它仅用于请求追踪,不替代 body `id` 或各方法约定的业务幂等键。
 - `Authorization` 固定使用 Provider 注册时的 `bcs_to_provider_token`
   (服务级凭据;caller 相关方法也复用它,caller 身份材料只走 body,
   见 §3.2/§3.3/§3.7)。

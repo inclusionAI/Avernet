@@ -160,5 +160,5 @@ export function SafeHtml({ html, className, richText }: { html: string; classNam
     return Array.from(document.body.childNodes).map((node, index) => renderSafeNode(node, String(index), !!richText));
   }, [html, richText]);
 
-  return <div className={className}>{children}</div>;
+  return createElement('div', { className }, children);
 }

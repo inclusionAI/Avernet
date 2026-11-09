@@ -1,11 +1,7 @@
 /**
- * useTaskExecution —— 任务发起编排：选择动态/工作流任务、校验、提交、打开任务副屏（taskPanel.TaskLoopView）。
- * 对齐 spec Task 10：提交期间防重入、disabledReason、execute 成功经 submitPanelMessage 发声明式 <AixUI component="taskPanel.TaskLoopView"> 落库持久。
- *
- * workflow 列表经 taskService.fetchWorkflows(ownerUserId, ownerBotId) 动态加载（ownerBotId 形如 "default:146836"，
- * controller 裁成裸 botId 后连同 botOwnerId(=ownerUserId) 直连 clawweb /api/workflows；替代写死列表）。
- * 提交工作流任务时经 taskService.resolveWorkflowCommand 取 facade.command 作为 execution_config.workflow_id。
- * Controller 调用收口在 service 层，Hook 不直接 import controller（守卫 TC-G002）。
+ * 任务发起：动态/工作流选择、校验及声明式 TaskLoopView 消息提交（spec Task 10）。
+ * 工作流列表/command 经 taskService 动态解析；Hook 不直接 import controller（TC-G002）。
+ * 提交只登记显式 open intent；SDK 真正展示后的焦点由共享 controller 投影。
  */
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
 import type {
@@ -154,15 +150,19 @@ export function useTaskExecution({
           },
         });
         const launchMessage = buildTaskLaunchMessage(panelMessage, record);
-        if (launchMessage.shouldTriggerBot) {
-          (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
-        } else {
-          submitPanelMessage(launchMessage.content);
-        }
-        // V2 多任务切换(spec §3.2):发起任务即自动切换活跃任务(AixUI 面板消息落库后自动开该任务 tab)
+        // Explicit intent authorizes the SDK open; only actual presentation may project activeTaskId.
         const taskStore = useTaskSidePanelStore.getState();
-        taskStore.setActiveTask(record.task_id);
         taskStore.markTaskPanelOpenIntent(record.task_id);
+        try {
+          if (launchMessage.shouldTriggerBot) {
+            (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
+          } else {
+            submitPanelMessage(launchMessage.content);
+          }
+        } catch (error) {
+          taskStore.consumeTaskPanelOpenIntent(record.task_id);
+          throw error;
+        }
         return { ok: true, taskId: record.task_id } as const;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '任务提交失败';

@@ -24,18 +24,18 @@ jest.mock('@/extensions', () => ({
 }));
 
 test('collab 形态 avatarEditor 槽位为 null：整块不渲染，无头像按钮与保存按钮', () => {
-  const { container } = render(<AvatarSettings botId="bot-1" editable onSaved={jest.fn()} />);
+  const { container } = render(<AvatarSettings botId="bot-1" editable />);
 
   expect(container).toBeEmptyDOMElement();
-  expect(screen.queryByRole('button', { name: '保存头像' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '头像' })).not.toBeInTheDocument();
 });
 
-test('注册编辑器槽位后：打开头像弹层渲染编辑器与保存按钮', async () => {
+test('注册编辑器槽位后：打开头像弹层渲染编辑器与暂存提示（保存由宿主弹窗统一落库）', async () => {
   const extensions = appExtension as unknown as { avatarEditor: ComponentType | null };
   extensions.avatarEditor = () => <div>头像编辑器桩</div>;
-  render(<AvatarSettings botId="bot-1" editable onSaved={jest.fn()} />);
+  render(<AvatarSettings botId="bot-1" editable />);
 
   fireEvent.click(screen.getByRole('button', { name: '头像' }));
   expect(await screen.findByText('头像编辑器桩')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '保存头像' })).toBeInTheDocument();
+  expect(screen.getByText('修改仅本地暂存，点击弹窗的「保存修改」后生效')).toBeInTheDocument();
 });

@@ -16,6 +16,9 @@ export interface PublicBotCatalogDto {
   status: string;
   /** Search 返回的当前 Human→Bot 好友关系；缺失时由 Domain 安全降级为 none。 */
   is_friend?: boolean;
+  /** BCS 当前在线状态；独立于 Backend 生命周期 status（如 ACTIVE）。 */
+  is_online?: boolean;
+  actor_kind?: 'bot' | 'human';
   friend_ext?: Record<string, unknown>;
   friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
   /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）；缺失时按未知处理。 */
@@ -155,6 +158,12 @@ export interface PublicBotCapabilityDto {
   display_name: string;
 }
 
+/** Bot 画像（bot-catalog profile）技能条目 DTO：skill_id + display_name。 */
+export interface PublicBotSkillDto {
+  skill_id: string;
+  display_name: string;
+}
+
 /** 好友申请弹窗消费的公开 Bot 画像 DTO（后端 `PublicBotProfile` 契约）。 */
 export interface PublicBotProfileDto {
   bot_id: string;
@@ -164,6 +173,8 @@ export interface PublicBotProfileDto {
   description?: string | null;
   engine_name?: string | null;
   capabilities: PublicBotCapabilityDto[];
+  /** 已公开技能清单；旧 envelope / BCS-only 画像可能缺省，Mapper 统一回退空列表。 */
+  skills?: PublicBotSkillDto[];
   // 线上 envelope 允许携带未知扩展键；未知键不进 Mapper 投影。
   [key: string]: unknown;
 }

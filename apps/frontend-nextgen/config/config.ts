@@ -46,6 +46,10 @@ export default defineConfig({
     QWENWORK_PROVIDER_SLUG: process.env.QWENWORK_PROVIDER_SLUG || '',
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,
+    // 可选 Backend 增强开关（BCS 独立好友发现）：默认全栈开启；本地 BCS-only 排障经
+    // TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false 编译关闭（值为**布尔**，与 QWENWORK 同法；
+    // 部署态运行时 window.AVERNET_RUNTIME_CONFIG.PUBLIC_BOT_BACKEND_ENABLED 优先，见 defaultCapabilities）。
+    TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: process.env.TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED !== 'false',
     // A2A 客户端构建期默认开关（spec stage2 §1 唯一读取口=adapters/a2a/
     // switch.ts）。镜像构建参数 A2A_CLIENT_DEFAULT=true 时验证/灰度镜像
     // 整包默认开；主线构建不注入保持关闭。值为**布尔**（review P2 修复：

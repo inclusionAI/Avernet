@@ -93,6 +93,10 @@ def test_internal_router_mirrors_all_bbs_operations():
         ("GET", "/api/v1/collaboration/tasks/bbs/topics"),
         ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
         ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
+        (
+            "GET",
+            "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+        ),
         # Content surface — unified writes (author declared in the body).
         ("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),

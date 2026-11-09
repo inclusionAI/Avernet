@@ -1,6 +1,6 @@
 # Bot ownership sync operations
 
-This extends [manager sync operations](bot-manager-sync-operations.md) with the
+This extends [manager sync operations](flows/bot-manager-sync.md) with the
 explicit Backend → BCS Owner channel. See the
 [ownership specification](../specs/2026-11-01-bcs-ownership-sync/spec.md) and
 [Core boundary](../src/agentclaw/community/core/bot_management/ownership_sync/README.md).
@@ -186,7 +186,7 @@ page = repair.request_page(avernet_tenant=tenant, env=env, after_pk=cursor, limi
 ```
 
 Use the same bounded paging/drain pattern as
-[manager maintenance bootstrap](bot-manager-sync-operations.md#5-manual-resync),
+[manager maintenance bootstrap](flows/bot-manager-sync.md#5-manual-resync),
 but resolve `OwnershipSyncRepairService`, not `ManagerSyncRepairService`.
 Do not shut down the application's shared lifecycle from such a callback.
 For a **standalone** process, the linked full bootstrap is mandatory: detect and
@@ -203,6 +203,40 @@ may require a subsequent managers round; choose a maintenance window accordingly
 and inspect both kinds. Retain rejected keys, wait between bounded pages, and
 verify BCS before declaring repair complete. No service accepts a caller-specified
 replacement Owner, and no repair call grants Owner-change business authority.
+
+## One-shot collaboration repair (the user-facing route)
+
+The section above is **queue admission**, not a repair result. Since the
+bot-avatar/collaboration-repair work there is also a real one-shot repair
+interface exposed to Bot owners over HTTP:
+
+```http
+POST /openapi/v1/bots/{bot_id}/collaboration/repair
+```
+
+It repairs one Bot's BCS collaboration metadata — `profile` (name / summary /
+avatar), `ownership`, `managers`, and the applicable `caller_config` — from
+committed Backend facts, in the caller's request. Only the Bot's current
+Backend Owner may call it (`GRANT_CHECKED_OWN_BOT` admission; a non-owner gets
+the same masked 404 as a missing Bot). Read the module
+[Core boundary](../src/agentclaw/community/core/bot_management/collaboration_repair/README.md)
+for the full failure semantics. The two repair surfaces are different tools:
+
+| | Enqueue repair (`request_bot` / `request_page`) | One-shot route (POST) |
+| --- | --- | --- |
+| Caller | Operator inside a controlled callback against the live injector | The Bot's current Owner over the public API |
+| Result | Queue admission (`QUEUED`/`COALESCED`/`DISABLED`) — an admitted hint, **never** a delivery receipt | A synchronous 200 `Envelope<CollaborationRepairReport>` with one item per component (`succeeded`/`failed`/`unknown`/`skipped_dependency`/`not_applicable`) |
+| Precondition failures | Admission diagnostics (`queue_full`, `closed`, `env_mismatch`) | Stable errors: 404 `collaboration_bot_not_found` for a missing target, 409 ambiguous/drifted facts or `owner_changed`, 502/503/504 for probe/unavailable/deadline |
+| Missing BCS Bot | Background missing-noop classification | Refused before any write; never registers, creates or restores the Bot |
+| Retry/background behavior | Admitted hints re-read fresh facts and may send up to the bounded budget | No queue, no retry, no compensation; one bounded send per item, one budget per request (unconfirmed outcomes report `unknown`) |
+| Use it for | Maintenance sweeps of delivery state behind the already-best-effort channel | An Owner-driven "fix my Bot's collaboration info now" action with an explicit per-component report |
+
+Do not use queue admission to answer "is it aligned now", and do not treat the
+route's HTTP 200 as "everything succeeded" — read `data.status` and the items.
+The route requires the deployment's transport to carry BCN provider scope; a
+credential-less deployment answers 503 before any plugin is built, and that
+refusal creates nothing.
+
 
 ## Stop, rollback, and downgrade
 

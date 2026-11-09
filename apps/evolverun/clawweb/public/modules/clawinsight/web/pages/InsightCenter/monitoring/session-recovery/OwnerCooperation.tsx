@@ -21,6 +21,7 @@ export function OwnerCooperation({ task, busy, onReload }: { task: SessionRecove
   const request = task.ownerRequest;
   useEffect(() => { setFeedback(''); }, [request?.requestId]);
   if (!request) return null;
+  const isConfiguration = request.reason === 'configuration';
   const terminal = ['completed', 'failed', 'canceled'].includes(task.status);
   const pending = !terminal && task.status === 'waiting_owner' && request.status === 'pending';
   const status = terminal ? '配合处理已结束' : request.status === 'confirmed' ? '已反馈，正在核验' : '等待 Owner 配合';
@@ -47,17 +48,17 @@ export function OwnerCooperation({ task, busy, onReload }: { task: SessionRecove
   };
 
   return <section className="sr-card sr-owner-action" aria-label="Owner 配合">
-    <div className="sr-card-header"><div><h2>Owner 配合</h2><p>{request.reason === 'permission' ? '需要权限授权' : '需要补充材料'}</p></div><span className={`sr-pill ${pending ? 'warning' : terminal ? 'neutral' : 'running'}`}>{status}</span></div>
+    <div className="sr-card-header"><div><h2>Owner 配合</h2><p>{isConfiguration ? '需要补齐配置' : '需要权限授权'}</p></div><span className={`sr-pill ${pending ? 'warning' : terminal ? 'neutral' : 'running'}`}>{status}</span></div>
     <div className="sr-plan-body">
       <PlanMarkdown text={request.summary} />
       <div className="sr-owner-request sr-owner-item"><PlanMarkdown text={request.instructions} /></div>
       <p className="sr-note">{notificationLabel(task)}</p>
       {request.evidence_ids.length > 0 && <details className="sr-disclosure"><summary>查看配合事项的依据</summary>{task.evidence.filter(item => request.evidence_ids.includes(item.evidence_id)).map(item => <div className="sr-note-box" key={item.evidence_id}><p>{item.excerpt}</p></div>)}</details>}
       {request.feedback && <div className="sr-note-box"><strong>Owner 处理反馈</strong><p>{request.feedback.text || 'Owner 已确认处理。'}</p></div>}
-      {!terminal && <p className="sr-note">确认处理后，Agent 将重新核验权限或材料，并继续原任务；恢复效果以核验结果为准。</p>}
+      {!terminal && <p className="sr-note">{isConfiguration ? '确认处理后，Agent 将核验配置和原任务进展，再决定是否续接。' : '确认处理后，Agent 将重新核验权限，并继续原任务；恢复效果以核验结果为准。'}</p>}
       {error && <p role="alert" className="sr-process-error">{error}</p>}
       {!task.simulation && task.canOperate && pending && <div className="sr-decision-panel">
-        <label>处理说明（可选）<textarea maxLength={4000} value={feedback} disabled={busy || submitting} onChange={event => setFeedback(event.target.value)} placeholder="填写已完成的处理或补充材料，供 Agent 核验" /></label>
+        <label>处理说明（可选）<textarea maxLength={4000} value={feedback} disabled={busy || submitting} onChange={event => setFeedback(event.target.value)} placeholder={isConfiguration ? '填写已补齐的配置，供 Agent 核验' : '填写已完成的权限处理，供 Agent 核验'} /></label>
         <div className="sr-actions"><button type="button" className="sr-button primary" disabled={busy || submitting} onClick={() => void confirm()}>{submitting ? '提交中…' : '已处理，继续核验'}</button></div>
       </div>}
     </div>

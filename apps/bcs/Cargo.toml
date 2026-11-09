@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    "crates/plugin-api/bcs-a2a-binding-api",
+    "crates/plugin-api/bcs-tracing-api",
+    "crates/auxiliary/bcs-network-tracing",
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
@@ -17,6 +20,7 @@ members = [
     "crates/contracts/bcs-protocol",
     # services
     "crates/services/bcs-config",
+    "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
@@ -40,7 +44,6 @@ members = [
     "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
     "crates/services/bcs-channel",
-    "crates/services/bcs-callback",
     "crates/services/bcs-collaboration-template",
     "crates/services/bcs-collaboration-runtime",
     "crates/services/bcs-collaboration-store",
@@ -141,6 +144,9 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
+bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
+bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -264,7 +270,6 @@ bcs-bot-store = { path = "crates/services/bcs-bot-store" }
 bcs-chat-run-store = { path = "crates/services/bcs-chat-run-store" }
 bcs-channel-store = { path = "crates/services/bcs-channel-store" }
 bcs-channel = { path = "crates/services/bcs-channel" }
-bcs-callback   = { path = "crates/services/bcs-callback" }
 bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
 bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }
 bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
@@ -346,6 +351,7 @@ bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
 bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }
 bcs-db-local               = { path = "crates/plugins/bcs-db-local" }
 bcs-db-mysql               = { path = "crates/plugins/bcs-db-mysql" }
+bcs-db-migrations          = { path = "crates/services/bcs-db-migrations" }
 bcs-human-notify-dummy     = { path = "crates/plugins/bcs-human-notify-dummy" }
 bcs-human-notify-work-order  = { path = "crates/plugins/bcs-human-notify-work-order" }
 bcs-llm-anthropic          = { path = "crates/plugins/bcs-llm-anthropic" }

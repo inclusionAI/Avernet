@@ -18,9 +18,9 @@ chrono = "0.4"
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-config-api  = { workspace = true }
 bcs-db-mysql    = { workspace = true }
 mysql_async     = { workspace = true }

@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import * as botsController from '@/services/backendApi/bots/botController';
+import { generateBotAvatar } from '@/domain/botAvatar';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import * as publicBotController from '@/services/backendApi/collaboration/publicBotController';
@@ -38,6 +39,32 @@ beforeEach(() => {
 });
 
 describe('collaborationCandidateService', () => {
+  it.each(['/avatars/saved.svg', undefined, null, '', '  '])(
+    'preserves query/candidates avatar_url and shares management defaults for missing avatars (%p)',
+    async (avatarUrl) => {
+      const dto = {
+        kind: 'bot', bot_id: 'b1:owner', name: 'Alpha', avatar_url: avatarUrl,
+        status: 'online', reachability: 'reachable', visibility: 'public',
+      };
+      connections.listFriendConnections.mockResolvedValue({
+        code: 20000, data: { items: [{ actor: { type: 'bot', id: dto.bot_id } }], total: 1 },
+      });
+      bc.queryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [dto], total: 1 } });
+      bc.listBotCandidates.mockResolvedValue({
+        code: 20000, data: { items: [{ bot: dto, is_friend: true }], total: 1 },
+      });
+
+      const friends = await collaborationCandidateService.listFriends('actor:owner', { detailSource: 'collaboration' });
+      const candidates = await collaborationCandidateService.listCandidates('actor:owner');
+      const expected = avatarUrl?.trim() || generateBotAvatar('b1');
+      for (const result of [friends, candidates]) {
+        expect(result).toMatchObject({ ok: true, data: { items: [{ id: dto.bot_id, avatarUrl: expected }] } });
+      }
+      expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: [dto.bot_id] });
+      expect(bots.listBotMetadata).not.toHaveBeenCalled();
+    },
+  );
+
   it('listMine filters human identities and returns bots only', async () => {
     bc.listMyBots.mockResolvedValue({
       code: 20000,
@@ -110,6 +137,7 @@ describe('collaborationCandidateService', () => {
           {
             id: 'b1:actor-1',
             name: 'Alpha',
+            avatarUrl: generateBotAvatar('b1'),
             online: true,
             status: 'online',
             botStatus: 'ACTIVE',
@@ -120,6 +148,7 @@ describe('collaborationCandidateService', () => {
           {
             id: 'b2:actor-1',
             name: 'Beta',
+            avatarUrl: generateBotAvatar('b2'),
             online: false,
             status: 'online',
             botStatus: 'INACTIVE',
@@ -267,6 +296,7 @@ describe('collaborationCandidateService', () => {
     expect(res.ok && res.data.items[0]).toMatchObject({
       id: 'b1:actor-1',
       name: 'Alpha',
+      avatarUrl: generateBotAvatar('b1'),
       online: false,
       status: 'hidden',
       detailsResolved: false,
@@ -314,11 +344,30 @@ describe('collaborationCandidateService', () => {
     expect(res.ok && res.data.items[0]).toMatchObject({ id: 'b3', name: 'Gamma', isFriend: false });
   });
 
-  it('recommendCandidates intersects discovery with candidates, sorts online first by score', async () => {
+  it.each([undefined, 'data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E'])(
+    'renders catalog-visible discover results outside the loaded candidate page with avatar %p', async (avatarUrl) => {
+      publicBots.discoverPublicBots.mockResolvedValue(discoveryResponse([{
+        bot_id: 'discovered-bot', bot_uuid: 'discovered-bot:owner', entity_id: 'owner',
+        bot_type: 'service', name: '测试专用', description: '', is_friend: false,
+        visibility: 'protected', is_online: true, actor_kind: 'bot', engine: 'openclaw', status: 'ACTIVE',
+        avatar_url: avatarUrl, recommendation: { score: 0.83927983045578, short_profile: '' },
+      }]));
+      const res = await collaborationCandidateService.recommendCandidates({
+        actorId: 'actor:viewer', actorKind: 'bot', keyword: '数据分析', candidates: [],
+      });
+      expect(res).toMatchObject({ ok: true, data: [{
+        id: 'discovered-bot:owner', name: '测试专用', online: true, reachability: 'reachable',
+        visibility: 'protected', isFriend: false, botType: 'service', engine: 'openclaw',
+        avatarUrl: avatarUrl || generateBotAvatar('discovered-bot'), recommendScore: 0.83927983045578,
+      }] });
+    },
+  );
+
+  it('recommendCandidates enriches cached Bots without dropping new discoveries and sorts online first', async () => {
     publicBots.discoverPublicBots.mockResolvedValue(
       discoveryResponse([
         { bot_uuid: 'b1:actor-1', recommendation: { score: 0.9, short_profile: '值班相关' } },
-        { bot_uuid: 'b9:actor-9', recommendation: { score: 0.95 } },
+        { bot_id: 'b9', bot_uuid: 'b9:actor-9', name: 'New Bot', is_online: true, recommendation: { score: 0.95 } },
         { bot_uuid: 'b2:actor-1', recommendation: { score: 0.4, short_profile: '分析相关' } },
       ]),
     );
@@ -343,22 +392,46 @@ describe('collaborationCandidateService', () => {
       },
       undefined,
     );
-    expect(res.ok && res.data).toHaveLength(2);
-    // 在线项排在离线项之前；两项均附加推荐分与画像摘要。
-    expect(res.ok && res.data[0]).toMatchObject({
+    expect(res.ok && res.data).toHaveLength(3);
+    expect(res.ok && res.data[0]).toMatchObject({ id: 'b9:actor-9', name: 'New Bot', online: true });
+    // 在线项排在离线项之前；保留推荐分与画像摘要。
+    expect(res.ok && res.data[1]).toMatchObject({
       id: 'b2:actor-1',
       name: 'Beta',
       online: true,
       recommendScore: 0.4,
       shortProfile: '分析相关',
     });
-    expect(res.ok && res.data[1]).toMatchObject({
+    expect(res.ok && res.data[2]).toMatchObject({
       id: 'b1:actor-1',
       name: 'Alpha',
       online: false,
       recommendScore: 0.9,
       shortProfile: '值班相关',
     });
+  });
+
+  it('maps current catalog online state without treating ACTIVE as online or losing known reachability', async () => {
+    const offline = { bot_id: 'b1', bot_uuid: 'b1:owner', name: 'Catalog Name', status: 'ACTIVE',
+      is_online: false, avatar_url: '/current.svg', visibility: 'protected', is_friend: false,
+      recommendation: { score: 0.9, short_profile: '' } };
+    publicBots.discoverPublicBots.mockResolvedValue(discoveryResponse([
+      offline, offline,
+      { bot_id: 'b2', bot_uuid: 'b2:owner', is_online: true, recommendation: { score: 0.8 } },
+      { bot_id: 'human_1', actor_kind: 'human', is_online: true },
+      { name: '没有 Bot ID' },
+    ]));
+    const result = await collaborationCandidateService.recommendCandidates({
+      actorId: 'actor:owner', actorKind: 'bot', keyword: '分析', candidates: [
+        candidateView({ id: 'b1:owner', name: 'Stale Name', online: true, isFriend: true, avatarUrl: '/stale.svg' }),
+        candidateView({ id: 'b2:owner', name: 'Unreachable', online: false, reachability: 'unreachable' }),
+      ],
+    });
+    expect(result).toMatchObject({ ok: true, data: [
+      { id: 'b1:owner', name: 'Catalog Name', online: false, botStatus: 'ACTIVE',
+        avatarUrl: '/current.svg', visibility: 'protected', isFriend: false },
+      { id: 'b2:owner', online: false, reachability: 'unreachable' },
+    ] });
   });
 
   it('recommendCandidates returns empty without discovery when keyword is blank', async () => {
@@ -373,7 +446,7 @@ describe('collaborationCandidateService', () => {
     expect(res).toEqual({ ok: true, data: [] });
   });
 
-  it('recommendCandidates maps user actor kind to human viewer and passes empty intersection', async () => {
+  it('recommendCandidates maps the human viewer and retains discover-only results', async () => {
     publicBots.discoverPublicBots.mockResolvedValue(
       discoveryResponse([{ bot_uuid: 'b9:actor-9', recommendation: { score: 0.9 } }]),
     );
@@ -389,7 +462,7 @@ describe('collaborationCandidateService', () => {
       expect.objectContaining({ viewer_actor_type: 'human', viewer_actor_id: 'human_1' }),
       undefined,
     );
-    expect(res).toEqual({ ok: true, data: [] });
+    expect(res).toMatchObject({ ok: true, data: [{ id: 'b9:actor-9', recommendScore: 0.9 }] });
   });
 
   it('recommendCandidates returns domain error when discovery fails', async () => {

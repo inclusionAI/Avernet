@@ -2,79 +2,50 @@
 // Open Core（capability null）→ supported:false，HelpMenu 不渲染「版本发布说明」项。
 // Internal overlay 提供 load/markSeen → mount 单飞拉取，hasNew 比对 localStorage 决定红点。
 // Hook ≤150 行（AGENTS.md）。纯读 capability，不直接 fetch，不发 yuyan 请求（capability 内部实现）。
-import type { ReleaseNotesData } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useReleaseNotesStore, type ReleaseNotesStatus } from '@/stores/releaseNotesStore';
 
-export type ReleaseNotesStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type { ReleaseNotesStatus };
 
 export interface UseReleaseNotesResult {
   /** 当前运行形态是否支持版本发布说明（Open Core=false）。 */
   supported: boolean;
   status: ReleaseNotesStatus;
-  data: ReleaseNotesData | null;
-  /** 菜单「版本发布说明」项是否显示红点（有未读新版本）。 */
+  data: import('@/capabilities').ReleaseNotesData | null;
+  /** 菜单「版本发布说明」项是否显示红点（有未读新发布且用户尚未主动关闭过弹窗）。 */
   hasNew: boolean;
   modalOpen: boolean;
-  /** 打开 Modal；当前发布日期存在时立即标记已读并清红点。 */
+  /** 打开 Modal；不写已读（用户主动关闭弹窗时统一收口已读）。 */
   open: () => void;
+  /** 关闭 Modal 的统一收口（按钮/ESC/遮罩同路径）：markSeen 写已读 + 清红点。 */
   closeModal: () => void;
-  /** 标记已读并关闭 Modal（写 localStorage 记录日期，清红点）。 */
+  /** 语义等价 closeModal（关闭即已读统一后保留的兼容出口）。 */
   markSeenAndClose: () => void;
 }
 
 /**
- * 版本发布说明状态收口。mount 时若 supported 则单飞 load，比对 readSeenDate 判 hasNew。
- * 新发布日期首次加载时自动开 Modal 并标记已读；open() 手动打开时走相同已读逻辑。
- * markSeenAndClose() 保留关闭时兜底写入。
+ * 版本发布说明状态收口（单实例）：状态与单飞拉取在 releaseNotesStore，多处消费共享
+ * 同一份状态，消除重复 fetch 与「未渲染弹窗的实例静默 markSeen」缺陷。
+ * 已读语义（2026-11-10 拍板）：用户主动关闭 Modal（按钮/ESC/遮罩统一走 closeModal）才
+ * 视为已读；自动弹出/手动打开均不写——被动中断（刷新/路由）红点保留、下次可重弹。
  */
 export function useReleaseNotes(): UseReleaseNotesResult {
-  const capResult = getCapabilities().getReleaseNotesCapability();
-  const cap = capResult.value;
+  const cap = getCapabilities().getReleaseNotesCapability().value;
   const supported = !!cap;
 
-  const [status, setStatus] = useState<ReleaseNotesStatus>(supported ? 'loading' : 'idle');
-  const [data, setData] = useState<ReleaseNotesData | null>(null);
-  const [hasNew, setHasNew] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const status = useReleaseNotesStore((s) => s.status);
+  const data = useReleaseNotesStore((s) => s.data);
+  const hasNew = useReleaseNotesStore((s) => s.hasNew);
+  const modalOpen = useReleaseNotesStore((s) => s.modalOpen);
 
   useEffect(() => {
-    if (!cap) return;
-    let cancelled = false;
-    void cap.load().then((res) => {
-      if (cancelled) return;
-      if (res) {
-        setData(res);
-        setStatus('ready');
-        // 新发布日期首次加载 → 自动展示一次；Modal 打开即标记已读并清红点。
-        const seen = cap.getSeenDate();
-        if (res.date && seen !== res.date) {
-          cap.markSeen(res.date);
-          setHasNew(false);
-          setModalOpen(true);
-        } else {
-          setHasNew(false);
-        }
-      } else {
-        setStatus('error');
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    if (cap) useReleaseNotesStore.getState().initialize(cap);
   }, [cap]);
 
-  const open = () => {
-    if (cap && data?.date) cap.markSeen(data.date);
-    setHasNew(false);
-    setModalOpen(true);
-  };
-  const closeModal = () => setModalOpen(false);
-  const markSeenAndClose = () => {
-    if (cap && data?.date) cap.markSeen(data.date);
-    setHasNew(false);
-    setModalOpen(false);
-  };
+  const open = () => useReleaseNotesStore.getState().open();
+  const closeModal = () => useReleaseNotesStore.getState().close();
+  const markSeenAndClose = closeModal;
 
   return { supported, status, data, hasNew, modalOpen, open, closeModal, markSeenAndClose };
 }

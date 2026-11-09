@@ -4,6 +4,7 @@ import { queryCollaborationBots } from '@/services/backendApi/collaboration/coll
 import { PublicGroupCatalogError } from '@/services/backendApi/collaboration/collaborationGroupController';
 import { PublicBotCatalogError } from '@/services/backendApi/collaboration/publicBotController';
 import { AceLoginRedirectError, BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { CollaborationSquareError } from './collaborationSquareError';
 
 export function unsupported(message: string): never {
@@ -12,7 +13,7 @@ export function unsupported(message: string): never {
 
 /** httpClient 上游探测到 ACE 未登录体时会抛 AceLoginRedirectError;协作域通用 error mapper 需将其映射为 unauthenticated,
  *  而非被兜底吞成 network(否则既有 {code:'unauthenticated'} 断言失守,且丢失登录态语义)。 */
-function isAceLoginRedirectError(error: unknown): error is AceLoginRedirectError {
+export function isAceLoginRedirectError(error: unknown): error is AceLoginRedirectError {
   return (
     error instanceof AceLoginRedirectError ||
     (typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AceLoginRedirectError')
@@ -23,7 +24,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Bot 画像（好友申请弹窗）读取错误映射：404＝不在公开目录（target_invalid，由弹窗降级为无能力版式）。 */
+/**
+ * Bot 画像（好友申请弹窗）读取错误映射：404＝不在公开目录（target_invalid）。
+ * 画像失败的唯一提示面是弹窗内错误文案：cancel httpClient 已入队的默认 sonner 投递，
+ * 避免弹窗之上再叠一条 toast（enqueue 发生在 throw 之前，此处 cancel 一定早于观察者 drain）。
+ */
 export function mapProfileError(error: unknown): never {
   if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') throw error;
   if (error instanceof CollaborationSquareError) throw error;
@@ -37,6 +42,7 @@ export function mapProfileError(error: unknown): never {
     );
   }
   if (error instanceof BackendRequestError) {
+    if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
     if (error.status === 401) throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
     if (error.status === 404) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
   }

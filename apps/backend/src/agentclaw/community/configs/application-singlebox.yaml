@@ -29,6 +29,14 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # The content store's bytes (core/content_store): this profile's object
+  # storage is a test double that keeps nothing, so its blob store is the
+  # local tree under this directory (di/modules/infrastructure/test/
+  # content_blob_store.py). Deployments keep the bytes in object storage and
+  # do not read this key.
+  bot_config_manifest:
+    content_store_dir: "./data/manifest_content"
+
   # The same production adapter/port contract as every other deployment. The
   # local BaaS OpenAPI key is injected by the deployment just like api_key_secret
   # is injected in production.

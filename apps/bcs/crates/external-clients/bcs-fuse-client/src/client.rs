@@ -1,5 +1,6 @@
 //! HTTP client for bcsfuse API.
 
+use bcs_network_tracing::{ClientWithDefaults, RequestBuilderExt};
 use std::time::Duration;
 
 use crate::FuseClientError;
@@ -13,11 +14,11 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 /// - `fusion_client`: longer timeout for LLM-backed fusion calls
 /// - `sync_client`: shorter timeout for worker CRUD operations
 pub struct FuseClient {
-    base_url: String,
+    pub(crate) base_url: String,
     /// Longer timeout for LLM-backed fusion (default: 120s).
-    fusion_client: reqwest::Client,
+    fusion_client: ClientWithDefaults<reqwest::Client>,
     /// Shorter timeout for sync/offline CRUD (default: 10s).
-    sync_client: reqwest::Client,
+    pub(crate) sync_client: ClientWithDefaults<reqwest::Client>,
 }
 
 impl std::fmt::Debug for FuseClient {
@@ -40,19 +41,17 @@ impl FuseClient {
         }
         let fusion_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.fusion_timeout_ms))
-            .default_headers(headers.clone())
             .build()
             .map_err(FuseClientError::HttpClient)?;
         let sync_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.sync_timeout_ms))
-            .default_headers(headers)
             .build()
             .map_err(FuseClientError::HttpClient)?;
 
         Ok(Self {
             base_url: config.url.clone(),
-            fusion_client,
-            sync_client,
+            fusion_client: ClientWithDefaults::new(fusion_client, headers.clone()),
+            sync_client: ClientWithDefaults::new(sync_client, headers),
         })
     }
 
@@ -115,9 +114,8 @@ impl FuseClient {
 
         let response = self
             .sync_client
-            .post(&url)
-            .json(&request)
-            .send()
+            .request(|http| http.post(&url).json(&request))
+            .send_traced()
             .await?
             .error_for_status()?
             .json::<SyncWorkerResponse>()
@@ -133,8 +131,8 @@ impl FuseClient {
         let url = format!("{}/v1/workers/{}/offline", self.base_url, worker_id);
 
         self.sync_client
-            .put(&url)
-            .send()
+            .request(|http| http.put(&url))
+            .send_traced()
             .await?
             .error_for_status()?;
 
@@ -155,9 +153,8 @@ impl FuseClient {
             );
             let response = self
                 .sync_client
-                .put(&url)
-                .json(&serde_json::json!({"availability": availability}))
-                .send()
+                .request(|http| http.put(&url).json(&serde_json::json!({"availability": availability})))
+                .send_traced()
                 .await?;
             Self::require_worker_operation_success(response, worker_id).await
         })
@@ -168,7 +165,7 @@ impl FuseClient {
     pub async fn delete_worker(&self, worker_id: &str) -> Result<(), FuseClientError> {
         bcs_observability::observe_result("fuse.delete_worker", async {
             let url = format!("{}/v1/workers/{}", self.base_url, worker_id);
-            let response = self.sync_client.delete(&url).send().await?;
+            let response = self.sync_client.request(|http| http.delete(&url)).send_traced().await?;
             match Self::require_worker_operation_success(response, worker_id).await {
                 Err(FuseClientError::WorkerNotFound(_)) => Ok(()),
                 result => result,
@@ -188,9 +185,8 @@ impl FuseClient {
 
         let resp = self
             .fusion_client
-            .post(&url)
-            .json(&request)
-            .send()
+            .request(|http| http.post(&url).json(&request))
+            .send_traced()
             .await?
             .error_for_status()?;
 
@@ -226,7 +222,7 @@ impl FuseClient {
             "recommend_workers: sending request"
         );
 
-        let resp = self.sync_client.post(&url).json(&request).send().await?;
+        let resp = self.sync_client.request(|http| http.post(&url).json(&request)).send_traced().await?;
 
         let status = resp.status();
         let raw_body = resp.text().await?;
@@ -273,7 +269,7 @@ impl FuseClient {
             worker_ids: worker_ids.to_vec(),
         };
 
-        let resp = self.sync_client.post(&url).json(&request).send().await?;
+        let resp = self.sync_client.request(|http| http.post(&url).json(&request)).send_traced().await?;
 
         let status = resp.status();
         let raw_body = resp.text().await?;

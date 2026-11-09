@@ -272,7 +272,7 @@ class AsyncSessionClient:
 
         try:
             async with session.request(method, url, json=json, headers=headers) as resp:
-                body = await resp.json()
+                body = await self._read_json_body(resp, method, url)
         except (TimeoutError, aiohttp.ClientError) as e:
             logger.error(
                 "[SessionClient] Request failed: method=%s url=%s error=%s",
@@ -295,6 +295,34 @@ class AsyncSessionClient:
             raise RuntimeError(f"API error: {body.get('message', 'Unknown error')}")
 
         return cast(dict[str, Any], body)
+
+    async def _read_json_body(
+        self, resp: aiohttp.ClientResponse, method: str, url: str
+    ) -> dict[str, Any]:
+        try:
+            body = await resp.json()
+        except (ValueError, aiohttp.ContentTypeError):
+            body = None
+        if not isinstance(body, dict):
+            # 下游返回非 JSON（如网关错误页）或非对象时，带出原文供下游排查
+            raw = await resp.text(errors="replace")
+            raise self._malformed_body_error(resp, method, url, raw)
+        return body
+
+    def _malformed_body_error(
+        self, resp: aiohttp.ClientResponse, method: str, url: str, raw: str
+    ) -> RuntimeError:
+        logger.warning(
+            "[SessionClient] Malformed response body: method=%s url=%s "
+            "status=%s body=%s",
+            method,
+            url,
+            resp.status,
+            raw,
+        )
+        return RuntimeError(
+            f"SessionClient malformed response body (status={resp.status}): {raw}"
+        )
 
     def _parse_session_info(self, data: dict[str, Any]) -> SessionInfo:
         return SessionInfo(

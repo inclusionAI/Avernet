@@ -33,7 +33,10 @@ from agentclaw.community.api.task.task_grant_service import (
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
+from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
+    TaskNodeSessionRef,
+)
 
 _BASE = "/openapi/v1/collaboration/tasks"
 _CALLER = "public-task-owner"
@@ -128,6 +131,99 @@ def execute_authenticated():
     expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
 )
 def execute_unauthenticated():
+    pass
+
+
+def _seed_task_session(world) -> None:
+    def get_task_nodes_by_session(_self, session_id: str):
+        assert session_id == "public-task-session"
+        return [
+            TaskNodeSessionRef(
+                task_id="public-task-dashboard",
+                node_id="public-task-node",
+                owner_user_id="public-task-owner",
+            ),
+        ]
+
+    bind_overrides(
+        world,
+        TaskServiceProtocol,
+        {"get_task_nodes_by_session": get_task_nodes_by_session},
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="authenticated_existing_session",
+    seed=lambda w: (_boot_verifier(w), _seed_task_session(w)),
+    input=CaseInput(
+        headers=_headers(),
+        query_params={"session_id": "public-task-session"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "public-task-session",
+                "items": [
+                    {
+                        "task_id": "public-task-dashboard",
+                        "owner_user_id": "public-task-owner",
+                        "node_id": "public-task-node",
+                    }
+                ],
+                "total": 1,
+            },
+        },
+    ),
+)
+def by_session_authenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="unauthenticated",
+    seed=_boot_verifier,
+    input=CaseInput(query_params={"session_id": "public-task-session"}),
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def by_session_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="empty_session",
+    seed=lambda w: (
+        _boot_verifier(w),
+        bind_overrides(
+            w,
+            TaskServiceProtocol,
+            {"get_task_nodes_by_session": lambda _self, _session_id: []},
+        ),
+    ),
+    input=CaseInput(
+        headers=_headers(),
+        query_params={"session_id": "missing-task-session"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "missing-task-session",
+                "items": [],
+                "total": 0,
+            },
+        },
+    ),
+)
+def by_session_empty():
     pass
 
 
@@ -348,7 +444,7 @@ _SKILL_INSTALL_RESULT = {
 
 
 def _seed_bbs_skill_install_runner(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         return _SKILL_INSTALL_RESULT
 
     bind_overrides(
@@ -359,7 +455,7 @@ def _seed_bbs_skill_install_runner(world) -> None:
 
 
 def _seed_bbs_skill_install_not_found(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         raise NotFound("subscription not found")
 
     bind_overrides(
@@ -378,7 +474,7 @@ def _seed_bbs_skill_install_not_found(world) -> None:
         _seed_bbs_skill_install_runner(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectSuccess(
         status=200,
@@ -398,7 +494,7 @@ def bbs_skill_install_public_happy():
         _seed_bbs_skill_install_not_found(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectError(status=404),
 )

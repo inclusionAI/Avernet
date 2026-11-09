@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-a2a-binding-api.workspace = true
 bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
@@ -33,6 +34,7 @@ bcs-bot-store = { workspace = true }
 bcs-user-directory-api = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-group-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-test-support = { workspace = true }

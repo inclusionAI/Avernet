@@ -10,9 +10,11 @@ import type {
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,
+  BotModelBadge,
   CapabilityResult,
   CodingBotConversationHost,
   ConversationInstanceScopeCapability,
+  GuideAssistantSpec,
   HumanIdentity,
   InviteCodeGatePolicy,
   LegacyVersionSwitchSpec,
@@ -35,6 +37,23 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
 }
 
 const DEFAULT_TASK_API_BASE = '/openapi/v1/collaboration/tasks';
+
+/**
+ * 可选 Backend 增强（BCS 独立好友发现）的本地配置读取：运行时显式设置优先，
+ * 其次编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED（config define 注入，缺省全栈 true）。
+ * 供 getPublicBotBackendEnabled 与 getShellVisibility 共用同一决策，不从默认能力实现
+ * 反向调用 registry 造成循环；页面/Service 不得绕过能力散落环境变量访问。
+ */
+function publicBotBackendEnabled(): boolean {
+  const runtime =
+    typeof window === 'undefined'
+      ? undefined
+      : (window as { AVERNET_RUNTIME_CONFIG?: { PUBLIC_BOT_BACKEND_ENABLED?: unknown } }).AVERNET_RUNTIME_CONFIG;
+  // 运行时（部署 profile 写入）只认布尔值；字符串 'false' 不当作关闭。
+  if (typeof runtime?.PUBLIC_BOT_BACKEND_ENABLED === 'boolean') return runtime.PUBLIC_BOT_BACKEND_ENABLED;
+  if (typeof TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED === 'boolean') return TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED;
+  return true;
+}
 
 function configuredTaskApiBase(): string {
   return typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
@@ -151,6 +170,11 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // 产品引导（新版助手）：内源专属功能，Open Core 无此能力（入口不渲染、浮层不挂载）。
+  getGuideAssistant: (): CapabilityResult<GuideAssistantSpec | null> => ({
+    status: 'available',
+    value: null,
+  }),
   // Open Core 无员工目录数据源 → 员工搜索不支持（添加成员弹窗降级为手填工号）。
   getUserSearchCapability: (): CapabilityResult<UserSearchCapability | null> => ({
     status: 'available',
@@ -171,6 +195,8 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 无内源运营配置：模型列表不渲染徽标。
+  getModelBadge: (): CapabilityResult<BotModelBadge | null> => ({ status: 'available', value: null }),
   getAgentCodingInternalResources: (): CapabilityResult<AgentCodingInternalResources> => ({
     status: 'available',
     value: {
@@ -252,6 +278,7 @@ export const defaultCapabilities: AppCapabilities = {
   getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
   getBotEditorPanels: () => ({ status: 'available', value: [] }),
   getConversationComposer: () => ({ status: 'available', value: null }),
+  getUserMessagePresentation: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
@@ -335,10 +362,13 @@ export const defaultCapabilities: AppCapabilities = {
   // 侧栏品牌区搜索入口（globalSearch=true），不展示侧栏空间切换器（spaceSwitcher=false）；
   // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
   // internal overlay 覆盖为三项全 true（extensions/internal.ts）。
+  // BCS-only 部署形态经同一 publicBotBackendEnabled() 决策隐藏铃铛：Backend 可选增强关闭时
+  // 铃铛不挂载，未读轮询随 AppSidebar 条件挂载自然停止（不在 notification service 捕获 404 伪装禁用）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
+  getPublicBotBackendEnabled: publicBotBackendEnabled,
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { spaceSwitcher: false, notificationBell: true, globalSearch: true },
+    value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled(), globalSearch: true },
   }),
   // Open Core 空间上下文双初始化（挂载 ensurePersonalSpaceOnAppEntry + Bot 分组 initSpaceContext）
   // 默认开启（现状行为零变化）；collab 装配（src/extensions/collab.ts）覆盖为 false，

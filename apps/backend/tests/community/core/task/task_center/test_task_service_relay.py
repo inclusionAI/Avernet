@@ -27,7 +27,14 @@ class _Graph:
 
 
 class _Search:
-    async def search_catalog(self, query):
+    async def search_catalog(
+        self,
+        query,
+        *,
+        viewer_actor_type=None,
+        viewer_actor_id=None,
+        visibility=None,
+    ):
         return {
             "candidates": [
                 {
@@ -56,6 +63,7 @@ async def test_search_bots_records_relay_search_trace() -> None:
         query="payment risk",
         task_id="task-1",
         node_id="node-1",
+        relay_token="generation-1",
     )
 
     assert [candidate.bot_id for candidate in candidates] == ["bot-1"]

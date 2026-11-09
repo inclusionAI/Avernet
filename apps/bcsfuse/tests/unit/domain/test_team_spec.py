@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================

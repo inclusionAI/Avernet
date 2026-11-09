@@ -634,3 +634,58 @@ does not add it (rule C2)._
    with no `total`.
 5. **Timeouts** — `DeviceAdapterTransport.invoke()` takes a per-call timeout; the
    public surface needs one documented deadline per group.
+
+## Routines runtime targets
+
+The seven `/openapi/v1/bots/{bot_id}/routines` operations reuse the existing
+Cron relay. `runtime_stage` is `draft`, `verify`, or `online`; it does not select
+a Backend deployment environment. Create accepts `runtime_stage`, `device_uuid`,
+and `operator_id` **in the JSON body**. All six other operations accept them
+**in the query string**. `user_id` and `entity_id` (retiring alias `owner_id`)
+remain query parameters under existing authentication, grant, role and edit-lock checks.
+
+```json
+{
+  "name": "daily-brief",
+  "trigger": {"type": "schedule", "cron": "0 9 * * *"},
+  "command": "Summarize yesterday's work",
+  "runtime_stage": "online",
+  "device_uuid": "existing-device-uuid",
+  "operator_id": "authorized-caller"
+}
+```
+
+Subsequent requests retain that same target tuple, for example:
+`GET /openapi/v1/bots/<bot-id>/routines/<routine-id>?user_id=<acting-user>&entity_id=<owner>&runtime_stage=online&device_uuid=<device-uuid>&operator_id=<caller>`.
+PATCH still takes the existing partial routine body, such as `{"enabled":false}`.
+Routing fields never enter the engine job payload.
+
+| Operation | Omitted stage | Explicit selectors / published-stage behavior |
+| --- | --- | --- |
+| List | Aggregate available stages and the current authorized user's existing online Caller instances | Explicit draft retains the previous draft-only scope; instance/Caller selectors require an explicit stage |
+| Create | Existing draft creation | Any explicit stage selects one existing runtime; multiple replicas require UUID |
+| Detail / PATCH / DELETE / run | draft | UUID or Caller selects one runtime; stage-only published PATCH permits enabled changes and may broadcast; run may broadcast; stage-only published DELETE remains forbidden |
+| Runs | Validate selectors first, then draft | Only operator triggers Caller-targeted resolution; UUID-only published requests retain device filtering; draft plus UUID without operator remains invalid |
+
+`operator_id` selects a Caller and never grants permission. Selecting someone
+else's Caller additionally requires Bot ADMIN. Human authorization uses the
+verified principal; app-only calls keep their existing granted acting-user
+context. Missing Caller bindings are never created and failures never fall back
+to another runtime. POST schema/type errors remain 422; invalid query targets,
+cross-field combinations and domain targets use their existing 400/403/404/409/504 statuses.
+
+Routine and run views retain trusted `device_uuid`/`operator_id` and runtime
+context. Keep rows by `(owner_id, bot_id, runtime_stage, device_uuid, operator_id,
+routine_id)`; identical IDs on different devices are distinct. Nullable target
+fields mean unreported metadata, not a guessed device. List and history pages
+add `failed_targets`; history totals describe the records actually fetched,
+ordered newest first with stable ties. Deprecated addresses keep their original
+contract and do not gain target selectors.
+
+Stage-only PATCH/run broadcasts add a `RoutineOperationBatch` response branch
+with `results`, `succeeded`, `failed`, and `failed_targets`. Successful run
+acknowledgements describe triggering, with null execution timestamps; consult
+history for execution results. Relay failure always produces the standard error
+Envelope with `data=null`, including partially executed broadcasts; no automatic
+retry is performed. Successful reads with empty data and failed targets preserve
+both the success status and the failure metadata.

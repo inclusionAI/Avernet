@@ -36,7 +36,7 @@ class TestMySQLFusedProfileStoreContract:
     def test_module_imports_without_connecting(self):
         """Test that the module can be imported without database connection."""
         import importlib
-        import src.infra.public.stores.mysql_fused_profile_store as store_module
+        import app.infra.public.stores.mysql_fused_profile_store as store_module
 
         # Reload to ensure no connection happens on import
         importlib.reload(store_module)
@@ -46,9 +46,9 @@ class TestMySQLFusedProfileStoreContract:
 
     def test_store_constructs_without_connecting(self):
         from unittest.mock import patch
-        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+        from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
-        with patch("src.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider") as factory:
+        with patch("app.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider") as factory:
             config = dict(host="test-host", port=3307, user="test-user", password="test-password", database="test-db")
             MySQLFusedProfileStore(**config)
             factory.assert_called_once_with(**config)
@@ -56,7 +56,7 @@ class TestMySQLFusedProfileStoreContract:
 
     def test_required_methods_exist(self):
         """Test that all required methods exist."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
+        from app.infra.public.stores.mysql_fused_profile_store import (
             MySQLFusedProfileStore,
         )
 
@@ -113,7 +113,7 @@ class TestMySQLFusedProfileStoreContract:
             [
                 sys.executable,
                 "-c",
-                "from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore; print('OK')",
+                "from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore; print('OK')",
             ],
             cwd=str(open_core_root),
             env=env,
@@ -133,26 +133,26 @@ class TestMySQLFusedProfileStoreContract:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
-            "src.infra.vectorstores.qdrant_zdas_vector_store",
-            "src.infra.vectorstores.faiss_zdas_vector_store",
-            "src.infra.vectorstore_backends.zdas_vector_persistence_backend",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
+            "app.infra.vectorstores.qdrant_zdas_vector_store",
+            "app.infra.vectorstores.faiss_zdas_vector_store",
+            "app.infra.vectorstore_backends.zdas_vector_persistence_backend",
         ]
         for keyword in forbidden:
             assert keyword not in result.stdout.lower(), f"Forbidden import found: {keyword}"
             assert keyword not in result.stderr.lower(), f"Forbidden import found: {keyword}"
 
     def test_no_fallback_to_inmemory_or_sqlite(self):
-        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+        from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
         store = MySQLFusedProfileStore(connection_pool=UnavailablePool())
         with pytest.raises(RuntimeError, match="controlled MySQL outage"):
             store.find_by_key("test-fusion-id")
 
     def test_fail_fast_without_mysql_config(self):
-        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
-        from src.domain.models.profile_fusion import FusedProfileRecord, ConversationTurn
+        from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+        from app.domain.models.profile_fusion import FusedProfileRecord, ConversationTurn
 
         store = MySQLFusedProfileStore(connection_pool=UnavailablePool())
         record = FusedProfileRecord(fusion_id="fusion-1", fusion_mode="G9")
@@ -172,7 +172,7 @@ class TestMySQLFusedProfileStoreContract:
                 operation()
 
     def test_lazy_connection_initialization(self):
-        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+        from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
         pool = UnavailablePool()
         store = MySQLFusedProfileStore(connection_pool=pool)
@@ -193,7 +193,7 @@ class TestMySQLFusedProfileStoreIntegration:
     @pytest.fixture
     def mysql_store(self):
         """Create MySQLFusedProfileStore with real MySQL connection."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
+        from app.infra.public.stores.mysql_fused_profile_store import (
             MySQLFusedProfileStore,
         )
 
@@ -220,7 +220,7 @@ class TestMySQLFusedProfileStoreIntegration:
     @pytest.fixture
     def test_record(self):
         """Create a test FusedProfileRecord."""
-        from src.domain.models.profile_fusion import FusedProfileRecord
+        from app.domain.models.profile_fusion import FusedProfileRecord
         from datetime import datetime
 
         return FusedProfileRecord(
@@ -325,7 +325,7 @@ class TestMySQLFusedProfileStoreIntegration:
 
     def test_append_turn_appends_conversation_turn(self, mysql_store, test_record):
         """Test that append_turn appends a conversation turn."""
-        from src.domain.models.profile_fusion import ConversationTurn
+        from app.domain.models.profile_fusion import ConversationTurn
 
         mysql_store.save(test_record)
 
@@ -357,7 +357,7 @@ class TestMySQLFusedProfileStoreIntegration:
 
     def test_get_conversation_returns_turns_with_offset_limit(self, mysql_store, test_record):
         """Test that get_conversation supports pagination."""
-        from src.domain.models.profile_fusion import ConversationTurn
+        from app.domain.models.profile_fusion import ConversationTurn
 
         mysql_store.save(test_record)
 

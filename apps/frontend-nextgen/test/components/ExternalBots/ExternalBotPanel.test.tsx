@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { ExternalBotPanel } from '@/components/ExternalBots/ExternalBotPanel';
+import { generateBotAvatar } from '@/domain/botAvatar';
 import { externalBotService } from '@/services/externalBots/externalBotService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -24,10 +25,10 @@ jest.mock('@/components/Workspace/IdentitySelector/BotRegistrationDialog', () =>
 
 afterEach(() => jest.resetAllMocks());
 
-it('外部 Bot 的通用配置入口明确使用外部配置模式', async () => {
+it('外部 Bot 的公开设置入口明确使用外部配置模式', async () => {
   jest.mocked(externalBotService.list).mockResolvedValue([{ id: 'external-1', name: '外部助手' }]);
   render(<ExternalBotPanel active />);
-  fireEvent.click(await screen.findByRole('button', { name: '通用配置' }));
+  fireEvent.click(await screen.findByRole('button', { name: '公开设置' }));
   expect(screen.getByText('外部 Bot 配置')).toBeInTheDocument();
 });
 
@@ -64,4 +65,15 @@ it('关闭接入指南后更新已有 Bot 的连接状态并保留搜索词', as
   expect(screen.queryByText('离线')).not.toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: '搜索外部 Bot' })).toHaveValue('千问');
   expect(externalBotService.list).toHaveBeenCalledTimes(2);
+});
+
+it('外部 Bot 头像：有 URL 按 URL 渲染，缺失时回退按 Bot ID 生成的稳定默认图', async () => {
+  jest.mocked(externalBotService.list).mockResolvedValue([
+    { id: 'external-1', name: '外部助手', avatarUrl: '/ext/a.png' },
+    { id: 'external-2', name: '无常驻图助手' },
+  ]);
+  render(<ExternalBotPanel active />);
+
+  expect(await screen.findByRole('img', { name: '外部助手' })).toHaveAttribute('src', '/ext/a.png');
+  expect(screen.getByRole('img', { name: '无常驻图助手' })).toHaveAttribute('src', generateBotAvatar('external-2'));
 });

@@ -19,8 +19,8 @@ describe('independent flow run links', () => {
   it('creates and upgrades SQLite through the migration runner and is idempotent', async () => {
     const raw = new Database(':memory:');
     const db = new SqliteDatabase(raw);
-    // Existing installation at the reserved v146; no unrelated tables are needed.
-    raw.exec('CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (146, \'existing\')');
+    // Existing installation at the reserved v146, including the run table required by v151.
+    raw.exec('CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (146, \'existing\')');
     await runMigrations(db, 'sqlite');
     await runMigrations(db, 'sqlite');
     const repo = new FlowRunLinkRepository(db);
@@ -38,8 +38,59 @@ describe('independent flow run links', () => {
     await runMigrations(db, 'sqlite');
     await new FlowRunLinkRepository(db).insert(link);
     expect(await new FlowRunLinkRepository(db).findByChild('child')).toEqual(link);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 148 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 151 });
     await db.close();
+  });
+
+  it.each([146, 147, 151].flatMap(version => [false, true].map(hasModify => ({ version, hasModify }))))(
+    'preserves a provisioned SQLite table and data at v$version with optional gmt_modify=$hasModify', async ({ version, hasModify }) => {
+    const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
+    raw.exec(`CREATE TABLE flow_runs (flow_id TEXT);
+      CREATE TABLE schema_version (version INTEGER, description TEXT);
+      INSERT INTO schema_version VALUES (${version}, 'existing');
+      CREATE TABLE flow_run_links (child_flow_id VARCHAR(255) NOT NULL PRIMARY KEY,
+        parent_flow_id VARCHAR(255) NOT NULL, parent_node_id VARCHAR(255) NOT NULL,
+        parent_attempt INTEGER, child_workflow_id VARCHAR(255) NOT NULL,
+        gmt_create ${hasModify ? 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' : 'INTEGER NOT NULL DEFAULT (unixepoch())'}
+        ${hasModify ? ', gmt_modify TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' : ''});
+      CREATE INDEX idx_flow_run_links_parent ON flow_run_links(parent_flow_id);
+      INSERT INTO flow_run_links (child_flow_id,parent_flow_id,parent_node_id,child_workflow_id)
+        VALUES ('old','parent','node','wf');`);
+    const before = raw.prepare('SELECT * FROM flow_run_links WHERE child_flow_id = ?').get('old');
+    await runMigrations(db, 'sqlite'); await runMigrations(db, 'sqlite');
+    expect(raw.prepare('SELECT * FROM flow_run_links WHERE child_flow_id = ?').get('old')).toEqual(before);
+    expect(raw.prepare('SELECT description FROM schema_version WHERE version = ?').get(version)).toEqual({ description: 'existing' });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 151 });
+    const repo = new FlowRunLinkRepository(db);
+    await repo.insert(link);
+    expect(await repo.findByChild('old')).toEqual({ ...link, childFlowId: 'old' });
+    expect(await repo.findByChild('child')).toEqual(link);
+    expect(await repo.listByParent('parent', 20)).toHaveLength(2);
+    if (hasModify) expect(raw.prepare('SELECT gmt_modify FROM flow_run_links WHERE child_flow_id = ?').get('child'))
+      .toEqual({ gmt_modify: expect.any(String) });
+    else expect(raw.pragma('table_info(flow_run_links)') as { name: string }[])
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'gmt_modify' })]));
+    await db.close();
+  });
+
+  it.each(['mysql', 'zdas'] as const)('accepts an extra database-managed gmt_modify in %s metadata', async dbType => {
+    const exec = vi.fn<IDatabase['exec']>().mockResolvedValue({ affectedRows: 1 });
+    const query = vi.fn(async (sql: string) => {
+      const rows = await mysqlSchemaQuery(sql);
+      return sql.includes('COLUMNS') ? [...rows,
+        { column_name: 'parent_attempt', max_length: null }, { column_name: 'gmt_create', max_length: null },
+        { column_name: 'gmt_modify', max_length: null }] : rows;
+    });
+    const db = { dbType, exec, query } as unknown as IDatabase;
+    await upgrade.migrate!(db);
+    expect(exec).toHaveBeenCalledExactlyOnceWith(flowRunLinkMysqlUpgradeDdl);
+    exec.mockClear();
+    const repo = new FlowRunLinkRepository(db);
+    await repo.insert(link);
+    expect(exec).toHaveBeenCalledExactlyOnceWith(
+      'INSERT INTO flow_run_links (child_flow_id, parent_flow_id, parent_node_id, parent_attempt, child_workflow_id) VALUES (?, ?, ?, ?, ?)',
+      ['child', 'parent', 'node', null, 'wf'],
+    );
   });
 
   it('accepts 255-character IDs with common prefixes and rejects 256 for every field', async () => {
@@ -60,7 +111,7 @@ describe('independent flow run links', () => {
 
   it('upgrades a v147 SQLite table in place without losing rows or enforcing its old VARCHAR declaration', async () => {
     const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
-    raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT);
+    raw.exec(`CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT);
       INSERT INTO schema_version VALUES (147, 'old');
       CREATE TABLE flow_run_links (child_flow_id VARCHAR(190) NOT NULL PRIMARY KEY,
         parent_flow_id VARCHAR(190) NOT NULL, parent_node_id VARCHAR(190) NOT NULL,
@@ -73,7 +124,7 @@ describe('independent flow run links', () => {
     const long = { ...link, childFlowId: 'c'.repeat(255), parentFlowId: 'p'.repeat(255),
       parentNodeId: 'n'.repeat(255), childWorkflowId: 'w'.repeat(255) };
     await repo.insert(long); expect(await repo.findByChild(long.childFlowId)).toEqual(long);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 148 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 151 });
     await db.close();
   });
 

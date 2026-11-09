@@ -94,6 +94,13 @@ native Editor/draft admission. BUILDING captures at most 100 enabled IDs (LIMIT
 session. Historical versions are never backfilled. Rebuilds replace the latest
 successful observation, not an immutable build-generation artifact.
 
+Legacy service Bots with no `space_id` and no personal Space for their owner in
+that environment skip build observation and online projection with a WARNING
+and `reason=SPACE_NOT_FOUND`. An existing personal Space remains the normal
+fallback; a deleted personal Space or an invalid explicit binding is an ERROR.
+Unexpected read/write/transaction failures retain ERROR and traceback. No Space
+is created or rebound, and a skipped observation is not a recorded empty list.
+
 The existing management and conversation GET URLs accept `runtime_stage`:
 `draft` uses current binding state; `verify` resolves the latest native validating
 publication and its observation; `online` resolves native SUCCESS and reads the

@@ -44,6 +44,7 @@
 //! cargo test --package bcs --test e2e_chat -- --test-threads=1
 //! ```
 
+#[path = "support/e2e_helpers.rs"]
 mod e2e_helpers;
 
 use std::time::Duration;

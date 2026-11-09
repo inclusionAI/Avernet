@@ -4,6 +4,7 @@ Bot service for managing bot lifecycle.
 This service handles bot creation, retrieval, updates, and deletion.
 It integrates with the device service to allocate devices for bots.
 """
+import asyncio
 import json
 import random
 import re
@@ -16,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
 from agentclaw.community.core.bot_management.capabilities import (
@@ -117,6 +119,8 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     resolve_current_arca_image,
 )
 from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    avernet_tenant_scope,
     bind_current_avernet_tenant,
 )
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
@@ -150,7 +154,11 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
+from agentclaw.community.core.bot_management.collaboration_repair.profile import (
+    outbound_avatar_from_record,
+)
 
 logger = get_logger()
 
@@ -171,6 +179,9 @@ PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 # fan-out bounded while still attempting every instance before reporting an
 # aggregate failure.
 _CALLER_REFRESH_MAX_WORKERS = 5
+
+# Enable best-effort scheduled Caller refresh after a successful Owner update.
+SCHEDULED_CALLER_REFRESH_ENABLED = True
 
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
@@ -387,8 +398,10 @@ class BotService(BotServiceProtocol):
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
         restart_backup_dependencies: "RestartBackupDependencies | None" = None,
+        scheduled_caller_refresh: ScheduledCallerRefreshProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._scheduled_caller_refresh = scheduled_caller_refresh
         self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
         self._skill_layout_repository = skill_layout_repository
         self._bot_storage_policy = bot_storage_policy
@@ -569,6 +582,7 @@ class BotService(BotServiceProtocol):
         template_type: "str | None",
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
+        bot_name: str | None = None,
     ) -> "Optional[Dict[str, Any]]":
         """Build engine-specific extra_envs via the provisioning strategy.
 
@@ -593,6 +607,8 @@ class BotService(BotServiceProtocol):
                 template_config=template_config,
             )
             extra_envs = strategy.build_extra_envs(ctx)
+            if isinstance(bot_name, str) and bot_name.strip():
+                extra_envs = {**(extra_envs or {}), "TEAMCLAW_BOT_NAME": bot_name.strip()}
             if extra_envs:
                 logger.info(
                     "[%s] Setting engine extra_envs for bot %s: %s",
@@ -1170,7 +1186,10 @@ class BotService(BotServiceProtocol):
             return
         try:
             current_raw = self._repository.count_by_owner(
-                owner_id, exclude_bot_type="desktop", exclude_active_engine="teclaw"
+                owner_id,
+                exclude_bot_type="desktop",
+                exclude_active_engine="teclaw",
+                exclude_identity_inheriting=True,
             )
             current = int(current_raw)
         except (TypeError, ValueError):
@@ -1446,6 +1465,7 @@ class BotService(BotServiceProtocol):
         space_id: Optional[int] = None,
         provision: bool = True,
         space_quota: bool = False,
+        identity_bot_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1631,6 +1651,7 @@ class BotService(BotServiceProtocol):
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
+                "identity_bot_id": identity_bot_id,
             }
             initial_layout = self._skills_pool_native_creation_policy.select(
                 env=get_current_env(),
@@ -1694,6 +1715,9 @@ class BotService(BotServiceProtocol):
                     bot_name=resolved_bot_name or bot_id,
                     bot_summary=bot_desc or "",
                     connection_mode=connection_mode,
+                    avatar_url=outbound_avatar_from_record(
+                        bot_record, log_context="[bot_service.create_bot]"
+                    ),
                     **provider_address_kwargs(bot_data),
                     respect_drm=False,
                 )
@@ -2029,6 +2053,7 @@ class BotService(BotServiceProtocol):
                     template_type=template_type,
                     template_config=template_config,
                     log_context="bot_service.create_bot",
+                    bot_name=resolved_bot_name,
                 )
                 if resolved_active_engine == "openclaw":
                     extra_envs = {
@@ -2301,6 +2326,7 @@ class BotService(BotServiceProtocol):
                     template_type=bot_template_type,
                     template_config=resolved_template_config,
                     log_context="bot_service._allocate_device_async",
+                    bot_name=bot_record.get("bot_name") if bot_record else None,
                 )
                 if active_engine == "openclaw":
                     extra_envs = {
@@ -2516,6 +2542,7 @@ class BotService(BotServiceProtocol):
                 address = resolver.resolve(bot_id=bot_id, legacy_owner_id=user_id)
         except BotAddressNotFoundError as exc:
             raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
+        mark("bot.locator_resolved")
         return self.get_bot(bot_id=bot_id, user_id=address.current_owner_id)
 
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
@@ -2555,6 +2582,7 @@ class BotService(BotServiceProtocol):
 
         # Fetch template info if exists
         try:
+            mark("bot.template")
             template = self._template_service.get_template(bot_id)
             if template:
                 bot["template_config"] = template.get("ext")
@@ -2804,6 +2832,33 @@ class BotService(BotServiceProtocol):
         page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
         items = (page or {}).get("items") or []
         return items[0] if items else None
+
+    async def find_identity_source(
+        self, bot_id: str, *, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The Bot that supplies an inheriting Bot's passport identity.
+
+        Same-entity only: an inheriting Bot must run under an identity owned by
+        the entity that owns it, so a Bot from another entity is not a candidate
+        even when it exists. Soft-deleted Bots are not returned.
+
+        Async, and the lookup runs in a worker thread: the repository call is
+        blocking, and callers reach this from the event loop.
+        """
+        return await asyncio.to_thread(
+            self.get_identity_source_row, bot_id, entity_id=entity_id
+        )
+
+    def get_identity_source_row(
+        self, bot_id: str, *, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The synchronous lookup ``find_identity_source`` runs off the loop.
+
+        Creation resolves its source from a sync flow, so it uses this
+        directly; async callers await ``find_identity_source``.
+        """
+        bot = self._repository.get_by_id_and_owner(bot_id, entity_id)
+        return bot or None
 
     def get_bot_classification(
         self, bot_id: str, entity_id: Optional[str] = None
@@ -3356,8 +3411,14 @@ class BotService(BotServiceProtocol):
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # Sync to BCN if bot_name or bot_desc was updated
-            if sync_to_bcn and (bot_name is not None or bot_desc is not None):
+            # Sync to BCN if bot_name, bot_desc, or the avatar field was
+            # updated. Avatar presence in the request ext is the signal — not a
+            # stored-value comparison, which cannot distinguish an explicit
+            # clear ("") from a missing field.
+            avatar_changed = ext is not None and "avatar_url" in ext
+            if sync_to_bcn and (
+                bot_name is not None or bot_desc is not None or avatar_changed
+            ):
                 sync_kwargs = {
                     "bot_id": bot_id,
                     "owner_id": user_id,
@@ -3697,9 +3758,14 @@ class BotService(BotServiceProtocol):
         bot_desc: Optional[str] = None,
         request_headers: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Sync bot name and summary to BCN.
+        """Sync bot name, summary and avatar projection to BCN.
 
         服务 Bot 使用稳定 entity 后缀；个人/桌面 Bot 保留 owner 后缀，例如 "20260421_gfdsz5vi:85020"。
+
+        头像投影取自已保存记录（resolver 重新读取），不使用本次请求的
+        partial ext —— 请求未携带的 ext 字段不能覆盖已持久化数据。投影
+        读取失败（字段类型非法 / ext JSON 损坏）则省略 ``avatar_url`` 字段，
+        BCN 保留远端旧值；绝不伪造空串把读不出来的数据变成"显式清空"。
 
         Args:
             bot_id: TC 页面上的 bot_id
@@ -3730,12 +3796,33 @@ class BotService(BotServiceProtocol):
             }
             if request_headers:
                 onboard_kwargs["request_headers"] = request_headers
-            self._bcn_service.onboard_bot(**onboard_kwargs)
-
-            logger.info(
-                f"[bot_service._sync_bot_to_bcn] Synced to BCN: "
-                f"bot_id={bcn_bot_id}, name={final_name}"
+            avatar_url = outbound_avatar_from_record(
+                bot, log_context="[bot_service._sync_bot_to_bcn]"
             )
+            if avatar_url is not None:
+                onboard_kwargs["avatar_url"] = avatar_url
+            result: Dict[str, Any] = self._bcn_service.onboard_bot(**onboard_kwargs)
+
+            if result.get("skipped") is True:
+                logger.warning(
+                    f"[bot_service._sync_bot_to_bcn] BCN sync skipped: "
+                    f"bot_id={bcn_bot_id}, name={final_name}"
+                )
+            elif result.get("onboarded") is not True:
+                # Project only documented onboard-response fields, matching the
+                # register path's log convention (raw payloads stay private).
+                logger.warning(
+                    f"[bot_service._sync_bot_to_bcn] BCN did not confirm onboarding: "
+                    f"bot_id={bcn_bot_id}, "
+                    f"bot_uuid={result.get('bot_uuid')!r}, "
+                    f"onboarded={result.get('onboarded')!r}, "
+                    f"message={result.get('message')!r}"
+                )
+            else:
+                logger.info(
+                    f"[bot_service._sync_bot_to_bcn] Synced to BCN: "
+                    f"bot_id={bcn_bot_id}, name={final_name}"
+                )
 
         except BcnServiceError as e:
             # BCN 同步失败不影响主流程，只记录警告日志
@@ -3770,12 +3857,18 @@ class BotService(BotServiceProtocol):
         *,
         respect_drm: bool = True,
         provider_bot_ref: str | None = None,
+        avatar_url: str | None = None,
     ) -> None:
         """Register with BCN best effort.
 
         Create/start/restart pass ``respect_drm=False`` so every legal lifecycle
         execution attempts registration. Environment credential checks remain
         owned by BcnService. Success only persists ``bcn_registered=True``.
+
+        ``avatar_url`` 是可省略的边界参数：``None`` 不发送该字段（BCN 保留
+        旧值），``""`` 显式清空远端头像。实际 Backend 调用方必须始终传调用点
+        已持有记录的当前投影（``outbound_avatar_from_record``）—— 投影读不
+        出来时以 ``None`` 省略，而不是伪造空串。
         """
         if respect_drm and not self._is_claude_code_bcn_register_enabled():
             logger.info(
@@ -3797,6 +3890,8 @@ class BotService(BotServiceProtocol):
                 register_kwargs["provider_bot_ref"] = provider_bot_ref
             if connection_mode is not None:
                 register_kwargs["connection_mode"] = connection_mode
+            if avatar_url is not None:
+                register_kwargs["avatar_url"] = avatar_url
             result = self._bcn_service.register_provider_bot(
                 **register_kwargs,
             )
@@ -4013,6 +4108,22 @@ class BotService(BotServiceProtocol):
         if (bot.get("ext") or {}).get("digital_employee"):
             raise BotOperationNotAllowedError("已绑定数字员工的 Bot 不支持删除")
 
+        # An identity Bot is the authority every inheriting Bot runs under. Its
+        # children carry a copy of its passport, so deleting it would destroy
+        # the credential they all still present, and they cannot be re-pointed.
+        # Refuse while any live inheriting Bot still references it.
+        raw_inheriting = self._repository.count_identity_bot_children(
+            bot_id, owner_id=user_id
+        )
+        # Only a genuine count blocks deletion. The protocol returns ``int``;
+        # anything else means the repository could not answer, and treating that
+        # as "has dependents" would make every Bot undeletable.
+        inheriting = raw_inheriting if isinstance(raw_inheriting, int) else 0
+        if inheriting:
+            raise BotOperationNotAllowedError(
+                f"该 Bot 仍是 {inheriting} 个继承 Bot 的身份来源，请先删除这些 Bot"
+            )
+
         # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
         # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
         # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
@@ -4146,12 +4257,23 @@ class BotService(BotServiceProtocol):
                         raise BotServiceError(f"设备释放失败，无法删除 Bot: {e}")
 
             # Step 2: 通知 Passport 服务销毁 Passport（阻塞流程）
-            try:
-                self._passport_plugin.destroy_passport(bot_id, resource_owner_id)
-                logger.info(f"[bot_service.delete_bot] destroyPassport success: bot_id={bot_id}, owner_workno={user_id}")
-            except PassportError as e:
-                logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
-                raise BotServiceError(f"销毁 Passport 失败: {e}")
+            # An identity-inheriting Bot presents a COPY of its source's
+            # passport. Destroying it would destroy the identity the source and
+            # every sibling still run under, so the child never destroys the
+            # passport it borrowed -- skipping is structural, not swallowed.
+            if bot.get("identity_bot_id"):
+                logger.info(
+                    f"[bot_service.delete_bot] skip destroyPassport for "
+                    f"identity-inheriting bot: bot_id={bot_id}, "
+                    f"source={bot.get('identity_bot_id')!r}"
+                )
+            else:
+                try:
+                    self._passport_plugin.destroy_passport(bot_id, resource_owner_id)
+                    logger.info(f"[bot_service.delete_bot] destroyPassport success: bot_id={bot_id}, owner_workno={user_id}")
+                except PassportError as e:
+                    logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
+                    raise BotServiceError(f"销毁 Passport 失败: {e}")
 
             # Soft delete the bot (use soft_delete_by_owner to ensure we only delete the owner's bot)
             result = self._repository.soft_delete_by_owner(bot_id, user_id)
@@ -4682,6 +4804,9 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            avatar_url=outbound_avatar_from_record(
+                bot, log_context="[bot_service.start_bot]"
+            ),
             **provider_address_kwargs(bot),
             respect_drm=False,
         )
@@ -5183,6 +5308,9 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            avatar_url=outbound_avatar_from_record(
+                bot, log_context="[bot_service._restart_bot_baas]"
+            ),
             **provider_address_kwargs(bot),
             respect_drm=False,
         )
@@ -5210,6 +5338,7 @@ class BotService(BotServiceProtocol):
             template_type=bot_template_type,
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
+            bot_name=bot.get("bot_name"),
         )
         if active_engine == "openclaw":
             extra_envs = {
@@ -5959,7 +6088,7 @@ class BotService(BotServiceProtocol):
                 bindings = [{
                     "binding_id": personal_result.get("binding_id"),
                     "type": "personal",
-                    "device_count": len(devices),
+                    "device_count": personal_result.get("device_count", len(devices)),
                     "devices": devices,
                 }]
             else:
@@ -5973,6 +6102,33 @@ class BotService(BotServiceProtocol):
                     "skipped": True,
                     "reason": f"unsupported bot_type: {bot_type}",
                 }
+            if bot_type == "service" and not SCHEDULED_CALLER_REFRESH_ENABLED:
+                logger.info(
+                    "scheduled_caller_refresh_skipped bot_id=%s owner_user_id=%s reason=disabled",
+                    bot_id, user_id,
+                )
+            if SCHEDULED_CALLER_REFRESH_ENABLED and bot_type == "service" and self._scheduled_caller_refresh is not None:
+                refresh_fields = {
+                    "bot_id": bot_id, "owner_user_id": user_id,
+                }
+                started = time.monotonic()
+                try:
+                    refresh_fields.update(entity_id=stable_resource_owner_id(bot), env=get_current_env())
+                    logger.info("scheduled_caller_refresh_requested fields=%s", refresh_fields)
+                    # COSEC: use the resolved Bot's tenant, never a callback-supplied tenant.
+                    with avernet_tenant_scope(bot.get("avernet_tenant") or DEFAULT_AVERNET_TENANT):
+                        self._scheduled_caller_refresh.refresh(**refresh_fields)
+                except Exception as exc:
+                    # COSEC: optional Caller failures must not fail Owner refresh or expose credentials.
+                    logger.warning(
+                        "scheduled_caller_refresh_failed fields=%s owner_refresh=success error_type=%s duration_ms=%.1f",
+                        refresh_fields, type(exc).__name__, (time.monotonic() - started) * 1000,
+                    )
+                else:
+                    logger.info(
+                        "scheduled_caller_refresh_succeeded fields=%s duration_ms=%.1f",
+                        refresh_fields, (time.monotonic() - started) * 1000,
+                    )
             logger.info(
                 f"[bot_service.refresh_passport_token] Device hot-update succeeded: "
                 f"bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, bindings={bindings}"
@@ -6037,12 +6193,16 @@ class BotService(BotServiceProtocol):
         # ========== 步骤 4: 调用热更新接口更新设备 header ==========
         update_result = service.update_device_headers(device=device, agent_pass_token=token, agent_code=agent_code)
         devices = update_result if isinstance(update_result, list) else []
+        # Direct ARCA acknowledges its single sandbox with an exact True;
+        # BaaS/teclaw report physical devices as a list. Do not invent inventory
+        # or accept truthy values / another provider's boolean as confirmation.
+        device_count = 1 if binding.device_provider == "arca" and update_result is True else len(devices)
         logger.info(
             f"[_hot_update_by_device_binding] Hot-update succeeded: "
             f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, "
-            f"device_id={binding.device_id}, updated_devices={len(devices)}"
+            f"device_id={binding.device_id}, updated_devices={device_count}"
         )
-        return {"binding_id": binding_id, "devices": devices}
+        return {"binding_id": binding_id, "devices": devices, "device_count": device_count}
 
     def _hot_update_service_bot_passport_token(
         self, bot_id: str, user_id: str, token: str, bot: dict, agent_code: str = ""
@@ -6087,7 +6247,7 @@ class BotService(BotServiceProtocol):
                 updated_bindings.append({
                     "binding_id": draft_binding_id,
                     "type": "draft",
-                    "device_count": len(devices),
+                    "device_count": draft_result.get("device_count", len(devices)),
                     "devices": devices,
                 })
             except Exception as e:

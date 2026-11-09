@@ -28,7 +28,7 @@ const friendBot = { ...botOf('fb-1:2', '朋友 Bot'), section: 'friend' as const
 function renderRail(over: Partial<Parameters<typeof ConversationCollapsedRail>[0]> = {}) {
   const props = {
     sections: [
-      { id: 'managed' as const, label: '我的 Bot', items: [managedA] },
+      { id: 'managed' as const, label: '我管理的 Bot', items: [managedA] },
       { id: 'friend' as const, label: '好友 Bot', items: [friendBot] },
     ],
     selectedBotId: null,
@@ -61,7 +61,7 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
     const nonChatable = botOf('bot-nc:1', '禁聊 Bot', { chatable: false });
     const props = renderRail({
       sections: [
-        { id: 'managed' as const, label: '我的 Bot', items: [agentCoding, nonChatable, managedA] },
+        { id: 'managed' as const, label: '我管理的 Bot', items: [agentCoding, nonChatable, managedA] },
       ],
     });
     fireEvent.click(screen.getByRole('button', { name: '打开 AgentCoding Bot' }));
@@ -74,10 +74,10 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
 
   it('caps each section at five tiles and routes the +N overflow to expand', () => {
     const many = Array.from({ length: 7 }, (_, i) => botOf(`m-${i}:1`, `泊位 Bot ${i}`));
-    const props = renderRail({ sections: [{ id: 'managed' as const, label: '我的 Bot', items: many }] });
+    const props = renderRail({ sections: [{ id: 'managed' as const, label: '我管理的 Bot', items: many }] });
     expect(screen.getByRole('button', { name: '打开 泊位 Bot 4' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '打开 泊位 Bot 5' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '展开侧栏，查看我的 Bot其余 2 个' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开侧栏，查看我管理的 Bot其余 2 个' }));
     expect(props.onExpand).toHaveBeenCalledTimes(1);
     expect(props.onQuickOpen).not.toHaveBeenCalled();
   });
@@ -85,11 +85,11 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
   it('keeps empty sections as dashed ghost tiles that request expansion', () => {
     const props = renderRail({
       sections: [
-        { id: 'managed' as const, label: '我的 Bot', items: [] },
+        { id: 'managed' as const, label: '我管理的 Bot', items: [] },
         { id: 'friend' as const, label: '好友 Bot', items: [friendBot] },
       ],
     });
-    fireEvent.click(screen.getByRole('button', { name: '展开侧栏，添加我的 Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开侧栏，添加我管理的 Bot' }));
     expect(props.onExpand).toHaveBeenCalledTimes(1);
   });
 
@@ -119,3 +119,23 @@ it.each([false, true])(
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
   },
 );
+
+it.each([
+  ['managed', 'OFFLINE', '已下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['managed', 'RECYCLED', '已回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+  ['managed', 'RELEASED', '已回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+  ['team', 'OFFLINE', '协作下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['team', 'RECYCLED', '协作回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+  ['team', 'RELEASED', '协作回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+] as const)('收起侧栏的 %s/%s Bot 保持置灰且不能快捷打开', async (section, status, name, reason) => {
+  const unavailable = botOf(`${section}-${status}:1`, name, { status });
+  unavailable.section = section;
+  const props = renderRail({ sections: [{ id: section, label: 'Bot', items: [unavailable] }] });
+
+  expect(screen.queryByRole('button', { name: `打开 ${name}` })).not.toBeInTheDocument();
+  const tile = screen.getByLabelText(`${name}（不可发起会话）`);
+  fireEvent.click(tile);
+  expect(props.onQuickOpen).not.toHaveBeenCalled();
+  fireEvent.pointerMove(tile, { pointerType: 'mouse' });
+  await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(reason));
+});

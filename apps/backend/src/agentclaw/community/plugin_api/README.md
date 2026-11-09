@@ -14,6 +14,7 @@ purpose: "Plugin Protocol declarations (the kernel's outbound interface to swapp
 provides:
   - BcsOwnershipPlugin
   - BcsOwnershipError
+  - BcsCollaborationMetadataPlugin
   - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
   - "LocalSkillSecurityProviderProtocol V1"
   - "Plugin marker"
@@ -28,6 +29,7 @@ internal_dependencies:
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.kernel.bot_manager_sync    # manager sync delivery DTOs
+  - agentclaw.community.kernel.collaboration_repair    # metadata delivery snapshots + MetadataDeliveryError (kernel-owned error family)
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -40,6 +42,12 @@ internal_dependencies:
 ### Change impact
 
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+
+Passport create, metadata-update, and credential-reissue operations may carry
+the optional TeamClaw `bot_type`. Enterprise adapters use it together with the
+existing owner work number to synchronize Agent Portal ownership metadata;
+community implementations may ignore it. Omitting it preserves the previous
+wire behavior.
 
 `PassportPlugin.reissue_agent_credentials` separates the stable AgentPass
 address (`entity_id`) from the principal that receives ALC/AAC/AEC authority
@@ -145,6 +153,11 @@ translation, including enterprise host addresses and Teclaw namespaces.
 `BcsManagersPlugin` is the outbound transport boundary for manager projection.
 `replace_managers` sends one full `ManagerSnapshot` under an explicit deadline;
 failures expose `BcsManagersError(kind, code)` without raw response bodies.
+Missing targets use `REJECTED` with the kernel's `BOT_NOT_FOUND_CODE` instead
+of an HTTP-shaped code. Background sync still treats this as a permanent
+rejection; request-scoped repair stops remaining writes and reports
+`collaboration_bot_not_found`. The HTTP plugin and consumer conformance suites
+pin this mapping.
 NOT_SENT and UNKNOWN are eligible for the consumer's bounded best-effort retry;
 REJECTED ends the round. UNKNOWN does not prove whether BCS applied the write.
 There is no coordination plugin or persistent block. Consumer conformance lives
@@ -181,3 +194,21 @@ The v1 consumer is `BotOwnershipSyncService`; implementations are
 `tests/community/contracts/test_bcs_ownership.py` consumer suite obtains the
 service through `world`, checks success/failure and actual plugin calls; no
 protocol waiver is required. Existing `BcsManagersPlugin` remains managers-only.
+
+## Collaboration metadata delivery Plugin API v2 (2026-11-05)
+
+`BcsCollaborationMetadataPlugin` (in `bcs_collaboration_metadata.py`) is the
+collaboration repair feature's outbound port to BCS's Bot metadata:
+`exists(bcs_bot_id) -> bool` probes remote presence, `update_profile(snapshot)`
+sends one `ProfileSnapshot` (an explicit `""` avatar clear is a valid payload),
+and `aclose()` releases delivery resources on the shared
+loop. Every method performs one bounded attempt under `timeout_seconds`; any
+unconfirmed outcome raises the kernel-owned `MetadataDeliveryError(kind, code)`
+with the NOT_SENT/UNKNOWN/REJECTED classification, and no raw response body
+escapes the transport implementation. Core owns component ordering, retries
+and interpretation; implementations register nothing and never initialize
+ownership.
+
+V2 removes caller configuration repair; the normal caller configuration APIs
+are unchanged. Empty/blank summaries retain BCS Keep semantics but a valid
+onboard acknowledgement is successful profile delivery, not an unknown result.

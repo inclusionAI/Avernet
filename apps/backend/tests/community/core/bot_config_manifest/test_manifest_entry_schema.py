@@ -783,3 +783,280 @@ manifest:
     assert ("manifest.resources[1].path", "resources_protected_entry") in rejected
     assert ("manifest.resources[2].path", "resources_protected_entry") in rejected
     assert not any(code == "resources_protected_entry" and "[3]" in loc for loc, code in rejected)
+
+
+# ── resources excludes (bot file sync) ──────────────────────────────────────
+
+
+def test_excludes_on_a_bot_source_directory_entry_is_accepted():
+    """A 'protocol: bot' directory tree may carry an ``excludes`` list — its
+    members are literal relative paths, governed by the build-ignore grammar."""
+    document = """schema_version: 1
+sources:
+  bot_src:
+    protocol: bot
+    bot_id: src_1
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bot_src
+      excludes:
+        - secrets
+        - large/tmp
+"""
+    # Accepted when validate_document raises (hexibs of a refusal) not at all.
+    assert _accept(document) is not None
+
+
+def test_excludes_on_a_non_bot_source_entry_is_refused():
+    """An ``excludes`` filters a workspace sync, so a git/oss/content source —
+    which addresses its content exactly — has nothing to exclude."""
+    document = """schema_version: 1
+sources:
+  git_src:
+    protocol: git
+    url: https://code.example.com/x.git
+    ref: v1
+manifest:
+  resources:
+    - path: wk/
+      from: git_src
+      excludes:
+        - nested
+"""
+    codes = _codes(document)
+    assert "excludes_not_valid_for_source" in codes
+
+
+def test_excludes_on_a_content_entry_is_refused():
+    """Inline content has no fetch to filter either."""
+    document = """schema_version: 1
+manifest:
+  resources:
+    - path: wk/readme.md
+      content: hi
+      excludes:
+        - nested
+"""
+    assert "excludes_not_valid_for_source" in _codes(document)
+
+
+def test_excludes_on_a_single_file_bot_entry_is_refused():
+    """``excludes`` applies to a directory entry; a single file has no members."""
+    document = """schema_version: 1
+sources:
+  bot_src:
+    protocol: bot
+    bot_id: src_1
+    owner_id: u1
+manifest:
+  resources:
+    - path: wk/one.md
+      from: bot_src
+      excludes:
+        - nested
+"""
+    assert "excludes_on_file_entry" in _codes(document)
+
+
+def test_excludes_must_be_a_non_empty_list():
+    """An empty or non-list ``excludes`` is invalid on either count."""
+    for bad in ("[]", "not-a-list"):
+        document = f"""schema_version: 1
+sources:
+  bot_src:
+    protocol: bot
+    bot_id: src_1
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bot_src
+      excludes: {bad}
+"""
+        assert "invalid_excludes" in _codes(document)
+
+
+def test_a_non_string_excludes_rule_is_refused():
+    """An excludes list entry that is not a string has no path to be: reported
+    per-index under ``invalid_excludes`` rather than tried against the grammar."""
+    document = """schema_version: 1
+sources:
+  bot_src:
+    protocol: bot
+    bot_id: src_1
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bot_src
+      excludes:
+        - 123
+"""
+    assert "invalid_excludes" in _codes(document)
+
+
+def test_excludes_rules_are_literal_relative_paths():
+    """Each rule is governed by ``normalize_build_ignore_path``: no glob
+    characters and no leading ``/``. (A trailing ``/`` or a leading ``./`` are
+    normalized away rather than refused — the build-ignore grammar does the
+    stripping, so only genuine escapes are excluded.)"""
+    for bad in ("*.log", "/abs", "with*glob", "has[glob]", "has?q"):
+        document = f"""schema_version: 1
+sources:
+  bot_src:
+    protocol: bot
+    bot_id: src_1
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bot_src
+      excludes:
+        - "{bad}"
+"""
+        assert "invalid_ignore_path" in _codes(document), bad
+
+
+# ── source declarations: protocol kind properties + bot_id validity ───────
+
+
+def _parse(raw):
+    from agentclaw.community.core.bot_config_manifest.schema.sources import parse_source
+
+    return parse_source(raw)
+
+
+def test_source_decl_kind_properties_report_the_protocol():
+    """``is_git`` / ``is_bot`` read off the parsed protocol — one road, never a
+    second string the wire disagreed with."""
+    from agentclaw.community.core.bot_config_manifest.schema.sources import (
+        parse_source,
+    )
+
+    bot, _ = parse_source({"protocol": "bot", "bot_id": "src_1", "owner_id": "u1"})
+    assert bot.is_bot is True
+    assert bot.is_git is False
+
+    git, _ = parse_source(
+        {"protocol": "git", "url": "https://x/y.git", "ref": "v1", "subpath": "p"}
+    )
+    assert git.is_git is True
+    assert git.is_bot is False
+
+
+def test_a_bot_source_with_a_non_string_bot_id_is_refused():
+    """``bot_id`` must name a source bot — a non-string (or empty) value is a
+    misuse, not a default, and the parser reports it rather than accepting it."""
+    import yaml
+
+    document = """schema_version: 1
+sources:
+  bad:
+    protocol: bot
+    bot_id: 12345
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bad
+"""
+    assert "invalid_bot_id" in _codes(document)
+
+
+def test_a_bot_source_with_an_empty_bot_id_is_refused():
+    """An empty string is the same misuse as a non-string — it names no bot."""
+    document = """schema_version: 1
+sources:
+  bad:
+    protocol: bot
+    bot_id: ""
+    owner_id: u1
+manifest:
+  resources:
+    - path: workspace/
+      from: bad
+"""
+    assert "invalid_bot_id" in _codes(document)
+
+
+# ── bot_config (mapping-valued, kind-dispatched) ──────────────────────────────
+
+
+def test_a_well_formed_render_screen_kind_is_accepted():
+    """``render_screen`` is the v1 kind; a row with ``name`` and ``cdn_url`` is
+    the shape the RenderScreenService create path admits, accepted at ``PUT``."""
+    document = """schema_version: 1
+manifest:
+  bot_config:
+    render_screen:
+      - name: lib-a
+        cdn_url: https://cdn.example.com/a.js
+"""
+    parsed = _accept(document).parsed["manifest"]["bot_config"]["render_screen"]
+    assert parsed[0]["name"] == "lib-a"
+
+
+def test_bot_config_is_a_mapping_not_a_list_so_it_forms_a_kind_branch():
+    """A list where a mapping is expected is refused at the kind, mirroring the
+    engine_config mapping branch — not the list categories' ``invalid_category``."""
+    document = "schema_version: 1\nmanifest:\n  bot_config: []\n"
+    assert ("manifest.bot_config", "invalid_category") in _reject(document)
+
+
+def test_an_unknown_bot_config_kind_is_refused_at_put():
+    """A kind no handler resolves would abort its category mid-write on the
+    bot's apply lock; refused here, from the kind table, before that."""
+    document = """schema_version: 1
+manifest:
+  bot_config:
+    task_nav:
+      - anything: 1
+"""
+    assert ("manifest.bot_config.task_nav", "unknown_bot_config_kind") in _reject(document)
+
+
+def test_a_render_screen_entry_missing_name_and_cdn_url_reports_both_fields():
+    """All-or-nothing: both required fields are named in one pass."""
+    document = """schema_version: 1
+manifest:
+  bot_config:
+    render_screen:
+      - {}
+"""
+    codes = _codes(document)
+    assert "missing_name" in codes
+    assert "missing_cdn_url" in codes
+
+
+def test_an_unknown_field_on_a_render_screen_entry_is_refused():
+    """A closed field set: an extra key is a caller believing they configured a
+    column the RenderScreenService does not store."""
+    document = """schema_version: 1
+manifest:
+  bot_config:
+    render_screen:
+      - name: lib
+        cdn_url: https://cdn.example.com/x.js
+        scope: bot
+"""
+    assert (
+        "manifest.bot_config.render_screen[0].scope",
+        "unknown_field",
+    ) in _reject(document)
+
+
+def test_a_kind_value_that_is_not_a_list_is_refused():
+    document = """schema_version: 1
+manifest:
+  bot_config:
+    render_screen:
+      name: lib
+      cdn_url: https://cdn.example.com/x.js
+"""
+    assert (
+        "manifest.bot_config.render_screen",
+        "invalid_bot_config_kind",
+    ) in _reject(document)
+

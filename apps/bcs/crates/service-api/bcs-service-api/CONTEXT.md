@@ -1,5 +1,77 @@
 # bcs-service-api Context
 
+## Version 4.0.0: Provider initial authority
+
+`OwnershipInitialization` adds required `initial_manager_user_ids`; existing Rust
+constructors must supply it (empty for Human-token registrations). Provider Core
+and the Bot Provider repo add separate fail-closed atomic multi-user admission
+methods. Fresh ordinary identity/binding/authority commits together; initialized
+replays preserve changes, and existing uninitialized multi-user targets conflict.
+Empty snapshots preserve the legacy path. Workspace consumers rebuild together;
+HTTP fields and Plugin APIs are unchanged. Shared registration/rollback tests
+cover Memory and SQLite, with native MySQL migration-chain conformance.
+
+## Version 5.0.0: Candidate viewer perspective and bound friend set
+
+`BotCandidateReadQuery` adds required `viewer_kind: ActorKind`, and
+`BotSearchCandidateQuery` adds `viewer_kind: Option<ActorKind>` plus
+`name_only: bool`. Existing external struct literals must supply the new
+fields, so this is a major Rust Service API version change even though no JSON
+wire field changes. All workspace consumers use path dependencies and rebuild
+together; there is no Plugin API or database migration change.
+
+A Human viewer filters candidates on the target's `user_visibility`, while a
+Bot viewer filters on the Bot-facing `visibility`. Collaboration adds the
+approved friend set to that same dimension. The store applies the filter
+before COUNT and before `offset`/`limit`, so `total` is the post-filter
+pre-pagination value. The V1 candidate list and V1 candidate search now pass
+the authorized perspective `acting.kind`, so a Human viewer filters on
+`user_visibility` and a Bot viewer on `visibility`, with the approved
+Connect/edge friend set. The legacy control-plane search keeps `viewer_kind:
+None` and `name_only: false` (Bot-oriented filtering and the broader
+name/summary/Bot-ID search), while the store's `Some(..)` viewer and
+`name_only: true` (name-only matching for the V1 name fallback) are consumed by
+the authorized Core search entry wired at the composition root.
+
+Candidate stores bind the sorted, de-duplicated friend IDs as one JSON array
+expanded with SQLite `json_each` or MySQL `JSON_TABLE`; page and COUNT share
+the same CTE, conditions and bindings. This removes the per-friend
+`UNION ALL` statement chain (which failed at 501 friends on SQLite) without
+claiming constant set-construction or scan cost.
+
+Measured SQLite shape evidence over 0, 100, 500, 501 and 1,000 friends:
+1,000 friend IDs serialize to about 30,001 bytes of JSON; the candidate page
+SQL is about 811–826 bytes and its COUNT about 357–372 bytes depending on the
+viewer/purpose branch; the page statement binds 6 parameters (one friend JSON
+array plus the fixed filters and page bounds), and COUNT binds the same shared
+4 conditions. Each candidate query remains
+exactly two statements (page + COUNT) and contains no per-friend `UNION ALL`
+chain; the friend-set binding count does not grow with the set size.
+
+The control-plane Core contract also exposes `search_candidate_records`, a
+Provider-hydration-free search path for authorization. The production
+`BotControlPlaneCore` delegates it directly to the repository's candidate
+record query; authorized candidate search must use it for visibility/edge
+filtering and hydrate Provider metadata only for the final displayed IDs.
+The existing `search_candidates` path remains the hydrated projection for
+callers that need Provider information.
+
+The same 5.0.0 change adds the authorized shared-search contract.
+`BotCandidateSearchCoreService::search_authorized_candidates` takes
+`AuthorizedCandidateSearchQuery` (query text, acting actor, env, `ActorKind`
+viewer, purpose visibility, approved `friend_ids`, display limit) and returns
+`ServiceResult<BotCandidateSearchCoreResult>`. Its default explicitly fails, so
+test doubles and legacy implementations keep compiling while an unwired
+composition never returns an unauthorized success. `WorkerRecommendCommand`
+gains the required `WorkerRecommendationScope` (`LegacyDefault` /
+`AllVisibilities`), making the provider recall range an explicit choice at every
+construction site. Recall scope is not authorization: the production Core
+re-checks the bounded provider recall against the control plane before
+hydration. This contract adds no JSON wire field of its own, no Plugin API
+change, and no database migration; the same 5.0.0 delivery also adds the
+BCSFuse request `filters` field in `bcs-fuse-client` to carry that recall
+scope.
+
 ## Version 3.0.0: Bot response avatars
 
 `PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
@@ -798,3 +870,5 @@ not Caller inheritance. There is no identity Plugin API or task wire change.
 Bounded replay and composition semantics are specified in
 `apps/bcs/docs/native-task-caller.md` and exercised through the real task and
 protected-delivery application seams.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.

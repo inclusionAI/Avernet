@@ -1,6 +1,6 @@
-import { GroupSessionView } from '@/assets/TaskPanel/GroupDrillDown';
-import type { TaskNodeView } from '@/assets/TaskPanel/types';
 import type { TaskLinkedSessionProps } from '@/extensions/contracts/groupTasks';
+import { TaskPanelAssetBoundary } from './TaskPanelAssetBoundary';
+import type { TaskNodeView } from '@avernet-assets/task-panel';
 import type { TaskLinkedSessionTarget } from '@/stores/taskSidePanelStore';
 import { useCallback, useState } from 'react';
 import { TaskLinkedSessionComposer } from './TaskLinkedSessionComposer';
@@ -42,7 +42,7 @@ export function TaskLinkedSession({ target, userId, onClose }: TaskLinkedSession
   return (
     <section aria-label="任务联动会话" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1">
-        <GroupSessionView
+        <TaskPanelAssetBoundary>{asset => <asset.GroupSessionView
           key={targetKey}
           node={node}
           bcsBaseUrl=""
@@ -51,7 +51,7 @@ export function TaskLinkedSession({ target, userId, onClose }: TaskLinkedSession
           onBack={onClose}
           backLabel="返回当前会话"
           refreshVersion={refreshVersion}
-        />
+        />}</TaskPanelAssetBoundary>
       </div>
       <TaskLinkedSessionComposer
         key={targetKey}

@@ -50,6 +50,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
+  - agentclaw.community.plugin_api.service_bot_eval  # service-Bot evaluation gate Protocol, context and uploaded material contract
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.repository.protocols.identity

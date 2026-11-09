@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 export type McpCandidateQuery = { source: 'internal' | 'open-platform'; keyword?: string };
 
-export function useBotEditorCandidates(botId: string | null, spaceId?: string) {
+export function useBotEditorCandidates(botId: string | null, spaceId?: string, ownerId?: string) {
   const [availableMcps, setAvailableMcps] = useState<BotEditorMcp[]>([]);
   const [marketSkills, setMarketSkills] = useState<BotEditorSkill[]>([]);
   const [skillCenterSkills, setSkillCenterSkills] = useState<BotEditorSkill[]>([]);
@@ -19,7 +19,7 @@ export function useBotEditorCandidates(botId: string | null, spaceId?: string) {
     setMarketSkills([]);
     setSkillCenterSkills([]);
     setWorkshopSkills([]);
-  }, [botId]);
+  }, [botId, ownerId]);
 
   const loadCapabilityCandidates = useCallback(
     async (kind: 'skill' | 'mcp', mcpQuery?: McpCandidateQuery) => {
@@ -27,7 +27,7 @@ export function useBotEditorCandidates(botId: string | null, spaceId?: string) {
       const sequence = ++sequenceRef.current;
       setCandidatesLoading(true);
       try {
-        const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId, kind, mcpQuery);
+        const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId, kind, mcpQuery, ownerId);
         if (sequence !== sequenceRef.current) return;
         if (kind === 'mcp') setAvailableMcps(candidates.availableMcps);
         else {
@@ -43,7 +43,7 @@ export function useBotEditorCandidates(botId: string | null, spaceId?: string) {
         if (sequence === sequenceRef.current) setCandidatesLoading(false);
       }
     },
-    [botId, spaceId],
+    [botId, ownerId, spaceId],
   );
 
   return {

@@ -22,6 +22,14 @@ pending message before exposing interaction cards or issuing a continuation.
 It does not call a Core contract via an import or facade re-export. Bootstrap
 supplies the application implementation; no implementation selection occurs here.
 
+REST clients retain default headers in `ClientWithDefaults`, outside the
+underlying reqwest transport. They are merged before tracing, so stale trace
+aliases and absent baggage cannot return at send time. Card fetch stays untraced;
+DNS pinning, TLS, credentials and redirect policy are unchanged. The binding
+exposes its five explicit BCS operations; its previous unused SDK `Deref` escape
+hatch is removed so calls cannot silently bypass the controlled header path.
+`bind_rest_client` accepts the wrapper (or a default-free reqwest client).
+
 Initial stream, async continuation, Task query/cancel and subscription share
 bounded REST error parsing so ProtoJSON typed ErrorInfo survives SDK binding
 gaps. A complete initial 400/401/403/404/405/406/415/422 rejection is Failed with
@@ -197,3 +205,5 @@ must match JSON-RPC 2.0 and request ID; errors retain numeric codes and typed da
 not remote diagnostics. The shared bounded SSE decoder unwraps each RPC response
 before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
 binding fallback are introduced. Run persistence records json_rpc separately.
+
+Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.

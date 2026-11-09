@@ -46,3 +46,31 @@ describe('useBotSessionFileUpload', () => {
     expect(result.current.tasks[0]).toMatchObject({ phase: 'ready', resourceId: 'resource-1' });
   });
 });
+
+it('取消后忽略晚到的上传成功，不引用旧文件、不消费新会话队列或覆盖上传态', async () => {
+  let resolveUpload!: (value: unknown) => void;
+  uploadOne.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve; }));
+  const { result } = renderHook(() => useBotSessionFileUpload('bot-1', 'session-1', 'user-1'));
+  const ready = jest.fn();
+  let pending!: Promise<void>;
+  act(() => {
+    result.current.stageFiles([new File(['old'], 'old.md')]);
+    pending = result.current.submit(ready);
+  });
+  const signal = (uploadOne.mock.calls[0][4] as { signal: AbortSignal }).signal;
+  act(() => result.current.cancelAll());
+  expect(signal.aborted).toBe(true);
+  act(() => {
+    useBotSessionFileStore.getState().resetForSession();
+    result.current.stageFiles([new File(['new'], 'new.md')]);
+    useBotSessionFileStore.getState().setIsUploading(true);
+  });
+  await act(async () => {
+    resolveUpload({ ok: true, data: { resourceId: 'old-resource', displayName: 'old.md', status: 'ready' } });
+    await pending;
+  });
+  expect(ready).not.toHaveBeenCalled();
+  expect(useBotSessionFileStore.getState().readyFiles).toEqual([]);
+  expect(useBotSessionFileStore.getState().isUploading).toBe(true);
+  expect(uploadOne).toHaveBeenCalledTimes(1);
+});

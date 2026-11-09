@@ -1,297 +1,102 @@
-//! Fixed-column queue telemetry. Hooks only update bounded in-memory counters;
-//! the sampler owns SQL and emits message-only events to the existing logger.
+//! One fixed-column CSV summary per sample, using the existing log writer.
+//! Post-commit hooks only update eight bounded Send counters in memory.
 use bcs_domain::{message_delivery::PersistedMessageDelivery, DeliveryType};
 use bcs_message_flow::delivery_policy::LiveDeliveryPolicy;
 use bcs_service_api::application::message_delivery::{
     DeliveryInstrumentation, ManagedMessageDeliveryService,
 };
 use bcs_service_api::port::repo::message_delivery::DeliveryQueueStatistic;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::{Arc, Mutex}, time::{Duration, Instant}};
 
-// Codes are a versioned positional contract documented in message-delivery-service-api.md.
-const FLOWS: &[&str] = &["group", "direct_a2a", "task", "system", "state_machine"];
-const STATUSES: &[&str] = &[
-    "queued",
-    "dispatching",
-    "running",
-    "unknown",
-    "cancelling",
-    "cancel_unknown",
-    "completed",
-    "failed",
-    "cancelled",
-    "expired",
-    "rejected_capacity",
-    "pending_context",
-    "bound",
-    "consumed",
-    "discarded_context",
-];
-const REASONS: &[&str] = &[
-    "prior_message_running",
-    "bot_capacity",
-    "rate_limited",
-    "bot_offline",
-    "retry_backoff",
-    "paused",
-];
-const OPERATIONS: &[&str] = &[
-    "lane_blocked",
-    "lookup",
-    "queued_bots",
-    "active_count",
-    "queued_heads",
-    "expiry_batch",
-    "control_batch",
-    "recovery_batch",
-    "queue_statistics",
-    "budget_exhausted",
-    "tick",
-    "bounded_contexts",
-];
-fn code(value: &str, choices: &[&str]) -> u8 {
-    choices
-        .iter()
-        .position(|v| *v == value)
-        .map_or(0, |i| i as u8 + 1)
+struct Interval {
+    counts: [u64; 8],
+    started: Instant,
 }
-fn label(value: impl serde::Serialize) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default()
+impl Default for Interval {
+    fn default() -> Self { Self { counts: [0; 8], started: Instant::now() } }
 }
-
-// type, flow, kind, status, wait reason, metric/event/operation code.
-type Key = [u8; 6];
-#[derive(Clone, Default)]
-struct Sample {
-    value: f64,
-    count: u64,
-    sum: f64,
-    max: f64,
-}
-impl Sample {
-    fn observe(&mut self, seconds: Option<f64>, rows: usize) {
-        self.value += rows as f64;
-        if let Some(seconds) = seconds {
-            self.count += 1;
-            self.sum += seconds;
-            self.max = self.max.max(seconds);
-        }
-    }
-}
+#[derive(Default)]
 pub struct DeliveryMetrics {
-    boot_id: String,
-    counters: Mutex<BTreeMap<Key, Sample>>,
-}
-impl Default for DeliveryMetrics {
-    fn default() -> Self {
-        Self { boot_id: uuid::Uuid::new_v4().simple().to_string(), counters: Mutex::default() }
-    }
+    // Shared across sampler/leadership restarts: never replay an emitted interval.
+    interval: Mutex<Interval>,
 }
 impl DeliveryInstrumentation for DeliveryMetrics {
-    fn operation(&self, operation: &'static str, seconds: f64, rows: usize, success: bool) {
-        let mut counters = self.counters.lock().unwrap_or_else(|e| e.into_inner());
-        // status 1/2 means operation success/error only for record type 3.
-        counters
-            .entry([
-                3,
-                0,
-                0,
-                if success { 1 } else { 2 },
-                0,
-                code(operation, OPERATIONS),
-            ])
-            .or_default()
-            .observe(Some(seconds.max(0.0)), rows);
-    }
+    // Operation timings belong in ordinary dependency observations. This file
+    // contains only queue throughput, depth and sampler/writer health.
+    fn operation(&self, _operation: &'static str, _seconds: f64, _rows: usize, _success: bool) {}
+
     fn event(&self, event: &'static str, row: &PersistedMessageDelivery) {
-        // Context metrics count first send-start only, not safe retries. Values
-        // are cumulative quantities; no body, URL or identity is logged.
-        if event == "started" && row.attempt_no == 1 {
-            if let Some(selection) = row.context_selection_json.as_ref().and_then(|v| serde_json::from_value::<bcs_domain::message_delivery::DeliveryContextSelection>(v.clone()).ok()) {
-                let mut counters = self.counters.lock().unwrap_or_else(|e| e.into_inner());
-                let discarded = selection.bound_count.saturating_sub(selection.selected.len() as u64);
-                let truncated = discarded > 0 || selection.selected.iter().any(|s| s.body_start > 0);
-                for (index, value) in [selection.selected.len() as u64, selection.history_bytes, discarded, u64::from(truncated)].into_iter().enumerate() {
-                    counters.entry([5, code(&label(row.flow_kind), FLOWS), 1, 0, 0, index as u8 + 1]).or_default().value += value as f64;
-                }
+        if row.state.kind != DeliveryType::Send { return; }
+        use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+        let mut interval = self.interval.lock().unwrap_or_else(|e| e.into_inner());
+        match (event, row.state.status) {
+            ("admitted", Status::RejectedCapacity) => interval.counts[6] += 1,
+            ("admitted", _) => interval.counts[0] += 1,
+            ("started", _) => {
+                interval.counts[1] += 1;
+                if row.attempt_no > 1 { interval.counts[7] += 1; }
             }
+            ("terminal", Status::Completed) => interval.counts[2] += 1,
+            ("terminal", Status::Failed) => interval.counts[3] += 1,
+            ("terminal", Status::Cancelled) => interval.counts[4] += 1,
+            ("terminal", Status::Expired) => interval.counts[5] += 1,
+            _ => {}
         }
-        let event_code = code(event, &["admitted", "started", "terminal"]);
-        let seconds = match event {
-            "started" => row
-                .send_started_at_ms
-                .map(|t| (t - row.created_at_ms).max(0) as f64 / 1000.0),
-            "terminal" => row
-                .send_started_at_ms
-                .zip(row.terminal_at_ms)
-                .map(|(a, b)| (b - a).max(0) as f64 / 1000.0),
-            _ => None,
-        };
-        let key = [
-            2,
-            code(&label(row.flow_kind), FLOWS),
-            if row.state.kind == DeliveryType::Send {
-                1
-            } else {
-                2
-            },
-            code(&label(row.state.status), STATUSES),
-            0,
-            event_code,
-        ];
-        self.counters
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(key)
-            .or_default()
-            .observe(seconds, 1);
     }
 }
 
 #[derive(Default)]
 struct Snapshot {
-    depths: BTreeMap<Key, Sample>,
-    totals: [f64; 7],
+    // queued, active, pending context, bound context, uncertain, oldest seconds.
+    totals: [f64; 6],
     success: bool,
-    last_success: i64,
+    last_success: Option<i64>,
 }
 impl Snapshot {
     fn update(&mut self, rows: Option<Vec<DeliveryQueueStatistic>>, now: i64) {
         self.success = rows.is_some();
-        let Some(rows) = rows else {
-            return;
-        };
-        // Retain the finite key set and explicitly zero vanished groups.
-        for value in self.depths.values_mut() {
-            *value = Sample::default();
-        }
-        self.totals = [0.0; 7];
+        let Some(rows) = rows else { return; };
+        self.totals = [0.0; 6];
         for row in rows {
             let send = row.kind == "send";
-            let key = [
-                1,
-                code(&row.flow_kind, FLOWS),
-                if send { 1 } else { 2 },
-                code(&row.status, STATUSES),
-                code(&row.wait_reason, REASONS),
-                0,
-            ];
-            self.depths.entry(key).or_default().value += row.count as f64;
             if send && row.status == "queued" {
                 self.totals[0] += row.count as f64;
                 self.totals[5] = self.totals[5].max(
-                    row.oldest_created_at_ms
-                        .map_or(0.0, |t| (now - t).max(0) as f64 / 1000.0),
+                    row.oldest_created_at_ms.map_or(0.0, |t| (now - t).max(0) as f64 / 1000.0),
                 );
             }
-            if send
-                && [
-                    "dispatching",
-                    "running",
-                    "unknown",
-                    "cancelling",
-                    "cancel_unknown",
-                ]
-                .contains(&row.status.as_str())
-            {
+            if send && ["dispatching", "running", "unknown", "cancelling", "cancel_unknown"].contains(&row.status.as_str()) {
                 self.totals[1] += row.count as f64;
             }
-            if row.status == "pending_context" {
-                self.totals[2] += row.count as f64;
-            }
-            if row.status == "bound" {
-                self.totals[3] += row.count as f64;
-            }
+            if !send && row.status == "pending_context" { self.totals[2] += row.count as f64; }
+            if !send && row.status == "bound" { self.totals[3] += row.count as f64; }
             if send && ["unknown", "cancel_unknown"].contains(&row.status.as_str()) {
                 self.totals[4] += row.count as f64;
             }
         }
-        self.totals[6] = self.totals[4];
-        self.last_success = now;
+        self.last_success = Some(now);
     }
-    fn line(&self, now: i64, boot: &str, key: Key, sample: &Sample) -> String {
-        format!(
-            "1,{now},{boot},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-            key[0],
-            key[1],
-            key[2],
-            key[3],
-            key[4],
-            key[5],
-            sample.value,
-            sample.count,
-            sample.sum,
-            sample.max,
-            u8::from(self.success),
-            self.last_success
-        )
-    }
-    fn render(
-        &self,
-        now: i64,
-        boot: &str,
-        metrics: &DeliveryMetrics,
-        available: bool,
-        paused: bool,
-        version: u64,
-        cache: [u64; 6],
-        dropped: usize,
-        errors: u64,
-    ) -> String {
-        let mut text = String::new();
-        for (i, value) in self
-            .totals
-            .iter()
-            .copied()
-            .chain([
-                f64::from(available),
-                f64::from(paused),
-                version as f64,
-                dropped as f64,
-                errors as f64,
-            ])
-            .enumerate()
-        {
-            text.push_str(&self.line(
-                now,
-                boot,
-                [0, 0, 0, 0, 0, i as u8 + 1],
-                &Sample {
-                    value,
-                    ..Default::default()
-                },
-            ));
-        }
-        for (key, sample) in &self.depths {
-            text.push_str(&self.line(now, boot, *key, sample));
-        }
-        let counters = metrics
-            .counters
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        for (key, sample) in counters {
-            text.push_str(&self.line(now, boot, key, &sample));
-        }
-        for (i, value) in cache.into_iter().enumerate() {
-            text.push_str(&self.line(
-                now,
-                boot,
-                [4, 0, 0, 0, 0, i as u8 + 1],
-                &Sample {
-                    value: value as f64,
-                    ..Default::default()
-                },
-            ));
-        }
-        text
+
+    fn render(&self, now: i64, metrics: &DeliveryMetrics, available: bool, paused: bool, dropped: usize, errors: u64) -> String {
+        let (counts, interval_ms) = {
+            let mut interval = metrics.interval.lock().unwrap_or_else(|e| e.into_inner());
+            let finished = Instant::now();
+            let elapsed = finished.duration_since(interval.started).as_millis();
+            interval.started = finished;
+            (std::mem::take(&mut interval.counts), elapsed)
+        };
+        // CSV v2: each metric has one stable column. No record-type/code rows.
+        // Column order and aggregation rules are in message-delivery-service-api.md.
+        let mut columns = vec![now.to_string(), interval_ms.to_string()];
+        columns.extend(counts.into_iter().map(|v| v.to_string()));
+        columns.extend(self.totals.iter().map(|v| v.to_string()));
+        columns.extend([
+            u8::from(available).to_string(), u8::from(paused).to_string(),
+            u8::from(self.success).to_string(),
+            self.last_success.map_or(-1, |t| (now - t).max(0)).to_string(),
+            dropped.to_string(), errors.to_string(), "2".to_owned(),
+        ]);
+        columns.join(",")
     }
 }
 
@@ -301,7 +106,6 @@ pub async fn run(
     metrics: Arc<DeliveryMetrics>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    let boot = &metrics.boot_id;
     let mut ticker = tokio::time::interval(Duration::from_secs(10));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut snapshot = Snapshot::default();
@@ -331,14 +135,11 @@ pub async fn run(
         let (dropped, errors) = crate::logging::delivery_monitor_statistics();
         let record = snapshot.render(
                 now,
-                boot,
                 &metrics,
                 policy
                     .scheduler_available
                     .load(std::sync::atomic::Ordering::SeqCst),
                 current.policy.pause_dispatch,
-                current.version,
-                bcs_bot_store::provider_cache::statistics(),
                 dropped,
                 errors,
         );
@@ -349,110 +150,108 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn sampler_restarts_preserve_counter_identity() {
-        let metrics = Arc::new(DeliveryMetrics::default());
-        let first_epoch = metrics.clone();
-        first_epoch.operation("tick", 0.1, 3, true);
-        let first = Snapshot::default().render(1000, &first_epoch.boot_id, &first_epoch, true, false, 0, [0; 6], 0, 0);
-        drop(first_epoch);
-        let next_epoch = metrics.clone();
-        next_epoch.operation("tick", 0.2, 2, true);
-        let next = Snapshot::default().render(2000, &next_epoch.boot_id, &next_epoch, true, false, 0, [0; 6], 0, 0);
-        assert_eq!(first.lines().next().unwrap().split(',').nth(2), next.lines().next().unwrap().split(',').nth(2));
-        assert!(next.contains(",3,0,0,1,0,11,5,2,"), "operation counter remains cumulative");
-        assert_ne!(metrics.boot_id, DeliveryMetrics::default().boot_id);
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+
+    fn row() -> PersistedMessageDelivery {
+        serde_json::from_value(serde_json::json!({
+            "delivery_id":"private", "env":"test", "source_message_id":"private",
+            "target_bot_id":"private", "session_id":"private", "group_id":"private", "source_session_seq":1,
+            "flow_kind":"group", "kind":"send", "status":"queued", "state_version":1,
+            "may_have_been_sent":false, "available_at_ms":1000, "created_at_ms":1000,
+            "updated_at_ms":1000, "attempt_no":0, "semantic_projection_json":{}
+        })).unwrap()
     }
-    #[test]
-    fn snapshot_failure_retains_data_and_successful_empty_clears_it() {
-        let mut snapshot = Snapshot::default();
-        snapshot.update(None, 1);
-        assert!(!snapshot.success);
-        assert_eq!(snapshot.last_success, 0);
-        snapshot.update(
-            Some(vec![DeliveryQueueStatistic {
-                flow_kind: "group".into(),
-                kind: "send".into(),
-                status: "queued".into(),
-                wait_reason: "paused".into(),
-                count: 3,
-                oldest_created_at_ms: Some(1000),
-            }]),
-            5000,
-        );
-        snapshot.update(None, 6000);
-        assert_eq!(snapshot.totals[0], 3.0);
-        assert_eq!(snapshot.totals[5], 4.0);
-        assert_eq!(snapshot.last_success, 5000);
-        assert!(!snapshot.success);
-        snapshot.update(Some(vec![]), 7000);
-        assert_eq!(snapshot.totals[0], 0.0);
-        assert!(snapshot.depths.values().all(|s| s.value == 0.0));
-        assert!(snapshot.success);
-    }
-    #[test]
-    fn monitor_has_fixed_columns_and_no_header_or_tracing_prefix() {
-        let snapshot = Snapshot::default();
-        let metrics = DeliveryMetrics::default();
-        metrics.operation("tick", 0.5, 3, true);
-        metrics.operation("tick", 0.2, 2, true);
-        let records = snapshot.render(1000, "abc", &metrics, true, false, 7, [0; 6], 0, 0);
-        assert_eq!(
-            records.lines().next().unwrap(),
-            "1,1000,abc,0,0,0,0,0,1,0,0,0,0,0,0"
-        );
-        assert!(records.lines().all(|line| line.split(',').count() == 15));
-        assert!(records.contains("1,1000,abc,3,0,0,1,0,11,5,2,0.7,0.5,0,0\n"));
-        assert!(!records.contains("tick"));
-        assert!(!records.contains("INFO"));
-    }
-    #[test]
-    fn event_counts_and_duration_samples_have_distinct_denominators() {
-        let mut row: PersistedMessageDelivery = serde_json::from_value(serde_json::json!({
-            "delivery_id":"not-logged", "env":"test", "source_message_id":"not-logged",
-            "target_bot_id":"not-logged", "session_id":"not-logged", "group_id":"not-logged",
-            "source_session_seq":1, "flow_kind":"group", "kind":"send", "status":"queued",
-            "state_version":1, "may_have_been_sent":false, "available_at_ms":1000,
-            "created_at_ms":1000, "updated_at_ms":1000, "attempt_no":0, "semantic_projection_json":{}
-        })).unwrap();
-        let metrics = DeliveryMetrics::default();
-        metrics.event("admitted", &row);
-        row.send_started_at_ms = Some(3000);
-        row.state.status = bcs_domain::message_delivery::MessageDeliveryStatus::Dispatching;
-        metrics.event("started", &row);
-        row.terminal_at_ms = Some(8000);
-        row.state.status = bcs_domain::message_delivery::MessageDeliveryStatus::Completed;
-        metrics.event("terminal", &row);
-        let data = metrics.counters.lock().unwrap();
-        assert_eq!(data[&[2, 1, 1, 1, 0, 1]].value, 1.0);
-        assert_eq!(data[&[2, 1, 1, 1, 0, 1]].count, 0);
-        assert_eq!(data[&[2, 1, 1, 2, 0, 2]].sum, 2.0);
-        assert_eq!(data[&[2, 1, 1, 7, 0, 3]].sum, 5.0);
+    fn columns(snapshot: &Snapshot, metrics: &DeliveryMetrics) -> Vec<String> {
+        snapshot.render(10000, metrics, true, false, 0, 0).split(',').map(str::to_owned).collect()
     }
 
     #[test]
-    fn context_monitor_uses_existing_columns_and_counts_first_attempt_only() {
-        let mut row: PersistedMessageDelivery = serde_json::from_value(serde_json::json!({
-            "delivery_id":"private", "env":"test", "source_message_id":"private",
-            "target_bot_id":"private", "session_id":"private", "group_id":"private",
-            "source_session_seq":1, "flow_kind":"group", "kind":"send", "status":"dispatching",
-            "state_version":2, "may_have_been_sent":true, "available_at_ms":1000,
-            "created_at_ms":1000, "updated_at_ms":1000, "attempt_no":1, "semantic_projection_json":{},
-            "context_selection_json":{"version":1,"max_messages":24,"max_bytes":131072,"bound_count":3,"history_bytes":512,
-                "selected":[{"delivery_id":"private-context","state_version":2,"body_start":10}]}
-        })).unwrap();
+    fn one_csv_row_has_stable_metric_columns_and_no_private_data() {
+        let mut snapshot = Snapshot::default();
+        snapshot.update(Some(vec![]), 9000);
         let metrics = DeliveryMetrics::default();
-        metrics.event("started", &row);
-        row.attempt_no = 2;
-        metrics.event("started", &row);
-        let data = metrics.counters.lock().unwrap();
-        for (index, expected) in [1.0, 512.0, 2.0, 1.0].into_iter().enumerate() {
-            assert_eq!(data[&[5,1,1,0,0,index as u8 + 1]].value, expected);
-        }
-        drop(data);
-        let text = Snapshot::default().render(1000, "boot", &metrics, true, false, 1, [0;6], 0, 0);
-        assert!(text.lines().all(|l| l.split(',').count() == 15));
+        let mut delivery = row();
+        metrics.event("admitted", &delivery);
+        metrics.event("started", &delivery);
+        delivery.state.status = Status::Completed;
+        metrics.event("terminal", &delivery);
+        let text = snapshot.render(10000, &metrics, true, false, 4, 5);
+        assert_eq!(text.lines().count(), 1);
+        let fields: Vec<_> = text.split(',').collect();
+        assert_eq!(fields.len(), 23);
+        assert_eq!(fields[0], "10000");
+        assert!(fields[1].parse::<u128>().is_ok());
+        assert_eq!(&fields[2..10], &["1", "1", "1", "0", "0", "0", "0", "0"]);
+        assert_eq!(&fields[10..16], &["0"; 6]);
+        assert_eq!(&fields[16..], &["1", "0", "1", "1000", "4", "5", "2"]);
         assert!(!text.contains("private"));
-        assert!(text.contains(",5,1,1,0,0,2,512,0,0,0,"));
+        assert!(!text.contains("INFO"));
+    }
+
+    #[test]
+    fn deltas_reset_and_sampler_restart_does_not_replay() {
+        let metrics = Arc::new(DeliveryMetrics::default());
+        metrics.event("admitted", &row());
+        let first = columns(&Snapshot::default(), &metrics);
+        assert_eq!(first[2], "1");
+        let resumed = metrics.clone();
+        assert_eq!(columns(&Snapshot::default(), &resumed)[2], "0");
+        resumed.event("admitted", &row());
+        assert_eq!(columns(&Snapshot::default(), &resumed)[2], "1");
+    }
+
+    #[test]
+    fn retry_rejection_and_terminal_counts_exclude_inject() {
+        let metrics = DeliveryMetrics::default();
+        let mut delivery = row();
+        delivery.attempt_no = 2;
+        metrics.event("started", &delivery);
+        for status in [Status::Failed, Status::Cancelled, Status::Expired] {
+            delivery.state.status = status;
+            metrics.event("terminal", &delivery);
+        }
+        delivery.state.status = Status::RejectedCapacity;
+        metrics.event("admitted", &delivery);
+        metrics.event("terminal", &delivery);
+        delivery.state.kind = DeliveryType::Inject;
+        for event in ["admitted", "started", "terminal"] { metrics.event(event, &delivery); }
+        let fields = columns(&Snapshot::default(), &metrics);
+        assert_eq!(&fields[2..10], &["0", "1", "0", "1", "1", "1", "1", "1"]);
+        assert_eq!(&columns(&Snapshot::default(), &metrics)[2..10], &["0"; 8]);
+    }
+
+    #[test]
+    fn failed_snapshot_retains_gauges_but_marks_them_invalid() {
+        let mut snapshot = Snapshot::default();
+        let metrics = DeliveryMetrics::default();
+        snapshot.update(None, 1000);
+        assert_eq!(&columns(&snapshot, &metrics)[18..20], &["0", "-1"]);
+        snapshot.update(Some(vec![DeliveryQueueStatistic {
+            flow_kind: "group".into(), kind: "send".into(), status: "queued".into(),
+            wait_reason: "paused".into(), count: 3, oldest_created_at_ms: Some(1000),
+        }]), 5000);
+        snapshot.update(None, 6000);
+        let fields = columns(&snapshot, &metrics);
+        assert_eq!(fields[10], "3");
+        assert_eq!(fields[15], "4");
+        assert_eq!(&fields[18..20], &["0", "5000"]);
+        // SQL failure does not invalidate or discard post-commit event counts.
+        metrics.event("admitted", &row());
+        assert_eq!(columns(&snapshot, &metrics)[2], "1");
+        snapshot.update(Some(vec![]), 10000);
+        assert_eq!(&columns(&snapshot, &metrics)[10..16], &["0"; 6]);
+        assert_eq!(&columns(&snapshot, &metrics)[18..20], &["1", "0"]);
+    }
+
+    #[test]
+    fn depth_summary_keeps_active_uncertain_and_context_separate() {
+        let mut snapshot = Snapshot::default();
+        let rows = [("send", "running", 2), ("send", "unknown", 1),
+            ("send", "cancel_unknown", 1), ("inject", "pending_context", 3), ("inject", "bound", 4)];
+        snapshot.update(Some(rows.into_iter().map(|(kind, status, count)| DeliveryQueueStatistic {
+            flow_kind: "group".into(), kind: kind.into(), status: status.into(),
+            wait_reason: "none".into(), count, oldest_created_at_ms: None,
+        }).collect()), 10000);
+        assert_eq!(&columns(&snapshot, &DeliveryMetrics::default())[10..16], &["0", "4", "3", "4", "2", "0"]);
     }
 }

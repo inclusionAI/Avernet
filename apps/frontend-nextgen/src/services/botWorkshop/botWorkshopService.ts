@@ -27,6 +27,7 @@ import { botAvatarService } from './botAvatarService';
 import { personalCreateSpace, toBotCreateRequest, validateBotCreate } from './botCreatePolicy';
 import { botEditorService } from './botEditorService';
 import { mapBotDto, mapBotList } from '@/services/bots/botMapper';
+import type { BotRestartResponse } from './botRestartTracking';
 import { localBotService } from './localBotService';
 import type {
   AvernetBotCreateRequest,
@@ -345,9 +346,24 @@ export const botWorkshopService = {
     else if (bot.serviceMode === 'service') await deleteServiceDraft(bot.id);
     else await deleteBot(bot.id);
   },
-  async restart(bot: BotDomain) {
-    if (bot.deployment === 'local') await restartLocalBot(bot.id);
-    else await restartBot(bot.id);
+  async restart(bot: BotDomain, userId?: string): Promise<BotRestartResponse | undefined> {
+    if (bot.deployment === 'local') {
+      await restartLocalBot(bot.id);
+      return undefined;
+    }
+    // AgentCoding 的 Bot 管理页重启等价于用户确认后执行模板重载。沿用 open-claw
+    // 的既有 wire 契约传字符串 'true'；其他引擎保持无 body 重启，不受影响。
+    const target = bot.runtime.isAgentCodingBot
+      ? {
+          userId: userId ?? '',
+          ownerId: bot.ownerId,
+          extraConfigs: { confirmed_template_update: 'true' },
+        }
+      : undefined;
+    const response = await restartBot(bot.id, target);
+    // restart 接口返回已落库的 Bot 记录：同步引擎（openclaw）此时已是 PENDING，
+    // coding 引擎携带 ext.aicoding.restart journal，由前端据此启动重启追踪。
+    return (response.data ?? undefined) as unknown as BotRestartResponse | undefined;
   },
   async restartEngine(id: string) {
     await restartBotEngine(id);

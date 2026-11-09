@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 
@@ -27,9 +26,6 @@ from agentclaw.community.core.session_resources.types import (
     SessionResourceStatus,
     SessionUploadIntent,
     UploadGrant,
-)
-from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
-    TcResourceReadyCoordinator,
 )
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
@@ -58,23 +54,6 @@ def _record(**overrides):
     }
     values.update(overrides)
     return SessionResourceRecord(**values)
-
-
-class _RecordingObserver:
-    def __init__(self) -> None:
-        self.records: list[SessionResourceRecord] = []
-
-    def notify_in_background(self, resource: SessionResourceRecord) -> None:
-        self.records.append(resource)
-
-
-class _FailingPublisher:
-    def __init__(self) -> None:
-        self.events = []
-
-    async def publish(self, event) -> None:
-        self.events.append(event)
-        raise RuntimeError("downstream unavailable")
 
 
 class _Service:
@@ -166,6 +145,7 @@ async def test_upload_intent_keeps_the_primary_service_contract_only():
         "binding_id": None,
         "size_bytes": 12,
         "content_hash": "hash-1",
+        "creator_name": None,
     }
     assert result["files"][0]["resource_id"] == "sr_001"
     assert "mime_type" not in result["files"][0]
@@ -228,10 +208,9 @@ def test_upload_intent_request_accepts_positive_binding_id_only():
 
 
 @pytest.mark.asyncio
-async def test_upload_complete_invokes_the_shared_observer():
+async def test_upload_complete_preserves_ready_without_knowledge_observer():
     service = _Service()
     service.complete_result = replace(_record(), status=SessionResourceStatus.READY)
-    observer = _RecordingObserver()
 
     result = await upload_complete(
         UploadCompleteRequest(
@@ -242,17 +221,15 @@ async def test_upload_complete_invokes_the_shared_observer():
         ),
         user=AuthenticatedUser("id", "owner-1", "owner-1"),
         service=service,
-        observer=observer,
     )
 
     assert result["status"] == "ready"
-    assert observer.records == [service.complete_result]
+    assert service.complete_kwargs["resource_id"] == "sr_001"
 
 
 @pytest.mark.asyncio
-async def test_polling_invokes_the_shared_observer_even_before_ready():
+async def test_polling_preserves_materializing_without_knowledge_observer():
     service = _Service()
-    observer = _RecordingObserver()
 
     result = await materialize_status(
         "sr_001",
@@ -260,11 +237,9 @@ async def test_polling_invokes_the_shared_observer_even_before_ready():
         "session-raw",
         user=AuthenticatedUser("id", "owner-1", "owner-1"),
         service=service,
-        observer=observer,
     )
 
     assert result["status"] == "device_syncing"
-    assert observer.records == [service.status_result]
     assert service.status_kwargs == {
         "owner_id": "owner-1",
         "bot_id": "bot-1",
@@ -274,11 +249,9 @@ async def test_polling_invokes_the_shared_observer_even_before_ready():
 
 
 @pytest.mark.asyncio
-async def test_ready_status_response_survives_async_publisher_failure():
+async def test_ready_status_does_not_require_a_knowledge_observer():
     service = _Service()
     service.status_result = replace(_record(), status=SessionResourceStatus.READY)
-    publisher = _FailingPublisher()
-    coordinator = TcResourceReadyCoordinator(publisher=publisher)
 
     result = await materialize_status(
         "sr_001",
@@ -286,13 +259,9 @@ async def test_ready_status_response_survives_async_publisher_failure():
         "session-raw",
         user=AuthenticatedUser("id", "owner-1", "owner-1"),
         service=service,
-        observer=coordinator,
     )
-    while coordinator._tasks:
-        await asyncio.gather(*tuple(coordinator._tasks), return_exceptions=True)
 
     assert result["status"] == "ready"
-    assert len(publisher.events) == 1
 
 
 @pytest.mark.asyncio
@@ -315,9 +284,8 @@ async def test_pending_lists_only_control_plane_records():
 
 
 @pytest.mark.asyncio
-async def test_callback_uses_task_capability_and_observes_the_applied_record():
+async def test_callback_preserves_materialization_without_knowledge_observer():
     service = _Service()
-    observer = _RecordingObserver()
     body = MaterializedCallbackRequest(
         transfer_id="transfer-1",
         task_id="task-1",
@@ -334,21 +302,16 @@ async def test_callback_uses_task_capability_and_observes_the_applied_record():
         body,
         x_materialization_task_id="task-1",
         service=service,
-        observer=observer,
     )
 
     assert result == {"applied": True, "status": "ready"}
     stored = service.callback_kwargs["materialized_ref"]
     assert "canonical_bot_absolute_path" not in stored
     assert stored["path_hash"]
-    assert [record.status for record in observer.records] == [
-        SessionResourceStatus.READY
-    ]
 
 
 @pytest.mark.asyncio
-async def test_callback_rejects_wrong_task_capability_before_observation():
-    observer = _RecordingObserver()
+async def test_callback_rejects_wrong_task_capability_before_materialization():
     with pytest.raises(HTTPException) as exc:
         await materialized_callback(
             "sr_001",
@@ -361,11 +324,9 @@ async def test_callback_rejects_wrong_task_capability_before_observation():
             ),
             x_materialization_task_id="wrong",
             service=_Service(),
-            observer=observer,
         )
 
     assert exc.value.status_code == 401
-    assert observer.records == []
 
 
 @pytest.mark.asyncio
@@ -387,3 +348,20 @@ async def test_content_proxies_only_safe_headers_and_closes_upstream():
     assert "x-internal-token" not in response.headers
     assert [chunk async for chunk in response.body_iterator] == [b"hello"]
     assert service.content_closed is True
+
+
+@pytest.mark.asyncio
+async def test_upload_intent_passes_authenticated_nickname_not_login_or_target():
+    service = _Service()
+    await create_upload_intents(
+        body=UploadIntentRequest(
+            bot_id="bot-1", session_key="s", scope_type="friend_bot_chat",
+            engine_type="openclaw", target_entity_id="other-owner",
+            files=[{"filename": "a.txt"}],
+        ),
+        user=AuthenticatedUser("id", "actor-2", "login-name", nickName="上传者"),
+        service=service,
+    )
+    assert service.intent_kwargs["owner_id"] == "actor-2"
+    assert service.intent_kwargs["target_entity_id"] == "other-owner"
+    assert service.intent_kwargs["creator_name"] == "上传者"

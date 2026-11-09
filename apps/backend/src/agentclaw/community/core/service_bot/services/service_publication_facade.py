@@ -58,6 +58,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
@@ -76,6 +78,10 @@ from agentclaw.community.core.service_bot.services.publish_flow_service import (
 )
 from agentclaw.community.core.service_bot.types import (
     can_upgrade_publication_from_records,
+)
+from agentclaw.community.plugin_api.service_bot_eval import (
+    ServiceBotEvalContext,
+    ServiceBotEvalPlugin,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -111,6 +117,7 @@ class ServicePublicationFacade:
         lock_service: CollaboratorLockService,
         bot_service: BotService,
         device_service: ServiceRuntimeDevicePort,
+        eval_gate: ServiceBotEvalPlugin,
     ) -> None:
         self._bot_repo = bot_repo
         self._publish_repo = publish_repo
@@ -121,6 +128,7 @@ class ServicePublicationFacade:
         self._lock_service = lock_service
         self._bot_service = bot_service
         self._device_service = device_service
+        self._eval_gate = eval_gate
 
     def _resolve_bot(
         self,
@@ -694,6 +702,22 @@ class ServicePublicationFacade:
                 owner_id=owner_id,
             )
             self._require_draft_lock(bot_id, bot["owner_id"], actor_id)
+            context = ServiceBotEvalContext(
+                bot_id=str(bot["bot_id"]),
+                bot_version=str(record.version),
+                release_id=str(record.id),
+                publish_id=str(record.id),
+                operator_id=actor_id,
+                latest_bot_modified_at=str(bot.get("gmt_modified") or ""),
+            )
+            gate_result = await self._eval_gate.precheck(
+                context,
+                trigger_source="draft_to_validate",
+            )
+            if gate_result.get("allowed") is not True:
+                if gate_result.get("gate_status") == "PENDING":
+                    raise ServicePublicationGatePendingError(gate_result)
+                raise ServicePublicationGateBlockedError(gate_result)
             result = await self._flow_service.process(record.id, actor_id)
             return self._operation(
                 record, action="publish_staging", result=result.model_dump()

@@ -281,6 +281,59 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('/admin/work-orders');
   });
 
+  test('审批中在途行提供刷新状态入口，未提供回调时不渲染', () => {
+    const approvingStatus = {
+      kind: 'approving' as const,
+      detailUrl: null,
+      onViewApprovalProgress: jest.fn(),
+    };
+    const html = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        riskStatus={{ ...approvingStatus, onRefreshStatus: jest.fn(), refreshingStatus: false }}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(html).toContain('审批中');
+    expect(html).toContain('查看审批进度');
+    expect(html).toContain('刷新状态');
+
+    // 未提供刷新回调（宿主未接 hook）时不渲染。
+    const withoutCallback = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        riskStatus={approvingStatus}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(withoutCallback).toContain('审批中');
+    expect(withoutCallback).not.toContain('刷新状态');
+
+    // 风险动线审批期后端把同一申请投影进 BCS friend_ext（pendingPublications），
+    // 刷新入口不因 pending 隐藏——角标/外链仍按 pending 优先，避免双徽标。
+    const withPending = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        pending={{
+          id: 'MOCK-WO-24081802',
+          audience: 'user',
+          target: { scope: 'all', organizationPaths: [] },
+          submittedAt: '2026-08-18T09:30:00.000Z',
+        }}
+        riskStatus={{ ...approvingStatus, onRefreshStatus: jest.fn() }}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(withPending).toContain('待审批');
+    expect(withPending).toContain('刷新状态');
+  });
+
   test('组织级联支持可变层级且父级和中间层级均可选择', () => {
     const options = [
       ['示例集团', '平台事业群'],
@@ -496,6 +549,77 @@ describe('collaboration privacy accessible UI', () => {
     );
 
     expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).not.toContain('刷新状态');
+  });
+
+  test('检测进行中提示条提供手动刷新入口（可穿透后端暂停轮询态）', () => {
+    // 检测超时（5 分钟）后端仅暂停自动轮询、状态停留「检测中」无终态：
+    // 提示条须提供「刷新状态」入口，让用户主动同步最新结论。
+    const checkingRecord = {
+      risk_check_id: 'rk-9',
+      phase: 'CHECKING',
+      security_status: 'DETECTING',
+      detail_url: 'https://example.test/risk/rk-9',
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{
+          uiState: { kind: 'checking', record: checkingRecord },
+          record: checkingRecord,
+          isCreating: false,
+          refreshCurrent: jest.fn(),
+          isRefreshing: false,
+        }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测进行中');
+    expect(html).toContain('查看检测工单');
+    expect(html).toContain('刷新状态');
+    expect(html).toContain('若长时间停留在检测中，可手动刷新同步最新结论。');
+  });
+
+  test('在途提示条未提供刷新回调时不渲染刷新按钮', () => {
+    const checkingRecord = {
+      risk_check_id: 'rk-10',
+      phase: 'CHECKING',
+      security_status: 'DETECTING',
+      detail_url: null,
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{ uiState: { kind: 'checking', record: checkingRecord }, record: checkingRecord, isCreating: false }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测进行中');
+    expect(html).toContain('检测工单号：rk-10');
     expect(html).not.toContain('刷新状态');
   });
 

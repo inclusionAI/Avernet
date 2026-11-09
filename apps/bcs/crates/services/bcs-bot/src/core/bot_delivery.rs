@@ -334,7 +334,10 @@ impl BotCore {
     }
     fn select_a2a_route(&self, card:&serde_json::Value)->ServiceResult<bcs_service_api::types::a2a_bot::A2aInterface> {
         use bcs_service_api::types::a2a_bot::{select_a2a_interface,A2aBinding};
-        select_a2a_interface(card,|binding,url|match binding {
+        let projected = bcs_a2a_binding_api::registry().project(card).map_err(|_|ServiceError::InvalidOperation {
+            message:"A2A custom interface is unavailable".into(),request_id:None})?;
+        select_a2a_interface(&projected,|binding,url|match binding {
+            A2aBinding::Custom=>bcs_a2a_binding_api::registry().fingerprint(url).is_ok(),
             A2aBinding::HttpJson|A2aBinding::JsonRpc=>bcs_service_api::types::a2a_bot::http_interface_address_allowed(url)
                 && self.a2a_url_guard.validate_configured_http_url(url).is_ok(),
             A2aBinding::Grpc=>self.a2a_grpc_urls.iter().any(|allowed|allowed==url),

@@ -44,8 +44,9 @@ POST /api/cron accepts runtime_stage (draft/verify/online), device_uuid (runtime
 instance UUID), and operator_id (creator and
 Caller identity). The authenticated operator (internal authenticated_user_id) remains separate from
 the requested operator_id/Caller identity;
-delegation requires existing Bot ADMIN/OWNER permission. Explicit Caller targets
-only support online and must reference an existing Caller binding. Device
+delegation requires existing Bot ADMIN/OWNER permission. Independent Caller targets
+only support online and must reference an existing Caller binding. Teclaw service
+Bots use their service stage bindings, including for explicit instance selection. Device
 membership is validated before forwarding once. No provisioning or fallback
 occurs. Omitted creation target fields preserve the legacy draft behavior.
 
@@ -60,7 +61,9 @@ binding, transport result/failure and response events without connection credent
 ### Default list and Caller identity
 
 GET /api/cron with no operator_id/device_uuid supports bot_id=all and a specific
-Bot. With no runtime_stage, or with runtime_stage=online, Caller service Bots
+Bot. Teclaw service Bots use draft/verify/online service bindings even when
+call_type=caller; no independent Caller instance is required. With no runtime_stage,
+or with runtime_stage=online, non-Teclaw Caller service Bots
 contribute only the authenticated user's existing Caller instances; their parent
 service draft/verify/online targets are not added. The Bot owner's identity stays
 separate from the authenticated Caller. Every returned Caller row includes

@@ -75,6 +75,14 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # Catalog policy rows are declarative HTTP infrastructure, like the tables
     # above. Concrete-service imports are still checked across all files.
     "authorization_rules_catalog.py",
+    # The bots/metadata rows of that table, split from authorization_rules at
+    # the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_metadata.py",
+    # The service-Bot evaluation rows of that table, split from authorization_rules
+    # at the 1000-line module cap. Policy rows only, no HTTP stack.
+    "authorization_rules_service_eval.py",
+
     "__init__.py",
 })
 

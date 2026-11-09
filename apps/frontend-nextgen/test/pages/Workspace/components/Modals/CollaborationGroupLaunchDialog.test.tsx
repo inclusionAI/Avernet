@@ -177,3 +177,34 @@ it('offers retry for failed draft reads and blocks launch without owned Bots', a
   await screen.findByText('暂无可发起协作的自有 Bot，请先创建或绑定 Bot。');
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
 });
+
+it('offers retry when identities stall and ignores results from the timed-out attempt', async () => {
+  jest.useFakeTimers();
+  try {
+    let finish!: (value: Awaited<ReturnType<typeof identityService.loadIdentities>>) => void;
+    jest.mocked(identityService.loadIdentities).mockReturnValueOnce(new Promise((resolve) => {
+      finish = resolve;
+    }));
+    openDialog();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(14_999);
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('正在读取协作版本和自有 Bot');
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('超时');
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await screen.findByRole('button', { name: '重新编辑' });
+    expect(identityService.loadIdentities).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('协作群名称')).toHaveValue('Draft 标题');
+    await act(async () => {
+      finish({ ok: true, data: { identities: [], defaultActiveId: '' } });
+    });
+    expect(useWorkspaceStore.getState().identities).toEqual(bots);
+    expect(screen.queryByText('暂无可发起协作的自有 Bot，请先创建或绑定 Bot。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  } finally {
+    jest.useRealTimers();
+  }
+});

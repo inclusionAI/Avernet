@@ -7,8 +7,8 @@ Stage 1 Domain Model Tests
 import pytest
 from datetime import datetime
 
-from src.domain.models.worker_audit_log import WorkerAuditLog, WorkerAuditAction
-from src.domain.models.worker_source_info import WorkerSourceType
+from app.domain.models.worker_audit_log import WorkerAuditLog, WorkerAuditAction
+from app.domain.models.worker_source_info import WorkerSourceType
 
 
 class TestWorkerAuditAction:

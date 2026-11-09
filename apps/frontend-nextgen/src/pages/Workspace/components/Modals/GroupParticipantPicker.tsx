@@ -20,7 +20,7 @@ export interface GroupParticipantPickerProps {
   onToggle: (id: string) => void;
   excludeId?: string | null;
   /** 置顶 Bot（如发起方 bot）；在 task_dag 模式下将此 Bot 放到列表首位。 */
-  prependBot?: { id: string; name: string } | null;
+  prependBot?: { id: string; name: string; avatarUrl?: string } | null;
   /** 候选列表滚动视口的局部高度覆盖。 */
   listViewportClassName?: string;
   /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
@@ -71,6 +71,7 @@ export function GroupParticipantPicker({
     const originatorView: CollaborationBotView = {
       id: prependBot.id,
       name: prependBot.name,
+      avatarUrl: prependBot.avatarUrl?.trim() || source.find((bot) => bot.id === prependBot.id)?.avatarUrl,
       summary: '',
       online: true,
       status: 'online',
@@ -98,7 +99,7 @@ export function GroupParticipantPicker({
       className={cn('w-full min-w-0 max-w-full', fillAvailableHeight && 'flex min-h-0 flex-1 flex-col')}
     >
       <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-xs font-medium text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
         <span className="text-xs text-muted-foreground">
@@ -156,7 +157,7 @@ export function GroupParticipantPicker({
       <div className="relative mb-3 shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          className="h-10 rounded-lg pl-9 text-sm"
+          className="h-8 rounded-lg pl-9 text-xs"
           value={picker.search}
           onChange={(event) => picker.setSearch(event.target.value)}
           placeholder={
@@ -173,14 +174,14 @@ export function GroupParticipantPicker({
       </div>
 
       {recommendActive && picker.recommendError ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.recommendError}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retryRecommend}>
             重试
           </Button>
         </div>
-      ) : picker.error ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+      ) : !recommendActive && picker.error ? (
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.error}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retry}>
             重试

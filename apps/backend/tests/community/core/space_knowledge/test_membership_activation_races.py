@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.engine import make_url
 
 from agentclaw.community.core.repository.implementations.spaces import knowledge_sync
 from agentclaw.community.core.repository.implementations.spaces.management import (
@@ -34,9 +35,19 @@ from tests.community.core.space_knowledge.test_membership_real_database import (
 
 
 @pytest.mark.parametrize("mutation", ["remove", "add", "delete", "auto"])
+@pytest.mark.parametrize("driver_timeout", [0.05, 5.0])
 def test_activation_roster_and_source_mutation_are_one_serial_order(
-    database, monkeypatch, mutation
+    database, monkeypatch, mutation, driver_timeout
 ):
+    # The race must not depend on an implicit sqlite3 connection default.
+    dbapi = database._engine.dialect.dbapi
+    connect = dbapi.connect
+
+    def connect_with_driver_default(*args, **kwargs):
+        kwargs.setdefault("timeout", driver_timeout)
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(dbapi, "connect", connect_with_driver_default)
     space_id, _ = create_space(database)
     SpaceRepository(database, KnowledgeSpacePersistenceEffects()).add_member(
         space_id=space_id,
@@ -59,7 +70,11 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             session.add(order)
             session.flush()
             order_id = order.id
-    other = CommunitySqliteDatabase(database._url)
+    # This test deliberately pauses the holder. Allow contention to outlive
+    # its 10-second coordination watchdog, including slow coverage/CI work.
+    # Keep the production default and the bounded-failure test below unchanged.
+    race_url = make_url(database._url).update_query_dict({"timeout": "30"})
+    other = CommunitySqliteDatabase(str(race_url))
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     roster_read, release, write_attempted, committed = (Event() for _ in range(4))
@@ -115,7 +130,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
                 assert write_attempted.wait(timeout=5)
                 # Old implementation commits here without recording an event.
                 # The repair holds a DB write guard, so this wait expires.
-                committed.wait(timeout=0.5)
+                assert not committed.wait(timeout=0.5)
             finally:
                 release.set()
             try:
@@ -156,7 +171,9 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
     def pause_before_guard(_conn, _cursor, statement, _parameters, _context, _many):
         if statement.lstrip().upper().startswith("BEGIN IMMEDIATE"):
             before_guard.set()
-            assert release.wait(timeout=5)
+            # Full-suite CI can starve thread scheduling. These waits coordinate
+            # one tiny local SQLite transaction; they are not production timeouts.
+            assert release.wait(timeout=60)
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     other = CommunitySqliteDatabase(database._url)
@@ -166,14 +183,14 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
                 sync.ensure_synced, space_id=space_id, environment="pre"
             )
             try:
-                assert before_guard.wait(timeout=5)
+                assert before_guard.wait(timeout=30)
                 SpaceManagementRepository(other, effects=KnowledgeSpacePersistenceEffects()).delete_team(
                     space_id=space_id, with_members=True, env="pre"
                 )
             finally:
                 release.set()
             with pytest.raises(SpaceKnowledgeError, match="RESOURCE_NOT_FOUND"):
-                activation.result(timeout=5)
+                activation.result(timeout=60)
     finally:
         release.set()
         other._engine.dispose()

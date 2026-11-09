@@ -71,6 +71,7 @@ export function useBotWorkshopCopyHost({ load, currentOpenApiUserId }: UseBotWor
     openCopy,
     closeCopy,
     copying: copyFlow.copying,
+    awaitingDetail: copyFlow.awaitingDetail,
     copyAuthorization: copyFlow.authorization,
     cancelCopyAuthorization: copyFlow.cancelAuthorization,
     submitCopy: copyFlow.submitCopy,

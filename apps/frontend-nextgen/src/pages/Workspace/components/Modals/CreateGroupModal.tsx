@@ -70,8 +70,7 @@ export function CreateGroupModal({
 
   const leaderOptions = useMemo<GroupLeaderOption[]>(() => {
     return selectedBots.map((bot) => ({
-      id: bot.id,
-      name: bot.name,
+      ...bot,
       current: activeIdentity?.kind === 'bot' && bot.id === activeIdentity.id,
     }));
   }, [activeIdentity, selectedBots]);
@@ -269,7 +268,7 @@ export function CreateGroupModal({
                 excludeId={kind === 'task_dag' ? null : activeIdentity?.id}
                 prependBot={
                   kind === 'task_dag' && activeIdentity?.kind === 'bot'
-                    ? { id: activeIdentity.id, name: activeIdentity.displayName }
+                    ? { id: activeIdentity.id, name: activeIdentity.displayName, avatarUrl: activeIdentity.avatarUrl }
                     : null
                 }
                 activeRoleName={kind === 'task_dag' ? binding.yamlValidation.participantDefinitions.find((role) => role.key === binding.activeParticipantKey)?.displayName || binding.activeParticipantKey : undefined}
@@ -279,7 +278,7 @@ export function CreateGroupModal({
               />
             )}
             {friendlyError && (
-              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{friendlyError}</p>
             )}
           </div>
         </div>

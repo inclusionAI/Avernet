@@ -20,6 +20,7 @@ from agentclaw.community.core.task.domain.intake import (
     TaskIntakeResult,
     TaskIntakeStatus,
 )
+from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -425,6 +426,90 @@ def relay_context_expired_attempt():
 
 
 # Authenticated mirrors of the public task read surfaces.
+def _seed_task_session(world) -> None:
+    def get_task_nodes_by_session(_self, _session_id: str):
+        return [
+            TaskNodeSessionRef(
+                task_id="task-endpoint-1",
+                node_id="node-endpoint-session-1",
+                owner_user_id="user-endpoint-1",
+            )
+        ]
+
+    bind_overrides(world, TaskServiceProtocol, {"get_task_nodes_by_session": get_task_nodes_by_session})
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="happy_ok",
+    seed=_seed_task_session,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"session_id": "session-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "session-endpoint-1",
+                "items": [
+                    {
+                        "task_id": "task-endpoint-1",
+                        "owner_user_id": "user-endpoint-1",
+                        "node_id": "node-endpoint-session-1",
+                    }
+                ],
+                "total": 1,
+            },
+        },
+    ),
+)
+def by_session_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="empty_ok",
+    seed=lambda w: bind_overrides(
+        w,
+        TaskServiceProtocol,
+        {"get_task_nodes_by_session": lambda _self, _session_id: []},
+    ),
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"session_id": "session-endpoint-missing"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "session-endpoint-missing",
+                "items": [],
+                "total": 0,
+            },
+        },
+    ),
+)
+def by_session_empty():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="err_unauthenticated",
+    input=CaseInput(query_params={"session_id": "session-endpoint-1"}),
+    expect=ExpectError(status=401),
+)
+def by_session_unauthenticated():
+    pass
+
+
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/dashboard",
@@ -659,7 +744,7 @@ def scheduled_trigger_error():
     pass
 
 
-# ── 任务认领 grant/revoke + claim_on JOIN 灰度开关(internal /api/v1 face)─────────
+# ── 任务认领 grant/revoke(internal /api/v1 face)─────────
 _GRANT_BODY = {"bcs_bot_id": "bot-endpoint-1:ent"}
 
 
@@ -801,7 +886,7 @@ _SKILL_INSTALL_RESULT = {
 
 
 def _seed_bbs_skill_install_runner(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         return _SKILL_INSTALL_RESULT
 
     bind_overrides(
@@ -812,7 +897,7 @@ def _seed_bbs_skill_install_runner(world) -> None:
 
 
 def _seed_bbs_skill_install_not_found(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         raise NotFound("subscription not found")
 
     bind_overrides(
@@ -827,7 +912,7 @@ def _seed_bbs_skill_install_not_found(world) -> None:
     path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
     scenario="happy_ok",
     seed=_seed_bbs_skill_install_runner,
-    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    input=CaseInput(path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, json_body={}),
     expect=ExpectSuccess(
         status=200,
         json_contains={"code": 200000, "data": _SKILL_INSTALL_RESULT},
@@ -842,7 +927,7 @@ def bbs_skill_install_internal_happy():
     path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
     scenario="err_subscription_not_found",
     seed=_seed_bbs_skill_install_not_found,
-    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    input=CaseInput(path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, json_body={}),
     expect=ExpectError(status=404),
 )
 def bbs_skill_install_internal_error():

@@ -85,6 +85,38 @@ async fn sqlite_control_batches_are_indexed_fair_and_bounded() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn sqlite_session_unfinished_lookup_is_indexed_and_bounded() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_service_api::port::repo::message_delivery::*;
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    // Unfinished sends of the Session across several Bots, plus rows that
+    // must not match: terminal, inject, and another Session.
+    db.execute(DbStatement::new("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<8) INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) SELECT printf('row%02d',x),'dev',printf('m%d',x),printf('bot%d',x % 3),CASE WHEN x=8 THEN 'other' ELSE 'doomed' END,'g',x,'group',CASE WHEN x=7 THEN 'inject' ELSE 'send' END,CASE x WHEN 1 THEN 'queued' WHEN 2 THEN 'dispatching' WHEN 3 THEN 'running' WHEN 4 THEN 'unknown' WHEN 5 THEN 'completed' WHEN 6 THEN 'queued' WHEN 7 THEN 'pending_context' ELSE 'queued' END,1,0,1,1,1,0,'{}' FROM n")).await?;
+    let recording = Arc::new(RecordingQueries { inner: db.clone(), queries: Default::default() });
+    let repo = MySqlMessageStore::sqlite(recording.clone(), "dev".into());
+    let rows = repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), after: None, limit: 10 }).await?;
+    let mut ids = rows.iter().map(|r| r.delivery_id.as_str()).collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, vec!["row01", "row02", "row03", "row04", "row06"]);
+    // Keyset pages: each continues after the previous page's last row and
+    // together they return every unfinished row exactly once.
+    let (mut paged, mut after) = (Vec::new(), None);
+    loop {
+        let page = repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), after: after.clone(), limit: 2 }).await?;
+        assert!(page.len() <= 2);
+        let Some(last) = page.last() else { break };
+        after = Some((last.source_message_id.clone(), last.delivery_id.clone()));
+        paged.extend(page.into_iter().map(|r| r.delivery_id));
+    }
+    assert_eq!(paged, vec!["row01", "row02", "row03", "row04", "row06"]);
+    let query = recording.queries.lock().unwrap()[0].0.clone();
+    let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", query.sql()), query.params().to_vec())).await?;
+    let plan = plan.iter().map(|r| bcs_db_api::db_get_column::<String>(r, "detail").unwrap()).collect::<Vec<_>>().join("; ");
+    assert!(plan.contains("idx_delivery_session_message"), "{plan}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn sqlite_bound_context_page_does_not_read_unbounded_bodies() -> Result<(), Box<dyn std::error::Error>> {
     use bcs_service_api::port::repo::message_delivery::*;
     let db = Arc::new(LocalSqliteDbPlugin::new()?);
@@ -206,9 +238,7 @@ async fn newly_created_session_sequence_uses_transactional_read() -> Result<(), 
     Ok(())
 }
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod migrations;
+use bcs_db_migrations as migrations;
 
 #[tokio::test]
 async fn conformance_memory_delivery_repo() -> Result<(), Box<dyn std::error::Error>> {

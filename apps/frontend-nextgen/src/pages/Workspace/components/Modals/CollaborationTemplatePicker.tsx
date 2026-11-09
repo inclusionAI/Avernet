@@ -49,8 +49,9 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
             <Button
               type="button"
               variant="secondary"
+              size="sm"
               aria-label="选择协作模板"
-              className="order-3 h-10 min-w-0 basis-full justify-between rounded-lg border-input bg-background px-3 sm:order-none sm:h-9 sm:basis-auto sm:flex-1"
+              className="order-3 h-8 min-w-0 basis-full justify-between rounded-lg border-input bg-background px-3 sm:order-none sm:basis-auto sm:flex-1"
             >
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 {selectedTemplate ? (

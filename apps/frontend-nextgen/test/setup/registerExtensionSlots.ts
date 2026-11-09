@@ -38,6 +38,9 @@ const useServiceBotRoutingStub = () => {
 const useSessionTaskPanelBootstrapStub = () => {
   throw new Error('jest 全局槽位默认占位：需要真实 useSessionTaskPanelBootstrap 的用例请在测试文件内 registerExtensionSlots 覆盖');
 };
+const useSessionTaskPanelTabStub = () => {
+  throw new Error('jest 全局槽位默认占位：需要真实 useSessionTaskPanelTab 的用例请在测试文件内 registerExtensionSlots 覆盖');
+};
 
 registerExtensionSlots({
   groupTasks: {
@@ -51,4 +54,5 @@ registerExtensionSlots({
   groupServiceBotRouting: { useServiceBotRouting: useServiceBotRoutingStub, ServiceBotRoutingControl: emptyFragment },
   taskSessionNavigationObserver: () => null,
   taskPanelBootstrap: useSessionTaskPanelBootstrapStub,
+  sessionTaskPanelTab: useSessionTaskPanelTabStub,
 } satisfies AppExtensionSlots);
