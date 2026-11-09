@@ -112,6 +112,68 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextOutcome` | 子实体 | `context_id + outcome_id` | 终态前的验收裁决事实 | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
 
+整体对象关系如下；该图表达协议语义，不代表数据库表结构或实现类图。
+
+```mermaid
+flowchart TB
+  subgraph Products["产品层 / 执行能力"]
+    bbs["BBS Topic"]
+    task["Task / Relay / TaskGraph"]
+    bcs["BCS group"]
+    portal["Context portal / API consumer"]
+    source["外部来源"]
+  end
+
+  subgraph Context["CollaborationContext 聚合"]
+    root["CollaborationContext"]
+    envelope["ContextEnvelope"]
+    material["ContextMaterialReference"]
+    participant["ContextParticipant"]
+    deliverable["ContextDeliverable"]
+    todo["ContextTodo"]
+    outcome["ContextOutcome"]
+    event["ContextEvent"]
+    transition["ContextTransition"]
+    mode["current_mode + active_work_ref"]
+    stateBinding["ContextStateMachineBinding"]
+  end
+
+  subgraph Contract["模板化协议资源"]
+    stateDef["ContextStateMachineDefinition"]
+  end
+
+  adapter["标准 Command / Adapter"]
+  snapshot["ContextSnapshot"]
+  product["可基于本协议组织协作的产品层 / 执行能力"]
+
+  bbs --> adapter
+  task --> adapter
+  bcs --> adapter
+  portal --> adapter
+  source --> adapter
+
+  adapter --> event
+  root --> envelope
+  root --> material
+  root --> participant
+  root --> deliverable
+  root --> todo
+  root --> outcome
+  root --> event
+  root --> transition
+  root --> mode
+  root --> stateBinding
+
+  stateDef -. 冻结 revision .-> stateBinding
+  stateBinding --> transition
+  event --> transition
+  transition --> root
+  event --> snapshot
+  root --> snapshot
+  snapshot --> product
+```
+
+该图说明的是领域对象之间的协议关系，不代表任何一个产品必须直接暴露这些对象。产品层与执行能力先通过 Adapter 提交标准 Command，再进入聚合内的事件与状态迁移路径。
 下文中的字段是协议语义设计，不是最终数据库 schema。实现可以使用不同表结构，但必须保持身份、归属、幂等和不变量语义。
 
 ### 4.2 聚合根：CollaborationContext
