@@ -136,7 +136,7 @@ impl State {
                     ChatState::Delta=>{let suffix=next[self.text.len()..].to_string();if !suffix.is_empty(){self.pending.push_back(AgentEvent::Delta{text:suffix});}}
                     ChatState::Final=>{self.done=true;self.pending.push_back(AgentEvent::Completed{output:output(&next)});}
                     ChatState::Error|ChatState::Aborted=>{
-                        self.done=true;self.pending.push_back(AgentEvent::Snapshot{snapshot:ExecutionSnapshot{observation_error:None,
+                        self.done=true;self.pending.push_back(AgentEvent::Snapshot{snapshot:ExecutionSnapshot{ input_prompt: None,observation_error:None,
                             handle:self.handle.clone().ok_or(())?,status:if chat.state==ChatState::Aborted{TaskStatus::Cancelled}else{TaskStatus::Failed},
                             output:output(&next),error:(chat.state==ChatState::Error).then(||RuntimeError::Unavailable("remote task failed".into()))}});
                     }

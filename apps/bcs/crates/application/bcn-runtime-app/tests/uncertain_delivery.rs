@@ -466,7 +466,7 @@ async fn oversized_snapshots_preserve_remote_termination_evidence_and_durable_ha
         let f = Fixture::new(); let g = f.gateway(); let w = f.worker("w");
         let task = g.submit(caller(), request("snapshot-overflow")).await.unwrap();
         w.step(&task.session_id).await.unwrap();
-        let c = f.connector("c", Arc::new(Transport::new(vec![Ok(AgentEvent::Snapshot { snapshot: ExecutionSnapshot { observation_error: None,
+        let c = f.connector("c", Arc::new(Transport::new(vec![Ok(AgentEvent::Snapshot { snapshot: ExecutionSnapshot { input_prompt: None, observation_error: None,
             handle: handle(), status: if terminal { TaskStatus::Completed } else { TaskStatus::Working },
             output: text(&"x".repeat(65536)), error: None,
         } })])));

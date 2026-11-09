@@ -215,7 +215,7 @@ pub(crate) fn apply_agent(
                     node,
                     &AgentEvent::InputRequired {
                         handle: snapshot.handle.clone(),
-                        prompt: snapshot.output.clone(),
+                        prompt: snapshot.input_prompt.clone().unwrap_or_else(||snapshot.output.clone()),
                     },
                     at_ms,
                 )?;

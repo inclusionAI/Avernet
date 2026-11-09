@@ -14,7 +14,7 @@ async fn terminal_snapshot_is_retained_when_projection_write_fails_after_stream_
     let w = f.worker("w");
     w.step(&task.session_id).await.unwrap();
     let t = Arc::new(Transport::new(vec![Ok(AgentEvent::Snapshot {
-        snapshot: ExecutionSnapshot { observation_error: None,
+        snapshot: ExecutionSnapshot { input_prompt: None, observation_error: None,
             handle: handle(),
             status: TaskStatus::Completed,
             output: text("authoritative streamed result"),

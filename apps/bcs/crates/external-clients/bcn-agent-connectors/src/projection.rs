@@ -52,8 +52,10 @@ pub(crate) fn snapshot(binding:&FrozenTargetBinding, task:a2a::Task, expected:Op
         Ok(state)=>(state,None),Err(_)=>(TaskStatus::Working,Some(RuntimeError::ExecutionUnknown)),
     };
     let (parts,part_error)=project_parts(task.artifacts.into_iter().flatten().flat_map(|a|a.parts));
-    let observation_error=state_error.or(part_error);
-    Ok(ExecutionSnapshot{handle:h,status:state,output:parts,observation_error,
+    let (prompt,prompt_error)=project_parts(task.status.message.into_iter().flat_map(|m|m.parts));
+    let input_prompt=(state==TaskStatus::InputRequired).then_some(prompt);
+    let observation_error=state_error.or(part_error).or(prompt_error);
+    Ok(ExecutionSnapshot{input_prompt,handle:h,status:state,output:parts,observation_error,
         error:(state==TaskStatus::Failed).then(||RuntimeError::Unavailable("remote task failed".into()))})
 }
 struct State {
@@ -115,6 +117,7 @@ impl State {
         let mut text=self.text.clone();
         let mut pending=VecDeque::new();
         let mut prompt=vec![];
+        let mut prompt_error=None;
         for event in outputs {
             match event {
                 Output::Identity{task_id,context_id}=>{
@@ -124,12 +127,19 @@ impl State {
                 }
                 Output::Delta(delta)=>{text.push_str(&delta);pending.push_back(AgentEvent::Delta{text:delta});}
                 Output::StatusMessage(message)=>{
-                    for p in message.parts {match p.content {a2a::PartContent::Text(text)=>prompt.push(MessagePart::Text{text}),_=>return Err(uncertain())}}
+                    (prompt,prompt_error)=project_parts(message.parts);
                 }
                 Output::Status(state)=>{
                     let status=status(state)?;
                     let h=self.handle.clone().ok_or_else(uncertain)?;
                     let parts=output(&text);
+                    if let Some(error)=prompt_error.take() {
+                        let output=if fits(&parts){parts}else{output(&self.text)};
+                        self.done=true;
+                        self.pending.push_back(if status.is_terminal(){AgentEvent::FailedWithOutput{error,output}}
+                            else{AgentEvent::ObservationFailed{error,output}});
+                        return Ok(());
+                    }
                     let bounded=fits(&parts) && fits(&prompt);
                     if !bounded {
                         self.done=true;
@@ -140,7 +150,7 @@ impl State {
                     match status {
                         TaskStatus::Completed=>{pending.push_back(AgentEvent::Completed{output:parts});self.done=true;}
                         TaskStatus::Failed|TaskStatus::Cancelled=>{
-                            pending.push_back(AgentEvent::Snapshot{snapshot:ExecutionSnapshot{observation_error:None,handle:h,status,output:parts,
+                            pending.push_back(AgentEvent::Snapshot{snapshot:ExecutionSnapshot{ input_prompt: None,observation_error:None,handle:h,status,output:parts,
                                 error:(status==TaskStatus::Failed).then(||RuntimeError::Unavailable("remote task failed".into()))}});self.done=true;
                         }
                         TaskStatus::InputRequired=>{pending.push_back(AgentEvent::InputRequired{handle:h,prompt:prompt.clone()});self.done=true;}

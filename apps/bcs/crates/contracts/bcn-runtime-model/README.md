@@ -45,3 +45,9 @@ responses remain terminal, with only an actual optional server context and no
 fabricated task identity. Consumers must persist a returned handle before acting
 on observation failure, retain previously known output if failed projection
 produced none, and distinguish live uncertainty from confirmed termination.
+
+`ExecutionSnapshot.input_prompt` optionally carries an InputRequired question
+separately from artifact `output`. A present empty list explicitly means no
+question; only legacy snapshots with None use output as the prompt fallback.
+The field defaults to None and is omitted when absent. This is a neutral runtime
+contract, not an additional A2A or Provider wire field.

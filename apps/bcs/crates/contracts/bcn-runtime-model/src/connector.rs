@@ -67,6 +67,10 @@ pub struct ExecutionSnapshot {
     pub handle: ExecutionHandle,
     pub status: TaskStatus,
     pub output: Vec<MessagePart>,
+    /// InputRequired question, separate from artifacts. None is a legacy payload
+    /// whose consumer may use output as the prompt; Some(empty) is explicit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_prompt: Option<Vec<MessagePart>>,
     pub error: Option<RuntimeError>,
     /// Local projection failed; status still describes the remote execution.
     /// An empty output with this field present must not erase known partial output.

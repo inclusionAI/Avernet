@@ -120,3 +120,10 @@ ExecutionUnknown/CancellationUnknown normalize to Unavailable("terminal observat
 failed") so they do not falsely block a completed context; unknown-delivery
 handling is unchanged. Direct Messages retain their own response variant, with
 optional context and observation_error, including failures with no context.
+
+InputRequired snapshots carry `input_prompt` separately from artifact output.
+The connector checks its 64 KiB serialized limit after saving the handle; prompt
+projection/bounds failure retains partial output and live observation uncertainty.
+A question with absent artifacts does not clear the prior partial projection.
+Runner emits the explicit prompt in InputRequired; only old snapshots without
+input_prompt use output as their question. Existing aggregate limits still apply.

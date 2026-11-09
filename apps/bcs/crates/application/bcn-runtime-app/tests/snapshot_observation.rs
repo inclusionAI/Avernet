@@ -105,3 +105,50 @@ async fn direct_message_projection_errors_are_terminal_with_or_without_remote_co
         assert_eq!(transport.sends.load(Ordering::SeqCst),1);
     }
 }
+
+#[tokio::test]
+async fn unary_input_prompt_and_partial_output_survive_together() {
+    for prompt in [None,Some("Which account?"),Some("")] {
+        let f=Fixture::new();
+        let g=DefaultGateway::new(f.ports.clone(),f.runners(),Arc::new(UnaryCatalog),vec![Arc::new(Allow)],f.clock.clone(),true).unwrap();
+        let task=g.submit(caller(),request("prompt")).await.unwrap();let w=f.worker("w");
+        let mut value=serde_json::to_value(failed_snapshot(false)).unwrap();
+        value["status"]=serde_json::json!("input_required");value["observation_error"]=serde_json::Value::Null;
+        value["output"]=serde_json::to_value(text("partial artifact")).unwrap();
+        if let Some(prompt)=prompt {value["input_prompt"]=serde_json::to_value(if prompt.is_empty(){vec![]}else{text(prompt)}).unwrap();}
+        let transport=Arc::new(Unary{snapshot:serde_json::from_value(value).unwrap(),sends:AtomicU64::new(0),queries:AtomicU64::new(0),cancels:AtomicU64::new(0)});
+        let mut b=binding();b.capabilities.streaming=false;
+        let c=DefaultConnector::new(node("c"),f.ports.clone(),vec![(b,transport.clone())],f.clock.clone()).unwrap();
+        f.pump(&w,&c,8).await;
+        let view=g.get(caller(),task.task_id.clone()).await.unwrap();assert_eq!(view.status,TaskStatus::InputRequired);assert_eq!(view.output,text("partial artifact"));
+        let cursor=f.repo.read_snapshot(&task.task_id).await.unwrap().unwrap().cursor;
+        let events=f.repo.read_after(&task.task_id,Some(EventCursor{epoch:cursor.epoch,sequence:0}),100).await.unwrap();
+        assert!(events.events.iter().any(|e|matches!(&e.kind,TaskEventKind::Domain{event:DomainEvent{kind:DomainEventKind::InputRequired{prompt:p,..},..}} if p==prompt.unwrap_or("partial artifact"))));
+        assert_eq!(transport.sends.load(Ordering::SeqCst),1);assert_eq!(transport.cancels.load(Ordering::SeqCst),0);
+    }
+}
+
+#[tokio::test]
+async fn input_prompt_validation_does_not_clear_prior_partial() {
+    for mode in ["question","oversized","legacy-empty"] {
+        let oversized=mode=="oversized";
+        let f=Fixture::new();let g=f.gateway();let task=g.submit(caller(),request("prompt-bounds")).await.unwrap();let w=f.worker("w");
+        let mut value=serde_json::to_value(failed_snapshot(false)).unwrap();
+        value["status"]=serde_json::json!("input_required");value["observation_error"]=serde_json::Value::Null;
+        if mode!="legacy-empty" {value["input_prompt"]=serde_json::to_value(text(&if oversized{"q".repeat(65536)}else{"Question?".into()})).unwrap();}
+        let transport=Arc::new(Transport::new(vec![Ok(AgentEvent::Accepted{handle:handle()}),Ok(AgentEvent::Delta{text:"prior partial".into()}),Ok(AgentEvent::Snapshot{snapshot:serde_json::from_value(value).unwrap()})]));
+        let c=f.connector("c",transport.clone());f.pump(&w,&c,12).await;
+        let done=g.get(caller(),task.task_id.clone()).await.unwrap();assert_eq!(done.output,text("prior partial"));
+        if mode=="legacy-empty" {
+            let cursor=f.repo.read_snapshot(&task.task_id).await.unwrap().unwrap().cursor;
+            let events=f.repo.read_after(&task.task_id,Some(EventCursor{epoch:cursor.epoch,sequence:0}),100).await.unwrap();
+            assert!(events.events.iter().any(|e|matches!(&e.kind,TaskEventKind::Domain{event:DomainEvent{kind:DomainEventKind::InputRequired{prompt,..},..}} if prompt.is_empty())));
+        }
+        assert_eq!(done.status,if oversized{TaskStatus::Failed}else{TaskStatus::InputRequired});
+        if oversized {assert_eq!(done.error,Some(RuntimeError::CapacityExceeded));}
+        let cp=f.repo.load(&task.session_id).await.unwrap().unwrap();assert_eq!(cp.state.context_blocked,oversized);
+        let mut expected=handle();if oversized{expected.remote_task_id=None;}
+        assert_eq!(cp.state.direct_context,Some(expected));
+        assert_eq!(transport.sends.load(Ordering::SeqCst),1);
+    }
+}

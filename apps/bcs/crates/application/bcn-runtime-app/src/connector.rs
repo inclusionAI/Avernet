@@ -357,7 +357,7 @@ impl DefaultConnector {
                     Ok(Io::Response(AgentSendResponse::Message { parts, handle, observation_error })) => {
                         let event = match handle {
                             Some(handle) => AgentEvent::Snapshot {
-                                snapshot: ExecutionSnapshot { observation_error,
+                                snapshot: ExecutionSnapshot { input_prompt: None, observation_error,
                                     handle,
                                     status: TaskStatus::Completed,
                                     output: parts,
@@ -540,6 +540,9 @@ impl DefaultConnector {
             }
             AgentEvent::Snapshot { mut snapshot } => {
                 snapshot.error = snapshot.error.map(bounded_error);
+                if let Some(prompt) = &snapshot.input_prompt {
+                    if size(prompt)? > MAX_CONTENT_BYTES { snapshot.observation_error = Some(RuntimeError::CapacityExceeded); }
+                }
                 if let Some(error) = snapshot.observation_error.take() {
                     // Handle persistence above must succeed before recording local loss.
                     // Empty failed projection is not an authoritative empty snapshot.
@@ -556,7 +559,11 @@ impl DefaultConnector {
                     a.output = projection::bounded_output(snapshot.output, MAX_CONTENT_BYTES);
                     return if snapshot.status.is_terminal() { self.terminal_failure(a, RuntimeError::CapacityExceeded, now) } else { self.observation_failure(a, RuntimeError::CapacityExceeded, now) };
                 }
-                a.output = snapshot.output.clone();
+                // Keep prior artifacts when an input question has no artifacts.
+                // Leave the receipt unchanged so legacy empty prompts stay empty.
+                if snapshot.status != TaskStatus::InputRequired || !snapshot.output.is_empty() {
+                    a.output = snapshot.output.clone();
+                }
                 a.pending_text.clear();
                 projection::reset(&self.ports, &a.record, a.output.clone(), a.sequence, &mut a.projection).await?;
                 a.sequence += 1;
@@ -634,7 +641,7 @@ impl DefaultConnector {
             // A local failed result for a confirmed terminal observation, not a
             // claim that the remote status changed to Failed. Preserve its real
             // context for the next Direct task; never invent a remote task ID.
-            Some(handle) => AgentEvent::Snapshot { snapshot: ExecutionSnapshot {
+            Some(handle) => AgentEvent::Snapshot { snapshot: ExecutionSnapshot { input_prompt: None,
                 handle, status: TaskStatus::Failed, output, error: Some(error), observation_error: None,
             } },
             None => AgentEvent::FailedWithOutput { error, output },

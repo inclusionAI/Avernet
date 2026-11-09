@@ -74,3 +74,16 @@ fn direct_message_observation_error_survives_wire_without_inventing_task() {
     let message:AgentSendResponse=serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(message).unwrap(),value);
 }
+
+#[test]
+fn snapshot_input_prompt_is_optional_and_does_not_replace_artifacts() {
+    let scope=Scope::new("test","tenant","runtime");
+    let old=json!({"handle":{"target":{"scope":scope,"value":"agent"},"binding_version":"v1","remote_task_id":"task","remote_context_id":"context"},"status":"input_required","output":[{"kind":"text","text":"partial"}],"error":null});
+    let decoded:ExecutionSnapshot=serde_json::from_value(old.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(),old);
+    for prompt in [json!([]),json!([{"kind":"text","text":"question?"}])] {
+        let mut value=old.clone();value["input_prompt"]=prompt;
+        let decoded:ExecutionSnapshot=serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(),value);
+    }
+}

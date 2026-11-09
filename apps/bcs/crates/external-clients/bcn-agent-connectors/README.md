@@ -84,3 +84,10 @@ loopback HTTP fixtures, including protocol DTOs, requests, state projection,
 uncertainty, bounds, context reuse and cancellation evidence. Shared Provider
 framing remains covered by the original `bcs-provider-http` tests. These tests
 establish protocol behavior only, not production durability or capacity.
+
+A2A unary/query InputRequired snapshots preserve artifact output and project
+status.message into a separate `input_prompt` (explicitly empty if absent).
+Unsupported or oversized status content records observation_error. Streaming
+status-message projection waits for the validated status before classifying a
+failure: completed/failed/canceled remains terminal; a live status remains
+ObservationFailed, with the actual handle and bounded artifact partial retained.

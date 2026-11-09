@@ -202,3 +202,52 @@ async fn cumulative_empty_artifact_budget_stops_observation_before_terminal() {
     assert!(matches!(events.last(),Some(Ok(AgentEvent::ObservationFailed{output,..})) if output==&vec![MessagePart::Text{text:"partial".into()}]));
     assert_eq!(f.calls.lock().unwrap().len(),1);
 }
+
+#[tokio::test]
+async fn status_message_projection_failure_preserves_validated_execution_evidence() {
+    use futures::StreamExt;
+    for initial in [false,true] {for state in ["TASK_STATE_COMPLETED","TASK_STATE_FAILED","TASK_STATE_CANCELED","TASK_STATE_WORKING"] {for part in [json!({"data":{"unsupported":true}}),json!({"url":"fixture:file","mediaType":"image/png"})] {
+        let status=json!({"state":state,"message":{"messageId":"status","role":"ROLE_AGENT","parts":[part]}});
+        let body=if initial {
+            format!("data: {}\n\n",json!({"task":{"id":"task","contextId":"context","status":status,"artifacts":[{"artifactId":"a","parts":[{"text":"partial"}]}]}}))
+        } else {
+            format!("data: {}\n\ndata: {}\n\n",json!({"task":{"id":"task","contextId":"context","status":{"state":"TASK_STATE_WORKING"},"artifacts":[{"artifactId":"a","parts":[{"text":"partial"}]}]}}),
+                json!({"statusUpdate":{"taskId":"task","contextId":"context","status":status}}))
+        };
+        let f=fixture(body,"text/event-stream",false).await;
+        let c=A2aConnector::new(binding(),card(f.url.clone(),"HTTP+JSON"),http()).unwrap();
+        let events=c.send_streaming_message(request()).await.unwrap().collect::<Vec<_>>().await;
+        assert!(matches!(events.first(),Some(Ok(AgentEvent::Accepted{handle:h})) if h==&handle()));
+        let expected=vec![MessagePart::Text{text:"partial".into()}];
+        if state=="TASK_STATE_WORKING" {
+            assert!(matches!(events.last(),Some(Ok(AgentEvent::ObservationFailed{error:RuntimeError::Unsupported(_),output})) if output==&expected),"{events:?}");
+        } else {
+            assert!(matches!(events.last(),Some(Ok(AgentEvent::FailedWithOutput{error:RuntimeError::Unsupported(_),output})) if output==&expected),"{events:?}");
+        }
+        assert_eq!(f.calls.lock().unwrap().len(),1);
+    }}}
+}
+
+#[tokio::test]
+async fn unary_and_query_input_prompt_is_separate_from_artifacts() {
+    for query in [false,true] {for artifacts in [false,true] {for content in ["text","absent","unsupported","file","oversized"] {
+        let mut task=json!({"id":"task","contextId":"context","status":{"state":"TASK_STATE_INPUT_REQUIRED"}});
+        if artifacts {task["artifacts"]=json!([{"artifactId":"a","parts":[{"text":"unrelated partial"}]}]);}
+        if content!="absent" {
+            let part=match content {"unsupported"=>json!({"data":{}}),"file"=>json!({"url":"fixture:file","mediaType":"image/png"}),"oversized"=>json!({"text":"x".repeat(65536)}),_=>json!({"text":"Which account should I use?"})};
+            task["status"]["message"]=json!({"messageId":"question","role":"ROLE_AGENT","parts":[part]});
+        }
+        let body=if query{task}else{json!({"task":task})};
+        let f=fixture(body.to_string(),"application/json",query).await;
+        let c=A2aConnector::new(binding(),card(f.url.clone(),if query{"JSONRPC"}else{"HTTP+JSON"}),http()).unwrap();
+        let snapshot=if query{c.get_task(handle()).await.unwrap()}else{
+            let AgentSendResponse::Task{snapshot}=c.send_message(request()).await.unwrap() else{panic!("task")};snapshot
+        };
+        assert_eq!(snapshot.handle,handle());assert_eq!(snapshot.status,TaskStatus::InputRequired);
+        assert_eq!(snapshot.output,if artifacts{vec![MessagePart::Text{text:"unrelated partial".into()}]}else{vec![]});
+        let value=serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(value.get("input_prompt"),Some(&if content=="text"{json!([{"kind":"text","text":"Which account should I use?"}])}else{json!([])}));
+        assert_eq!(snapshot.observation_error.is_some(),matches!(content,"unsupported"|"file"|"oversized"));
+        assert_eq!(f.calls.lock().unwrap().len(),1);
+    }}}
+}
