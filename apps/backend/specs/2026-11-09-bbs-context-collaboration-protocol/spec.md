@@ -3,9 +3,9 @@
 - 日期：2026-11-09
 - 状态：Draft / 待评审，尚未实现
 - 归属：Backend Community / Task 主导的跨端目标设计
-- 参与模块：Backend Collaboration Context、BBS、Task / Relay、BCS、Frontend Nextgen
+- 参与模块：Backend Collaboration Context、BBS、Task / Relay、BCS、公开 API consumers
 - 本次交付：方案文档，不包含代码、数据库迁移或运行接口变更
-- 文档位置：按用户要求放在 Backend specs，说明一个由 Backend 拥有、可跨 BBS / Task / 前端使用的上下文协作协议
+- 文档位置：按用户要求放在 Backend specs，说明一个由 Backend 拥有、可跨 BBS / Task / API consumers 使用的上下文协作协议
 
 ## 0. 一句话方案
 
@@ -41,7 +41,7 @@
 4. 可引用的工作材料，不保存字节。
 5. 业务状态与状态机定义版本。
 6. 事件日志与版本号。
-7. 一个或多个协作表面绑定，例如 BBS Topic、前端 Context 页面、BCN 群、Task / Relay 执行。
+7. 一个或多个协作表面绑定，例如 BBS Topic、公开 API consumer、BCN 群、Task / Relay 执行。
 8. 轻量代办清单和可升级为正式 Work 的事项。
 
 ### 2.2 Command / Event / State / Transition
@@ -56,17 +56,11 @@ Context 由事件推进，不由任何 Bot 直接改状态：
 
 LLM 可以输出执行结果、摘要或建议，但不能直接改写 Context 状态。状态只能由服务端状态机根据已接纳事件确定地转换。
 
-### 2.3 状态分层
+### 2.3 Context State
 
-| 层 | 所有者 | 例子 | 职责 |
-| --- | --- | --- | --- |
-| Context State | Collaboration Context | `collecting_info`、`handoff_running`、`reviewing`、`done` | 业务阶段与下一步协作方式 |
-| Task State | TaskGraph | 节点 `PENDING / RUNNING / DONE / FAILED / HUNG / SUCCESS` | 执行节点进度与恢复 |
-| BCS Run State | BCS | run `running / completed / failed / cancelled` | 群、工作流和路由执行 |
-| BBS Topic State | Forum | `OPEN / CLOSED / LOCKED` | 帖子讨论管理状态 |
-| Todo State | Context Todo | `todo / doing / blocked / done / cancelled` | 单个代办事项的完成状态 |
+Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协作方式，例如 `collecting_info`、`handoff_running`、`reviewing`、`done`，由状态机根据已接纳的 `ContextEvent` 推进。
 
-适配器只在事实被上游接纳后才向 Context 投射事件。这些层可以互相关联，但不得互相覆盖或把对方伪造成同义状态。
+外部系统或子实体的事实不构成本协议的第二类 Context State。适配器可以引用外部事实，但必须先由外部系统接纳并转换成 ContextEvent；Context 不能代表、覆盖或反向修改任何外部系统自己的运行事实。
 
 ## 3. 目标与范围
 
@@ -77,7 +71,7 @@ LLM 可以输出执行结果、摘要或建议，但不能直接改写 Context �
 - **G3** 状态机可自定义扩展，但校验、授权、边界和审计由服务端治理。
 - **G4** Context 状态作为驱动层，可按阶段选择协作方式，而不是提前把业务固化成一种运行时。
 - **G5** 统一支持 BBS 公开讨论、Task / Relay 任务接力、以及人类与 Bot 都可参与的代办清单；必要时可按阶段挂接单 Bot、BCN 群或 BCS 自定义协作。
-- **G6** 前端、BBS、任务图和 Bot 读取同一 Context 投影，避免一个页面的进度与任务图进度彼此脱节。
+- **G6** BBS、任务图、Bot 和公开 API consumers 读取同一 Context 投影，避免同一 Context 对外出现多套业务进度。
 - **G7** 状态推进幂等、可恢复、可审计，可回放事实重建状态。
 
 ### 3.2 非目标
@@ -163,7 +157,7 @@ CollaborationContext (aggregate root)
 | 生命周期 | `context.info_updated` | 标题、目标、背景、材料等更新 | 人类编辑 / 授权来源 |
 | 生命周期 | `context.cancelled` | 人类明确取消 | 责任人或控制者 |
 | 参与者 | `participant.role_granted`、`participant.role_revoked` | 参与者或角色变化 | 人类操作 / 授权适配器 |
-| 公开讨论 | `discussion.posted` | 一条可公开回复进入时间线 | BBS Topic、前端讨论区 |
+| 公开讨论 | `discussion.posted` | 一条可公开回复进入时间线 | BBS Topic、讨论入口 |
 | 公开讨论 | `discussion.summarized` | 系统生成摘要事实 | Summary Service |
 | 公开讨论 | `decision.recorded` | 人类记录一个决定或结论 | 人类操作 |
 | 代办 | `todo.created`、`todo.updated`、`todo.assigned` | 新增或更新一条代办 | 人类 / 合法 Bot |
@@ -258,7 +252,7 @@ transitions:
 
 每个自定义状态必须选择一个系统治理类别：
 
-| 类别 | 语义 | UI / 计算约定 |
+| 类别 | 语义 | 展示 / 计算约定 |
 | --- | --- | --- |
 | `initial` | 起点 | 只能有一个 |
 | `waiting` | 等待人类补充、外部输入或选择 | 会进入待办通知与 blockers |
@@ -269,7 +263,7 @@ transitions:
 | `terminal_cancelled` | 主动取消 | 保留历史事实 |
 | `terminal_failed` | 无法继续 | 需要人工决定是否重建 |
 
-允许模板增加自定义状态 ID 和事件名，类别必须映射到上述治理类别。前端可以用自定义显示名，但系统只用治理类别完成权限、超时、通知和终态判断。
+允许模板增加自定义状态 ID 和事件名，类别必须映射到上述治理类别。客户端可以使用自定义显示名，但系统只用治理类别完成权限、超时、通知和终态判断。
 
 ### 5.3 守卫与效果
 
@@ -300,163 +294,47 @@ transitions:
 10. Content digest 和 revision 一起保存，已发布版本被 Context 绑定后不可原位修改。
 11. 升级状态机定义必须显式声明兼容策略；不声明时只能影响之后创建的新 Context。
 
-## 6. 灵活的协作方式
+## 6. 协作 Surface 与 Driver
 
-### 6.1 Surface 与 Driver 分离
+### 6.1 Surface
 
-Context 协议把“看和讨论的表面”与“推进执行的驱动”分开：
+`ContextSurface` 表示协作中可读写投影的入口，描述“在什么入口交流和共享事实”，不规定入口自身的交互实现。
 
-| 类型 | 含义 | 例子 |
-| --- | --- | --- |
-| `ContextSurface` | 人类和 Bot 看到哪里、在哪里交流 | BBS Topic、前端 Context 页、协作群会话 |
-| `ContextDriver` | 当前状态用什么机制推进 | public_discussion、relay_work、todo_board、bcs_group、single_bot |
-
-这使公开讨论不必在启动任务时消失。例如一个 Context 可以：
-
-- 用 BBS Topic 一直承载公开讨论；
-- `ready → handoff_running` 时驱动切换为 Relay；
-- `waiting` 时继续允许公开讨论；
-- `reviewing` 时公开读者可见执行摘要，责任人进入验收；
-- `needs_changes` 时再切换成 todo_board 修小问题。
-
-### 6.2 内建驱动
-
-| Driver | 用途 | 是否创建正式任务 |
-| --- | --- | --- |
-| `public_discussion` | 公开讨论、共识和公开材料沉淀 | 否 |
-| `relay_work` | 多 Bot 或多棒接力的正式执行 | 是，通过现有 Task / Relay |
-| `todo_board` | 轻量代办，适合人类自己和 Bot 承接 | 否；可按需升级为 Work |
-| `single_bot` | 只需要一个 Bot 完成 | 可选择现有轻量执行或正式 Task，由策略声明 |
-| `bcs_group` | 需要 chat、ManagerWorker 或 BCS StateMachine 群协作 | 视具体绑定 |
-
-Driver 切换必须是事件，而不是前端页面开关。前端提交 Command，服务端校验当前状态是否允许该 Driver，然后追加事件并记录状态迁移。
-
-### 6.3 公开讨论
-
-Context 可以由 BBS Topic 创建，或把已授权 Topic 作为 Surface 绑定：
-
-1. Topic 正文和回复不变，仍是 BBS 的权威内容。
-2. 每条 Post 通过 ForumAdapter 转换为 `discussion.posted` 事件；事件保留 `topic_id`、`post_id`、作者、引用楼层、可见范围。
-3. 普通回复不改变状态机；只有显式规则、系统摘要事件或人类动作才触发 Transition。
-4. Topic `CLOSED / LOCKED` 不隐式取消 Context，也不隐式表示任务完成。
-5. Context `done / cancelled` 不自动改 Topic 状态；需要关闭 Topic 的状态效果必须显式声明并经过 Topic 权限校验。
-6. Topic 读者获得的是话术和公开材料可见性，不获得执行、验收或读取附件原始权限的能力。
-7. Context 可以从讨论收敛出结构化 `decision.recorded` 事件，但人类操作者必须明确确认。
-
-### 6.4 任务接力
-
-当 Context 进入可执行状态时：
-
-1. 状态机效果 `ensure_work_binding` 创建或复用一个 `WorkBinding`，指向现有 Task / Relay / BCS Run。
-2. WorkBinding 负责映射 TaskGraph 事实到 Context 事件，例如节点完成、失败、阻塞、取消请求。
-3. Context 只读接入现有 Relay 上下文；`root_task_spec`、`current_task_spec` 和材料引用由现有 TaskContext 投影提供，不新建一套节点图。
-4. Relay 的 GAP 推理、候选搜索、后继节点创建和认领仍由现有协议裁决。
-5. 任务图完成只触发 `work.completed`，进入 Context 的 `review` 类别状态；不能被直接推成 `done`。
-6. 责任人验收通过后，Context 才进入 `terminal_success`。
-7. 驳回时保留原 Work 事实，状态进入 `needs_changes`；新的 Work 请求创建新一轮 WorkBinding，禁止同一 Context 并行推进两轮活跃接力。
-8. 状态迁移与 WorkBinding 激活需要数据库唯一约束或等价 CAS，防止并发请求创建双新执行循环。
-
-### 6.5 任务代办
-
-Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
-
-| 字段 | 说明 |
+| Surface | 协议职责 |
 | --- | --- |
-| `todo_id` | 稳定 ID |
-| `title`、`instruction` | 代办内容 |
-| `assignee` | 人类或 Bot 身份 |
-| `required` | 是否必须完成后 Context 才可进入终态 |
-| `due_at` | 可选截止时间 |
-| `status` | `todo / doing / blocked / done / cancelled` |
-| `evidence_refs` | 完成证据的稳定引用 |
-| `version` | 乐观锁 |
-| `context_ref` | 始终属于一个 Context |
+| BBS Topic | 公开讨论、系统事件摘要、公开材料引用 |
+| Context portal / API | Context 快照、增量分页阅读、Command 提交 |
+| BCS session / group | 群消息、协作邀请、运行摘要、执行事件回投 |
+| External source surface | 来源阅读、修订同步、回写通道 |
 
-规则：
+Surface 绑定必须稳定记录来源类型、来源 ID、作用域和可见性。Context 不拥有这些入口的内部状态，也不通过绑定提升任何入口权限。
 
-1. 人类和 Bot 都可以认领，但只有合法报名校验通过的 Bot 能提交完成事件。
-2. Todo 完成事件只说明这个 Todo 完成，不直接证明业务目标完成。
-3. 状态机可以用 `required_todos_are_done` guard，把“所有必填代办已完成”作为业务终态前置条件。
-4. 当 Todo 需要真正执行、交付文件或外部副作用时，可显式升级为 `WorkBinding`；升级后 Todo 状态只保留代理状态，事实以 WorkBinding 为准。
-5. Todo 自动同步到外部系统时必须走 outbox 和来源回写；同步失败不能吞掉。
-6. 删除 Todo 默认不可用；取消会记录事件。已完成记录不因后续不相关编辑被覆盖。
+### 6.2 Driver
 
-### 6.6 单 Bot 与 BCN 协作群
+`ContextDriver` 表示当前状态依赖的能力，描述“当前阶段由什么机制推进任务”。
 
-用户熟悉的既有协作方式仍是重要适配器，但不是 Context 的中心：
+| Driver | 主要语义 | 协议产物 |
+| --- | --- | --- |
+| `public_discussion` | 讨论与共识形成 | Discussion / Decision 事件 |
+| `relay_work` | 通过现有 Task / Relay 多棒执行正式 Work | `WorkBinding` 与 Work 事件 |
+| `todo_board` | 维护轻量待办清单 | `ContextTodo` 与 Todo 事件 |
+| `single_bot` | 单一 Bot 承接当前能力 | Work / Progress 事件 |
+| `bcs_group` | 挂接 BCS 群或自定义协作运行 | WorkBinding / Run 绑定 |
 
-- `singlebot_2_group`：先由一个 Bot 会话承接，必要时再把执行升级为协作群。
-- `manager_worker`：需要 Manager / Worker 结构化协商时，通过 BCS 创建群并绑定 Driver。
-- `state_machine`：需要结构化节点执行和固定流程时，复用 BCS StateMachine Run。
-- `chat`：需要自由讨论再加结果收集时绑定普通 BCS 群。
+协议只治理 Driver 的选择、事件、守卫和绑定。Driver 自己的执行语义按其原系统协议处理，不能由 Context 状态机重定义。
 
-这些 Adapter 不能绕过 Context 状态机，也不能把自己的运行状态直接写进 Context；必须把自身接纳的事实投射为 ContextEvent。BCS 保留 Bot 关系、路由、会话和状态机执行的权威；Context 保留业务目标状态和事件事实。
+### 6.3 Driver 选择规则
 
-## 7. 基于状态驱动任务前进
+1. 每个 State 必须声明 `allowed_drivers`。
+2. Driver 只能通过 ContextCommand 触发，不能单靠消费者展示态切换。
+3. Driver 变化必须通过 Context 状态机 `Transition` 记录。
+4. `ensure_work_binding` 等 Entry Effects 只能创建、复用或释放协议绑定，不直接调用底层执行入口。
+5. 换 Driver 不默认断开已绑定 Surface，也不覆盖历史事件。
+6. 外部系统内的已接纳事实必须经 Adapter 转换后才能驱动 Context 状态。
+7. Driver 本身不代表权限；执行前仍须独立校验执行许可、材料授权和主体归属。
+## 7. Service API 与协议边界
 
-### 7.1 主流程
-
-```text
-来源（BBS / Table Form / Engine / API）
-  └─ CreateContextCommand
-        └─ ContextCreated + profile revision frozen
-              → DRAFT
-
-用户补齐信息
-  └─ context.info_updated
-        → READY
-
-选用 Driver（公开讨论 / Relay / Todo / BCS 群）
-  └─ 讨论：discussion.posted（可能状态不变）
-  └─ Relay：ensure_work_binding → work.started
-  └─ Todo：todo.created / todo.completed
-        → 状态机计算 ACTIVE / WAITING / REVIEW
-
-上游执行事实
-  └─ work.completed / work.failed / work.blocked
-        → REVIEW / BLOCKED / NEEDS_CHANGES
-
-人类裁决
-  └─ outcome.accepted / outcome.rejected
-        → DONE / NEEDS_CHANGES
-
-外部同步与展示
-  └─ SnapshotPublished / SourceRevisionDetected
-        → 前端、BBS 系统回复、来源回写
-```
-
-### 7.2 Relay 场景
-
-1. 用户发布 BBS HELP Topic，服务端按配置决定是否创建 Context。
-2. Context 处于 `draft`，公开讨论继续补充需求。
-3. 信息完整后进入 `ready`；责任人选择 `relay_work`。
-4. WorkBinding 复用无人值守根启动协议，创建 Task / Relay 图。
-5. Relay 每棒完成并接纳 `EXECUTION_RESULT` / `PLAN_RESULT` 后，TaskAdapter 折射为 `work.progressed`。
-6. 图收敛后 `work.completed` 使 Context 进入 `reviewing`。
-7. 责任人确认交付后进入 `done`；驳回进入 `needs_changes`，可再发起下一轮 Relay。
-8. 公开 BBS 中只展示公开摘要、系统事件和稳定交付物引用；执行日志仍保留在既有权限模型内。
-
-### 7.3 Todo 场景
-
-1. 用户从讨论页选择“转为代办清单”，Context 创建 Todo Driver。
-2. 人类可把“找上线负责人确认域名”分配给自己，“生成部署清单”分配给某 Bot。
-3. Bot 通过 Context Action API 认领并提交文件引用结果；服务端校验 Bot 权限和材料归属。
-4. 人类完成自己的 Todo 后可附语雀链接或回复 ID。
-5. 全部 `required` Todo 完成后，状态机 guard 允许责任人提交验收。
-6. Context 保存每个完成事实、操作者、时间、证明和复核结果；不会把模型自由文本直接当成可验证完成。
-
-### 7.4 纯公开讨论场景
-
-1. Context 创建时绑定 `open_discussion_v1` profile，不创建 TaskInfo。
-2. BBS Topic 作为公开 Surface；所有公开 Posts 继续在 Topic 中展示。
-3. Context 状态可以治理“收集中 / 待决策 / 已形成共识 / 已关闭”，但不改变 BBS 管理状态。
-4. 系统摘要任务可以生成 `discussion.summarized`；摘要是系统产物，不是某个 Bot 的普通回复。
-5. 只有人类责任人可提交 `decision.recorded`。
-6. 若后续需要执行，状态效果显式创建 WorkBinding；普通摘要不能暗中启动任务。
-
-## 8. Service API 与协议边界
-
-### 8.1 Backend 域位置
+### 7.1 Backend 域位置
 
 建议实现时使用以下模块名，可在实施 PR 前调整，但角色必须明确：
 
@@ -483,7 +361,7 @@ apps/backend/src/agentclaw/community/
 
 Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin implementation。所有外部能力通过 Plugin API 注入，由 Composition Root 绑定。
 
-### 8.2 Service API 能力
+### 7.2 Service API 能力
 
 以下为能力，不承诺路径字符串；最终 HTTP DTO 与 Protocol 同步评审。
 
@@ -501,9 +379,9 @@ Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin imp
 | Publish Snapshot | target actor / group、材料允许范围 | Snapshot revision |
 | Resolve Source Revision | source revision、接受 / 拒绝、expected version | 冲突记录与状态 |
 
-前端返回的 `available_actions` 只是展示投影。每次提交时必须重新校验身份、作用域、状态、guard 和 Context 版本。
+`available_actions` 只是给消费者的展示投影。每次提交时必须重新校验身份、作用域、状态、guard 和 Context 版本。
 
-### 8.3 HTTP 面
+### 7.3 HTTP 面
 
 生产公开面可以挂载：
 
@@ -522,7 +400,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 写命令是否公开取决于 PR 权限范围；公开面默认只读。BBS、Task 和 BCN 的系统式服务端适配器在本服务面之外使用共享 Service API，不单靠 HTTP 循环调用。内部面与公开面必须保持同一 Envelope 约定与错误类别。
 
-### 8.4 Adapter 事实映射
+### 7.4 Adapter 事实映射
 
 | Adapter | 方向 | 职责 |
 | --- | --- | --- |
@@ -530,14 +408,14 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | Task / Relay Adapter | Context ⇄ TaskGraph | 启动 Work、读取节点上下文、接收已接纳执行结果 |
 | BCS Adapter | Context ⇄ BCS | 创建 session/group/run、传递推送通知、投放 state_machine 活动 |
 | Source Adapter | 外部 → Context，Context → 外部 | 来源修订、回写摘要、交付物和完成事实 |
-| Frontend Adapter | Context → UI | Web Workbench 渲染时间线、状态、Todo 和提交 Command |
+| Consumer Adapter | Context → API consumers | 提供快照、Timeline、状态和 Command 提交入口 |
 | Summary Adapter | 独立 Summary 任务 → Context | 将系统摘要存储为事件，不伪装成 Bot 回复 |
 
 所有 Adapter 只能提交标准化 Context Command；不能直接写状态机表。服务端保留唯一裁决权。Core 调 Plugin API，Plugin 回调 Deferred Service。共享 Controller-A-Service 面和 Consumer Suite。
 
-## 9. 并发、持久化与一致性
+## 8. 并发、持久化与一致性
 
-### 9.1 逻辑持久化对象
+### 8.1 逻辑持久化对象
 
 以下只描述逻辑职责，具体落表可在实现 PR 前调整；不要把整个状态机 profile 塞入 BBS `topic_config`。
 
@@ -583,7 +461,7 @@ ContextOutbox
   └─ last error
 ```
 
-### 9.2 ACID 与幂等
+### 8.2 ACID 与幂等
 
 - Context 版本、state fencing token 和事件序号共同防止将新命令应用到旧状态上。
 - 事件、Transition、状态机版本、Todo 变更和必要的业务外键必须同一事务提交。
@@ -596,7 +474,7 @@ ContextOutbox
 - 到达 `terminal_*` 状态后，仍可写入公开评论、来源同步或审计事实，但它们不能把 Context 拉出终态。
 - 事件日志是重建 Context 快照的依据；重建只能重放本地事实，不能重新执行外部副作用。
 
-## 10. 安全、可见性与审计
+## 9. 安全、可见性与审计
 
 1. `visibility` 和 `authorization` 是两个独立概念：帖子可读不代表可参与、可启动执行、可验收或可读取原始附件。
 2. 状态机不能用来提升权限；进入某个 `active` 状态不会自动授予 Bot 仓库、群、外部系统或材料访问权限。
@@ -611,44 +489,90 @@ ContextOutbox
 11. 状态机 guard 结果和 effect 结果不直接作为权限证据，权限判断必须独立执行。
 12. 所有新配置和 profile 支持启用范围、默认关闭、tenant / env 隔离和 schema 校验，不引入硬编码私有名称或端点。
 
-## 11. 前端设计
+## 10. 当前协议如何支持接力、公开讨论等场景
 
-### 11.1 Context Workbench
+本节统一说明已有设计中移入的典型场景支持方式。这些例子是实现协议能力的用法，不表示代码已经具备该能力。
+
+### 10.1 通用推进主线
 
 ```text
-┌────────────────────────────────────┬────────────────────────────────────┐
-│ Context title / objective          │ State badge / current driver       │
-│ Background + constraints           │ Participants / permissions         │
-│ Materials / deliverables           │ Next recommended actions           │
-│ Timeline                           │ Driver panel                        │
-│ Reply input                        │ Todo panel / Relay panel / logs     │
-└────────────────────────────────────┴────────────────────────────────────┘
+来源命令
+  └─ CreateContextCommand
+        └─ ContextCreated + profile revision frozen
+              → DRAFT
+
+信息补充
+  └─ context.info_updated
+        → READY
+
+状态允许的 Driver 被选择
+  └─ work.requested / todo.created / discussion.posted
+        → 状态机计算 ACTIVE / WAITING / REVIEW
+
+上游事实回投
+  └─ work.completed / work.failed / work.blocked / todo.completed
+        → REVIEW / BLOCKED / NEEDS_CHANGES
+
+责任人裁决
+  └─ outcome.accepted / outcome.rejected
+        → DONE / NEEDS_CHANGES
+
+外部同步与 Snapshot
+  └─ source.revision_detected / snapshot.published
+        → outbox 投影与回写
 ```
 
-BBS HELP 详情页可采用双栏：
+### 10.2 公开讨论
 
-- 左侧保留原 Topic 正文和回复；
-- 右侧展示 Context 状态、Todo / Relay Driver、公开事件摘要和稳定交付物；
-- 未启动 Work 时显示待补充原因和下一步，不渲染空图冒充执行中。
+Context 可以由 BBS Topic 创建，或把已授权 Topic 作为 Surface 绑定：
 
-### 11.2 交互规则
+1. Topic 正文和回复不变，仍是 BBS 的权威内容。
+2. 每条 Post 通过 ForumAdapter 转换为 `discussion.posted` 事件；事件保留 `topic_id`、`post_id`、作者、引用楼层和可见范围。
+3. 普通回复只记录事实，不改变状态机；只有显式规则、系统摘要事件或人类动作才触发 Transition。
+4. 帖子自身的管理状态不隐式取消 Context，也不隐式表示业务完成。
+5. Context 进入终态后，需要关闭 Topic 的效果必须显式声明，并经过 Topic 权限校验。
+6. Topic 读者获得的是公开内容可见性，不获得参与、执行、验收或读取受保护附件的能力。
+7. Context 可以从讨论收敛出 `decision.recorded` 事实，但必须由人类责任人显式确认。
 
-- 前端展示 `available_actions`，但每次提交都重新鉴权和校验版本；不可用操作需要展示服务端返回的原因。
-- Driver 切换、启动执行、验收和取消都是 Context Command，不直接调用底层 Topic close / Function / BCS API。
-- 409 冲突后重新拉取 Context 快照；用户确认后使用新的 request id 重试，不能旧请求自动覆盖新状态。
-- Timeline 使用游标增量拉取；页面切换或卸载时取消旧请求，防止串到其他 Context。
-- 认证或权限失效立即清除受保护内容；普通加载失败保留最后合法快照并显示可重试异常。
-- 到达终态后，详情仍可阅读，并显示历史 Work、Todo 和验收记录。
-- UI 颜色按状态治理类别区分；主操作和 surfaces 继续使用既有语义 token，不引入硬编码品牌色或主背景色。
+### 10.3 任务接力
 
-### 11.3 与 BBS / TaskPanel 的关系
+当 Context 状态进入可执行阶段并选择 `relay_work` 时：
 
-- Context Workbench 不是 BBS Post 列表的复制；系统化事件可通过 Context timeline 直读或以显式系统回复模式同步发表。
-- TaskPanel 继续渲染注册 Task / Relay 的节点详情；Context 只显示 Work 级摘要和引用。
-- 打开 Topic 页不触发 Work 启动，也不劫持工作台全局任务侧屏。
-- Context 和 Topic 状态分开展示；关闭标题旁若同时存在“Topic OPEN / Context RUNNING”，需要明确解释两者是两层状态。
+1. `ensure_work_binding` 创建或复用一个 `WorkBinding`，指向现有 Task / Relay / BCS Run。
+2. WorkBinding 负责把上游已接纳的节点完成、失败、阻塞、取消请求映射为 ContextEvent。
+3. Context 只读取现有 Relay 投影；不新建节点图，不复刻 GAP 推理、候选搜索、后继创建和认领协议。
+4. Work 完成只产生 `work.completed`，使 Context 进入 review 类状态；不能直接进入完成终态。
+5. 责任人验收通过后，Context 才进入 `terminal_success`。
+6. 驳回后进入 `needs_changes`；重新启动形成新一轮 WorkBinding，历史 Work 事实保留。
+7. 同一 Context 不允许并行推进多轮活跃 Work。
+8. Work 状态机迁移、WorkBinding 激活和状态迁移必须使用唯一约束或等价 CAS，防止并发创建双执行循环。
+9. 公开讨论 Surface 可以在接力期间继续存在，但只能接收公开投影，不能改变执行事实或权限。
 
-## 12. 分阶段交付
+### 10.4 任务代办
+
+Todo 是 Context 内的小型工作项，不必升级为正式 TaskGraph：
+
+1. Context 选择 `todo_board` 后，责任人或授权参与者可创建、指派和更新 Todo。
+2. 每个 Todo 保存标题、指令、assignee、required、due、完成证据和版本。
+3. 人类和 Bot 都可以认领；Bot 提交完成时必须通过主体归属、能力、材料和权限校验。
+4. `todo.completed` 只证明该单条代办完成，不直接证明业务目标完成。
+5. 状态机可以使用 `required_todos_are_done` guard，将所有必需 Todo 完成作为终态验收前置条件。
+6. 当 Todo 需要真正执行、交付文件或产生外部副作用时，可显式升级为 `WorkBinding`；升级后 Work 事实归 Task / Relay。
+7. Todo 取消会记录事件，已完成事实不因后续编辑被覆盖。
+8. 外部系统同步必须通过 outbox 和来源回写，失败不能被吞掉。
+
+### 10.5 单 Bot、BCN 协作群与自定义协作
+
+既有协作方式作为 Context Driver 或 Adapter 使用，而不是被升级为 Context：
+
+- `single_bot`：单一 Bot 承接当前状态允许的能力，结果经 Task / BCS 或授权 Action Adapter 回报。
+- `manager_worker`：需要 Manager / Worker 结构化协商时，通过 BCS 创建群并绑定 Driver。
+- `state_machine`：需要固定结构化执行时，复用 BCS StateMachine Run。
+- `chat`：需要自由讨论并收集结果时绑定普通 BCS 群。
+
+这些 Adapter 不能绕过 Context 状态机，也不能把自己内部运行状态直接写进 Context。BCS 继续保留 Bot 关系、路由、会话和状态机执行事实；Context 只根据其已接纳事实记录业务阶段。若一次状态机 Run 完成但业务验收未通过，后续可通过显式状态迁移重新绑定或创建新的 Run。
+
+## 11. 分阶段交付
 
 | 阶段 | 范围 | 准入条件 |
 | --- | --- | --- |
@@ -660,9 +584,9 @@ BBS HELP 详情页可采用双栏：
 
 实现排序采用可独立上线的小步，而不是一次重构所有协作入口。每个阶段保持旧入口可用，并用功能开关控制新增 Context 入口。
 
-## 13. 测试与验收
+## 12. 测试与验收
 
-### 13.1 领域单测
+### 12.1 领域单测
 
 - Profile schema 校验：合法、非法、未知字段、缺初始状态、终态存在出边、重复 rule、未注册 guard / effect。
 - 状态机执行：合法迁移、非法迁移、guard PASS / FAIL / BLOCKED、effect 幂等。
@@ -672,7 +596,7 @@ BBS HELP 详情页可采用双栏：
 - 事务：数据库失败不上抛伪成功；blocked effect 保留失败原因。
 - 并发：单活跃 Work、旧版本提交、迟到回放、取消和验收同时到达。
 
-### 13.2 Service API / HTTP 测试
+### 12.2 Service API / HTTP 测试
 
 - 内部面与公开面 Envelope、错误码和字段映射一致。
 - 读者、作者、责任人、管理员、Bot 的 allowed actions 和实际权限一致。
@@ -681,7 +605,7 @@ BBS HELP 详情页可采用双栏：
 - Timeline 分页、游标重放、事件可见性和敏感字段拒绝。
 - 出现写失败时错误可重试或可诊断，不返回 success=false 的模拟数据。
 
-### 13.3 Plugin conformance
+### 12.3 Plugin conformance
 
 根据 `docs/arch/protocol-contract-tests.md`，Forum、Task / Relay、BCS 和 Source adapters 均需要 Consumer-Level 机器级测试：
 
@@ -692,27 +616,27 @@ BBS HELP 详情页可采用双栏：
 5. 消息经过传送和解析后，原始敏感字段、token 和私有路径仍未被持久化到 event payload。
 6. Any contract rename fires compatibility suite, not just local unit tests.
 
-### 13.4 端到端验收
+### 12.4 端到端验收
 
 | 编号 | 场景 | 判定 |
 | --- | --- | --- |
 | A01 | Topic → Context | 双向引用可追溯；原 Post 不复制，公开讨论保留 |
 | A02 | 讨论 → 决策 | 摘要和决策事件可见，责任人显式裁定 |
-| A03 | Context → Relay | 页面关闭后仍推进；无浏览器时启动可恢复 |
+| A03 | Context → Relay | 无人值守时仍可启动和推进；崩溃后可恢复 |
 | A04 | Relay 中取消 | Work 停止状态可见，不把取消请求伪装成已取消 |
 | A05 | Relay 完成 | 自动进入 reviewing，不自动进入 done |
 | A06 | 责任人驳回 | 保留历史 Work，新一轮不并行 |
 | A07 | Todo 混合执行 | 人类和 Bot 均可认领；必需 Todo guard 生效 |
 | A08 | Todo 升级 Work | Todo 历史保留，Work 以 Task / Relay 为准 |
 | A09 | 公开读者 | 只可见公开事件与摘要，不能验收或启动 Work |
-| A10 | Topic close | Context / Work 状态不被隐式改变；UI 解释边界 |
+| A10 | Topic close | Context / Work 状态不被隐式改变，接口返回明确边界 |
 | A11 | Context close | Work 正常停止，历史事实保留 |
 | A12 | BCS group event | Context 迁移只在 BCS run 事实被接纳后发生 |
 | A13 | 外部 revision | Conflict / blocked 状态可见，不会覆盖本地裁定 |
 | A14 | 权限降级 | 受保护投影立即不可导出 / 不可读 |
 | A15 | 版本冲突 | 输方收到 409，并重新获取快照后操作 |
 
-## 14. 兼容与迁移
+## 13. 兼容与迁移
 
 - 既有 Topic、Post、TaskInfo、TaskGraph 和 BCS group 不做破坏性改写。
 - 历史内容不自动转换；Topic ↔ Context、Task ↔ WorkBinding 都使用显式绑定表。
@@ -723,7 +647,7 @@ BBS HELP 详情页可采用双栏：
 - 回滚时关闭新入口和 Driver，不让已有 Work 被孤立终止；历史事件、绑定和 Task / BCS 原始事实保留。
 - 不通过删除 Topic / Task 行或直接改写状态表来回滚；只通过功能开关和审核过的兼容版本退出。
 
-## 15. 主要风险与决策
+## 14. 主要风险与决策
 
 | 风险 | 处理 |
 | --- | --- |
@@ -734,21 +658,21 @@ BBS HELP 详情页可采用双栏：
 | 事件过多造成 Timeline 噪音 | 消息按层级、已读和压缩状态折叠；只读 projection 折叠，事件日志保留完整事实 |
 | 模型直接推进状态 | 状态变更必须来自受信 Actor / Service / Adapter 事件，LLM 输出默认无法直接作为状态事实 |
 | 高并发事件乱序 | Transition 只根据当前 state + accepted source event 推进；接收到缺失序号的事件不立即应用，等待补齐或回放 |
-| 前端显示进度与实际执行不一致 | Context progress 只显示已接纳事实，future / routing / internal details 按来源权限过滤 |
+| 消费者看到的进度与实际执行不一致 | Context progress 只暴露已接纳事实，future / routing / internal details 按来源权限过滤 |
 | 策略 dump 过大 | profile 冻结 revision，用户 Context 不实时加载最新 definition |
-| Older profile incompatible migrations | detail revision; migration only via explicit renewal command and compatibility tests |
+| 旧 profile 升级不兼容 | 单独生成新 revision，只允许显式 renew 命令迁移，并通过兼容测试 |
 
-## 16. 待评审问题
+## 15. 待评审问题
 
 1. 状态机 Profile 由平台内置、管理员配置，还是允许经审批的消费者模板扩展？
 2. `ContextCommand` 是否采用统一 endpoint + differentiated action schema，还是保持 explicit endpoints？
 3. Driver 是否支持组合，如 Relay 与 Todo 并行活跃，或首版强制只有一个 current driver？
 4. Context 是否作为所有新 HELP Topic 默认创建，只在显式 Action 时显示，还是用户显式创建？
-5. Todo 与现有任务 / 工作项模型是否共享 UI 组件，但保留不同领域对象？
-6. 是否在 P1 公开 Context Workbench，还是由 Community Topic action 逐步引入？
-7. Context 概念名是否应对用户隐藏，前端用“协作目标”或“协作空间”表达？
+5. Todo 是否作为 Context 内部实体落地，还是复用现有工作项仓储并只保留 Context 映射？
+6. `WorkBinding` 是否允许跨外部系统并存，但单个 Context 仍只允许一个活跃 Work？
+7. Context 与 Topic、Task、BCS Run 的绑定关系是否需要显式版本字段以支持并发解绑和重绑？
 
-## 17. 参考文档
+## 16. 参考文档
 
 - [架构宪章](../../../../docs/arch/arch.rules.md)
 - [CI 门禁](../../../../docs/arch/ci.enforce.md)
