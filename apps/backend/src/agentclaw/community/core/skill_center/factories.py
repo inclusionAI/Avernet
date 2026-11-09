@@ -869,14 +869,19 @@ class SkillParameterServiceFactory(SkillParameterServiceFactoryProtocol):
                    / "workspace" / "skills" / "skill_parameters.json")
 
     def _parameter_device_context(self, bot_id: str, user_id: str):
-        bot = self._parameter_bot(bot_id, user_id)
-        # Resource locators can be entity IDs; ARCA connection authorization
-        # expects the current owner after the caller has been authorized.
-        if bot and bot.get("active_engine") == "deepseek_harness":
-            return self._resolver.resolve_for_bot(
-                bot_id, user_id, connection_user_id=bot["owner_id"],
-            ), bot
-        return self._resolver.resolve_for_bot(bot_id, user_id), bot
+        if self._parameter_bot_repo is None:
+            return self._resolver.resolve_for_bot(bot_id, user_id), None
+        bot = None
+
+        def connection_owner():
+            nonlocal bot
+            bot = self._parameter_bot(bot_id, user_id)
+            # Resource locators can be entity IDs; ARCA authorization expects
+            # the current owner after the actual caller has been authorized.
+            return bot["owner_id"] if bot.get("active_engine") == "deepseek_harness" else None
+
+        ctx = self._resolver.resolve_for_bot(bot_id, user_id, connection_user_id=connection_owner)
+        return ctx, bot
 
     async def create(
         self,

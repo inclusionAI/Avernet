@@ -16,7 +16,8 @@ async def test_parameter_read_and_write_use_engine_workspace(monkeypatch, engine
     bots = MagicMock()
     bots.list_matches_by_legacy_locator.return_value = [bot]
     resolver = MagicMock()
-    resolver.resolve_for_bot.return_value = SimpleNamespace(provider="arca")
+    context = SimpleNamespace(provider="arca")
+    resolver.resolve_for_bot.side_effect = lambda *args, **kw: (kw["connection_user_id"](), context)[1]
     fs = MagicMock()
     fs.read_file = AsyncMock(return_value=b'{"parameters":{"test":{"value":"old"}}}')
     fs.write_file = AsyncMock()
@@ -32,10 +33,8 @@ async def test_parameter_read_and_write_use_engine_workspace(monkeypatch, engine
                 if engine == "deepseek_harness" else DEFAULT_PARAMETERS_PATH)
     assert fs.read_file.await_args.args[0] == expected
     assert fs.write_file.await_args.args[0] == expected
-    if engine == "deepseek_harness":
-        resolver.resolve_for_bot.assert_called_once_with("bot-1", "space-7", connection_user_id="owner-1")
-    else:
-        resolver.resolve_for_bot.assert_called_once_with("bot-1", "space-7")
+    assert resolver.resolve_for_bot.call_args.args == ("bot-1", "space-7")
+    assert resolver.resolve_for_bot.call_args.kwargs["connection_user_id"]() == ("owner-1" if engine == "deepseek_harness" else None)
 
 
 @pytest.mark.asyncio

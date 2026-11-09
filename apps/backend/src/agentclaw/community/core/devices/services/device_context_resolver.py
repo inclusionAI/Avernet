@@ -5,7 +5,7 @@ caller 用 (bot_id, user_id) 入参,resolver 查 binding.device_provider 拿 pro
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -60,14 +60,14 @@ class DeviceContextResolver:
 
     def resolve_for_bot(
         self, bot_id: str, user_id: str, *, device_uuid: str | None = None,
-        connection_user_id: str | None = None,
+        connection_user_id: Callable[[], str | None] | None = None,
     ) -> DeviceContext:
         """resolve bot → DeviceContext。
 
         Args:
             bot_id: 业务 bot ID
             user_id: 操作者身份(用于权限/审计,内部用作 device_affinity)
-            connection_user_id: 调用方完成授权后提供的当前 Owner，仅用于建立连接；
+            connection_user_id: 调用方完成授权后解析当前 Owner 的回调，仅用于 ARCA 连接；
                 binding 仍按 user_id 定位，避免把资源 entity 和 owner 混用。
             device_uuid: 可选设备 UUID,用于多实例场景锁定特定实例;不传则由
                 provider 自动选活跃实例(单实例 provider 忽略)。命不中时底层 builder
@@ -91,7 +91,8 @@ class DeviceContextResolver:
             )
 
         builder = self._builders[provider]
-        builder_user_id = connection_user_id if provider == "arca" and connection_user_id else user_id
+        owner = connection_user_id() if provider == "arca" and connection_user_id else None
+        builder_user_id = owner or user_id
         raw_conn_info = builder.build(binding, builder_user_id, device_uuid=device_uuid)
         conn_info = self._normalize_schema(raw_conn_info, provider)
 
