@@ -1,5 +1,14 @@
 # Bot S1-S6 函数式执行协议
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design.md`](../2026-09-23-task-cli/design.md)。
 
 ## 1. 文档定位
@@ -728,7 +737,7 @@ class BotCandidate:
     score: float | None = None
 ```
 
-`TaskService.search_bots(*, query: str, task_id: str, node_id: str) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
+`TaskService.search_bots(*, query: str, task_id: str, node_id: str, viewer_actor_type: Literal["bot", "human"] | None = None, viewer_actor_id: str | None = None) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
 
 目标 Service 方法为 `TaskService.report(TaskReportCommand) -> TaskReportResult`。当前实现链路仍为 `RelayTaskEventDTO -> report_task_event(散列参数及 payload dict) -> dict`，需要在 Service、HTTP adapter 和测试中一起迁移，不能只修改 Bot 文档。
 
@@ -1246,6 +1255,16 @@ def plan_next_node(
 
 ### 9.3 S5.3：搜索候选
 
+2026-11-06 已审查的兼容扩展：`POST /search` 可选传入成对的
+`viewer_actor_type`（`bot` / `human`）与非空字符串 `viewer_actor_id`。
+两个字段均省略或均为 null 时完全保留现有 public-only 搜索；只传一个、空 ID
+或非法类型返回 422。显式 viewer 复用产品侧对应的 BCSFuse/BCS 可见性规则，
+不是认证凭据，不覆盖节点执行者；执行代次校验不变。任务候选仍执行运行就绪
+过滤，最多返回 5 个，不能把可发现等同于可派发授权。Backend 保留旧四字段请求兼容；task-loop Skill 固定传入当前执行 Bot 的
+`viewer_actor_type="bot"` 与明确 Runtime 身份 `viewer_actor_id`，不开放 Human
+视角，身份不明不得回退到无 viewer 搜索。
+
+
 输入参数：
 
 ```python
@@ -1483,17 +1502,13 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不做恢复；`active + 无进展` 按观察轮次递增介入。同一节点最多 2 次送达成功的 same-session resume：
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 与 `active + 无进展` 都不直接恢复。`active + 无进展` 仅累计观察指标，并等待引擎自身 timeout/终态；只有转换成 `terminal_failed` / `timeout` / `aborted`、`terminal_success` 但图谱未收到报告，或连续 `unknown/unresponsive` 时才进入 same-session recovery。同一节点最多 2 次送达成功的 same-session resume；预算耗尽后显式置 `HUNG`。
 
-- 第 1 轮观察期为 4 个巡检周期，连续无进展后发送 resume；
-- 第 2 轮观察期为 6 个巡检周期，视为上一轮 resume 后仍未推进；
-- 第 3 轮观察期为 8 个巡检周期，若仍无恢复信号则显式置 `HUNG`。
-
-`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒；`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
+`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒。该窗口从服务首次观察到 `terminal_success` 后开始计时；任何离开 `terminal_success` 的后续观察都会清空该计时基准，任务此前处于 active 等状态的时长不得消耗本窗口。`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
 
 每次成功送达的 resume 都会开启新的“恢复观察窗”：
 
-- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、观察时间起点；
+- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、`terminal_success_observed_at` 观察时间起点；
 - **不重置**：`relay_harness_resume_attempts`、`relay_token`、`task_id/node_id`、`run_mode`、`assignee`、会话/群身份。
 
 首个 post-resume probe 使用新的 cursor 基线，确保 resume 消息本身不会被误判为新的业务进展。

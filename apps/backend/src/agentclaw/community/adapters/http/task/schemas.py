@@ -932,7 +932,7 @@ def op_result_to_dto(result) -> TaskOpResultDTO:
 class TaskGrantRequestDTO(BaseModel):
     """前端开启「任务认领」grant 公共 api-key 给某 Bot 的请求体。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     bcs_bot_id: str = Field(
         ...,
@@ -953,7 +953,7 @@ class TaskGrantResultDTO(BaseModel):
 class TaskRevokeRequestDTO(BaseModel):
     """关闭「任务认领」撤销授权的请求体。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     bcs_bot_id: str = Field(..., description="撤销授权 Bot 的 real:entity")
 
@@ -979,7 +979,7 @@ TaskSettingType = Literal[
 class TaskSettingRequestDTO(BaseModel):
     """设置一种任务开关。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     setting_type: TaskSettingType = Field(..., description="任务开关类型")
     enabled: bool = Field(..., description="是否启用")
