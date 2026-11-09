@@ -1,0 +1,14 @@
+submodules/avernet
+  h_7ecb107b24dd7d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "663a4d35cc85d33e5c4dba37edb6c1299e7eb98a",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
