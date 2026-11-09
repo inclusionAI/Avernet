@@ -280,7 +280,7 @@ export function createRunReadRouter(
         return;
       }
       const nodes = await nodeExecRepo.findLatestByFlowId(run.flow_id);
-      const availableInterventions = res.locals.runRead?.managed ? [] : computeAvailableInterventions(run);
+      const availableInterventions = res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : computeAvailableInterventions(run);
       // Never expose credentials_json; add safe derived fields
       const safeRun = projectRun(toSafeRunFields(fixDurationMs(run) as Record<string, unknown>), inspection);
       res.json({ run: safeRun, nodes: projectNodes(nodes, inspection), availableInterventions });
@@ -326,7 +326,7 @@ export function createRunReadRouter(
       const flowId = String(req.params.flowId);
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 200, 1000);
       const events = await eventRepo.findByFlowId(flowId, { limit });
-      res.json(res.locals.runRead?.managed ? [] : events);
+      res.json(res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : events);
     } catch (error) {
       sendRunReadError(res, error);
     }
@@ -346,7 +346,16 @@ export function createRunReadRouter(
         return;
       }
 
-      const availableInterventions = res.locals.runRead?.managed ? [] : computeAvailableInterventions(run);
+      const inspection = res.locals.runRead as RunReadInspection | undefined;
+      if (inspection?.sensitiveChild) {
+        // The public write endpoints lack a verified production principal. Do not
+        // offer actions or turn redacted session fields into editable settings.
+        res.json({ flowId, status: run.status, canIntervene: false, availableInterventions: [],
+          interventionReady: false, interventionReadOnly: true, sessionConfigured: inspection.sessionConfigured === true,
+          originBotId: null, originSessionKey: null, originSessionId: null, hasCredentials: null });
+        return;
+      }
+      const availableInterventions = inspection?.managed ? [] : computeAvailableInterventions(run);
       const canIntervene = availableInterventions.length > 0;
 
       res.json({

@@ -66,6 +66,11 @@ describe('pack scripts read route', () => {
     expect(deps.botPermRepo.hasEditPermission.mock.invocationCallOrder[0]).toBeLessThan(deps.workflowSpecRepo.findByWorkflowId.mock.invocationCallOrder[0]);
     expect(deps.workflowSpecRepo.findByWorkflowId.mock.invocationCallOrder[0]).toBeLessThan(deps.readSnapshot.mock.invocationCallOrder[0]);
   });
+  it.each(['origin/saved/wf-1', 'origin/wf/other', 'refs/tags/deploy/wf-1/#1'])('rejects unversioned non-wf snapshot %s', async baseRef => {
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, baseRef });
+    const res = await request(deps); expect(res.status).toBe(503);
+    const body = await res.text(); expect(body).not.toContain('print(1)'); expect(body).not.toContain(baseRef);
+  });
   it.each(['current', 'draft'])('fails closed for an old host that ignores the %s version', async version => {
     const deps = dependencies();
     const res = await request(deps, 'wf-1', {}, `&version=${version}`);
@@ -73,7 +78,8 @@ describe('pack scripts read route', () => {
     expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
   it.each([
-    ['current', 'origin/saved/wf-1'], ['draft', 'origin/wf/wf-1'],
+    ['current', 'origin/saved/wf-1'], ['draft', 'origin/saved/wf-1'], ['draft', 'refs/tags/deploy/wf-1/#1'],
+    ['current', 'origin/wf/wf-1'],
     ['current', 'origin/wf/other'], ['draft', 'refs/remotes/origin/saved/wf-1'],
   ] as const)('rejects a mismatched %s response ref without exposing contents', async (version, baseRef) => {
     const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, baseRef });
@@ -82,7 +88,7 @@ describe('pack scripts read route', () => {
     expect(res.status).toBe(503); const body = await res.text();
     expect(JSON.parse(body).code).toBe('SERVICE_UNAVAILABLE'); expect(body).not.toContain('print(1)'); expect(body).not.toContain(baseRef);
   });
-  it.each([['current', 'origin/wf/wf-1'], ['draft', 'origin/saved/wf-1']] as const)('accepts a matching %s response ref from a capable host', async (version, baseRef) => {
+  it.each([['current', 'refs/tags/deploy/wf-1/#1'], ['draft', 'origin/wf/wf-1']] as const)('accepts a matching %s response ref from a capable host', async (version, baseRef) => {
     const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, baseRef });
     const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, `&version=${version}`);
     expect(res.status).toBe(200); expect(await res.json()).toEqual({ ...snapshot, baseRef });
@@ -94,7 +100,7 @@ describe('pack scripts read route', () => {
     expect(res.status).toBe(503); expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
   it('authorizes the actual historical Pack before returning any contents', async () => {
-    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, packId: 'old-pack' });
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, packId: 'old-pack', baseRef: 'refs/tags/deploy/wf-1/#1' });
     deps.authorizePackRead.mockImplementation(async (_workflowId, packId) => packId !== 'old-pack');
     const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, '&version=current');
     expect(res.status).toBe(403); expect(await res.text()).not.toContain('print(1)');

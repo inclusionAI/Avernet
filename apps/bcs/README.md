@@ -108,7 +108,6 @@ crates/
 │   ├── bcs-proposal/       # Group proposal generation
 │   ├── bcs-proposal-store/ # Proposal persistence
 │   ├── bcs-judge/          # LLM-based coordination decisions
-│   ├── bcs-callback/       # Bot callback management
 │   ├── bcs-jwt/            # JWT token generation
 │   ├── bcs-secret/         # Secret/token management
 │   ├── bcs-user-identity/  # User identity and auth

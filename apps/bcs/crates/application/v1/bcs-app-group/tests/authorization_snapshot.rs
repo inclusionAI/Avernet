@@ -47,9 +47,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{authority_hook_for, grant_owner_edge, revoke_authority_edge};
 
-#[path = "../../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 /// The env binding of both store instances.
 const ENV: &str = "cutover-snap";

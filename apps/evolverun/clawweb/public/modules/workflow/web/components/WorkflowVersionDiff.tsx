@@ -3,6 +3,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { VersionDiffResult } from '@avernet/clawweb-shared/web/types'
 import SideBySideView from './workflow-version-diff/SideBySideView'
+import { assertLosslessNumbers } from '../editor/losslessNumbers'
+import YamlCodeViewer from './YamlCodeViewer'
 
 interface WorkflowVersionDiffProps {
   workflowId: string
@@ -107,35 +109,24 @@ export function compactDiff(lines: DiffLine[], contextLines = 3): DiffLine[] {
   return compacted
 }
 
-/** Turn stored JSON (or the legacy { content: yaml } wrapper) into readable YAML.
- * The history API deliberately returns the original snapshot; formatting it here
- * keeps the raw snapshot lossless while making line-level diff useful. */
-function stripSyntheticSpecFields(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const { updatedAt: _updatedAt, version: _version, facade: _facade, ...persistedSpec } = value as Record<string, unknown>
-  return persistedSpec
-}
-
-/**
- * Format a deploy-history snapshot in the same persisted-spec shape used for
- * editor comparisons. `updatedAt`, `version`, and `facade` are enriched or
- * synchronized metadata, not deployable workflow content.
- */
+/** Format the complete stored document without interpreting historical fields.
+ * Fall back to exact bytes if parsing would lose data, including duplicate keys
+ * or numbers that JavaScript cannot represent. */
 export function formatSpecForDiff(specJson: string): string {
   try {
-    const parsed = JSON.parse(specJson)
-    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
-      return stringifyYaml(stripSyntheticSpecFields(parseYaml(parsed.content)), { lineWidth: 0 })
-    }
-    return stringifyYaml(stripSyntheticSpecFields(parsed), { lineWidth: 0 })
+    assertLosslessNumbers(specJson)
+    const parsed: unknown = JSON.parse(specJson)
+    // A JSON string could itself be authored data, not an envelope.
+    if (typeof parsed === 'string') return specJson
+    return stringifyYaml(parsed, { lineWidth: 0 })
   } catch {
     return specJson
   }
 }
 
-/** Format the current editor value using the same persisted-spec shape as a deploy snapshot. */
+/** Compare the complete current document; no user field is synthetic by name. */
 export function formatCurrentSpecForDiff(spec: unknown): string {
-  return stringifyYaml(stripSyntheticSpecFields(spec), { lineWidth: 0 })
+  return stringifyYaml(spec, { lineWidth: 0 })
 }
 
 function sortSpecValue(value: unknown): unknown {
@@ -154,9 +145,24 @@ function sortSpecValue(value: unknown): unknown {
 /** Compare parsed specs so YAML field ordering and formatting do not create a false pending deploy. */
 export function specsEqual(fromText: string, toText: string): boolean {
   try {
+    assertLosslessNumbers(fromText)
+    assertLosslessNumbers(toText)
     return JSON.stringify(sortSpecValue(parseYaml(fromText))) === JSON.stringify(sortSpecValue(parseYaml(toText)))
   } catch {
     return fromText === toText
+  }
+}
+
+/** A historical field cannot authenticate its own origin. */
+export function historyComparisonUncertain(text: string): boolean {
+  try {
+    assertLosslessNumbers(text)
+    const value: unknown = parseYaml(text, { uniqueKeys: true, maxAliasCount: 100 })
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return true
+    const document = value as Record<string, unknown>
+    return Object.hasOwn(document, '__clawweb_snapshot_v1') || typeof document.content === 'string'
+  } catch {
+    return true
   }
 }
 
@@ -212,6 +218,23 @@ export default function WorkflowVersionDiff({
   }
   if (!result) {
     return null
+  }
+
+  const fromRaw = result.from.specJson ?? ''
+  const toRaw = result.to.specJson ?? ''
+  if (historyComparisonUncertain(fromRaw) || historyComparisonUncertain(toRaw)) {
+    return <div className="flex h-full min-h-0 flex-col">
+      <div role="status" className="border-b border-border bg-muted px-3 py-2 text-xs text-foreground">
+        无法确认历史内容的来源或无损解析，无法判断工作流是否相同；以下展示完整历史记录（保留所有字段，不展开或剥离），请人工核对。
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-2 overflow-auto">
+        {[{ label: '旧版本', snapshot: result.from, raw: fromRaw }, { label: '新版本', snapshot: result.to, raw: toRaw }].map(({ label, snapshot, raw }) =>
+          <section key={label} aria-label={`${label} v${snapshot.version} 原始记录`} className="flex min-h-0 min-w-0 flex-col border-r border-border">
+            <div className="border-b border-border bg-muted px-3 py-2 text-xs">{label} · v{snapshot.version} · deploy #{snapshot.deployNumber}</div>
+            <YamlCodeViewer value={raw} unwrapLegacyContent={false} />
+          </section>)}
+      </div>
+    </div>
   }
 
   const fromText = formatSpecForDiff(result.from.specJson ?? '')

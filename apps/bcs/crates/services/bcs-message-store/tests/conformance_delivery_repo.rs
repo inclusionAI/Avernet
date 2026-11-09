@@ -206,9 +206,7 @@ async fn newly_created_session_sequence_uses_transactional_read() -> Result<(), 
     Ok(())
 }
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod migrations;
+use bcs_db_migrations as migrations;
 
 #[tokio::test]
 async fn conformance_memory_delivery_repo() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,3 +1,4 @@
+import { StepReportRepository } from "./step-report-repository.js";
 import { productionRunsSql, productionDiagnosesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { spaceBotPredicate, type SpaceBot } from "../services/evolve/teamclaw-scope.js";
 import { randomUUID } from "node:crypto";
@@ -255,10 +256,11 @@ export type AccessibleEvolveBotRuntime = {
 };
 
 export class EvolveRepository {
+  readonly stepReports: StepReportRepository;
   constructor(
     private readonly db: IDatabase,
     private readonly botDb: Pick<IDatabase, "query"> = db,
-  ) {}
+  ) { this.stepReports = new StepReportRepository(db); }
 
   async createTaskLogArchive(input: { archiveId: string; taskId: string; requestedBy: string }): Promise<EvolveTaskLogArchiveRow> {
     // ce_task_log_archives deliberately stores portable unix seconds in BIGINT
@@ -2371,6 +2373,15 @@ export class EvolveRepository {
           throw new Error('Cannot finalize an ended Skill task');
         }
       }
+      let ext = input.ext;
+      if (ext !== undefined) {
+        await tx.exec("UPDATE ce_tasks SET task_id = task_id WHERE task_id = ?", [step.task_id]);
+        const current = (await tx.query<{ ext_json: string | null }>(
+          `SELECT ext_json FROM ce_steps WHERE step_id = ?${tx.dbType === "sqlite" ? "" : " FOR UPDATE"}`, [stepId],
+        ))[0];
+        const receipts = JSON.parse(current?.ext_json ?? "{}")?.report_delivery;
+        if (receipts) ext = { ...(ext as Record<string, unknown>), report_delivery: receipts };
+      }
       await tx.exec(
         `UPDATE ce_steps SET status = ?, summary = COALESCE(?, summary),
          output_json = COALESCE(?, output_json), error_code = COALESCE(?, error_code),
@@ -2382,7 +2393,7 @@ export class EvolveRepository {
           input.output === undefined ? null : JSON.stringify(input.output),
           input.errorCode ?? null, input.errorMessage ?? null,
           input.retryable == null ? null : Number(input.retryable),
-          input.ext === undefined ? null : JSON.stringify(input.ext),
+          ext === undefined ? null : JSON.stringify(ext),
           lifecycleAt, terminal ? lifecycleAt : null, now, stepId],
       );
       // Auxiliary Agent executions do not own the business Task's terminal state.
