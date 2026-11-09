@@ -11,7 +11,7 @@
  *   会话切换复位——useBotChat 同边界 closePanelForce；无 <AixUI type="panel"> 内容时
  *   图标禁用，防 autoCloseWhenEmpty 弹回）；右缘域面板开合互斥（让位收起/全收回开/
  *   真实态收面板，修复侧边栏被悬浮副屏掩盖）统一委托 sidePanePanelMutex。
- * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
+ * 历史搜索状态下沉同目录 sessionHistorySearchModel.ts（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
 import {
@@ -19,21 +19,20 @@ import {
   shouldPreserveTaskPanelForSession,
 } from '@/services/tasks/taskConversationNavigation';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
-import type {
-  SessionMessageSearchQuery,
-  SessionMessageSearchResult,
-} from '@/services/workspace/conversationSearchService';
-import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
 import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSidePanePanelMutex } from './sidePanePanelMutex';
+import { useSessionHistorySearchModel } from './sessionHistorySearchModel';
+import type { UseSessionHistorySearchModel } from './sessionHistorySearchModel';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 // 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
 // 保留再导出兼容既有导入面（useGroupChatHeaderPanels / 测试用例）。
 export { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
+// 历史搜索模型同边界下沉 sessionHistorySearchModel.ts；类型再导出保持既有导入面。
+export type { UseSessionHistorySearchModel } from './sessionHistorySearchModel';
 
 /** 头部右侧承载的右缘面板类型（资源面板走既有文件副屏，不在此枚举内）。 */
 export type ChatHeaderPanelKind = 'detail' | 'history';
@@ -88,45 +87,6 @@ export interface UseChatHeaderPanelsResult {
   /** 点击搜索结果后待定位高亮的 messageId（3s 后自动清除）。 */
   highlightMessageId: string | null;
   locateMessage: (messageId: string) => void;
-}
-
-export interface UseSessionHistorySearchModel {
-  query: SessionMessageSearchQuery;
-  setKeyword: (keyword: string) => void;
-  setSender: (sender: SessionMessageSearchQuery['sender']) => void;
-  setTodayOnly: (todayOnly: boolean) => void;
-  /** 本地降级态指示：面板据此明示「仅已载入消息」。 */
-  source: 'local';
-  results: SessionMessageSearchResult[];
-}
-
-/** 历史消息面板的搜索/筛选/结果模型（本地源即时过滤）。 */
-function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: number): UseSessionHistorySearchModel {
-  const [keyword, setKeyword] = useState('');
-  const [sender, setSender] = useState<SessionMessageSearchQuery['sender']>(null);
-  const [todayOnly, setTodayOnly] = useState(false);
-
-  // 会话切换复位筛选（sessionEpoch 变化即重置）。
-  const lastEpochRef = useRef(sessionEpoch);
-  if (lastEpochRef.current !== sessionEpoch) {
-    lastEpochRef.current = sessionEpoch;
-    setKeyword('');
-    setSender(null);
-    setTodayOnly(false);
-  }
-
-  const outcome = useMemo(
-    () => searchConversationMessages(messages, { keyword, sender, todayOnly }),
-    [messages, keyword, sender, todayOnly],
-  );
-  return {
-    query: { keyword, sender, todayOnly },
-    setKeyword,
-    setSender,
-    setTodayOnly,
-    source: outcome.source,
-    results: outcome.items,
-  };
 }
 
 const HIGHLIGHT_TIMEOUT_MS = 3000;
