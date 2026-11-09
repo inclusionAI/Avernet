@@ -354,17 +354,20 @@ impl DefaultConnector {
                 a.last_progress = now;
                 match result {
                     Ok(Io::Stream(stream)) => a.stream = Some(stream),
-                    Ok(Io::Response(AgentSendResponse::Message { parts, handle })) => {
+                    Ok(Io::Response(AgentSendResponse::Message { parts, handle, observation_error })) => {
                         let event = match handle {
                             Some(handle) => AgentEvent::Snapshot {
-                                snapshot: ExecutionSnapshot {
+                                snapshot: ExecutionSnapshot { observation_error,
                                     handle,
                                     status: TaskStatus::Completed,
                                     output: parts,
                                     error: None,
                                 },
                             },
-                            None => AgentEvent::Completed { output: parts },
+                            None => match observation_error {
+                                Some(error) => AgentEvent::FailedWithOutput { error: terminal_observation_error(error), output: parts },
+                                None => AgentEvent::Completed { output: parts },
+                            },
                         };
                         self.observe(a, event, now).await?;
                     }
@@ -537,6 +540,18 @@ impl DefaultConnector {
             }
             AgentEvent::Snapshot { mut snapshot } => {
                 snapshot.error = snapshot.error.map(bounded_error);
+                if let Some(error) = snapshot.observation_error.take() {
+                    // Handle persistence above must succeed before recording local loss.
+                    // Empty failed projection is not an authoritative empty snapshot.
+                    if !snapshot.output.is_empty() {
+                        a.output = projection::bounded_output(snapshot.output, MAX_CONTENT_BYTES);
+                    }
+                    return if snapshot.status.is_terminal() {
+                        self.terminal_observation_failure(a, error, now)
+                    } else {
+                        self.observation_failure(a, error, now)
+                    };
+                }
                 if size(&snapshot.output)? > MAX_CONTENT_BYTES {
                     a.output = projection::bounded_output(snapshot.output, MAX_CONTENT_BYTES);
                     return if snapshot.status.is_terminal() { self.terminal_failure(a, RuntimeError::CapacityExceeded, now) } else { self.observation_failure(a, RuntimeError::CapacityExceeded, now) };
@@ -556,12 +571,12 @@ impl DefaultConnector {
                 AgentEvent::Snapshot { snapshot }
             }
             AgentEvent::ObservationFailed { error, output } => {
-                a.output = projection::bounded_output(output, MAX_CONTENT_BYTES);
+                if !output.is_empty() { a.output = projection::bounded_output(output, MAX_CONTENT_BYTES); }
                 return self.observation_failure(a, error, now);
             }
             AgentEvent::Failed { error } => return self.terminal_failure(a, error, now),
             AgentEvent::FailedWithOutput { error, output } => {
-                a.output = projection::bounded_output(output, MAX_CONTENT_BYTES);
+                if !output.is_empty() { a.output = projection::bounded_output(output, MAX_CONTENT_BYTES); }
                 return self.terminal_failure(a, error, now);
             }
             other => other,
@@ -608,6 +623,23 @@ impl DefaultConnector {
         self.agent_receipt(a, AgentEvent::ObservationFailed {
             error: bounded_error(error), output: projection::bounded_output(a.output.clone(), MAX_CONTENT_BYTES),
         }, now)
+    }
+    fn terminal_observation_failure(&self, a: &mut Actor, error: RuntimeError, now: u64) -> RuntimeResult<()> {
+        let error = terminal_observation_error(error);
+        a.io = None;
+        a.stream = None;
+        a.pending_text.clear();
+        let output = projection::bounded_output(a.output.clone(), MAX_CONTENT_BYTES);
+        let event = match a.record.handle.clone() {
+            // A local failed result for a confirmed terminal observation, not a
+            // claim that the remote status changed to Failed. Preserve its real
+            // context for the next Direct task; never invent a remote task ID.
+            Some(handle) => AgentEvent::Snapshot { snapshot: ExecutionSnapshot {
+                handle, status: TaskStatus::Failed, output, error: Some(error), observation_error: None,
+            } },
+            None => AgentEvent::FailedWithOutput { error, output },
+        };
+        self.agent_receipt(a, event, now)
     }
     fn terminal_failure(&self, a: &mut Actor, error: RuntimeError, now: u64) -> RuntimeResult<()> {
         let error = bounded_error(error);
@@ -774,5 +806,14 @@ fn bounded_error(error: RuntimeError) -> RuntimeError {
         RuntimeError::Storage(s) => RuntimeError::Storage(clip(s)),
         RuntimeError::Unavailable(s) => RuntimeError::Unavailable(clip(s)),
         other => other,
+    }
+}
+
+// ExecutionUnknown means the remote may still run elsewhere in the runtime.
+// A confirmed terminal response with unreadable output has a different meaning.
+fn terminal_observation_error(error: RuntimeError) -> RuntimeError {
+    match error {
+        RuntimeError::ExecutionUnknown | RuntimeError::CancellationUnknown => RuntimeError::Unavailable("terminal observation failed".into()),
+        other => bounded_error(other),
     }
 }

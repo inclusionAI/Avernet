@@ -107,3 +107,16 @@ Repeated external failures back off; stalled futures are dropped after 15 s and
 the durable command remains available. Detailed per-repository costs are in the
 runtime-store README. No production capacity, crash durability or real failover
 claim follows from memory tests. Production adapters and bootstrap are separate.
+
+
+Connector Message/Snapshot `observation_error` is local projection loss, distinct
+from remote execution error. A returned handle is saved before handling it.
+Live snapshots produce ObservationFailed and preserve prior output when the
+failed projection is empty. Confirmed terminal observations produce local failed
+results through the immutable result barrier; a saved context is included in a
+local Failed snapshot receipt so the runner can reuse it. This receipt does not
+claim the remote execution itself changed to Failed. Terminal observation errors
+ExecutionUnknown/CancellationUnknown normalize to Unavailable("terminal observation
+failed") so they do not falsely block a completed context; unknown-delivery
+handling is unchanged. Direct Messages retain their own response variant, with
+optional context and observation_error, including failures with no context.

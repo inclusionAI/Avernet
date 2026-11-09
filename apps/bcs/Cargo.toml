@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/external-clients/bcn-agent-connectors",
     "crates/application/bcn-runtime-app",
     "crates/services/bcn-runtime-store",
     "crates/services/bcn-session-runner",
@@ -152,6 +153,7 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcn-agent-connectors = { path = "crates/external-clients/bcn-agent-connectors" }
 bcn-runtime-app = { path = "crates/application/bcn-runtime-app" }
 bcn-runtime-store = { path = "crates/services/bcn-runtime-store" }
 bcn-session-runner = { path = "crates/services/bcn-session-runner" }

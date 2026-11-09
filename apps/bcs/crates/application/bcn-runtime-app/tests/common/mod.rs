@@ -183,7 +183,7 @@ impl Transport {
             events: std::sync::Mutex::new(events),
             sends: AtomicU64::new(0),
             queries: AtomicU64::new(0),
-            query: std::sync::Mutex::new(ExecutionSnapshot {
+            query: std::sync::Mutex::new(ExecutionSnapshot { observation_error: None,
                 handle: handle(),
                 status: TaskStatus::Completed,
                 output: text("queried"),

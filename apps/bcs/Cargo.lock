@@ -318,6 +318,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bcn-agent-connectors"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcs-a2a-http",
+ "bcs-network-tracing",
+ "bcs-protocol",
+ "futures",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bcn-runtime-api"
 version = "0.1.4-beta.3"
 dependencies = [

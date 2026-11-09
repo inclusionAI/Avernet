@@ -70,7 +70,7 @@ async fn direct_message_response_preserves_server_context_for_subsequent_task() 
             let mut h = handle();
             h.remote_task_id = None;
             h.remote_context_id = Some("server-selected-context".into());
-            Ok(AgentSendResponse::Message {
+            Ok(AgentSendResponse::Message { observation_error: None,
                 parts: text("message-result"),
                 handle: Some(h),
             })

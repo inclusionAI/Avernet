@@ -58,9 +58,21 @@ pub enum AgentSendResponse { Message {
     /// Actual server context from a direct Message response; no remote task is invented.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     handle: Option<ExecutionHandle>,
+    /// Direct response is terminal even when its output cannot be projected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observation_error: Option<RuntimeError>,
 }, Task { snapshot: ExecutionSnapshot } }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExecutionSnapshot { pub handle: ExecutionHandle, pub status: TaskStatus, pub output: Vec<MessagePart>, pub error: Option<RuntimeError> }
+pub struct ExecutionSnapshot {
+    pub handle: ExecutionHandle,
+    pub status: TaskStatus,
+    pub output: Vec<MessagePart>,
+    pub error: Option<RuntimeError>,
+    /// Local projection failed; status still describes the remote execution.
+    /// An empty output with this field present must not erase known partial output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_error: Option<RuntimeError>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {

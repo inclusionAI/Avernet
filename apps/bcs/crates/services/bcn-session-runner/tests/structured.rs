@@ -278,7 +278,7 @@ fn failed_snapshot_keeps_partial_output_and_blocks_successors() {
                     .clone()
                     .unwrap(),
                 event: AgentEvent::Snapshot {
-                    snapshot: ExecutionSnapshot {
+                    snapshot: ExecutionSnapshot { observation_error: None,
                         handle: ExecutionHandle {
                             target: AgentId::new(scope(), "bot"),
                             binding_version: "1".into(),
@@ -332,7 +332,7 @@ fn unsolicited_cancelled_snapshot_finishes_after_result_barriers() {
                     .clone()
                     .unwrap(),
                 event: AgentEvent::Snapshot {
-                    snapshot: ExecutionSnapshot {
+                    snapshot: ExecutionSnapshot { observation_error: None,
                         handle: ExecutionHandle {
                             target: AgentId::new(scope(), "bot"),
                             binding_version: "1".into(),

@@ -6,7 +6,7 @@ fn legacy_message_and_submit_decode_without_new_optional_context_fields() {
         serde_json::from_value(json!({"kind":"message","parts":[]})).unwrap();
     assert_eq!(
         response,
-        AgentSendResponse::Message {
+        AgentSendResponse::Message { observation_error: None,
             parts: vec![],
             handle: None
         }
@@ -55,4 +55,22 @@ fn local_observation_failure_has_distinct_wire_identity() {
     let value = serde_json::to_value(&event).unwrap();
     assert_eq!(value["kind"], "observation_failed");
     assert_eq!(serde_json::from_value::<AgentEvent>(value).unwrap(), event);
+}
+
+#[test]
+fn snapshot_observation_error_roundtrips_separately_from_remote_error() {
+    let scope=Scope::new("test","tenant","runtime");
+    let old=json!({"handle":{"target":{"scope":scope,"value":"agent"},"binding_version":"v1","remote_task_id":"task","remote_context_id":"context"},"status":"working","output":[],"error":null});
+    let decoded:ExecutionSnapshot=serde_json::from_value(old.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(),old);
+    let mut with_error=old;with_error["observation_error"]=json!("execution_unknown");
+    let decoded:ExecutionSnapshot=serde_json::from_value(with_error.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(),with_error);
+}
+
+#[test]
+fn direct_message_observation_error_survives_wire_without_inventing_task() {
+    let value=json!({"kind":"message","parts":[],"observation_error":"execution_unknown"});
+    let message:AgentSendResponse=serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(message).unwrap(),value);
 }

@@ -35,3 +35,13 @@ Failed/FailedWithOutput: local observation stopped without proving remote
 termination. Its durable receipt drives the application's TaskFailure path,
 retaining the saved-result barrier, known-handle cancellation and uncertain
 Direct context blocking. Existing failure wire shapes are unchanged.
+
+
+`ExecutionSnapshot.observation_error` and `AgentSendResponse::Message.observation_error`
+are optional, serde-default local projection errors, separate from a remote task
+execution error. Old messages/snapshots without the fields still decode; None is
+not serialized. A snapshot retains actual remote status and handle. Direct Message
+responses remain terminal, with only an actual optional server context and no
+fabricated task identity. Consumers must persist a returned handle before acting
+on observation failure, retain previously known output if failed projection
+produced none, and distinguish live uncertainty from confirmed termination.
