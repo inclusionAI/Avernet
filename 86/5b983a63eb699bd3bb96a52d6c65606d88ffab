@@ -1,0 +1,30 @@
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 4
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_7d9f4f65cedfaf::t_3e3f0adc585d0d 1-232
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 712-713
+  s_7d9f4f65cedfaf::t_c1deaeed2fe045 705-711,714-718
+apps/bcs/docs/native-task-caller.md
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 15-18
+  s_7d9f4f65cedfaf::t_c8486e34ada78d 12-14
+  s_7d9f4f65cedfaf::t_62fc1f1f737b02 19-21
+apps/bcs/Cargo.lock
+  s_7d9f4f65cedfaf::t_5782adaaabc102 2213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "865b983a63eb699bd3bb96a52d6c65606d88ffab",
+  "prompts": {},
+  "sessions": {
+    "s_7d9f4f65cedfaf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3e32aee1-425a-45d9-a866-5e98ac005613",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

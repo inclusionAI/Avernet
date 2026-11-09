@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_interaction_repository.py
+  h_059e888e5e4e82 26,135
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_repository.py
+  h_059e888e5e4e82 14,430
+apps/backend/src/agentclaw/community/core/task/forum/interaction/README.md
+  h_059e888e5e4e82 31
+apps/backend/src/agentclaw/community/core/task/forum/interaction/time_utils.py
+  h_059e888e5e4e82 1-12
+apps/backend/src/agentclaw/community/core/task/forum/repository/models.py
+  h_059e888e5e4e82 527-530
+apps/backend/src/agentclaw/community/core/task/forum/sql/2026_10_27_forum_interaction.sql
+  h_059e888e5e4e82 12,14
+apps/backend/tests/community/repository/task/forum/test_forum_interaction_repository.py
+  h_059e888e5e4e82 25,57,66,75,79-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1e8fc7c87307d98ab90a1e8fd3116409d7abddc",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

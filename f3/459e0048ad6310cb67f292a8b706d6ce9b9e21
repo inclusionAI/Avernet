@@ -1,0 +1,29 @@
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependency_runtime.py
+  h_5686002b4ce7b9 1-174
+apps/bcsfuse/tests/contract/test_profile_activation_index_batching_tdd.py
+  h_5686002b4ce7b9 1-262
+apps/bcsfuse/src/app/bootstrap/profile_activation_index.py
+  h_5686002b4ce7b9 1-8,17,21-26,29-93,95-273,277,279-281,283,287
+apps/bcsfuse/src/app/domain/services/profile_embedding_indexer.py
+  h_5686002b4ce7b9 53-55,59-70,120-125,128-144,290,301,341,359
+apps/bcsfuse/src/app/bootstrap/oss_worker_lifecycle_routes.py
+  h_5686002b4ce7b9 417-422
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_request_dependencies.py
+  h_5686002b4ce7b9 1-185
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependency_services.py
+  h_5686002b4ce7b9 1-794,796-813
+  h_5686002b4ce7b9 795
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependencies.py
+  h_5686002b4ce7b9 33-34,44-48,92-94,97,190,194-195,208,210-215,898-928
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f3459e0048ad6310cb67f292a8b706d6ce9b9e21",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/skill_center/test_skill_set_management_service_part6.py
+  s_4d5d95b7550955::t_339ba0dbf636b7 10,709-732
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8499eb948dafb30fa83455bdb307604436ba674c",
+  "prompts": {},
+  "sessions": {
+    "s_4d5d95b7550955": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b6-803c-7ca3-9d1a-5be469286112",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

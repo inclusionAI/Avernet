@@ -1,0 +1,18 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  h_12dd6d063428b2 111-112,165-166
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  h_12dd6d063428b2 386-388,397-399
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  h_12dd6d063428b2 45-48,848-879
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6b9d69afee257df6ad9ad5062e9be0691d8f173",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

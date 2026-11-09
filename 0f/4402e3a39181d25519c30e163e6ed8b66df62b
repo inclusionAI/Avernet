@@ -1,0 +1,29 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/fresh_fixture_pair.py
+  s_cecdc98e721f4b::t_0cb4ed25c6003e 1-322
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_connection_decision_case_run.py
+  s_cecdc98e721f4b::t_48914d7a099f4e 3-7,12-18,42,67-92,126-127,140-144,153-161,163-173,175-184,186-201,203,205-224,240-241,247
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_8dd9c6e606db75 3-6,11-17,40,69-94,128-129,142-146,154-162,164-174,176-185,187-202,204,206-225,241-242,247
+apps/bcs/scripts/e2e-runner/tests/test_fresh_fixture_pair.py
+  s_cecdc98e721f4b::t_0e6964ecef162a 1-258
+apps/bcs/scripts/e2e-runner/tests/test_friend_connection_decision_case_run.py
+  s_cecdc98e721f4b::t_079289872cd221 19-24,170-182,188-190,217-221,223-225,243-276
+apps/bcs/scripts/e2e-runner/tests/test_friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_001cabc54758a0 19-24,140-152,158-160,185-189,191-193,208-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f4402e3a39181d25519c30e163e6ed8b66df62b",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apps/bcs/scripts/e2e-test/caller_delegation_chain_story.py
+  h_7ecb107b24dd7d 90,110-116
+apps/bcs/scripts/e2e-test/caller_identity_story.sh
+  h_7ecb107b24dd7d 58-70
+apps/bcs/scripts/e2e-test/native_task_caller_story.py
+  h_7ecb107b24dd7d 1-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1ce289ebe2d815fe83498c5c72bb82fd5582143b",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
