@@ -47,31 +47,31 @@ fn needs_cancel(row: &PersistedMessageDelivery) -> bool {
 
 /// Every unfinished Send of the Session, whoever the target Bot is now: a Bot
 /// removed from the Session while its delivery was running is still here.
-/// Cancelled rows leave the lookup, so pages advance by themselves; a page
-/// that only repeats rows already attempted ends the sweep.
+/// Pages follow the Session index with a keyset cursor, so the sweep reads
+/// the Session's index entries once instead of re-scanning per page.
 async fn cancel_session(
     service: &dyn ManagedMessageDeliveryService,
     session_id: &str,
     reason: &str,
 ) -> ServiceResult<()> {
-    let mut attempted = std::collections::BTreeSet::new();
+    let mut after: Option<(String, String)> = None;
     let mut failed = 0usize;
     loop {
         let rows = service
-            .lookup(DeliveryLookup::SessionUnfinished { session: session_id.to_owned(), limit: PAGE })
+            .lookup(DeliveryLookup::SessionUnfinished { session: session_id.to_owned(), after: after.clone(), limit: PAGE })
             .await
             .map_err(|error| ServiceError::InternalError(format!("session delivery lookup failed: {error}")))?;
-        let fresh: Vec<_> = rows.into_iter()
-            .filter(|row| row.session_id == session_id && attempted.insert(row.delivery_id.clone()))
-            .collect();
-        if fresh.is_empty() {
-            break;
-        }
-        for row in fresh {
+        let Some(last) = rows.last() else { break };
+        after = Some((last.source_message_id.clone(), last.delivery_id.clone()));
+        let full = rows.len() >= PAGE;
+        for row in rows.into_iter().filter(|row| row.session_id == session_id) {
             if let Err(error) = cancel_row(service, row, reason).await {
                 failed += 1;
                 tracing::warn!(%session_id, %error, "session delete: delivery cancellation failed");
             }
+        }
+        if !full {
+            break;
         }
     }
     if failed > 0 {

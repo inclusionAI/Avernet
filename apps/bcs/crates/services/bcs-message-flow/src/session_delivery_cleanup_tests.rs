@@ -81,5 +81,5 @@ async fn lanes_of_bots_no_longer_in_the_session_are_cancelled_too() {
     let (service, row) = queued_for("removed-bot", 0).await;
     cancel_session(&service, "s", "session_deleted").await.unwrap();
     assert_eq!(status(&service, &row).await, Status::Cancelled);
-    assert_eq!(service.lookup(DeliveryLookup::SessionUnfinished { session: "s".into(), limit: 10 }).await.unwrap().len(), 0);
+    assert_eq!(service.lookup(DeliveryLookup::SessionUnfinished { session: "s".into(), after: None, limit: 10 }).await.unwrap().len(), 0);
 }

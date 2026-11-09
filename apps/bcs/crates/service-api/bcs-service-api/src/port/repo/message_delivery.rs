@@ -39,9 +39,11 @@ pub enum DeliveryLookup {
     LanePendingContextCarrier { bot: String, session: String, now_ms: i64 },
     Message(String),
     /// Unfinished Sends (Queued/Dispatching/Running/Unknown) of one Session,
-    /// whoever the target Bot is, in no particular order. Bounded by `limit`
-    /// (at most 500) and served by `idx_delivery_session_message`.
-    SessionUnfinished { session: String, limit: usize },
+    /// whoever the target Bot is, in `(source_message_id, delivery_id)` order
+    /// after the `after` cursor. Keyset pages follow
+    /// `idx_delivery_session_message`, so a full sweep walks the Session's
+    /// index entries once. Bounded by `limit` (at most 500).
+    SessionUnfinished { session: String, after: Option<(String, String)>, limit: usize },
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }
 

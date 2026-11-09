@@ -94,11 +94,21 @@ async fn sqlite_session_unfinished_lookup_is_indexed_and_bounded() -> Result<(),
     db.execute(DbStatement::new("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<8) INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) SELECT printf('row%02d',x),'dev',printf('m%d',x),printf('bot%d',x % 3),CASE WHEN x=8 THEN 'other' ELSE 'doomed' END,'g',x,'group',CASE WHEN x=7 THEN 'inject' ELSE 'send' END,CASE x WHEN 1 THEN 'queued' WHEN 2 THEN 'dispatching' WHEN 3 THEN 'running' WHEN 4 THEN 'unknown' WHEN 5 THEN 'completed' WHEN 6 THEN 'queued' WHEN 7 THEN 'pending_context' ELSE 'queued' END,1,0,1,1,1,0,'{}' FROM n")).await?;
     let recording = Arc::new(RecordingQueries { inner: db.clone(), queries: Default::default() });
     let repo = MySqlMessageStore::sqlite(recording.clone(), "dev".into());
-    let rows = repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), limit: 10 }).await?;
+    let rows = repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), after: None, limit: 10 }).await?;
     let mut ids = rows.iter().map(|r| r.delivery_id.as_str()).collect::<Vec<_>>();
     ids.sort();
     assert_eq!(ids, vec!["row01", "row02", "row03", "row04", "row06"]);
-    assert_eq!(repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), limit: 2 }).await?.len(), 2);
+    // Keyset pages: each continues after the previous page's last row and
+    // together they return every unfinished row exactly once.
+    let (mut paged, mut after) = (Vec::new(), None);
+    loop {
+        let page = repo.lookup(DeliveryLookup::SessionUnfinished { session: "doomed".into(), after: after.clone(), limit: 2 }).await?;
+        assert!(page.len() <= 2);
+        let Some(last) = page.last() else { break };
+        after = Some((last.source_message_id.clone(), last.delivery_id.clone()));
+        paged.extend(page.into_iter().map(|r| r.delivery_id));
+    }
+    assert_eq!(paged, vec!["row01", "row02", "row03", "row04", "row06"]);
     let query = recording.queries.lock().unwrap()[0].0.clone();
     let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", query.sql()), query.params().to_vec())).await?;
     let plan = plan.iter().map(|r| bcs_db_api::db_get_column::<String>(r, "detail").unwrap()).collect::<Vec<_>>().join("; ");

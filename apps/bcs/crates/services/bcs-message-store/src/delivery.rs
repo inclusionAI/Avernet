@@ -624,9 +624,17 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             DeliveryLookup::LanePendingContexts { bot, session } => { params.extend([bot.into(), session.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' LIMIT 100" }
             DeliveryLookup::LanePendingContextCarrier { bot, session, now_ms } => { params.extend([bot.into(), session.into(), now_ms.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' AND (expire_at_ms IS NULL OR expire_at_ms > ?) LIMIT 1" }
             DeliveryLookup::Message(id) => { params.push(id.into()); "source_message_id = ?" }
-            DeliveryLookup::SessionUnfinished { session, limit } => {
-                params.extend([session.into(), (limit.min(500) as i64).into()]);
-                "session_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown') LIMIT ?"
+            DeliveryLookup::SessionUnfinished { session, after, limit } => {
+                params.push(session.into());
+                let cursor = match after {
+                    Some((message, delivery)) => {
+                        params.extend([message.as_str().into(), message.into(), delivery.into()]);
+                        " AND (source_message_id > ? OR (source_message_id = ? AND delivery_id > ?))"
+                    }
+                    None => "",
+                };
+                params.push((limit.min(500) as i64).into());
+                return self.db.query(DbStatement::with_params(format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND session_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown'){cursor} ORDER BY source_message_id, delivery_id LIMIT ?"), params)).await.map_err(storage)?.into_iter().map(row_to_delivery).collect();
             }
             DeliveryLookup::Successor { bot, session, after_seq, exclude, now_ms } => {
                 params.extend([bot.into(), session.into(), after_seq.into(), exclude.into(), now_ms.into()]);
