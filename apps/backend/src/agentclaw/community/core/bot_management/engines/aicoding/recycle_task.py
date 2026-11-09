@@ -7,7 +7,10 @@ import json
 import time
 import uuid
 
-from agentclaw.community.core.bot_dormant.recycle_state import (
+from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import (
+    BackupPersistenceError,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
     BLOCKING,
     POLL_SECONDS,
     RELEASE_TIMEOUT,
@@ -20,9 +23,6 @@ from agentclaw.community.core.bot_dormant.recycle_state import (
     RecycleTargetChanged,
     RecycleUnavailable,
     journal,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import (
-    BackupPersistenceError,
 )
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import (
     RestartBackupTargetChanged,
@@ -52,6 +52,8 @@ from agentclaw.community.utils.avernet_tenant import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
+from .restart_state import supports
+
 
 def task_key(bot_id, owner_id):
     return hashlib.sha256(
@@ -60,7 +62,11 @@ def task_key(bot_id, owner_id):
 
 
 def ensure_supported(bot, is_teclaw):
-    if bot.get("bot_type") != "personal" or is_teclaw(bot.get("active_engine")):
+    if (
+        bot.get("bot_type") != "personal"
+        or not supports(bot)
+        or is_teclaw(bot.get("active_engine"))
+    ):
         raise BotOperationNotAllowedError(
             "Only personal managed-cloud Bots can be recycled"
         )
@@ -79,7 +85,7 @@ def public_result(bot, record):
     }
 
 
-class RecycleOperationService:
+class AicodingRecycleOperations:
     def __init__(
         self,
         *,
@@ -208,10 +214,10 @@ class RecycleOperationService:
         return public_result(bot, record)
 
 
-class RecycleHandler:
+class AicodingRecycleHandler:
     task_type = TASK_TYPE
 
-    def __init__(self, service: RecycleOperationService, passport, clock=time.time):
+    def __init__(self, service: AicodingRecycleOperations, passport, clock=time.time):
         self.service, self.passport, self.clock = service, passport, clock
 
     def handle(self, payload):
@@ -289,6 +295,7 @@ class RecycleHandler:
             bot = store.read(payload["bot_id"], payload["owner_id"])
             if (
                 bot.get("bot_type") != "personal"
+                or not supports(bot)
                 or service.is_teclaw(bot.get("active_engine"))
                 or bot["status"] != "ACTIVE"
                 or bot["active_engine"] != record["engine"]
@@ -423,7 +430,7 @@ class RecycleHandler:
                 )
 
 
-class RecycleTaskLifecycle(LifecycleBase):
+class AicodingRecycleLifecycle(LifecycleBase):
     def __init__(self, registry, handler):
         self.registry, self.handler = registry, handler
 

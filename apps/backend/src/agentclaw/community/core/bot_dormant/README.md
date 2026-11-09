@@ -11,11 +11,6 @@ provides:
   - BotDormantRecycleOperationProtocol
   - BotDormantRecycleServiceProtocol
   - BotDormantActivateServiceProtocol
-  - RecycleOperationService
-  - RecycleHandler
-  - RecycleTaskLifecycle
-  - RecycleRuntime
-  - assert_not_recycling
   - ActivateBotService
   - DormantBotService
 consumes:
@@ -25,13 +20,12 @@ consumes:
   - HttpClient
   - BotRepository
   - BotRecycleRepositoryProtocol
-  - RestartBackupDependencies
-  - TaskQueueService
+  - EngineProvisioningStrategy
+  - RecycleServices
 internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.common_config
   - agentclaw.community.core.repository.protocols.bot
-  - agentclaw.community.core.task_queue
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.plugin_api
   - agentclaw.community.log
@@ -40,15 +34,17 @@ internal_dependencies:
 
 ### Change impact
 
-OpenAPI uses durable `bot.recycle` submission and its own read-only operation
-query. Existing internal/cron recycling retains the synchronous contract but
-must respect pending OpenAPI recycle. Bot runtime status is not an operation
-phase: backup failure leaves the serving Bot ACTIVE. Unconfirmed destruction
-keeps the journal protected as NEEDS_CONFIRMATION. Completion/audit atomicity
-belongs to the recycle repository, not the HTTP adapter. Restore preserves
-existing asynchronous provisioning, with atomic admission and conditional
-rollback. Changes affect Bot lifecycle conflict checks, provider release proof,
-DI worker registration and the Gateway's scoped public schema pin. See
-`apps/backend/docs/openapi-v1/README.md` and
-`docs/plans/2026-11-07-openapi-recycle-async.md` from repository root for the
-contract, rollout ordering and limits; no new table is required.
+The shared service selects an engine strategy, just like restart. Default engines
+keep synchronous recycling and its existing audit; AICoding alone owns durable
+`bot.recycle` admission, backup policy and the dedicated operation query. The
+shared module must not import `engines.aicoding`, interpret fastdisk configuration,
+manage backup contexts, or inspect provider release progress. Its dependencies
+are the engine-neutral strategy interface and lazy `RecycleServices` envelope.
+
+AICoding backup failure does not mark the serving Bot FAILED. Its unresolved
+release vetoes conflicting operations through the strategy's lifecycle hook.
+Completion/audit atomicity belongs to the recycle repository, not the HTTP
+adapter. Activation preserves existing provisioning and guarded claims/rollback.
+See `apps/backend/docs/openapi-v1/README.md` and
+`docs/plans/2026-11-07-openapi-recycle-async.md` from repository root for contract,
+rollout ordering and limits; no new table is required.

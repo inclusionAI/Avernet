@@ -1,26 +1,23 @@
 """Real journal/queue transactions, exercising the public recycle interface."""
 
+import json
+import time
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-import json
-import time
 
 import pytest
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
-from agentclaw.community.core.bot_dormant.recycle_operation import (
-    RecycleOperationService,
-    RecycleHandler,
-)
-from agentclaw.community.core.bot_dormant.recycle_state import (
+from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
     RecycleUnavailable,
     journal,
 )
-from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_task import (
+    AicodingRecycleHandler,
+    AicodingRecycleOperations,
+)
 from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import (
     RestartBackupBlocked,
 )
@@ -46,6 +43,8 @@ from agentclaw.community.di.config import TaskQueueConfig
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.env_utils import get_current_env
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
@@ -105,7 +104,7 @@ def case(tmp_path):
                 entity_id="u1",
                 entity_type="staff",
                 bot_type="personal",
-                active_engine="openclaw",
+                active_engine="claude_code",
                 status="ACTIVE",
                 binding_id=binding.id,
                 device_id="d1",
@@ -138,7 +137,7 @@ def case(tmp_path):
     runtime.submit_release.return_value = {"request_id": "release-1"}
     runtime.observe_release.return_value = "RELEASED"
     clock = [time.time()]
-    service = RecycleOperationService(
+    service = AicodingRecycleOperations(
         store=store,
         runtime=runtime,
         queue=queue,
@@ -149,7 +148,7 @@ def case(tmp_path):
         clock=lambda: clock[0],
     )
     passport = MagicMock()
-    handler = RecycleHandler(service, passport, clock=lambda: clock[0])
+    handler = AicodingRecycleHandler(service, passport, clock=lambda: clock[0])
     c = SimpleNamespace(
         db=db,
         store=store,
@@ -453,7 +452,9 @@ def test_redelivery_cannot_reset_backup_policy_budget_or_target_evidence(case):
     assert second["backup_started_at"] == first["backup_started_at"] == 1
     assert second["fail_block"] is True
     assert second["fastdisk_targets"] == ["s1", "s2"]
-    from agentclaw.community.core.bot_dormant.recycle_state import RecycleTargetChanged
+    from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+        RecycleTargetChanged,
+    )
 
     with pytest.raises(RecycleTargetChanged):
         case.store.update(payload, {"BACKING_UP"}, physical_targets=["p2"])

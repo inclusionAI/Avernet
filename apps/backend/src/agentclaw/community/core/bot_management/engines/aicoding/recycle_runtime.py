@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import time
-
-from agentclaw.community.core.bot_dormant.recycle_state import RecycleTargetChanged
-from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import (
-    BackupOperation,
-    current_backup,
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+    RecycleTargetChanged,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_restart_strategy,
 )
 
 
-class DeviceRecycleRuntime:
-    def __init__(self, devices, bots, backup_dependencies):
+class AicodingRecycleRuntime:
+    def __init__(self, devices, bots, backup_dependencies, arca_transport):
         self.devices, self.bots, self.dependencies = devices, bots, backup_dependencies
+        self.arca_transport = arca_transport
 
     def target(self, bot):
         binding_id = bot.get("binding_id")
@@ -77,35 +74,15 @@ class DeviceRecycleRuntime:
                 raise RecycleTargetChanged("Physical targets changed during backup")
             save(physical_targets=physical_targets)
         ctx, strategy = resolve_restart_strategy(bot)
-        started = record.get("backup_started_at", time.time())
-        policy = record.get("fail_block")
-        if policy is None:
-            # The existing strategy owns config interpretation, including the
-            # default-false fallback. Non-coding strategies never resolve it.
-            reader = getattr(strategy, "_fastdisk_backup_blocking", lambda: False)
-            policy = reader()
-            policy = save(fail_block=policy)["fail_block"]
-        operation = BackupOperation(
-            operation_id=record["operation_id"],
-            started_at=started,
-            confirmed=set(record.get("fastdisk_targets") or []),
-            persist=save,
+        verify = strategy.prepare_recycle(
+            ctx,
+            record=record,
+            save=save,
+            binding_id=bot.get("binding_id"),
+            device_service_provider=self.devices,
+            bot_repository=self.bots,
+            restart_dependencies=self.dependencies,
         )
-        token = current_backup.set(operation)
-        try:
-            verify = strategy.prepare_restart(
-                ctx,
-                binding_id=bot.get("binding_id"),
-                device_service_provider=self.devices,
-                bot_repository=self.bots,
-                restart_dependencies=self.dependencies,
-                operation_id=record["operation_id"],
-                strict_deadline=time.monotonic()
-                + max(0, 300 - (time.time() - started)),
-                blocking_enabled=lambda: policy,
-            )
-        finally:
-            current_backup.reset(token)
 
         def check():
             if (
@@ -117,19 +94,19 @@ class DeviceRecycleRuntime:
                 raise RecycleTargetChanged("Recycle target changed")
             if physical_targets is not None and inventory() != physical_targets:
                 raise RecycleTargetChanged("Physical targets changed before release")
-            token = current_backup.set(operation)
-            try:
-                if verify is not None:
-                    verify()
-            finally:
-                current_backup.reset(token)
+            if verify is not None:
+                verify()
 
         return check
 
     def submit_release(self, target, request_id, owner_id):
         if target["binding_id"] is None:
             return {"confirmed": True}
-        return self.devices().submit_recycle_release(
+        from .recycle_release import submit_release
+
+        return submit_release(
+            self.dependencies,
+            self.arca_transport,
             target=target,
             request_id=request_id,
             owner_id=owner_id,
@@ -138,4 +115,8 @@ class DeviceRecycleRuntime:
     def observe_release(self, target, release):
         if target["binding_id"] is None:
             return "RELEASED"
-        return self.devices().observe_recycle_release(target=target, release=release)
+        from .recycle_release import observe_release
+
+        return observe_release(
+            self.dependencies, self.arca_transport, target=target, release=release
+        )

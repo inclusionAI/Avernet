@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
-
 TASK_TYPE = "bot.recycle"
 TASK_DEADLINE = 86400
 RELEASE_TIMEOUT = 600

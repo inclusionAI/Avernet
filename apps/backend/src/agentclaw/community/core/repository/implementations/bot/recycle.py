@@ -7,14 +7,14 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 
-from agentclaw.community.core.bot_dormant.recycle_state import (
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
     BLOCKING,
     RecycleSuperseded,
     RecycleTargetChanged,
-    assert_not_recycling,
     journal,
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
+from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
 from agentclaw.community.core.bot_management.owner_handoff.guard import (
     assert_bot_mutable,
 )
@@ -223,7 +223,7 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
                 raise BotOperationNotAllowedError(
                     "Only personal managed-cloud Bots can be activated"
                 )
-            assert_not_recycling(bot)
+            assert_lifecycle_mutable(bot)
             if row.status in {"ACTIVE", "REACTIVATING"}:
                 return row.status, False
             if row.status != "RECYCLED":
@@ -244,7 +244,7 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
             row = self._row(session, bot_id, owner_id, lock=True)
             allowed = row.status == "REACTIVATING" and row.binding_id is None
             if allowed:
-                assert_not_recycling(row.to_dict())
+                assert_lifecycle_mutable(row.to_dict())
             yield allowed
             if allowed:
                 row.status = "RECYCLED"

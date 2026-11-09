@@ -17,7 +17,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 class Service:
     def __init__(self):
-        self.bot = {"bot_id": "b", "owner_id": "u", "entity_id": "u", "ext": {}}
+        self.bot = {"bot_id": "b", "owner_id": "u", "entity_id": "u", "active_engine": "claude_code", "ext": {}}
         self._repository = SimpleNamespace(
             get_by_id_and_owner=Mock(side_effect=lambda *_: self.bot)
         )
@@ -29,7 +29,7 @@ class Service:
 
     @serialize_resource_release
     def release(self, bot_id, user_id):
-        from agentclaw.community.core.bot_dormant.recycle_state import (
+        from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
             assert_not_recycling,
         )
 
@@ -82,3 +82,12 @@ def test_busy_release_has_no_side_effect():
     with pytest.raises(BotInvalidLifecycleStateError):
         service.release("b", "u")
     service.effect.assert_not_called()
+
+
+def test_default_engine_release_does_not_acquire_coding_lock():
+    service = Service()
+    service.bot["active_engine"] = "openclaw"
+    service.release("b", "u")
+    service.effect.assert_called_once()
+    service._try_acquire_restart_lock.assert_not_called()
+    service._restart_lock_repo.release.assert_not_called()
