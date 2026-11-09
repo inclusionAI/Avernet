@@ -7,7 +7,16 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 jest.mock('@/services/workspace/botSessionFileService');
 jest.mock('sonner', () => ({ toast: { error: jest.fn(), success: jest.fn() } }));
 const service = jest.mocked(botSessionFileService);
-const file = { resourceId: 'r1', displayName: 'image.png', status: 'ready' as const, sizeBytes: 1, errorCode: null };
+const file = {
+  resourceId: 'r1',
+  displayName: 'image.png',
+  status: 'ready' as const,
+  sizeBytes: 1,
+  errorCode: null,
+  creatorType: null,
+  creatorName: null,
+  createdAt: null,
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
