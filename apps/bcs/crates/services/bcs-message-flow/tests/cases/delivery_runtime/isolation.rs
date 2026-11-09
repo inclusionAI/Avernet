@@ -121,3 +121,21 @@ async fn transport_evidence_outlives_the_bounded_row_retries() -> Result<(), Box
     task.await??;
     Ok(())
 }
+
+/// Wait reasons are advisory: an undecodable queued head must not fail the
+/// whole update (it used to end every master epoch), and healthy rows in the
+/// same batch still get their reason.
+#[tokio::test]
+async fn unreadable_rows_do_not_fail_wait_reason_updates() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_db_api::{DbPlugin, DbStatement};
+    let db = Arc::new(bcs_db_local::LocalSqliteDbPlugin::new()?);
+    bcs_db_migrations::run_sqlite_migrations(db.as_ref()).await?;
+    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (session_id, group_id, env, participants) VALUES ('healthy-session', 'group', 'dev', '[]')")).await?;
+    let service = ManagedMessageDelivery::new(Arc::new(bcs_message_store::MySqlMessageStore::sqlite(db.clone(), "dev".into())));
+    let healthy = service.admit(command("healthy", "healthy-session")).await?.deliveries.remove(0);
+    db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) VALUES ('corrupt','dev','m','bot-a','doomed','g',1,'not-a-flow-kind','send','queued',1,0,1,1,1,0,'{}')")).await?;
+    service.update_wait_reasons(vec![("corrupt".into(), DeliveryWaitReason::BotOffline), (healthy.delivery_id.clone(), DeliveryWaitReason::BotOffline)], 5).await?;
+    let row = service.snapshot(Some("healthy-session")).await?.remove(0);
+    assert_eq!(row.wait_reason, Some(DeliveryWaitReason::BotOffline));
+    Ok(())
+}

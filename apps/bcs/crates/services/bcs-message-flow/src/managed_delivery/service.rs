@@ -365,12 +365,19 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         }
         let reasons: BTreeMap<_, _> = waiting.into_iter().collect();
         let mut owners = BTreeMap::new();
+        // Wait reasons are advisory: a row that cannot be read is left to
+        // the scheduler's row isolation instead of failing the whole tick.
         for id in reasons.keys() {
-            if let Some(row) = self.repo.get_delivery(id).await? { owners.insert(id.clone(), row.target_bot_id); }
+            match self.repo.get_delivery(id).await {
+                Ok(Some(row)) => { owners.insert(id.clone(), row.target_bot_id); }
+                Ok(None) => {}
+                Err(error @ MessageDeliveryRepoError::Storage(_)) => return Err(error.into()),
+                Err(error) => tracing::debug!(delivery_id = %id, %error, "wait reason skipped for an unreadable delivery row"),
+            }
         }
         let _guards = self.mutations.acquire(owners.values().cloned()).await;
         let mut updates = Vec::new();
-        for id in reasons.keys() {
+        for id in owners.keys() {
             let Some(mut row) = self.repo.get_delivery(id).await? else { continue; };
             if owners.get(id) != Some(&row.target_bot_id) { return Err(ManagedDeliveryError::Conflict); }
             let Some(reason) = reasons.get(&row.delivery_id) else {
