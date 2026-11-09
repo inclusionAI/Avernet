@@ -1,0 +1,167 @@
+# BCN runtime contracts v1
+
+The BCN runtime is an additive, opt-in execution path. Existing sessions and the
+legacy execution loop are unchanged. Production admission remains disabled until
+explicitly wired and validated by a deployment. These contracts do not claim
+production durability, recovery latency, or capacity.
+
+## Layers and consumers
+
+| Crate | Layer | Contract and consumers |
+| --- | --- | --- |
+| `bcn-runtime-model` | contracts | Neutral serializable data used by runners, applications and repository implementations |
+| `bcn-runtime-api` | service-api | Inbound application services, pure core reducer, outbound business ports |
+| `bcn-runtime-storage-api` | plugin-api | Atomic partition storage and liveness; called by repository implementations |
+| `bcn-storage-memory` | plugins | Volatile implementation used only by local/test composition roots |
+
+Delivery adapters call `application::GatewayService`. Applications orchestrate
+`core::SessionRunner` and outbound ports. Repository implementations map business
+records to `AtomicStore`; reducers never depend on the infrastructure API.
+Concrete implementation selection belongs in bootstrap/tests. No protocol SDK,
+HTTP client, database client, endpoint or secret belongs in the model/core API.
+
+The public model modules are `identity`, `task`, `runner`, `connector`, `storage`
+and `error`. All durable ID types carry `Scope { environment, tenant, namespace }`.
+Caller authentication is separate from message fields. IDs confer no access;
+every gateway operation authorizes the authenticated principal, target and the
+resolved session/task through registered `AccessPolicy` hooks.
+
+## Application and reducer lifecycle
+
+`GatewayService` exposes submit/get/list/subscribe/cancel, each with
+`CallerContext`. Submission returns only after admission receipt, inbox and wake
+are persisted. Repeated identity with different content is a conflict. Reads
+resolve authoritative saved results, checkpoint state, then admission receipts.
+Subscription begins with an authoritative snapshot and its cursor; a terminal
+task is queried rather than newly subscribed. Expired cursors fall back to a
+full snapshot, without a gap during concurrent event production.
+
+Worker and Connector runtimes expose `run(CancellationReceiver)`,
+`drain(deadline_ms)` and `status()`. Cancellation is a watch receiver: true or
+sender closure requests shutdown. Drain stops new work and leaves unfinished
+work recoverable; deadlines are absolute server-clock milliseconds.
+
+`SessionRunner` exposes kind/validate/initialize/reduce. `SessionSpec` freezes the
+source `bcs_domain::collaboration::StateMachineDefinition`, resolved bindings and
+policy at admission. `RunnerState` is a schema-versioned, normalized, serializable
+checkpoint, never a legacy executor. The reducer is deterministic: no I/O, clock
+reads, random identity generation or mutation of supplied state. Inputs carry
+identity and time; derived identities must be deterministic.
+
+A `Transition` contains next state, effect intents, hard events and timer changes.
+State, consumed input position, effects, hard events and timer changes commit in
+one transaction under the current ownership epoch and checkpoint revision.
+`TimerChange` explicitly supports both Upsert and Cancel. Effects execute only
+after commit. Recovery loads committed state rather than reinitializing it.
+
+The workflow subset is BotTask, HumanInput, acyclic sequence/parallel joins and
+persisted Judge selection. Unsupported loops, nested group execution, direct
+tool actions, sub-state-machines, notification, guards and output contracts must
+be rejected before admission. Bindings and workflow semantics cannot change
+mid-session. Unselected branches are skipped; human replies correlate an
+interaction identity. Judge choices and node results persist before successors
+start. Direct contexts carry across serial tasks; an unknown direct execution
+blocks that context. Group node attempts use isolated downstream contexts.
+
+## Connector contract
+
+`port::AgentConnector` is an object-safe Send + Sync async trait. It exposes
+capabilities, send_message, send_streaming_message, get_task, subscribe_to_task,
+and cancel_task. Owned neutral requests and boxed Send streams avoid SDK types.
+Optional operations default to `ConnectorError::Unsupported` without I/O.
+Implementations bind a frozen target and reject mismatched target/binding version
+before I/O; capabilities are target-specific and never inferred from a protocol
+name. Cancellation distinguishes unsupported, single-task and exclusive-context
+scope. Input continuation, streaming, query and subscription are independent.
+
+`ExecutionHandle` contains target and remote IDs plus binding version, never
+credentials. `FrozenTargetBinding` contains only an optional opaque credential
+reference. `CredentialResolver` resolves an ephemeral non-serializable,
+Debug-redacted credential at the external boundary.
+
+Only PREPARED proves unsent. The connector atomically commits MAY_HAVE_SENT under
+its dispatch fence before network I/O. It saves a remote handle immediately and
+uses query/subscription after uncertainty. A finite dedup window does not alone
+authorize replay; the capability must cover the operation's entire possible
+lifetime or enforce an immutable expiry. Otherwise expose execution_unknown.
+Errors distinguish NotSent, MayHaveBeenAccepted, RemoteFailed, Unsupported and
+OwnershipLost. EOF without a terminal event cannot become success. Cancellation
+intent is not cancellation confirmation.
+
+An immutable result intent is fenced and persisted before `ResultStore` is
+called. That store returns the authoritative saved result; only then may a
+reducer publish terminal completion or advance dependent nodes. PendingResult
+is nonterminal. Result writes never overwrite an existing authoritative result.
+New connector epochs persist complete event projection before ordered Reset;
+old epochs cannot overwrite snapshots or append new events. Hard results require
+a fenced receipt and atomic inbox append.
+
+## Infrastructure Plugin API
+
+`AtomicStore` is linearizable within one explicit `(scope, partition)`:
+
+- `read_many` returns values/revisions in requested order, including duplicates
+  and missing entries. Empty reads are valid.
+- `transact` validates the entire request, checks all absence/revision conditions
+  against one pre-state, then applies all mutations or none. Duplicate mutation
+  keys are invalid. Duplicate conditions are allowed and all must hold. Empty
+  and condition-only batches are valid. Mutations may be unconditional, but
+  business ownership/checkpoint writes must supply all required fences.
+- Every mutation, including deletion of an absent key, receives a monotonically
+  increasing revision. Revisions never repeat after deletion/recreation within
+  a store lifetime. A persistent backend must preserve this property across
+  restarts. Exhaustion rejects the whole transaction before any mutation.
+- `scan_page` is ordered by key, with an exclusive cursor bound to scope,
+  partition and prefix. It returns at most the requested limit and examines at
+  most limit + 1 matching rows. Pages are not a cross-request snapshot; callers
+  handle concurrent writes through durable cursors and idempotency. Prefix may
+  be empty. A foreign cursor fails closed.
+- `server_time_ms` supplies backend-authoritative time; the memory implementation
+  uses an injected `ServerClock`.
+
+Scope and partition components are 1–64 ASCII letters, digits, underscore or
+hyphen. Keys use 1–256 ASCII letters, digits or `_-/.:`; prefix may be empty.
+Isolation is structural, never string concatenation of unescaped tenant names.
+
+| Request bound | v1 maximum |
+| --- | --- |
+| read keys | 100 |
+| transaction conditions / mutations | 100 / 100 |
+| individual value | 1 MiB |
+| total condition-key + mutation-key + value bytes | 8 MiB |
+| scan page size | 1–100 |
+
+All bounds are checked before touching state. One API call is one bounded
+backend operation, not an N+1 loop. Memory reads are O(keys), transactions are
+O(conditions + mutations) under one lock, scans use a tree range and at most
+limit + 1 matching rows. A maximal read/scan may return 100 MiB; callers should
+choose lower limits for large records. No lock spans external network I/O.
+
+`NodeLivenessPort` registers process incarnation, renews heartbeats, inspects
+bounded batches, pages membership and marks draining. Alive/Dead/Unknown are
+explicit. Storage failures cannot be interpreted as Dead. Heartbeat TTL is a
+failure detector, never an ownership fence; `OwnershipPort` epochs are the
+correctness mechanism.
+
+`conformance` exports reusable async consumer scenarios accepting
+`Arc<dyn AtomicStore>`. Supply an empty isolated backend per case. The same
+suite must run against every real backend; the memory tests prove only local
+semantics. Memory construction rejects `RuntimeProfile::Production` and has no
+automatic production fallback. It has no resources to drain beyond owned memory.
+Its isolation tier is trusted in-process code with memory/clock access only;
+there is no network, filesystem persistence, environment access or credential
+resolution. The profile constructor and dependency boundaries enforce that tier.
+
+## Defaults and compatibility
+
+Defaults are 1024 fixed shards, heartbeat 1 s / TTL 3 s, ownership inspection
+500 ms, inbox batch 100, recovery concurrency 64, dispatch supervision 1 s,
+progress 5 s / stall 15 s, token batching 200 ms, 16 pending tasks per session,
+32 graph nodes / 5 agents, quarantine after 3 unsuccessful takeovers and 30 s
+drain. Configuration and capacity validation remain composition-root work.
+
+These are new v1 contracts and do not change legacy APIs. Future changes must
+update consumer compatibility tests and these docs before reducers, repositories,
+applications or adapters depend on new fields. Checkpoint schema upgrades must
+be explicitly supported before new writers are enabled. No production adapter
+or runtime entrypoint is implemented by the contract crates.

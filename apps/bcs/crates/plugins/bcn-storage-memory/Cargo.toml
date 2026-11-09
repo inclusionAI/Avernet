@@ -1,0 +1,17 @@
+[package]
+name = "bcn-storage-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bcn-runtime-model.workspace = true
+bcn-runtime-storage-api.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

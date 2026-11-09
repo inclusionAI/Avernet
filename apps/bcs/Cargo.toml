@@ -1,5 +1,10 @@
 [workspace]
 members = [
+    "crates/contracts/bcn-runtime-model",
+    "crates/service-api/bcn-runtime-api",
+    "crates/plugin-api/bcn-runtime-storage-api",
+    "crates/plugins/bcn-storage-memory",
+
     "crates/plugin-api/bcs-a2a-binding-api",
     "crates/plugin-api/bcs-tracing-api",
     "crates/auxiliary/bcs-network-tracing",
@@ -144,6 +149,11 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcn-runtime-model = { path = "crates/contracts/bcn-runtime-model" }
+bcn-runtime-api = { path = "crates/service-api/bcn-runtime-api" }
+bcn-runtime-storage-api = { path = "crates/plugin-api/bcn-runtime-storage-api" }
+bcn-storage-memory = { path = "crates/plugins/bcn-storage-memory" }
+
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }

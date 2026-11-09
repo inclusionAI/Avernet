@@ -318,6 +318,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bcn-runtime-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "futures",
+ "tokio",
+]
+
+[[package]]
+name = "bcn-runtime-model"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-domain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bcn-runtime-storage-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "futures",
+]
+
+[[package]]
+name = "bcn-storage-memory"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "tokio",
+]
+
+[[package]]
 name = "bcs"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -2431,6 +2470,9 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",
