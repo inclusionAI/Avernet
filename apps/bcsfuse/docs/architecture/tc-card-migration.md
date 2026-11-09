@@ -1,8 +1,8 @@
 # TC Card / Doc 迁移边界
 
 **当前 TC 已接入 Card/Doc，默认 legacy 保留旧接口读写旧表，v2 始终读写新表；配置重启后旧接口整体切到新表。**
-当前规则以 [完整方案](../../../../docs/specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)及
-[部署步骤](../../../../docs/deploy/tc-card-migration.md)为准，以下原迁移约束与之不一致处由已确认方案取代。
+当前规则以 [完整方案](../../specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)及
+[部署步骤](../deploy/tc-card-migration.md)为准，以下原迁移约束与之不一致处由已确认方案取代。
 
 [Card 通用接口](../../packages/search-core/docs/card-management-api.md) 与 [Provider 契约](../../packages/search-core/docs/provider-contracts.md#card-management) 已由 Avernet 提供。
 TC 显式挂载接口并提供自己的构建器；不能把其他业务的字段解释、状态规则或推荐编排搬进 TC。

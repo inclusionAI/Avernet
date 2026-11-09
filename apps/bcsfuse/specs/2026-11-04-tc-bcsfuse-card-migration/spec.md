@@ -56,8 +56,8 @@ TC 业务及公共搜索能力由 Avernet 维护，内部平台适配及部署�
 
 ### 2.2 与已有文档的关系
 
-本方案遵守 [架构规则](../../arch/arch.rules.md)、[CI 要求](../../arch/ci.enforce.md)、
-[模块边界格式](../../arch/context-boundary-format.md)和[协议契约测试要求](../../arch/protocol-contract-tests.md)。
+本方案遵守 [架构规则](../../../../docs/arch/arch.rules.md)、[CI 要求](../../../../docs/arch/ci.enforce.md)、
+[模块边界格式](../../../../docs/arch/context-boundary-format.md)和[协议契约测试要求](../../../../docs/arch/protocol-contract-tests.md)。
 未发现现有 ADR 对 TC 的多 Profile 或旧评分方式作必须保留的决定。
 
 重构分支原 `tc-card-migration.md` 中的多 Profile、旧加权聚合和 MD 资料保留要求，
